@@ -560,8 +560,16 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
     }
 
     try {
-      const currentMessages = [...messages, userMessage];
-      const history = currentMessages.slice(-20).map(m => ({ role: m.role, content: m.content }));
+      // History: on regen the user turn is already in `messages` (drop anything
+      // after it); on a normal send, append the new turn.
+      let base: ChatMessage[];
+      if (regen) {
+        const lastUserIdx = messages.map(m => m.role).lastIndexOf('user');
+        base = lastUserIdx >= 0 ? messages.slice(0, lastUserIdx + 1) : messages;
+      } else {
+        base = [...messages, { id: 'tmp', role: 'user', content: trimmed }];
+      }
+      const history = base.slice(-20).map(m => ({ role: m.role, content: m.content }));
 
       // Agentic tools path (opt-in, non-project). The model calls built-in tools.
       if (toolsOn && !activeProjectId) {
