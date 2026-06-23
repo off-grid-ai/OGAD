@@ -3,9 +3,9 @@
 // device later) points here and gets the on-device models. No cloud, no keys.
 //
 //   GET  /                       -> gateway info + live modality status
-//   GET  /v1/models              -> all on-device models, every modality, each
-//                                   tagged with a `kind` (chat/vision/image/
-//                                   speech/transcription)
+//   GET  /v1/models              -> the ACTIVE model per modality (text/vision +
+//                                   image/speech/transcription), each tagged with
+//                                   a `kind` — what a request would load on demand
 //   POST /v1/chat/completions    -> proxied to llama-server (text + vision-in)
 //   POST /v1/completions         -> proxied to llama-server
 //   POST /v1/embeddings          -> proxied to llama-server
@@ -27,7 +27,7 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import { desktopExtraction } from './rag/extractors';
 import * as tts from './tts';
-import { generateImage, imageGenStatus, listImageModels, type ImageGenParams } from './imagegen';
+import { generateImage, imageGenStatus, activeImageModel, type ImageGenParams } from './imagegen';
 import { whisperModel } from './rag/extractors';
 import { getActiveModal } from './active-models';
 import { embeddings } from './embeddings';
@@ -527,10 +527,13 @@ async function handleEmbeddings(req: http.IncomingMessage, res: http.ServerRespo
 }
 
 // ─── Models list (all modalities) ────────────────────────────────────────────
-// llama-server's own /v1/models only knows the text/vision LLM. We fetch that,
-// then fold in the other on-device modalities (image, speech, transcription) so
-// one call shows the full local model surface. Each entry carries a non-standard
-// `kind` so a client can tell chat/vision/image/speech/transcription apart.
+// One ACTIVE model per modality is served on demand: a request loads it, returns,
+// then it's offloaded — models never co-reside in RAM (that's why long calls hand
+// back a request id to poll). So /v1/models reports the *active* pick per modality
+// — what an incoming request would actually load — not every installed file.
+// llama-server's own /v1/models only knows the loaded text/vision LLM; we fetch
+// that and fold in the active image, speech (TTS), and transcription (STT) models.
+// Each entry carries a non-standard `kind` (chat/vision/image/speech/transcription).
 function fetchUpstreamModels(): Promise<Record<string, unknown>> {
   return new Promise((resolve) => {
     const r = http.request(
@@ -559,17 +562,19 @@ async function handleModelsList(res: http.ServerResponse): Promise<void> {
   const tag = (id: string, kind: string, extra: Record<string, unknown> = {}): Record<string, unknown> =>
     ({ id, object: 'model', created: now, owned_by: 'off-grid', kind, ...extra });
 
-  const images = listImageModels().map((id) => tag(id, 'image'));
+  // Active image model (chosen pick, else the resolver default).
+  const imgId = activeImageModel();
+  const images = imgId ? [tag(imgId, 'image')] : [];
 
+  // Active speech (TTS) model + its available voices.
   let voices: string[] = [];
   try { voices = await tts.listVoices(); } catch { /* TTS may be unavailable */ }
-  const activeSpeech = getActiveModal('speech');
-  const speech = activeSpeech || voices.length
-    ? [tag(activeSpeech || 'kokoro', 'speech', { voices })]
-    : [];
+  const speechId = getActiveModal('speech') || (voices.length ? 'kokoro' : null);
+  const speech = speechId ? [tag(speechId, 'speech', { voices })] : [];
 
-  const wm = whisperModel();
-  const transcription = wm ? [tag(path.basename(wm), 'transcription')] : [];
+  // Active transcription (STT) model (chosen pick, else the resolved whisper model).
+  const sttId = getActiveModal('transcription') || (whisperModel() ? path.basename(whisperModel() as string) : null);
+  const transcription = sttId ? [tag(sttId, 'transcription')] : [];
 
   const data: Record<string, unknown>[] = [...text, ...images, ...speech, ...transcription];
   // Mirror into the ollama-style `models` array some clients read, so both shapes

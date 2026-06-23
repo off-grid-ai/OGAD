@@ -269,6 +269,13 @@ function ggufIsFullCheckpoint(p: string): boolean {
 }
 
 /** Pick a model: the requested filename if present, else prefer the higher-quality v2.1, else any. */
+/** The image model an incoming request would actually load (active pick, else the
+ *  resolver's default), as a bare filename — or null if none installed. */
+export function activeImageModel(): string | null {
+  const m = resolveModel();
+  return m ? path.basename(m) : null;
+}
+
 function resolveModel(preferred?: string): string | null {
   const dir = modelsDir();
   if (preferred) {
