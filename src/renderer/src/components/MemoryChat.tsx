@@ -627,6 +627,19 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Slash skill autocomplete: while typing "/name" (before any space), Tab —
+    // or Enter on a not-yet-complete name — fills in the top matching skill.
+    const sq = input.startsWith('/') && !/\s/.test(input) ? input.slice(1).toLowerCase() : null;
+    if (sq !== null) {
+      const matches = skills.filter(s => s.name.toLowerCase().includes(sq));
+      const exact = skills.some(s => s.name.toLowerCase() === sq);
+      if (matches.length > 0 && (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && !exact))) {
+        e.preventDefault();
+        setInput(`/${matches[0].name} `);
+        inputRef.current?.focus();
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
@@ -1550,12 +1563,15 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
               <div className="relative rounded-2xl border border-neutral-800 bg-neutral-950 shadow-sm transition-colors focus-within:border-neutral-600">
                 {skillMatches.length > 0 && (
                   <div className="absolute bottom-full left-0 z-20 mb-2 w-72 overflow-hidden rounded-md border border-neutral-800 bg-neutral-950 py-1 text-sm shadow-lg">
-                    <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-neutral-600">Skills</div>
-                    {skillMatches.slice(0, 6).map(s => (
+                    <div className="flex items-center justify-between px-3 py-1 text-[10px] uppercase tracking-wide text-neutral-600">
+                      <span>Skills</span>
+                      <span className="normal-case text-neutral-700">Tab to complete</span>
+                    </div>
+                    {skillMatches.slice(0, 6).map((s, i) => (
                       <button
                         key={s.name}
                         onClick={() => { setInput(`/${s.name} `); inputRef.current?.focus(); }}
-                        className="flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left transition-colors hover:bg-neutral-900"
+                        className={`flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left transition-colors hover:bg-neutral-900 ${i === 0 ? 'bg-neutral-900/60' : ''}`}
                       >
                         <span className="text-green-500">/{s.name}</span>
                         {s.description ? <span className="line-clamp-1 text-[11px] text-neutral-500">{s.description}</span> : null}
