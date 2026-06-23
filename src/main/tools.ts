@@ -78,6 +78,35 @@ const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'brave_search',
+    description: 'Search the web via Brave and return the top results (title, URL). An alternative to web_search. Requires network.',
+    parameters: { type: 'object', properties: { query: { type: 'string', description: 'the search query' } }, required: ['query'] },
+    run: async (a) => {
+      const q = String(a.query ?? '').trim();
+      if (!q) return 'Error: empty query.';
+      try {
+        const res = await fetch('https://search.brave.com/search?q=' + encodeURIComponent(q) + '&source=web', {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36', 'Accept-Language': 'en-US,en;q=0.9' },
+        });
+        const html = await res.text();
+        const out: { title: string; url: string }[] = [];
+        const seen = new Set<string>();
+        const re = /<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(html)) && out.length < 6) {
+          const url = m[1];
+          if (/brave\.com|search\.brave|\/settings|javascript:/i.test(url)) continue;
+          const title = stripTags(m[2]);
+          if (!title || title.length < 3 || seen.has(url)) continue;
+          seen.add(url);
+          out.push({ title, url });
+        }
+        if (!out.length) return 'No results found (Brave markup may have changed — try web_search).';
+        return out.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}`).join('\n');
+      } catch (e) { return 'Error: brave search failed — ' + (e as Error).message; }
+    },
+  },
+  {
     name: 'read_url',
     description: 'Fetch a web page and return its readable text. Use to read a specific URL (e.g. one from web_search). Requires network.',
     parameters: { type: 'object', properties: { url: { type: 'string', description: 'the page URL' } }, required: ['url'] },
