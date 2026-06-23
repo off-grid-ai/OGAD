@@ -16,6 +16,34 @@ import fs from 'node:fs';
 const MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX';
 const DEFAULT_VOICE = 'af_heart';
 
+// kokoro-js' RawAudio.toWav() emits 32-bit IEEE-float WAV (format 3), which
+// Chromium's <audio>/new Audio() refuses to decode — so playback is silent.
+// Re-encode the float samples to 16-bit PCM, which plays everywhere.
+function encodeWavPcm16(float32, sampleRate) {
+  const n = float32.length;
+  const buf = Buffer.alloc(44 + n * 2);
+  buf.write('RIFF', 0);
+  buf.writeUInt32LE(36 + n * 2, 4);
+  buf.write('WAVE', 8);
+  buf.write('fmt ', 12);
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);            // PCM
+  buf.writeUInt16LE(1, 22);            // mono
+  buf.writeUInt32LE(sampleRate, 24);
+  buf.writeUInt32LE(sampleRate * 2, 28); // byte rate
+  buf.writeUInt16LE(2, 32);            // block align
+  buf.writeUInt16LE(16, 34);           // bits per sample
+  buf.write('data', 36);
+  buf.writeUInt32LE(n * 2, 40);
+  let off = 44;
+  for (let i = 0; i < n; i++) {
+    const s = Math.max(-1, Math.min(1, float32[i]));
+    buf.writeInt16LE((s < 0 ? s * 0x8000 : s * 0x7fff) | 0, off);
+    off += 2;
+  }
+  return buf;
+}
+
 async function main() {
   const mode = process.argv[2];
   const { KokoroTTS } = await import('kokoro-js');
@@ -37,8 +65,11 @@ async function main() {
     text = text.trim().slice(0, 2000);
     if (!text) throw new Error('no text on stdin');
     const audio = await tts.generate(text, { voice });
-    const wav = audio.toWav();
-    fs.writeFileSync(outPath, Buffer.from(wav));
+    const samples = audio.audio || audio.data;
+    const sr = audio.sampling_rate || audio.sampleRate || 24000;
+    process.stderr.write(`[tts-worker] samples=${samples ? samples.length : 0} sampleRate=${sr} -> 16-bit PCM\n`);
+    const wav = encodeWavPcm16(samples, sr);
+    fs.writeFileSync(outPath, wav);
     return;
   }
 
