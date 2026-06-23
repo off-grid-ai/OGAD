@@ -95,17 +95,24 @@ export function ArtifactCanvas({ artifact, onClose }: { artifact: Artifact; onCl
       .replace(/\bexport\s+default\s+/g, '__ogDefault = ')
       // `export const/function/class …` -> plain declaration
       .replace(/\bexport\s+(const|let|var|function|class|default)\b/g, '$1');
-    return `<!doctype html><html><head>${base}<script>${runtime.react || ''}</script><script>${runtime.reactDom || ''}</script><script>${runtime.babel || ''}</script></head><body><div id="root"></div><script type="text/babel" data-presets="react">
+    return `<!doctype html><html><head>${base}
+<script>
+  function __ogShow(msg){ var r=document.getElementById('root')||document.body; r.innerHTML='<pre style="color:#b91c1c;white-space:pre-wrap;padding:12px;font:13px ui-monospace,monospace">'+String(msg).replace(/</g,'&lt;')+'</pre>'; }
+  window.onerror=function(m,s,l,c,e){ console.log('[artifact] onerror', e&&e.stack||m); __ogShow(e&&e.stack||m); return false; };
+  window.addEventListener('unhandledrejection',function(ev){ console.log('[artifact] rejection', ev.reason); __ogShow(ev.reason&&ev.reason.stack||ev.reason); });
+</script>
+<script>${runtime.react || ''}</script><script>${runtime.reactDom || ''}</script><script>${runtime.babel || ''}</script>
+</head><body><div id="root">Loading…</div><script type="text/babel" data-presets="react">
+console.log('[artifact] runner start; React=' + (typeof React) + ' ReactDOM=' + (typeof ReactDOM) + ' Babel=' + (typeof Babel));
 var __ogDefault;
 const { useState, useEffect, useRef, useMemo, useCallback, useReducer, useContext, useLayoutEffect, createContext, Fragment, memo } = React;
-try {
 ${stripped}
 const _root = document.getElementById('root');
 const _Comp = (typeof __ogDefault !== 'undefined' && __ogDefault) || (typeof App !== 'undefined' && App) || null;
-if (_root.hasChildNodes()) { /* code rendered itself */ }
-else if (_Comp) { ReactDOM.createRoot(_root).render(React.createElement(_Comp)); }
-else { document.body.innerHTML = '<pre style="color:#b91c1c;white-space:pre-wrap">No React component found — define a component named App or a default export.</pre>'; }
-} catch (e) { document.body.innerHTML = '<pre style="color:#b91c1c;white-space:pre-wrap">'+(e && e.stack || e)+'</pre>'; }
+console.log('[artifact] component=' + (_Comp ? (_Comp.name || 'anonymous') : 'NONE FOUND'));
+_root.innerHTML = '';
+if (_Comp) { ReactDOM.createRoot(_root).render(React.createElement(_Comp)); console.log('[artifact] render() called'); }
+else { __ogShow('No React component found — define a component named App or a default export.'); }
 </script></body></html>`;
   }, [artifact, runtime]);
 
