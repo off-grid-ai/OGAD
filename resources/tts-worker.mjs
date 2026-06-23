@@ -76,9 +76,21 @@ async function main() {
   throw new Error(`unknown mode: ${String(mode)}`);
 }
 
+// onnxruntime-node crashes (SIGABRT, "mutex lock failed") inside its static
+// destructors during a normal exit() — which pops the macOS crash reporter even
+// though our work is already done and flushed. Hard-exit with SIGKILL instead:
+// it skips the C++ destructors entirely, so no crash dialog. Output (the WAV file
+// or stdout JSON) is written synchronously before we get here; give pipes a brief
+// tick to flush, then kill.
+function hardExit() {
+  setTimeout(() => {
+    try { process.kill(process.pid, 'SIGKILL'); } catch { process.exit(0); }
+  }, 40);
+}
+
 main()
-  .then(() => process.exit(0))
+  .then(() => hardExit())
   .catch((e) => {
     process.stderr.write(String(e && e.stack ? e.stack : e));
-    process.exit(1);
+    hardExit();
   });
