@@ -183,6 +183,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [convSearch, setConvSearch] = useState('');
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [openTabs, setOpenTabs] = useState<string[]>([]); // conversation ids open as tabs
   const [showHistory, setShowHistory] = useState(true);
   const [mode, setMode] = useState<ChatMode>('ask');
   const [showImageOptions, setShowImageOptions] = useState(false);
@@ -390,6 +391,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   };
 
   const switchConversation = useCallback(async (convId: string) => {
+    setOpenTabs(t => (t.includes(convId) ? t : [...t, convId]));
     if (convId === activeConversationId) return;
     setActiveConversationId(convId);
     setActiveProjectId(conversations.find(c => c.id === convId)?.project_id ?? null);
@@ -402,6 +404,19 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
     }
   }, [activeConversationId, conversations]);
 
+  // Close a chat tab; fall back to another open tab (or a fresh chat) if it was active.
+  const closeTab = useCallback((convId: string) => {
+    setOpenTabs(prev => {
+      const next = prev.filter(t => t !== convId);
+      if (activeConversationId === convId) {
+        const fallback = next[next.length - 1];
+        if (fallback) void switchConversation(fallback);
+        else { setActiveConversationId(null); setMessages([]); setActiveProjectId(null); }
+      }
+      return next;
+    });
+  }, [activeConversationId, switchConversation]);
+
   // Open a target passed from the Projects tab (an existing chat, or a new chat
   // scoped to a project). Resolves project from the DB to avoid stale state.
   useEffect(() => {
@@ -411,6 +426,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
         if (openTarget.conversationId) {
           const convId = openTarget.conversationId;
           setActiveConversationId(convId);
+          setOpenTabs(t => (t.includes(convId) ? t : [...t, convId]));
           const conv = await window.api.getRagConversation?.(convId);
           setActiveProjectId((conv as { project_id?: string | null })?.project_id ?? null);
           setMessages(mapRagMessages(await window.api.getRagMessages(convId)));
@@ -499,6 +515,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
       try {
         await window.api.createRagConversation(convId, title, activeProjectId);
         setActiveConversationId(convId);
+        setOpenTabs(t => (t.includes(convId!) ? t : [...t, convId!]));
       } catch (e) {
         console.error('Failed to create conversation:', e);
         sendingRef.current = false;
@@ -1046,6 +1063,25 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
 
         {/* Main column */}
         <div className="flex min-w-0 flex-1 flex-col">
+          {/* Chat tabs — quick-switch between open conversations */}
+          {(openTabs.length > 0 || activeConversationId) && (
+            <div className="flex items-center gap-1 overflow-x-auto border-b border-neutral-900 px-2 py-1">
+              {openTabs.map(id => {
+                const t = conversations.find(c => c.id === id);
+                const active = activeConversationId === id;
+                return (
+                  <div key={id} className={`group flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-xs transition-colors ${active ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900'}`}>
+                    <button onClick={() => switchConversation(id)} className="max-w-[12rem] truncate">{t?.title || 'Untitled'}</button>
+                    <button onClick={() => closeTab(id)} className="text-neutral-600 transition-colors hover:text-red-400" title="Close tab">✕</button>
+                  </div>
+                );
+              })}
+              {!activeConversationId && (
+                <div className="flex shrink-0 items-center rounded-md bg-neutral-800 px-2.5 py-1 text-xs text-neutral-100">New chat</div>
+              )}
+              <button onClick={startNewConversation} className="shrink-0 rounded-md px-2 py-1 text-neutral-500 transition-colors hover:text-green-500" title="New tab">+</button>
+            </div>
+          )}
           {/* Messages */}
           <div ref={scrollRef} className="flex-1 overflow-y-auto">
             {messages.length === 0 ? (
