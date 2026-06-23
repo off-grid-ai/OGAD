@@ -210,6 +210,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const [speakingId, setSpeakingId] = useState<string | null>(null);
   const [speakLoadingId, setSpeakLoadingId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const [lightbox, setLightbox] = useState<{ url: string; path?: string } | null>(null);
   const [canvasArtifact, setCanvasArtifact] = useState<Artifact | null>(null);
   const [skillsOpen, setSkillsOpen] = useState(false);
@@ -226,7 +227,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const sendingRef = useRef(false);
   const queueRef = useRef<string[]>([]);
-  const [queuedCount, setQueuedCount] = useState(0);
+  const [queued, setQueued] = useState<string[]>([]);
 
   const markdownComponents: Components = {
     p: ({ children }) => <p style={{ margin: 0 }}>{children}</p>,
@@ -459,7 +460,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
     // let them keep typing/sending. The queue drains in order when each finishes.
     if (sendingRef.current) {
       queueRef.current.push(typed);
-      setQueuedCount(c => c + 1);
+      setQueued(q => [...q, typed]);
       if (isInput) setInput('');
       return;
     }
@@ -643,7 +644,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const drainQueue = (): void => {
     const next = queueRef.current.shift();
     if (next === undefined) return;
-    setQueuedCount(c => Math.max(0, c - 1));
+    setQueued(q => q.slice(1));
     setTimeout(() => { void sendMessage(next); }, 30);
   };
 
@@ -1524,8 +1525,28 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                 </div>
               )}
 
+              {queued.length > 0 && (
+                <div className="mb-2 flex flex-col gap-1">
+                  {queued.map((q, i) => (
+                    <div key={i} className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-1.5 text-[11px] text-neutral-400">
+                      <svg className="h-3 w-3 shrink-0 text-neutral-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                      <span className="flex-1 truncate">{q}</span>
+                      <span className="shrink-0 text-neutral-600">queued</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* Unified composer block */}
-              <div className="relative rounded-2xl border border-neutral-800 bg-neutral-950 shadow-sm transition-colors focus-within:border-neutral-600">
+              <div
+                onDragOver={(e) => { e.preventDefault(); if (!dragOver) setDragOver(true); }}
+                onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOver(false); }}
+                onDrop={(e) => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files?.length) void addFiles(e.dataTransfer.files); }}
+                className={`relative rounded-2xl border bg-neutral-950 shadow-sm transition-colors ${dragOver ? 'border-green-500' : 'border-neutral-800 focus-within:border-neutral-600'}`}
+              >
+                {dragOver ? (
+                  <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-2xl bg-neutral-950/80 text-xs text-green-500">Drop files to attach</div>
+                ) : null}
                 {skillMatches.length > 0 && (
                   <div className="absolute bottom-full left-0 z-20 mb-2 w-72 overflow-hidden rounded-md border border-neutral-800 bg-neutral-950 py-1 text-sm shadow-lg">
                     <div className="flex items-center justify-between px-3 py-1 text-[10px] uppercase tracking-wide text-neutral-600">
@@ -1664,9 +1685,9 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                       <SlidersHorizontal className="h-3.5 w-3.5" /> Image options
                     </Button>
                   )}
-                  {queuedCount > 0 && (
+                  {queued.length > 0 && (
                     <span className="flex h-8 items-center rounded-full border border-neutral-800 px-2.5 text-[11px] text-neutral-400">
-                      {queuedCount} queued
+                      {queued.length} queued
                     </span>
                   )}
                   </div>
