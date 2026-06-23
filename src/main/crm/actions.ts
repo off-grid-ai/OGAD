@@ -144,7 +144,23 @@ Reply JSON only: {"items": [{"text": "...", "owner": "me|someone_else|unclear", 
       Date.now(),
       key
     );
-    if (info.changes > 0) added += 1;
+    if (info.changes > 0) {
+      added += 1;
+      try {
+        const actionId = Number(info.lastInsertRowid);
+        BrowserWindow.getAllWindows().forEach((w) =>
+          w.webContents.send('notification:new-action', {
+            actionId,
+            text,
+            due: it.due || null,
+            entityName: params.entityName || null,
+            sourceApp: params.app,
+          })
+        );
+      } catch {
+        /* ignore */
+      }
+    }
   }
   if (added > 0) emitChanged();
   return added;
