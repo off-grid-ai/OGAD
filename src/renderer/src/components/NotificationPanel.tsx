@@ -1,28 +1,23 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { IconBell, IconX, IconBrain, IconUsers, IconMessageCircle, IconSparkles, IconCheck, IconTrash, IconArrowRight } from '@tabler/icons-react';
+import { IconBell, IconX, IconShieldCheck, IconChecklist, IconCheck, IconTrash, IconArrowRight } from '@tabler/icons-react';
 import { useNotifications, Notification } from '../hooks/useNotifications';
 import { cn } from '@renderer/lib/utils';
 import { ProgressiveBlur } from './ui/progressive-blur';
 
 interface NotificationPanelProps {
-  onSelectChat?: (sessionId: string) => void;
-  onSelectEntity?: (entityId: number) => void;
-  onSelectMemory?: (memoryId: number) => void;
+  /** Open the Actions / Approvals screen (where approvals and to-dos live). */
+  onOpenActions?: () => void;
   onViewAll?: () => void;
 }
 
 function getNotificationIcon(type: Notification['type']) {
   const iconClass = "h-4 w-4 text-neutral-500";
   switch (type) {
-    case 'memory':
-      return <IconBrain className={iconClass} />;
-    case 'entity':
-      return <IconUsers className={iconClass} />;
-    case 'chat':
-      return <IconMessageCircle className={iconClass} />;
-    case 'summary':
-      return <IconSparkles className={iconClass} />;
+    case 'approval':
+      return <IconShieldCheck className={iconClass} />;
+    case 'todo':
+      return <IconChecklist className={iconClass} />;
     default:
       return <IconBell className={iconClass} />;
   }
@@ -43,7 +38,7 @@ function formatTimestamp(date: Date): string {
   return date.toLocaleDateString();
 }
 
-export function NotificationPanel({ onSelectChat, onSelectEntity, onSelectMemory, onViewAll }: NotificationPanelProps) {
+export function NotificationPanel({ onOpenActions, onViewAll }: NotificationPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const { notifications, unreadCount, markAsRead, markAllAsRead, clearNotification, clearAll } = useNotifications();
@@ -65,20 +60,9 @@ export function NotificationPanel({ onSelectChat, onSelectEntity, onSelectMemory
 
   const handleNotificationClick = (notification: Notification) => {
     markAsRead(notification.id);
-    
-    if (notification.type === 'entity' && notification.entityId && onSelectEntity) {
-      onSelectEntity(notification.entityId);
-      setIsOpen(false);
-    } else if (notification.type === 'memory' && notification.sessionId && onSelectChat) {
-      onSelectChat(notification.sessionId);
-      setIsOpen(false);
-    } else if (notification.memoryId && onSelectMemory) {
-      onSelectMemory(notification.memoryId);
-      setIsOpen(false);
-    } else if (notification.sessionId && onSelectChat) {
-      onSelectChat(notification.sessionId);
-      setIsOpen(false);
-    }
+    // Both approvals and to-dos live on the Actions screen.
+    onOpenActions?.();
+    setIsOpen(false);
   };
 
   return (

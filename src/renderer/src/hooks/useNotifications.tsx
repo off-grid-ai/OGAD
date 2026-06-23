@@ -2,14 +2,13 @@ import { createContext, useContext, useState, useCallback, ReactNode, useEffect 
 
 export interface Notification {
   id: string;
-  type: 'memory' | 'entity' | 'chat' | 'summary' | 'info';
+  type: 'approval' | 'todo' | 'info';
   title: string;
   message: string;
   timestamp: Date;
   read: boolean;
-  sessionId?: string;
-  entityId?: number;
-  memoryId?: number;
+  approvalId?: number;
+  actionId?: number;
 }
 
 interface NotificationContextType {
@@ -33,10 +32,14 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
-        return parsed.map((n: any) => ({
-          ...n,
-          timestamp: new Date(n.timestamp)
-        }));
+        // Drop legacy chat/memory/entity/summary notifications — we only surface
+        // proactive approvals and to-dos now.
+        return parsed
+          .filter((n: any) => n.type === 'approval' || n.type === 'todo' || n.type === 'info')
+          .map((n: any) => ({
+            ...n,
+            timestamp: new Date(n.timestamp)
+          }));
       }
     } catch (e) {
       console.error('Failed to load notifications from storage:', e);

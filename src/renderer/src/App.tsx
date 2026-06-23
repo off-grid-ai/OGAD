@@ -266,53 +266,28 @@ function AppContent() {
   useEffect(() => {
     const unsubscribers: (() => void)[] = [];
 
-    // New messages notification
-    if (window.api?.onNewMessages) {
-      const unsubscribe = window.api.onNewMessages((data) => {
+    // Proactive approval queued — needs the user's decision
+    if (window.api?.onNewApproval) {
+      const unsubscribe = window.api.onNewApproval((data) => {
         addNotification({
-          type: 'chat',
-          title: `New messages in ${data.appName}`,
-          message: `${data.count} new message${data.count > 1 ? 's' : ''} in "${data.chatTitle}"`,
-          sessionId: data.sessionId,
+          type: 'approval',
+          title: data.entityName ? `Approval — ${data.entityName}` : 'Approval needed',
+          message: data.detail ? `${data.title} — ${data.detail}` : data.title,
+          approvalId: data.approvalId,
         });
       });
       unsubscribers.push(unsubscribe);
     }
 
-    // New memory notification
-    if (window.api?.onNewMemory) {
-      const unsubscribe = window.api.onNewMemory((data) => {
+    // New to-do extracted from your activity
+    if (window.api?.onNewAction) {
+      const unsubscribe = window.api.onNewAction((data) => {
+        const where = [data.entityName, data.sourceApp].filter(Boolean).join(' · ');
         addNotification({
-          type: 'memory',
-          title: 'New memory stored',
-          message: data.memoryContent,
-          sessionId: data.sessionId || undefined,
-        });
-      });
-      unsubscribers.push(unsubscribe);
-    }
-
-    // New entity notification
-    if (window.api?.onNewEntity) {
-      const unsubscribe = window.api.onNewEntity((data) => {
-        addNotification({
-          type: 'entity',
-          title: `New entity: ${data.entityName}`,
-          message: `${data.entityType} with ${data.factsCount} fact${data.factsCount > 1 ? 's' : ''} discovered`,
-          entityId: data.entityId,
-        });
-      });
-      unsubscribers.push(unsubscribe);
-    }
-
-    // Summary generated notification
-    if (window.api?.onSummaryGenerated) {
-      const unsubscribe = window.api.onSummaryGenerated((data) => {
-        addNotification({
-          type: 'summary',
-          title: 'Chat summary generated',
-          message: `Summary created for "${data.chatTitle}"`,
-          sessionId: data.sessionId,
+          type: 'todo',
+          title: data.due ? `New to-do — due ${data.due}` : 'New to-do',
+          message: where ? `${data.text} (${where})` : data.text,
+          actionId: data.actionId,
         });
       });
       unsubscribers.push(unsubscribe);
@@ -607,9 +582,12 @@ function AppContent() {
                     <SearchScreen initialQuery={searchQuery} onOpen={handleOpenHit} />
                   ) : viewMode === 'notifications' ? (
                     <NotificationList
-                      onSelectChat={handleSelectChat}
-                      onSelectMemory={handleSelectMemory}
-                      onSelectEntity={handleSelectEntity}
+                      onOpenActions={() => {
+                        setSelectedSessionId(null);
+                        setSelectedMemoryId(null);
+                        setSelectedEntityId(null);
+                        setViewMode('actions');
+                      }}
                     />
                   ) : viewMode === 'models' ? (
                     <ModelsScreen />

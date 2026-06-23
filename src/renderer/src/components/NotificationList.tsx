@@ -1,29 +1,24 @@
 import { motion, AnimatePresence } from 'motion/react';
-import { IconBell, IconX, IconBrain, IconUsers, IconMessageCircle, IconSparkles, IconCheck, IconTrash, IconFilter } from '@tabler/icons-react';
+import { IconBell, IconX, IconShieldCheck, IconChecklist, IconCheck, IconTrash, IconFilter } from '@tabler/icons-react';
 import { useNotifications, Notification } from '../hooks/useNotifications';
 import { cn } from '../lib/utils';
 import { useState } from 'react';
 import { ProgressiveBlur } from './ui/progressive-blur';
 
 interface NotificationListProps {
-  onSelectChat?: (sessionId: string) => void;
-  onSelectEntity?: (entityId: number) => void;
-  onSelectMemory?: (memoryId: number) => void;
+  /** Open the Actions / Approvals screen (where approvals and to-dos live). */
+  onOpenActions?: () => void;
 }
 
-type FilterType = 'all' | 'memory' | 'entity' | 'chat' | 'summary';
+type FilterType = 'all' | 'approval' | 'todo';
 
 function getNotificationIcon(type: Notification['type']) {
   const iconClass = "h-5 w-5 text-neutral-500";
   switch (type) {
-    case 'memory':
-      return <IconBrain className={iconClass} />;
-    case 'entity':
-      return <IconUsers className={iconClass} />;
-    case 'chat':
-      return <IconMessageCircle className={iconClass} />;
-    case 'summary':
-      return <IconSparkles className={iconClass} />;
+    case 'approval':
+      return <IconShieldCheck className={iconClass} />;
+    case 'todo':
+      return <IconChecklist className={iconClass} />;
     default:
       return <IconBell className={iconClass} />;
   }
@@ -51,37 +46,27 @@ function formatTimestamp(date: Date): string {
 function getTypeLabel(type: FilterType): string {
   switch (type) {
     case 'all': return 'All';
-    case 'memory': return 'Memories';
-    case 'entity': return 'Entities';
-    case 'chat': return 'Chats';
-    case 'summary': return 'Summaries';
+    case 'approval': return 'Approvals';
+    case 'todo': return 'To-do';
     default: return 'All';
   }
 }
 
-export function NotificationList({ onSelectChat, onSelectEntity, onSelectMemory }: NotificationListProps) {
+export function NotificationList({ onOpenActions }: NotificationListProps) {
   const { notifications, unreadCount, markAsRead, markAllAsRead, clearNotification, clearAll } = useNotifications();
   const [filter, setFilter] = useState<FilterType>('all');
 
-  const filteredNotifications = filter === 'all' 
-    ? notifications 
+  const filteredNotifications = filter === 'all'
+    ? notifications
     : notifications.filter(n => n.type === filter);
 
   const handleNotificationClick = (notification: Notification) => {
     markAsRead(notification.id);
-    
-    if (notification.type === 'entity' && notification.entityId && onSelectEntity) {
-      onSelectEntity(notification.entityId);
-    } else if (notification.type === 'memory' && notification.sessionId && onSelectChat) {
-      onSelectChat(notification.sessionId);
-    } else if (notification.memoryId && onSelectMemory) {
-      onSelectMemory(notification.memoryId);
-    } else if (notification.sessionId && onSelectChat) {
-      onSelectChat(notification.sessionId);
-    }
+    // Both approvals and to-dos live on the Actions screen.
+    onOpenActions?.();
   };
 
-  const filterOptions: FilterType[] = ['all', 'chat', 'memory', 'entity', 'summary'];
+  const filterOptions: FilterType[] = ['all', 'approval', 'todo'];
 
   return (
     <div className="h-full flex flex-col">
@@ -188,8 +173,8 @@ export function NotificationList({ onSelectChat, onSelectEntity, onSelectMemory 
                   {filter === 'all' ? 'No notifications yet' : `No ${getTypeLabel(filter).toLowerCase()} notifications`}
                 </p>
                 <p className="text-neutral-600 text-sm max-w-md">
-                  {filter === 'all' 
-                    ? "Updates appear here when chats are analyzed, memories are stored, and entities are discovered."
+                  {filter === 'all'
+                    ? "Updates appear here when Off Grid queues an approval for you or extracts a new to-do from your activity."
                     : `${getTypeLabel(filter)} notifications will appear here when they occur.`}
                 </p>
               </motion.div>
