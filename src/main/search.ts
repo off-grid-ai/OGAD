@@ -7,7 +7,7 @@ import { getDB } from './database';
 import { embeddings } from './embeddings';
 import { addChunks, searchVectors, vectorCount, type VecChunk } from './vectors';
 
-export type SearchKind = 'screen' | 'meeting' | 'memory' | 'entity' | 'fact';
+export type SearchKind = 'screen' | 'meeting' | 'memory' | 'entity' | 'fact' | 'artifact';
 
 export interface SearchResult {
   key: string;
@@ -264,6 +264,26 @@ function thumbFor(hit: RawHit): string | null {
 }
 
 /** Hybrid universal search. `semantic` adds the LanceDB pass (slower first call). */
+// Generated artifacts live as files (not in the FTS index), so match them
+// directly on title + code and fold them into the fused results.
+function artifactHits(q: string, limit: number): RawHit[] {
+  const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return [];
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { listArtifacts } = require('./artifacts') as typeof import('./artifacts');
+    return listArtifacts()
+      .map((a) => {
+        const hay = `${a.title}\n${a.code}`.toLowerCase();
+        return { a, score: terms.filter((t) => hay.includes(t)).length };
+      })
+      .filter((x) => x.score > 0)
+      .sort((x, y) => y.score - x.score)
+      .slice(0, limit)
+      .map(({ a }) => ({ key: `artifact:${a.id}`, kind: 'artifact' as SearchKind, refId: 0, title: a.title || a.kind, snippet: a.code.slice(0, 280), surface: 'Artifact', url: null, ts: a.created }));
+  } catch { return []; }
+}
+
 export async function universalSearch(
   query: string,
   opts: { limit?: number; semantic?: boolean; sources?: string[] } = {}
@@ -276,6 +296,8 @@ export async function universalSearch(
   const sourceSet = opts.sources?.length ? new Set(opts.sources.map((s) => s.toLowerCase())) : null;
 
   const lists = keywordHits(q, perSource);
+  const arts = artifactHits(q, perSource);
+  if (arts.length) lists.push(arts);
   if (opts.semantic !== false) {
     try {
       lists.push(await semanticHits(q, perSource));
