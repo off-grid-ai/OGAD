@@ -211,11 +211,11 @@ else { __ogShow('No React component found — define a component named App or a 
           <button onClick={onClose} className="rounded-md border border-neutral-700 px-3 py-1 text-xs text-neutral-300 transition-colors hover:text-white">Close</button>
         </div>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="relative min-h-0 flex-1">
         {view === 'preview' ? (
-          <iframe title="artifact" sandbox="allow-scripts" srcDoc={srcdoc} className="w-full flex-1 border-0 bg-white" style={{ minHeight: 0 }} />
+          <iframe title="artifact" sandbox="allow-scripts" srcDoc={srcdoc} className="absolute inset-0 h-full w-full border-0 bg-white" />
         ) : (
-          <pre className="min-h-0 flex-1 overflow-auto bg-neutral-950 p-4 text-xs text-neutral-300">{artifact.code}</pre>
+          <pre className="absolute inset-0 overflow-auto bg-neutral-950 p-4 text-xs text-neutral-300">{artifact.code}</pre>
         )}
       </div>
     </div>
