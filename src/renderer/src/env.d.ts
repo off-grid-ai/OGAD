@@ -115,11 +115,13 @@ interface IElectronAPI {
   regenerateMasterMemory: () => Promise<string | null>
 
   // RAG Chat
-  ragChat: (query: string, appName?: string, conversationHistory?: { role: string; content: string }[]) => Promise<{ answer: string; context: any }>
+  ragChat: (query: string, appName?: string, conversationHistory?: { role: string; content: string }[], projectId?: string | null, conversationId?: string, noMemory?: boolean, streamId?: string, thinking?: boolean) => Promise<{ answer: string; context: any }>
+  onRagStream: (callback: (data: { streamId: string; type: 'content' | 'reasoning' | 'step'; text?: string; step?: any }) => void) => () => void
 
   // RAG Conversations
-  createRagConversation: (id: string, title?: string) => Promise<string>
-  getRagConversations: () => Promise<RagConversation[]>
+  createRagConversation: (id: string, title?: string, projectId?: string | null) => Promise<string>
+  getRagConversations: (projectId?: string | null) => Promise<RagConversation[]>
+  setRagConversationProject: (id: string, projectId: string | null) => Promise<boolean>
   getRagConversation: (id: string) => Promise<RagConversation | null>
   getRagMessages: (conversationId: string) => Promise<RagMessage[]>
   addRagMessage: (conversationId: string, role: 'user' | 'assistant', content: string, context?: any) => Promise<number>
@@ -137,6 +139,16 @@ interface IElectronAPI {
   rebuildEntityGraph: () => Promise<boolean>
   deleteEntity: (entityId: number) => Promise<boolean>
   deleteMemory: (memoryId: number) => Promise<boolean>
+
+  // Artifacts library
+  saveArtifact: (a: { kind: 'html' | 'svg' | 'mermaid' | 'react'; code: string; title?: string }) => Promise<{ id: string; kind: 'html' | 'svg' | 'mermaid' | 'react'; code: string; title: string; created: number }>
+  listArtifacts: () => Promise<{ id: string; kind: 'html' | 'svg' | 'mermaid' | 'react'; code: string; title: string; created: number }[]>
+  deleteArtifact: (id: string) => Promise<boolean>
+  processFile: (bytes: ArrayBuffer, name: string) => Promise<{ name: string; kind: 'text' | 'pdf' | 'docx' | 'image' | 'audio' | 'video'; text: string }>
+
+  // Skills
+  listSkills: () => Promise<{ name: string; description: string }[]>
+  getSkill: (name: string) => Promise<{ name: string; description: string; instructions: string } | null>
 
   // User Profile
   getUserProfile: () => Promise<UserProfile | null>

@@ -310,6 +310,13 @@ export function getDB() {
     // Column already exists, ignore
   }
 
+  // Migration: Add project_id to rag_conversations (chats can be scoped to a project)
+  try {
+    db.exec(`ALTER TABLE rag_conversations ADD COLUMN project_id TEXT`);
+  } catch (e) {
+    // Column already exists, ignore
+  }
+
   return db;
 }
 
@@ -1013,6 +1020,7 @@ export function saveUserProfile(profile: UserProfile): void {
 export interface RagConversation {
     id: string;
     title: string | null;
+    project_id?: string | null;
     created_at: string;
     updated_at: string;
     message_count?: number;
@@ -1027,36 +1035,76 @@ export interface RagMessage {
     created_at: string;
 }
 
-export function createRagConversation(id: string, title?: string): string {
+export function createRagConversation(id: string, title?: string, projectId?: string | null): string {
     const db = getDB();
     db.prepare(`
-        INSERT INTO rag_conversations (id, title, created_at, updated_at)
-        VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `).run(id, title || null);
+        INSERT INTO rag_conversations (id, title, project_id, created_at, updated_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `).run(id, title || null, projectId || null);
     return id;
 }
 
-export function getRagConversations(): RagConversation[] {
+export function getRagConversations(projectId?: string | null): RagConversation[] {
     const db = getDB();
-    return db.prepare(`
-        SELECT 
+    const where = projectId === undefined ? '' : projectId === null ? 'WHERE rc.project_id IS NULL' : 'WHERE rc.project_id = ?';
+    const stmt = db.prepare(`
+        SELECT
             rc.id,
             rc.title,
+            rc.project_id,
             rc.created_at,
             rc.updated_at,
             (SELECT COUNT(*) FROM rag_messages rm WHERE rm.conversation_id = rc.id) as message_count
         FROM rag_conversations rc
+        ${where}
         ORDER BY rc.updated_at DESC
-    `).all() as RagConversation[];
+    `);
+    return (projectId ? stmt.all(projectId) : stmt.all()) as RagConversation[];
 }
 
 export function getRagConversation(id: string): RagConversation | null {
     const db = getDB();
     return db.prepare(`
-        SELECT id, title, created_at, updated_at
+        SELECT id, title, project_id, created_at, updated_at
         FROM rag_conversations
         WHERE id = ?
     `).get(id) as RagConversation | null;
+}
+
+export function setRagConversationProject(id: string, projectId: string | null): void {
+    const db = getDB();
+    db.prepare(`UPDATE rag_conversations SET project_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(projectId, id);
+}
+
+/**
+ * Recent messages from OTHER chats in the same project — lets a project chat
+ * reference what was discussed in sibling conversations. Returns chronological.
+ */
+export function getProjectChatHistory(
+    projectId: string,
+    excludeConversationId: string,
+    limit = 12
+): { role: string; content: string; title: string | null }[] {
+    const db = getDB();
+    // Project memory spans EVERY sibling chat in the project, regardless of which
+    // path stored it — rag_messages (main chat) and project_messages (project
+    // threads). UNION both so context isn't lost across chats in the project.
+    const rows = db.prepare(`
+        SELECT role, content, title, created_at FROM (
+            SELECT rm.role AS role, rm.content AS content, rc.title AS title, rm.created_at AS created_at
+            FROM rag_messages rm
+            JOIN rag_conversations rc ON rc.id = rm.conversation_id
+            WHERE rc.project_id = ? AND rm.conversation_id != ?
+            UNION ALL
+            SELECT pm.role AS role, pm.content AS content, pt.title AS title, pm.created_at AS created_at
+            FROM project_messages pm
+            JOIN project_threads pt ON pt.id = pm.thread_id
+            WHERE pt.project_id = ? AND pm.thread_id != ?
+        )
+        ORDER BY created_at DESC
+        LIMIT ?
+    `).all(projectId, excludeConversationId, projectId, excludeConversationId, limit) as { role: string; content: string; title: string | null; created_at: string }[];
+    return rows.map(({ role, content, title }) => ({ role, content, title })).reverse();
 }
 
 export function updateRagConversationTitle(id: string, title: string): void {

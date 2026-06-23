@@ -158,6 +158,26 @@ function tokenizeQuery(query: string, maxTokens: number = 6): string[] {
     return Array.from(new Set(tokens)).slice(0, maxTokens);
 }
 
+// Generate the answer for a rag:chat turn. When a streamId + sender are present,
+// stream tokens/reasoning to the renderer over the 'rag:stream' channel as they
+// arrive (inline chain-of-thought); otherwise fall back to a single blocking call.
+async function streamAnswer(
+    event: { sender?: { send: (channel: string, payload: unknown) => void } } | undefined,
+    streamId: string | undefined,
+    prompt: string,
+    thinking: boolean = false,
+): Promise<string> {
+    const { llm } = await import('./llm');
+    if (!streamId || !event?.sender) {
+        return (await llm.chat(prompt, [], 300000, 2048, { disableThinking: !thinking })).trim();
+    }
+    const sender = event.sender;
+    const answer = await llm.chatStream(prompt, [], (text, kind) => {
+        try { sender.send('rag:stream', { streamId, type: kind, text }); } catch { /* window gone */ }
+    }, { thinking });
+    return answer.trim();
+}
+
 function clipText(text: string, maxLength: number): string {
     if (!text) return '';
     if (text.length <= maxLength) return text;
@@ -532,7 +552,59 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
       };
   });
 
-  ipcMain.handle('rag:chat', async (_, query: string, appName?: string, conversationHistory?: { role: string; content: string }[]) => {
+  ipcMain.handle('rag:chat', async (event, query: string, appName?: string, conversationHistory?: { role: string; content: string }[], projectId?: string | null, conversationId?: string, noMemory?: boolean, streamId?: string, thinking?: boolean) => {
+      // No-memory mode: a plain on-device assistant — no retrieval at all.
+      if (noMemory) {
+          const { llm } = await import('./llm');
+          const hist = (conversationHistory ?? [])
+              .slice(-10)
+              .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${m.content}`)
+              .join('\n');
+          const prompt = ['You are Off Grid, a private, on-device assistant.', hist ? `Conversation so far:\n${hist}` : '', `User: ${query}`, 'Assistant:']
+              .filter(Boolean)
+              .join('\n\n');
+          void llm; // retained for non-stream fallback inside streamAnswer
+          const answer = await streamAnswer(event, streamId, prompt, thinking);
+          return { answer, context: undefined };
+      }
+
+      // Project-scoped chat: retrieve from the project's knowledge base (uploaded
+      // docs + optionally captured memory) AND reference sibling chats in the project.
+      if (projectId) {
+          const { ragService } = await import('./rag');
+          const { listProjects } = await import('./rag/store');
+          const { getProjectChatHistory } = await import('./database');
+          const { formatForPrompt } = await import('@offgrid/rag');
+          const { llm } = await import('./llm');
+          const project = listProjects().find((p) => p.id === projectId);
+          const sys = project?.systemPrompt?.trim() || 'You are a helpful assistant for this project.';
+          const search = await ragService.searchProject(projectId, query, { topK: 6, contextLength: 4096 });
+          const ctx = formatForPrompt(search);
+          // Cross-chat memory: recent messages from other chats in this project.
+          const siblings = getProjectChatHistory(projectId, conversationId ?? '', 12);
+          const siblingCtx = siblings.length
+              ? 'Related discussion from other chats in this project:\n' +
+                siblings.map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}${m.title ? ` (${m.title})` : ''}: ${m.content}`).join('\n')
+              : '';
+          const hist = (conversationHistory ?? [])
+              .slice(-8)
+              .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${m.content}`)
+              .join('\n');
+          const prompt = [sys, ctx, siblingCtx, hist ? `Conversation so far:\n${hist}` : '', `User: ${query}`, 'Assistant:']
+              .filter(Boolean)
+              .join('\n\n');
+          void llm; // retained for non-stream fallback inside streamAnswer
+          if (streamId) event.sender?.send('rag:stream', { streamId, type: 'step', step: { kind: 'project', counts: { sources: search.chunks.length, projectChats: siblings.length } } });
+          const answer = await streamAnswer(event, streamId, prompt, thinking);
+          return {
+              answer,
+              context: {
+                  sources: search.chunks.map((c) => ({ name: c.name, position: c.position, score: c.score })),
+                  projectChats: siblings.length,
+              },
+          };
+      }
+
       const db = getDB();
       const tokens = tokenizeQuery(query);
       const ftsQuery = tokens.length > 0 ? tokens.join(' OR ') : query;
@@ -669,6 +741,25 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
 
     const contextBlock = `MASTER MEMORY:\n${masterRelevant || masterFallback ? clipText(masterContent || '(none)', 500) : '(not relevant)'}\n\nRELEVANT MEMORIES:\n${memoryLines || '(none)'}\n\nRELEVANT MESSAGES:\n${messageLines || '(none)'}\n\nRELEVANT SUMMARIES:\n${summaryLines || '(none)'}\n\nRELEVANT ENTITIES:\n${entityLines || '(none)'}\n\nRELEVANT ENTITY FACTS:\n${factLines || '(none)'}`;
 
+    // Unified search: fuse in the best-ranked hits across screens, meetings,
+    // memories, entities and facts (hybrid FTS + vectors with RRF) — the same
+    // engine as the search screen, so the chat gets the right context too.
+    let unifiedBlock = '';
+    let unifiedHits: { kind: string; title: string; snippet: string; surface: string; ts: number; refId: number; imagePath: string | null }[] = [];
+    try {
+        const { universalSearch } = await import('./search');
+        unifiedHits = await universalSearch(query, { limit: 12, semantic: true });
+        if (unifiedHits.length) {
+            unifiedBlock = '\n\nSOURCES — every factual claim must cite the source it came from using its tag in square brackets, e.g. [S2]. Cite ONLY sources you actually used; never invent a citation:\n' +
+                unifiedHits.map((h, i) => {
+                    const when = h.ts ? ` · ${new Date(h.ts).toISOString().slice(0, 10)}` : '';
+                    return `[S${i + 1}] (${h.kind} · ${h.surface || 'unknown'}${when})${h.title ? ` ${h.title} —` : ''} ${clipText(h.snippet || '', 350)}`;
+                }).join('\n');
+        }
+    } catch (e) {
+        console.error('[RAG] universalSearch failed', e);
+    }
+
     // Build conversation history block if provided
     let historyBlock = '';
     if (conversationHistory && conversationHistory.length > 0) {
@@ -678,15 +769,23 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
         historyBlock = `\nCONVERSATION HISTORY:\n${historyLines}\n`;
     }
 
+    let skillsBlock = 'None installed.';
+    try {
+        const { listSkills } = await import('./skills');
+        const sk = listSkills();
+        if (sk.length) skillsBlock = sk.map((s) => `- /${s.name}: ${s.description}`).join('\n');
+    } catch { /* skills optional */ }
+
     const prompt = getPrompt('ragChat', {
         HISTORY_BLOCK: historyBlock,
         QUERY: query,
-        CONTEXT_BLOCK: contextBlock,
+        CONTEXT_BLOCK: contextBlock + unifiedBlock,
+        SKILLS_BLOCK: skillsBlock,
     });
 
       try {
-          const { llm } = await import('./llm');
-          const answer = await llm.chat(prompt);
+          if (streamId) event.sender?.send('rag:stream', { streamId, type: 'step', step: { kind: 'memory', counts: { memories: memories.length, messages: messages.length, summaries: summaries.length, entities: entities.length, facts: entityFacts.length, unified: unifiedHits.length } } });
+          const answer = await streamAnswer(event, streamId, prompt, thinking);
           return {
               answer,
               context: {
@@ -695,7 +794,8 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
                   messages,
                   summaries,
                   entities,
-                  entityFacts
+                  entityFacts,
+                  unified: unifiedHits
               }
           };
       } catch (e) {
@@ -708,7 +808,8 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
                   messages,
                   summaries,
                   entities,
-                  entityFacts
+                  entityFacts,
+                  unified: unifiedHits
               }
           };
       }
@@ -817,12 +918,18 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
 
   // === RAG CONVERSATION HANDLERS ===
   
-  ipcMain.handle('rag:create-conversation', (_, id: string, title?: string) => {
-      return createRagConversation(id, title);
+  ipcMain.handle('rag:create-conversation', (_, id: string, title?: string, projectId?: string | null) => {
+      return createRagConversation(id, title, projectId);
   });
 
-  ipcMain.handle('rag:get-conversations', () => {
-      return getRagConversations();
+  ipcMain.handle('rag:get-conversations', (_, projectId?: string | null) => {
+      return getRagConversations(projectId);
+  });
+
+  ipcMain.handle('rag:set-conversation-project', async (_, id: string, projectId: string | null) => {
+      const { setRagConversationProject } = await import('./database');
+      setRagConversationProject(id, projectId);
+      return true;
   });
 
   ipcMain.handle('rag:get-conversation', (_, id: string) => {
@@ -1074,22 +1181,315 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
       try {
           for (const model of models) {
               const destPath = path.join(modelsDir, model.name);
-              
+
               if (fs.existsSync(destPath)) {
                   console.log(`[Model] ${model.name} already exists, skipping`);
                   continue;
               }
-              
+
               console.log(`[Model] Downloading ${model.name}...`);
               await downloadFile(model.url, destPath, model.name);
               console.log(`[Model] ${model.name} downloaded`);
           }
-          
+
           return { success: true };
       } catch (err: any) {
           console.error('[Model] Download failed:', err);
           return { success: false, error: err.message };
       }
+  });
+
+  // === OFF GRID MODEL CATALOG (text, vision, image, voice, transcription) ===
+
+  ipcMain.handle('models:catalog', async () => {
+      const { CATALOG, MODEL_KINDS } = await import('@offgrid/models');
+      return { kinds: MODEL_KINDS, models: CATALOG };
+  });
+
+  ipcMain.handle('models:installed', async () => {
+      const { CATALOG } = await import('@offgrid/models');
+      const { llm } = await import('./llm');
+      const { isMfluxModelCached } = await import('./mflux');
+      const fs = await import('fs');
+      const path = await import('path');
+      const dir = llm.getModelsDir();
+      return CATALOG.filter((m) => {
+          // MLX/mflux models have no files[] (mflux fetches its own weights) —
+          // check the HF cache. Otherwise an empty files[] would always pass .every().
+          if (m.runtime === 'mflux') return isMfluxModelCached(m.id);
+          return m.files.length > 0 && m.files.every((f) => {
+              try { return fs.statSync(path.join(dir, f.name)).size > 0; } catch { return false; }
+          });
+      }).map((m) => m.id);
+  });
+
+  // Search Hugging Face for GGUF models.
+  ipcMain.handle('models:search', async (_, query: string) => {
+      try {
+          const { searchHuggingFace } = await import('@offgrid/models');
+          return await searchHuggingFace(query, { limit: 30 });
+      } catch (err: any) {
+          console.error('[Models] HF search failed:', err);
+          return [];
+      }
+  });
+
+  // Download a model by id: a curated catalog entry, or any Hugging Face repo.
+  ipcMain.handle('models:download', async (_, modelId: string) => {
+      const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models');
+      const { llm } = await import('./llm');
+      const fs = await import('fs');
+      const path = await import('path');
+      const entry = CATALOG.find((m) => m.id === modelId) ?? (await resolveHuggingFaceModel(modelId));
+      if (!entry) return { success: false, error: 'unknown model' };
+
+      const dir = llm.getModelsDir();
+      fs.mkdirSync(dir, { recursive: true });
+      const send = (data: Record<string, unknown>) =>
+          BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('model:download-progress', { modelId, ...data }));
+
+      // MLX/mflux models: fetch weights into the HF cache via the bundled python.
+      if (entry.runtime === 'mflux') {
+          try {
+              const { downloadMfluxModel } = await import('./mflux');
+              await downloadMfluxModel(modelId, (pct) => send({ percent: pct, status: 'downloading' }));
+              send({ percent: 100, status: 'completed' });
+              return { success: true };
+          } catch (err: any) {
+              send({ status: 'failed', error: err.message });
+              return { success: false, error: err.message };
+          }
+      }
+
+      try {
+          for (const file of entry.files) {
+              const dest = path.join(dir, file.name);
+              if (fs.existsSync(dest) && fs.statSync(dest).size > 0) continue;
+              const res = await fetch(file.url); // fetch follows HF redirects
+              if (!res.ok || !res.body) throw new Error(`HTTP ${res.status} for ${file.name}`);
+              const total = Number(res.headers.get('content-length') ?? 0);
+              const out = fs.createWriteStream(`${dest}.part`);
+              let written = 0;
+              const reader = res.body.getReader();
+              for (;;) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  out.write(Buffer.from(value));
+                  written += value.length;
+                  send({
+                      currentFile: file.name,
+                      percent: total ? Math.round((written / total) * 100) : 0,
+                      downloadedMB: (written / 1048576).toFixed(1),
+                      totalMB: total ? (total / 1048576).toFixed(1) : '?',
+                  });
+              }
+              out.end();
+              await new Promise<void>((r) => out.on('finish', () => r()));
+              fs.renameSync(`${dest}.part`, dest);
+          }
+          send({ percent: 100, status: 'completed' });
+          return { success: true };
+      } catch (err: any) {
+          send({ status: 'failed', error: err.message });
+          return { success: false, error: err.message };
+      }
+  });
+
+  // Set the active LLM (text/vision) model: resolve the catalog entry's files
+  // and write active-model.json, then reload the llama-server.
+  ipcMain.handle('models:set-active', async (_, modelId: string) => {
+      const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models');
+      const { llm } = await import('./llm');
+      const fs = await import('fs');
+      const path = await import('path');
+      const entry = CATALOG.find((m) => m.id === modelId) ?? (await resolveHuggingFaceModel(modelId));
+      if (!entry) return { success: false, error: 'unknown model' };
+      if (entry.kind !== 'text' && entry.kind !== 'vision') {
+          return { success: false, error: `${entry.kind} models are not loadable as the chat LLM` };
+      }
+      const primary = (entry.files.find((f) => f.role === 'primary') ?? entry.files[0])?.name;
+      const mmproj = entry.files.find((f) => f.role === 'mmproj')?.name ?? null;
+      fs.writeFileSync(
+          path.join(llm.getModelsDir(), 'active-model.json'),
+          JSON.stringify({ id: modelId, primary, mmproj }, null, 2)
+      );
+      llm.reloadModel();
+      return { success: true };
+  });
+
+  ipcMain.handle('models:get-active', async () => {
+      const { llm } = await import('./llm');
+      const fs = await import('fs');
+      const path = await import('path');
+      try {
+          const cfg = JSON.parse(fs.readFileSync(path.join(llm.getModelsDir(), 'active-model.json'), 'utf-8'));
+          return cfg.id ?? null;
+      } catch {
+          return null;
+      }
+  });
+
+  // --- Image generation (stable-diffusion.cpp) ----------------------------
+  ipcMain.handle('imagegen:status', async () => {
+      const { imageGenStatus } = await import('./imagegen');
+      return imageGenStatus();
+  });
+
+  ipcMain.handle('imagegen:generate', async (e, params: import('./imagegen').ImageGenParams) => {
+      const { generateImage } = await import('./imagegen');
+      return generateImage(params, (p) => {
+          try { e.sender.send('imagegen:progress', p); } catch { /* window gone */ }
+      });
+  });
+
+  ipcMain.handle('imagegen:cancel', async () => {
+      const { cancelImageGen } = await import('./imagegen');
+      return cancelImageGen();
+  });
+
+  ipcMain.handle('imagegen:list', async () => {
+      const { listGeneratedImages } = await import('./imagegen');
+      return listGeneratedImages();
+  });
+
+  ipcMain.handle('imagegen:style-thumbs', async () => {
+      const { listStyleThumbs } = await import('./imagegen');
+      return listStyleThumbs();
+  });
+  ipcMain.handle('imagegen:make-style-thumb', async (_e, key: string, prompt: string) => {
+      const { generateStyleThumb } = await import('./imagegen');
+      return generateStyleThumb(key, prompt);
+  });
+  ipcMain.handle('imagegen:list-loras', async () => {
+      const { listLoras } = await import('./imagegen');
+      return listLoras();
+  });
+  ipcMain.handle('imagegen:reveal-loras', async () => {
+      const { ensureLoraDir } = await import('./imagegen');
+      const { shell } = await import('electron');
+      const dir = ensureLoraDir();
+      await shell.openPath(dir);
+      return dir;
+  });
+  ipcMain.handle('imagegen:download-lora', async (e, url: string, filename: string) => {
+      const { downloadLora } = await import('./imagegen');
+      return downloadLora(url, filename, (pct) => {
+          try { e.sender.send('imagegen:lora-progress', { filename, pct }); } catch { /* window gone */ }
+      });
+  });
+
+  ipcMain.handle('imagegen:delete', async (_e, p: string) => {
+      const { deleteGeneratedImage } = await import('./imagegen');
+      return deleteGeneratedImage(p);
+  });
+
+  ipcMain.handle('imagegen:export', async (e, srcPath: string, suggestedName?: string) => {
+      const { dialog } = await import('electron');
+      const fs = await import('fs');
+      const win = BrowserWindow.fromWebContents(e.sender) ?? undefined;
+      const res = await dialog.showSaveDialog(win!, {
+          title: 'Save image',
+          defaultPath: suggestedName || 'off-grid-image.png',
+          filters: [{ name: 'PNG', extensions: ['png'] }],
+      });
+      if (res.canceled || !res.filePath) return false;
+      await fs.promises.copyFile(srcPath, res.filePath);
+      return true;
+  });
+
+  // --- Agentic tool-calling (isolated, opt-in) ----------------------------
+  ipcMain.handle('tools:list', async () => {
+      const { listTools } = await import('./tools');
+      return listTools();
+  });
+  ipcMain.handle('tools:chat', async (_e, query: string, history?: { role: string; content: string }[]) => {
+      const { toolChat } = await import('./tools');
+      return toolChat(query, history || []);
+  });
+
+  // --- LLM inference settings (temperature, context window) ---------------
+  ipcMain.handle('llm:get-settings', async () => {
+      const { llm } = await import('./llm');
+      return llm.getSettings();
+  });
+  ipcMain.handle('llm:set-settings', async (_e, s: { temperature?: number; ctxSize?: number }) => {
+      const { llm } = await import('./llm');
+      await llm.setSettings(s);
+      return llm.getSettings();
+  });
+
+  // --- Canvas / artifacts sandbox runtime ---------------------------------
+  ipcMain.handle('artifacts:runtime', async (_e, kind: import('./artifacts').ArtifactKind) => {
+      const { artifactRuntime } = await import('./artifacts');
+      return artifactRuntime(kind);
+  });
+  ipcMain.handle('artifacts:save', async (_e, a: { kind: import('./artifacts').ArtifactKind; code: string; title?: string }) => {
+      const { saveArtifact } = await import('./artifacts');
+      return saveArtifact(a);
+  });
+  ipcMain.handle('artifacts:list', async () => {
+      const { listArtifacts } = await import('./artifacts');
+      return listArtifacts();
+  });
+  ipcMain.handle('artifacts:delete', async (_e, id: string) => {
+      const { deleteArtifact } = await import('./artifacts');
+      return deleteArtifact(id);
+  });
+
+  // --- File attachments: any file -> text (read / parse / caption / transcribe) ---
+  ipcMain.handle('files:process', async (_e, bytes: ArrayBuffer | Uint8Array, name: string) => {
+      const { processUpload } = await import('./files');
+      return processUpload(name, bytes);
+  });
+
+  // --- Skills (.skills folder, invoked from chat with /skill-name) ---
+  ipcMain.handle('skills:list', async () => {
+      const { listSkills } = await import('./skills');
+      return listSkills();
+  });
+  ipcMain.handle('skills:get', async (_e, name: string) => {
+      const { getSkill } = await import('./skills');
+      return getSkill(name);
+  });
+
+  // --- Voice output (TTS via Kokoro) --------------------------------------
+  ipcMain.handle('tts:voices', async () => {
+      const { listVoices } = await import('./tts');
+      try { return await listVoices(); } catch (e) { console.error('[tts] voices failed', e); return []; }
+  });
+
+  ipcMain.handle('tts:speak', async (_e, text: string, voice?: string) => {
+      const { synthesize } = await import('./tts');
+      return synthesize(text, voice);
+  });
+
+  // --- Voice input (STT via bundled whisper) ------------------------------
+  ipcMain.handle('voice:transcribe', async (_e, audio: ArrayBuffer | Uint8Array, ext = 'webm') => {
+      const fs = await import('fs');
+      const path = await import('path');
+      const os = await import('os');
+      const { desktopExtraction } = await import('./rag/extractors');
+      if (!desktopExtraction.transcribeAudio) throw new Error('Transcription is not available.');
+      const buf = Buffer.from(audio as ArrayBuffer);
+      const tmp = path.join(os.tmpdir(), `offgrid-mic-${Date.now()}.${ext}`);
+      await fs.promises.writeFile(tmp, buf);
+      try {
+          return await desktopExtraction.transcribeAudio(tmp);
+      } finally {
+          fs.promises.unlink(tmp).catch(() => {});
+      }
+  });
+
+  ipcMain.handle('imagegen:pick-image', async (e) => {
+      const { dialog } = await import('electron');
+      const win = BrowserWindow.fromWebContents(e.sender) ?? undefined;
+      const res = await dialog.showOpenDialog(win!, {
+          title: 'Choose an init image',
+          properties: ['openFile'],
+          filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+      });
+      if (res.canceled || res.filePaths.length === 0) return null;
+      return res.filePaths[0];
   });
 }
 

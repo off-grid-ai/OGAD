@@ -5,46 +5,114 @@ import * as fs from "fs";
 import * as http from "http";
 import os from "os";
 
-// Get the models directory in user's app support folder
+// Models live under the unified userData dir (pinned in main/index.ts), so this
+// stays consistent with the DB + embeddings paths instead of a hardcoded name.
 function getModelsDir(): string {
-    const platform = process.platform;
-    let appDataDir: string;
-
-    if (platform === 'darwin') {
-        appDataDir = path.join(os.homedir(), 'Library', 'Application Support', 'My Memories');
-    } else if (platform === 'win32') {
-        appDataDir = path.join(process.env.APPDATA || os.homedir(), 'My Memories');
-    } else {
-        appDataDir = path.join(os.homedir(), '.my-memories');
-    }
-
-    return path.join(appDataDir, 'models');
+    return path.join(app.getPath('userData'), 'models');
 }
 
 export class LLMService {
   private server: ChildProcess | null = null;
-  private port = 8080;
-  private modelPath: string;
-  private mmProjPath: string;
+  // Off the contested 8080 (collides with other local dev servers) onto a
+  // less-trafficked port so the model server reliably binds.
+  private port = 8439;
+  // Single-flight init guard: concurrent chat() calls (e.g. the capture
+  // extractor firing rapidly) must share ONE spawn, not each launch a server.
+  private initPromise: Promise<void> | null = null;
+  private modelPath = "";
+  private mmProjPath = ""; // empty for text-only models (no vision projector)
   private initialized = false;
+  // Paused during image generation: on Apple Silicon unified memory the LLM and
+  // the image model can't both be resident. While paused we DON'T respawn the
+  // server — capture keeps running but its LLM distillation is deferred until
+  // generation finishes (and the LLM warms back up).
+  private paused = false;
+  private activeModelFile = path.join(getModelsDir(), "active-model.json");
+  // User-tunable inference settings (persisted). Context window needs a server
+  // respawn to take effect (it's a launch arg); temperature is per-request.
+  private temperature = 0.7;
+  private ctxSize = 32768;
+  private settingsFile = path.join(getModelsDir(), "llm-settings.json");
 
   constructor() {
+    this.resolveModel();
+    try {
+      const s = JSON.parse(fs.readFileSync(this.settingsFile, "utf-8"));
+      if (typeof s.temperature === "number") this.temperature = s.temperature;
+      if (typeof s.ctxSize === "number") this.ctxSize = s.ctxSize;
+    } catch { /* defaults */ }
+  }
+
+  getSettings(): { temperature: number; ctxSize: number } {
+    return { temperature: this.temperature, ctxSize: this.ctxSize };
+  }
+
+  /** Update inference settings; respawns the server if the context window changed. */
+  async setSettings(s: { temperature?: number; ctxSize?: number }): Promise<void> {
+    const ctxChanged = typeof s.ctxSize === "number" && s.ctxSize !== this.ctxSize;
+    if (typeof s.temperature === "number") this.temperature = s.temperature;
+    if (typeof s.ctxSize === "number") this.ctxSize = s.ctxSize;
+    try { fs.writeFileSync(this.settingsFile, JSON.stringify({ temperature: this.temperature, ctxSize: this.ctxSize })); } catch { /* ignore */ }
+    if (ctxChanged && !this.paused) {
+      this.stop();
+      await this.init();
+    }
+  }
+
+  // Resolve the active model's files. The Models screen writes active-model.json
+  // ({ id, primary, mmproj }) after resolving a catalog entry; default to the
+  // bundled Qwen3-VL vision model when nothing is selected yet.
+  private resolveModel(): void {
     const modelsDir = getModelsDir();
+    try {
+      const cfg = JSON.parse(fs.readFileSync(this.activeModelFile, "utf-8"));
+      if (cfg?.primary) {
+        this.modelPath = path.join(modelsDir, cfg.primary);
+        this.mmProjPath = cfg.mmproj ? path.join(modelsDir, cfg.mmproj) : "";
+        return;
+      }
+    } catch {
+      // no active selection yet
+    }
     this.modelPath = path.join(modelsDir, "Qwen3-VL-4B-Instruct-Q4_K_M.gguf");
     this.mmProjPath = path.join(modelsDir, "mmproj-Qwen3VL-4B-Instruct-F16.gguf");
   }
 
-  // Check if models are downloaded
+  /** Switch the active model and force a reload on next init. */
+  reloadModel(): void {
+    if (this.server) {
+      this.server.kill();
+      this.server = null;
+    }
+    this.initialized = false;
+    this.resolveModel();
+  }
+
+  // Check if the active model's files are present (mmproj only if it has one).
   modelsExist(): boolean {
-    return fs.existsSync(this.modelPath) && fs.existsSync(this.mmProjPath);
+    this.resolveModel();
+    return fs.existsSync(this.modelPath) && (!this.mmProjPath || fs.existsSync(this.mmProjPath));
   }
 
   getModelsDir(): string {
     return getModelsDir();
   }
 
-  async init() {
+  async init(): Promise<void> {
+    if (this.paused) return; // don't respawn while paused for image generation
     if (this.initialized) return;
+    // Coalesce concurrent inits into one spawn.
+    if (this.initPromise) return this.initPromise;
+    this.initPromise = this._doInit().finally(() => {
+      this.initPromise = null;
+    });
+    return this.initPromise;
+  }
+
+  private async _doInit() {
+    if (this.initialized) return;
+
+    this.resolveModel();
 
     // Check if models exist
     if (!this.modelsExist()) {
@@ -54,24 +122,19 @@ export class LLMService {
       throw new Error("Models not downloaded. Please complete onboarding to download the AI model.");
     }
 
-    const binName = "llama-server";
-    let serverPath = "";
-
-    if (app.isPackaged) {
-        serverPath = path.join(process.resourcesPath, "bin", binName);
-    } else {
-        serverPath = path.join(app.getAppPath(), "resources", "bin", binName);
-    }
-
-    if (!fs.existsSync(serverPath)) {
-        console.error(`[LLMService] llama-server binary not found at ${serverPath}`);
-        const altPath = path.join(process.cwd(), "resources", "bin", binName);
-        if (fs.existsSync(altPath)) {
-            serverPath = altPath;
-        } else {
-            console.error(`[LLMService] llama-server binary also not found at ${altPath}`);
-            return;
-        }
+    // Prefer the updated, self-contained llama.cpp build in bin/llama (supports
+    // newer architectures like gemma4); fall back to the legacy bin/llama-server.
+    const roots = app.isPackaged
+        ? [path.join(process.resourcesPath, "bin")]
+        : [path.join(app.getAppPath(), "resources", "bin"), path.join(process.cwd(), "resources", "bin")];
+    const candidates = roots.flatMap((r) => [
+        path.join(r, "llama", "llama-server"),
+        path.join(r, "llama-server"),
+    ]);
+    const serverPath = candidates.find((p) => fs.existsSync(p)) ?? "";
+    if (!serverPath) {
+        console.error(`[LLMService] llama-server binary not found. Looked in:\n${candidates.join("\n")}`);
+        return;
     }
 
     console.log(`[LLMService] Starting llama-server from ${serverPath}`);
@@ -91,15 +154,21 @@ export class LLMService {
 
     const binDir = path.dirname(serverPath);
 
-    this.server = spawn(serverPath, [
-      "-m", this.modelPath,
-      "--mmproj", this.mmProjPath,
+    const args = ["-m", this.modelPath];
+    if (this.mmProjPath) args.push("--mmproj", this.mmProjPath);
+    args.push(
       "--port", String(this.port),
       "--host", "127.0.0.1",
-      "--image-min-tokens", "2048",
-      "-c", "32768",
+      "-c", String(this.ctxSize),
       "-ngl", "99"
-    ], {
+    );
+    // Kill any lingering server before spawning (defends against a crashed or
+    // orphaned instance still holding the port / RAM).
+    if (this.server) {
+      try { this.server.kill("SIGKILL"); } catch { /* ignore */ }
+      this.server = null;
+    }
+    this.server = spawn(serverPath, args, {
       env: {
         ...process.env,
         DYLD_LIBRARY_PATH: binDir,
@@ -184,7 +253,15 @@ export class LLMService {
     });
   }
 
-  async chat(message: string, images: string[] = [], timeoutMs: number = 300000, maxTokens: number = 2048): Promise<string> {
+  async chat(
+    message: string,
+    images: string[] = [],
+    timeoutMs: number = 300000,
+    maxTokens: number = 2048,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    opts: { responseFormat?: any; temperature?: number; disableThinking?: boolean } = {}
+  ): Promise<string> {
+    if (this.paused) throw new Error("LLM paused during image generation — deferred");
     if (!this.initialized) {
         await this.init();
         if (!this.initialized) {
@@ -217,11 +294,19 @@ export class LLMService {
             }
         }
 
-        const body = JSON.stringify({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const payload: any = {
             messages: messages,
             max_tokens: maxTokens,
-            temperature: 0.7
-        });
+            temperature: opts.temperature ?? this.temperature
+        };
+        // Grammar-constrained output: llama.cpp converts the JSON schema to a
+        // GBNF grammar so the model can ONLY emit valid matching JSON.
+        if (opts.responseFormat) payload.response_format = opts.responseFormat;
+        // Turn off the model's reasoning channel for fast, direct output (its
+        // chain-of-thought otherwise eats the token budget and leaves content empty).
+        if (opts.disableThinking) payload.chat_template_kwargs = { enable_thinking: false };
+        const body = JSON.stringify(payload);
 
         console.log(`[LLMService] Starting LLM request (timeout: ${timeoutMs/1000}s, body: ${body.length} chars)...`);
 
@@ -236,12 +321,132 @@ export class LLMService {
     }
   }
 
+  // Streaming variant of chat(): posts with stream:true and invokes `onDelta`
+  // for each token as it arrives. Separates the model's reasoning channel
+  // (delta.reasoning_content, or text inside <think>…</think>) from the answer
+  // (delta.content). Returns the full answer text when the stream ends.
+  async chatStream(
+    message: string,
+    images: string[] = [],
+    onDelta: (text: string, kind: 'content' | 'reasoning') => void,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    opts: { temperature?: number; thinking?: boolean } = {},
+    maxTokens: number = 2048,
+    timeoutMs: number = 300000,
+  ): Promise<string> {
+    if (this.paused) throw new Error('LLM paused during image generation — deferred');
+    if (!this.initialized) {
+      await this.init();
+      if (!this.initialized) throw new Error('LLM Service not ready');
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const content: any[] = [{ type: 'text', text: message }];
+    for (const imgPath of images) {
+      try {
+        const base64 = fs.readFileSync(imgPath).toString('base64');
+        const mime = imgPath.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+        content.push({ type: 'image_url', image_url: { url: `data:${mime};base64,${base64}` } });
+      } catch (e) {
+        console.error(`[LLMService] Failed to read image ${imgPath}:`, e);
+      }
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const payload: any = {
+      messages: [{ role: 'user', content }],
+      max_tokens: maxTokens,
+      temperature: opts.temperature ?? this.temperature,
+      stream: true,
+    };
+    // Thinking control: when on, ask the template to emit reasoning and have
+    // llama.cpp split it into reasoning_content (deepseek-style); when off,
+    // suppress it so the token budget goes to the answer.
+    if (opts.thinking) {
+      payload.chat_template_kwargs = { enable_thinking: true };
+      payload.reasoning_format = 'deepseek';
+    } else {
+      payload.chat_template_kwargs = { enable_thinking: false };
+    }
+    const body = JSON.stringify(payload);
+
+    return new Promise<string>((resolve, reject) => {
+      let full = '';
+      let buf = '';
+      let inThink = false; // for models that inline <think>…</think> in content
+      let timedOut = false;
+      const timer = setTimeout(() => { timedOut = true; req.destroy(); reject(new Error('LLM request timed out')); }, timeoutMs);
+
+      const emitContent = (text: string): void => {
+        // Split out inline <think> reasoning if the template uses it.
+        let rest = text;
+        while (rest) {
+          if (inThink) {
+            const end = rest.indexOf('</think>');
+            if (end === -1) { onDelta(rest, 'reasoning'); return; }
+            if (end > 0) onDelta(rest.slice(0, end), 'reasoning');
+            rest = rest.slice(end + 8);
+            inThink = false;
+          } else {
+            const start = rest.indexOf('<think>');
+            if (start === -1) { full += rest; onDelta(rest, 'content'); return; }
+            if (start > 0) { full += rest.slice(0, start); onDelta(rest.slice(0, start), 'content'); }
+            rest = rest.slice(start + 7);
+            inThink = true;
+          }
+        }
+      };
+
+      const req = http.request({
+        hostname: '127.0.0.1',
+        port: this.port,
+        path: '/v1/chat/completions',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+      }, (res) => {
+        if (res.statusCode !== 200) { clearTimeout(timer); reject(new Error(`LLM Server Error: ${res.statusCode}`)); res.resume(); return; }
+        res.setEncoding('utf8');
+        res.on('data', (chunk: string) => {
+          buf += chunk;
+          let nl: number;
+          while ((nl = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, nl).trim();
+            buf = buf.slice(nl + 1);
+            if (!line.startsWith('data:')) continue;
+            const data = line.slice(5).trim();
+            if (data === '[DONE]') continue;
+            try {
+              const delta = JSON.parse(data).choices?.[0]?.delta;
+              if (delta?.reasoning_content) onDelta(delta.reasoning_content, 'reasoning');
+              if (delta?.content) emitContent(delta.content);
+            } catch { /* partial/ignorable line */ }
+          }
+        });
+        res.on('end', () => { clearTimeout(timer); if (!timedOut) resolve(full); });
+      });
+      req.on('error', (e) => { clearTimeout(timer); if (!timedOut) reject(e); });
+      req.write(body);
+      req.end();
+    });
+  }
+
   stop() {
     if (this.server) {
         this.server.kill();
         this.server = null;
         this.initialized = false;
     }
+  }
+
+  /** Pause for image generation: free the server and block respawns until resumed. */
+  pause() {
+    this.paused = true;
+    this.stop();
+  }
+
+  /** Resume after image generation and warm the server back up. */
+  resume() {
+    this.paused = false;
+    this.init().catch(() => {});
   }
 
   isReady() {
