@@ -764,12 +764,19 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
     } catch (e) { console.error(e); }
   }, []);
 
+  // Right-side panels are mutually exclusive — opening one closes the others so
+  // they never overlap (one common docked panel slot).
+  const closePanels = useCallback(() => {
+    setCanvasArtifact(null); setSkillsOpen(false); setSettingsOpen(false); setViewer(null); setShowGallery(false);
+  }, []);
+  const openCanvas = useCallback((a: Artifact) => { closePanels(); setCanvasArtifact(a); }, [closePanels]);
+
   const openGallery = useCallback(() => {
     setShowGallery(v => {
-      if (!v) refreshGallery();
-      return !v;
+      if (v) return false;
+      closePanels(); refreshGallery(); return true;
     });
-  }, [refreshGallery]);
+  }, [refreshGallery, closePanels]);
 
   const downloadImage = useCallback(async (path?: string, name?: string) => {
     if (!path) return;
@@ -892,7 +899,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   return (
     <div
       className="flex h-full flex-col font-mono bg-neutral-950 transition-[padding] duration-200"
-      style={{ paddingRight: canvasArtifact || skillsOpen || settingsOpen || viewer ? 'max(420px, 44vw)' : undefined }}
+      style={{ paddingRight: canvasArtifact || skillsOpen || settingsOpen || viewer || showGallery ? 'max(420px, 44vw)' : undefined }}
     >
       {/* Header */}
       <header className="flex items-center gap-3 border-b border-neutral-900 px-6 py-4">
@@ -909,7 +916,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
 
         {/* Settings — model params, voice, tools, connectors (right-side panel) */}
         <button
-          onClick={() => setSettingsOpen(true)}
+          onClick={() => { closePanels(); setSettingsOpen(true); }}
           className={`rounded-md border p-1.5 transition-colors ${settingsOpen ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
           title="Settings"
         >
@@ -1188,7 +1195,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                         return (
                           <button
                             type="button"
-                            onClick={() => setCanvasArtifact(art)}
+                            onClick={() => openCanvas(art)}
                             className="mt-2 flex w-full items-center gap-3 rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2.5 text-left transition-colors hover:border-green-500/60"
                           >
                             <span className="flex h-9 w-9 items-center justify-center rounded-md border border-neutral-800 bg-neutral-950 text-green-500">
@@ -1347,7 +1354,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                         ) : null}
                         {parseArtifact(message.content) ? (
                           <button
-                            onClick={() => { const a = parseArtifact(message.content); if (a) setCanvasArtifact(a); }}
+                            onClick={() => { const a = parseArtifact(message.content); if (a) openCanvas(a); }}
                             className="flex items-center gap-1 text-[11px] text-green-500 transition-colors hover:text-green-400"
                           >
                             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7h10v10M9 17H5a2 2 0 01-2-2V5a2 2 0 012-2h10a2 2 0 012 2v2" /></svg>
@@ -1665,7 +1672,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                         <button
                           type="button"
                           disabled={!a.text}
-                          onClick={() => a.text && setViewer({ title: a.kind === 'pasted' ? 'Pasted text' : a.name, text: a.text })}
+                          onClick={() => { if (a.text) { closePanels(); setViewer({ title: a.kind === 'pasted' ? 'Pasted text' : a.name, text: a.text }); } }}
                           title={a.text ? 'Click to expand' : undefined}
                           className="line-clamp-3 h-[2.6rem] overflow-hidden text-left text-[10px] leading-snug text-neutral-500 enabled:hover:text-neutral-300"
                         >
@@ -1712,7 +1719,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                         <FolderPlus /> Add to project
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem onSelect={() => setSkillsOpen(true)}>
+                      <DropdownMenuItem onSelect={() => { closePanels(); setSkillsOpen(true); }}>
                         <Lightning /> Skills
                       </DropdownMenuItem>
                       <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setToolsOn(t => !t); }}>
@@ -1905,8 +1912,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
       {/* Gallery — everything generated on-device: images + artifacts */}
       {showGallery && (
         <>
-          <div className="fixed inset-0 z-40 bg-black/40" onClick={() => setShowGallery(false)} />
-          <div className="fixed right-0 top-0 z-40 flex h-full w-80 flex-col border-l border-neutral-800 bg-neutral-950">
+          <div className="fixed right-0 top-0 bottom-0 z-50 flex w-[44vw] min-w-[420px] flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl">
             <div className="flex items-center justify-between border-b border-neutral-900 px-4 py-3">
               <span className="text-sm text-neutral-200">Gallery</span>
               <button onClick={() => setShowGallery(false)} className="text-neutral-500 transition-colors hover:text-neutral-200">✕</button>
@@ -1959,7 +1965,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                 <div className="flex flex-col gap-2">
                   {artifacts.map((a) => (
                     <div key={a.id} className="group flex items-center gap-2 rounded-md border border-neutral-800 p-2 transition-colors hover:border-green-500">
-                      <button onClick={() => setCanvasArtifact({ kind: a.kind, code: a.code, title: a.title })} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                      <button onClick={() => openCanvas({ kind: a.kind, code: a.code, title: a.title })} className="flex min-w-0 flex-1 items-center gap-2 text-left">
                         <span className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-green-500">{a.kind}</span>
                         <span className="truncate text-xs text-neutral-200">{a.title}</span>
                       </button>
