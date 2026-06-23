@@ -2,7 +2,6 @@
 import { ChatList } from './components/ChatList';
 import { ChatDetail } from './components/ChatDetail';
 import { MemoryList } from './components/MemoryList';
-import { EntityList } from './components/EntityList';
 import { EntitiesScreen } from './components/EntitiesScreen';
 import { SearchScreen, type SearchHit } from './components/SearchScreen';
 import { CommandPalette } from './components/CommandPalette';
@@ -31,11 +30,7 @@ import { Sidebar, SidebarBody } from './components/ui/sidebar';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   IconMessageCircle,
-  IconMessages,
-  IconBrain,
   IconUsers,
-  IconGraph,
-  IconSparkles,
   IconBell,
   IconSettings,
   IconDownload,
@@ -119,6 +114,8 @@ function AppContent() {
   const [selectedEntityId, setSelectedEntityId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [replayTarget, setReplayTarget] = useState<number | null>(null);
+  // A search hit can deep-link to a specific meeting; cleared on leaving Meetings.
+  const [meetingTarget, setMeetingTarget] = useState<number | null>(null);
   // Target chat to open in the main Chat screen (from the Projects tab): an
   // existing conversation, or a request to start a new chat scoped to a project.
   const [chatTarget, setChatTarget] = useState<{ conversationId?: string; projectId?: string } | null>(null);
@@ -365,7 +362,7 @@ function AppContent() {
   const handleOpenHit = useCallback((hit: SearchHit) => {
     if (hit.kind === 'entity' || hit.kind === 'fact') { handleSelectEntity(hit.refId); return; }
     if (hit.kind === 'memory') { handleSelectMemory(hit.refId); return; }
-    if (hit.kind === 'meeting') { setViewMode('meetings'); return; }
+    if (hit.kind === 'meeting') { setMeetingTarget(hit.refId || null); setViewMode('meetings'); return; }
     // Screen capture → seek Replay to that exact moment (the captured frame is the
     // point; the source URL may be stale/missing).
     setReplayTarget(hit.ts || Date.now());
@@ -373,6 +370,14 @@ function AppContent() {
   }, [handleSelectEntity, handleSelectMemory]);
 
   const openSearch = useCallback((q: string) => { setSearchQuery(q); setViewMode('search'); }, []);
+
+  // Deep-link targets (Replay moment, specific meeting) are one-shot: once we've
+  // left the screen that consumes them, clear them so a later normal visit isn't
+  // pinned to a stale moment. Covers every exit path (nav, back/forward, deep-link).
+  useEffect(() => {
+    if (viewMode !== 'replay' && replayTarget !== null) setReplayTarget(null);
+    if (viewMode !== 'meetings' && meetingTarget !== null) setMeetingTarget(null);
+  }, [viewMode, replayTarget, meetingTarget]);
 
   // Open a project chat in the main Chat screen (existing convo or new-in-project).
   const handleOpenProjectChat = useCallback((target: { conversationId?: string; projectId?: string }) => {
@@ -563,7 +568,7 @@ function AppContent() {
                   ) : viewMode === 'connectors' ? (
                     <ConnectorsScreen />
                   ) : viewMode === 'meetings' ? (
-                    <MeetingsScreen rec={rec} />
+                    <MeetingsScreen rec={rec} initialId={meetingTarget} />
                   ) : viewMode === 'memory-chat' ? (
                     <MemoryChat
                       onNavigateToMemory={handleSelectMemory}

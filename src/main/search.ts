@@ -264,25 +264,10 @@ function thumbFor(hit: RawHit): string | null {
 }
 
 /** Hybrid universal search. `semantic` adds the LanceDB pass (slower first call). */
-// Generated artifacts live as files (not in the FTS index), so match them
-// directly on title + code and fold them into the fused results.
-function artifactHits(q: string, limit: number): RawHit[] {
-  const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
-  if (!terms.length) return [];
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { listArtifacts } = require('./artifacts') as typeof import('./artifacts');
-    return listArtifacts()
-      .map((a) => {
-        const hay = `${a.title}\n${a.code}`.toLowerCase();
-        return { a, score: terms.filter((t) => hay.includes(t)).length };
-      })
-      .filter((x) => x.score > 0)
-      .sort((x, y) => y.score - x.score)
-      .slice(0, limit)
-      .map(({ a }) => ({ key: `artifact:${a.id}`, kind: 'artifact' as SearchKind, refId: 0, title: a.title || a.kind, snippet: a.code.slice(0, 280), surface: 'Artifact', url: null, ts: a.created }));
-  } catch { return []; }
-}
+// NOTE: artifacts are intentionally NOT in universal search yet — a hit can't be
+// deep-linked (it carries no conversation context and there's no standalone
+// artifact viewer), so clicking one used to jump to a meaningless Replay moment.
+// Re-add an `artifactHits` source here once artifacts have an openable target.
 
 export async function universalSearch(
   query: string,
@@ -296,8 +281,6 @@ export async function universalSearch(
   const sourceSet = opts.sources?.length ? new Set(opts.sources.map((s) => s.toLowerCase())) : null;
 
   const lists = keywordHits(q, perSource);
-  const arts = artifactHits(q, perSource);
-  if (arts.length) lists.push(arts);
   if (opts.semantic !== false) {
     try {
       lists.push(await semanticHits(q, perSource));

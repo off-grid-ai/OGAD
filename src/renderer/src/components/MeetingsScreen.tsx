@@ -25,7 +25,7 @@ function fmtWhen(ms: number | null): string {
   return ms ? new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
 }
 
-export function MeetingsScreen({ rec }: { rec: MeetingRecorder }) {
+export function MeetingsScreen({ rec, initialId }: { rec: MeetingRecorder; initialId?: number | null }) {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
@@ -37,8 +37,13 @@ export function MeetingsScreen({ rec }: { rec: MeetingRecorder }) {
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     if (!api.onCrmChanged) return;
-    return api.onCrmChanged(load);
+    const off = api.onCrmChanged(load);
+    return () => { if (typeof off === 'function') off(); };
   }, [load]);
+  // Deep-link from universal search → select that meeting once it's loaded.
+  useEffect(() => {
+    if (initialId != null && meetings.some((m) => m.id === initialId)) setSelectedId(initialId);
+  }, [initialId, meetings]);
   useEffect(() => { if (!rec.busy) void load(); }, [rec.busy, load]);
 
   const del = async (id: number): Promise<void> => {
