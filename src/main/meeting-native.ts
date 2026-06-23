@@ -323,10 +323,25 @@ export async function recoverOrphanTempDirs(): Promise<void> {
       continue;
     }
     // A recorder may STILL be running for this orphan (it outlived its parent).
-    // Ask it to finalize cleanly (closes the mp4 moov atom), then give it a moment.
+    // Ask it to finalize cleanly (closes the mp4 moov atom), then wait for it to
+    // ACTUALLY exit before muxing.
     try {
+      // pkill exits non-zero when nothing matched → no live recorder, files final.
       await execFileAsync('pkill', ['-INT', '-f', `meeting-recorder ${dir}`]);
-      await delay(3000);
+      // A recorder WAS running. SIGINT makes it finalize (finishWriting flushes the
+      // moov atom), which can take well over a fixed guess on a long recording — so
+      // poll until the process is actually gone rather than racing a hard delay and
+      // muxing a truncated, unplayable file.
+      const deadline = Date.now() + 20000;
+      while (Date.now() < deadline) {
+        await delay(300);
+        try {
+          await execFileAsync('pgrep', ['-f', `meeting-recorder ${dir}`]);
+        } catch {
+          break; // pgrep non-zero → recorder has exited and finalized
+        }
+      }
+      await delay(300); // small settle for the filesystem to see the final bytes
     } catch {
       /* no live recorder — files are already final */
     }
