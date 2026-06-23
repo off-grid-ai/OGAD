@@ -43,6 +43,7 @@ try {
     getRagMessages: (conversationId: string) => ipcRenderer.invoke('rag:get-messages', conversationId),
     addRagMessage: (conversationId: string, role: 'user' | 'assistant', content: string, context?: any) => 
       ipcRenderer.invoke('rag:add-message', conversationId, role, content, context),
+    truncateRagMessages: (conversationId: string, keepCount: number) => ipcRenderer.invoke('rag:truncate-messages', conversationId, keepCount),
     updateRagConversationTitle: (id: string, title: string) => ipcRenderer.invoke('rag:update-conversation-title', id, title),
     deleteRagConversation: (id: string) => ipcRenderer.invoke('rag:delete-conversation', id),
 
@@ -61,6 +62,10 @@ try {
     // App Settings
     getSettings: () => ipcRenderer.invoke('settings:get'),
     saveSetting: (key: string, value: any) => ipcRenderer.invoke('settings:save', key, value),
+    consoleEnroll: (url: string, token: string) => ipcRenderer.invoke('console:enroll', url, token),
+    consoleStatus: () => ipcRenderer.invoke('console:status'),
+    consoleSyncNow: () => ipcRenderer.invoke('console:sync-now'),
+    consoleDisconnect: () => ipcRenderer.invoke('console:disconnect'),
     reprocessAllSessions: (clean?: boolean) => ipcRenderer.invoke('db:reprocess-all-sessions', clean ?? false),
 
     // Master Memory Progress

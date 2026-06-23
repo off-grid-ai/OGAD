@@ -126,12 +126,28 @@ interface IElectronAPI {
   getRagConversation: (id: string) => Promise<RagConversation | null>
   getRagMessages: (conversationId: string) => Promise<RagMessage[]>
   addRagMessage: (conversationId: string, role: 'user' | 'assistant', content: string, context?: any) => Promise<number>
+  truncateRagMessages: (conversationId: string, keepCount: number) => Promise<number>
   updateRagConversationTitle: (id: string, title: string) => Promise<void>
   deleteRagConversation: (id: string) => Promise<void>
 
   // App Settings
   getSettings: () => Promise<AppSettings>
   saveSetting: (key: string, value: any) => Promise<void>
+  consoleEnroll: (
+    url: string,
+    token: string
+  ) => Promise<{ enrolled: boolean; deviceId?: string; error?: string }>
+  consoleStatus: () => Promise<{
+    enrolled: boolean
+    url: string
+    deviceId: string
+    lastSync: number
+    policyVersion: number | null
+    killed: boolean
+    queued: number
+  }>
+  consoleSyncNow: () => Promise<{ enrolled: boolean; policyVersion: number | null; lastSync: number }>
+  consoleDisconnect: () => Promise<boolean>
   reprocessAllSessions: (clean?: boolean) => Promise<{ processed: number; total: number }>
 
   getEntities: (appName?: string) => Promise<any[]>

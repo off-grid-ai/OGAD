@@ -862,8 +862,10 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
       if (messages[i].role === 'user') {
         const content = messages[i].content;
         // Drop everything after that user turn (the old answer) and re-run in
-        // place — no new user bubble.
+        // place — no new user bubble. Also prune the persisted rows so reopening
+        // the chat doesn't show old answers stacked.
         setMessages(prev => prev.slice(0, i + 1));
+        if (activeConversationId) void window.api.truncateRagMessages?.(activeConversationId, i + 1);
         void sendMessage(content, { regen: true });
         return;
       }
@@ -878,8 +880,12 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
     const idx = messages.findIndex(m => m.id === id);
     if (idx < 0) return;
     setMessages(prev => prev.slice(0, idx + 1).map((m, i) => (i === idx ? { ...m, content: text } : m)));
+    // Persist the edit: drop the old user row + everything after, re-add the
+    // edited message, then regenerate the answer onto it.
+    const cid = activeConversationId;
+    if (cid) void window.api.truncateRagMessages?.(cid, idx).then(() => window.api.addRagMessage(cid, 'user', text));
     void sendMessage(text, { regen: true });
-  }, [editText, messages]);
+  }, [editText, messages, activeConversationId]);
 
   // Process attached files into text (read/parse/caption/transcribe) on the main side.
   const addFiles = useCallback(async (files: FileList | File[]) => {

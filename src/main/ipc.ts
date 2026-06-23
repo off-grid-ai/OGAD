@@ -1073,6 +1073,10 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
       return getRagMessages(conversationId);
   });
 
+  ipcMain.handle('rag:truncate-messages', async (_e, conversationId: string, keepCount: number) => {
+      const { truncateRagMessages } = await import('./database');
+      return truncateRagMessages(conversationId, keepCount);
+  });
   ipcMain.handle('rag:add-message', (_, conversationId: string, role: 'user' | 'assistant', content: string, context?: any) => {
       return addRagMessage(conversationId, role, content, context);
   });
@@ -1095,6 +1099,29 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
   ipcMain.handle('settings:save', (_, key: string, value: any) => {
       saveSetting(key, value);
       console.log(`[IPC] Setting saved: ${key} =`, value);
+      return true;
+  });
+
+  // === FLEET CONSOLE (node client) ===
+
+  ipcMain.handle('console:enroll', async (_, url: string, token: string) => {
+      const { enrollDevice } = await import('./console');
+      return enrollDevice(url, token);
+  });
+
+  ipcMain.handle('console:status', async () => {
+      const { getConsoleStatus } = await import('./console');
+      return getConsoleStatus();
+  });
+
+  ipcMain.handle('console:sync-now', async () => {
+      const { syncPolicyNow } = await import('./console');
+      return syncPolicyNow();
+  });
+
+  ipcMain.handle('console:disconnect', async () => {
+      const { disconnectConsole } = await import('./console');
+      disconnectConsole();
       return true;
   });
 

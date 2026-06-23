@@ -1199,6 +1199,17 @@ export function addRagMessage(
     return Number(info.lastInsertRowid);
 }
 
+// Keep the first `keepCount` messages of a conversation (chronological) and
+// delete the rest — used by regenerate/edit so old answers don't pile up.
+export function truncateRagMessages(conversationId: string, keepCount: number): number {
+    const db = getDB();
+    const rows = db.prepare(`SELECT id FROM rag_messages WHERE conversation_id = ? ORDER BY id ASC`).all(conversationId) as { id: number }[];
+    const toDelete = rows.slice(Math.max(0, keepCount)).map((r) => r.id);
+    if (!toDelete.length) return 0;
+    const ph = toDelete.map(() => '?').join(',');
+    return db.prepare(`DELETE FROM rag_messages WHERE id IN (${ph})`).run(...toDelete).changes;
+}
+
 export function getRagMessages(conversationId: string): RagMessage[] {
     const db = getDB();
     return db.prepare(`
