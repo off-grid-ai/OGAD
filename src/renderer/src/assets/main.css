@@ -5,6 +5,75 @@
   --animate-spotlight: spotlight 2s ease .75s 1 forwards;
   --animate-orbit: orbit calc(var(--duration)*1s) linear infinite;
 
+  /*
+   * Remap the Tailwind palette the components already use onto the Off Grid
+   * tokens (--og-*), which flip between dark and light via data-theme. This
+   * recolors every neutral/white/black/accent class to the brutalist/terminal
+   * palette and makes the whole app theme-aware, with no component edits.
+   * Tailwind v4 applies opacity modifiers (e.g. /60) to these via color-mix.
+   */
+  --color-neutral-950: var(--og-background);
+  --color-neutral-900: var(--og-surface);
+  --color-neutral-800: var(--og-surface-light);
+  --color-neutral-700: var(--og-border-light);
+  --color-neutral-600: var(--og-text-muted);
+  --color-neutral-500: var(--og-text-muted);
+  --color-neutral-400: var(--og-text-secondary);
+  --color-neutral-300: var(--og-text-secondary);
+  --color-neutral-200: var(--og-text);
+  --color-neutral-100: var(--og-text);
+  --color-neutral-50: var(--og-text);
+  --color-white: var(--og-text);
+  --color-black: var(--og-background);
+  --color-slate-950: var(--og-background);
+  --color-slate-900: var(--og-surface);
+  /* Emerald is the only accent; fold blue/purple/green into primary. */
+  --color-green-400: var(--og-primary);
+  --color-green-500: var(--og-primary);
+  --color-blue-400: var(--og-primary);
+  --color-blue-500: var(--og-primary);
+  --color-purple-400: var(--og-primary);
+  --color-purple-500: var(--og-primary);
+  --color-red-400: var(--og-error);
+  --color-red-500: var(--og-error);
+
+  /*
+   * shadcn/ui semantic tokens mapped onto Off Grid tokens, so every approved
+   * library component (shadcn, Aceternity, Magic UI) inherits the brutalist /
+   * emerald brand with zero per-component styling. Theme-aware via --og-*.
+   */
+  --color-background: var(--og-background);
+  --color-foreground: var(--og-text);
+  --color-card: var(--og-surface);
+  --color-card-foreground: var(--og-text);
+  --color-popover: var(--og-surface);
+  --color-popover-foreground: var(--og-text);
+  --color-primary: var(--og-primary);
+  --color-primary-foreground: var(--og-background);
+  --color-secondary: var(--og-surface-light);
+  --color-secondary-foreground: var(--og-text);
+  --color-muted: var(--og-surface-light);
+  --color-muted-foreground: var(--og-text-muted);
+  --color-accent: var(--og-surface-light);
+  --color-accent-foreground: var(--og-text);
+  --color-destructive: var(--og-error);
+  --color-destructive-foreground: var(--og-text);
+  --color-border: var(--og-border);
+  --color-input: var(--og-border);
+  --color-ring: var(--og-primary);
+
+  /*
+   * Brutalist/terminal radius scale — Off Grid is flat, sharp, dense. Remapping
+   * the radius tokens globally makes EVERY approved-library component (shadcn,
+   * Aceternity, Magic UI) sharp and on-brand with no per-component overrides.
+   */
+  --radius: 3px;
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-xl: 6px;
+  --radius-2xl: 8px;
+
   @keyframes spotlight {
     0% {
       opacity: 0;

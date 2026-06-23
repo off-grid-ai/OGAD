@@ -2,8 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown, { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
-import { motion, AnimatePresence } from 'motion/react';
-import { ProgressiveBlur } from './ui/progressive-blur';
+import { ArtifactCanvas, parseArtifact, type Artifact } from './ArtifactCanvas';
+import { Button } from '@renderer/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@renderer/components/ui/dropdown-menu';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@renderer/components/ui/collapsible';
+import { Plus, Paperclip, Image as ImageIcon, Sparkle as Sparkles, FolderPlus, Wrench, MagnifyingGlass as Search, Plug, SlidersHorizontal, Brain } from '@phosphor-icons/react';
 
 type RagContext = {
   masterMemory?: string | null;
@@ -12,6 +16,9 @@ type RagContext = {
   summaries?: any[];
   entities?: any[];
   entityFacts?: any[];
+  unified?: { kind: string; title: string; snippet: string; surface: string; ts: number; refId?: number; imagePath?: string | null }[];
+  image?: string;
+  sources?: { name: string; position: number; score: number }[];
 };
 
 type ChatMessage = {
@@ -19,21 +26,111 @@ type ChatMessage = {
   role: 'user' | 'assistant';
   content: string;
   context?: RagContext;
+  image?: string;
+  imagePath?: string;
+  toolCalls?: { name: string; result: string }[];
+  reasoning?: string;
+  streaming?: boolean;
+};
+
+type ChatMode = 'ask' | 'image';
+
+type AskBlock = { question: string; options: string[]; multiSelect: boolean };
+
+// Detect a model-emitted interactive question: ```ask { question, options, multiSelect }```
+function parseAsk(content: string): AskBlock | null {
+  const m = content.match(/```ask\s*\n([\s\S]*?)```/i);
+  if (!m) return null;
+  try {
+    const j = JSON.parse(m[1].trim());
+    if (j && typeof j.question === 'string' && Array.isArray(j.options) && j.options.length) {
+      return { question: j.question, options: j.options.map(String), multiSelect: !!j.multiSelect };
+    }
+  } catch { /* not a valid ask block */ }
+  return null;
+}
+
+const ASK_FENCE = /```ask\s*\n[\s\S]*?```/i;
+
+type Attachment = {
+  id: string;
+  name: string;
+  kind: 'text' | 'pdf' | 'docx' | 'image' | 'audio' | 'video' | 'pasted';
+  text: string;
+  status: 'loading' | 'ready' | 'error';
 };
 
 type Conversation = {
   id: string;
   title: string | null;
+  project_id?: string | null;
   created_at: string;
   updated_at: string;
   message_count?: number;
 };
 
+type ProjectLite = { id: string; name: string };
+
 interface MemoryChatProps {
   onNavigateToMemory?: (memoryId: number) => void;
   onNavigateToChat?: (sessionId: string) => void;
   onNavigateToEntity?: (entityId: number) => void;
+  /** Open a specific conversation, or start a new one scoped to a project. */
+  openTarget?: { conversationId?: string; projectId?: string } | null;
+  onTargetConsumed?: () => void;
 }
+
+function mapRagMessages(raw: any[]): ChatMessage[] {
+  return (raw || []).map((m: any) => {
+    const ctx = m.context ? (typeof m.context === 'string' ? JSON.parse(m.context) : m.context) : undefined;
+    return {
+      id: String(m.id),
+      role: m.role as 'user' | 'assistant',
+      content: m.content,
+      context: ctx,
+      image: ctx?.image ? `ogcapture://${ctx.image}` : undefined,
+      imagePath: ctx?.image,
+    };
+  });
+}
+
+const ASK_EXAMPLES = [
+  'What did I work on today?',
+  'Summarize my last meeting',
+  'What have I spent the most time on this week?',
+  'What open action items do I have?',
+];
+const IMAGE_EXAMPLES = [
+  'A serene mountain lake at dawn, photorealistic',
+  'Minimal logo mark for a coffee brand, flat',
+  'Cyberpunk city street at night, neon, rain',
+  'Studio portrait of a husky, soft lighting',
+];
+
+// Gemini-style visual style presets — pick one, then describe the subject; the
+// style text is appended to the prompt. `swatch` = a characteristic gradient so
+// the gallery is pictorial (no bundled images needed).
+// `prompt` = style modifier appended to the user's subject when generating.
+// `preview` = the subject used for the on-device style-thumbnail (varied per
+// style so the grid showcases the style, not a gallery of faces).
+const STYLE_PRESETS: { name: string; prompt: string; preview: string; swatch: string }[] = [
+  { name: 'Photoreal', prompt: 'photorealistic, sharp focus, high detail, 50mm photo', preview: 'a red fox standing in a misty forest', swatch: 'from-stone-400 to-stone-600' },
+  { name: 'Cinematic', prompt: 'cinematic film still, dramatic lighting, shallow depth of field, color graded', preview: 'a lone car on a coastal highway at sunset', swatch: 'from-orange-800 via-neutral-800 to-teal-800' },
+  { name: 'Anime', prompt: 'anime illustration, clean lineart, vibrant colors', preview: 'a bustling futuristic city street with cherry blossoms', swatch: 'from-pink-400 via-purple-400 to-sky-400' },
+  { name: 'Sketch', prompt: 'detailed pencil sketch on paper, monochrome line art', preview: 'an old european cathedral', swatch: 'from-neutral-300 to-neutral-500' },
+  { name: 'Watercolor', prompt: 'watercolor painting, soft washes, paper texture', preview: 'a serene mountain lake with pine trees', swatch: 'from-rose-300 via-sky-200 to-emerald-300' },
+  { name: 'Oil painting', prompt: 'oil painting, visible brushstrokes, classical, rich color', preview: 'a still life of fruit and a wine bottle on a table', swatch: 'from-amber-700 via-red-800 to-yellow-700' },
+  { name: 'Monochrome', prompt: 'black and white, high contrast, monochrome', preview: 'a rainy city street with umbrellas', swatch: 'from-neutral-900 to-neutral-500' },
+  { name: 'Neon', prompt: 'neon-lit cyberpunk, glowing lights, night, moody', preview: 'a rain-soaked alley in a cyberpunk city', swatch: 'from-fuchsia-600 via-purple-700 to-cyan-500' },
+  { name: '3D render', prompt: '3D render, octane, soft studio lighting, subsurface detail', preview: 'a cute friendly robot character', swatch: 'from-slate-300 via-slate-500 to-slate-700' },
+  { name: 'Steampunk', prompt: 'steampunk, brass and gears, victorian, intricate', preview: 'a flying steampunk airship above the clouds', swatch: 'from-amber-800 via-yellow-900 to-stone-700' },
+  { name: 'Surreal', prompt: 'surreal, dreamlike, imaginative composition', preview: 'floating islands with waterfalls in a dreamlike sky', swatch: 'from-indigo-500 via-fuchsia-500 to-amber-400' },
+  { name: 'Vintage film', prompt: 'vintage film photograph, faded colors, grain, 1970s', preview: 'a vintage convertible car on a desert road', swatch: 'from-amber-300 via-orange-300 to-rose-300' },
+  { name: 'Minimal', prompt: 'minimal flat design, clean, simple shapes, lots of negative space', preview: 'a single sailboat on calm water', swatch: 'from-neutral-100 to-neutral-300' },
+  { name: 'Risograph', prompt: 'risograph print, halftone texture, limited palette', preview: 'a bicycle leaning against a wall', swatch: 'from-pink-500 via-yellow-400 to-blue-500' },
+  { name: 'Fantasy art', prompt: 'epic fantasy concept art, dramatic, highly detailed', preview: 'a majestic dragon perched on a mountain peak', swatch: 'from-purple-800 via-indigo-700 to-amber-600' },
+  { name: 'Studio portrait', prompt: 'studio portrait, soft key light, bokeh background', preview: 'a golden retriever dog', swatch: 'from-neutral-600 via-neutral-800 to-neutral-900' },
+];
 
 function timeAgo(dateStr: string): string {
   const date = new Date(dateStr + 'Z');
@@ -49,58 +146,202 @@ function timeAgo(dateStr: string): string {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToEntity }: MemoryChatProps) {
+export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToEntity, openTarget, onTargetConsumed }: MemoryChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [skills, setSkills] = useState<{ name: string; description: string }[]>([]);
+  const [askSel, setAskSel] = useState<Record<string, string[]>>({});
   const [loading, setLoading] = useState(false);
-  const [openContextId, setOpenContextId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [convSearch, setConvSearch] = useState('');
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(true);
-  const [hoveredConvId, setHoveredConvId] = useState<string | null>(null);
+  const [mode, setMode] = useState<ChatMode>('ask');
+  const [showImageOptions, setShowImageOptions] = useState(false);
+  const [imageAvailable, setImageAvailable] = useState(false);
+  const [imgSize, setImgSize] = useState(512);
+  const [imgSteps, setImgSteps] = useState(16);
+  const [imgSeed, setImgSeed] = useState('');
+  const [imgNegative, setImgNegative] = useState('');
+  const [imgInit, setImgInit] = useState<string | null>(null);
+  const [imgStrength, setImgStrength] = useState(0.6);
+  const [imgModels, setImgModels] = useState<string[]>([]);
+  const [imgModel, setImgModel] = useState<string>('');
+  const [activeStyle, setActiveStyle] = useState<string | null>(null);
+  const [styleThumbs, setStyleThumbs] = useState<Record<string, string>>({});
+  const [genThumbsBusy, setGenThumbsBusy] = useState(false);
+  const [imgProgress, setImgProgress] = useState<{ step: number; total: number; secPerStep: number; preview?: string } | null>(null);
+  const [projects, setProjects] = useState<ProjectLite[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  // Memory scope: no memory (plain chat, default) · all memory · a project.
+  const [noMemory, setNoMemory] = useState(true);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [projCreating, setProjCreating] = useState(false);
+  const [projNewName, setProjNewName] = useState('');
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [toolsOn, setToolsOn] = useState(false);
+  const [thinkingEnabled, setThinkingEnabled] = useState(false);
+  const [voiceOn, setVoiceOn] = useState(false);
+  const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const [llmSettingsOpen, setLlmSettingsOpen] = useState(false);
+  const [temperature, setTemperature] = useState(0.7);
+  const [ctxSize, setCtxSize] = useState(32768);
+  const [lightbox, setLightbox] = useState<{ url: string; path?: string } | null>(null);
+  const [canvasArtifact, setCanvasArtifact] = useState<Artifact | null>(null);
+  const [showGallery, setShowGallery] = useState(false);
+  const [gallery, setGallery] = useState<{ path: string; name: string; mtime: number }[]>([]);
+  const [galleryTab, setGalleryTab] = useState<'images' | 'artifacts'>('images');
+  const [artifacts, setArtifacts] = useState<(Artifact & { id: string; title: string; created: number })[]>([]);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
-  const listRef = useRef<HTMLDivElement | null>(null);
+  const sendingRef = useRef(false);
 
   const markdownComponents: Components = {
-    p: ({ children }) => (
-      <p style={{ margin: 0 }}>{children}</p>
-    ),
+    p: ({ children }) => <p style={{ margin: 0 }}>{children}</p>,
     a: ({ href, children }) => (
-      <a href={href} target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>
+      <a href={href} target="_blank" rel="noreferrer" className="text-green-500 underline">
         {children}
       </a>
     ),
     code: ({ children, ...props }) => {
       const inline = !('className' in props);
       return (
-        <code
-          style={{
-            background: 'rgba(255,255,255,0.08)',
-            padding: inline ? '2px 4px' : '8px 10px',
-            borderRadius: '6px',
-            display: inline ? 'inline' : 'block',
-            fontFamily: 'ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-            fontSize: '0.9em',
-            overflowX: 'auto'
-          }}
-        >
+        <code className={`font-mono text-[0.9em] bg-neutral-800/60 rounded ${inline ? 'px-1 py-0.5' : 'block px-2.5 py-2 overflow-x-auto'}`}>
           {children}
         </code>
       );
     },
-    pre: ({ children }) => (
-      <pre style={{ margin: 0 }}>{children}</pre>
-    )
+    pre: ({ children }) => <pre style={{ margin: 0 }}>{children}</pre>,
   };
 
-  // Load conversations on mount
+  // Citation-aware markdown components: `[S2]` in an answer is rewritten to a
+  // cite: link and rendered as a clickable chip that opens the exact source it
+  // cites (memory / entity / meeting). Falls back to a normal link otherwise.
+  const makeCiteComponents = (unified?: RagContext['unified']): Components => ({
+    ...markdownComponents,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    a: ({ href, children }: any) => {
+      const m = typeof href === 'string' ? /^cite:(\d+)$/.exec(href) : null;
+      if (m && unified) {
+        const u = unified[parseInt(m[1], 10) - 1];
+        return (
+          <button
+            type="button"
+            onClick={() => {
+              if (!u || u.refId == null) return;
+              if (u.kind === 'memory') onNavigateToMemory?.(u.refId);
+              else if (u.kind === 'entity') onNavigateToEntity?.(u.refId);
+              else if (u.kind === 'meeting') onNavigateToChat?.(String(u.refId));
+            }}
+            title={u ? `${u.kind} · ${u.surface}${u.title ? ' · ' + u.title : ''}` : 'source'}
+            className="mx-0.5 inline-flex items-center rounded-sm border border-green-500/40 bg-green-500/10 px-1 align-baseline text-[0.72em] font-semibold text-green-500 transition-colors hover:bg-green-500/20"
+          >
+            {children}
+          </button>
+        );
+      }
+      return <a href={href} target="_blank" rel="noreferrer" className="text-green-500 underline">{children}</a>;
+    },
+  } as Components);
+
+  // Load conversations on mount; probe image gen; load projects for scoping.
   useEffect(() => {
     loadConversations();
+    window.api.imageGenStatus?.().then((s: { available: boolean; models?: string[] }) => {
+      setImageAvailable(!!s?.available);
+      const models = s?.models || [];
+      setImgModels(models);
+      // Default to the best fit: Z-Image Turbo (2026 flagship) > SDXL-Lightning > SDXL > 2.1 > rest.
+      const preferred = models.find(m => /z[-_]?image/i.test(m)) || models.find(m => /lightning/i.test(m)) || models.find(m => /sdxl|xl/i.test(m)) || models.find(m => /v2-1|v2\.1/i.test(m)) || models[0] || '';
+      setImgModel(prev => prev || preferred);
+    }).catch(() => {});
+    window.api.listProjects?.().then((p: ProjectLite[]) => setProjects(p || [])).catch(() => {});
+    window.api.getLlmSettings?.().then((s: { temperature: number; ctxSize: number }) => {
+      if (s) { setTemperature(s.temperature); setCtxSize(s.ctxSize); }
+    }).catch(() => {});
+    window.api.styleThumbs?.().then((t: Record<string, string>) => setStyleThumbs(t || {})).catch(() => {});
   }, []);
+
+  const styleKey = (name: string): string => name.replace(/[^\w-]+/g, '_');
+
+  // Generate on-device preview thumbnails for any styles that don't have one yet.
+  const generateStylePreviews = useCallback(async () => {
+    if (genThumbsBusy) return;
+    setGenThumbsBusy(true);
+    try {
+      for (const s of STYLE_PRESETS) {
+        const k = styleKey(s.name);
+        if (styleThumbs[k]) continue;
+        try {
+          await window.api.makeStyleThumb?.(s.name, `${s.preview}, ${s.prompt}`);
+          const refreshed = await window.api.styleThumbs?.();
+          if (refreshed) setStyleThumbs(refreshed);
+        } catch (e) { console.error('style thumb failed', s.name, e); }
+      }
+    } finally {
+      setGenThumbsBusy(false);
+    }
+  }, [genThumbsBusy, styleThumbs]);
+
+  // Match canvas + steps to the model. Few-step models (Lightning/Turbo) need
+  // very low steps; full models want their native resolution.
+  useEffect(() => {
+    if (!imgModel) return;
+    const zimage = /z[-_]?image/i.test(imgModel);
+    const lightning = /lightning/i.test(imgModel);
+    const turbo = /turbo/i.test(imgModel) && !zimage;
+    setImgSize(turbo ? 512 : /sdxl|xl/i.test(imgModel) || lightning || zimage ? 1024 : /v2-1|v2\.1/i.test(imgModel) ? 768 : 512);
+    if (zimage) setImgSteps(8);
+    else if (turbo) setImgSteps(4);
+    else if (lightning) setImgSteps(parseInt(imgModel.match(/(\d+)\s*step/i)?.[1] || '4', 10));
+    else setImgSteps(/sdxl|xl/i.test(imgModel) ? 28 : 20);
+  }, [imgModel]);
+
+  const activeProjectName = projects.find(p => p.id === activeProjectId)?.name ?? null;
+
+  const loadProjects = useCallback(async () => {
+    try { setProjects((await window.api.listProjects?.()) || []); } catch (e) { console.error(e); }
+  }, []);
+
+  // Assign the current chat to a project (or clear it). Persists if a conversation exists.
+  const assignProject = useCallback(async (projectId: string | null) => {
+    setNoMemory(false); // choosing All-memory or a project turns memory on
+    setActiveProjectId(projectId);
+    setProjectMenuOpen(false);
+    setProjCreating(false);
+    setProjNewName('');
+    if (activeConversationId) {
+      try { await window.api.setRagConversationProject?.(activeConversationId, projectId); } catch (e) { console.error(e); }
+      await loadConversations();
+    }
+  }, [activeConversationId]);
+
+  // Create a project inline and assign the current chat to it.
+  const createAndAssignProject = useCallback(async () => {
+    const name = projNewName.trim();
+    if (!name) { setProjCreating(false); return; }
+    try {
+      const id = await window.api.createProject?.({ name });
+      await loadProjects();
+      if (id) await assignProject(id);
+    } catch (e) { console.error('Failed to create project', e); }
+  }, [projNewName, loadProjects, assignProject]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
+
+  // Live per-step image generation progress (step counter + forming preview).
+  useEffect(() => {
+    const off = window.api.onImageGenProgress?.((p) => setImgProgress(p));
+    return () => off?.();
+  }, []);
 
   const loadConversations = async () => {
     try {
@@ -114,26 +355,47 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const switchConversation = useCallback(async (convId: string) => {
     if (convId === activeConversationId) return;
     setActiveConversationId(convId);
-    setOpenContextId(null);
+    setActiveProjectId(conversations.find(c => c.id === convId)?.project_id ?? null);
     try {
       const rawMessages = await window.api.getRagMessages(convId);
-      const mapped: ChatMessage[] = (rawMessages || []).map((m: any) => ({
-        id: String(m.id),
-        role: m.role as 'user' | 'assistant',
-        content: m.content,
-        context: m.context ? (typeof m.context === 'string' ? JSON.parse(m.context) : m.context) : undefined,
-      }));
-      setMessages(mapped);
+      setMessages(mapRagMessages(rawMessages));
     } catch (e) {
       console.error('Failed to load messages:', e);
       setMessages([]);
     }
-  }, [activeConversationId]);
+  }, [activeConversationId, conversations]);
+
+  // Open a target passed from the Projects tab (an existing chat, or a new chat
+  // scoped to a project). Resolves project from the DB to avoid stale state.
+  useEffect(() => {
+    if (!openTarget) return;
+    (async () => {
+      try {
+        if (openTarget.conversationId) {
+          const convId = openTarget.conversationId;
+          setActiveConversationId(convId);
+          const conv = await window.api.getRagConversation?.(convId);
+          setActiveProjectId((conv as { project_id?: string | null })?.project_id ?? null);
+          setMessages(mapRagMessages(await window.api.getRagMessages(convId)));
+        } else if (openTarget.projectId) {
+          setActiveConversationId(null);
+          setMessages([]);
+          setActiveProjectId(openTarget.projectId);
+        }
+        await loadConversations();
+      } catch (e) {
+        console.error('Failed to open chat target:', e);
+      } finally {
+        onTargetConsumed?.();
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openTarget]);
 
   const startNewConversation = useCallback(() => {
     setActiveConversationId(null);
     setMessages([]);
-    setOpenContextId(null);
+    setActiveProjectId(null);
   }, []);
 
   const deleteConversation = useCallback(async (convId: string, e: React.MouseEvent) => {
@@ -150,9 +412,35 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
     }
   }, [activeConversationId]);
 
-  const sendMessage = async () => {
-    const trimmed = input.trim();
-    if (!trimmed || loading) return;
+  const sendMessage = async (override?: string) => {
+    const isInput = override === undefined;
+    // Attachments (pasted blocks + processed files) ride along only on a normal
+    // send from the composer, not on resend/regenerate/example.
+    const atts = isInput ? attachments.filter(a => a.status === 'ready' && a.text) : [];
+    const typed = (override ?? input).trim();
+    // The user sees `trimmed`; the model also gets the attachment text folded in.
+    const trimmed = typed || (atts.length ? `(${atts.length} attachment${atts.length > 1 ? 's' : ''})` : '');
+    const attBlock = atts.map(a => `--- attached ${a.kind}: ${a.name} ---\n${a.text}`).join('\n\n');
+    let modelQuery = (attBlock ? `${attBlock}\n\n${typed}` : typed).trim();
+    // Synchronous guard: React state batching lets rapid clicks slip past the
+    // `loading` check and fire concurrent generations; the ref blocks that.
+    if ((!typed && atts.length === 0) || loading || sendingRef.current) return;
+    sendingRef.current = true;
+    if (isInput) setAttachments([]);
+
+    // Skill invocation: "/skill-name [rest]" prepends that skill's instructions.
+    if (isInput) {
+      const sm = /^\/([A-Za-z0-9_-]+)\s*([\s\S]*)$/.exec(typed);
+      if (sm && skills.some(s => s.name.toLowerCase() === sm[1].toLowerCase())) {
+        try {
+          const sk = await window.api.getSkill?.(sm[1]);
+          if (sk) {
+            const rest = sm[2].trim();
+            modelQuery = `${attBlock ? attBlock + '\n\n' : ''}# Skill: ${sk.name}\n${sk.instructions}\n\n${rest}`.trim();
+          }
+        } catch (e) { console.error('skill load failed', e); }
+      }
+    }
 
     let convId = activeConversationId;
 
@@ -161,19 +449,16 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
       convId = `rag-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const title = trimmed.length > 50 ? trimmed.slice(0, 47) + '...' : trimmed;
       try {
-        await window.api.createRagConversation(convId, title);
+        await window.api.createRagConversation(convId, title, activeProjectId);
         setActiveConversationId(convId);
       } catch (e) {
         console.error('Failed to create conversation:', e);
+        sendingRef.current = false;
         return;
       }
     }
 
-    const userMessage: ChatMessage = {
-      id: `u-${Date.now()}`,
-      role: 'user',
-      content: trimmed
-    };
+    const userMessage: ChatMessage = { id: `u-${Date.now()}`, role: 'user', content: trimmed };
 
     setMessages(prev => [...prev, userMessage]);
     setInput('');
@@ -186,43 +471,115 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
       console.error('Failed to persist user message:', e);
     }
 
-    try {
-      // Build conversation history from current messages (last 20)
-      const currentMessages = [...messages, userMessage];
-      const historySlice = currentMessages.slice(-20);
-      const history = historySlice.map(m => ({ role: m.role, content: m.content }));
-
-      const result = await window.api.ragChat(trimmed, 'All', history);
-      const assistantContent = result.answer || 'No response returned.';
-      const assistantMessage: ChatMessage = {
-        id: `a-${Date.now()}`,
-        role: 'assistant',
-        content: assistantContent,
-        context: result.context
-      };
-      setMessages(prev => [...prev, assistantMessage]);
-
-      // Persist assistant message with context
+    // Image-generation mode: render a prompt → image instead of a memory answer.
+    if (mode === 'image') {
+      setImgProgress(null);
       try {
-        await window.api.addRagMessage(convId, 'assistant', assistantContent, result.context);
+        const seedNum = imgSeed.trim() === '' ? -1 : parseInt(imgSeed, 10);
+        const styleObj = STYLE_PRESETS.find(s => s.name === activeStyle);
+        const fullPrompt = styleObj ? `${trimmed}, ${styleObj.prompt}` : trimmed;
+        const img = await window.api.generateImage({
+          prompt: fullPrompt,
+          negativePrompt: imgNegative.trim() || undefined,
+          width: imgSize,
+          height: imgSize,
+          steps: imgSteps,
+          seed: Number.isNaN(seedNum) ? -1 : seedNum,
+          model: imgModel || undefined,
+          initImage: imgInit || undefined,
+          strength: imgInit ? imgStrength : undefined,
+        });
+        const assistantMessage: ChatMessage = {
+          id: `a-${Date.now()}`,
+          role: 'assistant',
+          content: `Generated for: ${trimmed}`,
+          image: img.dataUrl,
+          imagePath: img.path,
+        };
+        setMessages(prev => [...prev, assistantMessage]);
+        try {
+          await window.api.addRagMessage(convId, 'assistant', `Generated for: ${trimmed}`, { image: img.path });
+        } catch (_) { /* ignore */ }
       } catch (e) {
-        console.error('Failed to persist assistant message:', e);
+        const errorContent = (e as Error)?.message || 'Image generation failed.';
+        // User-cancelled: just drop the loading state, no error bubble.
+        if (!/cancel/i.test(errorContent)) {
+          console.error('Image generation failed', e);
+          setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: errorContent }]);
+          try {
+            await window.api.addRagMessage(convId, 'assistant', errorContent);
+          } catch (_) { /* ignore */ }
+        }
+      } finally {
+        sendingRef.current = false;
+        setLoading(false);
+        setImgProgress(null);
+        await loadConversations();
+      }
+      return;
+    }
+
+    try {
+      const currentMessages = [...messages, userMessage];
+      const history = currentMessages.slice(-20).map(m => ({ role: m.role, content: m.content }));
+
+      // Agentic tools path (opt-in, non-project). The model calls built-in tools.
+      if (toolsOn && !activeProjectId) {
+        const tr = await window.api.toolChat(modelQuery, history);
+        const am: ChatMessage = {
+          id: `a-${Date.now()}`,
+          role: 'assistant',
+          content: tr?.answer || 'No response returned.',
+          toolCalls: (tr?.toolCalls || []).map((c: { name: string; result: string }) => ({ name: c.name, result: c.result })),
+        };
+        setMessages(prev => [...prev, am]);
+        if (voiceOn) speakMessage(am.id, am.content);
+        try { await window.api.addRagMessage(convId, 'assistant', am.content); } catch (_) { /* ignore */ }
+        return;
+      }
+
+      // Placeholder message that fills in live as tokens/reasoning stream in
+      // (matched by streamId in the onRagStream subscription).
+      const streamId = `a-${Date.now()}`;
+      setMessages(prev => [...prev, { id: streamId, role: 'assistant', content: '', reasoning: '', streaming: true }]);
+      const result = await window.api.ragChat(modelQuery, 'All', history, activeProjectId, convId, noMemory && !activeProjectId, streamId, thinkingEnabled);
+      const assistantContent = result.answer || 'No response returned.';
+
+      // The model decided this is an image request — replace the streamed turn
+      // with on-device generation.
+      const imgMatch = assistantContent.match(/```image\s*\n([\s\S]*?)```/i);
+      if (imgMatch && window.api.generateImage) {
+        const imgPrompt = imgMatch[1].trim();
+        setMessages(prev => prev.map(m => (m.id === streamId ? { ...m, content: 'Generating image…', reasoning: undefined, streaming: false } : m)));
+        try {
+          const img = await window.api.generateImage({ prompt: imgPrompt });
+          setMessages(prev => prev.map(m => (m.id === streamId ? { ...m, content: `Generated: ${imgPrompt.slice(0, 80)}`, image: img.dataUrl, imagePath: img.path } : m)));
+          try { await window.api.addRagMessage(convId, 'assistant', `Generated: ${imgPrompt.slice(0, 80)}`, { image: img.path }); } catch (_) { /* ignore */ }
+        } catch (err) {
+          const msg = (err as Error)?.message || 'Image generation failed.';
+          if (!/cancel/i.test(msg)) setMessages(prev => prev.map(m => (m.id === streamId ? { ...m, content: msg, streaming: false } : m)));
+        }
+      } else {
+        // Finalize the streamed message — set authoritative text + context, clear streaming.
+        setMessages(prev => prev.map(m => (m.id === streamId ? { ...m, content: assistantContent, context: result.context, streaming: false } : m)));
+        const art = parseArtifact(assistantContent);
+        if (art) { try { void window.api.saveArtifact?.({ kind: art.kind, code: art.code }); } catch { /* ignore */ } }
+        if (voiceOn) speakMessage(streamId, assistantContent);
+        try {
+          await window.api.addRagMessage(convId, 'assistant', assistantContent, result.context);
+        } catch (e) {
+          console.error('Failed to persist assistant message:', e);
+        }
       }
     } catch (e) {
       console.error('RAG chat failed', e);
       const errorContent = 'Sorry, something went wrong while generating a response.';
-      setMessages(prev => [
-        ...prev,
-        {
-          id: `a-${Date.now()}`,
-          role: 'assistant',
-          content: errorContent
-        }
-      ]);
+      setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: errorContent }]);
       try {
         await window.api.addRagMessage(convId, 'assistant', errorContent);
       } catch (_) { /* ignore */ }
     } finally {
+      sendingRef.current = false;
       setLoading(false);
       await loadConversations();
     }
@@ -235,185 +592,699 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
     }
   };
 
+  // Voice input: record from the mic, transcribe on-device with whisper, then
+  // drop the text into the input for review (not auto-sent).
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        if (blob.size === 0) return;
+        setTranscribing(true);
+        try {
+          const bytes = new Uint8Array(await blob.arrayBuffer());
+          const text = await window.api.transcribeAudio(bytes, 'webm');
+          if (text && text.trim()) setInput(prev => (prev ? prev + ' ' : '') + text.trim());
+        } catch (err) {
+          console.error('Transcription failed', err);
+        } finally {
+          setTranscribing(false);
+        }
+      };
+      recorder.start();
+      recorderRef.current = recorder;
+      setRecording(true);
+    } catch (err) {
+      console.error('Mic access failed', err);
+      setRecording(false);
+    }
+  };
+
+  const stopRecording = () => {
+    recorderRef.current?.stop();
+    recorderRef.current = null;
+    setRecording(false);
+  };
+
+  const toggleRecording = () => { recording ? stopRecording() : startRecording(); };
+
+  // Voice output: synthesize a message on-device (Kokoro) and play it. Toggling
+  // the same message stops playback.
+  const speakMessage = useCallback(async (id: string, text: string) => {
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+    if (speakingId === id) { setSpeakingId(null); return; }
+    setSpeakingId(id);
+    try {
+      const { dataUrl } = await window.api.speak(text);
+      const audio = new Audio(dataUrl);
+      audioRef.current = audio;
+      audio.onended = () => { setSpeakingId(cur => (cur === id ? null : cur)); audioRef.current = null; };
+      await audio.play();
+    } catch (e) {
+      console.error('TTS failed', e);
+      setSpeakingId(cur => (cur === id ? null : cur));
+    }
+  }, [speakingId]);
+
+  const refreshGallery = useCallback(async () => {
+    try { setGallery((await window.api.listGeneratedImages?.()) || []); } catch (e) { console.error(e); }
+    try { setArtifacts((await window.api.listArtifacts?.()) || []); } catch (e) { console.error(e); }
+  }, []);
+
+  const deleteArtifact = useCallback(async (id: string) => {
+    try {
+      await window.api.deleteArtifact?.(id);
+      setArtifacts(prev => prev.filter(a => a.id !== id));
+    } catch (e) { console.error(e); }
+  }, []);
+
+  const openGallery = useCallback(() => {
+    setShowGallery(v => {
+      if (!v) refreshGallery();
+      return !v;
+    });
+  }, [refreshGallery]);
+
+  const downloadImage = useCallback(async (path?: string, name?: string) => {
+    if (!path) return;
+    try { await window.api.exportGeneratedImage?.(path, name || 'off-grid-image.png'); } catch (e) { console.error(e); }
+  }, []);
+
+  const deleteImage = useCallback(async (path?: string) => {
+    if (!path) return;
+    try {
+      await window.api.deleteGeneratedImage?.(path);
+      setMessages(prev => prev.map(m => (m.imagePath === path ? { ...m, image: undefined, imagePath: undefined, content: m.content + '  (deleted)' } : m)));
+      setGallery(prev => prev.filter(g => g.path !== path));
+      setLightbox(null);
+    } catch (e) { console.error(e); }
+  }, []);
+
+  // Auto-grow the composer with its content, up to a cap (then it scrolls).
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 208)}px`;
+  }, [input]);
+
+  useEffect(() => {
+    window.api.listSkills?.().then(s => setSkills(s || [])).catch(() => {});
+  }, []);
+
+  // Live streaming: route token/reasoning events to the in-flight assistant
+  // message (matched by streamId === message id) so it fills in as it generates.
+  useEffect(() => {
+    const off = window.api.onRagStream?.((data) => {
+      setMessages(prev => prev.map(m => {
+        if (m.id !== data.streamId) return m;
+        if (data.type === 'content') return { ...m, content: (m.content || '') + (data.text || '') };
+        if (data.type === 'reasoning') return { ...m, reasoning: (m.reasoning || '') + (data.text || '') };
+        return m;
+      }));
+    });
+    return () => off?.();
+  }, []);
+
+  const copyText = useCallback((t: string) => {
+    try { void navigator.clipboard.writeText(t); } catch (e) { console.error(e); }
+  }, []);
+
+  // Re-run the user prompt that produced (or precedes) a given message.
+  const regenerate = useCallback((messageId: string) => {
+    const idx = messages.findIndex(m => m.id === messageId);
+    if (idx < 0) return;
+    for (let i = idx; i >= 0; i--) {
+      if (messages[i].role === 'user') { void sendMessage(messages[i].content); return; }
+    }
+  }, [messages]);
+
+  // Process attached files into text (read/parse/caption/transcribe) on the main side.
+  const addFiles = useCallback(async (files: FileList | File[]) => {
+    for (const file of Array.from(files)) {
+      const id = `att-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      setAttachments(prev => [...prev, { id, name: file.name, kind: 'text', text: '', status: 'loading' }]);
+      try {
+        const buf = await file.arrayBuffer();
+        const res = await window.api.processFile?.(buf, file.name);
+        setAttachments(prev => prev.map(a => a.id === id
+          ? { ...a, kind: (res?.kind as Attachment['kind']) || 'text', text: res?.text || '', status: res && res.text ? 'ready' : 'error' }
+          : a));
+      } catch (e) {
+        console.error('process file failed', e);
+        setAttachments(prev => prev.map(a => (a.id === id ? { ...a, status: 'error' } : a)));
+      }
+    }
+  }, []);
+
+  const removeAttachment = useCallback((id: string) => setAttachments(prev => prev.filter(a => a.id !== id)), []);
+
+  // Pasting a large blob becomes a "PASTED" chip instead of flooding the input.
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const text = e.clipboardData.getData('text');
+    if (text && text.length > 1200) {
+      e.preventDefault();
+      const id = `att-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      setAttachments(prev => [...prev, { id, name: 'Pasted text', kind: 'pasted', text, status: 'ready' }]);
+    }
+  }, []);
+
+  const examples = mode === 'image' ? IMAGE_EXAMPLES : ASK_EXAMPLES;
+
+  // Slash-command autocomplete: typing "/" (before any space) lists matching skills.
+  const slashQuery = mode === 'ask' && input.startsWith('/') && !/\s/.test(input) ? input.slice(1).toLowerCase() : null;
+  const skillMatches = slashQuery !== null ? skills.filter(s => s.name.toLowerCase().includes(slashQuery)) : [];
+
   return (
-    <motion.div
-      className="flex flex-col h-full gap-4"
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] }}
+    <div
+      className="flex h-full flex-col font-mono bg-neutral-950 transition-[padding] duration-200"
+      style={{ paddingRight: canvasArtifact ? 'max(420px, 44vw)' : undefined }}
     >
       {/* Header */}
-      <motion.div
-        className="flex items-center gap-3"
-        initial={{ opacity: 0, filter: 'blur(10px)' }}
-        animate={{ opacity: 1, filter: 'blur(0px)' }}
-        transition={{ duration: 0.6, delay: 0.1 }}
-      >
-        <div className="h-10 w-10 rounded-xl bg-neutral-800 border border-neutral-700 flex items-center justify-center">
-          <svg className="w-5 h-5 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <header className="flex items-center gap-3 border-b border-neutral-900 px-6 py-4">
+        <div className="flex h-8 w-8 items-center justify-center rounded-md border border-neutral-800 bg-neutral-900">
+          <svg className="h-4 w-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
           </svg>
         </div>
-        <div className="flex-1">
-          <h2 className="text-lg font-semibold text-white">Chat with your memories</h2>
-          <p className="text-sm text-neutral-500">Ask questions about your saved conversations</p>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-sm font-medium tracking-wide text-neutral-200">OFF GRID</h2>
+          <p className="truncate text-xs text-neutral-500">Private, on-device — ask your memory or generate images</p>
+        </div>
+
+        {/* Project scope picker */}
+        <div className="relative">
+          <button
+            onClick={() => setProjectMenuOpen(o => !o)}
+            title="Scope this chat to a project's knowledge base"
+            className={`flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs transition-colors ${
+              activeProjectId
+                ? 'border-green-500 text-green-500'
+                : 'border-neutral-800 text-neutral-400 hover:border-neutral-700 hover:text-neutral-200'
+            }`}
+          >
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+            </svg>
+            <span className="max-w-[10rem] truncate">{activeProjectName ?? (noMemory ? 'No memory' : 'All memory')}</span>
+            <svg className="h-3 w-3 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {projectMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setProjectMenuOpen(false)} />
+              <div className="absolute right-0 z-20 mt-1 max-h-80 w-60 overflow-y-auto rounded-md border border-neutral-800 bg-neutral-950 py-1">
+                <div className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-neutral-600">Scope this chat</div>
+                <button
+                  onClick={() => { setNoMemory(true); assignProject(null); setProjectMenuOpen(false); }}
+                  className={`block w-full px-3 py-2 text-left text-xs transition-colors hover:bg-neutral-900 ${!activeProjectId && noMemory ? 'text-green-500' : 'text-neutral-300'}`}
+                  title="Just chat — don't search your memory"
+                >
+                  No memory
+                </button>
+                <button
+                  onClick={() => { setNoMemory(false); assignProject(null); setProjectMenuOpen(false); }}
+                  className={`block w-full px-3 py-2 text-left text-xs transition-colors hover:bg-neutral-900 ${!activeProjectId && !noMemory ? 'text-green-500' : 'text-neutral-300'}`}
+                  title="Answer using everything in your memory"
+                >
+                  All memory
+                </button>
+                {projects.map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => { setNoMemory(false); assignProject(p.id); setProjectMenuOpen(false); }}
+                    className={`block w-full truncate px-3 py-2 text-left text-xs transition-colors hover:bg-neutral-900 ${activeProjectId === p.id ? 'text-green-500' : 'text-neutral-300'}`}
+                  >
+                    {p.name}
+                  </button>
+                ))}
+                <div className="my-1 border-t border-neutral-900" />
+                {projCreating ? (
+                  <input
+                    autoFocus
+                    value={projNewName}
+                    onChange={(e) => setProjNewName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') createAndAssignProject();
+                      if (e.key === 'Escape') { setProjCreating(false); setProjNewName(''); }
+                    }}
+                    onBlur={createAndAssignProject}
+                    placeholder="Project name…"
+                    className="mx-2 my-1 w-[calc(100%-1rem)] rounded border border-green-500 bg-neutral-900 px-2 py-1.5 text-xs text-white placeholder-neutral-600 outline-none"
+                  />
+                ) : (
+                  <button
+                    onClick={() => setProjCreating(true)}
+                    className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs text-neutral-400 transition-colors hover:bg-neutral-900 hover:text-green-500"
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                    New project
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Model settings (temperature + context window) */}
+        <div className="relative">
+          <button
+            onClick={() => setLlmSettingsOpen(o => !o)}
+            className={`rounded-md border p-1.5 transition-colors ${llmSettingsOpen ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
+            title="Model settings"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </button>
+          {llmSettingsOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setLlmSettingsOpen(false)} />
+              <div className="absolute right-0 z-20 mt-1 w-72 rounded-md border border-neutral-800 bg-neutral-950 p-4 text-xs">
+                <div className="mb-3 text-[10px] uppercase tracking-wide text-neutral-500">Model settings</div>
+                <label className="mb-1 flex items-center justify-between text-neutral-400">
+                  Temperature <span className="text-green-500">{temperature.toFixed(2)}</span>
+                </label>
+                <input
+                  type="range" min={0} max={1.5} step={0.05} value={temperature}
+                  onChange={(e) => { const v = Number(e.target.value); setTemperature(v); window.api.setLlmSettings?.({ temperature: v }); }}
+                  className="mb-1 w-full accent-green-500"
+                />
+                <p className="mb-3 text-[10px] text-neutral-600">Lower = focused/deterministic, higher = creative.</p>
+                <label className="mb-1 block text-neutral-400">Context window</label>
+                <select
+                  value={ctxSize}
+                  onChange={(e) => { const v = Number(e.target.value); setCtxSize(v); window.api.setLlmSettings?.({ ctxSize: v }); }}
+                  className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-300 outline-none focus:border-green-500"
+                >
+                  <option value={8192}>8K tokens (lightest)</option>
+                  <option value={16384}>16K tokens</option>
+                  <option value={32768}>32K tokens (default)</option>
+                  <option value={65536}>64K tokens (heaviest)</option>
+                </select>
+                <p className="mt-1 text-[10px] text-neutral-600">Larger holds more history but uses more memory. Changing it reloads the model.</p>
+              </div>
+            </>
+          )}
         </div>
         <button
+          onClick={openGallery}
+          className={`rounded-md border p-1.5 transition-colors ${showGallery ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
+          title="Generated images"
+        >
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 15l4-4 4 4 3-3 5 5" />
+            <circle cx="9" cy="9" r="1.5" fill="currentColor" />
+          </svg>
+        </button>
+        <button
+          onClick={() => setVoiceOn(v => !v)}
+          className={`rounded-md border p-1.5 transition-colors ${voiceOn ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
+          title={voiceOn ? 'Voice replies on — auto-speak answers' : 'Voice replies off'}
+        >
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5L6 9H2v6h4l5 4V5z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.54 8.46a5 5 0 010 7.07M19.07 4.93a10 10 0 010 14.14" />
+          </svg>
+        </button>
+        <button
           onClick={() => setShowHistory(prev => !prev)}
-          className="p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
+          className={`rounded-md border p-1.5 transition-colors ${showHistory ? 'border-neutral-700 text-neutral-300' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
           title={showHistory ? 'Hide history' : 'Show history'}
         >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         </button>
-      </motion.div>
+      </header>
 
-      {/* Two-panel layout */}
-      <motion.div
-        className="flex-1 flex gap-3 overflow-hidden"
-        initial={{ opacity: 0, filter: 'blur(10px)' }}
-        animate={{ opacity: 1, filter: 'blur(0px)' }}
-        transition={{ duration: 0.6, delay: 0.2 }}
-      >
-        {/* Conversation List (left panel) */}
-        <AnimatePresence>
-          {showHistory && (
-            <motion.div
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 288, opacity: 1 }}
-              exit={{ width: 0, opacity: 0 }}
-              transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] }}
-              className="flex-shrink-0 overflow-hidden rounded-2xl bg-neutral-900/60 backdrop-blur-sm border border-neutral-800 flex flex-col"
-            >
-              {/* New conversation button */}
-              <div className="p-3 border-b border-neutral-800">
-                <button
-                  onClick={startNewConversation}
-                  className="w-full py-2 px-3 rounded-xl bg-neutral-800 border border-neutral-700 text-white text-sm font-medium hover:bg-neutral-700 hover:border-neutral-600 transition-all flex items-center justify-center gap-2"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                  New chat
-                </button>
+      {/* Body */}
+      <div className="flex min-h-0 flex-1">
+        {/* History rail */}
+        {showHistory && (
+          <aside className="flex w-64 shrink-0 flex-col border-r border-neutral-900">
+            <div className="p-3">
+              <button
+                onClick={startNewConversation}
+                className="flex w-full items-center justify-center gap-2 rounded-md border border-neutral-800 px-3 py-2 text-xs text-neutral-300 transition-colors hover:border-green-500 hover:text-green-500"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                New chat
+              </button>
+            </div>
+            {conversations.length > 0 && (
+              <div className="px-2 pb-2">
+                <div className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-950 px-2.5 py-1.5 focus-within:border-neutral-600">
+                  <svg className="h-3.5 w-3.5 shrink-0 text-neutral-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                  <input
+                    value={convSearch}
+                    onChange={e => setConvSearch(e.target.value)}
+                    placeholder="Search conversations…"
+                    className="w-full bg-transparent text-xs text-neutral-200 placeholder-neutral-600 outline-none"
+                  />
+                  {convSearch && <button onClick={() => setConvSearch('')} className="shrink-0 text-neutral-600 hover:text-neutral-300">✕</button>}
+                </div>
               </div>
-
-              {/* Conversation list */}
-              <div className="flex-1 overflow-y-auto relative" ref={listRef}>
-                {conversations.length === 0 ? (
-                  <div className="p-4 text-center text-neutral-600 text-sm">
-                    No conversations yet
-                  </div>
-                ) : (
-                  <div className="p-2 space-y-1">
-                    {conversations.map((conv, index) => (
-                      <motion.button
+            )}
+            <div className="flex-1 overflow-y-auto px-2 pb-2">
+              {(() => {
+                const q = convSearch.trim().toLowerCase();
+                const filtered = q ? conversations.filter(c => (c.title || '').toLowerCase().includes(q)) : conversations;
+                if (conversations.length === 0) return <p className="px-2 py-4 text-center text-xs text-neutral-600">No conversations yet</p>;
+                if (filtered.length === 0) return <p className="px-2 py-4 text-center text-xs text-neutral-600">No matches</p>;
+                const now = new Date();
+                const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+                const groups: { label: string; items: Conversation[] }[] = [
+                  { label: 'Today', items: [] }, { label: 'Yesterday', items: [] }, { label: 'This week', items: [] }, { label: 'Older', items: [] },
+                ];
+                for (const c of filtered) {
+                  const t = new Date(c.updated_at).getTime();
+                  if (t >= startToday) groups[0].items.push(c);
+                  else if (t >= startToday - 86400000) groups[1].items.push(c);
+                  else if (t >= startToday - 6 * 86400000) groups[2].items.push(c);
+                  else groups[3].items.push(c);
+                }
+                return groups.filter(g => g.items.length).map(g => (
+                  <div key={g.label} className="mb-2">
+                    <div className="px-1 py-1 text-[10px] uppercase tracking-wider text-neutral-600">{g.label}</div>
+                    {g.items.map(conv => (
+                      <div
                         key={conv.id}
                         onClick={() => switchConversation(conv.id)}
-                        onMouseEnter={() => setHoveredConvId(conv.id)}
-                        onMouseLeave={() => setHoveredConvId(null)}
-                        initial={{ opacity: 0, filter: 'blur(6px)' }}
-                        animate={{ opacity: 1, filter: 'blur(0px)' }}
-                        transition={{ duration: 0.3, delay: index * 0.03 }}
-                        className={`w-full text-left p-3 rounded-xl transition-colors relative group ${
-                          activeConversationId === conv.id
-                            ? 'bg-neutral-800 border border-neutral-700'
-                            : 'hover:bg-neutral-800/50 border border-transparent'
+                        className={`group flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-2 text-left transition-colors ${
+                          activeConversationId === conv.id ? 'border-neutral-800 bg-neutral-900' : 'border-transparent hover:bg-neutral-900/50'
                         }`}
                       >
-                        <p className="text-sm text-neutral-300 truncate pr-6">
-                          {conv.title || 'Untitled'}
-                        </p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="text-xs text-neutral-600">{timeAgo(conv.updated_at)}</span>
-                          {conv.message_count != null && conv.message_count > 0 && (
-                            <span className="text-[10px] text-neutral-500 bg-neutral-800 px-1.5 py-0.5 rounded-full">
-                              {conv.message_count}
-                            </span>
-                          )}
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs text-neutral-300">{conv.title || 'Untitled'}</p>
+                          <div className="mt-0.5 flex items-center gap-2">
+                            <span className="text-[10px] text-neutral-600">{timeAgo(conv.updated_at)}</span>
+                            {conv.project_id && <span className="text-[10px] text-green-500/70">project</span>}
+                          </div>
                         </div>
-                        {/* Delete button */}
-                        {hoveredConvId === conv.id && (
+                        <button
+                          onClick={(e) => deleteConversation(conv.id, e)}
+                          className="shrink-0 text-neutral-700 opacity-0 transition hover:text-red-400 group-hover:opacity-100"
+                          title="Delete conversation"
+                        >
+                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ));
+              })()}
+            </div>
+          </aside>
+        )}
+
+        {/* Main column */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto">
+            {messages.length === 0 ? (
+              <div className={`mx-auto flex min-h-full flex-col items-center justify-center px-6 py-6 text-center ${mode === 'image' ? 'max-w-6xl' : 'max-w-2xl'}`}>
+                <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-neutral-800 bg-neutral-900 shadow-sm">
+                  <svg className="h-8 w-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                  </svg>
+                </div>
+                <h2 className="text-3xl font-semibold tracking-tight text-neutral-100">{mode === 'image' ? 'Create an image' : 'Start a conversation'}</h2>
+                <p className="mt-3 max-w-md text-sm text-neutral-500">
+                  {mode === 'image'
+                    ? 'Pick a style, then describe your subject — generated on-device.'
+                    : activeProjectName
+                      ? `Grounded in the “${activeProjectName}” knowledge base.`
+                      : 'Ask across your memories, chats, and entities from every source.'}
+                </p>
+                {mode === 'image' ? (
+                  <div className="mt-4 w-full">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-[10px] uppercase tracking-wider text-neutral-600">Style</span>
+                      {Object.keys(styleThumbs).length < STYLE_PRESETS.length && (
+                        <button
+                          onClick={generateStylePreviews}
+                          disabled={genThumbsBusy}
+                          className="text-[10px] text-neutral-500 transition-colors hover:text-green-500 disabled:opacity-50"
+                        >
+                          {genThumbsBusy ? 'Generating previews…' : 'Generate previews'}
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid w-full grid-cols-2 gap-2.5 sm:grid-cols-4">
+                      {STYLE_PRESETS.map(s => {
+                        const thumb = styleThumbs[styleKey(s.name)];
+                        return (
                           <button
-                            onClick={(e) => deleteConversation(conv.id, e)}
-                            className="absolute top-3 right-2 p-1 rounded-md text-neutral-600 hover:text-red-400 hover:bg-neutral-700/50 transition-colors"
-                            title="Delete conversation"
+                            key={s.name}
+                            onClick={() => setActiveStyle(cur => (cur === s.name ? null : s.name))}
+                            className={`group relative aspect-[16/9] overflow-hidden rounded-md border transition-all ${
+                              activeStyle === s.name ? 'border-green-500 ring-1 ring-green-500' : 'border-neutral-800 hover:border-neutral-600'
+                            }`}
                           >
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
+                            {thumb ? (
+                              <img
+                                src={`ogcapture://${thumb}`}
+                                alt={s.name}
+                                className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                              />
+                            ) : (
+                              <span className={`absolute inset-0 bg-gradient-to-br ${s.swatch} transition-transform duration-300 group-hover:scale-105`} />
+                            )}
+                            <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-2 py-1.5 text-left text-[11px] font-medium text-white">
+                              {s.name}
+                            </span>
+                            {activeStyle === s.name && (
+                              <span className="absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-green-500 text-neutral-950">
+                                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                              </span>
+                            )}
                           </button>
-                        )}
-                      </motion.button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-6 grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
+                    {examples.map(ex => (
+                      <button
+                        key={ex}
+                        onClick={() => sendMessage(ex)}
+                        className="rounded-md border border-neutral-800 px-3 py-2.5 text-left text-xs text-neutral-400 transition-colors hover:border-green-500 hover:text-neutral-200"
+                      >
+                        {ex}
+                      </button>
                     ))}
                   </div>
                 )}
-                <ProgressiveBlur
-                  className="pointer-events-none sticky bottom-0 left-0 right-0 h-12"
-                  height="48px"
-                />
               </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Chat area (right panel) */}
-        <div className="flex-1 flex flex-col gap-3 min-w-0">
-          <div className="flex-1 overflow-hidden rounded-2xl bg-neutral-900/60 backdrop-blur-sm border border-neutral-800 relative">
-            <div className="absolute inset-0 overflow-y-auto p-4">
-              {messages.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-center px-4">
-                  <div className="w-16 h-16 rounded-2xl bg-neutral-800 border border-neutral-700 flex items-center justify-center mb-4">
-                    <svg className="w-8 h-8 text-neutral-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                    </svg>
-                  </div>
-                  <p className="text-neutral-400 text-lg font-medium mb-2">Start a conversation</p>
-                  <p className="text-neutral-600 text-sm max-w-md">
-                    Ask questions to search across your memories, chats, and entities from all sources.
-                  </p>
-                </div>
-              ) : (
-                messages.map((message, index) => (
-                  <motion.div
-                    key={message.id}
-                    className={`mb-4 flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.3, delay: index * 0.05 }}
-                  >
-                    <div className={`max-w-[80%] px-4 py-3 rounded-2xl ${message.role === 'user'
-                        ? 'bg-neutral-700 border border-neutral-600 text-white'
-                        : 'bg-neutral-800/80 border border-neutral-700 text-neutral-200'
-                      }`}>
-                      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={markdownComponents}>
-                        {message.content}
-                      </ReactMarkdown>
+            ) : (
+              <div className="w-full px-6 py-5">
+                {messages.map(message => (
+                  <div key={message.id} className={`mb-5 flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
+                    <div className="mb-1 text-[10px] uppercase tracking-wider text-neutral-600">
+                      {message.role === 'user' ? 'You' : 'Off Grid'}
+                    </div>
+                    {message.role === 'assistant' && message.reasoning && message.reasoning.trim() ? (
+                      <Collapsible defaultOpen={!!message.streaming} className="mb-1.5 max-w-[85%]">
+                        <CollapsibleTrigger className="group flex items-center gap-1.5 text-[11px] text-neutral-500 transition-colors hover:text-neutral-300">
+                          <svg className={`h-3 w-3 ${message.streaming ? 'animate-pulse text-green-500' : 'text-neutral-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3a6 6 0 00-3.6 10.8c.3.225.45.6.45.975V16.5h6.3v-1.725c0-.375.15-.75.45-.975A6 6 0 0012 3z" /></svg>
+                          {message.streaming ? 'Thinking…' : 'Thought process'}
+                          <svg className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="mt-1 whitespace-pre-wrap border-l-2 border-neutral-800 pl-3 text-xs leading-relaxed text-neutral-500">
+                          {message.reasoning}
+                        </CollapsibleContent>
+                      </Collapsible>
+                    ) : null}
+                    <div
+                      className={`max-w-[85%] rounded-md px-3.5 py-2.5 text-sm leading-relaxed ${
+                        message.role === 'user'
+                          ? 'bg-neutral-800 text-neutral-100'
+                          : 'border border-neutral-800 bg-neutral-900/40 text-neutral-200'
+                      }`}
+                    >
+                      {message.role === 'assistant' && message.streaming && !message.content.trim() ? (
+                        <span className="inline-flex gap-1 text-green-500">
+                          <span className="animate-bounce [animation-delay:-0.3s]">●</span>
+                          <span className="animate-bounce [animation-delay:-0.15s]">●</span>
+                          <span className="animate-bounce">●</span>
+                        </span>
+                      ) : (
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm, remarkBreaks]}
+                          components={message.role === 'assistant' ? makeCiteComponents(message.context?.unified) : markdownComponents}
+                        >
+                          {message.role === 'assistant'
+                            ? message.content.replace(ASK_FENCE, '').replace(/\[S(\d+)\]/g, '[S$1](cite:$1)').trim()
+                            : message.content}
+                        </ReactMarkdown>
+                      )}
+                      {(() => {
+                        if (message.role !== 'assistant') return null;
+                        const ask = parseAsk(message.content);
+                        if (!ask) return null;
+                        const sel = askSel[message.id] || [];
+                        return (
+                          <div className="mt-2 flex flex-col gap-1.5">
+                            <p className="text-xs text-neutral-400">{ask.question}</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {ask.options.map(opt => {
+                                const on = sel.includes(opt);
+                                return (
+                                  <button
+                                    key={opt}
+                                    onClick={() => {
+                                      if (ask.multiSelect) {
+                                        setAskSel(prev => ({ ...prev, [message.id]: on ? sel.filter(o => o !== opt) : [...sel, opt] }));
+                                      } else {
+                                        void sendMessage(opt);
+                                      }
+                                    }}
+                                    className={`rounded-md border px-2.5 py-1 text-xs transition-colors ${on ? 'border-green-500 text-green-500' : 'border-neutral-700 text-neutral-300 hover:border-green-500 hover:text-green-500'}`}
+                                  >
+                                    {opt}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            {ask.multiSelect && sel.length > 0 ? (
+                              <button onClick={() => void sendMessage(sel.join(', '))} className="mt-1 self-start rounded-md bg-green-600 px-3 py-1 text-xs text-white transition-colors hover:bg-green-500">
+                                Submit ({sel.length})
+                              </button>
+                            ) : null}
+                          </div>
+                        );
+                      })()}
+                      {message.image ? (
+                        <img
+                          src={message.image}
+                          alt="Generated"
+                          onClick={() => setLightbox({ url: message.image as string, path: message.imagePath })}
+                          className="mt-2 max-w-full cursor-zoom-in rounded-md border border-neutral-800 transition-opacity hover:opacity-90"
+                        />
+                      ) : null}
                     </div>
 
-                    {message.role === 'assistant' && message.context ? (
-                      <button
-                        onClick={() => setOpenContextId(openContextId === message.id ? null : message.id)}
-                        className="mt-2 text-xs text-neutral-500 hover:text-neutral-400 transition-colors"
-                      >
-                        {openContextId === message.id ? 'Hide context' : 'Show context'}
-                      </button>
+                    {message.toolCalls && message.toolCalls.length > 0 ? (
+                      <div className="mt-1.5 flex max-w-[85%] flex-wrap gap-1">
+                        {message.toolCalls.map((tc, i) => (
+                          <span key={i} className="rounded-sm border border-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-500" title={tc.result}>
+                            {tc.name} → {tc.result.length > 32 ? tc.result.slice(0, 32) + '…' : tc.result}
+                          </span>
+                        ))}
+                      </div>
                     ) : null}
 
-                    {message.role === 'assistant' && message.context && openContextId === message.id ? (
-                      <motion.div
-                        className="mt-2 p-4 rounded-xl bg-neutral-800/50 border border-neutral-700 text-sm max-w-[90%] max-h-[400px] overflow-y-auto"
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        transition={{ duration: 0.2 }}
-                      >
-                        <div className="font-medium text-neutral-300 mb-3">Context used</div>
+                    {message.role === 'user' ? (
+                      <div className="mt-1.5 flex items-center gap-3">
+                        <button onClick={() => copyText(message.content)} className="flex items-center gap-1 text-[11px] text-neutral-600 transition-colors hover:text-green-500" title="Copy">
+                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16h8M8 12h8m-7 8h6a2 2 0 002-2V6a2 2 0 00-2-2h-3.586a1 1 0 00-.707.293l-2.414 2.414A1 1 0 009 7.414V18a2 2 0 002 2z" /></svg>
+                          Copy
+                        </button>
+                        <button onClick={() => sendMessage(message.content)} className="flex items-center gap-1 text-[11px] text-neutral-600 transition-colors hover:text-green-500" title="Send again">
+                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                          Resend
+                        </button>
+                      </div>
+                    ) : null}
+
+                    {message.role === 'assistant' && !message.image ? (
+                      <div className="mt-1.5 flex items-center gap-3">
+                        <button
+                          onClick={() => speakMessage(message.id, message.content)}
+                          className={`flex items-center gap-1 text-[11px] transition-colors ${speakingId === message.id ? 'text-green-500' : 'text-neutral-600 hover:text-green-500'}`}
+                          title={speakingId === message.id ? 'Stop' : 'Speak'}
+                        >
+                          {speakingId === message.id ? (
+                            <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
+                          ) : (
+                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5L6 9H2v6h4l5 4V5z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.54 8.46a5 5 0 010 7.07M19.07 4.93a10 10 0 010 14.14" /></svg>
+                          )}
+                          {speakingId === message.id ? 'Stop' : 'Speak'}
+                        </button>
+                        <button
+                          onClick={() => copyText(message.content)}
+                          className="flex items-center gap-1 text-[11px] text-neutral-600 transition-colors hover:text-green-500"
+                          title="Copy"
+                        >
+                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16h8M8 12h8m-7 8h6a2 2 0 002-2V6a2 2 0 00-2-2h-3.586a1 1 0 00-.707.293l-2.414 2.414A1 1 0 009 7.414V18a2 2 0 002 2z" /></svg>
+                          Copy
+                        </button>
+                        <button
+                          onClick={() => regenerate(message.id)}
+                          className="flex items-center gap-1 text-[11px] text-neutral-600 transition-colors hover:text-green-500"
+                          title="Regenerate"
+                        >
+                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                          Regenerate
+                        </button>
+                        {parseArtifact(message.content) ? (
+                          <button
+                            onClick={() => { const a = parseArtifact(message.content); if (a) setCanvasArtifact(a); }}
+                            className="flex items-center gap-1 text-[11px] text-green-500 transition-colors hover:text-green-400"
+                          >
+                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7h10v10M9 17H5a2 2 0 01-2-2V5a2 2 0 012-2h10a2 2 0 012 2v2" /></svg>
+                            Open canvas
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {message.role === 'assistant' && message.context && ((message.context.sources?.length || 0) + (message.context.memories?.length || 0) + (message.context.summaries?.length || 0) + (message.context.entities?.length || 0) + (message.context.entityFacts?.length || 0) + (message.context.unified?.length || 0)) > 0 ? (
+                      <Collapsible className="mt-2 w-full max-w-[90%]">
+                        <CollapsibleTrigger className="group flex w-full items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2 text-left text-xs text-neutral-400 transition-colors hover:border-neutral-700">
+                          <svg className="h-3.5 w-3.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                          <span className="flex-1">Searched your memory — {(message.context.sources?.length || 0) + (message.context.memories?.length || 0) + (message.context.summaries?.length || 0) + (message.context.entities?.length || 0) + (message.context.entityFacts?.length || 0) + (message.context.unified?.length || 0)} results</span>
+                          <svg className="h-3.5 w-3.5 transition-transform group-data-[state=open]:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="mt-1.5 max-h-[400px] max-w-full overflow-y-auto rounded-md border border-neutral-800 bg-neutral-900/40 p-4 text-sm">
+
+                        {message.context.unified && message.context.unified.length > 0 ? (
+                          <div className="mb-3">
+                            <div className="mb-2 text-[10px] uppercase tracking-wide text-neutral-600">Sources ({message.context.unified.length}) — cited as [S#] in the answer</div>
+                            <div className="space-y-1">
+                              {message.context.unified.map((u, idx) => (
+                                <div key={idx} className="flex items-center gap-2 rounded-md border border-neutral-800 p-2 text-[11px] text-neutral-400">
+                                  <span className="shrink-0 font-semibold text-green-500">[S{idx + 1}]</span>
+                                  <span className="shrink-0 rounded-sm border border-neutral-700 px-1 py-0.5 text-[9px] uppercase tracking-wide text-neutral-500">{u.kind}</span>
+                                  <span className="min-w-0 flex-1 truncate">{u.title || u.snippet}</span>
+                                  <span className="shrink-0 text-neutral-600">{u.surface}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {message.context.sources && message.context.sources.length > 0 ? (
+                          <div className="mb-3">
+                            <div className="mb-2 text-[10px] uppercase tracking-wide text-neutral-600">Sources ({message.context.sources.length})</div>
+                            <div className="space-y-1">
+                              {message.context.sources.slice(0, 8).map((s, idx) => (
+                                <div key={idx} className="flex items-center gap-2 rounded-md border border-neutral-800 p-2 text-[11px] text-neutral-400">
+                                  <span className="min-w-0 flex-1 truncate">{s.name}</span>
+                                  <span className="shrink-0 text-neutral-600">{(s.score * 100).toFixed(0)}%</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
 
                         {message.context.masterMemory ? (
-                          <div className="mb-4 p-3 rounded-lg bg-neutral-900/50 border border-neutral-700">
-                            <div className="text-xs text-neutral-500 uppercase tracking-wide mb-2">Master Memory</div>
-                            <div className="text-neutral-300 prose prose-sm prose-invert max-w-none">
+                          <div className="mb-3 rounded-md border border-neutral-800 p-3">
+                            <div className="mb-2 text-[10px] uppercase tracking-wide text-neutral-600">Master memory</div>
+                            <div className="text-neutral-300">
                               <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={markdownComponents}>
                                 {message.context.masterMemory}
                               </ReactMarkdown>
@@ -421,169 +1292,428 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                           </div>
                         ) : null}
 
-                        {/* Clickable Memories */}
                         {message.context.memories && message.context.memories.length > 0 ? (
                           <div className="mb-3">
-                            <div className="text-xs text-neutral-500 uppercase tracking-wide mb-2">Memories ({message.context.memories.length})</div>
+                            <div className="mb-2 text-[10px] uppercase tracking-wide text-neutral-600">Memories ({message.context.memories.length})</div>
                             <div className="space-y-1">
                               {message.context.memories.slice(0, 5).map((memory: any, idx: number) => (
                                 <button
                                   key={memory.id || idx}
                                   onClick={() => onNavigateToMemory?.(memory.id)}
-                                  className="w-full text-left p-2 rounded-lg bg-neutral-800/30 hover:bg-neutral-700/50 border border-neutral-700/50 hover:border-neutral-600 transition-colors group"
+                                  className="block w-full rounded-md border border-neutral-800 p-2 text-left transition-colors hover:border-neutral-700"
                                 >
-                                  <p className="text-xs text-neutral-400 group-hover:text-neutral-300 line-clamp-2">
-                                    {memory.content || memory.text || 'Memory'}
-                                  </p>
+                                  <p className="line-clamp-2 text-[11px] text-neutral-400">{memory.content || memory.text || 'Memory'}</p>
                                 </button>
                               ))}
-                              {message.context.memories.length > 5 && (
-                                <button
-                                  onClick={() => onNavigateToMemory?.(message.context?.memories?.[0]?.id)}
-                                  className="text-xs text-neutral-500 hover:text-neutral-400 transition-colors"
-                                >
-                                  +{message.context.memories.length - 5} more memories
-                                </button>
-                              )}
                             </div>
                           </div>
                         ) : null}
 
-                        {/* Clickable Summaries (Chats) */}
                         {message.context.summaries && message.context.summaries.length > 0 ? (
                           <div className="mb-3">
-                            <div className="text-xs text-neutral-500 uppercase tracking-wide mb-2">Related Chats ({message.context.summaries.length})</div>
+                            <div className="mb-2 text-[10px] uppercase tracking-wide text-neutral-600">Related chats ({message.context.summaries.length})</div>
                             <div className="space-y-1">
                               {message.context.summaries.slice(0, 5).map((summary: any, idx: number) => (
                                 <button
                                   key={summary.session_id || idx}
                                   onClick={() => onNavigateToChat?.(summary.session_id)}
-                                  className="w-full text-left p-2 rounded-lg bg-neutral-800/30 hover:bg-neutral-700/50 border border-neutral-700/50 hover:border-neutral-600 transition-colors group"
+                                  className="block w-full rounded-md border border-neutral-800 p-2 text-left transition-colors hover:border-neutral-700"
                                 >
-                                  <p className="text-xs text-neutral-400 group-hover:text-neutral-300 line-clamp-2">
-                                    {summary.summary || summary.title || 'Chat conversation'}
-                                  </p>
-                                  {summary.app_name && (
-                                    <span className="text-[10px] text-neutral-600 mt-1 inline-block">{summary.app_name}</span>
-                                  )}
+                                  <p className="line-clamp-2 text-[11px] text-neutral-400">{summary.summary || summary.title || 'Chat'}</p>
+                                  {summary.app_name && <span className="mt-1 inline-block text-[10px] text-neutral-600">{summary.app_name}</span>}
                                 </button>
                               ))}
-                              {message.context.summaries.length > 5 && (
-                                <button
-                                  onClick={() => onNavigateToChat?.(message.context?.summaries?.[0]?.session_id)}
-                                  className="text-xs text-neutral-500 hover:text-neutral-400 transition-colors"
-                                >
-                                  +{message.context.summaries.length - 5} more chats
-                                </button>
-                              )}
                             </div>
                           </div>
                         ) : null}
 
-                        {/* Clickable Entities */}
                         {message.context.entities && message.context.entities.length > 0 ? (
                           <div className="mb-3">
-                            <div className="text-xs text-neutral-500 uppercase tracking-wide mb-2">Entities ({message.context.entities.length})</div>
+                            <div className="mb-2 text-[10px] uppercase tracking-wide text-neutral-600">Entities ({message.context.entities.length})</div>
                             <div className="flex flex-wrap gap-1">
                               {message.context.entities.slice(0, 10).map((entity: any, idx: number) => (
                                 <button
                                   key={entity.id || idx}
                                   onClick={() => onNavigateToEntity?.(entity.id)}
-                                  className="px-2 py-1 rounded-md bg-neutral-800/50 hover:bg-neutral-700/50 border border-neutral-700/50 hover:border-neutral-600 transition-colors text-xs text-neutral-400 hover:text-neutral-300"
+                                  className="rounded-md border border-neutral-800 px-2 py-1 text-[11px] text-neutral-400 transition-colors hover:border-green-500 hover:text-green-500"
                                 >
                                   {entity.name || 'Entity'}
-                                  {entity.type && <span className="text-neutral-600 ml-1">({entity.type})</span>}
                                 </button>
                               ))}
-                              {message.context.entities.length > 10 && (
-                                <span className="text-xs text-neutral-500 px-2 py-1">
-                                  +{message.context.entities.length - 10} more
-                                </span>
-                              )}
                             </div>
                           </div>
                         ) : null}
 
-                        {/* Entity Facts */}
                         {message.context.entityFacts && message.context.entityFacts.length > 0 ? (
                           <div>
-                            <div className="text-xs text-neutral-500 uppercase tracking-wide mb-2">Entity Facts ({message.context.entityFacts.length})</div>
+                            <div className="mb-2 text-[10px] uppercase tracking-wide text-neutral-600">Entity facts ({message.context.entityFacts.length})</div>
                             <div className="space-y-1">
                               {message.context.entityFacts.slice(0, 5).map((fact: any, idx: number) => (
-                                <div key={idx} className="p-2 rounded-lg bg-neutral-800/30 border border-neutral-700/50">
-                                  <p className="text-xs text-neutral-400 line-clamp-2">{fact.fact || fact}</p>
+                                <div key={idx} className="rounded-md border border-neutral-800 p-2">
+                                  <p className="line-clamp-2 text-[11px] text-neutral-400">{fact.fact || fact}</p>
                                 </div>
                               ))}
                             </div>
                           </div>
                         ) : null}
-                      </motion.div>
+                        </CollapsibleContent>
+                      </Collapsible>
                     ) : null}
-                  </motion.div>
-                ))
-              )}
-              {loading ? (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="flex items-start gap-3 mb-4"
-                >
-                  <div className="max-w-[80%] px-4 py-3 rounded-2xl bg-neutral-800/80 border border-neutral-700">
-                    <div className="flex items-center gap-3">
-                      <div className="flex items-center gap-1">
-                        <motion.div
-                          className="w-2 h-2 bg-neutral-400 rounded-full"
-                          animate={{ scale: [1, 1.2, 1], opacity: [0.5, 1, 0.5] }}
-                          transition={{ duration: 1, repeat: Infinity, delay: 0 }}
-                        />
-                        <motion.div
-                          className="w-2 h-2 bg-neutral-400 rounded-full"
-                          animate={{ scale: [1, 1.2, 1], opacity: [0.5, 1, 0.5] }}
-                          transition={{ duration: 1, repeat: Infinity, delay: 0.2 }}
-                        />
-                        <motion.div
-                          className="w-2 h-2 bg-neutral-400 rounded-full"
-                          animate={{ scale: [1, 1.2, 1], opacity: [0.5, 1, 0.5] }}
-                          transition={{ duration: 1, repeat: Infinity, delay: 0.4 }}
-                        />
-                      </div>
-                      <span className="text-sm text-neutral-400">Searching your memories...</span>
-                    </div>
-                    <div className="mt-3 h-0.5 bg-neutral-700/50 rounded-full overflow-hidden">
-                      <motion.div
-                        className="h-full bg-gradient-to-r from-neutral-600 via-neutral-500 to-neutral-600"
-                        animate={{ x: ['-100%', '100%'] }}
-                        transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
-                        style={{ width: '50%' }}
-                      />
-                    </div>
                   </div>
-                </motion.div>
-              ) : null}
-              <div ref={bottomRef} className="h-4" />
-            </div>
+                ))}
+                {loading && !messages.some(m => m.streaming) ? (
+                  <div className="mb-5 flex flex-col items-start">
+                    <div className="mb-1 text-[10px] uppercase tracking-wider text-neutral-600">Off Grid</div>
+                    {mode === 'image' ? (
+                      <div className="rounded-md border border-neutral-800 bg-neutral-900/40 p-3">
+                        {imgProgress?.preview ? (
+                          <img src={imgProgress.preview} alt="forming" className="mb-2 w-56 rounded-md border border-neutral-800" />
+                        ) : (
+                          <div className="mb-2 flex h-56 w-56 items-center justify-center rounded-md border border-neutral-800 text-[11px] text-neutral-600">
+                            warming up…
+                          </div>
+                        )}
+                        <div className="flex items-center justify-between text-[11px] text-neutral-500">
+                          <span>
+                            {imgProgress ? `Step ${imgProgress.step}/${imgProgress.total}` : 'Loading model…'}
+                          </span>
+                          {imgProgress ? (
+                            <span className="text-neutral-600">
+                              ~{Math.max(0, Math.round((imgProgress.total - imgProgress.step) * imgProgress.secPerStep))}s left
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="mt-1.5 h-1 w-56 overflow-hidden rounded-full bg-neutral-800">
+                          <div
+                            className="h-full bg-green-500 transition-all duration-300"
+                            style={{ width: imgProgress ? `${(imgProgress.step / imgProgress.total) * 100}%` : '5%' }}
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-3.5 py-2.5">
+                        <span className="flex gap-1">
+                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-green-500 [animation-delay:0ms]" />
+                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-green-500 [animation-delay:150ms]" />
+                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-green-500 [animation-delay:300ms]" />
+                        </span>
+                        <span className="text-xs text-neutral-500">Searching your memory…</span>
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+                <div ref={bottomRef} className="h-2" />
+              </div>
+            )}
           </div>
 
-          {/* Input area */}
-          <div className="flex gap-3">
-            <textarea
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              rows={2}
-              placeholder="Ask about your memories..."
-              className="flex-1 resize-none px-4 py-3 rounded-xl bg-neutral-900/80 border border-neutral-800 text-white placeholder-neutral-600 focus:outline-none focus:border-neutral-600 transition-colors"
-            />
-            <button
-              onClick={sendMessage}
-              disabled={loading || !input.trim()}
-              className="px-6 py-3 rounded-xl bg-neutral-800 border border-neutral-700 text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-neutral-700 hover:border-neutral-600 transition-all"
-            >
-              Send
-            </button>
+          {/* Composer */}
+          <div className="border-t border-neutral-900 px-6 py-3">
+            <div className="w-full px-6">
+              {/* Image options (image mode, expandable) */}
+              {mode === 'image' && showImageOptions && (
+                <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-neutral-800 px-3 py-2 text-[11px] text-neutral-500">
+                  {imgModels.length > 1 && (
+                    <label className="flex items-center gap-1.5">
+                      Model
+                      <select value={imgModel} onChange={e => setImgModel(e.target.value)} className="max-w-[12rem] rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-300 outline-none focus:border-green-500">
+                        {imgModels.map(m => <option key={m} value={m}>{m.replace(/\.gguf$/i, '').replace(/-Q\d.*$/i, '')}</option>)}
+                      </select>
+                    </label>
+                  )}
+                  <label className="flex items-center gap-1.5">
+                    Size
+                    <select value={imgSize} onChange={e => setImgSize(Number(e.target.value))} className="rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-300 outline-none focus:border-green-500">
+                      <option value={512}>512</option>
+                      <option value={640}>640</option>
+                      <option value={768}>768</option>
+                      <option value={1024}>1024</option>
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-1.5">
+                    Steps
+                    <input type="number" min={4} max={50} value={imgSteps} onChange={e => setImgSteps(Math.max(4, Math.min(50, Number(e.target.value) || 16)))} className="w-14 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-300 outline-none focus:border-green-500" />
+                  </label>
+                  <label className="flex items-center gap-1.5">
+                    Seed
+                    <input value={imgSeed} onChange={e => setImgSeed(e.target.value.replace(/[^0-9]/g, ''))} placeholder="random" className="w-20 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-300 placeholder-neutral-700 outline-none focus:border-green-500" />
+                  </label>
+                  <input value={imgNegative} onChange={e => setImgNegative(e.target.value)} placeholder="Negative prompt" className="min-w-[10rem] flex-1 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-300 placeholder-neutral-700 outline-none focus:border-green-500" />
+                  {imgInit ? (
+                    <span className="flex items-center gap-2 rounded-md border border-green-500/40 px-2 py-1 text-green-500">
+                      {imgInit.split('/').pop()}
+                      <label className="flex items-center gap-1 text-neutral-500" title="img2img strength: how much to change the init image (0.1 = subtle, 1 = ignore it)">
+                        Strength
+                        <input type="number" min={0.1} max={1} step={0.05} value={imgStrength} onChange={e => setImgStrength(Math.max(0.1, Math.min(1, Number(e.target.value) || 0.6)))} className="w-14 rounded border border-neutral-800 bg-neutral-950 px-1.5 py-0.5 text-neutral-300 outline-none focus:border-green-500" />
+                      </label>
+                      <button onClick={() => setImgInit(null)} className="text-neutral-500 hover:text-red-400">✕</button>
+                    </span>
+                  ) : (
+                    <button onClick={async () => { const p = await window.api.pickImageForGen?.(); if (p) setImgInit(p); }} className="rounded-md border border-neutral-800 px-2 py-1 text-neutral-400 transition-colors hover:border-green-500 hover:text-green-500">
+                      + Init image
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Active style chip (image mode) */}
+              {mode === 'image' && activeStyle && (
+                <div className="mb-2 flex items-center gap-2 text-[11px] text-neutral-500">
+                  <span>Style</span>
+                  <span className="rounded-md border border-green-500/40 px-2 py-0.5 text-green-500">{activeStyle}</span>
+                  <button onClick={() => setActiveStyle(null)} className="text-neutral-600 transition-colors hover:text-red-400">clear</button>
+                </div>
+              )}
+
+              {/* Unified composer block */}
+              <div className="relative rounded-2xl border border-neutral-800 bg-neutral-950 shadow-sm transition-colors focus-within:border-neutral-600">
+                {skillMatches.length > 0 && (
+                  <div className="absolute bottom-full left-0 z-20 mb-2 w-72 overflow-hidden rounded-md border border-neutral-800 bg-neutral-950 py-1 text-sm shadow-lg">
+                    <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-neutral-600">Skills</div>
+                    {skillMatches.slice(0, 6).map(s => (
+                      <button
+                        key={s.name}
+                        onClick={() => { setInput(`/${s.name} `); inputRef.current?.focus(); }}
+                        className="flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left transition-colors hover:bg-neutral-900"
+                      >
+                        <span className="text-green-500">/{s.name}</span>
+                        {s.description ? <span className="line-clamp-1 text-[11px] text-neutral-500">{s.description}</span> : null}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={e => { if (e.target.files?.length) void addFiles(e.target.files); e.target.value = ''; }}
+                />
+                {attachments.length > 0 && (
+                  <div className="flex flex-wrap gap-2 px-3 pt-3">
+                    {attachments.map(a => (
+                      <div key={a.id} className="group relative flex w-40 flex-col gap-1 rounded-lg border border-neutral-800 bg-neutral-900 p-2">
+                        <button onClick={() => removeAttachment(a.id)} className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full border border-neutral-700 bg-neutral-950 text-[10px] text-neutral-400 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100">✕</button>
+                        <p className="line-clamp-3 h-[2.6rem] overflow-hidden text-[10px] leading-snug text-neutral-500">
+                          {a.status === 'loading' ? 'Processing…' : a.status === 'error' ? 'Could not read this file.' : (a.text.slice(0, 140) || a.name)}
+                        </p>
+                        <div className="flex items-center justify-between">
+                          <span className="truncate text-[10px] text-neutral-400" title={a.name}>{a.kind === 'pasted' ? '' : a.name}</span>
+                          <span className="rounded-sm border border-neutral-700 px-1 py-0.5 text-[9px] uppercase tracking-wide text-neutral-400">
+                            {a.kind === 'pasted' ? 'Pasted' : a.kind}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <textarea
+                  ref={inputRef}
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  onPaste={handlePaste}
+                  rows={1}
+                  placeholder={mode === 'image' ? 'Describe an image to generate…' : activeProjectName ? `Ask about “${activeProjectName}”…` : 'Ask about your memory…'}
+                  className="max-h-52 w-full resize-none overflow-y-auto bg-transparent px-3.5 pt-3 text-sm text-neutral-200 placeholder-neutral-600 outline-none"
+                />
+                <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-1">
+                  <div className="flex items-center gap-2">
+                  {/* "+" menu — attach / image / project / tools */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button type="button" variant="outline" size="icon" className="size-8 rounded-full"><Plus className="h-4 w-4" /></Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" side="top" sideOffset={8} className="w-56">
+                      <DropdownMenuItem onSelect={() => fileInputRef.current?.click()}>
+                        <Paperclip /> Attach files
+                      </DropdownMenuItem>
+                      <DropdownMenuItem disabled={!imageAvailable} onSelect={async () => { setMode('image'); const p = await window.api.pickImageForGen?.(); if (p) setImgInit(p); }}>
+                        <ImageIcon /> Add image
+                      </DropdownMenuItem>
+                      <DropdownMenuItem disabled={!imageAvailable} onSelect={() => setMode('image')}>
+                        <Sparkles /> Generate image
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => setProjectMenuOpen(true)}>
+                        <FolderPlus /> Add to project
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setToolsOn(t => !t); }}>
+                        <Wrench /> <span className="flex-1">Tools</span>
+                        <span className={`text-xs ${toolsOn ? 'text-primary' : 'text-muted-foreground'}`}>{toolsOn ? 'On' : 'Off'}</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">Coming soon</DropdownMenuLabel>
+                      <DropdownMenuItem disabled><Search /> Web search</DropdownMenuItem>
+                      <DropdownMenuItem disabled><Plug /> Connectors</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setThinkingEnabled(t => !t)}
+                        className={`h-8 gap-1.5 rounded-full ${thinkingEnabled ? 'border-green-500 text-primary' : 'text-neutral-400'}`}
+                      >
+                        <Brain className="h-3.5 w-3.5" /> Thinking
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{thinkingEnabled ? 'Reasoning on — the model thinks step by step (slower)' : 'Reasoning off — direct answers (faster)'}</TooltipContent>
+                  </Tooltip>
+                  {mode === 'image' && (
+                    <Button type="button" variant="outline" size="sm" onClick={() => setShowImageOptions(o => !o)} className={`h-8 gap-1.5 rounded-full ${showImageOptions ? 'text-primary' : ''}`}>
+                      <SlidersHorizontal className="h-3.5 w-3.5" /> Image options
+                    </Button>
+                  )}
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          onClick={toggleRecording}
+                          disabled={transcribing}
+                          className={`size-8 ${recording ? 'border-red-500/50 text-red-400' : ''}`}
+                        >
+                          {transcribing ? (
+                            <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                          ) : recording ? (
+                            <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+                          ) : (
+                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-14 0m7 7v3m0-3a4 4 0 01-4-4V5a4 4 0 018 0v6a4 4 0 01-4 4z" /></svg>
+                          )}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{recording ? 'Stop recording' : 'Record voice'}</TooltipContent>
+                    </Tooltip>
+                    {loading && mode === 'image' ? (
+                      <Button type="button" variant="outline" onClick={() => window.api.cancelImageGen?.()} className="h-8 gap-1.5 border-red-500/50 text-red-400 hover:bg-red-500/10">
+                        <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+                        Stop
+                      </Button>
+                    ) : (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            size="icon"
+                            onClick={() => sendMessage()}
+                            disabled={loading || (!input.trim() && attachments.length === 0)}
+                            className="size-8 rounded-full"
+                          >
+                            {loading ? (
+                              <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                            ) : (
+                              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" /></svg>
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Send</TooltipContent>
+                      </Tooltip>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
-      </motion.div>
-    </motion.div>
+      </div>
+
+      {/* Canvas — sandboxed render of a model-generated artifact */}
+      {canvasArtifact && <ArtifactCanvas artifact={canvasArtifact} onClose={() => setCanvasArtifact(null)} />}
+
+      {/* Lightbox — click a generated image to enlarge, download, or delete */}
+      {lightbox && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-10" onClick={() => setLightbox(null)}>
+          <div className="absolute right-4 top-4 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+            {lightbox.path && (
+              <>
+                <button
+                  onClick={() => downloadImage(lightbox.path, lightbox.path?.split('/').pop())}
+                  className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:border-green-500 hover:text-green-500"
+                >
+                  Download
+                </button>
+                <button
+                  onClick={() => deleteImage(lightbox.path)}
+                  className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:border-red-500 hover:text-red-400"
+                >
+                  Delete
+                </button>
+              </>
+            )}
+            <button
+              onClick={() => setLightbox(null)}
+              className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:text-white"
+            >
+              Close
+            </button>
+          </div>
+          <img src={lightbox.url} alt="" className="max-h-full max-w-full rounded-md object-contain" onClick={(e) => e.stopPropagation()} />
+        </div>
+      )}
+
+      {/* Gallery — everything generated on-device: images + artifacts */}
+      {showGallery && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/40" onClick={() => setShowGallery(false)} />
+          <div className="fixed right-0 top-0 z-40 flex h-full w-80 flex-col border-l border-neutral-800 bg-neutral-950">
+            <div className="flex items-center justify-between border-b border-neutral-900 px-4 py-3">
+              <span className="text-sm text-neutral-200">Gallery</span>
+              <button onClick={() => setShowGallery(false)} className="text-neutral-500 transition-colors hover:text-neutral-200">✕</button>
+            </div>
+            <div className="flex items-center gap-1 border-b border-neutral-900 px-3 py-2">
+              {(['images', 'artifacts'] as const).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setGalleryTab(tab)}
+                  className={`rounded px-3 py-1 text-xs capitalize transition-colors ${galleryTab === tab ? 'bg-neutral-800 text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
+                >
+                  {tab} {tab === 'images' ? `(${gallery.length})` : `(${artifacts.length})`}
+                </button>
+              ))}
+            </div>
+            <div className="flex-1 overflow-y-auto p-3">
+              {galleryTab === 'images' ? (
+                gallery.length === 0 ? (
+                  <p className="py-10 text-center text-xs text-neutral-600">No images generated yet.</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    {gallery.map((g) => (
+                      <button
+                        key={g.path}
+                        onClick={() => setLightbox({ url: `ogcapture://${g.path}`, path: g.path })}
+                        className="overflow-hidden rounded-md border border-neutral-800 transition-colors hover:border-green-500"
+                      >
+                        <img src={`ogcapture://${g.path}`} alt="" className="aspect-square w-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                )
+              ) : artifacts.length === 0 ? (
+                <p className="py-10 text-center text-xs text-neutral-600">No artifacts yet. Ask for a webpage, chart, or diagram.</p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {artifacts.map((a) => (
+                    <div key={a.id} className="group flex items-center gap-2 rounded-md border border-neutral-800 p-2 transition-colors hover:border-green-500">
+                      <button onClick={() => setCanvasArtifact({ kind: a.kind, code: a.code, title: a.title })} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                        <span className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-green-500">{a.kind}</span>
+                        <span className="truncate text-xs text-neutral-200">{a.title}</span>
+                      </button>
+                      <button onClick={() => deleteArtifact(a.id)} className="text-neutral-600 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100" title="Delete">✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
