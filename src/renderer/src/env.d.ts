@@ -158,8 +158,8 @@ interface IElectronAPI {
   deleteMemory: (memoryId: number) => Promise<boolean>
 
   // Artifacts library
-  saveArtifact: (a: { kind: 'html' | 'svg' | 'mermaid' | 'react'; code: string; title?: string; conversationId?: string; projectId?: string | null }) => Promise<{ id: string; kind: 'html' | 'svg' | 'mermaid' | 'react'; code: string; title: string; created: number }>
-  listArtifacts: (scope?: { conversationId?: string; projectId?: string | null }) => Promise<{ id: string; kind: 'html' | 'svg' | 'mermaid' | 'react'; code: string; title: string; created: number; conversationId?: string; projectId?: string | null }[]>
+  saveArtifact: (a: { kind: 'html' | 'svg' | 'mermaid' | 'react' | 'text'; code: string; title?: string; conversationId?: string; projectId?: string | null }) => Promise<{ id: string; kind: 'html' | 'svg' | 'mermaid' | 'react' | 'text'; code: string; title: string; created: number }>
+  listArtifacts: (scope?: { conversationId?: string; projectId?: string | null }) => Promise<{ id: string; kind: 'html' | 'svg' | 'mermaid' | 'react' | 'text'; code: string; title: string; created: number; conversationId?: string; projectId?: string | null }[]>
   deleteArtifact: (id: string) => Promise<boolean>
   processFile: (bytes: ArrayBuffer, name: string) => Promise<{ name: string; kind: 'text' | 'pdf' | 'docx' | 'image' | 'audio' | 'video'; text: string; path?: string }>
 

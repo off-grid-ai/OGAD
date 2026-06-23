@@ -573,6 +573,16 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
       console.error('Failed to persist user message:', e);
     }
 
+    // Catalogue attached inputs (files / pasted text) as artifacts of this chat &
+    // project, so the gallery holds the whole working set — inputs and outputs.
+    if (!regen) {
+      for (const a of atts) {
+        if (a.text && a.kind !== 'image') {
+          try { void window.api.saveArtifact?.({ kind: 'text', code: a.text, title: a.name, conversationId: convId, projectId: activeProjectId }); } catch { /* ignore */ }
+        }
+      }
+    }
+
     // Image-generation mode: render a prompt → image instead of a memory answer.
     if (mode === 'image') {
       setImgProgress(null);
@@ -2161,8 +2171,13 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                 <div className="flex flex-col gap-2">
                   {artifacts.map((a) => (
                     <div key={a.id} className="group flex items-center gap-2 rounded-md border border-neutral-800 p-2 transition-colors hover:border-green-500">
-                      <button onClick={() => openCanvas({ kind: a.kind, code: a.code, title: a.title })} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-                        <span className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-green-500">{a.kind}</span>
+                      <button
+                        onClick={() => a.kind === 'text'
+                          ? (closePanels(), setViewer({ title: a.title, text: a.code }))
+                          : openCanvas({ kind: a.kind, code: a.code, title: a.title })}
+                        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                      >
+                        <span className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-green-500">{a.kind === 'text' ? 'input' : a.kind}</span>
                         <span className="truncate text-xs text-neutral-200">{a.title}</span>
                       </button>
                       <button onClick={() => deleteArtifact(a.id)} className="text-neutral-600 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100" title="Delete">✕</button>

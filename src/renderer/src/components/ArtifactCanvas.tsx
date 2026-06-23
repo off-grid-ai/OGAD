@@ -5,10 +5,12 @@ import { useEffect, useMemo, useState } from 'react';
 // code can't touch the app, filesystem, or network. Runtime libs (React/Babel/
 // Mermaid) are inlined from the bundled offline copies, so it runs fully on-device.
 
-export type Artifact = { kind: 'html' | 'svg' | 'mermaid' | 'react'; code: string; title?: string };
+// 'text' is a catalogued input (uploaded file / pasted block) — shown as plain
+// text, never executed in the sandbox.
+export type Artifact = { kind: 'html' | 'svg' | 'mermaid' | 'react' | 'text'; code: string; title?: string };
 
 const KIND_LABEL: Record<Artifact['kind'], string> = {
-  html: 'HTML', svg: 'SVG', mermaid: 'Diagram', react: 'React',
+  html: 'HTML', svg: 'SVG', mermaid: 'Diagram', react: 'React', text: 'Document',
 };
 
 function escapeForHtml(s: string): string {
