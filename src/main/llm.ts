@@ -4,7 +4,6 @@ import path from "path";
 import { app } from "electron";
 import * as fs from "fs";
 import * as http from "http";
-import os from "os";
 
 // Models live under the unified userData dir (pinned in main/index.ts), so this
 // stays consistent with the DB + embeddings paths instead of a hardcoded name.
@@ -225,10 +224,20 @@ export class LLMService {
     // whatever owns the port and kill it.
     try {
       const pids = execSync(`lsof -ti tcp:${this.port}`, { encoding: "utf-8" }).trim().split("\n").filter(Boolean);
+      let killed = 0;
       for (const pid of pids) {
-        try { process.kill(Number(pid), "SIGKILL"); console.log(`[LLMService] killed orphaned process ${pid} on port ${this.port}`); } catch { /* gone */ }
+        // ONLY kill a process we recognize as our own llama-server. The port is
+        // ours by convention, not by reservation — blindly SIGKILLing whatever
+        // holds it would take down an unrelated app that happened to bind it.
+        let cmd = "";
+        try { cmd = execSync(`ps -p ${pid} -o command=`, { encoding: "utf-8" }).trim(); } catch { continue; /* already gone */ }
+        if (!/llama-server/i.test(cmd)) {
+          console.warn(`[LLMService] port ${this.port} held by non-llama process ${pid} (${cmd.slice(0, 80)}) — leaving it alone`);
+          continue;
+        }
+        try { process.kill(Number(pid), "SIGKILL"); killed++; console.log(`[LLMService] killed orphaned llama-server ${pid} on port ${this.port}`); } catch { /* gone */ }
       }
-      if (pids.length) await new Promise((r) => setTimeout(r, 400)); // let the port free
+      if (killed) await new Promise((r) => setTimeout(r, 400)); // let the port free
     } catch { /* nothing on the port */ }
 
     this.server = spawn(serverPath, args, {
@@ -379,6 +388,12 @@ export class LLMService {
         const raw = await this.httpPost(body, timeoutMs);
         const data = JSON.parse(raw);
         console.log('[LLMService] LLM request completed');
+        // Best-effort fleet audit: record the local model call if enrolled in a console.
+        try {
+            const tokens = data.usage?.total_tokens ?? 0;
+            const modelName = path.basename(this.modelPath) || 'local-llm';
+            void import('./console').then((m) => m.recordModelCall(modelName, tokens, 'ok', false));
+        } catch { /* audit is never load-bearing */ }
         return data.choices?.[0]?.message?.content ?? "";
 
     } catch (e: any) {
