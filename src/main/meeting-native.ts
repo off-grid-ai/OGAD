@@ -348,11 +348,17 @@ export async function recoverOrphanTempDirs(): Promise<void> {
         /* ignore */
       }
     }
+    // Diarize from the SEPARATE tracks (mic = you, system audio = far side) while
+    // they still exist — gives You/Them labels for free. The mux removes the temp
+    // tracks afterward, so a recovered-from-mixed file can't be diarized later.
+    let diarized = '';
     try {
-      // No pre-diarization: saveMeetingFromFile inserts the row FIRST, then
-      // transcribes — so the recovered meeting shows up immediately rather than
-      // after a long double whisper pass.
-      await saveMeetingFromFile(finalPath, { startedAt, endedAt, ext: 'mp4' });
+      diarized = await buildDiarizedTranscript(screen, mic);
+    } catch {
+      /* fall back to plain transcription inside saveMeetingFromFile */
+    }
+    try {
+      await saveMeetingFromFile(finalPath, { startedAt, endedAt, ext: 'mp4' }, diarized || undefined);
       cleanupDir(dir);
     } catch (e) {
       console.error('[meetings] temp-dir recovery failed for', name, e);
