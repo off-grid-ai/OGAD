@@ -598,6 +598,21 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
               const historyLines = conversationHistory.map((msg) => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${clipText(msg.content, 400)}`).join('\n');
               historyBlock = `Conversation so far:\n${historyLines}`;
           }
+          // read_url → build: if the build request references URL(s), fetch them
+          // ourselves (deterministic — the small model won't chain tools reliably)
+          // and hand the page content to the artifact prompt as reference.
+          let referenceBlock = '';
+          const urls = (query.match(/https?:\/\/[^\s)<>"']+/g) || []).slice(0, 2);
+          if (urls.length) {
+              if (streamId) event.sender?.send('rag:stream', { streamId, type: 'step', step: { kind: 'reading', counts: { urls: urls.length } } });
+              const { readUrlText } = await import('./tools');
+              const parts: string[] = [];
+              for (const u of urls) {
+                  try { parts.push(`--- Content fetched from ${u} ---\n${clipText(await readUrlText(u), 5000)}`); }
+                  catch (e) { parts.push(`--- Could not fetch ${u}: ${(e as Error).message} ---`); }
+              }
+              referenceBlock = `REFERENCE — the user pointed you at these page(s); BUILD using this content (e.g. if it's API docs, build a UI that actually calls those endpoints):\n${parts.join('\n\n')}`;
+          }
           const prompt = [
               'You are Off Grid, an on-device assistant with a LIVE, sandboxed code canvas built in.',
               'The user wants you to BUILD something. Output the FINISHED, self-contained code as ONE fenced block — it runs immediately in the canvas beside the chat:',
@@ -605,6 +620,7 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
               '- a plain web page / interactive UI (no React) -> ```html — one complete document, inline all CSS and JS.',
               '- a diagram -> ```mermaid.  a static graphic -> ```svg.',
               'You DO have a real execution sandbox — do NOT say "since I am on-device" or "copy this into a new project", do NOT give npm/Vite/Create-React-App setup steps, and do NOT split it into src/App.js + src/App.css instructions. Just write ONE runnable code block. At most one short sentence before it.',
+              referenceBlock,
               historyBlock,
               `User: ${query}`,
               'Assistant:',

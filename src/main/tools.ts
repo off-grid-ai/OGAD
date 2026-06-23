@@ -45,6 +45,16 @@ function htmlToText(html: string): string {
     .replace(/<\/(p|div|li|h[1-6]|br|tr|section|article)>/gi, '\n');
   return decodeEntities(body.replace(/<[^>]*>/g, ' ')).replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 }
+// Fetch a URL and return its readable text (shared by the read_url tool and the
+// deterministic "read this URL, then build" flow). Works for localhost too.
+export async function readUrlText(url: string): Promise<string> {
+  let u = url.trim();
+  if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+  const res = await fetch(u, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return htmlToText(await res.text());
+}
+
 // DuckDuckGo wraps result links in a redirect: //duckduckgo.com/l/?uddg=<encoded>
 function decodeDdgHref(href: string): string {
   const m = /[?&]uddg=([^&]+)/.exec(href);

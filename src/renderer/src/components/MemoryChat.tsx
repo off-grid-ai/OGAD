@@ -64,6 +64,7 @@ const ARTIFACT_FENCE = /```(?:html|svg|mermaid|jsx|tsx|react|image)\s*\n[\s\S]*?
 // Human label for a live retrieval/activity step shown while the model works.
 function activityLabel(a?: { kind: string; counts?: Record<string, number> }): string {
   if (!a) return '';
+  if (a.kind === 'reading') return `Reading the page${(a.counts?.urls ?? 0) > 1 ? 's' : ''}…`;
   if (a.kind === 'searching') return 'Searching your memory…';
   if (a.kind === 'memory') {
     const c = a.counts || {};
