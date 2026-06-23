@@ -61,7 +61,7 @@ export function listImageModels(): string[] {
   // Exclude LLM / companion / non-diffusion files so they don't show as pickable
   // image models (gemma/qwen LLMs, the Z-Image Qwen3 encoder + FLUX ae VAE,
   // whisper .bin, TTS .onnx, and standalone VAE/CLIP/T5 components).
-  const EXCLUDE = /qwen3-4b-instruct|gemma|^qwen[^-]|mmproj|^ae\.|ggml-|kokoro|lessac|en_us|[-_.](vae|clip|t5xxl|text_encoder|tokenizer)\b/i;
+  const EXCLUDE = /qwen3-4b-instruct|gemma|^qwen[^-]|mmproj|^ae\.|ggml-|kokoro|lessac|en_us|^clip[_-]?[lg]\b|[-_.](vae|clip|t5xxl|text_encoder|tokenizer)\b/i;
   const isImage = (f: string): boolean => {
     if (EXCLUDE.test(f)) return false;
     // Custom checkpoints (Civitai etc.) ship as a single .safetensors.
