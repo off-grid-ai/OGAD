@@ -15,6 +15,21 @@ function escapeForHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// npm packages a React artifact imports beyond react/react-dom (loaded from esm.sh).
+function extractPkgs(code: string): string[] {
+  const out = new Set<string>();
+  const re = /import\s+(?:[\w*{}\n\s,]+from\s+)?['"]([^'"]+)['"]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(code))) {
+    let p = m[1];
+    if (p.startsWith('.') || p.startsWith('/')) continue;
+    p = p.startsWith('@') ? p.split('/').slice(0, 2).join('/') : p.split('/')[0];
+    if (p === 'react' || p === 'react-dom') continue;
+    out.add(p);
+  }
+  return [...out];
+}
+
 export function ArtifactCanvas({ artifact, onClose }: { artifact: Artifact; onClose: () => void }) {
   const [runtime, setRuntime] = useState<Record<string, string> | null>(null);
   const [view, setView] = useState<'preview' | 'code'>('preview');
@@ -40,10 +55,39 @@ export function ArtifactCanvas({ artifact, onClose }: { artifact: Artifact; onCl
     if (kind === 'mermaid') {
       return `<!doctype html><html><head>${base}<script>${runtime.mermaid || ''}</script></head><body><div class="mermaid">${escapeForHtml(code)}</div><script>try{mermaid.initialize({startOnLoad:true});}catch(e){document.body.innerHTML='<pre style="color:#b91c1c">'+e+'</pre>'}</script></body></html>`;
     }
-    // react — the model writes idiomatic React (import React, hooks, export
-    // default). In-browser Babel can't resolve ESM, so strip imports/exports,
-    // expose React + hooks as globals, and auto-render the default export (or an
-    // `App`) into #root.
+    // react with npm packages → load them from esm.sh (keyless CDN), Babel-compile
+    // as an ES module, and dynamic-import it so bare imports resolve via an import
+    // map. React itself comes from esm.sh here so all libs share one instance.
+    const pkgs = extractPkgs(code);
+    if (pkgs.length) {
+      const imports: Record<string, string> = {
+        react: 'https://esm.sh/react@18',
+        'react-dom': 'https://esm.sh/react-dom@18',
+        'react-dom/client': 'https://esm.sh/react-dom@18/client',
+        'react/jsx-runtime': 'https://esm.sh/react@18/jsx-runtime',
+      };
+      for (const p of pkgs) imports[p] = `https://esm.sh/${p}?external=react,react-dom`;
+      return `<!doctype html><html><head>${base}
+<script type="importmap">${JSON.stringify({ imports })}</script>
+<script>${runtime.babel || ''}</script>
+</head><body><div id="root"></div>
+<script>
+(async () => {
+  try {
+    const out = Babel.transform(${JSON.stringify(code)}, { presets: [['react', { runtime: 'automatic' }]], sourceType: 'module', filename: 'App.jsx' }).code;
+    const mod = await import(URL.createObjectURL(new Blob([out], { type: 'text/javascript' })));
+    const C = mod.default || mod.App || Object.values(mod).find((v) => typeof v === 'function');
+    const React = (await import('react')).default;
+    const { createRoot } = await import('react-dom/client');
+    if (C) createRoot(document.getElementById('root')).render(React.createElement(C));
+    else document.body.innerHTML = '<pre style="color:#b91c1c">No React component exported.</pre>';
+  } catch (e) { document.body.innerHTML = '<pre style="color:#b91c1c;white-space:pre-wrap;padding:12px">'+(e && e.stack || e)+'</pre>'; }
+})();
+</script></body></html>`;
+    }
+
+    // react (no extra packages) — fully offline: bundled React/Babel, strip
+    // imports/exports, expose hooks as globals, auto-render the default export.
     const stripped = code
       // remove `import X from 'y'`, `import {a,b} from 'y'`, and `import 'y.css'`
       .replace(/import\s+(?:[\w*{}\n\s,]+from\s+)?['"][^'"]+['"];?/g, '')
