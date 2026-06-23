@@ -1506,6 +1506,18 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
       const { getSkill } = await import('./skills');
       return getSkill(name);
   });
+  ipcMain.handle('skills:save', async (_e, input: { name: string; description: string; instructions: string; originalName?: string }) => {
+      const { saveSkill } = await import('./skills');
+      return saveSkill(input);
+  });
+  ipcMain.handle('skills:delete', async (_e, name: string) => {
+      const { deleteSkill } = await import('./skills');
+      return deleteSkill(name);
+  });
+  ipcMain.handle('skills:dir', async () => {
+      const { skillsDir } = await import('./skills');
+      return skillsDir();
+  });
 
   // --- Voice output (TTS via Kokoro) --------------------------------------
   ipcMain.handle('tts:voices', async () => {

@@ -150,6 +150,9 @@ interface IElectronAPI {
   // Skills
   listSkills: () => Promise<{ name: string; description: string }[]>
   getSkill: (name: string) => Promise<{ name: string; description: string; instructions: string } | null>
+  saveSkill: (input: { name: string; description: string; instructions: string; originalName?: string }) => Promise<{ name: string; description: string; instructions: string }>
+  deleteSkill: (name: string) => Promise<boolean>
+  skillsDir: () => Promise<string>
 
   // User Profile
   getUserProfile: () => Promise<UserProfile | null>

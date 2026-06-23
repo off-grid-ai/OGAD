@@ -3,11 +3,12 @@ import ReactMarkdown, { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { ArtifactCanvas, parseArtifact, type Artifact } from './ArtifactCanvas';
+import { SkillsPanel } from './SkillsPanel';
 import { Button } from '@renderer/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@renderer/components/ui/dropdown-menu';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@renderer/components/ui/collapsible';
-import { Plus, Paperclip, Image as ImageIcon, Sparkle as Sparkles, FolderPlus, Wrench, MagnifyingGlass as Search, Plug, SlidersHorizontal, Brain, FolderOpen, CaretDown } from '@phosphor-icons/react';
+import { Plus, Paperclip, Image as ImageIcon, Sparkle as Sparkles, FolderPlus, Wrench, MagnifyingGlass as Search, Plug, SlidersHorizontal, Brain, FolderOpen, CaretDown, Lightning } from '@phosphor-icons/react';
 
 type RagContext = {
   masterMemory?: string | null;
@@ -210,6 +211,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const [ctxSize, setCtxSize] = useState(32768);
   const [lightbox, setLightbox] = useState<{ url: string; path?: string } | null>(null);
   const [canvasArtifact, setCanvasArtifact] = useState<Artifact | null>(null);
+  const [skillsOpen, setSkillsOpen] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
   const [gallery, setGallery] = useState<{ path: string; name: string; mtime: number }[]>([]);
   const [galleryTab, setGalleryTab] = useState<'images' | 'artifacts'>('images');
@@ -817,7 +819,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   return (
     <div
       className="flex h-full flex-col font-mono bg-neutral-950 transition-[padding] duration-200"
-      style={{ paddingRight: canvasArtifact ? 'max(420px, 44vw)' : undefined }}
+      style={{ paddingRight: canvasArtifact || skillsOpen ? 'max(420px, 44vw)' : undefined }}
     >
       {/* Header */}
       <header className="flex items-center gap-3 border-b border-neutral-900 px-6 py-4">
@@ -1589,6 +1591,9 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                         <FolderPlus /> Add to project
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
+                      <DropdownMenuItem onSelect={() => setSkillsOpen(true)}>
+                        <Lightning /> Skills
+                      </DropdownMenuItem>
                       <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setToolsOn(t => !t); }}>
                         <Wrench /> <span className="flex-1">Tools</span>
                         <span className={`text-xs ${toolsOn ? 'text-primary' : 'text-muted-foreground'}`}>{toolsOn ? 'On' : 'Off'}</span>
@@ -1727,6 +1732,9 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
 
       {/* Canvas — sandboxed render of a model-generated artifact */}
       {canvasArtifact && <ArtifactCanvas artifact={canvasArtifact} onClose={() => setCanvasArtifact(null)} />}
+
+      {/* Skills — view / create / edit reusable instruction packs */}
+      {skillsOpen && <SkillsPanel onClose={() => setSkillsOpen(false)} onChanged={() => window.api.listSkills?.().then(s => setSkills(s || [])).catch(() => {})} />}
 
       {/* Lightbox — click a generated image to enlarge, download, or delete */}
       {lightbox && (

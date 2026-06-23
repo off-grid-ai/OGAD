@@ -103,6 +103,39 @@ export function listSkills(): { name: string; description: string }[] {
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+function slugify(name: string): string {
+  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'skill';
+}
+
+/** Create or update a skill folder (<slug>/SKILL.md). Renaming removes the old one. */
+export function saveSkill(input: { name: string; description: string; instructions: string; originalName?: string }): Skill {
+  const dir = ensureSkillsDir();
+  const name = input.name.trim() || 'skill';
+  if (input.originalName && input.originalName.trim().toLowerCase() !== name.toLowerCase()) {
+    try { deleteSkill(input.originalName); } catch { /* best effort */ }
+  }
+  const folder = path.join(dir, slugify(name));
+  fs.mkdirSync(folder, { recursive: true });
+  const md = `---\nname: ${name}\ndescription: ${input.description.trim()}\n---\n${input.instructions.trim()}\n`;
+  fs.writeFileSync(path.join(folder, 'SKILL.md'), md);
+  return { name, description: input.description.trim(), instructions: input.instructions.trim() };
+}
+
+/** Delete a skill by name (removes its folder or .md file). */
+export function deleteSkill(name: string): boolean {
+  const dir = skillsDir();
+  let entries: string[] = [];
+  try { entries = fs.readdirSync(dir); } catch { return false; }
+  const target = name.trim().toLowerCase();
+  for (const e of entries) {
+    const s = readEntry(dir, e);
+    if (s && s.name.toLowerCase() === target) {
+      try { fs.rmSync(path.join(dir, e), { recursive: true, force: true }); return true; } catch { return false; }
+    }
+  }
+  return false;
+}
+
 /** Full skill (with instructions) by name, case-insensitive. */
 export function getSkill(name: string): Skill | null {
   const target = name.trim().toLowerCase();
