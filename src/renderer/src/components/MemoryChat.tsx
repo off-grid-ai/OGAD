@@ -3,6 +3,7 @@ import ReactMarkdown, { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { ArtifactCanvas, parseArtifact, type Artifact } from './ArtifactCanvas';
+import { VoiceBubble, stopAllVoicePlayback } from './VoiceBubble';
 import { SkillsPanel } from './SkillsPanel';
 import { SettingsPanel } from './SettingsPanel';
 import { ModelPicker } from './ModelPicker';
@@ -38,6 +39,8 @@ type ChatMessage = {
   attachments?: { name: string; kind: string }[];
   variants?: string[];      // regenerated answers (navigate with ‹ ›)
   variantIndex?: number;
+  audioUrl?: string;        // voice-mode: recorded clip for a user voice note
+  audioDuration?: number;   // seconds, when known from the recording
 };
 
 type ChatMode = 'ask' | 'image';
@@ -185,6 +188,9 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [convSearch, setConvSearch] = useState('');
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  // Voice playback must never carry across chats — stop it whenever the active
+  // conversation changes (and on unmount).
+  useEffect(() => { stopAllVoicePlayback(); return () => stopAllVoicePlayback(); }, [activeConversationId]);
   const [openTabs, setOpenTabs] = useState<string[]>([]); // conversation ids open as tabs
   const [showHistory, setShowHistory] = useState(true);
   const [mode, setMode] = useState<ChatMode>('ask');
@@ -213,7 +219,32 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const [transcribing, setTranscribing] = useState(false);
   const [toolsOn, setToolsOn] = useState(false);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
-  const [voiceOn, setVoiceOn] = useState(false);
+  const [voiceMode, setVoiceMode] = useState(false); // voice mode: messages exchanged as voice notes
+  useEffect(() => { if (!voiceMode) stopAllVoicePlayback(); }, [voiceMode]);
+
+  // Composer preferences persist across sessions (memory scope, thinking, tools,
+  // voice mode). Individual tool toggles and model choices persist on their own
+  // (DB `disabledTools`, active-model.json). Load once, then save on every change.
+  const prefsLoaded = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const s = await window.api.getSettings();
+        if (s) {
+          if (typeof s.composerNoMemory === 'boolean') setNoMemory(s.composerNoMemory);
+          if (typeof s.composerToolsOn === 'boolean') setToolsOn(s.composerToolsOn);
+          if (typeof s.composerThinking === 'boolean') setThinkingEnabled(s.composerThinking);
+          if (typeof s.composerVoiceMode === 'boolean') setVoiceMode(s.composerVoiceMode);
+        }
+      } catch (e) { console.error('Failed to load composer prefs', e); }
+      finally { prefsLoaded.current = true; }
+    })();
+  }, []);
+  useEffect(() => { if (prefsLoaded.current) void window.api.saveSetting('composerNoMemory', noMemory); }, [noMemory]);
+  useEffect(() => { if (prefsLoaded.current) void window.api.saveSetting('composerToolsOn', toolsOn); }, [toolsOn]);
+  useEffect(() => { if (prefsLoaded.current) void window.api.saveSetting('composerThinking', thinkingEnabled); }, [thinkingEnabled]);
+  useEffect(() => { if (prefsLoaded.current) void window.api.saveSetting('composerVoiceMode', voiceMode); }, [voiceMode]);
+  const [autoPlayId, setAutoPlayId] = useState<string | null>(null); // assistant reply to auto-speak once
   const [speakingId, setSpeakingId] = useState<string | null>(null);
   const [speakLoadingId, setSpeakLoadingId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -469,7 +500,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
     }
   }, [activeConversationId]);
 
-  const sendMessage = async (override?: string, opts?: { regen?: boolean }) => {
+  const sendMessage = async (override?: string, opts?: { regen?: boolean; voiceClip?: { url: string; duration: number } }) => {
     const isInput = override === undefined;
     // Regenerate/Resend: the user turn already exists in the thread — re-run it
     // in place instead of echoing another user bubble.
@@ -528,7 +559,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
     }
 
     if (!regen) {
-      const userMessage: ChatMessage = { id: `u-${Date.now()}`, role: 'user', content: trimmed, attachments: atts.map(a => ({ name: a.name, kind: a.kind })) };
+      const userMessage: ChatMessage = { id: `u-${Date.now()}`, role: 'user', content: trimmed, attachments: atts.map(a => ({ name: a.name, kind: a.kind })), audioUrl: opts?.voiceClip?.url, audioDuration: opts?.voiceClip?.duration };
       setMessages(prev => [...prev, userMessage]);
     }
     setInput('');
@@ -615,7 +646,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
           toolCalls: (tr?.toolCalls || []).map((c: { name: string; result: string }) => ({ name: c.name, result: c.result })),
         };
         setMessages(prev => [...prev, am]);
-        if (voiceOn) speakMessage(am.id, am.content);
+        if (voiceMode) setAutoPlayId(am.id);
         try { await window.api.addRagMessage(convId, 'assistant', am.content); } catch (_) { /* ignore */ }
         return;
       }
@@ -655,7 +686,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
           // to this chat + project so the gallery can filter.
           try { void window.api.saveArtifact?.({ kind: art.kind, code: art.code, conversationId: convId, projectId: activeProjectId }); } catch { /* ignore */ }
         }
-        if (voiceOn) speakMessage(streamId, assistantContent);
+        if (voiceMode) setAutoPlayId(streamId);
         try {
           await window.api.addRagMessage(convId, 'assistant', assistantContent, result.context);
         } catch (e) {
@@ -714,6 +745,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
       const recorder = new MediaRecorder(stream);
       chunksRef.current = [];
       recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      const startedAt = Date.now();
       recorder.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
@@ -722,7 +754,16 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
         try {
           const bytes = new Uint8Array(await blob.arrayBuffer());
           const text = await window.api.transcribeAudio(bytes, 'webm');
-          if (text && text.trim()) setInput(prev => (prev ? prev + ' ' : '') + text.trim());
+          const clean = (text || '').trim();
+          if (voiceMode) {
+            // Voice mode: send the spoken note straight away, keeping the recording
+            // so the user's bubble plays back their own audio.
+            if (!clean) return;
+            const url = URL.createObjectURL(blob);
+            void sendMessage(clean, { voiceClip: { url, duration: (Date.now() - startedAt) / 1000 } });
+          } else if (clean) {
+            setInput(prev => (prev ? prev + ' ' : '') + clean);
+          }
         } catch (err) {
           console.error('Transcription failed', err);
         } finally {
@@ -987,9 +1028,9 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
           </svg>
         </button>
         <button
-          onClick={() => setVoiceOn(v => !v)}
-          className={`rounded-md border p-1.5 transition-colors ${voiceOn ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
-          title={voiceOn ? 'Voice replies on — auto-speak answers' : 'Voice replies off'}
+          onClick={() => setVoiceMode(v => !v)}
+          className={`rounded-md border p-1.5 transition-colors ${voiceMode ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
+          title={voiceMode ? 'Voice mode on — speak and listen in voice notes' : 'Voice mode off'}
         >
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5L6 9H2v6h4l5 4V5z" />
@@ -1195,6 +1236,49 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
             ) : (
               <div className="w-full px-6 py-5">
                 {messages.map(message => (
+                  voiceMode ? (
+                  <div key={message.id} className={`mb-4 flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
+                    {(() => {
+                      if (message.role === 'user') {
+                        return (
+                          <VoiceBubble
+                            messageId={message.id}
+                            isUser
+                            transcript={message.content}
+                            audioUrl={message.audioUrl}
+                            durationSeconds={message.audioDuration}
+                            synthesize={(t) => window.api.speak(t)}
+                            onCopy={copyText}
+                          />
+                        );
+                      }
+                      // Generated image in voice mode: show the image, no audio bubble.
+                      if (message.image) {
+                        return (
+                          <img
+                            src={message.image}
+                            alt="Generated"
+                            onClick={() => setLightbox({ url: message.image as string, path: message.imagePath })}
+                            className="max-w-[20rem] cursor-zoom-in rounded-md border border-neutral-800 transition-opacity hover:opacity-90"
+                          />
+                        );
+                      }
+                      const transcript = (message.variants && message.variantIndex != null ? message.variants[message.variantIndex] : message.content)
+                        .replace(ASK_FENCE, '').replace(ARTIFACT_FENCE, '').replace(/\[S(\d+)\]/g, '').trim();
+                      return (
+                        <VoiceBubble
+                          messageId={message.id}
+                          transcript={transcript}
+                          isLoading={!!message.streaming}
+                          autoPlay={autoPlayId === message.id}
+                          synthesize={(t) => window.api.speak(t)}
+                          onCopy={copyText}
+                          onRetry={() => regenerate(message.id)}
+                        />
+                      );
+                    })()}
+                  </div>
+                  ) : (
                   <div key={message.id} className={`mb-5 flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
                     {message.role === 'assistant' && !message.streaming && message.reasoning && message.reasoning.trim() ? (
                       <Collapsible className="mb-1.5 max-w-[85%]">
@@ -1564,6 +1648,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                       </Collapsible>
                     ) : null}
                   </div>
+                  )
                 ))}
                 {loading && generatingConvId === activeConversationId && !messages.some(m => m.streaming) ? (
                   <div className="mb-5 flex flex-col items-start">
@@ -1698,7 +1783,39 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                 </div>
               )}
 
-              {/* Unified composer block */}
+              {/* Voice mode: a single mic — record a note, it transcribes and sends. */}
+              {voiceMode ? (
+              <div className="flex flex-col items-center gap-2.5 rounded-2xl border border-neutral-800 bg-neutral-950 px-6 py-6">
+                <button
+                  type="button"
+                  onClick={toggleRecording}
+                  disabled={transcribing}
+                  className={`flex h-16 w-16 items-center justify-center rounded-full border-2 transition-colors ${recording ? 'border-red-500 bg-red-500/15 text-red-400' : 'border-green-500 bg-green-500/10 text-green-500 hover:bg-green-500/20'} ${transcribing ? 'cursor-default opacity-50' : 'cursor-pointer'}`}
+                >
+                  {transcribing ? (
+                    <svg className="h-6 w-6 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                  ) : recording ? (
+                    <svg className="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+                  ) : (
+                    <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-14 0m7 7v3m0-3a4 4 0 01-4-4V5a4 4 0 018 0v6a4 4 0 01-4 4z" /></svg>
+                  )}
+                </button>
+                <span className="text-xs text-neutral-500">
+                  {transcribing ? 'Transcribing…' : recording ? 'Recording — tap to send' : 'Tap to record a voice note'}
+                </span>
+                {messages.some(m => m.streaming) ? (
+                  <button
+                    type="button"
+                    onClick={() => { const s = messages.find(m => m.streaming); if (s) window.api.cancelRag?.(s.id); }}
+                    className="flex items-center gap-1.5 rounded-full border border-red-500/50 px-3 py-1 text-[11px] text-red-400 transition-colors hover:bg-red-500/10"
+                  >
+                    <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+                    Stop generating
+                  </button>
+                ) : null}
+              </div>
+              ) : (
+              /* Unified composer block */
               <div
                 onDragOver={(e) => { e.preventDefault(); if (!dragOver) setDragOver(true); }}
                 onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOver(false); }}
@@ -1922,6 +2039,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                   </div>
                 </div>
               </div>
+              )}
             </div>
           </div>
         </div>
