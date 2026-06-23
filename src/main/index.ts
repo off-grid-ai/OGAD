@@ -172,6 +172,21 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.whenReady().then(() => {
+  // Server-only (headless) mode: boot just the multimodal gateway + LLM runtime,
+  // no window / tray / capture / CRM loops. Lets the gateway be deployed on its
+  // own — `<app-binary> --server-only` (or OFFGRID_SERVER_ONLY=1) — while still
+  // reusing the Electron-built native binaries. First step toward a standalone
+  // gateway CLI (see docs/GATEWAY_SPINE.md "externalize later").
+  const serverOnly = process.argv.includes('--server-only') || process.env.OFFGRID_SERVER_ONLY === '1';
+  if (serverOnly) {
+    console.log('[gateway] server-only mode — gateway on :7878, no UI/capture');
+    if (process.platform === 'darwin' && app.dock) { try { app.dock.hide(); } catch { /* ignore */ } }
+    try { migrateCrm(); } catch (e) { console.warn('[gateway] crm migrate failed', e); }
+    try { startModelServer(); } catch (e) { console.error('[gateway] start failed', e); }
+    void import('./llm').then(({ llm }) => llm.init().catch((err) => console.error('[gateway] LLM init failed', err)));
+    return; // skip window, tray, watcher, IPC, capture, connectors — gateway only
+  }
+
   console.log("APP READY: Initializing Services...");
 
   // One-time, idempotent cleanup of the old "My Memories" AI-chat imports
