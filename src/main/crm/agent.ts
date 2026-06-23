@@ -19,7 +19,7 @@ import { getIdentity } from '../identity';
 // Automated / promotional / transactional mail never needs a personal reply —
 // keep it out of the secretary's context so it doesn't propose "reply to the
 // Supabase security alert" or "draft a response to the newsletter".
-const AUTOMATED_RE = /no-?reply|noreply|notification|unsubscribe|newsletter|digest| via |do not reply|automated|verify your|confirm your|reset your password|sign in to|security (?:alert|issue|vulnerab|notif)|invoice|receipt|payment (?:failed|declined|received)|your (?:subscription|order|account)|% off|sale ends|webinar|register now|spam (?:report|folder)/i;
+const AUTOMATED_RE = /no-?reply|noreply|notification|unsubscribe|newsletter|digest| via |do not reply|automated|verify your|confirm your|reset your password|sign in to|security (?:alert|issue|vulnerab|notif)|invoice|receipt|payment (?:failed|declined|received)|your (?:subscription|order|account)|% off|sale ends|webinar|register now|spam (?:report|folder)|\bseo\b|grow your (?:traffic|sales|business|revenue|audience)|boost your|cold (?:email|outreach)|limited (?:time|offer)|book a (?:demo|call)|free trial|increase your/i;
 
 interface ToolEntry { connector: string; tool: string; description: string }
 
@@ -143,6 +143,32 @@ ${mail}`;
     return { proposed: 0, error: e instanceof Error ? e.message : 'planning failed' };
   }
 
+  // INTELLIGENCE GATE — before creating any item, let the LLM judge each candidate
+  // instead of trusting brittle rules: is it genuinely worth surfacing? Drops
+  // self-directed, promotional/automated, trivial/already-done, and duplicate
+  // proposals. This is the reasoning step the user asked for.
+  if (actions.length) {
+    try {
+      const list = actions.map((a, i) => `${i + 1}. [${a.connector}/${a.tool}] ${a.title}${a.why ? ` — ${a.why}` : ''}`).join('\n');
+      const gate = `You are the quality gate for my proactive assistant. I am ${meLabel}. Keep ONLY actions genuinely worth surfacing to me. DROP any that:
+- are directed at ME or involve only me (never act toward myself),
+- come from a promotional / automated / no-reply / marketing / cold-outreach email (e.g. "AI SEO advice", security alerts, newsletters),
+- are trivial, vague, or likely already done,
+- duplicate another listed action (same person + same intent) — keep just one.
+Return JSON ONLY: {"keep":[<the item numbers to keep>]}
+
+ACTIONS:
+${list}`;
+      const resp = await llm.chat(gate, [], 90_000, 300, { temperature: 0, disableThinking: true });
+      const keep = new Set(((JSON.parse(extractJson(resp)) as { keep?: unknown[] }).keep ?? []).map((n) => Number(n)));
+      const before = actions.length;
+      actions = actions.filter((_, i) => keep.has(i + 1));
+      console.log(`[secretary] intelligence gate kept ${actions.length}/${before}`);
+    } catch (e) {
+      console.error('[secretary] gate failed (keeping all):', e);
+    }
+  }
+
   // Dedup key: connector + tool + the title's INTENT (lowercased, punctuation and
   // filler words stripped), so "Draft one-pager FOR Dhanraj" and "…TO Dhanraj"
   // collapse to one. Seeded with what's already pending, and grows within the
@@ -165,10 +191,38 @@ ${mail}`;
     a.forEach((x) => { if (b.has(x)) inter += 1; });
     return inter / (a.size + b.size - inter);
   };
-  const kept = listApprovals('pending').map((a) => ({ c: (a.connector ?? '').toLowerCase(), t: (a.tool ?? '').toLowerCase(), toks: tokSet(a.title) }));
+  // Char-level similarity so a typo'd name ("johson" ~ "johnson") still matches.
+  const charSim = (a: string, b: string): number => {
+    if (a === b) return 1;
+    const m = a.length, n = b.length;
+    if (!m || !n) return 0;
+    const dp = Array.from({ length: n + 1 }, (_, j) => j);
+    for (let i = 1; i <= m; i++) {
+      let prev = dp[0]; dp[0] = i;
+      for (let j = 1; j <= n; j++) {
+        const tmp = dp[j];
+        dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+        prev = tmp;
+      }
+    }
+    return 1 - dp[n] / Math.max(m, n);
+  };
+  // The "subject" of an action = its distinctive long tokens (names, topics) —
+  // "emma","johnson","anurag","supabase". Two same-tool actions sharing a subject
+  // (exact OR near-typo) are the same action ("reply to Emma" == "follow up w/ Emma").
+  const subjectToks = (s: string): string[] => [...tokSet(s)].filter((w) => w.length >= 4);
+  const sameSubject = (a: string[], b: string[]): boolean =>
+    a.some((x) => b.some((y) => charSim(x, y) >= 0.82));
+  const kept = listApprovals('pending').map((a) => ({ c: (a.connector ?? '').toLowerCase(), t: (a.tool ?? '').toLowerCase(), toks: tokSet(a.title), subj: subjectToks(a.title) }));
   const isDup = (connector: string, tool: string, title: string): boolean => {
     const toks = tokSet(title);
-    return kept.some((k) => k.c === connector.toLowerCase() && k.t === tool.toLowerCase() && jaccard(k.toks, toks) >= 0.6);
+    const subj = subjectToks(title);
+    return kept.some(
+      (k) =>
+        k.c === connector.toLowerCase() &&
+        k.t === tool.toLowerCase() &&
+        (jaccard(k.toks, toks) >= 0.5 || sameSubject(k.subj, subj))
+    );
   };
 
   // Backstop: drop anything aimed at ME (the model occasionally still proposes
@@ -181,7 +235,7 @@ ${mail}`;
     if (!entry || !a.title) continue;
     if (selfTarget.test(a.title)) { console.log(`[secretary] dropped self-directed: ${a.title}`); continue; }
     if (isDup(entry.connector, entry.tool, a.title)) continue;
-    kept.push({ c: entry.connector.toLowerCase(), t: entry.tool.toLowerCase(), toks: tokSet(a.title) });
+    kept.push({ c: entry.connector.toLowerCase(), t: entry.tool.toLowerCase(), toks: tokSet(a.title), subj: subjectToks(a.title) });
     proposeApproval({
       title: a.title.slice(0, 160),
       detail: a.why ?? '',
