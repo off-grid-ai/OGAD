@@ -43,7 +43,9 @@ import {
   IconPlug,
   IconChevronLeft,
   IconVideo,
-  IconLoader2
+  IconLoader2,
+  IconArrowLeft,
+  IconArrowRight
 } from '@tabler/icons-react';
 import { cn } from './lib/utils';
 import { usePostHog } from 'posthog-js/react';
@@ -165,6 +167,14 @@ function AppContent() {
   const navigationHistory = useRef<NavigationState[]>([]);
   const forwardHistory = useRef<NavigationState[]>([]);
   const isNavigatingHistory = useRef(false);
+  // Reactive mirrors of the stacks so the in-app back/forward buttons can
+  // enable/disable (refs alone don't trigger a re-render).
+  const [canGoBack, setCanGoBack] = useState(false);
+  const [canGoForward, setCanGoForward] = useState(false);
+  const syncNavFlags = useCallback(() => {
+    setCanGoBack(navigationHistory.current.length > 1);
+    setCanGoForward(forwardHistory.current.length > 0);
+  }, []);
 
   // Check onboarding status on mount
   useEffect(() => {
@@ -259,7 +269,8 @@ function AppContent() {
         navigationHistory.current = navigationHistory.current.slice(-50);
       }
     }
-  }, [viewMode, selectedSessionId, selectedMemoryId, selectedEntityId]);
+    syncNavFlags();
+  }, [viewMode, selectedSessionId, selectedMemoryId, selectedEntityId, syncNavFlags]);
 
   // Subscribe to notification events from the main process
   useEffect(() => {
@@ -318,8 +329,9 @@ function AppContent() {
         setSelectedMemoryId(previousState.selectedMemoryId);
         setSelectedEntityId(previousState.selectedEntityId);
       }
+      syncNavFlags();
     }
-  }, []);
+  }, [syncNavFlags]);
 
   // Navigate forward using forward history stack
   const navigateForward = useCallback(() => {
@@ -336,8 +348,9 @@ function AppContent() {
         setSelectedMemoryId(nextState.selectedMemoryId);
         setSelectedEntityId(nextState.selectedEntityId);
       }
+      syncNavFlags();
     }
-  }, []);
+  }, [syncNavFlags]);
 
   const handleBack = useCallback(() => {
     navigateBack();
@@ -484,6 +497,36 @@ function AppContent() {
                 </motion.span>
                 {sidebarOpen && <IconChevronLeft className="h-4 w-4 shrink-0 text-neutral-500" />}
               </button>
+
+              {/* In-app back / forward — available on every screen (also ⌘[ / ⌘]) */}
+              <div className="mt-3 flex items-center gap-1">
+                <button
+                  onClick={navigateBack}
+                  disabled={!canGoBack}
+                  aria-label="Back"
+                  title="Back (⌘[)"
+                  className="flex flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-neutral-400 transition-colors hover:bg-neutral-800/50 hover:text-white disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent"
+                >
+                  <IconArrowLeft className="h-4 w-4 shrink-0" />
+                  <motion.span
+                    animate={{ display: sidebarOpen ? 'inline-block' : 'none', opacity: sidebarOpen ? 1 : 0 }}
+                    className="text-sm whitespace-pre"
+                  >
+                    Back
+                  </motion.span>
+                </button>
+                {sidebarOpen && (
+                  <button
+                    onClick={navigateForward}
+                    disabled={!canGoForward}
+                    aria-label="Forward"
+                    title="Forward (⌘])"
+                    className="rounded-lg px-2 py-1.5 text-neutral-400 transition-colors hover:bg-neutral-800/50 hover:text-white disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent"
+                  >
+                    <IconArrowRight className="h-4 w-4 shrink-0" />
+                  </button>
+                )}
+              </div>
 
               {/* Navigation */}
               <div className="mt-8 flex flex-col gap-2">
