@@ -209,7 +209,7 @@ function clipText(text: string, maxLength: number): string {
 function isGenerativeRequest(text: string): boolean {
     const q = (text || '').trim().toLowerCase();
     if (!q) return false;
-    const hasNoun = /\b(react|next\.?js|vue|svelte|html|css|svg|website|web ?app|web ?page|landing page|component|widget|diagram|chart|flowchart|mermaid|game|canvas|prototype|mock-?up|ui|app|script|function|snippet|webpage)\b/.test(q);
+    const hasNoun = /\b(react|next\.?js|vue|svelte|html|css|svg|website|web ?app|web ?page|landing page|component|widget|diagram|chart|flowchart|mermaid|game|canvas|prototype|mock-?up|ui|app|script|function|snippet|webpage|playground|frontend|front-end|dashboard|form|interface|page|tool|visualization|visualisation|simulator|editor|viewer|demo|site)\b/.test(q);
     const hasVerb = /\b(build|create|make|write|generate|code|implement|design|draw|render|scaffold|give me a|show me a)\b/.test(q);
     return hasNoun && hasVerb;
 }
