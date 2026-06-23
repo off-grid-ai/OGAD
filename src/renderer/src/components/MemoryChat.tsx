@@ -908,10 +908,12 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
         <button
           onClick={() => setShowHistory(prev => !prev)}
           className={`rounded-md border p-1.5 transition-colors ${showHistory ? 'border-neutral-700 text-neutral-300' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
-          title={showHistory ? 'Hide history' : 'Show history'}
+          title={showHistory ? 'Collapse sidebar (full-screen chat)' : 'Show conversations'}
         >
+          {/* Sidebar / panel-left icon — collapse the conversation rail */}
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <rect x="3" y="4" width="18" height="16" rx="2" strokeWidth={2} />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 4v16" />
           </svg>
         </button>
       </header>
