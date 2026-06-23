@@ -16,6 +16,7 @@ import { setupCrmIPC } from './crm-ipc'
 import { startFocusLoop, setCapturePaused, isCapturePaused, getActiveAppName } from './focus'
 import { startMeetingDetector } from './meeting-detect'
 import { recoverOrphanedMeetings } from './meetings'
+import { recoverOrphanTempDirs } from './meeting-native'
 import { startModelServer } from './model-server'
 import { runBackfill } from './search'
 import { proposeActions } from './crm/agent'
@@ -288,6 +289,9 @@ app.whenReady().then(() => {
      // Adopt any recording whose transcription was interrupted by a restart so it
      // can never be lost. Delayed so it doesn't compete with startup; non-blocking.
      setTimeout(() => { void recoverOrphanedMeetings(); }, 8000);
+     // Adopt recordings orphaned by a crash/restart mid-call (a separate recorder
+     // process keeps writing to a temp dir after the app dies) — finalize + store.
+     setTimeout(() => { void recoverOrphanTempDirs().catch((e) => console.error('[meetings] temp recover', e)); }, 10000);
      // Proactive loop: periodically PULL every connector (keep memory fresh), then
      // the secretary surveys tools + fresh context and proposes actions on its own
      // (no button). Proposals land in the approval queue and surface on the Day;

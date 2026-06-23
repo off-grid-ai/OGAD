@@ -14,6 +14,7 @@ import os from 'os';
 import { app } from 'electron';
 import { saveMeetingFromFile } from './meetings';
 import { whisperBin, whisperModel } from './rag/extractors';
+import { getDB } from './database';
 
 const execFileAsync = promisify(execFile);
 
@@ -272,5 +273,82 @@ function cleanupDir(dir: string, keep?: string): void {
     fs.rmdirSync(dir);
   } catch {
     /* ignore */
+  }
+}
+
+const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Adopt recordings orphaned by a crash or restart mid-call. The native recorder
+ * is a separate process that keeps running (writing screen.mov + mic.m4a to a
+ * temp dir) even if the app that spawned it dies — so the media is never lost,
+ * but `stopMeetingRecording` never ran to finalize it. On startup we find those
+ * temp dirs, ask any still-running recorder to finalize (SIGINT), then mux +
+ * diarize + store via the normal pipeline. Idempotent: skips dirs already saved.
+ */
+export async function recoverOrphanTempDirs(): Promise<void> {
+  let names: string[];
+  try {
+    names = fs.readdirSync(os.tmpdir());
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    const m = /^offgrid-meeting-(\d+)$/.exec(name);
+    if (!m) continue;
+    const dir = path.join(os.tmpdir(), name);
+    if (session && session.dir === dir) continue; // the live recording — leave it
+    const screen = path.join(dir, 'screen.mov');
+    try {
+      if (!fs.existsSync(screen) || fs.statSync(screen).size < 1024) continue;
+    } catch {
+      continue;
+    }
+    const startedAt = Number(m[1]);
+    try {
+      const row = getDB().prepare('SELECT id FROM meetings WHERE started_at = ?').get(startedAt);
+      if (row) {
+        cleanupDir(dir); // already recovered — reclaim the (large) temp media
+        continue;
+      }
+    } catch {
+      /* db not ready — try again next launch */
+      continue;
+    }
+    // A recorder may STILL be running for this orphan (it outlived its parent).
+    // Ask it to finalize cleanly (closes the mp4 moov atom), then give it a moment.
+    try {
+      await execFileAsync('pkill', ['-INT', '-f', `meeting-recorder ${dir}`]);
+      await delay(3000);
+    } catch {
+      /* no live recorder — files are already final */
+    }
+    const mic = path.join(dir, 'mic.m4a');
+    const finalPath = path.join(dir, `meeting-${startedAt}.mp4`);
+    let endedAt = startedAt;
+    try {
+      endedAt = Math.max(startedAt, Math.round(fs.statSync(screen).mtimeMs));
+    } catch {
+      /* keep startedAt */
+    }
+    console.log('[meetings] recovering orphaned recording from temp:', name);
+    try {
+      await muxToMp4(screen, mic, finalPath);
+    } catch {
+      try {
+        fs.copyFileSync(screen, finalPath);
+      } catch {
+        /* ignore */
+      }
+    }
+    try {
+      // No pre-diarization: saveMeetingFromFile inserts the row FIRST, then
+      // transcribes — so the recovered meeting shows up immediately rather than
+      // after a long double whisper pass.
+      await saveMeetingFromFile(finalPath, { startedAt, endedAt, ext: 'mp4' });
+      cleanupDir(dir);
+    } catch (e) {
+      console.error('[meetings] temp-dir recovery failed for', name, e);
+    }
   }
 }
