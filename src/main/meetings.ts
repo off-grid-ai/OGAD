@@ -133,14 +133,14 @@ async function processMeeting(
   let people: string[] = [];
   if (transcript.length > 20) {
     try {
-      const prompt = `This is a transcript of a meeting/conversation. Return JSON only:
-{"title": "<a 3-7 word title>", "summary": "<2-4 sentence summary of what was discussed and any decisions/action items>", "people": ["<first names actually mentioned>"]}
+      const prompt = `Below is a transcript of a call/meeting (speaker-labeled where known). Write a PRECISE recap — be specific, name names. Return JSON only:
+{"title": "<3-7 word title naming the actual topic>", "summary": "<a precise recap that NAMES the real people on the call, their company/role, what was actually discussed, key points and decisions, and concrete next steps. Use the real names and specifics from the transcript — never write 'the other person', 'a developer', or 'the client' if a name or company is present.>", "people": ["<full names actually mentioned>"]}
 
 Transcript:
 """
-${transcript.slice(0, 6000)}
+${transcript.slice(0, 12000)}
 """`;
-      const resp = await llm.chat(prompt, [], 120_000, 500, { temperature: 0.3, disableThinking: true });
+      const resp = await llm.chat(prompt, [], 120_000, 700, { temperature: 0.3, disableThinking: true });
       const p = JSON.parse(extractJson(resp)) as { title?: string; summary?: string; people?: string[] };
       if (p.title) title = p.title.trim().slice(0, 80);
       if (p.summary) summary = p.summary.trim();

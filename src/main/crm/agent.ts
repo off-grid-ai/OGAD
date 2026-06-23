@@ -94,7 +94,9 @@ export async function proposeActions(nowSec: number): Promise<{ proposed: number
   const events = view.upcoming.map((e) => `- ${e.starts_at ? hhmm(e.starts_at) : '?'} ${e.title}${e.attendees ? ` (with ${e.attendees})` : ''}`).join('\n') || '(none)';
   const todos = view.priorities.slice(0, 18).map((p) => `- ${p.text}${p.due ? ` [due ${p.due}]` : ''}`).join('\n') || '(none)';
   const mail = emails.map((e) => `- ${e.summary}`).join('\n') || '(none)';
-  const calls = recentMeetings.map((m) => `- ${m.title ?? 'Meeting'}: ${(m.summary ?? '').slice(0, 220)}`).join('\n') || '(none)';
+  // Full summary (not truncated) so a proposed CRM note can be PRECISE — name the
+  // real people/company and the actual points, not "the developer".
+  const calls = recentMeetings.map((m) => `- ${m.title ?? 'Meeting'}: ${(m.summary ?? '').slice(0, 800)}`).join('\n') || '(none)';
   const toolList = catalog.map((t) => `- ${t.connector} / ${t.tool}: ${t.description}`.slice(0, 220)).join('\n');
 
   const prompt = `You are my proactive personal secretary. You can use the TOOLS listed below (and ONLY those). Looking at my context, propose a few concrete, genuinely useful actions that move things forward.
