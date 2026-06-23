@@ -8,9 +8,13 @@ import { getPrompt, getAllPromptDefs, resetPrompt, getPromptTemplate } from './p
 // Incrementally update master memory with a new conversation summary
 // This approach keeps context bounded by only processing current master + new summary
 async function updateMasterMemoryIncremental(newSummary: string): Promise<string | null> {
+    // Master memory (the consolidated "profile") is a retired My Memories feature —
+    // no longer injected into chat. Don't regenerate it so it stays cleared.
+    return null;
+    // eslint-disable-next-line no-unreachable
     console.log('[IPC] Starting incremental master memory update...');
     const currentMasterData = getMasterMemory();
-    const currentMaster = currentMasterData?.content;
+    const currentMaster: string = currentMasterData?.content ?? '';
 
     // If no existing master memory, create initial one from just this summary
     if (!currentMaster || currentMaster.trim().length === 0) {
@@ -49,6 +53,9 @@ async function updateMasterMemoryIncremental(newSummary: string): Promise<string
 // Phase 2 (reduce): Merge all partial summaries into the final master memory
 // This avoids the growing-prompt problem and minimizes LLM calls
 async function regenerateMasterMemoryFull(): Promise<string | null> {
+    // Retired feature — see updateMasterMemoryIncremental. Don't rebuild the profile.
+    return null;
+    // eslint-disable-next-line no-unreachable
     const summaries = getAllChatSummaries();
     console.log(`[IPC] regenerateMasterMemoryFull called, found ${summaries.length} summaries`);
 

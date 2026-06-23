@@ -11,6 +11,9 @@ import { parseClaudeDesktopOutput, parseClaudeWebOutput, parseChatGPTOutput, par
 export class Watcher {
   private static child: ChildProcess | null = null;
   private static intentionalStop = false;
+  // Legacy My Memories AI-chat scraping (Claude/ChatGPT/Gemini → conversations).
+  // Off Grid captures via screen/OCR instead, so this is permanently off.
+  private static readonly COLLECT_AI_CHATS = false;
 
   static start() {
     if (this.child) return;
@@ -99,6 +102,14 @@ export class Watcher {
                         console.error('[Watcher] Vision capture failed:', err);
                     });
                 }
+
+                // GENERIC CAPTURE: distill an observation from ANY app's on-screen
+                // text (the Swift layer already extracts text for every focused
+                // app). The extractor self-gates on length / dedupe / per-app
+                // interval / noise, so this is safe to fire on every signal.
+                // Generic CRM capture now runs via the get-windows focus loop in
+                // main/focus.ts (reliable where this spawned watcher couldn't see
+                // some apps, e.g. iTerm2). The watcher is kept for chat-app parsing.
 
              } catch (e) {
                  // Ignore partial lines or non-JSON
@@ -270,6 +281,10 @@ export class Watcher {
   }
 
   private static async handleVisionCapture(appName: string, title?: string) {
+      // Legacy "My Memories" behaviour: scrape Claude/ChatGPT/Gemini chats into
+      // the conversations table. Off Grid captures via screen/OCR instead, so this
+      // collection is disabled. (Existing scraped data is purged on startup.)
+      if (!Watcher.COLLECT_AI_CHATS) return;
       const isClaudeDesktop = appName.toLowerCase().includes("claude");
       const isBrowser = this.isBrowserApp(appName);
       // Only support Claude desktop or supported browser-based chat domains

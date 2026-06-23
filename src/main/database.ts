@@ -415,6 +415,61 @@ export function updateMasterMemory(content: string) {
     stmt.run(content);
 }
 
+// One-shot, idempotent purge of the legacy "My Memories" data: the AI-chat
+// conversations the old watcher scraped (Claude / ChatGPT / Gemini, web +
+// desktop) and everything derived from them — messages, vector memories,
+// summaries, entity facts, and entities left orphaned afterwards. The shared
+// `entities` table is ALSO fed by the current screen-capture/observation
+// pipeline, so we only drop entities with no remaining link in entity_sessions,
+// entity_facts, OR observation_entities. Once the legacy conversations are gone
+// this finds nothing and is a no-op, so it's safe to call on every startup.
+export function purgeLegacyChatImports(): Record<string, number> | null {
+    const db = getDB();
+    const legacy = db.prepare(`
+        SELECT id FROM conversations
+        WHERE app_name IN ('Claude.ai','ChatGPT','Gemini')
+           OR LOWER(app_name) LIKE '%claude%'
+           OR LOWER(app_name) LIKE '%chatgpt%'
+           OR LOWER(app_name) LIKE '%gemini%'
+    `).all() as { id: string }[];
+    const ids = legacy.map((r) => r.id);
+    if (ids.length === 0) return null;
+
+    const ph = ids.map(() => '?').join(',');
+    const hasObsEntities = !!db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='observation_entities'`).get();
+
+    const run = db.transaction(() => {
+        const counts: Record<string, number> = {};
+        const messages = db.prepare(`SELECT COUNT(*) AS c FROM messages WHERE conversation_id IN (${ph})`).get(...ids) as { c: number };
+        counts.messages = messages.c;
+        counts.memories = db.prepare(`DELETE FROM memories WHERE session_id IN (${ph})`).run(...ids).changes;
+        counts.summaries = db.prepare(`DELETE FROM chat_summaries WHERE session_id IN (${ph})`).run(...ids).changes;
+        counts.entityFacts = db.prepare(`DELETE FROM entity_facts WHERE source_session_id IN (${ph})`).run(...ids).changes;
+        // Cascades messages + entity_sessions (both FK conversations ON DELETE CASCADE).
+        counts.conversations = db.prepare(`DELETE FROM conversations WHERE id IN (${ph})`).run(...ids).changes;
+        // Drop entities now orphaned across every link table (keeps current-capture entities).
+        const orphanGuard = hasObsEntities
+            ? `id NOT IN (SELECT entity_id FROM entity_sessions)
+               AND id NOT IN (SELECT entity_id FROM entity_facts)
+               AND id NOT IN (SELECT entity_id FROM observation_entities)`
+            : `id NOT IN (SELECT entity_id FROM entity_sessions)
+               AND id NOT IN (SELECT entity_id FROM entity_facts)`;
+        counts.entitiesDeleted = hasObsEntities
+            ? db.prepare(`DELETE FROM entities WHERE ${orphanGuard}`).run().changes
+            : 0; // without obs links we can't tell current from legacy — leave them
+        // The stale consolidated profile is gone for good.
+        counts.masterMemory = db.prepare(`DELETE FROM master_memory`).run().changes;
+        // Rebuild external-content FTS indexes so they don't point at deleted rows.
+        for (const t of ['memory_fts', 'message_fts', 'summary_fts', 'entity_fts', 'entity_fact_fts']) {
+            try { db.prepare(`INSERT INTO ${t}(${t}) VALUES('rebuild')`).run(); } catch { /* table may be absent */ }
+        }
+        return counts;
+    });
+    const result = run();
+    console.log('[DB] Purged legacy My Memories chat imports:', result);
+    return result;
+}
+
 export function getAllChatSummaries(): { session_id: string; summary: string }[] {
     const db = getDB();
     const stmt = db.prepare('SELECT session_id, summary FROM chat_summaries WHERE summary IS NOT NULL');

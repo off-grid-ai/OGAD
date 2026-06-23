@@ -1135,18 +1135,6 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
               <div className="w-full px-6 py-5">
                 {messages.map(message => (
                   <div key={message.id} className={`mb-5 flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
-                    {message.role === 'assistant' && message.streaming ? (
-                      <div className="mb-1.5 flex flex-col gap-1.5">
-                        <span className="inline-flex gap-1 text-green-500">
-                          <span className="animate-bounce [animation-delay:-0.3s]">●</span>
-                          <span className="animate-bounce [animation-delay:-0.15s]">●</span>
-                          <span className="animate-bounce">●</span>
-                        </span>
-                        {activityLabel(message.activity) ? (
-                          <span className="text-[11px] text-neutral-500">{activityLabel(message.activity)}</span>
-                        ) : null}
-                      </div>
-                    ) : null}
                     {message.role === 'assistant' && message.reasoning && message.reasoning.trim() ? (
                       <Collapsible defaultOpen={!!message.streaming} className="mb-1.5 max-w-[85%]">
                         <CollapsibleTrigger className="group flex items-center gap-1.5 text-[11px] text-neutral-500 transition-colors hover:text-neutral-300">
@@ -1243,6 +1231,19 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                         />
                       ) : null}
                     </div>
+
+                    {message.role === 'assistant' && message.streaming ? (
+                      <div className="mt-1.5 flex flex-col gap-1.5">
+                        <span className="inline-flex gap-1 text-green-500">
+                          <span className="animate-bounce [animation-delay:-0.3s]">●</span>
+                          <span className="animate-bounce [animation-delay:-0.15s]">●</span>
+                          <span className="animate-bounce">●</span>
+                        </span>
+                        {activityLabel(message.activity) ? (
+                          <span className="text-[11px] text-neutral-500">{activityLabel(message.activity)}</span>
+                        ) : null}
+                      </div>
+                    ) : null}
 
                     {message.toolCalls && message.toolCalls.length > 0 ? (
                       <div className="mt-1.5 flex max-w-[85%] flex-wrap gap-1">
