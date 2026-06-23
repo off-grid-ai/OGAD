@@ -1783,39 +1783,9 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                 </div>
               )}
 
-              {/* Voice mode: a single mic — record a note, it transcribes and sends. */}
-              {voiceMode ? (
-              <div className="flex flex-col items-center gap-2.5 rounded-2xl border border-neutral-800 bg-neutral-950 px-6 py-6">
-                <button
-                  type="button"
-                  onClick={toggleRecording}
-                  disabled={transcribing}
-                  className={`flex h-16 w-16 items-center justify-center rounded-full border-2 transition-colors ${recording ? 'border-red-500 bg-red-500/15 text-red-400' : 'border-green-500 bg-green-500/10 text-green-500 hover:bg-green-500/20'} ${transcribing ? 'cursor-default opacity-50' : 'cursor-pointer'}`}
-                >
-                  {transcribing ? (
-                    <svg className="h-6 w-6 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-                  ) : recording ? (
-                    <svg className="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
-                  ) : (
-                    <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-14 0m7 7v3m0-3a4 4 0 01-4-4V5a4 4 0 018 0v6a4 4 0 01-4 4z" /></svg>
-                  )}
-                </button>
-                <span className="text-xs text-neutral-500">
-                  {transcribing ? 'Transcribing…' : recording ? 'Recording — tap to send' : 'Tap to record a voice note'}
-                </span>
-                {messages.some(m => m.streaming) ? (
-                  <button
-                    type="button"
-                    onClick={() => { const s = messages.find(m => m.streaming); if (s) window.api.cancelRag?.(s.id); }}
-                    className="flex items-center gap-1.5 rounded-full border border-red-500/50 px-3 py-1 text-[11px] text-red-400 transition-colors hover:bg-red-500/10"
-                  >
-                    <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
-                    Stop generating
-                  </button>
-                ) : null}
-              </div>
-              ) : (
-              /* Unified composer block */
+              {/* Unified composer — the SAME toolbar (attach / image / project /
+                  skills / tools / memory scope / thinking) serves chat and voice
+                  mode; only the input surface (textarea vs. mic) differs. */}
               <div
                 onDragOver={(e) => { e.preventDefault(); if (!dragOver) setDragOver(true); }}
                 onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOver(false); }}
@@ -1874,16 +1844,40 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                     ))}
                   </div>
                 )}
-                <textarea
-                  ref={inputRef}
-                  value={input}
-                  onChange={e => setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  onPaste={handlePaste}
-                  rows={1}
-                  placeholder={mode === 'image' ? 'Describe an image to generate…' : activeProjectName ? `Ask about “${activeProjectName}”…` : 'Ask about your memory…'}
-                  className="max-h-52 w-full resize-none overflow-y-auto bg-transparent px-3.5 pt-3 text-sm text-neutral-200 placeholder-neutral-600 outline-none"
-                />
+                {voiceMode ? (
+                  // Voice mode: the input surface is a single mic — record a note,
+                  // it transcribes and sends. The toolbar below stays identical.
+                  <button
+                    type="button"
+                    onClick={toggleRecording}
+                    disabled={transcribing}
+                    className={`flex w-full flex-col items-center gap-2 py-5 ${transcribing ? 'cursor-default' : 'cursor-pointer'}`}
+                  >
+                    <span className={`flex h-14 w-14 items-center justify-center rounded-full border-2 transition-colors ${recording ? 'border-red-500 bg-red-500/15 text-red-400' : 'border-green-500 bg-green-500/10 text-green-500 hover:bg-green-500/20'} ${transcribing ? 'opacity-50' : ''}`}>
+                      {transcribing ? (
+                        <svg className="h-6 w-6 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                      ) : recording ? (
+                        <svg className="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+                      ) : (
+                        <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-14 0m7 7v3m0-3a4 4 0 01-4-4V5a4 4 0 018 0v6a4 4 0 01-4 4z" /></svg>
+                      )}
+                    </span>
+                    <span className="text-xs text-neutral-500">
+                      {transcribing ? 'Transcribing…' : recording ? 'Recording — tap to send' : 'Tap to record a voice note'}
+                    </span>
+                  </button>
+                ) : (
+                  <textarea
+                    ref={inputRef}
+                    value={input}
+                    onChange={e => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    onPaste={handlePaste}
+                    rows={1}
+                    placeholder={mode === 'image' ? 'Describe an image to generate…' : activeProjectName ? `Ask about “${activeProjectName}”…` : 'Ask about your memory…'}
+                    className="max-h-52 w-full resize-none overflow-y-auto bg-transparent px-3.5 pt-3 text-sm text-neutral-200 placeholder-neutral-600 outline-none"
+                  />
+                )}
                 <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-1">
                   <div className="flex items-center gap-2">
                   {/* "+" menu — attach / image / project / tools */}
@@ -1977,6 +1971,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                   </div>
 
                   <div className="flex items-center gap-1.5">
+                    {!voiceMode && (
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
@@ -1998,6 +1993,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                       </TooltipTrigger>
                       <TooltipContent>{recording ? 'Stop recording' : 'Record voice'}</TooltipContent>
                     </Tooltip>
+                    )}
                     {messages.some(m => m.streaming) && (
                       <Tooltip>
                         <TooltipTrigger asChild>
@@ -2019,7 +2015,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                         <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
                         Stop
                       </Button>
-                    ) : (
+                    ) : voiceMode ? null : (
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <Button
@@ -2039,7 +2035,6 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                   </div>
                 </div>
               </div>
-              )}
             </div>
           </div>
         </div>
