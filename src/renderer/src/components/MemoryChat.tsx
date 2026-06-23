@@ -1917,11 +1917,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
 
       {/* Settings — model params, voice, tools, connectors */}
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
-      {modelPickerOpen && (
-        <div className="absolute right-0 top-0 z-30 h-full">
-          <ModelPicker onClose={() => setModelPickerOpen(false)} />
-        </div>
-      )}
+      {modelPickerOpen && <ModelPicker onClose={() => setModelPickerOpen(false)} />}
 
       {/* Text viewer — expand a pasted/attached file's full content */}
       {viewer && (
