@@ -1532,7 +1532,10 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
 
   ipcMain.handle('tts:speak', async (_e, text: string, voice?: string) => {
       const { synthesize } = await import('./tts');
-      return synthesize(text, voice);
+      // Fall back to the user's saved voice (Settings → Voice) when none is passed.
+      let chosen = voice;
+      if (!chosen) { try { const v = getSetting<string>('ttsVoice', ''); if (v) chosen = v; } catch { /* default */ } }
+      return synthesize(text, chosen);
   });
 
   // --- Voice input (STT via bundled whisper) ------------------------------

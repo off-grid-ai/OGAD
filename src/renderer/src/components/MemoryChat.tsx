@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { ArtifactCanvas, parseArtifact, type Artifact } from './ArtifactCanvas';
 import { SkillsPanel } from './SkillsPanel';
+import { SettingsPanel } from './SettingsPanel';
 import { Button } from '@renderer/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@renderer/components/ui/dropdown-menu';
@@ -206,9 +207,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [voiceOn, setVoiceOn] = useState(false);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
-  const [llmSettingsOpen, setLlmSettingsOpen] = useState(false);
-  const [temperature, setTemperature] = useState(0.7);
-  const [ctxSize, setCtxSize] = useState(32768);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [lightbox, setLightbox] = useState<{ url: string; path?: string } | null>(null);
   const [canvasArtifact, setCanvasArtifact] = useState<Artifact | null>(null);
   const [skillsOpen, setSkillsOpen] = useState(false);
@@ -287,9 +286,6 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
       setImgModel(prev => prev || preferred);
     }).catch(() => {});
     window.api.listProjects?.().then((p: ProjectLite[]) => setProjects(p || [])).catch(() => {});
-    window.api.getLlmSettings?.().then((s: { temperature: number; ctxSize: number }) => {
-      if (s) { setTemperature(s.temperature); setCtxSize(s.ctxSize); }
-    }).catch(() => {});
     window.api.styleThumbs?.().then((t: Record<string, string>) => setStyleThumbs(t || {})).catch(() => {});
   }, []);
 
@@ -845,7 +841,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   return (
     <div
       className="flex h-full flex-col font-mono bg-neutral-950 transition-[padding] duration-200"
-      style={{ paddingRight: canvasArtifact || skillsOpen ? 'max(420px, 44vw)' : undefined }}
+      style={{ paddingRight: canvasArtifact || skillsOpen || settingsOpen ? 'max(420px, 44vw)' : undefined }}
     >
       {/* Header */}
       <header className="flex items-center gap-3 border-b border-neutral-900 px-6 py-4">
@@ -860,48 +856,17 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
         </div>
 
 
-        {/* Model settings (temperature + context window) */}
-        <div className="relative">
-          <button
-            onClick={() => setLlmSettingsOpen(o => !o)}
-            className={`rounded-md border p-1.5 transition-colors ${llmSettingsOpen ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
-            title="Model settings"
-          >
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-          </button>
-          {llmSettingsOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setLlmSettingsOpen(false)} />
-              <div className="absolute right-0 z-20 mt-1 w-72 rounded-md border border-neutral-800 bg-neutral-950 p-4 text-xs">
-                <div className="mb-3 text-[10px] uppercase tracking-wide text-neutral-500">Model settings</div>
-                <label className="mb-1 flex items-center justify-between text-neutral-400">
-                  Temperature <span className="text-green-500">{temperature.toFixed(2)}</span>
-                </label>
-                <input
-                  type="range" min={0} max={1.5} step={0.05} value={temperature}
-                  onChange={(e) => { const v = Number(e.target.value); setTemperature(v); window.api.setLlmSettings?.({ temperature: v }); }}
-                  className="mb-1 w-full accent-green-500"
-                />
-                <p className="mb-3 text-[10px] text-neutral-600">Lower = focused/deterministic, higher = creative.</p>
-                <label className="mb-1 block text-neutral-400">Context window</label>
-                <select
-                  value={ctxSize}
-                  onChange={(e) => { const v = Number(e.target.value); setCtxSize(v); window.api.setLlmSettings?.({ ctxSize: v }); }}
-                  className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-300 outline-none focus:border-green-500"
-                >
-                  <option value={8192}>8K tokens (lightest)</option>
-                  <option value={16384}>16K tokens</option>
-                  <option value={32768}>32K tokens (default)</option>
-                  <option value={65536}>64K tokens (heaviest)</option>
-                </select>
-                <p className="mt-1 text-[10px] text-neutral-600">Larger holds more history but uses more memory. Changing it reloads the model.</p>
-              </div>
-            </>
-          )}
-        </div>
+        {/* Settings — model params, voice, tools, connectors (right-side panel) */}
+        <button
+          onClick={() => setSettingsOpen(true)}
+          className={`rounded-md border p-1.5 transition-colors ${settingsOpen ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
+          title="Settings"
+        >
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        </button>
         <button
           onClick={openGallery}
           className={`rounded-md border p-1.5 transition-colors ${showGallery ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
@@ -1763,6 +1728,9 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
 
       {/* Skills — view / create / edit reusable instruction packs */}
       {skillsOpen && <SkillsPanel onClose={() => setSkillsOpen(false)} onChanged={() => window.api.listSkills?.().then(s => setSkills(s || [])).catch(() => {})} />}
+
+      {/* Settings — model params, voice, tools, connectors */}
+      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
 
       {/* Lightbox — click a generated image to enlarge, download, or delete */}
       {lightbox && (
