@@ -228,7 +228,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const [showGallery, setShowGallery] = useState(false);
   const [gallery, setGallery] = useState<{ path: string; name: string; mtime: number }[]>([]);
   const [galleryTab, setGalleryTab] = useState<'images' | 'artifacts'>('images');
-  const [galleryScope, setGalleryScope] = useState<'chat' | 'project' | 'all'>('chat');
+  const [galleryScope, setGalleryScope] = useState<'chat' | 'project' | 'all'>('all');
   const [artifacts, setArtifacts] = useState<(Artifact & { id: string; title: string; created: number })[]>([]);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
