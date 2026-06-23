@@ -213,6 +213,8 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [viewer, setViewer] = useState<{ title: string; text: string } | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
   const [lightbox, setLightbox] = useState<{ url: string; path?: string } | null>(null);
   const [canvasArtifact, setCanvasArtifact] = useState<Artifact | null>(null);
   const [skillsOpen, setSkillsOpen] = useState(false);
@@ -823,6 +825,17 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
     }
   }, [messages]);
 
+  // Edit a sent message: replace its text, drop everything after it, re-run.
+  const saveEdit = useCallback((id: string) => {
+    const text = editText.trim();
+    setEditingId(null);
+    if (!text) return;
+    const idx = messages.findIndex(m => m.id === id);
+    if (idx < 0) return;
+    setMessages(prev => prev.slice(0, idx + 1).map((m, i) => (i === idx ? { ...m, content: text } : m)));
+    void sendMessage(text, { regen: true });
+  }, [editText, messages]);
+
   // Process attached files into text (read/parse/caption/transcribe) on the main side.
   const addFiles = useCallback(async (files: FileList | File[]) => {
     for (const file of Array.from(files)) {
@@ -1127,6 +1140,22 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                           ))}
                         </div>
                       ) : null}
+                      {editingId === message.id ? (
+                        <div className="flex flex-col gap-2">
+                          <textarea
+                            autoFocus
+                            value={editText}
+                            onChange={(e) => setEditText(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(message.id); } if (e.key === 'Escape') setEditingId(null); }}
+                            rows={Math.min(10, editText.split('\n').length + 1)}
+                            className="w-full resize-none rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-100 outline-none focus:border-green-500"
+                          />
+                          <div className="flex gap-2">
+                            <button onClick={() => saveEdit(message.id)} className="rounded-md bg-green-600 px-3 py-1 text-xs text-white transition-colors hover:bg-green-500">Save & submit</button>
+                            <button onClick={() => setEditingId(null)} className="rounded-md border border-neutral-700 px-3 py-1 text-xs text-neutral-400 transition-colors hover:text-neutral-200">Cancel</button>
+                          </div>
+                        </div>
+                      ) : (
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm, remarkBreaks]}
                         components={message.role === 'assistant' ? makeCiteComponents(message.context?.unified) : markdownComponents}
@@ -1137,6 +1166,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                           // via the card below). Only the clarifying-question fence is hidden.
                           : message.content.replace(ASK_FENCE, '').replace(/\[S(\d+)\]/g, '[S$1](cite:$1)').trim()}
                       </ReactMarkdown>
+                      )}
                       {(() => {
                         if (message.role !== 'assistant') return null;
                         const art = parseArtifact(message.content);
@@ -1246,6 +1276,10 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                         <button onClick={() => regenerate(message.id)} className="flex items-center gap-1 text-[11px] text-neutral-600 transition-colors hover:text-green-500" title="Regenerate the reply to this message">
                           <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                           Resend
+                        </button>
+                        <button onClick={() => { setEditingId(message.id); setEditText(message.content); }} className="flex items-center gap-1 text-[11px] text-neutral-600 transition-colors hover:text-green-500" title="Edit this message">
+                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                          Edit
                         </button>
                       </div>
                     ) : null}
