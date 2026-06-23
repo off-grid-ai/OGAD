@@ -11,7 +11,6 @@ import {
 import {
   filterAndSort,
   parseParamCount,
-  MODEL_TYPE_OPTIONS,
   CREDIBILITY_OPTIONS,
   SIZE_OPTIONS,
   SORT_OPTIONS,
@@ -195,12 +194,13 @@ export function ModelsScreen() {
     }
     setSearching(true);
     const t = setTimeout(async () => {
-      const res = await api.searchModels?.(q);
+      // Scope the search to the focused tab's modality (text/vision/image/stt/tts).
+      const res = await api.searchModels?.(q, activeKind);
       setHfResults(res ?? []);
       setSearching(false);
     }, 400);
     return () => clearTimeout(t);
-  }, [query]);
+  }, [query, activeKind]);
 
   const list = models.filter((m) => m.kind === activeKind);
   const searchingMode = query.trim().length >= 2;
@@ -242,26 +242,38 @@ export function ModelsScreen() {
         Download models for any capability. Everything runs locally on your device.
       </p>
 
-      {/* Hugging Face search */}
-      <div className="mt-5 flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2">
+      {/* Modality tabs — always visible; they also scope the search below. */}
+      <div className="mt-5 flex gap-2 border-b border-neutral-800 pb-px">
+        {kinds.map((k) => (
+          <button
+            key={k}
+            onClick={() => setActiveKind(k)}
+            className={`px-3 py-2 text-xs uppercase tracking-wide transition-colors ${
+              activeKind === k
+                ? 'border-b-2 border-green-500 text-white'
+                : 'text-neutral-500 hover:text-neutral-300'
+            }`}
+          >
+            {KIND_LABELS[k] ?? k}
+          </button>
+        ))}
+      </div>
+
+      {/* Hugging Face search — scoped to the active tab's modality. */}
+      <div className="mt-4 flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2">
         <IconSearch className="h-4 w-4 shrink-0 text-neutral-500" />
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search Hugging Face for any GGUF model..."
+          placeholder={`Search Hugging Face for ${(KIND_LABELS[activeKind] ?? activeKind).toLowerCase()} models...`}
           className="w-full bg-transparent text-sm text-white placeholder-neutral-600 outline-none"
         />
         {searching && <IconLoader2 className="h-4 w-4 animate-spin text-neutral-500" />}
       </div>
 
-      {/* Filter + sort bar (shared @offgrid/models options) — always visible */}
+      {/* Filter + sort bar (shared @offgrid/models options) — always visible.
+          The modality tab already scopes the type, so no separate type filter. */}
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <Sel
-          value={filterState.type}
-          onChange={(v) => setFilterState((s) => ({ ...s, type: v as FilterState['type'] }))}
-          allLabel="All types"
-          options={MODEL_TYPE_OPTIONS}
-        />
         <Sel
           value={filterState.source}
           onChange={(v) => setFilterState((s) => ({ ...s, source: v as FilterState['source'] }))}
@@ -294,7 +306,7 @@ export function ModelsScreen() {
       {searchingMode ? (
         <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
           {displayed.length === 0 && !searching && (
-            <p className="text-sm text-neutral-500">No GGUF models found for "{query}".</p>
+            <p className="text-sm text-neutral-500">No {(KIND_LABELS[activeKind] ?? activeKind).toLowerCase()} models found for "{query}".</p>
           )}
           {displayed.map((r) => {
             const prog = progress[r.id];
@@ -356,21 +368,6 @@ export function ModelsScreen() {
         </div>
       ) : (
         <>
-      <div className="mt-6 flex gap-2 border-b border-neutral-800 pb-px">
-        {kinds.map((k) => (
-          <button
-            key={k}
-            onClick={() => setActiveKind(k)}
-            className={`px-3 py-2 text-xs uppercase tracking-wide transition-colors ${
-              activeKind === k
-                ? 'border-b-2 border-green-500 text-white'
-                : 'text-neutral-500 hover:text-neutral-300'
-            }`}
-          >
-            {KIND_LABELS[k] ?? k}
-          </button>
-        ))}
-      </div>
 
       <div className="mt-6 grid grid-cols-1 gap-3 lg:grid-cols-2">
         {displayedCatalog.length === 0 && (

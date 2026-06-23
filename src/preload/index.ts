@@ -129,7 +129,7 @@ try {
     // Off Grid model catalog (text, vision, image, voice, transcription)
     getModelCatalog: () => ipcRenderer.invoke('models:catalog'),
     getInstalledModels: () => ipcRenderer.invoke('models:installed'),
-    searchModels: (query: string) => ipcRenderer.invoke('models:search', query),
+    searchModels: (query: string, kind?: string) => ipcRenderer.invoke('models:search', query, kind),
     downloadModel: (modelId: string) => ipcRenderer.invoke('models:download', modelId),
     cancelModelDownload: (modelId: string) => ipcRenderer.invoke('models:cancel-download', modelId),
     setActiveModel: (modelId: string) => ipcRenderer.invoke('models:set-active', modelId),

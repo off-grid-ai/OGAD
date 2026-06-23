@@ -1388,10 +1388,11 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
   });
 
   // Search Hugging Face for GGUF models.
-  ipcMain.handle('models:search', async (_, query: string) => {
+  ipcMain.handle('models:search', async (_, query: string, kind?: string) => {
       try {
           const { searchHuggingFace } = await import('@offgrid/models');
-          return await searchHuggingFace(query, { limit: 30 });
+          const k = kind as undefined | 'text' | 'vision' | 'image' | 'voice' | 'transcription';
+          return await searchHuggingFace(query, { limit: 30, kind: k });
       } catch (err: any) {
           console.error('[Models] HF search failed:', err);
           return [];
