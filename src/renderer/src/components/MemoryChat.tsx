@@ -612,7 +612,8 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
         setMessages(prev => prev.map(m => (m.id === streamId ? { ...m, content: assistantContent, context: result.context, streaming: false } : m)));
         const art = parseArtifact(assistantContent);
         if (art) {
-          setCanvasArtifact(art); // Claude-style: open the live preview on the side, not inline.
+          // Inline-first: don't force the canvas open — the user opens the live
+          // preview via the artifact card when they want it. Still save it.
           try { void window.api.saveArtifact?.({ kind: art.kind, code: art.code }); } catch { /* ignore */ }
         }
         if (voiceOn) speakMessage(streamId, assistantContent);
@@ -1128,9 +1129,11 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                         remarkPlugins={[remarkGfm, remarkBreaks]}
                         components={message.role === 'assistant' ? makeCiteComponents(message.context?.unified) : markdownComponents}
                       >
-                        {message.role === 'assistant'
-                          ? message.content.replace(ASK_FENCE, '').replace(ARTIFACT_FENCE, '').replace(/\[S(\d+)\]/g, '[S$1](cite:$1)').trim()
-                          : message.content}
+                        {message.role !== 'assistant'
+                          ? message.content
+                          // Keep the artifact code inline (you can also open it live in the canvas
+                          // via the card below). Only the clarifying-question fence is hidden.
+                          : message.content.replace(ASK_FENCE, '').replace(/\[S(\d+)\]/g, '[S$1](cite:$1)').trim()}
                       </ReactMarkdown>
                       {(() => {
                         if (message.role !== 'assistant') return null;
