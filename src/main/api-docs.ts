@@ -51,7 +51,7 @@ export function docsHtml(port: number): string {
   </style>
 </head><body>
   <script id="api-reference" data-url="${b}/openapi.json"
-          data-configuration='{"theme":"none","darkMode":true,"hideDownloadButton":false,"defaultHttpClient":{"targetKey":"shell","clientKey":"curl"}}'></script>
+          data-configuration='{"theme":"none","darkMode":true,"hideDownloadButton":false,"defaultHttpClient":{"targetKey":"shell","clientKey":"curl"},"hiddenClients":["c","clojure","csharp","go","http","java","kotlin","objc","ocaml","php","powershell","r","ruby","swift","httpie","wget","undici","axios","ofetch","unirest","nsurlsession","asynchttp","nethttp","okhttp","restsharp","native","cohttp","webrequest","jquery","xhr"]}'></script>
   <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
 </body></html>`;
 }
