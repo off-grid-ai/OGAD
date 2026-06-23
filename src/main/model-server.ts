@@ -3,7 +3,9 @@
 // device later) points here and gets the on-device models. No cloud, no keys.
 //
 //   GET  /                       -> gateway info + live modality status
-//   GET  /v1/models              -> proxied to llama-server (text/vision models)
+//   GET  /v1/models              -> all on-device models, every modality, each
+//                                   tagged with a `kind` (chat/vision/image/
+//                                   speech/transcription)
 //   POST /v1/chat/completions    -> proxied to llama-server (text + vision-in)
 //   POST /v1/completions         -> proxied to llama-server
 //   POST /v1/embeddings          -> proxied to llama-server
@@ -25,7 +27,9 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import { desktopExtraction } from './rag/extractors';
 import * as tts from './tts';
-import { generateImage, imageGenStatus, type ImageGenParams } from './imagegen';
+import { generateImage, imageGenStatus, listImageModels, type ImageGenParams } from './imagegen';
+import { whisperModel } from './rag/extractors';
+import { getActiveModal } from './active-models';
 import { embeddings } from './embeddings';
 import { docsText, docsHtml, openApiSpec } from './api-docs';
 import { handleMcpRequest } from './mcp-server';
@@ -522,6 +526,60 @@ async function handleEmbeddings(req: http.IncomingMessage, res: http.ServerRespo
   await serve(res, rid, 'embedding', '/v1/embeddings', isAsync(req, payload), run, (result) => jsonWithId(res, rid, result));
 }
 
+// ─── Models list (all modalities) ────────────────────────────────────────────
+// llama-server's own /v1/models only knows the text/vision LLM. We fetch that,
+// then fold in the other on-device modalities (image, speech, transcription) so
+// one call shows the full local model surface. Each entry carries a non-standard
+// `kind` so a client can tell chat/vision/image/speech/transcription apart.
+function fetchUpstreamModels(): Promise<Record<string, unknown>> {
+  return new Promise((resolve) => {
+    const r = http.request(
+      { hostname: UPSTREAM_HOST, port: UPSTREAM_PORT, path: '/v1/models', method: 'GET' },
+      (pr) => {
+        let b = '';
+        pr.on('data', (d) => (b += d));
+        pr.on('end', () => { try { resolve(JSON.parse(b)); } catch { resolve({}); } });
+      }
+    );
+    r.on('error', () => resolve({}));
+    r.end();
+  });
+}
+
+async function handleModelsList(res: http.ServerResponse): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  const upstream = await fetchUpstreamModels();
+  const upData = Array.isArray(upstream.data) ? (upstream.data as Record<string, unknown>[]) : [];
+  // Tag the LLM entries chat vs vision from their advertised capabilities.
+  const text: Record<string, unknown>[] = upData.map((m) => {
+    const caps = Array.isArray(m.capabilities) ? (m.capabilities as string[]) : [];
+    return { ...m, kind: caps.includes('multimodal') || caps.includes('vision') ? 'vision' : 'chat' };
+  });
+
+  const tag = (id: string, kind: string, extra: Record<string, unknown> = {}): Record<string, unknown> =>
+    ({ id, object: 'model', created: now, owned_by: 'off-grid', kind, ...extra });
+
+  const images = listImageModels().map((id) => tag(id, 'image'));
+
+  let voices: string[] = [];
+  try { voices = await tts.listVoices(); } catch { /* TTS may be unavailable */ }
+  const activeSpeech = getActiveModal('speech');
+  const speech = activeSpeech || voices.length
+    ? [tag(activeSpeech || 'kokoro', 'speech', { voices })]
+    : [];
+
+  const wm = whisperModel();
+  const transcription = wm ? [tag(path.basename(wm), 'transcription')] : [];
+
+  const data: Record<string, unknown>[] = [...text, ...images, ...speech, ...transcription];
+  // Mirror into the ollama-style `models` array some clients read, so both shapes
+  // stay in sync.
+  const models = data.map((m) => ({
+    name: m.id, model: m.id, type: 'model', kind: m.kind,
+  }));
+  json(res, 200, { object: 'list', data, models });
+}
+
 // ─── Speech-to-text (whisper) ────────────────────────────────────────────────
 async function handleTranscription(req: http.IncomingMessage, res: http.ServerResponse, rid: string): Promise<void> {
   const ct = req.headers['content-type'] || '';
@@ -923,8 +981,10 @@ export function startModelServer(port = 7878): void {
     // Chat (text + image-to-text): buffer so we can inline remote image URLs,
     // which llama-server can't fetch itself, then forward (response still streams).
     if (url === '/v1/chat/completions' && method === 'POST') return void handleChat(req, res, rid);
+    // Full local model surface across all modalities (not just the LLM).
+    if (url === '/v1/models' && method === 'GET') return void handleModelsList(res);
 
-    // Everything else (completions/embeddings/models) -> llama-server.
+    // Everything else (completions/embeddings) -> llama-server.
     proxyToLlama(req, res);
   });
 
