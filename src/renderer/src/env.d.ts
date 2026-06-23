@@ -115,7 +115,7 @@ interface IElectronAPI {
   regenerateMasterMemory: () => Promise<string | null>
 
   // RAG Chat
-  ragChat: (query: string, appName?: string, conversationHistory?: { role: string; content: string }[], projectId?: string | null, conversationId?: string, noMemory?: boolean, streamId?: string, thinking?: boolean) => Promise<{ answer: string; context: any }>
+  ragChat: (query: string, appName?: string, conversationHistory?: { role: string; content: string }[], projectId?: string | null, conversationId?: string, noMemory?: boolean, streamId?: string, thinking?: boolean, images?: string[]) => Promise<{ answer: string; context: any }>
   onRagStream: (callback: (data: { streamId: string; type: 'content' | 'reasoning' | 'step'; text?: string; step?: any }) => void) => () => void
   cancelRag: (streamId: string) => void
 
@@ -142,10 +142,10 @@ interface IElectronAPI {
   deleteMemory: (memoryId: number) => Promise<boolean>
 
   // Artifacts library
-  saveArtifact: (a: { kind: 'html' | 'svg' | 'mermaid' | 'react'; code: string; title?: string }) => Promise<{ id: string; kind: 'html' | 'svg' | 'mermaid' | 'react'; code: string; title: string; created: number }>
-  listArtifacts: () => Promise<{ id: string; kind: 'html' | 'svg' | 'mermaid' | 'react'; code: string; title: string; created: number }[]>
+  saveArtifact: (a: { kind: 'html' | 'svg' | 'mermaid' | 'react'; code: string; title?: string; conversationId?: string; projectId?: string | null }) => Promise<{ id: string; kind: 'html' | 'svg' | 'mermaid' | 'react'; code: string; title: string; created: number }>
+  listArtifacts: (scope?: { conversationId?: string; projectId?: string | null }) => Promise<{ id: string; kind: 'html' | 'svg' | 'mermaid' | 'react'; code: string; title: string; created: number; conversationId?: string; projectId?: string | null }[]>
   deleteArtifact: (id: string) => Promise<boolean>
-  processFile: (bytes: ArrayBuffer, name: string) => Promise<{ name: string; kind: 'text' | 'pdf' | 'docx' | 'image' | 'audio' | 'video'; text: string }>
+  processFile: (bytes: ArrayBuffer, name: string) => Promise<{ name: string; kind: 'text' | 'pdf' | 'docx' | 'image' | 'audio' | 'video'; text: string; path?: string }>
 
   // Skills
   listSkills: () => Promise<{ name: string; description: string }[]>
@@ -161,10 +161,8 @@ interface IElectronAPI {
   // Events
   onWatcherData: (callback: (data: any) => void) => () => void
   onPermissionDenied: (callback: () => void) => () => void
-  onNewMessages: (callback: (data: any) => void) => () => void
-  onNewMemory: (callback: (data: any) => void) => () => void
-  onNewEntity: (callback: (data: any) => void) => () => void
-  onSummaryGenerated: (callback: (data: any) => void) => () => void
+  onNewApproval: (callback: (data: { approvalId: number; title: string; detail: string; entityName: string | null }) => void) => () => void
+  onNewAction: (callback: (data: { actionId: number; text: string; due: string | null; entityName: string | null; sourceApp: string }) => void) => () => void
   onReprocessProgress: (callback: (data: ReprocessProgress) => void) => () => void
 
   // Permission APIs

@@ -24,8 +24,8 @@ try {
     regenerateMasterMemory: () => ipcRenderer.invoke('db:regenerate-master-memory'),
 
     // RAG Chat - updated to support conversation history + live streaming
-    ragChat: (query: string, appName?: string, conversationHistory?: { role: string; content: string }[], projectId?: string | null, conversationId?: string, noMemory?: boolean, streamId?: string, thinking?: boolean) =>
-      ipcRenderer.invoke('rag:chat', query, appName, conversationHistory, projectId, conversationId, noMemory, streamId, thinking),
+    ragChat: (query: string, appName?: string, conversationHistory?: { role: string; content: string }[], projectId?: string | null, conversationId?: string, noMemory?: boolean, streamId?: string, thinking?: boolean, images?: string[]) =>
+      ipcRenderer.invoke('rag:chat', query, appName, conversationHistory, projectId, conversationId, noMemory, streamId, thinking, images),
     // Live token/reasoning/step events for an in-flight ragChat (matched by streamId).
     onRagStream: (callback: (data: { streamId: string; type: 'content' | 'reasoning' | 'step'; text?: string; step?: unknown }) => void) => {
       const sub = (_: unknown, data: { streamId: string; type: 'content' | 'reasoning' | 'step'; text?: string; step?: unknown }) => callback(data)
@@ -92,26 +92,17 @@ try {
       return () => ipcRenderer.removeListener('watcher:permission-denied', subscription)
     },
     
-    // Notification Events
-    onNewMessages: (callback: (data: { sessionId: string; appName: string; chatTitle: string; count: number }) => void) => {
+    // Notification Events — only the things that need the user's attention:
+    // proactive approvals queued, and new to-dos extracted.
+    onNewApproval: (callback: (data: { approvalId: number; title: string; detail: string; entityName: string | null }) => void) => {
       const subscription = (_: any, data: any) => callback(data)
-      ipcRenderer.on('notification:new-messages', subscription)
-      return () => ipcRenderer.removeListener('notification:new-messages', subscription)
+      ipcRenderer.on('notification:new-approval', subscription)
+      return () => ipcRenderer.removeListener('notification:new-approval', subscription)
     },
-    onNewMemory: (callback: (data: { sessionId: string; memoryContent: string }) => void) => {
+    onNewAction: (callback: (data: { actionId: number; text: string; due: string | null; entityName: string | null; sourceApp: string }) => void) => {
       const subscription = (_: any, data: any) => callback(data)
-      ipcRenderer.on('notification:new-memory', subscription)
-      return () => ipcRenderer.removeListener('notification:new-memory', subscription)
-    },
-    onNewEntity: (callback: (data: { entityId: number; entityName: string; entityType: string }) => void) => {
-      const subscription = (_: any, data: any) => callback(data)
-      ipcRenderer.on('notification:new-entity', subscription)
-      return () => ipcRenderer.removeListener('notification:new-entity', subscription)
-    },
-    onSummaryGenerated: (callback: (data: { sessionId: string; chatTitle: string }) => void) => {
-      const subscription = (_: any, data: any) => callback(data)
-      ipcRenderer.on('notification:summary-generated', subscription)
-      return () => ipcRenderer.removeListener('notification:summary-generated', subscription)
+      ipcRenderer.on('notification:new-action', subscription)
+      return () => ipcRenderer.removeListener('notification:new-action', subscription)
     },
     
     // Permission APIs

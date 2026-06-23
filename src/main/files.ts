@@ -7,6 +7,7 @@
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
+import { app } from 'electron';
 import { desktopExtraction as ex } from './rag/extractors';
 
 const IMAGE_EXT = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'heic'];
@@ -17,6 +18,7 @@ export interface ProcessedFile {
   name: string;
   kind: 'text' | 'pdf' | 'docx' | 'image' | 'audio' | 'video';
   text: string;
+  path?: string; // for images: a persisted copy so it can be sent to the vision model
 }
 
 export async function processUpload(name: string, bytes: ArrayBuffer | Uint8Array): Promise<ProcessedFile> {
@@ -26,8 +28,14 @@ export async function processUpload(name: string, bytes: ArrayBuffer | Uint8Arra
   await fs.promises.writeFile(tmp, Buffer.from(bytes as ArrayBuffer));
   try {
     if (IMAGE_EXT.includes(ext)) {
-      const text = ex.captionImage ? await ex.captionImage(tmp) : '';
-      return { name, kind: 'image', text };
+      // Persist the image so the chat can pass the ACTUAL image to the multimodal
+      // model (not just a caption). Caption too, as a text fallback.
+      const dir = path.join(app.getPath('userData'), 'uploads');
+      await fs.promises.mkdir(dir, { recursive: true });
+      const dest = path.join(dir, `${Date.now()}-${safe}`);
+      await fs.promises.copyFile(tmp, dest);
+      const text = ex.captionImage ? await ex.captionImage(dest).catch(() => '') : '';
+      return { name, kind: 'image', text, path: dest };
     }
     if (AUDIO_EXT.includes(ext)) {
       if (!ex.transcribeAudio) throw new Error('Transcription runtime not available.');

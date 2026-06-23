@@ -79,6 +79,7 @@ type Attachment = {
   name: string;
   kind: 'text' | 'pdf' | 'docx' | 'image' | 'audio' | 'video' | 'pasted';
   text: string;
+  path?: string; // images: persisted path passed to the vision model
   status: 'loading' | 'ready' | 'error';
 };
 
@@ -445,11 +446,13 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
     const regen = opts?.regen ?? false;
     // Attachments (pasted blocks + processed files) ride along only on a normal
     // send from the composer, not on resend/regenerate/example.
-    const atts = isInput ? attachments.filter(a => a.status === 'ready' && a.text) : [];
+    const atts = isInput ? attachments.filter(a => a.status === 'ready' && (a.text || a.path)) : [];
     const typed = (override ?? input).trim();
     // The user sees `trimmed`; the model also gets the attachment text folded in.
     const trimmed = typed || (atts.length ? `(${atts.length} attachment${atts.length > 1 ? 's' : ''})` : '');
-    const attBlock = atts.map(a => `--- attached ${a.kind}: ${a.name} ---\n${a.text}`).join('\n\n');
+    const attBlock = atts.filter(a => a.text).map(a => `--- attached ${a.kind}: ${a.name} ---\n${a.text}`).join('\n\n');
+    // Actual image files go to the multimodal model (not just their captions).
+    const imagePaths = atts.filter(a => a.kind === 'image' && a.path).map(a => a.path as string);
     let modelQuery = (attBlock ? `${attBlock}\n\n${typed}` : typed).trim();
     if (!typed && atts.length === 0) return;
     // Don't block the user — if a generation is in flight, queue this message and
@@ -587,7 +590,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
       // (matched by streamId in the onRagStream subscription).
       const streamId = `a-${Date.now()}`;
       setMessages(prev => [...prev, { id: streamId, role: 'assistant', content: '', reasoning: '', streaming: true }]);
-      const result = await window.api.ragChat(modelQuery, 'All', history, activeProjectId, convId, noMemory && !activeProjectId, streamId, thinkingEnabled);
+      const result = await window.api.ragChat(modelQuery, 'All', history, activeProjectId, convId, noMemory && !activeProjectId, streamId, thinkingEnabled, imagePaths);
       const assistantContent = result.answer || 'No response returned.';
 
       // The model decided this is an image request — replace the streamed turn
@@ -818,8 +821,11 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
       try {
         const buf = await file.arrayBuffer();
         const res = await window.api.processFile?.(buf, file.name);
+        // Images are "ready" if we have the file path (even with no caption), so the
+        // actual image still gets sent to the vision model.
+        const ok = !!res && (!!res.text || (res.kind === 'image' && !!res.path));
         setAttachments(prev => prev.map(a => a.id === id
-          ? { ...a, kind: (res?.kind as Attachment['kind']) || 'text', text: res?.text || '', status: res && res.text ? 'ready' : 'error' }
+          ? { ...a, kind: (res?.kind as Attachment['kind']) || 'text', text: res?.text || '', path: res?.path, status: ok ? 'ready' : 'error' }
           : a));
       } catch (e) {
         console.error('process file failed', e);

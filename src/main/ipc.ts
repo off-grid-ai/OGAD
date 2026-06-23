@@ -177,16 +177,17 @@ async function streamAnswer(
     streamId: string | undefined,
     prompt: string,
     thinking: boolean = false,
+    images: string[] = [],
 ): Promise<string> {
     const { llm } = await import('./llm');
     if (!streamId || !event?.sender) {
-        return (await llm.chat(prompt, [], 300000, 2048, { disableThinking: !thinking })).trim();
+        return (await llm.chat(prompt, images, 300000, 2048, { disableThinking: !thinking })).trim();
     }
     const sender = event.sender;
     const controller = new AbortController();
     streamControllers.set(streamId, controller);
     try {
-        const answer = await llm.chatStream(prompt, [], (text, kind) => {
+        const answer = await llm.chatStream(prompt, images, (text, kind) => {
             try { sender.send('rag:stream', { streamId, type: kind, text }); } catch { /* window gone */ }
         }, { thinking, signal: controller.signal });
         return answer.trim();
@@ -586,7 +587,8 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
       streamControllers.get(streamId)?.abort();
   });
 
-  ipcMain.handle('rag:chat', async (event, query: string, appName?: string, conversationHistory?: { role: string; content: string }[], projectId?: string | null, conversationId?: string, noMemory?: boolean, streamId?: string, thinking?: boolean) => {
+  ipcMain.handle('rag:chat', async (event, query: string, appName?: string, conversationHistory?: { role: string; content: string }[], projectId?: string | null, conversationId?: string, noMemory?: boolean, streamId?: string, thinking?: boolean, images?: string[]) => {
+      const imgs = images || [];
       // Build/generate request — handled FIRST, before any memory branch, so it
       // always gets the artifact prompt (even in No-memory mode). A lean, direct
       // prompt: the small model otherwise narrates setup steps instead of building.
@@ -607,7 +609,7 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
               `User: ${query}`,
               'Assistant:',
           ].filter(Boolean).join('\n\n');
-          const answer = await streamAnswer(event, streamId, prompt, thinking);
+          const answer = await streamAnswer(event, streamId, prompt, thinking, imgs);
           return { answer, context: undefined };
       }
 
@@ -626,7 +628,7 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
               'Assistant:',
           ].filter(Boolean).join('\n\n');
           void llm; // retained for non-stream fallback inside streamAnswer
-          const answer = await streamAnswer(event, streamId, prompt, thinking);
+          const answer = await streamAnswer(event, streamId, prompt, thinking, imgs);
           return { answer, context: undefined };
       }
 
@@ -657,7 +659,7 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
               .join('\n\n');
           void llm; // retained for non-stream fallback inside streamAnswer
           if (streamId) event.sender?.send('rag:stream', { streamId, type: 'step', step: { kind: 'project', counts: { sources: search.chunks.length, projectChats: siblings.length } } });
-          const answer = await streamAnswer(event, streamId, prompt, thinking);
+          const answer = await streamAnswer(event, streamId, prompt, thinking, imgs);
           return {
               answer,
               context: {
@@ -845,7 +847,7 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
 
       try {
           if (streamId) event.sender?.send('rag:stream', { streamId, type: 'step', step: { kind: 'memory', counts: { memories: memories.length, messages: messages.length, summaries: summaries.length, entities: entities.length, facts: entityFacts.length, unified: unifiedHits.length } } });
-          const answer = await streamAnswer(event, streamId, prompt, thinking);
+          const answer = await streamAnswer(event, streamId, prompt, thinking, imgs);
           return {
               answer,
               context: {
