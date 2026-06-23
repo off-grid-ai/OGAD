@@ -3,10 +3,22 @@ import { ChatList } from './components/ChatList';
 import { ChatDetail } from './components/ChatDetail';
 import { MemoryList } from './components/MemoryList';
 import { EntityList } from './components/EntityList';
+import { EntitiesScreen } from './components/EntitiesScreen';
+import { SearchScreen, type SearchHit } from './components/SearchScreen';
+import { CommandPalette } from './components/CommandPalette';
+import logo from './assets/logo.png';
+import { useMeetingRecorder } from './useMeetingRecorder';
+import { DayView } from './components/DayView';
+import { ReplayScreen } from './components/ReplayScreen';
+import { ReflectScreen } from './components/ReflectScreen';
+import { ActionsScreen } from './components/ActionsScreen';
+import { ConnectorsScreen } from './components/ConnectorsScreen';
+import { MeetingsScreen } from './components/MeetingsScreen';
 import { EntityGraph } from './components/EntityGraph';
 import { MemoryChat } from './components/MemoryChat';
 import { Settings } from './components/Settings';
-import { Dashboard } from './components/Dashboard';
+import { ModelsScreen } from './components/ModelsScreen';
+import { ProjectsScreen } from './components/ProjectsScreen';
 import { Onboarding } from './components/Onboarding';
 import { NotificationList } from './components/NotificationList';
 import { PermissionGate } from './components/PermissionGate';
@@ -24,14 +36,24 @@ import {
   IconUsers,
   IconGraph,
   IconSparkles,
-  IconLayoutDashboard,
   IconBell,
-  IconSettings
+  IconSettings,
+  IconDownload,
+  IconFolders,
+  IconCalendar,
+  IconSearch,
+  IconMovie,
+  IconChartPie,
+  IconChecklist,
+  IconPlug,
+  IconChevronLeft,
+  IconVideo,
+  IconLoader2
 } from '@tabler/icons-react';
 import { cn } from './lib/utils';
 import { usePostHog } from 'posthog-js/react';
 
-type ViewMode = 'dashboard' | 'chats' | 'memories' | 'entities' | 'graph' | 'memory-chat' | 'notifications' | 'settings';
+type ViewMode = 'dashboard' | 'day' | 'replay' | 'reflect' | 'actions' | 'connectors' | 'meetings' | 'chats' | 'memories' | 'entities' | 'graph' | 'memory-chat' | 'models' | 'projects' | 'notifications' | 'settings' | 'search';
 
 // Navigation state type for history tracking
 interface NavigationState {
@@ -91,11 +113,54 @@ function AppContent() {
   const { addNotification, unreadCount } = useNotifications();
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState<boolean | null>(null);
 
-  const [viewMode, setViewMode] = useState<ViewMode>('dashboard');
+  const [viewMode, setViewMode] = useState<ViewMode>('day');
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [selectedMemoryId, setSelectedMemoryId] = useState<number | null>(null);
   const [selectedEntityId, setSelectedEntityId] = useState<number | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [replayTarget, setReplayTarget] = useState<number | null>(null);
+  // Target chat to open in the main Chat screen (from the Projects tab): an
+  // existing conversation, or a request to start a new chat scoped to a project.
+  const [chatTarget, setChatTarget] = useState<{ conversationId?: string; projectId?: string } | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [meetingPlatform, setMeetingPlatform] = useState<string | null>(null);
+  const rec = useMeetingRecorder();
+
+  // Proactive: a Zoom/Meet/Teams call detected → AUTO-record (visible indicator
+  // in-app + menu bar keeps it transparent).
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const api = (window as any).api;
+    const offDetected = api.onMeetingDetected?.((platform: string) => {
+      setMeetingPlatform(platform);
+      rec.start(platform);
+    });
+    const offEnded = api.onMeetingEnded?.(() => {
+      setMeetingPlatform(null);
+      rec.stop(); // call ended → finish + transcribe
+    });
+    const offStop = api.onMeetingStop?.(() => rec.stop()); // from the menu-bar tray
+    // Catch a call that was ALREADY in progress when this window loaded — the
+    // detector's edge broadcast can fire before the renderer is listening, so we
+    // ask main for the current state once on mount and auto-record if active.
+    void (async () => {
+      try {
+        const st = await api.meetingGetState?.();
+        if (st?.active && !rec.recording) {
+          setMeetingPlatform(st.platform ?? 'meeting');
+          rec.start(st.platform ?? undefined);
+        }
+      } catch { /* ignore */ }
+    })();
+    return () => { offDetected?.(); offEnded?.(); offStop?.(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Mirror recording state to main so the menu-bar tray can show it.
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).api.meetingSetRecording?.(rec.recording);
+  }, [rec.recording]);
 
   // Navigation history stacks (back and forward)
   const navigationHistory = useRef<NavigationState[]>([]);
@@ -112,14 +177,22 @@ function AppContent() {
   useEffect(() => {
     const path = window.location.pathname;
     const viewMap: Record<string, ViewMode> = {
-      '/': 'dashboard',
-      '/dashboard': 'dashboard',
+      '/': 'day',
+      '/day': 'day',
+      '/replay': 'replay',
+      '/reflect': 'reflect',
+      '/actions': 'actions',
+      '/connectors': 'connectors',
+      '/meetings': 'meetings',
       '/chat': 'memory-chat',
       '/chats': 'chats',
       '/memories': 'memories',
       '/entities': 'entities',
       '/graph': 'graph',
+      '/models': 'models',
+      '/projects': 'projects',
       '/notifications': 'notifications',
+      '/search': 'search',
       '/settings': 'settings'
     };
 
@@ -131,13 +204,22 @@ function AppContent() {
   // Update browser URL when view mode changes
   useEffect(() => {
     const urlMap: Record<ViewMode, string> = {
-      'dashboard': '/',
+      'day': '/day',
+      'replay': '/replay',
+      'reflect': '/reflect',
+      'actions': '/actions',
+      'connectors': '/connectors',
+      'meetings': '/meetings',
+      'dashboard': '/dashboard',
       'memory-chat': '/chat',
       'chats': '/chats',
       'memories': '/memories',
       'entities': '/entities',
       'graph': '/graph',
+      'models': '/models',
+      'projects': '/projects',
       'notifications': '/notifications',
+      'search': '/search',
       'settings': '/settings'
     };
 
@@ -303,6 +385,25 @@ function AppContent() {
     setSelectedEntityId(entityId);
   }, []);
 
+  // Universal-search result → jump to the exact thing: open its source URL, the
+  // owning entity/memory/meeting, or seek Replay to that captured moment.
+  const handleOpenHit = useCallback((hit: SearchHit) => {
+    if (hit.url) { window.open(hit.url, '_blank'); return; }
+    if (hit.kind === 'entity' || hit.kind === 'fact') { handleSelectEntity(hit.refId); return; }
+    if (hit.kind === 'memory') { handleSelectMemory(hit.refId); return; }
+    if (hit.kind === 'meeting') { setViewMode('meetings'); return; }
+    setReplayTarget(hit.ts || null); // screen capture → seek Replay to that frame
+    setViewMode('replay');
+  }, [handleSelectEntity, handleSelectMemory]);
+
+  const openSearch = useCallback((q: string) => { setSearchQuery(q); setViewMode('search'); }, []);
+
+  // Open a project chat in the main Chat screen (existing convo or new-in-project).
+  const handleOpenProjectChat = useCallback((target: { conversationId?: string; projectId?: string }) => {
+    setChatTarget(target);
+    setViewMode('memory-chat');
+  }, []);
+
   // Global keyboard shortcuts for back/forward navigation (Cmd+[ and Cmd+])
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -329,12 +430,17 @@ function AppContent() {
   }
 
   const navItems = [
-    { label: 'Dashboard', icon: <IconLayoutDashboard className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'dashboard' as ViewMode },
-    { label: 'Chats', icon: <IconMessages className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'chats' as ViewMode },
-    { label: 'Memories', icon: <IconBrain className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'memories' as ViewMode },
+    { label: 'Search', icon: <IconSearch className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'search' as ViewMode },
+    { label: 'Day', icon: <IconCalendar className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'day' as ViewMode },
+    { label: 'Replay', icon: <IconMovie className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'replay' as ViewMode },
+    { label: 'Reflect', icon: <IconChartPie className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'reflect' as ViewMode },
+    { label: 'Meetings', icon: <IconVideo className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'meetings' as ViewMode },
+    { label: 'Actions', icon: <IconChecklist className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'actions' as ViewMode },
+    { label: 'Integrations', icon: <IconPlug className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'connectors' as ViewMode },
     { label: 'Entities', icon: <IconUsers className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'entities' as ViewMode },
-    { label: 'Graph', icon: <IconGraph className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'graph' as ViewMode },
+    { label: 'Projects', icon: <IconFolders className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'projects' as ViewMode },
     { label: 'Chat', icon: <IconMessageCircle className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'memory-chat' as ViewMode },
+    { label: 'Models', icon: <IconDownload className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'models' as ViewMode },
     {
       label: 'Notifications',
       icon: (
@@ -354,6 +460,23 @@ function AppContent() {
 
   return (
     <div className="h-screen w-full overflow-hidden bg-neutral-950 relative">
+      <CommandPalette onOpenHit={handleOpenHit} onSeeAll={openSearch} />
+      {/* Recording indicator — auto-records detected meetings; always visible. */}
+      {(rec.recording || rec.busy) && (
+        <button
+          onClick={() => rec.recording && rec.stop()}
+          className="absolute left-1/2 top-4 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border border-red-500/40 bg-neutral-900/95 px-3.5 py-1.5 font-mono text-xs text-neutral-200 shadow-xl backdrop-blur hover:border-red-500"
+        >
+          {rec.busy ? (
+            <><IconLoader2 className="h-3.5 w-3.5 animate-spin text-neutral-400" /> Transcribing meeting…</>
+          ) : (
+            <>
+              <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
+              Recording {meetingPlatform === 'zoom' ? 'Zoom' : meetingPlatform === 'teams' ? 'Teams' : meetingPlatform === 'meet' ? 'Meet' : 'meeting'} · {Math.floor(rec.elapsed / 60)}:{String(rec.elapsed % 60).padStart(2, '0')} · click to stop
+            </>
+          )}
+        </button>
+      )}
       {/* Background effects */}
       <StarsBackground className="absolute inset-0 z-0" />
       <ShootingStars />
@@ -363,21 +486,20 @@ function AppContent() {
         <Sidebar open={sidebarOpen} setOpen={setSidebarOpen}>
           <SidebarBody className="justify-between gap-10 bg-neutral-900/80 backdrop-blur-xl border-r border-neutral-800">
             <div className="flex flex-col flex-1 overflow-y-auto overflow-x-hidden">
-              {/* Logo */}
-              <div className="flex items-center gap-2 py-2">
-                <div className="h-8 w-8 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center justify-center shrink-0">
-                  <IconSparkles className="h-4 w-4 text-neutral-400" />
-                </div>
+              {/* Logo + open/close toggle (the whole row toggles the sidebar) */}
+              <button onClick={() => setSidebarOpen((o) => !o)} className="flex items-center gap-2 py-2 w-full" title={sidebarOpen ? 'Collapse' : 'Expand'}>
+                <img src={logo} alt="Off Grid" className="h-8 w-8 shrink-0 rounded-lg" />
                 <motion.span
                   animate={{
                     display: sidebarOpen ? 'inline-block' : 'none',
                     opacity: sidebarOpen ? 1 : 0,
                   }}
-                  className="font-semibold text-white whitespace-pre"
+                  className="flex-1 text-left font-semibold text-white whitespace-pre"
                 >
-                  My Memories
+                  Off Grid AI Desktop
                 </motion.span>
-              </div>
+                {sidebarOpen && <IconChevronLeft className="h-4 w-4 shrink-0 text-neutral-500" />}
+              </button>
 
               {/* Navigation */}
               <div className="mt-8 flex flex-col gap-2">
@@ -386,7 +508,7 @@ function AppContent() {
                     key={item.view}
                     onClick={() => {
                       posthog.capture('button_clicked', { button_name: 'navigation_' + item.view })
-                      setViewMode(item.view); setSelectedSessionId(null); setSelectedMemoryId(null); setSelectedEntityId(null);
+                      setViewMode(item.view); setSelectedSessionId(null); setSelectedMemoryId(null); setSelectedEntityId(null); setReplayTarget(null);
                     }}
                     className={cn(
                       "flex items-center gap-2 py-2 px-2 rounded-lg transition-colors group/sidebar",
@@ -454,30 +576,44 @@ function AppContent() {
                   transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
                   className="p-6 h-full overflow-y-auto"
                 >
-                  {viewMode === 'dashboard' ? (
-                    <Dashboard
-                      onSelectChat={handleSelectChat}
-                      onSelectMemory={handleSelectMemory}
-                      onSelectEntity={handleSelectEntity}
-                    />
+                  {viewMode === 'day' ? (
+                    <DayView />
+                  ) : viewMode === 'replay' ? (
+                    <ReplayScreen seekToMs={replayTarget ?? undefined} />
+                  ) : viewMode === 'reflect' ? (
+                    <ReflectScreen />
+                  ) : viewMode === 'actions' ? (
+                    <ActionsScreen />
+                  ) : viewMode === 'connectors' ? (
+                    <ConnectorsScreen />
+                  ) : viewMode === 'meetings' ? (
+                    <MeetingsScreen rec={rec} />
                   ) : viewMode === 'memory-chat' ? (
                     <MemoryChat
                       onNavigateToMemory={handleSelectMemory}
                       onNavigateToChat={handleSelectChat}
                       onNavigateToEntity={handleSelectEntity}
+                      openTarget={chatTarget}
+                      onTargetConsumed={() => setChatTarget(null)}
                     />
                   ) : viewMode === 'chats' ? (
                     <ChatList onSelectSession={setSelectedSessionId} />
                   ) : viewMode === 'memories' ? (
                     <MemoryList selectedMemoryId={selectedMemoryId} onClearSelection={() => setSelectedMemoryId(null)} />
                   ) : viewMode === 'entities' ? (
-                    <EntityList selectedEntityId={selectedEntityId} onClearSelection={() => setSelectedEntityId(null)} />
+                    <EntitiesScreen />
+                  ) : viewMode === 'search' ? (
+                    <SearchScreen initialQuery={searchQuery} onOpen={handleOpenHit} />
                   ) : viewMode === 'notifications' ? (
                     <NotificationList
                       onSelectChat={handleSelectChat}
                       onSelectMemory={handleSelectMemory}
                       onSelectEntity={handleSelectEntity}
                     />
+                  ) : viewMode === 'models' ? (
+                    <ModelsScreen />
+                  ) : viewMode === 'projects' ? (
+                    <ProjectsScreen onOpenChat={handleOpenProjectChat} />
                   ) : viewMode === 'settings' ? (
                     <Settings />
                   ) : (

@@ -41,6 +41,11 @@ const SOURCES_SQL = `
   SELECT 'sum:'||rowid, 'meeting', rowid, summary, 'Meeting', '', 0
     FROM chat_summaries WHERE summary IS NOT NULL
   UNION ALL
+  SELECT 'mtg:'||id, 'meeting', id,
+         COALESCE(title,'Meeting')||'. '||COALESCE(summary, substr(transcript,1,2000)),
+         'Meeting', '', COALESCE(started_at,0)
+    FROM meetings WHERE COALESCE(summary, transcript) IS NOT NULL
+  UNION ALL
   SELECT 'mem:'||id, 'memory', id, content, COALESCE(source_app,''), '', 0
     FROM memories WHERE content IS NOT NULL
   UNION ALL
@@ -184,9 +189,26 @@ function keywordHits(query: string, perSource: number): RawHit[][] {
       m,
       perSource
     ),
+    // Recorded meeting transcripts (no FTS table) — LIKE over title/summary/transcript.
+    likeMeetingHits(query, perSource),
     // Raw frame OCR via LIKE — catches exact on-screen words dropped from the summary.
     likeFrameHits(query, perSource),
   ];
+}
+
+function likeMeetingHits(query: string, limit: number): RawHit[] {
+  const terms = (query.toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).slice(0, 6);
+  if (!terms.length) return [];
+  const where = terms.map(() => '(lower(title) LIKE ? OR lower(summary) LIKE ? OR lower(transcript) LIKE ?)').join(' AND ');
+  const args = terms.flatMap((t) => [`%${t}%`, `%${t}%`, `%${t}%`]);
+  return getDB()
+    .prepare(
+      `SELECT 'mtg:'||id AS key, 'meeting' AS kind, id AS refId, COALESCE(title,'Meeting') AS title,
+              substr(COALESCE(summary, transcript),1,300) AS snippet, 'Meeting' AS surface, NULL AS url,
+              COALESCE(started_at,0) AS ts
+         FROM meetings WHERE ${where} ORDER BY started_at DESC LIMIT ?`
+    )
+    .all(...args, limit) as RawHit[];
 }
 
 // Frames have no FTS index; match raw OCR text on all tokens (AND), newest first.
