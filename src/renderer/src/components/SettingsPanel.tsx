@@ -31,7 +31,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [tools, setTools] = useState<{ name: string; description: string }[]>([]);
   const [connectors, setConnectors] = useState<Connector[]>([]);
   const [newConn, setNewConn] = useState({ name: '', url: '' });
-  const [speaking, setSpeaking] = useState(false);
+  const [voiceState, setVoiceState] = useState<'idle' | 'generating' | 'playing' | 'error'>('idle');
 
   useEffect(() => {
     window.api.getLlmSettings?.().then((v: LlmSettings) => setS(v || {})).catch(() => {});
@@ -57,13 +57,21 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   };
 
   const testVoice = async (): Promise<void> => {
-    setSpeaking(true);
+    setVoiceState('generating');
     try {
-      const { dataUrl } = await window.api.speak('This is the Off Grid voice.', voice);
-      const audio = new Audio(dataUrl);
-      audio.onended = () => setSpeaking(false);
+      const res = await window.api.speak('This is the Off Grid voice.', voice);
+      if (!res?.dataUrl) throw new Error('No audio returned');
+      const audio = new Audio(res.dataUrl);
+      audio.onended = () => setVoiceState('idle');
+      audio.onerror = () => { console.error('[voice] playback error', audio.error); setVoiceState('error'); };
+      // Safety: never get stuck if onended doesn't fire.
+      audio.onloadedmetadata = () => setTimeout(() => setVoiceState(s => (s === 'playing' ? 'idle' : s)), (audio.duration + 1) * 1000);
+      setVoiceState('playing');
       await audio.play();
-    } catch { setSpeaking(false); }
+    } catch (e) {
+      console.error('[voice] test failed', e);
+      setVoiceState('error');
+    }
   };
 
   const addConnector = async (): Promise<void> => {
@@ -133,9 +141,10 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 {(voices.length ? voices : [voice]).map(v => <option key={v} value={v}>{v}</option>)}
               </select>
             </Row>
-            <button onClick={testVoice} disabled={speaking} className="rounded-md bg-green-600 px-3 py-1.5 text-xs text-white transition-colors hover:bg-green-500 disabled:opacity-40">
-              {speaking ? 'Playing…' : 'Test voice'}
+            <button onClick={testVoice} disabled={voiceState === 'generating' || voiceState === 'playing'} className="rounded-md bg-green-600 px-3 py-1.5 text-xs text-white transition-colors hover:bg-green-500 disabled:opacity-40">
+              {voiceState === 'generating' ? 'Generating…' : voiceState === 'playing' ? 'Playing…' : 'Test voice'}
             </button>
+            {voiceState === 'error' ? <span className="ml-2 text-[11px] text-red-400">Couldn’t play — check the console.</span> : null}
           </>
         )}
 
