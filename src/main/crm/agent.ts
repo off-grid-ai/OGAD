@@ -14,6 +14,12 @@ import { proposeApproval, listApprovals } from './approvals';
 import { getAhead } from './ahead';
 import { getDB } from '../database';
 import { listMeetings } from '../meetings';
+import { getIdentity } from '../identity';
+
+// Automated / promotional / transactional mail never needs a personal reply —
+// keep it out of the secretary's context so it doesn't propose "reply to the
+// Supabase security alert" or "draft a response to the newsletter".
+const AUTOMATED_RE = /no-?reply|noreply|notification|unsubscribe|newsletter|digest| via |do not reply|automated|verify your|confirm your|reset your password|sign in to|security (?:alert|issue|vulnerab|notif)|invoice|receipt|payment (?:failed|declined|received)|your (?:subscription|order|account)|% off|sale ends|webinar|register now|spam (?:report|folder)/i;
 
 interface ToolEntry { connector: string; tool: string; description: string }
 
@@ -72,7 +78,13 @@ export async function proposeActions(nowSec: number): Promise<{ proposed: number
   }
 
   const view = getAhead(nowSec);
-  const emails = getDB().prepare(`SELECT summary FROM observations WHERE surface = 'Gmail' ORDER BY ts DESC LIMIT 12`).all() as { summary: string }[];
+  const ident = getIdentity();
+  const meLabel = [ident.name, ...ident.aliases].filter(Boolean).join(', ') || 'me';
+  // Real correspondence only — drop automated/promotional mail before it ever
+  // reaches the model, so it can't propose replying to a security alert.
+  const emails = (getDB().prepare(`SELECT summary FROM observations WHERE surface = 'Gmail' ORDER BY ts DESC LIMIT 25`).all() as { summary: string }[])
+    .filter((e) => e.summary && !AUTOMATED_RE.test(e.summary))
+    .slice(0, 12);
   // Recent calls — a meeting that just happened is prime material for a CRM note,
   // a follow-up task, or a recap email. Feed the secretary the title + summary.
   const weekAgoMs = (nowSec - 7 * 86400) * 1000;
@@ -87,17 +99,20 @@ export async function proposeActions(nowSec: number): Promise<{ proposed: number
 
   const prompt = `You are my proactive personal secretary. You can use the TOOLS listed below (and ONLY those). Looking at my context, propose a few concrete, genuinely useful actions that move things forward.
 
+WHO I AM: I am ${ident.name || 'the user'} — also referred to as: ${meLabel}; my email is ${ident.email || '(unknown)'}. These all mean ME.
+- NEVER draft a message TO me, never create a task to "meet/call/speak with/follow up with" me, never treat any of my own names as a contact or recipient. An email from me, or only involving me, is not something to reply to.
+
 What GOOD looks like:
-- Draft a reply to an email that's clearly waiting on my response.
+- After a CALL (see RECENT CALLS): log it in the CRM — add a note to the relevant company/person in Attio with the key points + next steps, and/or create a follow-up task. If a recap/next-step email is owed to the OTHER side, draft it. Use the OTHER people/company named in the call (never me).
+- Draft a reply to a real email from another person that's clearly waiting on my response.
 - Turn an open to-do into the right action (create the task/issue, draft the message to the person).
 - A follow-up I'd otherwise forget.
-- After a CALL (see RECENT CALLS): log it in the CRM — e.g. add a note to the relevant company/person in Attio with the key points + next steps, and/or create a follow-up task. If a recap or next-step email is owed to the other side, draft it. Use the people/company named in the call summary.
 
 Rules:
 - Every action MUST use one of the listed tools, with connector + tool names EXACTLY as written.
-- Do NOT duplicate things that already exist — e.g. do NOT "schedule"/create a calendar event that is already in TODAY'S MEETINGS. They are already on my calendar.
+- Only act on REAL correspondence/people. Skip anything automated/promotional (security alerts, newsletters, notifications, receipts, no-reply) — it never needs a personal reply or a task.
+- Do NOT duplicate things that already exist — e.g. do NOT create a calendar event already in TODAY'S MEETINGS, and never propose two actions about the same person/topic — pick one.
 - Fill "args" with values grounded ONLY in the context — never invent emails, times, names, or IDs that aren't present. If you can't fill the required args from context, skip that action.
-- No duplicates: never propose two actions that accomplish the same thing (e.g. two drafts to the same person about the same topic) — pick one.
 - Quality over quantity: 1-4 strong proposals, or zero if nothing is genuinely worth doing.
 - Each action is a PROPOSAL — I review and approve before anything runs.
 
@@ -156,10 +171,15 @@ ${mail}`;
     return kept.some((k) => k.c === connector.toLowerCase() && k.t === tool.toLowerCase() && jaccard(k.toks, toks) >= 0.6);
   };
 
+  // Backstop: drop anything aimed at ME (the model occasionally still proposes
+  // "draft reply to Mac"). Strong self-names only (not the ambiguous "ali").
+  const selfTarget = /\b(mac|mohammed|chherawalla|alichherawalla)\b/i;
+
   let n = 0;
   for (const a of actions) {
     const entry = catalog.find((t) => t.connector === a.connector && t.tool === a.tool);
     if (!entry || !a.title) continue;
+    if (selfTarget.test(a.title)) { console.log(`[secretary] dropped self-directed: ${a.title}`); continue; }
     if (isDup(entry.connector, entry.tool, a.title)) continue;
     kept.push({ c: entry.connector.toLowerCase(), t: entry.tool.toLowerCase(), toks: tokSet(a.title) });
     proposeApproval({
