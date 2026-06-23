@@ -64,13 +64,9 @@ export function ArtifactCanvas({ artifact, onClose, width, onResize }: { artifac
 
   useEffect(() => {
     let alive = true;
-    console.log('[canvas] loading runtime for kind=', artifact.kind, 'codeLen=', artifact.code.length, 'api?', !!window.api?.artifactRuntime);
     window.api.artifactRuntime?.(artifact.kind)
-      .then((r: Record<string, string>) => {
-        console.log('[canvas] runtime resolved keys=', Object.keys(r || {}), 'reactBytes=', (r?.react || '').length, 'reactDomBytes=', (r?.reactDom || '').length, 'babelBytes=', (r?.babel || '').length);
-        if (alive) setRuntime(r || {});
-      })
-      .catch((e) => { console.error('[canvas] artifactRuntime FAILED', e); if (alive) setRuntime({}); });
+      .then((r: Record<string, string>) => { if (alive) setRuntime(r || {}); })
+      .catch(() => { if (alive) setRuntime({}); });
     return () => { alive = false; };
   }, [artifact.kind]);
 
