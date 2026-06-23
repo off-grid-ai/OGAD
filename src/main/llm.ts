@@ -42,7 +42,7 @@ export class LLMService {
   // User-tunable inference settings (persisted). Context window needs a server
   // respawn to take effect (it's a launch arg); temperature is per-request.
   private temperature = 0.7;
-  private ctxSize = 32768;
+  private ctxSize = 65536; // 64k — gemma-4 trains to 131k, so this is safe headroom and stops "context exceeded"
   // Advanced sampling (LM Studio-style). undefined = let llama.cpp use its default.
   private topP: number | undefined;
   private topK: number | undefined;

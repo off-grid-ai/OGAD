@@ -42,19 +42,24 @@ function toolScore(name: string): number {
 
 // Cap the catalog so the proposer prompt stays small/fast and the local model can
 // reason well — keep the top-ranked action tools across connectors.
-async function buildToolCatalog(limit = 24): Promise<ToolEntry[]> {
+// Per-connector so EVERY active integration is represented in the secretary's
+// prompt — a global cap would silently drop whole tools (e.g. Jira/Notion) and the
+// secretary could never act on them. Each connector contributes its top action
+// tools (ranked toward draft/send/create); the 64k context easily holds them all.
+async function buildToolCatalog(perConnector = 16): Promise<ToolEntry[]> {
   const out: ToolEntry[] = [];
   for (const c of listConnectors().filter((c) => c.enabled)) {
     try {
-      const tools = await fetchTools(c.id);
-      for (const t of tools) {
-        if (isActionTool(t.name)) out.push({ connector: c.name, tool: t.name, description: (t.description ?? '').slice(0, 100) });
-      }
+      const tools = (await fetchTools(c.id))
+        .filter((t) => isActionTool(t.name))
+        .sort((a, b) => toolScore(b.name) - toolScore(a.name))
+        .slice(0, perConnector);
+      for (const t of tools) out.push({ connector: c.name, tool: t.name, description: (t.description ?? '').slice(0, 100) });
     } catch {
       /* connector unreachable — skip */
     }
   }
-  return out.sort((a, b) => toolScore(b.tool) - toolScore(a.tool)).slice(0, limit);
+  return out;
 }
 
 function extractJson(s: string): string {
@@ -97,6 +102,31 @@ export async function proposeActions(nowSec: number): Promise<{ proposed: number
   // Full summary (not truncated) so a proposed CRM note can be PRECISE — name the
   // real people/company and the actual points, not "the developer".
   const calls = recentMeetings.map((m) => `- ${m.title ?? 'Meeting'}: ${(m.summary ?? '').slice(0, 800)}`).join('\n') || '(none)';
+
+  // Recent activity from EVERY connected tool (Jira, Linear, Slack, Notion, Attio,
+  // …) — so the secretary is proactive across all of them, not just email. Pull a
+  // few recent items per connector surface (Gmail/Calendar already have their own
+  // blocks). The dynamic tool catalog already exposes their ACTIONs; this gives the
+  // grounding DATA to propose them.
+  const connSurfaces = listConnectors()
+    .filter((c) => c.enabled)
+    .map((c) => c.name)
+    .filter((n) => n && !/gmail|google calendar/i.test(n));
+  let toolActivity = '(none)';
+  if (connSurfaces.length) {
+    const ph = connSurfaces.map(() => '?').join(',');
+    const rows = getDB()
+      .prepare(`SELECT surface, summary FROM observations WHERE surface IN (${ph}) AND summary IS NOT NULL ORDER BY ts DESC LIMIT 80`)
+      .all(...connSurfaces) as { surface: string; summary: string }[];
+    const bySurface = new Map<string, string[]>();
+    for (const r of rows) {
+      const arr = bySurface.get(r.surface) ?? [];
+      if (arr.length < 4 && !AUTOMATED_RE.test(r.summary)) arr.push(r.summary.slice(0, 150));
+      bySurface.set(r.surface, arr);
+    }
+    const blocks = [...bySurface.entries()].filter(([, v]) => v.length).map(([s, v]) => `${s}:\n${v.map((i) => `  - ${i}`).join('\n')}`);
+    if (blocks.length) toolActivity = blocks.join('\n');
+  }
   const toolList = catalog.map((t) => `- ${t.connector} / ${t.tool}: ${t.description}`.slice(0, 220)).join('\n');
 
   const prompt = `You are my proactive personal secretary. You can use the TOOLS listed below (and ONLY those). Looking at my context, propose a few concrete, genuinely useful actions that move things forward.
@@ -108,6 +138,7 @@ What GOOD looks like:
 - After a CALL (see RECENT CALLS): log it in the CRM — add a note to the relevant company/person in Attio with the key points + next steps, and/or create a follow-up task. If a recap/next-step email is owed to the OTHER side, draft it. Use the OTHER people/company named in the call (never me).
 - Draft a reply to a real email from another person that's clearly waiting on my response.
 - Turn an open to-do into the right action (create the task/issue, draft the message to the person).
+- Act across ALL my tools, not just email: e.g. create a Jira/Linear issue for a bug or task surfaced in RECENT TOOL ACTIVITY, schedule a Google Calendar event for something that needs a slot, reply in Slack, add a Notion page — whatever the data warrants, using the matching tool.
 - A follow-up I'd otherwise forget.
 
 Rules:
@@ -132,6 +163,9 @@ ${todos}
 
 RECENT CALLS (just happened — consider a CRM note / follow-up task / recap email):
 ${calls}
+
+RECENT TOOL ACTIVITY (from my connected tools — propose actions grounded in these too):
+${toolActivity}
 
 RECENT EMAILS:
 ${mail}`;
