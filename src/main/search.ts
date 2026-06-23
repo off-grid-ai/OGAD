@@ -115,6 +115,20 @@ export async function searchStatus(): Promise<{ vectors: number; pending: number
   return { vectors: await vectorCount(), pending: pendingCount() };
 }
 
+/** Data sources available to filter by (surfaces seen, busiest first, + meetings). */
+export function searchSources(): { source: string; count: number }[] {
+  const db = getDB();
+  const rows = db
+    .prepare(
+      `SELECT surface AS source, COUNT(*) AS count FROM observations
+        WHERE surface IS NOT NULL AND surface != '' GROUP BY surface ORDER BY count DESC LIMIT 20`
+    )
+    .all() as { source: string; count: number }[];
+  const mtg = db.prepare('SELECT COUNT(*) AS c FROM meetings').get() as { c: number };
+  if (mtg.c) rows.push({ source: 'Meeting', count: mtg.c });
+  return rows;
+}
+
 // ---------------------------------------------------------------------------
 // Query: keyword (FTS5) + semantic (LanceDB), fused with RRF
 // ---------------------------------------------------------------------------
@@ -250,11 +264,16 @@ function thumbFor(hit: RawHit): string | null {
 }
 
 /** Hybrid universal search. `semantic` adds the LanceDB pass (slower first call). */
-export async function universalSearch(query: string, opts: { limit?: number; semantic?: boolean } = {}): Promise<SearchResult[]> {
+export async function universalSearch(
+  query: string,
+  opts: { limit?: number; semantic?: boolean; sources?: string[] } = {}
+): Promise<SearchResult[]> {
   const q = query.trim();
   if (!q) return [];
   const limit = opts.limit ?? 30;
-  const perSource = Math.min(40, limit + 10);
+  // When filtering by source, cast a wider net per source so enough survive the filter.
+  const perSource = opts.sources?.length ? 80 : Math.min(40, limit + 10);
+  const sourceSet = opts.sources?.length ? new Set(opts.sources.map((s) => s.toLowerCase())) : null;
 
   const lists = keywordHits(q, perSource);
   if (opts.semantic !== false) {
@@ -289,7 +308,9 @@ export async function universalSearch(query: string, opts: { limit?: number; sem
     });
   }
 
-  const ranked = Array.from(fused.values()).sort((a, b) => b.score - a.score).slice(0, limit);
+  let ordered = Array.from(fused.values()).sort((a, b) => b.score - a.score);
+  if (sourceSet) ordered = ordered.filter((r) => sourceSet.has((r.surface || '').toLowerCase()));
+  const ranked = ordered.slice(0, limit);
   for (const r of ranked) r.imagePath = thumbFor({ key: r.key, kind: r.kind, refId: r.refId } as RawHit);
   return ranked;
 }

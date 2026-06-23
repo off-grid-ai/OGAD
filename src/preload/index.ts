@@ -236,9 +236,10 @@ try {
       ipcRenderer.invoke('crm:entity-record', entityId, opts),
     crmObservationFrames: (observationId: number) => ipcRenderer.invoke('crm:observation-frames', observationId),
     crmSearch: (query: string, entityId?: number) => ipcRenderer.invoke('crm:search', query, entityId),
-    universalSearch: (query: string, opts?: { limit?: number; semantic?: boolean }) =>
+    universalSearch: (query: string, opts?: { limit?: number; semantic?: boolean; sources?: string[] }) =>
       ipcRenderer.invoke('search:universal', query, opts),
     searchStatus: () => ipcRenderer.invoke('search:status'),
+    searchSources: () => ipcRenderer.invoke('search:sources'),
     searchReindex: () => ipcRenderer.invoke('search:reindex'),
     crmDayActivity: (startSec: number, endSec: number) => ipcRenderer.invoke('crm:day-activity', startSec, endSec),
     crmAhead: (nowSec?: number) => ipcRenderer.invoke('crm:ahead', nowSec),
