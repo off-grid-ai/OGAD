@@ -196,10 +196,15 @@ app.whenReady().then(() => {
       if (range) {
         const m = /bytes=(\d*)-(\d*)/.exec(range);
         const start = m && m[1] ? parseInt(m[1], 10) : 0;
-        const end = m && m[2] ? parseInt(m[2], 10) : stat.size - 1;
-        if (start >= stat.size || start > end) {
+        const reqEnd = m && m[2] ? parseInt(m[2], 10) : stat.size - 1;
+        if (start >= stat.size || start > reqEnd) {
           return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${stat.size}` } });
         }
+        // Cap each response to a chunk. Streaming an entire ~1GB recording in one
+        // open-ended ("bytes=0-") response stalls/dies partway in Electron; bounding
+        // it makes the <video> element pull sequential chunks (robust + seekable).
+        const MAX_CHUNK = 4 * 1024 * 1024;
+        const end = Math.min(reqEnd, start + MAX_CHUNK - 1, stat.size - 1);
         const stream = fs.createReadStream(p, { start, end });
         return new Response(Readable.toWeb(stream) as unknown as ReadableStream, {
           status: 206,
