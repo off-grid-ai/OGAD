@@ -536,6 +536,8 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
           model: imgModel || undefined,
           initImage: imgInit || undefined,
           strength: imgInit ? imgStrength : undefined,
+          conversationId: activeConversationId || undefined,
+          projectId: activeProjectId,
         });
         const assistantMessage: ChatMessage = {
           id: `a-${Date.now()}`,
@@ -609,7 +611,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
         const imgPrompt = imgMatch[1].trim();
         setMessages(prev => prev.map(m => (m.id === streamId ? { ...m, content: 'Generating image…', reasoning: undefined, streaming: false } : m)));
         try {
-          const img = await window.api.generateImage({ prompt: imgPrompt });
+          const img = await window.api.generateImage({ prompt: imgPrompt, conversationId: convId, projectId: activeProjectId });
           setMessages(prev => prev.map(m => (m.id === streamId ? { ...m, content: `Generated: ${imgPrompt.slice(0, 80)}`, image: img.dataUrl, imagePath: img.path } : m)));
           try { await window.api.addRagMessage(convId, 'assistant', `Generated: ${imgPrompt.slice(0, 80)}`, { image: img.path }); } catch (_) { /* ignore */ }
         } catch (err) {
@@ -745,10 +747,10 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   }, [speakingId, speakLoadingId]);
 
   const refreshGallery = useCallback(async () => {
-    try { setGallery((await window.api.listGeneratedImages?.()) || []); } catch (e) { console.error(e); }
     const scope = galleryScope === 'chat' ? { conversationId: activeConversationId || '__none__' }
       : galleryScope === 'project' ? { projectId: activeProjectId }
       : undefined;
+    try { setGallery((await window.api.listGeneratedImages?.(scope)) || []); } catch (e) { console.error(e); }
     try { setArtifacts((await window.api.listArtifacts?.(scope)) || []); } catch (e) { console.error(e); }
   }, [galleryScope, activeConversationId, activeProjectId]);
 
@@ -1920,6 +1922,18 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                 </button>
               ))}
             </div>
+            <div className="flex items-center gap-1 border-b border-neutral-900 px-3 py-1.5">
+              {(['chat', 'project', 'all'] as const).map(sc => (
+                <button
+                  key={sc}
+                  onClick={() => setGalleryScope(sc)}
+                  disabled={sc === 'project' && !activeProjectId}
+                  className={`rounded px-2 py-0.5 text-[10px] capitalize transition-colors disabled:opacity-30 ${galleryScope === sc ? 'bg-neutral-800 text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
+                >
+                  {sc === 'chat' ? 'This chat' : sc}
+                </button>
+              ))}
+            </div>
             <div className="flex-1 overflow-y-auto p-3">
               {galleryTab === 'images' ? (
                 gallery.length === 0 ? (
@@ -1939,18 +1953,6 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                 )
               ) : (
                 <>
-                  <div className="mb-2 flex items-center gap-1">
-                    {(['chat', 'project', 'all'] as const).map(sc => (
-                      <button
-                        key={sc}
-                        onClick={() => setGalleryScope(sc)}
-                        disabled={sc === 'project' && !activeProjectId}
-                        className={`rounded px-2 py-0.5 text-[10px] capitalize transition-colors disabled:opacity-30 ${galleryScope === sc ? 'bg-neutral-800 text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
-                      >
-                        {sc === 'chat' ? 'This chat' : sc}
-                      </button>
-                    ))}
-                  </div>
                   {artifacts.length === 0 ? (
                     <p className="py-10 text-center text-xs text-neutral-600">No artifacts in this {galleryScope === 'all' ? 'app' : galleryScope}.</p>
                   ) : (

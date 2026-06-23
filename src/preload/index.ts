@@ -169,7 +169,7 @@ try {
     // --- On-device image generation (stable-diffusion.cpp) ---
     imageGenStatus: () => ipcRenderer.invoke('imagegen:status'),
     cancelImageGen: () => ipcRenderer.invoke('imagegen:cancel'),
-    listGeneratedImages: () => ipcRenderer.invoke('imagegen:list'),
+    listGeneratedImages: (scope?: { conversationId?: string; projectId?: string | null }) => ipcRenderer.invoke('imagegen:list', scope),
     styleThumbs: () => ipcRenderer.invoke('imagegen:style-thumbs'),
     makeStyleThumb: (key: string, prompt: string) => ipcRenderer.invoke('imagegen:make-style-thumb', key, prompt),
     listLoras: () => ipcRenderer.invoke('imagegen:list-loras'),
@@ -200,6 +200,8 @@ try {
       initImage?: string
       strength?: number
       loras?: { name: string; weight: number }[]
+      conversationId?: string
+      projectId?: string | null
     }) => ipcRenderer.invoke('imagegen:generate', params),
 
     // --- Projects + RAG (knowledge bases) + project chat ---

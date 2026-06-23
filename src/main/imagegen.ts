@@ -9,6 +9,7 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { llm } from './llm';
+import { isMfluxModelId, mfluxAvailable, getMfluxModel, runMflux, cancelMflux, MFLUX_MODELS } from './mflux';
 
 function binRoots(): string[] {
   return app.isPackaged
@@ -71,21 +72,31 @@ export function listImageModels(): string[] {
   };
   const coreml = files.filter((f) => isCoreMLModelDir(path.join(dir, f)));
   const checkpoints = files.filter(isImage);
-  return [...coreml, ...checkpoints];
+  // MLX (mflux) models are virtual ids (mlx/…), not files in the models dir.
+  // Appended last so the sd-cli default (Z-Image) stays the preferred pick.
+  // mflux fetches its own weights from HF on first use (cached in userData).
+  const mlx = mfluxAvailable() ? MFLUX_MODELS.map((m) => m.id) : [];
+  return [...coreml, ...checkpoints, ...mlx];
 }
 
 /** All generated images on disk, newest first (excludes step-preview files). */
-export function listGeneratedImages(): { path: string; name: string; mtime: number }[] {
+export function listGeneratedImages(scope?: { conversationId?: string; projectId?: string | null }): { path: string; name: string; mtime: number; conversationId?: string; projectId?: string | null }[] {
   const dir = path.join(app.getPath('userData'), 'generated-images');
   try {
-    return fs
+    let all = fs
       .readdirSync(dir)
       .filter((f) => /\.png$/i.test(f) && !f.startsWith('preview-'))
       .map((f) => {
         const p = path.join(dir, f);
-        return { path: p, name: f, mtime: fs.statSync(p).mtimeMs };
+        // Optional sidecar with chat/project scope, written by the ipc handler.
+        let meta: { conversationId?: string; projectId?: string | null } = {};
+        try { meta = JSON.parse(fs.readFileSync(`${p}.json`, 'utf8')); } catch { /* no sidecar */ }
+        return { path: p, name: f, mtime: fs.statSync(p).mtimeMs, conversationId: meta.conversationId, projectId: meta.projectId ?? null };
       })
       .sort((a, b) => b.mtime - a.mtime);
+    if (scope?.conversationId) all = all.filter((r) => r.conversationId === scope.conversationId);
+    else if (scope?.projectId) all = all.filter((r) => r.projectId === scope.projectId);
+    return all;
   } catch {
     return [];
   }
@@ -131,6 +142,78 @@ export async function generateStyleThumb(key: string, prompt: string): Promise<s
   return dest;
 }
 
+// --- LoRA adapters -----------------------------------------------------------
+// LoRAs live in userData/models/loras as .safetensors. sd-cli applies them via
+// the `--lora-model-dir` flag + `<lora:NAME:WEIGHT>` syntax injected into the
+// prompt (NAME = filename without extension). Our checkpoints are quantized, so
+// sd-cli auto-selects "at_runtime" apply mode (compatible, slightly slower).
+function loraDir(): string {
+  return path.join(modelsDir(), 'loras');
+}
+
+export interface LoraInfo {
+  /** Filename without extension — the NAME used in <lora:NAME:weight>. */
+  name: string;
+  /** Display label (name with separators tidied). */
+  label: string;
+  file: string;
+  sizeBytes: number;
+}
+
+/** List installed LoRA adapters. */
+export function listLoras(): LoraInfo[] {
+  const dir = loraDir();
+  const out: LoraInfo[] = [];
+  try {
+    for (const f of fs.readdirSync(dir)) {
+      if (!/\.(safetensors|ckpt|gguf|pt)$/i.test(f)) continue;
+      const name = f.replace(/\.(safetensors|ckpt|gguf|pt)$/i, '');
+      let sizeBytes = 0;
+      try { sizeBytes = fs.statSync(path.join(dir, f)).size; } catch { /* ignore */ }
+      out.push({ name, label: name.replace(/[_-]+/g, ' '), file: path.join(dir, f), sizeBytes });
+    }
+  } catch { /* dir doesn't exist yet */ }
+  return out.sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/** Absolute path to the LoRA folder (created on demand) — for "reveal in Finder". */
+export function ensureLoraDir(): string {
+  const dir = loraDir();
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/** Download a LoRA .safetensors into the LoRA folder (HF resolve URLs, follows redirects). */
+export async function downloadLora(
+  url: string,
+  filename: string,
+  onProgress?: (pct: number) => void,
+): Promise<string> {
+  const dir = ensureLoraDir();
+  const dest = path.join(dir, filename);
+  if (fs.existsSync(dest) && fs.statSync(dest).size > 0) return dest;
+  const res = await fetch(url); // Electron main = Node 18+, follows redirects (HF → CDN)
+  if (!res.ok || !res.body) throw new Error(`Download failed: HTTP ${res.status}`);
+  const total = Number(res.headers.get('content-length') || 0);
+  const tmp = `${dest}.part`;
+  const out = fs.createWriteStream(tmp);
+  let received = 0;
+  const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      out.write(Buffer.from(value));
+      received += value.length;
+      if (total && onProgress) onProgress(Math.round((received / total) * 100));
+    }
+  } finally {
+    await new Promise<void>((r) => out.end(r));
+  }
+  fs.renameSync(tmp, dest);
+  return dest;
+}
+
 /** Find a companion file (text encoder / vae) in the models dir by pattern. */
 function findInModels(re: RegExp): string | null {
   try {
@@ -167,8 +250,9 @@ const DEFAULT_NEGATIVE =
 /** Whether image generation is usable right now (binary + at least one model). */
 export function imageGenStatus(): { available: boolean; models: string[]; reason?: string } {
   const models = listImageModels();
-  if (!findSdCli()) return { available: false, models, reason: 'sd-cli binary not found' };
-  if (!models.length) return { available: false, models, reason: 'no Stable Diffusion model installed' };
+  // Available if EITHER runtime is usable: sd-cli (with a model) or MLX/mflux.
+  if (!findSdCli() && !mfluxAvailable()) return { available: false, models, reason: 'no image runtime found' };
+  if (!models.length) return { available: false, models, reason: 'no image model installed' };
   return { available: true, models };
 }
 
@@ -185,6 +269,8 @@ export interface ImageGenParams {
   /** Local path to an init image for img2img. */
   initImage?: string;
   strength?: number;
+  /** LoRA adapters to apply: name (filename w/o ext) + weight (e.g. 0.8). */
+  loras?: { name: string; weight: number }[];
 }
 
 export interface ImageGenOutput {
@@ -206,12 +292,13 @@ let cancelled = false;
 
 /** Kill an in-progress generation. Returns true if one was running. */
 export function cancelImageGen(): boolean {
+  cancelMflux(); // no-op if mflux isn't the active runtime
   if (currentChild) {
     cancelled = true;
     currentChild.kill('SIGKILL');
     return true;
   }
-  return false;
+  return running; // mflux gen has no currentChild but sets running
 }
 
 export async function generateImage(
@@ -220,6 +307,50 @@ export async function generateImage(
 ): Promise<ImageGenOutput> {
   if (running) throw new Error('An image is already generating — please wait for it to finish.');
   if (!params.prompt?.trim()) throw new Error('A prompt is required.');
+
+  // --- MLX / mflux runtime branch (FLUX / Z-Image with native LoRA) ----------
+  // Self-contained: reuses the single-flight guard + llm.pause()/resume() (so
+  // the LLM and image model never coexist on Apple Silicon unified memory), then
+  // delegates the spawn to the mflux module. Returns before the sd-cli path.
+  if (isMfluxModelId(params.model)) {
+    const def = getMfluxModel(params.model)!;
+    const outDir = path.join(app.getPath('userData'), 'generated-images');
+    fs.mkdirSync(outDir, { recursive: true });
+    const outPath = path.join(outDir, `img-${String(Date.now())}.png`);
+    running = true;
+    cancelled = false;
+    try { llm.pause(); } catch { /* ignore */ }
+    await new Promise((r) => setTimeout(r, 2500));
+    try {
+      await runMflux(
+        {
+          prompt: params.prompt,
+          model: params.model!,
+          width: params.width,
+          height: params.height,
+          steps: params.steps,
+          seed: params.seed,
+          // mflux --lora-paths wants a full path or HF repo (not a bare name like
+          // sd-cli's --lora-model-dir). Resolve a bare filename to the loras dir;
+          // pass absolute paths and HF repo ids (contain '/') through unchanged.
+          loras: (params.loras ?? []).map((l) => {
+            if (path.isAbsolute(l.name) || l.name.includes('/')) return l;
+            const local = path.join(loraDir(), /\.(safetensors|ckpt|gguf|pt)$/i.test(l.name) ? l.name : `${l.name}.safetensors`);
+            return fs.existsSync(local) ? { ...l, name: local } : l;
+          }),
+        },
+        outPath,
+        (p) => onProgress?.({ step: p.step, total: p.total, secPerStep: p.secPerStep }),
+      );
+      if (!fs.existsSync(outPath)) throw new Error('MLX generation produced no output file.');
+      const b64 = fs.readFileSync(outPath).toString('base64');
+      return { dataUrl: `data:image/png;base64,${b64}`, path: outPath, seed: params.seed ?? -1, model: def.label };
+    } finally {
+      running = false;
+      currentChild = null;
+      llm.resume();
+    }
+  }
 
   // img2img: if the caller didn't pin a size, match the init image's dimensions
   // (rounded to /64). Avoids silently upscaling a 512px input to the model's 1024
@@ -264,6 +395,25 @@ export async function generateImage(
       `Not enough memory to run ${path.basename(model)} (~${modelGb.toFixed(1)}GB) on this ${totalGb.toFixed(0)}GB machine. ` +
       `Pick a lighter image model (e.g. SDXL-Lightning or SD 1.5) in the image options.`
     );
+  }
+
+  // LoRA adapters: inject <lora:NAME:WEIGHT> into the prompt (Core ML helper
+  // doesn't support LoRA, so skip there). The --lora-model-dir flag is added to
+  // the sd-cli args below.
+  const loras = (params.loras || []).filter((l) => l.name && Number.isFinite(l.weight));
+  if (!coreml && loras.length) {
+    // HARD LIMIT: stable-diffusion.cpp can only merge a LoRA into FULL-PRECISION
+    // (f16/f32) weights. Our shipped checkpoints are quantized (q8_0 / Q4_K) to
+    // save disk, and the LoRA merge then aborts the binary (Metal: unsupported
+    // op CPY/ADD; CPU: GGML_ASSERT src1->type == F32). Fail with a clear message
+    // instead of crash-aborting. Re-enable once an f16 base model ships.
+    if (/[._-]q\d/i.test(path.basename(model))) {
+      throw new Error(
+        `LoRAs can't be applied to "${path.basename(model)}" — it's a quantized model, and the image engine can only merge a LoRA into a full-precision (f16) model. LoRA support needs a non-quantized base model (not yet shipped).`
+      );
+    }
+    const tags = loras.map((l) => `<lora:${l.name}:${l.weight}>`).join(' ');
+    params.prompt = `${params.prompt} ${tags}`;
   }
 
   const outDir = path.join(app.getPath('userData'), 'generated-images');
@@ -349,6 +499,11 @@ export async function generateImage(
     if (params.initImage) {
       args.push('-i', params.initImage, '--strength', String(params.strength ?? 0.75));
     }
+  }
+
+  // Point sd-cli at the LoRA folder so the <lora:NAME:weight> tags resolve.
+  if (!coreml && loras.length) {
+    args.push('--lora-model-dir', loraDir());
   }
 
   running = true;

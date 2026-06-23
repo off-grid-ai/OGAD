@@ -1397,11 +1397,19 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
       return imageGenStatus();
   });
 
-  ipcMain.handle('imagegen:generate', async (e, params: import('./imagegen').ImageGenParams) => {
+  ipcMain.handle('imagegen:generate', async (e, params: import('./imagegen').ImageGenParams & { conversationId?: string; projectId?: string | null }) => {
       const { generateImage } = await import('./imagegen');
-      return generateImage(params, (p) => {
+      const result = await generateImage(params, (p) => {
           try { e.sender.send('imagegen:progress', p); } catch { /* window gone */ }
       });
+      // Write a scope sidecar so the gallery can filter images by chat/project.
+      try {
+          if (result?.path && (params.conversationId || params.projectId)) {
+              const fsp = await import('fs');
+              fsp.writeFileSync(`${result.path}.json`, JSON.stringify({ conversationId: params.conversationId, projectId: params.projectId ?? null }));
+          }
+      } catch { /* best effort */ }
+      return result;
   });
 
   ipcMain.handle('imagegen:cancel', async () => {
@@ -1409,9 +1417,9 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
       return cancelImageGen();
   });
 
-  ipcMain.handle('imagegen:list', async () => {
+  ipcMain.handle('imagegen:list', async (_e, scope?: { conversationId?: string; projectId?: string | null }) => {
       const { listGeneratedImages } = await import('./imagegen');
-      return listGeneratedImages();
+      return listGeneratedImages(scope);
   });
 
   ipcMain.handle('imagegen:style-thumbs', async () => {
