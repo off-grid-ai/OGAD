@@ -5,6 +5,7 @@ import remarkBreaks from 'remark-breaks';
 import { ArtifactCanvas, parseArtifact, type Artifact } from './ArtifactCanvas';
 import { SkillsPanel } from './SkillsPanel';
 import { SettingsPanel } from './SettingsPanel';
+import { ModelPicker } from './ModelPicker';
 import { Button } from '@renderer/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@renderer/components/ui/dropdown-menu';
@@ -215,6 +216,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const [speakingId, setSpeakingId] = useState<string | null>(null);
   const [speakLoadingId, setSpeakLoadingId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [viewer, setViewer] = useState<{ title: string; text: string } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -785,7 +787,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   // Right-side panels are mutually exclusive — opening one closes the others so
   // they never overlap (one common docked panel slot).
   const closePanels = useCallback(() => {
-    setCanvasArtifact(null); setSkillsOpen(false); setSettingsOpen(false); setViewer(null); setShowGallery(false);
+    setCanvasArtifact(null); setSkillsOpen(false); setSettingsOpen(false); setViewer(null); setShowGallery(false); setModelPickerOpen(false);
   }, []);
   const openCanvas = useCallback((a: Artifact) => { closePanels(); setCanvasArtifact(a); }, [closePanels]);
 
@@ -917,7 +919,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   return (
     <div
       className="flex h-full flex-col font-mono bg-neutral-950 transition-[padding] duration-200"
-      style={{ paddingRight: canvasArtifact || skillsOpen || settingsOpen || viewer || showGallery ? 'max(420px, 44vw)' : undefined }}
+      style={{ paddingRight: canvasArtifact || skillsOpen || settingsOpen || viewer || showGallery || modelPickerOpen ? 'max(420px, 44vw)' : undefined }}
     >
       {/* Header */}
       <header className="flex items-center gap-3 border-b border-neutral-900 px-6 py-4">
@@ -931,6 +933,18 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
           <p className="truncate text-xs text-neutral-500">Private, on-device — ask your memory or generate images</p>
         </div>
 
+
+        {/* Active models — pick the model per modality (text/image/voice/STT) */}
+        <button
+          onClick={() => { closePanels(); setModelPickerOpen(true); }}
+          className={`rounded-md border p-1.5 transition-colors ${modelPickerOpen ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
+          title="Active models"
+        >
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <rect x="4" y="4" width="16" height="16" rx="2" strokeWidth={2} />
+            <path strokeLinecap="round" strokeWidth={2} d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2" />
+          </svg>
+        </button>
 
         {/* Settings — model params, voice, tools, connectors (right-side panel) */}
         <button
@@ -1903,6 +1917,11 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
 
       {/* Settings — model params, voice, tools, connectors */}
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+      {modelPickerOpen && (
+        <div className="absolute right-0 top-0 z-30 h-full">
+          <ModelPicker onClose={() => setModelPickerOpen(false)} />
+        </div>
+      )}
 
       {/* Text viewer — expand a pasted/attached file's full content */}
       {viewer && (

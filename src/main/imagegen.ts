@@ -10,6 +10,7 @@ import fs from 'fs';
 import os from 'os';
 import { llm } from './llm';
 import { isMfluxModelId, mfluxAvailable, getMfluxModel, runMflux, cancelMflux, MFLUX_MODELS } from './mflux';
+import { getActiveModal } from './active-models';
 
 function binRoots(): string[] {
   return app.isPackaged
@@ -233,6 +234,12 @@ function resolveModel(preferred?: string): string | null {
   }
   const sd = listImageModels();
   if (!sd.length) return null;
+  // User-chosen image model is the default when the caller didn't request one.
+  const chosen = getActiveModal('image');
+  if (chosen) {
+    if (fs.existsSync(path.join(dir, chosen))) return path.join(dir, chosen);
+    if (sd.includes(chosen)) return path.join(dir, chosen); // mlx/virtual id
+  }
   // Preference: Z-Image-Turbo (2026 flagship, fast, great quality/byte) >
   // SDXL-Lightning > SDXL > SD 2.1 > anything else.
   const zimage = sd.find((f) => /z[-_]?image/i.test(f));

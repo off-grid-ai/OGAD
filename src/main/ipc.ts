@@ -1407,6 +1407,27 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
       }
   });
 
+  // Per-modality active model for the stateless runtimes (image / speech / STT).
+  // The text/vision chat LLM keeps models:set-active (it reloads llama-server);
+  // these just record the chosen id for the runtime to read on its next call.
+  ipcMain.handle('models:set-active-modal', async (_, kind: string, modelId: string | null) => {
+      const { setActiveModal } = await import('./active-models');
+      if (kind === 'image' || kind === 'speech' || kind === 'transcription') {
+          setActiveModal(kind as 'image' | 'speech' | 'transcription', modelId);
+          return { success: true };
+      }
+      return { success: false, error: 'use models:set-active for the chat LLM (text/vision)' };
+  });
+  ipcMain.handle('models:active-modalities', async () => {
+      const { getAllActiveModals } = await import('./active-models');
+      const { llm } = await import('./llm');
+      const fs = await import('fs');
+      const path = await import('path');
+      let text: string | null = null;
+      try { text = JSON.parse(fs.readFileSync(path.join(llm.getModelsDir(), 'active-model.json'), 'utf-8')).id ?? null; } catch { /* none */ }
+      return { text, ...getAllActiveModals() };
+  });
+
   // --- Image generation (stable-diffusion.cpp) ----------------------------
   ipcMain.handle('imagegen:status', async () => {
       const { imageGenStatus } = await import('./imagegen');

@@ -13,6 +13,7 @@ import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import { getActiveModal } from './active-models';
 
 const DEFAULT_VOICE = 'af_heart';
 
@@ -60,7 +61,12 @@ function isTeardownNoise(err: string): boolean {
 let busy = false;
 
 /** Synthesize speech for `text`; returns a WAV data URL. */
-export async function synthesize(text: string, voice = DEFAULT_VOICE): Promise<{ dataUrl: string }> {
+export async function synthesize(text: string, voice?: string): Promise<{ dataUrl: string }> {
+  // Caller's voice wins; else the user-selected speech voice IF it's a real voice
+  // name (e.g. "af_heart") and not a model id; else default. Guarded so picking a
+  // model in the UI can never feed the engine an invalid voice.
+  const sel = getActiveModal('speech');
+  voice = voice || (sel && /^[a-z]{2}_[a-z]+$/i.test(sel) ? sel : null) || DEFAULT_VOICE;
   const t = (text || '').trim();
   if (!t) throw new Error('Nothing to speak.');
   if (busy) throw new Error('Already generating speech — please wait.');

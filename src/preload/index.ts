@@ -128,6 +128,8 @@ try {
     downloadModel: (modelId: string) => ipcRenderer.invoke('models:download', modelId),
     setActiveModel: (modelId: string) => ipcRenderer.invoke('models:set-active', modelId),
     getActiveModel: () => ipcRenderer.invoke('models:get-active'),
+    setActiveModalModel: (kind: string, modelId: string | null) => ipcRenderer.invoke('models:set-active-modal', kind, modelId),
+    getActiveModalities: () => ipcRenderer.invoke('models:active-modalities'),
     onModelProgress: (callback: (data: any) => void) => {
       const subscription = (_: any, data: any) => callback(data)
       ipcRenderer.on('model:download-progress', subscription)
