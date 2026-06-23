@@ -116,24 +116,82 @@ export function openApiSpec(
     info: {
       title: 'Off Grid AI Desktop — Local Model Gateway',
       version: '1.0.0',
-      description: [
-        'One OpenAI-compatible API for every on-device modality. **No API key required** —',
-        'the server is bound to loopback and nothing leaves the machine.',
-        '',
-        '**Live modality status:** ' +
-          `text: ${ready('text')} · vision: ${ready('vision_understanding')} · embeddings: ${ready('embeddings')} · ` +
-          `STT: ${ready('transcription')} · TTS: ${ready('speech')} · image gen: ${ready('image_generation')}`,
-        '',
-        'Models swap in/out (Apple Silicon unified memory): image generation pauses the LLM,',
-        'TTS runs in a killable subprocess, STT is one-shot. HTTP timeouts are disabled so long',
-        'diffusion runs and first-run downloads complete — use a client timeout ≥120s for images/TTS.',
-        'While the LLM reloads after image gen, chat may briefly return 502 — retry after a moment.',
-        '',
-        '**Async & polling.** Every response carries an `X-Request-Id`. Any POST can run async',
-        '(`?async=true`, body `"async": true`, or header `X-Async: true`) → `202` with a `request_id`',
-        'and `poll_url`. Poll RESTfully with `GET /v1/requests/{request_id}` (canonical) or the',
-        'per-collection resource (e.g. `GET /v1/images/{id}`). No `/poll` verb — you read the resource.',
-      ].join('\n'),
+      description: `One **OpenAI-compatible** API for every on-device modality. **No API key** — the server is bound to loopback and nothing leaves the machine.
+
+**Live status:** text: ${ready('text')} · vision: ${ready('vision_understanding')} · embeddings: ${ready('embeddings')} · STT: ${ready('transcription')} · TTS: ${ready('speech')} · image gen: ${ready('image_generation')} · MCP: ready
+
+## Authentication
+
+None. The gateway listens only on \`127.0.0.1\`. Base URL: \`${b(port)}/v1\`. Pass any value (or none) where an SDK expects an API key.
+
+## SDKs
+
+The gateway speaks the OpenAI wire format, so the **universal SDK is the OpenAI SDK** — just point \`base_url\` here and leave the key blank. No Off Grid–specific SDK is required.
+
+\`\`\`python
+from openai import OpenAI
+client = OpenAI(base_url="${b(port)}/v1", api_key="not-needed")
+client.chat.completions.create(model="local", messages=[{"role":"user","content":"hi"}])
+\`\`\`
+
+\`\`\`javascript
+import OpenAI from "openai";
+const client = new OpenAI({ baseURL: "${b(port)}/v1", apiKey: "not-needed" });
+\`\`\`
+
+| Surface | SDK | Status |
+|---|---|---|
+| REST — chat, embeddings, audio, images | OpenAI SDK (Python / JS / Go / Rust / …) | ✅ works today |
+| MCP tools | any MCP client · \`@modelcontextprotocol/sdk\` | ✅ works today |
+| Off Grid native SDK (thin convenience wrapper) | \`@offgrid/sdk\` | 🚧 coming soon |
+
+## MCP server
+
+Off Grid is **also an MCP server** (Streamable HTTP, stateless) at \`POST ${b(port)}/mcp\`. Any MCP client can run the on-device models as tools — the inference layer for the whole device.
+
+**Tools:** \`generate_text\`, \`describe_image\`, \`generate_image\`, \`edit_image\`, \`transcribe_audio\`, \`text_to_speech\`, \`embed\`.
+
+List the tools:
+
+\`\`\`bash
+curl ${b(port)}/mcp \\
+  -H 'Content-Type: application/json' \\
+  -H 'Accept: application/json, text/event-stream' \\
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+\`\`\`
+
+Call one:
+
+\`\`\`bash
+curl ${b(port)}/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \\
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"generate_text","arguments":{"prompt":"Write a haiku."}}}'
+\`\`\`
+
+Register it with an MCP client (HTTP transport):
+
+\`\`\`json
+{ "mcpServers": { "off-grid": { "url": "${b(port)}/mcp" } } }
+\`\`\`
+
+## Models
+
+On-device models behind the API (all local; none are cloud-hosted):
+
+| Role | Model | Endpoint |
+|---|---|---|
+| Text + vision | local VLM — see \`GET /v1/models\` | \`/v1/chat/completions\` |
+| Embeddings | all-MiniLM-L6-v2 (384-dim) | \`/v1/embeddings\` |
+| Speech → text | whisper.cpp | \`/v1/audio/transcriptions\` |
+| Text → speech | Kokoro-82M | \`/v1/audio/speech\` |
+| Image (gen + edit) | ${imageModels.length ? imageModels.join(', ') : '_install one from the Models screen_'} | \`/v1/images\` |
+
+## Async & polling
+
+Every response carries an \`X-Request-Id\`. Any POST can run async — \`?async=true\`, body \`"async": true\`, or header \`X-Async: true\` → \`202\` with a \`request_id\` and \`poll_url\`. Poll RESTfully with \`GET /v1/requests/{request_id}\` (canonical) or the per-collection resource (e.g. \`GET /v1/images/{id}\`). There is no \`/poll\` verb — you read the resource.
+
+## Performance & memory
+
+Models swap in/out (Apple Silicon unified memory): image generation pauses the LLM, TTS runs in a killable subprocess, STT is one-shot. HTTP timeouts are disabled so long diffusion runs and first-run downloads complete — use a client timeout ≥120s for images/TTS (or just use async + polling). While the LLM reloads after image gen, chat may briefly return \`502\` — retry after a moment.`,
     },
     servers: [{ url: b(port), description: 'Local gateway (loopback)' }],
     tags: [
@@ -142,6 +200,7 @@ export function openApiSpec(
       { name: 'Audio', description: 'Speech-to-text and text-to-speech' },
       { name: 'Images', description: 'Text-to-image and image-to-image' },
       { name: 'Requests', description: 'Poll async requests (request_id)' },
+      { name: 'MCP', description: 'Model Context Protocol server — on-device models as MCP tools' },
     ],
     paths: {
       '/v1/chat/completions': {
@@ -454,8 +513,154 @@ export function openApiSpec(
       '/v1/requests': {
         get: { tags: ['Requests'], summary: 'List recent requests', responses: { '200': { description: 'List of requests' } } },
       },
+      '/mcp': {
+        post: {
+          tags: ['MCP'],
+          summary: 'MCP server (JSON-RPC over Streamable HTTP)',
+          description:
+            'Model Context Protocol endpoint (stateless). Send JSON-RPC: `initialize`, `tools/list`, `tools/call`. ' +
+            'Tools: generate_text, describe_image, generate_image, edit_image, transcribe_audio, text_to_speech, embed. ' +
+            'Requires `Accept: application/json, text/event-stream`. See the **MCP server** section above for client setup.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/McpRequest' },
+                examples: {
+                  list: { summary: 'tools/list', value: { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} } },
+                  call: {
+                    summary: 'tools/call',
+                    value: { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'generate_text', arguments: { prompt: 'Write a haiku.' } } },
+                  },
+                },
+              },
+            },
+          },
+          responses: { '200': { description: 'JSON-RPC result' }, default: errorResponse },
+        },
+      },
       '/health': {
         get: { tags: ['Chat'], summary: 'Gateway health & live modality status', responses: { '200': { description: 'OK' } } },
+      },
+    },
+    components: {
+      schemas: {
+        Error: {
+          type: 'object',
+          description: 'OpenAI-style error envelope.',
+          properties: { error: { type: 'object', properties: { message: { type: 'string' }, type: { type: 'string' } } } },
+        },
+        ChatMessage: {
+          type: 'object',
+          description: 'A chat message. `content` is a string, or an array of parts (text + image_url) for vision.',
+          properties: {
+            role: { type: 'string', enum: ['system', 'user', 'assistant'] },
+            content: {
+              oneOf: [
+                { type: 'string' },
+                {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      type: { type: 'string', enum: ['text', 'image_url'] },
+                      text: { type: 'string' },
+                      image_url: { type: 'object', properties: { url: { type: 'string', description: 'data: URL or http(s)/file URL' } } },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+          required: ['role', 'content'],
+        },
+        ChatCompletionRequest: {
+          type: 'object',
+          required: ['messages'],
+          properties: {
+            model: { type: 'string', default: 'local' },
+            messages: { type: 'array', items: { $ref: '#/components/schemas/ChatMessage' } },
+            stream: { type: 'boolean', default: false },
+            max_tokens: { type: 'integer' },
+            temperature: { type: 'number' },
+            response_format: { type: 'object', description: 'Grammar-constrained JSON / json_schema.' },
+          },
+        },
+        EmbeddingRequest: {
+          type: 'object',
+          required: ['input'],
+          properties: { input: { oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] }, model: { type: 'string' } },
+        },
+        EmbeddingList: {
+          type: 'object',
+          properties: {
+            object: { type: 'string', example: 'list' },
+            data: {
+              type: 'array',
+              items: { type: 'object', properties: { object: { type: 'string' }, index: { type: 'integer' }, embedding: { type: 'array', items: { type: 'number' } } } },
+            },
+            model: { type: 'string', example: 'all-MiniLM-L6-v2' },
+            usage: { type: 'object' },
+          },
+        },
+        ImageRequest: {
+          type: 'object',
+          required: ['prompt'],
+          properties: {
+            prompt: { type: 'string' },
+            input_references: {
+              type: 'array',
+              description: 'Init image(s) for image-to-image. Each is { type: image_url, image_url: { url } }.',
+              items: { type: 'object', properties: { type: { type: 'string' }, image_url: { type: 'object', properties: { url: { type: 'string' } } } } },
+            },
+            strength: { type: 'number', description: 'img2img only, 0–1' },
+            aspect_ratio: { type: 'string', example: '16:9' },
+            resolution: { type: 'string', enum: ['512', '1K', '2K'] },
+            size: { type: 'string', example: '1024x1024' },
+            steps: { type: 'integer' },
+            seed: { type: 'integer' },
+            cfg_scale: { type: 'number' },
+            negative_prompt: { type: 'string' },
+            model: { type: 'string', ...imgEnum },
+            response_format: { type: 'string', enum: ['b64_json', 'url'] },
+          },
+        },
+        ImageResult: imageResultSchema,
+        SpeechRequest: {
+          type: 'object',
+          required: ['input'],
+          properties: {
+            input: { type: 'string' },
+            voice: { type: 'string', default: 'af_heart' },
+            response_format: { type: 'string', enum: ['wav', 'json'], default: 'wav' },
+          },
+        },
+        TranscriptionResult: { type: 'object', properties: { text: { type: 'string' } } },
+        RequestResource: {
+          type: 'object',
+          description: 'An async request, returned by `?async=true` and read via GET /v1/requests/{id}.',
+          properties: {
+            request_id: { type: 'string' },
+            kind: { type: 'string', enum: ['chat', 'embedding', 'transcription', 'speech', 'image'] },
+            status: { type: 'string', enum: ['queued', 'running', 'completed', 'failed'] },
+            created_at: { type: 'integer' },
+            updated_at: { type: 'integer' },
+            poll_url: { type: 'string' },
+            result: { type: 'object', description: 'Present when completed — the modality payload.' },
+            error: { $ref: '#/components/schemas/Error' },
+          },
+        },
+        McpRequest: {
+          type: 'object',
+          description: 'JSON-RPC 2.0 request for the MCP endpoint.',
+          required: ['jsonrpc', 'method'],
+          properties: {
+            jsonrpc: { type: 'string', enum: ['2.0'] },
+            id: { oneOf: [{ type: 'integer' }, { type: 'string' }] },
+            method: { type: 'string', enum: ['initialize', 'tools/list', 'tools/call'] },
+            params: { type: 'object' },
+          },
+        },
       },
     },
   };
