@@ -219,6 +219,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const [showGallery, setShowGallery] = useState(false);
   const [gallery, setGallery] = useState<{ path: string; name: string; mtime: number }[]>([]);
   const [galleryTab, setGalleryTab] = useState<'images' | 'artifacts'>('images');
+  const [galleryScope, setGalleryScope] = useState<'chat' | 'project' | 'all'>('chat');
   const [artifacts, setArtifacts] = useState<(Artifact & { id: string; title: string; created: number })[]>([]);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -736,8 +737,14 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
 
   const refreshGallery = useCallback(async () => {
     try { setGallery((await window.api.listGeneratedImages?.()) || []); } catch (e) { console.error(e); }
-    try { setArtifacts((await window.api.listArtifacts?.()) || []); } catch (e) { console.error(e); }
-  }, []);
+    const scope = galleryScope === 'chat' ? { conversationId: activeConversationId || '__none__' }
+      : galleryScope === 'project' ? { projectId: activeProjectId }
+      : undefined;
+    try { setArtifacts((await window.api.listArtifacts?.(scope)) || []); } catch (e) { console.error(e); }
+  }, [galleryScope, activeConversationId, activeProjectId]);
+
+  // Reload the gallery's artifacts whenever the scope changes while it's open.
+  useEffect(() => { if (showGallery) void refreshGallery(); }, [galleryScope, showGallery, refreshGallery]);
 
   const deleteArtifact = useCallback(async (id: string) => {
     try {
@@ -1869,9 +1876,23 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                     ))}
                   </div>
                 )
-              ) : artifacts.length === 0 ? (
-                <p className="py-10 text-center text-xs text-neutral-600">No artifacts yet. Ask for a webpage, chart, or diagram.</p>
               ) : (
+                <>
+                  <div className="mb-2 flex items-center gap-1">
+                    {(['chat', 'project', 'all'] as const).map(sc => (
+                      <button
+                        key={sc}
+                        onClick={() => setGalleryScope(sc)}
+                        disabled={sc === 'project' && !activeProjectId}
+                        className={`rounded px-2 py-0.5 text-[10px] capitalize transition-colors disabled:opacity-30 ${galleryScope === sc ? 'bg-neutral-800 text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
+                      >
+                        {sc === 'chat' ? 'This chat' : sc}
+                      </button>
+                    ))}
+                  </div>
+                  {artifacts.length === 0 ? (
+                    <p className="py-10 text-center text-xs text-neutral-600">No artifacts in this {galleryScope === 'all' ? 'app' : galleryScope}.</p>
+                  ) : (
                 <div className="flex flex-col gap-2">
                   {artifacts.map((a) => (
                     <div key={a.id} className="group flex items-center gap-2 rounded-md border border-neutral-800 p-2 transition-colors hover:border-green-500">
@@ -1882,7 +1903,9 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                       <button onClick={() => deleteArtifact(a.id)} className="text-neutral-600 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100" title="Delete">✕</button>
                     </div>
                   ))}
-                </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>
