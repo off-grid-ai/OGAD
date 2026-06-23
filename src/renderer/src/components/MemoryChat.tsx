@@ -222,6 +222,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const sendingRef = useRef(false);
   const queueRef = useRef<string[]>([]);
   const [queuedCount, setQueuedCount] = useState(0);
@@ -358,6 +359,10 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   }, [projNewName, loadProjects, assignProject]);
 
   useEffect(() => {
+    // Only follow the stream if the user is already near the bottom — don't yank
+    // them down when they've scrolled up to read while generating.
+    const el = scrollRef.current;
+    if (el && el.scrollHeight - el.scrollTop - el.clientHeight > 120) return;
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
@@ -436,8 +441,11 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
     }
   }, [activeConversationId]);
 
-  const sendMessage = async (override?: string) => {
+  const sendMessage = async (override?: string, opts?: { regen?: boolean }) => {
     const isInput = override === undefined;
+    // Regenerate/Resend: the user turn already exists in the thread — re-run it
+    // in place instead of echoing another user bubble.
+    const regen = opts?.regen ?? false;
     // Attachments (pasted blocks + processed files) ride along only on a normal
     // send from the composer, not on resend/regenerate/example.
     const atts = isInput ? attachments.filter(a => a.status === 'ready' && a.text) : [];
@@ -488,15 +496,16 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
       }
     }
 
-    const userMessage: ChatMessage = { id: `u-${Date.now()}`, role: 'user', content: trimmed };
-
-    setMessages(prev => [...prev, userMessage]);
+    if (!regen) {
+      const userMessage: ChatMessage = { id: `u-${Date.now()}`, role: 'user', content: trimmed };
+      setMessages(prev => [...prev, userMessage]);
+    }
     setInput('');
     setLoading(true);
 
-    // Persist user message
+    // Persist user message (skip on regen — it's already in the thread)
     try {
-      await window.api.addRagMessage(convId, 'user', trimmed);
+      if (!regen) await window.api.addRagMessage(convId, 'user', trimmed);
     } catch (e) {
       console.error('Failed to persist user message:', e);
     }
@@ -775,8 +784,16 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const regenerate = useCallback((messageId: string) => {
     const idx = messages.findIndex(m => m.id === messageId);
     if (idx < 0) return;
+    // Walk back to the user turn that produced this answer.
     for (let i = idx; i >= 0; i--) {
-      if (messages[i].role === 'user') { void sendMessage(messages[i].content); return; }
+      if (messages[i].role === 'user') {
+        const content = messages[i].content;
+        // Drop everything after that user turn (the old answer) and re-run in
+        // place — no new user bubble.
+        setMessages(prev => prev.slice(0, i + 1));
+        void sendMessage(content, { regen: true });
+        return;
+      }
     }
   }, [messages]);
 
@@ -995,7 +1012,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
         {/* Main column */}
         <div className="flex min-w-0 flex-1 flex-col">
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto">
+          <div ref={scrollRef} className="flex-1 overflow-y-auto">
             {messages.length === 0 ? (
               <div className={`mx-auto flex min-h-full flex-col items-center justify-center px-6 py-6 text-center ${mode === 'image' ? 'max-w-6xl' : 'max-w-2xl'}`}>
                 <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-neutral-800 bg-neutral-900 shadow-sm">
@@ -1213,7 +1230,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                           <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16h8M8 12h8m-7 8h6a2 2 0 002-2V6a2 2 0 00-2-2h-3.586a1 1 0 00-.707.293l-2.414 2.414A1 1 0 009 7.414V18a2 2 0 002 2z" /></svg>
                           Copy
                         </button>
-                        <button onClick={() => sendMessage(message.content)} className="flex items-center gap-1 text-[11px] text-neutral-600 transition-colors hover:text-green-500" title="Send again">
+                        <button onClick={() => regenerate(message.id)} className="flex items-center gap-1 text-[11px] text-neutral-600 transition-colors hover:text-green-500" title="Regenerate the reply to this message">
                           <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                           Resend
                         </button>
