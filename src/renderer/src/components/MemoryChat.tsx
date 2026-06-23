@@ -217,6 +217,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const [speakLoadingId, setSpeakLoadingId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [canvasWidth, setCanvasWidth] = useState<number | null>(null); // px; null = default 30vw
   const [dragOver, setDragOver] = useState(false);
   const [viewer, setViewer] = useState<{ title: string; text: string } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -919,7 +920,15 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   return (
     <div
       className="flex h-full flex-col font-mono bg-neutral-950 transition-[padding] duration-200"
-      style={{ paddingRight: canvasArtifact || skillsOpen || settingsOpen || viewer || showGallery || modelPickerOpen ? 'max(420px, 30vw)' : undefined }}
+      style={{
+        paddingRight: canvasArtifact
+          ? canvasWidth
+            ? `${canvasWidth}px` // canvas open + resized → reflow content to its width
+            : 'max(360px, 30vw)'
+          : skillsOpen || settingsOpen || viewer || showGallery || modelPickerOpen
+            ? 'max(420px, 30vw)'
+            : undefined,
+      }}
     >
       {/* Header */}
       <header className="flex items-center gap-3 border-b border-neutral-900 px-6 py-4">
@@ -1910,7 +1919,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
       </div>
 
       {/* Canvas — sandboxed render of a model-generated artifact */}
-      {canvasArtifact && <ArtifactCanvas artifact={canvasArtifact} onClose={() => setCanvasArtifact(null)} />}
+      {canvasArtifact && <ArtifactCanvas artifact={canvasArtifact} onClose={() => setCanvasArtifact(null)} width={canvasWidth} onResize={setCanvasWidth} />}
 
       {/* Skills — view / create / edit reusable instruction packs */}
       {skillsOpen && <SkillsPanel onClose={() => setSkillsOpen(false)} onChanged={() => window.api.listSkills?.().then(s => setSkills(s || [])).catch(() => {})} />}

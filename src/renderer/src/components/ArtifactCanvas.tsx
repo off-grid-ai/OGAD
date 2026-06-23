@@ -30,17 +30,39 @@ function extractPkgs(code: string): string[] {
   return [...out];
 }
 
-export function ArtifactCanvas({ artifact, onClose }: { artifact: Artifact; onClose: () => void }) {
+export function ArtifactCanvas({ artifact, onClose, width, onResize }: { artifact: Artifact; onClose: () => void; width?: number | null; onResize?: (w: number) => void }) {
   const [runtime, setRuntime] = useState<Record<string, string> | null>(null);
   const [view, setView] = useState<'preview' | 'code'>('preview');
 
+  // Drag the left edge to widen/narrow the canvas (it's right-anchored, so width
+  // grows as the cursor moves left). Clamped to a sensible range.
+  const startResize = (e: React.MouseEvent): void => {
+    e.preventDefault();
+    const move = (ev: MouseEvent): void => {
+      const w = Math.min(window.innerWidth * 0.9, Math.max(360, window.innerWidth - ev.clientX));
+      onResize?.(w);
+    };
+    const up = (): void => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      document.body.style.userSelect = '';
+    };
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  };
+
   useEffect(() => {
     let alive = true;
+    console.log('[canvas] loading runtime for kind=', artifact.kind, 'codeLen=', artifact.code.length, 'api?', !!window.api?.artifactRuntime);
     window.api.artifactRuntime?.(artifact.kind)
-      .then((r: Record<string, string>) => { if (alive) setRuntime(r || {}); })
-      .catch(() => setRuntime({}));
+      .then((r: Record<string, string>) => {
+        console.log('[canvas] runtime resolved keys=', Object.keys(r || {}), 'reactBytes=', (r?.react || '').length, 'reactDomBytes=', (r?.reactDom || '').length, 'babelBytes=', (r?.babel || '').length);
+        if (alive) setRuntime(r || {});
+      })
+      .catch((e) => { console.error('[canvas] artifactRuntime FAILED', e); if (alive) setRuntime({}); });
     return () => { alive = false; };
-  }, [artifact.kind]);
+  }, [artifact.kind, artifact.code.length]);
 
   const srcdoc = useMemo(() => {
     if (!runtime) return '';
@@ -111,7 +133,11 @@ const _root = document.getElementById('root');
 const _Comp = (typeof __ogDefault !== 'undefined' && __ogDefault) || (typeof App !== 'undefined' && App) || null;
 console.log('[artifact] component=' + (_Comp ? (_Comp.name || 'anonymous') : 'NONE FOUND'));
 _root.innerHTML = '';
-if (_Comp) { ReactDOM.createRoot(_root).render(React.createElement(_Comp)); console.log('[artifact] render() called'); }
+if (_Comp) {
+  ReactDOM.createRoot(_root).render(React.createElement(_Comp));
+  console.log('[artifact] render() called');
+  setTimeout(function(){ try { console.log('[artifact] post-render: root.children=' + _root.children.length + ' bodyBG=' + getComputedStyle(document.body).backgroundColor + ' rootHTML=' + _root.innerHTML.slice(0,200)); } catch(err){ console.log('[artifact] post-render check failed', err); } }, 300);
+}
 else { __ogShow('No React component found — define a component named App or a default export.'); }
 </script></body></html>`;
   }, [artifact, runtime]);
@@ -155,7 +181,16 @@ else { __ogShow('No React component found — define a component named App or a 
   };
 
   return (
-    <div className="fixed right-0 top-0 bottom-0 z-50 flex w-[30vw] min-w-[420px] flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl">
+    <div
+      className="fixed right-0 top-0 bottom-0 z-50 flex min-w-[360px] max-w-[90vw] flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl"
+      style={{ width: width ? `${width}px` : '30vw' }}
+    >
+      {/* Resize handle — drag to slide the canvas wider/narrower. */}
+      <div
+        onMouseDown={startResize}
+        title="Drag to resize"
+        className="absolute left-0 top-0 z-10 h-full w-1.5 cursor-col-resize transition-colors hover:bg-green-500/40"
+      />
       <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2.5">
         <div className="flex items-center gap-2 text-sm text-neutral-200">
           <span className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-green-500">{KIND_LABEL[artifact.kind]}</span>
