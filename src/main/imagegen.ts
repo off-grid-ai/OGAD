@@ -503,7 +503,10 @@ export async function generateImage(
     const isV2 = /v2-1|v2\.1/i.test(base);
     const fewStep = isLightning || isTurbo;
     const nameStepMatch = base.match(/(\d+)\s*step/i);
-    const defaultSize = isTurbo ? 512 : isXL ? 1024 : isV2 ? 768 : 512;
+    // SDXL-Lightning's sweet spot is 768 (what our style thumbnails use): great
+    // quality, fast, and freeze-safe — full 1024 forces a slow tiled VAE decode.
+    // Full (non-distilled) XL stays at 1024 where the extra detail pays off.
+    const defaultSize = isTurbo ? 512 : isLightning ? 768 : isXL ? 1024 : isV2 ? 768 : 512;
     const defaultSteps = isTurbo ? 4 : isLightning ? (nameStepMatch ? parseInt(nameStepMatch[1], 10) : 4) : 28;
     args = [
       '-M', 'img_gen',
@@ -520,7 +523,12 @@ export async function generateImage(
       '-s', String(seed),
       ...previewArgs,
     ];
-    if (isXL) args.push('--vae-tiling');
+    // VAE-tiling only when the decode would actually spike memory (large XL
+    // images). At ≤768 it's unnecessary and just adds a slow second "decode"
+    // pass — exactly what our freeze-safe 768 thumbnail batch skipped.
+    const effW = params.width ?? defaultSize;
+    const effH = params.height ?? defaultSize;
+    if (isXL && Math.max(effW, effH) > 768) args.push('--vae-tiling');
     args.push('-n', params.negativePrompt?.trim() || DEFAULT_NEGATIVE);
     // img2img (not supported by Z-Image gen-only turbo).
     if (params.initImage) {
