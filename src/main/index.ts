@@ -1,7 +1,7 @@
 import { app, shell, BrowserWindow, systemPreferences, protocol, net, session, desktopCapturer, screen, ipcMain } from 'electron'
 import { join } from 'path'
+import { pathToFileURL } from 'url'
 import fs from 'fs'
-import { Readable } from 'stream'
 
 // Custom scheme to serve local capture screenshots to the renderer (file:// is
 // blocked there). Registered before app 'ready'; handled after.
@@ -175,52 +175,22 @@ app.whenReady().then(() => {
     }
   }
 
-  // Serve local capture screenshots + entity photos to the renderer.
+  // Serve local capture screenshots + entity photos + meeting videos to the
+  // renderer. Delegate to Electron's native file handler (net.fetch on a file://
+  // URL) — it implements HTTP range/seek for large media correctly, which the
+  // hand-rolled stream did not (long recordings would stall or jump to the end).
   protocol.handle('ogcapture', async (request) => {
     const p = decodeURIComponent(request.url.slice('ogcapture://'.length));
-    const mime = ((): string => {
-      const ext = p.toLowerCase().split('.').pop();
-      if (ext === 'mp4') return 'video/mp4';
-      if (ext === 'mov') return 'video/quicktime';
-      if (ext === 'webm') return 'video/webm';
-      if (ext === 'm4a') return 'audio/mp4';
-      if (ext === 'png') return 'image/png';
-      if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
-      return 'application/octet-stream';
-    })();
+    const range = request.headers.get('Range');
     try {
-      const stat = await fs.promises.stat(p);
-      const range = request.headers.get('Range');
-      // Honour HTTP range requests so the <video> element can seek/scrub and
-      // stream large recordings (a plain whole-file fetch breaks the controls).
-      if (range) {
-        const m = /bytes=(\d*)-(\d*)/.exec(range);
-        const start = m && m[1] ? parseInt(m[1], 10) : 0;
-        const reqEnd = m && m[2] ? parseInt(m[2], 10) : stat.size - 1;
-        if (start >= stat.size || start > reqEnd) {
-          return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${stat.size}` } });
-        }
-        // Cap each response to a chunk. Streaming an entire ~1GB recording in one
-        // open-ended ("bytes=0-") response stalls/dies partway in Electron; bounding
-        // it makes the <video> element pull sequential chunks (robust + seekable).
-        const MAX_CHUNK = 4 * 1024 * 1024;
-        const end = Math.min(reqEnd, start + MAX_CHUNK - 1, stat.size - 1);
-        const stream = fs.createReadStream(p, { start, end });
-        return new Response(Readable.toWeb(stream) as unknown as ReadableStream, {
-          status: 206,
-          headers: {
-            'Content-Type': mime,
-            'Content-Range': `bytes ${start}-${end}/${stat.size}`,
-            'Accept-Ranges': 'bytes',
-            'Content-Length': String(end - start + 1),
-          },
-        });
-      }
-      const stream = fs.createReadStream(p);
-      return new Response(Readable.toWeb(stream) as unknown as ReadableStream, {
-        headers: { 'Content-Type': mime, 'Accept-Ranges': 'bytes', 'Content-Length': String(stat.size) },
-      });
-    } catch {
+      const fileUrl = pathToFileURL(p).toString();
+      const headers = new Headers();
+      if (range) headers.set('Range', range);
+      const resp = await net.fetch(fileUrl, { headers });
+      console.log(`[ogcapture] ${p.split('/').pop()} range=${range || '(full)'} -> ${resp.status} cr=${resp.headers.get('content-range') || '-'} ct=${resp.headers.get('content-type') || '-'} len=${resp.headers.get('content-length') || '-'}`);
+      return resp;
+    } catch (e) {
+      console.error('[ogcapture] serve failed for', p, e);
       return new Response(null, { status: 404 });
     }
   });
