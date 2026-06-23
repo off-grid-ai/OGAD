@@ -212,6 +212,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const [speakLoadingId, setSpeakLoadingId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [viewer, setViewer] = useState<{ title: string; text: string } | null>(null);
   const [lightbox, setLightbox] = useState<{ url: string; path?: string } | null>(null);
   const [canvasArtifact, setCanvasArtifact] = useState<Artifact | null>(null);
   const [skillsOpen, setSkillsOpen] = useState(false);
@@ -857,7 +858,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   return (
     <div
       className="flex h-full flex-col font-mono bg-neutral-950 transition-[padding] duration-200"
-      style={{ paddingRight: canvasArtifact || skillsOpen || settingsOpen ? 'max(420px, 44vw)' : undefined }}
+      style={{ paddingRight: canvasArtifact || skillsOpen || settingsOpen || viewer ? 'max(420px, 44vw)' : undefined }}
     >
       {/* Header */}
       <header className="flex items-center gap-3 border-b border-neutral-900 px-6 py-4">
@@ -1589,9 +1590,15 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                     {attachments.map(a => (
                       <div key={a.id} className="group relative flex w-40 flex-col gap-1 rounded-lg border border-neutral-800 bg-neutral-900 p-2">
                         <button onClick={() => removeAttachment(a.id)} className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full border border-neutral-700 bg-neutral-950 text-[10px] text-neutral-400 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100">✕</button>
-                        <p className="line-clamp-3 h-[2.6rem] overflow-hidden text-[10px] leading-snug text-neutral-500">
+                        <button
+                          type="button"
+                          disabled={!a.text}
+                          onClick={() => a.text && setViewer({ title: a.kind === 'pasted' ? 'Pasted text' : a.name, text: a.text })}
+                          title={a.text ? 'Click to expand' : undefined}
+                          className="line-clamp-3 h-[2.6rem] overflow-hidden text-left text-[10px] leading-snug text-neutral-500 enabled:hover:text-neutral-300"
+                        >
                           {a.status === 'loading' ? 'Processing…' : a.status === 'error' ? 'Could not read this file.' : (a.text.slice(0, 140) || a.name)}
-                        </p>
+                        </button>
                         <div className="flex items-center justify-between">
                           <span className="truncate text-[10px] text-neutral-400" title={a.name}>{a.kind === 'pasted' ? '' : a.name}</span>
                           <span className="rounded-sm border border-neutral-700 px-1 py-0.5 text-[9px] uppercase tracking-wide text-neutral-400">
@@ -1780,6 +1787,17 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
 
       {/* Settings — model params, voice, tools, connectors */}
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+
+      {/* Text viewer — expand a pasted/attached file's full content */}
+      {viewer && (
+        <div className="fixed right-0 top-0 bottom-0 z-50 flex w-[44vw] min-w-[420px] flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl">
+          <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2.5">
+            <span className="truncate text-sm text-neutral-200">{viewer.title}</span>
+            <button onClick={() => setViewer(null)} className="rounded-md border border-neutral-700 px-3 py-1 text-xs text-neutral-300 transition-colors hover:text-white">Close</button>
+          </div>
+          <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-4 text-xs leading-relaxed text-neutral-300">{viewer.text}</pre>
+        </div>
+      )}
 
       {/* Lightbox — click a generated image to enlarge, download, or delete */}
       {lightbox && (
