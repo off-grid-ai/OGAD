@@ -34,6 +34,7 @@ type ChatMessage = {
   reasoning?: string;
   streaming?: boolean;
   activity?: { kind: string; counts?: Record<string, number> };
+  attachments?: { name: string; kind: string }[];
 };
 
 type ChatMode = 'ask' | 'image';
@@ -498,7 +499,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
     }
 
     if (!regen) {
-      const userMessage: ChatMessage = { id: `u-${Date.now()}`, role: 'user', content: trimmed };
+      const userMessage: ChatMessage = { id: `u-${Date.now()}`, role: 'user', content: trimmed, attachments: atts.map(a => ({ name: a.name, kind: a.kind })) };
       setMessages(prev => [...prev, userMessage]);
     }
     setInput('');
@@ -1105,6 +1106,17 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                             }`
                       }
                     >
+                      {message.attachments && message.attachments.length > 0 ? (
+                        <div className="mb-2 flex flex-wrap gap-1.5">
+                          {message.attachments.map((att, i) => (
+                            <span key={i} className="flex items-center gap-1 rounded-md bg-neutral-700/60 px-2 py-1 text-[10px] text-neutral-200">
+                              <svg className="h-3 w-3 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                              <span className="max-w-[12rem] truncate">{att.name}</span>
+                              <span className="text-neutral-500">{att.kind}</span>
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm, remarkBreaks]}
                         components={message.role === 'assistant' ? makeCiteComponents(message.context?.unified) : markdownComponents}
