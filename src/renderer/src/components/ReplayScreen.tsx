@@ -56,33 +56,45 @@ export function ReplayScreen({ seekToMs }: { seekToMs?: number } = {}) {
       const [s, e] = range();
       const f: Frame[] = (await api.crmReplayFrames?.(s, e)) ?? [];
       setFrames(f);
-      if (pendingSeek.current != null && f.length) {
-        const target = pendingSeek.current;
-        let best = 0;
-        let bestD = Infinity;
-        f.forEach((fr, i) => {
-          const d = Math.abs(fr.ts * 1000 - target);
-          if (d < bestD) {
-            bestD = d;
-            best = i;
-          }
-        });
-        setIdx(best);
-        pendingSeek.current = null;
-      } else {
-        setIdx(f.length ? f.length - 1 : 0); // start at the latest moment
-      }
+      // Default to the latest moment — UNLESS a search jump is pending, in which
+      // case the seek effect places the index once the right day has loaded.
+      if (pendingSeek.current == null) setIdx(f.length ? f.length - 1 : 0);
     } finally {
       setLoading(false);
     }
   }, [range]);
 
-  // A search jump owns the day — seek to that frame's day + moment.
+  const dayRef = useRef(day);
+  useEffect(() => {
+    dayRef.current = day;
+  }, [day]);
+
+  // A search jump owns the day. Navigate to the target's day only if we're not
+  // already on it (avoids a redundant reload that would snap back to the latest).
   useEffect(() => {
     if (seekToMs == null) return;
     pendingSeek.current = seekToMs;
-    setDay(startOfDay(new Date(seekToMs)));
+    const target = startOfDay(new Date(seekToMs));
+    if (startOfDay(dayRef.current).getTime() !== target.getTime()) setDay(target);
   }, [seekToMs]);
+
+  // Apply the pending seek once the matching day's frames are loaded.
+  useEffect(() => {
+    const target = pendingSeek.current;
+    if (target == null || !frames.length) return;
+    if (startOfDay(new Date(target)).getTime() !== startOfDay(day).getTime()) return;
+    let best = 0;
+    let bestD = Infinity;
+    frames.forEach((fr, i) => {
+      const d = Math.abs(fr.ts * 1000 - target);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    });
+    setIdx(best);
+    pendingSeek.current = null;
+  }, [frames, day]);
 
   // Land on the day that actually has frames (handles just-after-midnight, when
   // "today" is empty but last evening is full). Skipped when a search jump owns it.
