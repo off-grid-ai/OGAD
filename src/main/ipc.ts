@@ -214,6 +214,51 @@ function isGenerativeRequest(text: string): boolean {
     return hasNoun && hasVerb;
 }
 
+type ChatIntent = { intent: 'build' | 'image' | 'chat'; urls: string[] };
+
+const INTENT_SCHEMA = {
+    type: 'object',
+    properties: {
+        intent: { type: 'string', enum: ['build', 'image', 'chat'] },
+        urls: { type: 'array', items: { type: 'string' } },
+    },
+    required: ['intent', 'urls'],
+    additionalProperties: false,
+};
+
+// Decide the output format for a turn with the model itself (grammar-constrained
+// JSON), instead of brittle keyword matching: build (runnable artifact), image
+// (generate a picture), or chat. Also pulls out any URLs the user wants read.
+// Falls back to the keyword heuristic if the classifier call fails.
+async function classifyIntent(query: string, history?: { role: string; content: string }[]): Promise<ChatIntent> {
+    const regexUrls = (query.match(/https?:\/\/[^\s)<>"']+/g) || []).slice(0, 3);
+    try {
+        const { llm } = await import('./llm');
+        const hist = (history ?? []).slice(-4).map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${clipText(m.content, 200)}`).join('\n');
+        const prompt = [
+            'You route a request for an on-device assistant. Decide the OUTPUT FORMAT:',
+            '- "build": the user wants runnable code / a UI created — an app, component, page, playground, dashboard, form, diagram, chart, visualization, game, etc. (rendered live in a canvas).',
+            '- "image": the user wants a picture/photo/logo/illustration/art generated.',
+            '- "chat": anything else — questions, explanations, writing, discussion.',
+            'Also list any http(s) URLs the user wants you to read or build from.',
+            'Reply with ONLY JSON: {"intent":"build|image|chat","urls":[]}.',
+            hist ? `Recent conversation:\n${hist}` : '',
+            `User: ${query}`,
+        ].filter(Boolean).join('\n\n');
+        const raw = await llm.chat(prompt, [], 60000, 200, {
+            disableThinking: true,
+            responseFormat: { type: 'json_schema', json_schema: { name: 'intent', schema: INTENT_SCHEMA, strict: true } },
+        });
+        const j = JSON.parse(raw) as Partial<ChatIntent>;
+        const intent = j.intent === 'build' || j.intent === 'image' ? j.intent : 'chat';
+        const urls = Array.isArray(j.urls) ? j.urls.filter((u) => /^https?:\/\//i.test(u)) : [];
+        return { intent, urls: urls.length ? urls.slice(0, 3) : regexUrls };
+    } catch (e) {
+        console.warn('[intent] classifier failed, falling back to heuristic', (e as Error).message);
+        return { intent: isGenerativeRequest(query) ? 'build' : 'chat', urls: regexUrls };
+    }
+}
+
 function isTrivialMessage(text: string): boolean {
     const normalized = (text || '').trim();
     if (normalized.length === 0) return true;
@@ -589,20 +634,30 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
 
   ipcMain.handle('rag:chat', async (event, query: string, appName?: string, conversationHistory?: { role: string; content: string }[], projectId?: string | null, conversationId?: string, noMemory?: boolean, streamId?: string, thinking?: boolean, images?: string[]) => {
       const imgs = images || [];
-      // Build/generate request — handled FIRST, before any memory branch, so it
-      // always gets the artifact prompt (even in No-memory mode). A lean, direct
-      // prompt: the small model otherwise narrates setup steps instead of building.
-      if (isGenerativeRequest(query)) {
+      // Intelligence layer: a grammar-constrained classifier picks the output
+      // format (build / image / chat) and extracts URLs to read — replacing the
+      // brittle keyword gate. Skip it in project mode (that path is its own thing).
+      const { intent, urls: intentUrls } = projectId ? { intent: 'chat' as const, urls: [] as string[] } : await classifyIntent(query, conversationHistory);
+
+      // Image request → have the model write a vivid prompt, then the renderer
+      // generates it (it already detects an ```image block).
+      if (intent === 'image') {
+          const imgPrompt = `Write ONE vivid, detailed image-generation prompt (visual description only, no preamble) for this request:\n${query}`;
+          const desc = (await (await import('./llm')).llm.chat(imgPrompt, [], 60000, 200, { disableThinking: true })).trim().replace(/^["']|["']$/g, '');
+          return { answer: '```image\n' + (desc || query) + '\n```', context: undefined };
+      }
+
+      // Build request → artifact prompt (even in No-memory mode), with any URLs
+      // fetched for us so the small model never has to chain tools.
+      if (intent === 'build') {
           let historyBlock = '';
           if (conversationHistory && conversationHistory.length > 0) {
               const historyLines = conversationHistory.map((msg) => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${clipText(msg.content, 400)}`).join('\n');
               historyBlock = `Conversation so far:\n${historyLines}`;
           }
-          // read_url → build: if the build request references URL(s), fetch them
-          // ourselves (deterministic — the small model won't chain tools reliably)
-          // and hand the page content to the artifact prompt as reference.
+          // read_url → build: fetch the classifier's URLs (deterministic).
           let referenceBlock = '';
-          const urls = (query.match(/https?:\/\/[^\s)<>"']+/g) || []).slice(0, 2);
+          const urls = intentUrls;
           if (urls.length) {
               if (streamId) event.sender?.send('rag:stream', { streamId, type: 'step', step: { kind: 'reading', counts: { urls: urls.length } } });
               const { readUrlText } = await import('./tools');
