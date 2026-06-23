@@ -103,22 +103,31 @@ else { document.body.innerHTML = '<pre style="color:#b91c1c;white-space:pre-wrap
   );
 }
 
-/** Extract the first renderable artifact from assistant markdown, if any. */
+const JSX_SIGNAL = /(<[A-Za-z][^>]*>|<\/[A-Za-z]|=>\s*\(?\s*<|React\.|useState|ReactDOM|export default function|className=)/;
+
+/** Extract a renderable artifact from assistant markdown, if any. */
 export function parseArtifact(content: string): Artifact | null {
-  let m = content.match(/```(html|svg|mermaid|jsx|tsx|react)\s*\n([\s\S]*?)```/i);
-  if (!m) {
-    // A plain ```js / ```javascript / ```ts block is a React artifact if it looks
-    // like one (JSX or React APIs) — the model often fences React as js.
-    const js = content.match(/```(?:javascript|js|typescript|ts)\s*\n([\s\S]*?)```/i);
-    if (js && /(<[A-Za-z][^>]*>|<\/[A-Za-z]|=>\s*\(?\s*<|React\.|useState|ReactDOM|export default function|className=)/.test(js[1])) {
-      return { kind: 'react', code: js[1].trim() };
-    }
-    // A bare <svg>…</svg> with no fence is still a valid artifact.
-    const svg = content.match(/<svg[\s\S]*<\/svg>/i);
-    if (svg) return { kind: 'svg', code: svg[0] };
-    return null;
+  // React first: COMBINE all jsx/tsx/react blocks so multi-file responses
+  // (App.js + Child.js) run together — imports are stripped, so every component
+  // ends up in one shared scope and relative imports resolve.
+  const reactBlocks = [...content.matchAll(/```(?:jsx|tsx|react)\s*\n([\s\S]*?)```/gi)].map((b) => b[1].trim());
+  if (reactBlocks.length) return { kind: 'react', code: reactBlocks.join('\n\n') };
+
+  // A single html/svg/mermaid artifact.
+  const m = content.match(/```(html|svg|mermaid)\s*\n([\s\S]*?)```/i);
+  if (m) {
+    const lang = m[1].toLowerCase();
+    return { kind: lang === 'svg' ? 'svg' : lang === 'mermaid' ? 'mermaid' : 'html', code: m[2].trim() };
   }
-  const lang = m[1].toLowerCase();
-  const kind: Artifact['kind'] = lang === 'svg' ? 'svg' : lang === 'mermaid' ? 'mermaid' : lang === 'html' ? 'html' : 'react';
-  return { kind, code: m[2].trim() };
+
+  // Plain js/ts blocks that look like React — combine them too.
+  const jsBlocks = [...content.matchAll(/```(?:javascript|js|typescript|ts)\s*\n([\s\S]*?)```/gi)].map((b) => b[1].trim());
+  if (jsBlocks.length && jsBlocks.some((b) => JSX_SIGNAL.test(b))) {
+    return { kind: 'react', code: jsBlocks.join('\n\n') };
+  }
+
+  // A bare <svg>…</svg> with no fence is still a valid artifact.
+  const svg = content.match(/<svg[\s\S]*<\/svg>/i);
+  if (svg) return { kind: 'svg', code: svg[0] };
+  return null;
 }
