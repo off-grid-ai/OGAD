@@ -172,6 +172,10 @@ function tokenizeQuery(query: string, maxTokens: number = 6): string[] {
 // an in-flight generation and keep whatever was produced so far.
 const streamControllers = new Map<string, AbortController>();
 
+// In-flight model downloads, keyed by modelId, so 'models:cancel-download' can
+// abort the fetch and clean up the partial file.
+const downloadControllers = new Map<string, AbortController>();
+
 async function streamAnswer(
     event: { sender?: { send: (channel: string, payload: unknown) => void } } | undefined,
     streamId: string | undefined,
@@ -1408,6 +1412,10 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
       const send = (data: Record<string, unknown>) =>
           BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('model:download-progress', { modelId, ...data }));
 
+      // Allow the renderer to cancel an in-flight download (models:cancel-download).
+      const controller = new AbortController();
+      downloadControllers.set(modelId, controller);
+
       // MLX/mflux models: fetch weights into the HF cache via the bundled python.
       if (entry.runtime === 'mflux') {
           try {
@@ -1425,34 +1433,55 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
           for (const file of entry.files) {
               const dest = path.join(dir, file.name);
               if (fs.existsSync(dest) && fs.statSync(dest).size > 0) continue;
-              const res = await fetch(file.url); // fetch follows HF redirects
+              const res = await fetch(file.url, { signal: controller.signal }); // fetch follows HF redirects
               if (!res.ok || !res.body) throw new Error(`HTTP ${res.status} for ${file.name}`);
               const total = Number(res.headers.get('content-length') ?? 0);
-              const out = fs.createWriteStream(`${dest}.part`);
+              const partPath = `${dest}.part`;
+              const out = fs.createWriteStream(partPath);
               let written = 0;
               const reader = res.body.getReader();
-              for (;;) {
-                  const { done, value } = await reader.read();
-                  if (done) break;
-                  out.write(Buffer.from(value));
-                  written += value.length;
-                  send({
-                      currentFile: file.name,
-                      percent: total ? Math.round((written / total) * 100) : 0,
-                      downloadedMB: (written / 1048576).toFixed(1),
-                      totalMB: total ? (total / 1048576).toFixed(1) : '?',
-                  });
+              try {
+                  for (;;) {
+                      const { done, value } = await reader.read();
+                      if (done) break;
+                      out.write(Buffer.from(value));
+                      written += value.length;
+                      send({
+                          currentFile: file.name,
+                          percent: total ? Math.round((written / total) * 100) : 0,
+                          downloadedMB: (written / 1048576).toFixed(1),
+                          totalMB: total ? (total / 1048576).toFixed(1) : '?',
+                      });
+                  }
+              } finally {
+                  out.end();
+                  await new Promise<void>((r) => out.on('finish', () => r()));
               }
-              out.end();
-              await new Promise<void>((r) => out.on('finish', () => r()));
-              fs.renameSync(`${dest}.part`, dest);
+              // Cancelled mid-file: drop the partial and stop, leaving nothing behind.
+              if (controller.signal.aborted) { fs.rmSync(partPath, { force: true }); break; }
+              fs.renameSync(partPath, dest);
           }
+          if (controller.signal.aborted) { send({ status: 'cancelled' }); return { success: false, error: 'cancelled' }; }
           send({ percent: 100, status: 'completed' });
           return { success: true };
       } catch (err: any) {
+          // An abort surfaces as an AbortError — report it as cancelled, not failed.
+          if (controller.signal.aborted || err?.name === 'AbortError') {
+              send({ status: 'cancelled' });
+              return { success: false, error: 'cancelled' };
+          }
           send({ status: 'failed', error: err.message });
           return { success: false, error: err.message };
+      } finally {
+          downloadControllers.delete(modelId);
       }
+  });
+
+  // Cancel an in-flight model download.
+  ipcMain.handle('models:cancel-download', (_evt, modelId: string) => {
+      const c = downloadControllers.get(modelId);
+      if (c) { c.abort(); return true; }
+      return false;
   });
 
   // Set the active LLM (text/vision) model: resolve the catalog entry's files

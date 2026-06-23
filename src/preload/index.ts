@@ -131,6 +131,7 @@ try {
     getInstalledModels: () => ipcRenderer.invoke('models:installed'),
     searchModels: (query: string) => ipcRenderer.invoke('models:search', query),
     downloadModel: (modelId: string) => ipcRenderer.invoke('models:download', modelId),
+    cancelModelDownload: (modelId: string) => ipcRenderer.invoke('models:cancel-download', modelId),
     setActiveModel: (modelId: string) => ipcRenderer.invoke('models:set-active', modelId),
     getActiveModel: () => ipcRenderer.invoke('models:get-active'),
     setActiveModalModel: (kind: string, modelId: string | null) => ipcRenderer.invoke('models:set-active-modal', kind, modelId),
