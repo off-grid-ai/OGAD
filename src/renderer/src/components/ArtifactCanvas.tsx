@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { SandpackProvider, SandpackLayout, SandpackPreview, SandpackCodeEditor } from '@codesandbox/sandpack-react';
 
-// Renders a model-generated artifact. HTML / SVG / Mermaid run in a SANDBOXED
-// iframe (sandbox="allow-scripts", no same-origin) with runtime libs inlined
-// offline. React artifacts run in Sandpack — a real in-browser bundler that
-// resolves npm imports — so the model can `import` libraries and they work.
+// Renders a model-generated artifact (HTML / SVG / Mermaid / React) in a SANDBOXED
+// iframe — sandbox="allow-scripts" only, no same-origin, no network — so generated
+// code can't touch the app, filesystem, or network. Runtime libs (React/Babel/
+// Mermaid) are inlined from the bundled offline copies, so it runs fully on-device.
 
 export type Artifact = { kind: 'html' | 'svg' | 'mermaid' | 'react'; code: string; title?: string };
 
@@ -14,52 +13,6 @@ const KIND_LABEL: Record<Artifact['kind'], string> = {
 
 function escapeForHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-// Pull the npm packages a React artifact imports (skip relative paths and the
-// react/react-dom the template already provides) so Sandpack installs them.
-function extractDeps(code: string): Record<string, string> {
-  const deps: Record<string, string> = {};
-  const re = /import\s+(?:[\w*{}\n\s,]+from\s+)?['"]([^'"]+)['"]/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(code))) {
-    let pkg = m[1];
-    if (pkg.startsWith('.') || pkg.startsWith('/')) continue;
-    pkg = pkg.startsWith('@') ? pkg.split('/').slice(0, 2).join('/') : pkg.split('/')[0];
-    if (pkg === 'react' || pkg === 'react-dom') continue;
-    deps[pkg] = 'latest';
-  }
-  return deps;
-}
-
-// Tolerant entry point: render whatever the artifact exports — default, a named
-// `App`, or the first function/class export — so we don't depend on an exact shape.
-const BOOTSTRAP = `import React from 'react';
-import { createRoot } from 'react-dom/client';
-import * as Mod from './App';
-const Comp = Mod.default || Mod.App || Object.values(Mod).find((v) => typeof v === 'function');
-const root = createRoot(document.getElementById('root'));
-if (Comp) root.render(React.createElement(Comp));
-else document.body.innerHTML = '<pre style="color:#b91c1c;padding:12px">No React component exported. Define a default export or an App component.</pre>';
-`;
-
-function ReactSandpack({ code, showEditor }: { code: string; showEditor: boolean }) {
-  const deps = useMemo(() => extractDeps(code), [code]);
-  return (
-    <SandpackProvider
-      template="react"
-      theme="dark"
-      files={{ '/index.js': { code: BOOTSTRAP, hidden: true }, '/App.js': { code, active: true } }}
-      customSetup={{ dependencies: deps }}
-      options={{ recompileMode: 'delayed', recompileDelay: 400 }}
-      style={{ height: '100%' }}
-    >
-      <SandpackLayout style={{ height: '100%', border: 'none', borderRadius: 0 }}>
-        {showEditor && <SandpackCodeEditor style={{ height: '100%' }} showLineNumbers showTabs={false} />}
-        <SandpackPreview style={{ height: '100%' }} showOpenInCodeSandbox={false} showRefreshButton />
-      </SandpackLayout>
-    </SandpackProvider>
-  );
 }
 
 export function ArtifactCanvas({ artifact, onClose }: { artifact: Artifact; onClose: () => void }) {
@@ -140,9 +93,7 @@ else { document.body.innerHTML = '<pre style="color:#b91c1c;white-space:pre-wrap
         </div>
       </div>
       <div className="min-h-0 flex-1">
-        {artifact.kind === 'react' ? (
-          <ReactSandpack code={artifact.code} showEditor={view === 'code'} />
-        ) : view === 'preview' ? (
+        {view === 'preview' ? (
           <iframe title="artifact" sandbox="allow-scripts" srcDoc={srcdoc} className="h-full w-full border-0 bg-white" />
         ) : (
           <pre className="h-full overflow-auto bg-neutral-950 p-4 text-xs text-neutral-300">{artifact.code}</pre>
