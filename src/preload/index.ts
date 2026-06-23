@@ -32,6 +32,8 @@ try {
       ipcRenderer.on('rag:stream', sub)
       return () => ipcRenderer.removeListener('rag:stream', sub)
     },
+    // Stop an in-flight streaming turn; the partial answer is kept.
+    cancelRag: (streamId: string) => ipcRenderer.send('rag:cancel', streamId),
 
     // RAG Conversation History
     createRagConversation: (id: string, title?: string, projectId?: string | null) => ipcRenderer.invoke('rag:create-conversation', id, title, projectId),

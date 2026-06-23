@@ -330,7 +330,7 @@ export class LLMService {
     images: string[] = [],
     onDelta: (text: string, kind: 'content' | 'reasoning') => void,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    opts: { temperature?: number; thinking?: boolean } = {},
+    opts: { temperature?: number; thinking?: boolean; signal?: AbortSignal } = {},
     maxTokens: number = 2048,
     timeoutMs: number = 300000,
   ): Promise<string> {
@@ -374,6 +374,7 @@ export class LLMService {
       let buf = '';
       let inThink = false; // for models that inline <think>…</think> in content
       let timedOut = false;
+      let aborted = false;
       const timer = setTimeout(() => { timedOut = true; req.destroy(); reject(new Error('LLM request timed out')); }, timeoutMs);
 
       const emitContent = (text: string): void => {
@@ -421,9 +422,15 @@ export class LLMService {
             } catch { /* partial/ignorable line */ }
           }
         });
-        res.on('end', () => { clearTimeout(timer); if (!timedOut) resolve(full); });
+        res.on('end', () => { clearTimeout(timer); if (!timedOut && !aborted) resolve(full); });
       });
-      req.on('error', (e) => { clearTimeout(timer); if (!timedOut) reject(e); });
+      req.on('error', (e) => { clearTimeout(timer); if (!timedOut && !aborted) reject(e); });
+      // Cooperative cancellation: stop the request and return whatever was generated so far.
+      if (opts.signal) {
+        const onAbort = (): void => { aborted = true; clearTimeout(timer); try { req.destroy(); } catch { /* already gone */ } resolve(full); };
+        if (opts.signal.aborted) onAbort();
+        else opts.signal.addEventListener('abort', onAbort, { once: true });
+      }
       req.write(body);
       req.end();
     });

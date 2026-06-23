@@ -161,6 +161,10 @@ function tokenizeQuery(query: string, maxTokens: number = 6): string[] {
 // Generate the answer for a rag:chat turn. When a streamId + sender are present,
 // stream tokens/reasoning to the renderer over the 'rag:stream' channel as they
 // arrive (inline chain-of-thought); otherwise fall back to a single blocking call.
+// Active streaming turns, keyed by streamId, so a renderer 'rag:cancel' can abort
+// an in-flight generation and keep whatever was produced so far.
+const streamControllers = new Map<string, AbortController>();
+
 async function streamAnswer(
     event: { sender?: { send: (channel: string, payload: unknown) => void } } | undefined,
     streamId: string | undefined,
@@ -172,16 +176,34 @@ async function streamAnswer(
         return (await llm.chat(prompt, [], 300000, 2048, { disableThinking: !thinking })).trim();
     }
     const sender = event.sender;
-    const answer = await llm.chatStream(prompt, [], (text, kind) => {
-        try { sender.send('rag:stream', { streamId, type: kind, text }); } catch { /* window gone */ }
-    }, { thinking });
-    return answer.trim();
+    const controller = new AbortController();
+    streamControllers.set(streamId, controller);
+    try {
+        const answer = await llm.chatStream(prompt, [], (text, kind) => {
+            try { sender.send('rag:stream', { streamId, type: kind, text }); } catch { /* window gone */ }
+        }, { thinking, signal: controller.signal });
+        return answer.trim();
+    } finally {
+        streamControllers.delete(streamId);
+    }
 }
 
 function clipText(text: string, maxLength: number): string {
     if (!text) return '';
     if (text.length <= maxLength) return text;
     return text.slice(0, Math.max(0, maxLength - 1)) + '…';
+}
+
+// Build/generate requests ("build a react app", "write an svg", "make a landing
+// page") don't benefit from memory retrieval — pulling in unrelated SOURCES makes
+// the model cite junk and second-guess itself. Detect them so we can answer with
+// the artifact instructions only and skip the search.
+function isGenerativeRequest(text: string): boolean {
+    const q = (text || '').trim().toLowerCase();
+    if (!q) return false;
+    const hasNoun = /\b(react|next\.?js|vue|svelte|html|css|svg|website|web ?app|web ?page|landing page|component|widget|diagram|chart|flowchart|mermaid|game|canvas|prototype|mock-?up|ui|app|script|function|snippet|webpage)\b/.test(q);
+    const hasVerb = /\b(build|create|make|write|generate|code|implement|design|draw|render|scaffold|give me a|show me a)\b/.test(q);
+    return hasNoun && hasVerb;
 }
 
 function isTrivialMessage(text: string): boolean {
@@ -552,6 +574,11 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
       };
   });
 
+  // Cancel an in-flight streaming turn; chatStream resolves with the partial answer.
+  ipcMain.on('rag:cancel', (_evt, streamId: string) => {
+      streamControllers.get(streamId)?.abort();
+  });
+
   ipcMain.handle('rag:chat', async (event, query: string, appName?: string, conversationHistory?: { role: string; content: string }[], projectId?: string | null, conversationId?: string, noMemory?: boolean, streamId?: string, thinking?: boolean) => {
       // No-memory mode: a plain on-device assistant — no retrieval at all.
       if (noMemory) {
@@ -605,6 +632,30 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
           };
       }
 
+      // Generative/build request: answer directly with artifact instructions, no retrieval.
+      if (isGenerativeRequest(query)) {
+          let skillsBlock = 'None installed.';
+          try {
+              const { listSkills } = await import('./skills');
+              const sk = listSkills();
+              if (sk.length) skillsBlock = sk.map((s) => `- /${s.name}: ${s.description}`).join('\n');
+          } catch { /* skills optional */ }
+          let historyBlock = '';
+          if (conversationHistory && conversationHistory.length > 0) {
+              const historyLines = conversationHistory.map((msg) => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${clipText(msg.content, 500)}`).join('\n\n');
+              historyBlock = `\nCONVERSATION HISTORY:\n${historyLines}\n`;
+          }
+          const prompt = getPrompt('ragChat', {
+              HISTORY_BLOCK: historyBlock,
+              QUERY: query,
+              CONTEXT_BLOCK: '(No memory searched — this is a build/generate request. There are NO sources; do NOT cite [S#].)',
+              SKILLS_BLOCK: skillsBlock,
+          });
+          const answer = await streamAnswer(event, streamId, prompt, thinking);
+          return { answer, context: undefined };
+      }
+
+      if (streamId) event.sender?.send('rag:stream', { streamId, type: 'step', step: { kind: 'searching' } });
       const db = getDB();
       const tokens = tokenizeQuery(query);
       const ftsQuery = tokens.length > 0 ? tokens.join(' OR ') : query;
@@ -714,32 +765,29 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
             factQuery += ` ORDER BY score ASC LIMIT 8`;
             const entityFacts = db.prepare(factQuery).all(...factParams);
 
-    const master = getMasterMemory();
-    const masterContent = master?.content || '';
-    const masterRelevant = tokens.length > 0 && tokens.some(t => masterContent.toLowerCase().includes(t));
-    const masterFallback = !masterRelevant && (!memories.length && !messages.length && !summaries.length && !entities.length && !entityFacts.length);
-
-      const memoryLines = memories.slice(0, 6).map((m: any, idx: number) =>
-          `- [Memory ${idx + 1}] (${m.source_app || 'Unknown'} | ${m.created_at}): ${clipText(m.content, 500)}`
+      // Supplementary context (no bracket labels — the ONLY citeable tags are the
+      // numbered [S#] SOURCES below, so the model can't invent uncited labels).
+      const memoryLines = memories.slice(0, 6).map((m: any) =>
+          `- (${m.source_app || 'Unknown'} | ${m.created_at}): ${clipText(m.content, 500)}`
       ).join('\n');
 
-      const messageLines = messages.slice(0, 6).map((m: any, idx: number) =>
-          `- [Message ${idx + 1}] (${m.app_name || 'Unknown'} | ${m.title || 'Untitled'} | ${m.created_at}) ${m.role}: ${clipText(m.content, 400)}`
+      const messageLines = messages.slice(0, 6).map((m: any) =>
+          `- (${m.app_name || 'Unknown'} | ${m.title || 'Untitled'} | ${m.created_at}) ${m.role}: ${clipText(m.content, 400)}`
       ).join('\n');
 
-      const summaryLines = summaries.slice(0, 6).map((s: any, idx: number) =>
-          `- [Summary ${idx + 1}] (${s.app_name || 'Unknown'} | ${s.title || 'Untitled'}): ${clipText(s.summary, 600)}`
+      const summaryLines = summaries.slice(0, 6).map((s: any) =>
+          `- (${s.app_name || 'Unknown'} | ${s.title || 'Untitled'}): ${clipText(s.summary, 600)}`
       ).join('\n');
 
-      const entityLines = entities.slice(0, 6).map((e: any, idx: number) =>
-          `- [Entity ${idx + 1}] (${e.type || 'Unknown'}) ${e.name}: ${clipText(e.summary || '', 400)}`
+      const entityLines = entities.slice(0, 6).map((e: any) =>
+          `- (${e.type || 'Unknown'}) ${e.name}: ${clipText(e.summary || '', 400)}`
       ).join('\n');
 
-      const factLines = entityFacts.slice(0, 6).map((f: any, idx: number) =>
-          `- [Entity Fact ${idx + 1}] (${f.type || 'Unknown'}) ${f.name}: ${clipText(f.fact, 400)}`
+      const factLines = entityFacts.slice(0, 6).map((f: any) =>
+          `- (${f.type || 'Unknown'}) ${f.name}: ${clipText(f.fact, 400)}`
       ).join('\n');
 
-    const contextBlock = `MASTER MEMORY:\n${masterRelevant || masterFallback ? clipText(masterContent || '(none)', 500) : '(not relevant)'}\n\nRELEVANT MEMORIES:\n${memoryLines || '(none)'}\n\nRELEVANT MESSAGES:\n${messageLines || '(none)'}\n\nRELEVANT SUMMARIES:\n${summaryLines || '(none)'}\n\nRELEVANT ENTITIES:\n${entityLines || '(none)'}\n\nRELEVANT ENTITY FACTS:\n${factLines || '(none)'}`;
+    const contextBlock = `RELEVANT MEMORIES:\n${memoryLines || '(none)'}\n\nRELEVANT MESSAGES:\n${messageLines || '(none)'}\n\nRELEVANT SUMMARIES:\n${summaryLines || '(none)'}\n\nRELEVANT ENTITIES:\n${entityLines || '(none)'}\n\nRELEVANT ENTITY FACTS:\n${factLines || '(none)'}`;
 
     // Unified search: fuse in the best-ranked hits across screens, meetings,
     // memories, entities and facts (hybrid FTS + vectors with RRF) — the same
@@ -789,7 +837,7 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
           return {
               answer,
               context: {
-                  masterMemory: masterRelevant || masterFallback ? masterContent : null,
+                  masterMemory: null,
                   memories,
                   messages,
                   summaries,
@@ -803,7 +851,7 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
           return {
               answer: 'Sorry, I could not generate a response right now.',
               context: {
-                  masterMemory: masterRelevant || masterFallback ? masterContent : null,
+                  masterMemory: null,
                   memories,
                   messages,
                   summaries,

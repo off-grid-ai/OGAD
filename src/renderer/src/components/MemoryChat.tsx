@@ -31,6 +31,7 @@ type ChatMessage = {
   toolCalls?: { name: string; result: string }[];
   reasoning?: string;
   streaming?: boolean;
+  activity?: { kind: string; counts?: Record<string, number> };
 };
 
 type ChatMode = 'ask' | 'image';
@@ -51,6 +52,25 @@ function parseAsk(content: string): AskBlock | null {
 }
 
 const ASK_FENCE = /```ask\s*\n[\s\S]*?```/i;
+// Artifact code (html/svg/mermaid/react/image) is rendered on the side canvas, not
+// dumped inline — strip the fenced block from the chat bubble and show a card instead.
+const ARTIFACT_FENCE = /```(?:html|svg|mermaid|jsx|tsx|react|image)\s*\n[\s\S]*?```/gi;
+
+// Human label for a live retrieval/activity step shown while the model works.
+function activityLabel(a?: { kind: string; counts?: Record<string, number> }): string {
+  if (!a) return '';
+  if (a.kind === 'searching') return 'Searching your memory…';
+  if (a.kind === 'memory') {
+    const c = a.counts || {};
+    const total = (c.memories || 0) + (c.summaries || 0) + (c.entities || 0) + (c.facts || 0) + (c.unified || 0);
+    return `Searched your memory — ${total} result${total === 1 ? '' : 's'}`;
+  }
+  if (a.kind === 'project') {
+    const c = a.counts || {};
+    return `Searched project — ${c.sources || 0} sources · ${c.projectChats || 0} chats`;
+  }
+  return 'Working…';
+}
 
 type Attachment = {
   id: string;
@@ -201,6 +221,8 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const sendingRef = useRef(false);
+  const queueRef = useRef<string[]>([]);
+  const [queuedCount, setQueuedCount] = useState(0);
 
   const markdownComponents: Components = {
     p: ({ children }) => <p style={{ margin: 0 }}>{children}</p>,
@@ -422,9 +444,15 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
     const trimmed = typed || (atts.length ? `(${atts.length} attachment${atts.length > 1 ? 's' : ''})` : '');
     const attBlock = atts.map(a => `--- attached ${a.kind}: ${a.name} ---\n${a.text}`).join('\n\n');
     let modelQuery = (attBlock ? `${attBlock}\n\n${typed}` : typed).trim();
-    // Synchronous guard: React state batching lets rapid clicks slip past the
-    // `loading` check and fire concurrent generations; the ref blocks that.
-    if ((!typed && atts.length === 0) || loading || sendingRef.current) return;
+    if (!typed && atts.length === 0) return;
+    // Don't block the user — if a generation is in flight, queue this message and
+    // let them keep typing/sending. The queue drains in order when each finishes.
+    if (sendingRef.current) {
+      queueRef.current.push(typed);
+      setQueuedCount(c => c + 1);
+      if (isInput) setInput('');
+      return;
+    }
     sendingRef.current = true;
     if (isInput) setAttachments([]);
 
@@ -515,6 +543,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
         setLoading(false);
         setImgProgress(null);
         await loadConversations();
+        drainQueue();
       }
       return;
     }
@@ -563,7 +592,10 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
         // Finalize the streamed message — set authoritative text + context, clear streaming.
         setMessages(prev => prev.map(m => (m.id === streamId ? { ...m, content: assistantContent, context: result.context, streaming: false } : m)));
         const art = parseArtifact(assistantContent);
-        if (art) { try { void window.api.saveArtifact?.({ kind: art.kind, code: art.code }); } catch { /* ignore */ } }
+        if (art) {
+          setCanvasArtifact(art); // Claude-style: open the live preview on the side, not inline.
+          try { void window.api.saveArtifact?.({ kind: art.kind, code: art.code }); } catch { /* ignore */ }
+        }
         if (voiceOn) speakMessage(streamId, assistantContent);
         try {
           await window.api.addRagMessage(convId, 'assistant', assistantContent, result.context);
@@ -582,7 +614,16 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
       sendingRef.current = false;
       setLoading(false);
       await loadConversations();
+      drainQueue();
     }
+  };
+
+  // Pull the next queued message (sent while a generation was in flight) and send it.
+  const drainQueue = (): void => {
+    const next = queueRef.current.shift();
+    if (next === undefined) return;
+    setQueuedCount(c => Math.max(0, c - 1));
+    setTimeout(() => { void sendMessage(next); }, 30);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -704,6 +745,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
         if (m.id !== data.streamId) return m;
         if (data.type === 'content') return { ...m, content: (m.content || '') + (data.text || '') };
         if (data.type === 'reasoning') return { ...m, reasoning: (m.reasoning || '') + (data.text || '') };
+        if (data.type === 'step') return { ...m, activity: data.step as ChatMessage['activity'] };
         return m;
       }));
     });
@@ -1093,9 +1135,18 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
               <div className="w-full px-6 py-5">
                 {messages.map(message => (
                   <div key={message.id} className={`mb-5 flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
-                    <div className="mb-1 text-[10px] uppercase tracking-wider text-neutral-600">
-                      {message.role === 'user' ? 'You' : 'Off Grid'}
-                    </div>
+                    {message.role === 'assistant' && message.streaming ? (
+                      <div className="mb-1.5 flex flex-col gap-1.5">
+                        <span className="inline-flex gap-1 text-green-500">
+                          <span className="animate-bounce [animation-delay:-0.3s]">●</span>
+                          <span className="animate-bounce [animation-delay:-0.15s]">●</span>
+                          <span className="animate-bounce">●</span>
+                        </span>
+                        {activityLabel(message.activity) ? (
+                          <span className="text-[11px] text-neutral-500">{activityLabel(message.activity)}</span>
+                        ) : null}
+                      </div>
+                    ) : null}
                     {message.role === 'assistant' && message.reasoning && message.reasoning.trim() ? (
                       <Collapsible defaultOpen={!!message.streaming} className="mb-1.5 max-w-[85%]">
                         <CollapsibleTrigger className="group flex items-center gap-1.5 text-[11px] text-neutral-500 transition-colors hover:text-neutral-300">
@@ -1109,28 +1160,44 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                       </Collapsible>
                     ) : null}
                     <div
-                      className={`max-w-[85%] rounded-md px-3.5 py-2.5 text-sm leading-relaxed ${
-                        message.role === 'user'
-                          ? 'bg-neutral-800 text-neutral-100'
-                          : 'border border-neutral-800 bg-neutral-900/40 text-neutral-200'
-                      }`}
+                      className={
+                        message.role === 'assistant' && message.streaming && !message.content.trim()
+                          ? 'hidden'
+                          : `max-w-[85%] rounded-md px-3.5 py-2.5 text-sm leading-relaxed ${
+                              message.role === 'user'
+                                ? 'bg-neutral-800 text-neutral-100'
+                                : 'border border-neutral-800 bg-neutral-900/40 text-neutral-200'
+                            }`
+                      }
                     >
-                      {message.role === 'assistant' && message.streaming && !message.content.trim() ? (
-                        <span className="inline-flex gap-1 text-green-500">
-                          <span className="animate-bounce [animation-delay:-0.3s]">●</span>
-                          <span className="animate-bounce [animation-delay:-0.15s]">●</span>
-                          <span className="animate-bounce">●</span>
-                        </span>
-                      ) : (
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm, remarkBreaks]}
-                          components={message.role === 'assistant' ? makeCiteComponents(message.context?.unified) : markdownComponents}
-                        >
-                          {message.role === 'assistant'
-                            ? message.content.replace(ASK_FENCE, '').replace(/\[S(\d+)\]/g, '[S$1](cite:$1)').trim()
-                            : message.content}
-                        </ReactMarkdown>
-                      )}
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm, remarkBreaks]}
+                        components={message.role === 'assistant' ? makeCiteComponents(message.context?.unified) : markdownComponents}
+                      >
+                        {message.role === 'assistant'
+                          ? message.content.replace(ASK_FENCE, '').replace(ARTIFACT_FENCE, '').replace(/\[S(\d+)\]/g, '[S$1](cite:$1)').trim()
+                          : message.content}
+                      </ReactMarkdown>
+                      {(() => {
+                        if (message.role !== 'assistant') return null;
+                        const art = parseArtifact(message.content);
+                        if (!art) return null;
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => setCanvasArtifact(art)}
+                            className="mt-2 flex w-full items-center gap-3 rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2.5 text-left transition-colors hover:border-green-500/60"
+                          >
+                            <span className="flex h-9 w-9 items-center justify-center rounded-md border border-neutral-800 bg-neutral-950 text-green-500">
+                              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-xs text-neutral-200">{art.title || `${art.kind.toUpperCase()} artifact`}</span>
+                              <span className="block text-[11px] text-neutral-500">Click to open in the canvas →</span>
+                            </span>
+                          </button>
+                        );
+                      })()}
                       {(() => {
                         if (message.role !== 'assistant') return null;
                         const ask = parseAsk(message.content);
@@ -1253,15 +1320,28 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
 
                         {message.context.unified && message.context.unified.length > 0 ? (
                           <div className="mb-3">
-                            <div className="mb-2 text-[10px] uppercase tracking-wide text-neutral-600">Sources ({message.context.unified.length}) — cited as [S#] in the answer</div>
-                            <div className="space-y-1">
+                            <div className="mb-2 text-[10px] uppercase tracking-wide text-neutral-600">Sources ({message.context.unified.length}) — cited as [S#]</div>
+                            <div className="grid grid-cols-2 gap-1.5 lg:grid-cols-3">
                               {message.context.unified.map((u, idx) => (
-                                <div key={idx} className="flex items-center gap-2 rounded-md border border-neutral-800 p-2 text-[11px] text-neutral-400">
-                                  <span className="shrink-0 font-semibold text-green-500">[S{idx + 1}]</span>
-                                  <span className="shrink-0 rounded-sm border border-neutral-700 px-1 py-0.5 text-[9px] uppercase tracking-wide text-neutral-500">{u.kind}</span>
-                                  <span className="min-w-0 flex-1 truncate">{u.title || u.snippet}</span>
-                                  <span className="shrink-0 text-neutral-600">{u.surface}</span>
-                                </div>
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() => {
+                                    if (u.refId == null) return;
+                                    if (u.kind === 'memory') onNavigateToMemory?.(u.refId);
+                                    else if (u.kind === 'entity') onNavigateToEntity?.(u.refId);
+                                    else if (u.kind === 'meeting') onNavigateToChat?.(String(u.refId));
+                                  }}
+                                  title={`${u.kind} · ${u.surface}${u.title ? ' · ' + u.title : ''}`}
+                                  className="flex flex-col gap-1 rounded-md border border-neutral-800 p-2 text-left text-[11px] text-neutral-400 transition-colors hover:border-green-500"
+                                >
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-semibold text-green-500">[S{idx + 1}]</span>
+                                    <span className="rounded-sm border border-neutral-700 px-1 text-[9px] uppercase tracking-wide text-neutral-500">{u.kind}</span>
+                                  </div>
+                                  <span className="line-clamp-2 text-neutral-300">{u.title || u.snippet}</span>
+                                  <span className="truncate text-[10px] text-neutral-600">{u.surface}</span>
+                                </button>
                               ))}
                             </div>
                           </div>
@@ -1567,6 +1647,11 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                       <SlidersHorizontal className="h-3.5 w-3.5" /> Image options
                     </Button>
                   )}
+                  {queuedCount > 0 && (
+                    <span className="flex h-8 items-center rounded-full border border-neutral-800 px-2.5 text-[11px] text-neutral-400">
+                      {queuedCount} queued
+                    </span>
+                  )}
                   </div>
 
                   <div className="flex items-center gap-1.5">
@@ -1591,6 +1676,22 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                       </TooltipTrigger>
                       <TooltipContent>{recording ? 'Stop recording' : 'Record voice'}</TooltipContent>
                     </Tooltip>
+                    {messages.some(m => m.streaming) && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={() => { const s = messages.find(m => m.streaming); if (s) window.api.cancelRag?.(s.id); }}
+                            className="size-8 rounded-full border-red-500/50 text-red-400 hover:bg-red-500/10"
+                          >
+                            <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Stop generating</TooltipContent>
+                      </Tooltip>
+                    )}
                     {loading && mode === 'image' ? (
                       <Button type="button" variant="outline" onClick={() => window.api.cancelImageGen?.()} className="h-8 gap-1.5 border-red-500/50 text-red-400 hover:bg-red-500/10">
                         <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
@@ -1603,14 +1704,11 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                             type="button"
                             size="icon"
                             onClick={() => sendMessage()}
-                            disabled={loading || (!input.trim() && attachments.length === 0)}
+                            disabled={!input.trim() && attachments.length === 0}
                             className="size-8 rounded-full"
                           >
-                            {loading ? (
-                              <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-                            ) : (
-                              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" /></svg>
-                            )}
+                            {/* Always sendable — generating doesn't block; messages queue. */}
+                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" /></svg>
                           </Button>
                         </TooltipTrigger>
                         <TooltipContent>Send</TooltipContent>
