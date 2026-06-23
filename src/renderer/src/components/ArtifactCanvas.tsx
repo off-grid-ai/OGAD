@@ -33,21 +33,31 @@ function extractPkgs(code: string): string[] {
 export function ArtifactCanvas({ artifact, onClose, width, onResize }: { artifact: Artifact; onClose: () => void; width?: number | null; onResize?: (w: number) => void }) {
   const [runtime, setRuntime] = useState<Record<string, string> | null>(null);
   const [view, setView] = useState<'preview' | 'code'>('preview');
+  const [resizing, setResizing] = useState(false);
 
-  // Drag the left edge to widen/narrow the canvas (it's right-anchored, so width
-  // grows as the cursor moves left). Clamped to a sensible range.
+  // Drag the left edge to widen/narrow the canvas (right-anchored: width grows as
+  // the cursor moves left). The key to smoothness: while dragging, an overlay sits
+  // OVER the iframe so it can't swallow mousemove (the cause of the jumpiness), and
+  // updates are rAF-throttled to one per frame.
   const startResize = (e: React.MouseEvent): void => {
     e.preventDefault();
+    setResizing(true);
+    let lastX = e.clientX;
+    let raf = 0;
+    const apply = (): void => {
+      raf = 0;
+      onResize?.(Math.min(window.innerWidth * 0.9, Math.max(360, window.innerWidth - lastX)));
+    };
     const move = (ev: MouseEvent): void => {
-      const w = Math.min(window.innerWidth * 0.9, Math.max(360, window.innerWidth - ev.clientX));
-      onResize?.(w);
+      lastX = ev.clientX;
+      if (!raf) raf = requestAnimationFrame(apply);
     };
     const up = (): void => {
       window.removeEventListener('mousemove', move);
       window.removeEventListener('mouseup', up);
-      document.body.style.userSelect = '';
+      if (raf) cancelAnimationFrame(raf);
+      setResizing(false);
     };
-    document.body.style.userSelect = 'none';
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
   };
@@ -178,12 +188,15 @@ else { __ogShow('No React component found — define a component named App or a 
       className="fixed right-0 top-0 bottom-0 z-50 flex min-w-[360px] max-w-[90vw] flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl"
       style={{ width: width ? `${width}px` : '30vw' }}
     >
-      {/* Resize handle — drag to slide the canvas wider/narrower. */}
+      {/* Resize handle — drag the left edge to slide the canvas wider/narrower. */}
       <div
         onMouseDown={startResize}
         title="Drag to resize"
-        className="absolute left-0 top-0 z-10 h-full w-1.5 cursor-col-resize transition-colors hover:bg-green-500/40"
+        className="absolute left-[-3px] top-0 z-20 h-full w-2.5 cursor-col-resize transition-colors hover:bg-green-500/40"
       />
+      {/* While dragging, this overlay sits OVER the iframe so it can't swallow the
+          mousemove events — without it the drag stalls and jumps. */}
+      {resizing && <div className="fixed inset-0 z-[60] cursor-col-resize select-none" />}
       <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2.5">
         <div className="flex items-center gap-2 text-sm text-neutral-200">
           <span className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-green-500">{KIND_LABEL[artifact.kind]}</span>
