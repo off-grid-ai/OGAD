@@ -45,16 +45,28 @@ func pickMeetingWindow(_ content: SCShareableContent, _ platform: String) -> SCW
     func title(_ w: SCWindow) -> String { (w.title ?? "").lowercased() }
     let browsers = ["chrome", "brave", "safari", "edge", "arc", "firefox", "vivaldi", "opera"]
     func isBrowser(_ w: SCWindow) -> Bool { browsers.contains { appName(w).contains($0) } }
+    func area(_ w: SCWindow) -> CGFloat { w.frame.width * w.frame.height }
+    // The biggest browser window is, in practice, the one holding the call — the
+    // robust fallback when we can't title-match the exact tab (a browser window's
+    // title is only its ACTIVE tab, so a backgrounded Meet tab is invisible to us).
+    let biggestBrowser = wins.filter { isBrowser($0) }.max { area($0) < area($1) }
+    func titled(_ kws: [String]) -> SCWindow? {
+        wins.first { w in isBrowser(w) && kws.contains { title(w).contains($0) } }
+    }
+
+    errLog("[rec] window candidates: " + wins.map { "\(appName($0))::\(title($0)) [\(Int(area($0)))]" }.joined(separator: " | "))
 
     switch platform {
     case "zoom":
         return wins.first { appName($0).contains("zoom") && title($0).contains("meeting") }
             ?? wins.first { appName($0).contains("zoom") }
+            ?? biggestBrowser
     case "teams":
-        return wins.first { isBrowser($0) && title($0).contains("teams") }
-            ?? wins.first { appName($0).contains("teams") }
+        return titled(["teams"]) ?? wins.first { appName($0).contains("teams") } ?? biggestBrowser
     default: // meet (browser)
-        return wins.first { isBrowser($0) && title($0).contains("meet") }
+        // Match the Meet tab by title; otherwise capture the main browser window
+        // (where the call is) rather than falling through to a whole-display grab.
+        return titled(["meet.google", "google meet", "meet -", "- meet", "meet"]) ?? biggestBrowser
     }
 }
 
