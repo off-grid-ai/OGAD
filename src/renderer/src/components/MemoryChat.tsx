@@ -35,6 +35,8 @@ type ChatMessage = {
   streaming?: boolean;
   activity?: { kind: string; counts?: Record<string, number> };
   attachments?: { name: string; kind: string }[];
+  variants?: string[];      // regenerated answers (navigate with ‹ ›)
+  variantIndex?: number;
 };
 
 type ChatMode = 'ask' | 'image';
@@ -228,6 +230,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const pendingVariantsRef = useRef<string[] | null>(null); // prior answers to keep when regenerating
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const sendingRef = useRef(false);
@@ -615,7 +618,11 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
         }
       } else {
         // Finalize the streamed message — set authoritative text + context, clear streaming.
-        setMessages(prev => prev.map(m => (m.id === streamId ? { ...m, content: assistantContent, context: result.context, streaming: false } : m)));
+        // If this was a regenerate, keep the prior answer(s) as navigable variants.
+        const priorVariants = pendingVariantsRef.current;
+        pendingVariantsRef.current = null;
+        const allVariants = priorVariants ? [...priorVariants, assistantContent] : undefined;
+        setMessages(prev => prev.map(m => (m.id === streamId ? { ...m, content: assistantContent, context: result.context, streaming: false, variants: allVariants, variantIndex: allVariants ? allVariants.length - 1 : undefined } : m)));
         const art = parseArtifact(assistantContent);
         if (art) {
           // Inline-first: don't force the canvas open — the user opens the live
@@ -812,6 +819,11 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const regenerate = useCallback((messageId: string) => {
     const idx = messages.findIndex(m => m.id === messageId);
     if (idx < 0) return;
+    // Regenerating an assistant answer keeps prior answers as navigable variants.
+    const target = messages[idx];
+    if (target.role === 'assistant' && target.content.trim()) {
+      pendingVariantsRef.current = target.variants && target.variants.length ? target.variants : [target.content];
+    }
     // Walk back to the user turn that produced this answer.
     for (let i = idx; i >= 0; i--) {
       if (messages[i].role === 'user') {
@@ -1162,9 +1174,9 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                       >
                         {message.role !== 'assistant'
                           ? message.content
-                          // Keep the artifact code inline (you can also open it live in the canvas
-                          // via the card below). Only the clarifying-question fence is hidden.
-                          : message.content.replace(ASK_FENCE, '').replace(/\[S(\d+)\]/g, '[S$1](cite:$1)').trim()}
+                          // Show the selected regenerated variant (if any); keep artifact code
+                          // inline; hide only the clarifying-question fence.
+                          : (message.variants && message.variantIndex != null ? message.variants[message.variantIndex] : message.content).replace(ASK_FENCE, '').replace(/\[S(\d+)\]/g, '[S$1](cite:$1)').trim()}
                       </ReactMarkdown>
                       )}
                       {(() => {
@@ -1316,6 +1328,21 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                           <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                           Regenerate
                         </button>
+                        {message.variants && message.variants.length > 1 ? (
+                          <span className="flex items-center gap-1 text-[11px] text-neutral-500">
+                            <button
+                              onClick={() => setMessages(prev => prev.map(m => (m.id === message.id ? { ...m, variantIndex: Math.max(0, (m.variantIndex ?? 0) - 1) } : m)))}
+                              disabled={(message.variantIndex ?? 0) <= 0}
+                              className="transition-colors hover:text-green-500 disabled:opacity-30"
+                            >‹</button>
+                            <span>{(message.variantIndex ?? 0) + 1}/{message.variants.length}</span>
+                            <button
+                              onClick={() => setMessages(prev => prev.map(m => (m.id === message.id ? { ...m, variantIndex: Math.min((m.variants?.length ?? 1) - 1, (m.variantIndex ?? 0) + 1) } : m)))}
+                              disabled={(message.variantIndex ?? 0) >= message.variants.length - 1}
+                              className="transition-colors hover:text-green-500 disabled:opacity-30"
+                            >›</button>
+                          </span>
+                        ) : null}
                         {parseArtifact(message.content) ? (
                           <button
                             onClick={() => { const a = parseArtifact(message.content); if (a) setCanvasArtifact(a); }}
