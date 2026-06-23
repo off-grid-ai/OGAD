@@ -618,9 +618,13 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
               .slice(-10)
               .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${m.content}`)
               .join('\n');
-          const prompt = ['You are Off Grid, a private, on-device assistant.', hist ? `Conversation so far:\n${hist}` : '', `User: ${query}`, 'Assistant:']
-              .filter(Boolean)
-              .join('\n\n');
+          const prompt = [
+              'You are Off Grid, a private, on-device assistant.',
+              'You can generate images on-device. If (and only if) the user is asking for a picture/image/logo/art to be CREATED, respond with ONLY a fenced block ```image\\n<a detailed image prompt>\\n``` and nothing else. For everything else, answer normally in text.',
+              hist ? `Conversation so far:\n${hist}` : '',
+              `User: ${query}`,
+              'Assistant:',
+          ].filter(Boolean).join('\n\n');
           void llm; // retained for non-stream fallback inside streamAnswer
           const answer = await streamAnswer(event, streamId, prompt, thinking);
           return { answer, context: undefined };
