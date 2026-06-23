@@ -7,7 +7,7 @@ import { Button } from '@renderer/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@renderer/components/ui/dropdown-menu';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@renderer/components/ui/collapsible';
-import { Plus, Paperclip, Image as ImageIcon, Sparkle as Sparkles, FolderPlus, Wrench, MagnifyingGlass as Search, Plug, SlidersHorizontal, Brain } from '@phosphor-icons/react';
+import { Plus, Paperclip, Image as ImageIcon, Sparkle as Sparkles, FolderPlus, Wrench, MagnifyingGlass as Search, Plug, SlidersHorizontal, Brain, FolderOpen, CaretDown } from '@phosphor-icons/react';
 
 type RagContext = {
   masterMemory?: string | null;
@@ -196,7 +196,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   // Memory scope: no memory (plain chat, default) · all memory · a project.
   const [noMemory, setNoMemory] = useState(true);
-  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [, setProjectMenuOpen] = useState(false);
   const [projCreating, setProjCreating] = useState(false);
   const [projNewName, setProjNewName] = useState('');
   const [recording, setRecording] = useState(false);
@@ -831,80 +831,6 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
           <p className="truncate text-xs text-neutral-500">Private, on-device — ask your memory or generate images</p>
         </div>
 
-        {/* Project scope picker */}
-        <div className="relative">
-          <button
-            onClick={() => setProjectMenuOpen(o => !o)}
-            title="Scope this chat to a project's knowledge base"
-            className={`flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs transition-colors ${
-              activeProjectId
-                ? 'border-green-500 text-green-500'
-                : 'border-neutral-800 text-neutral-400 hover:border-neutral-700 hover:text-neutral-200'
-            }`}
-          >
-            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
-            </svg>
-            <span className="max-w-[10rem] truncate">{activeProjectName ?? (noMemory ? 'No memory' : 'All memory')}</span>
-            <svg className="h-3 w-3 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-          {projectMenuOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setProjectMenuOpen(false)} />
-              <div className="absolute right-0 z-20 mt-1 max-h-80 w-60 overflow-y-auto rounded-md border border-neutral-800 bg-neutral-950 py-1">
-                <div className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-neutral-600">Scope this chat</div>
-                <button
-                  onClick={() => { setNoMemory(true); assignProject(null); setProjectMenuOpen(false); }}
-                  className={`block w-full px-3 py-2 text-left text-xs transition-colors hover:bg-neutral-900 ${!activeProjectId && noMemory ? 'text-green-500' : 'text-neutral-300'}`}
-                  title="Just chat — don't search your memory"
-                >
-                  No memory
-                </button>
-                <button
-                  onClick={() => { setNoMemory(false); assignProject(null); setProjectMenuOpen(false); }}
-                  className={`block w-full px-3 py-2 text-left text-xs transition-colors hover:bg-neutral-900 ${!activeProjectId && !noMemory ? 'text-green-500' : 'text-neutral-300'}`}
-                  title="Answer using everything in your memory"
-                >
-                  All memory
-                </button>
-                {projects.map(p => (
-                  <button
-                    key={p.id}
-                    onClick={() => { setNoMemory(false); assignProject(p.id); setProjectMenuOpen(false); }}
-                    className={`block w-full truncate px-3 py-2 text-left text-xs transition-colors hover:bg-neutral-900 ${activeProjectId === p.id ? 'text-green-500' : 'text-neutral-300'}`}
-                  >
-                    {p.name}
-                  </button>
-                ))}
-                <div className="my-1 border-t border-neutral-900" />
-                {projCreating ? (
-                  <input
-                    autoFocus
-                    value={projNewName}
-                    onChange={(e) => setProjNewName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') createAndAssignProject();
-                      if (e.key === 'Escape') { setProjCreating(false); setProjNewName(''); }
-                    }}
-                    onBlur={createAndAssignProject}
-                    placeholder="Project name…"
-                    className="mx-2 my-1 w-[calc(100%-1rem)] rounded border border-green-500 bg-neutral-900 px-2 py-1.5 text-xs text-white placeholder-neutral-600 outline-none"
-                  />
-                ) : (
-                  <button
-                    onClick={() => setProjCreating(true)}
-                    className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs text-neutral-400 transition-colors hover:bg-neutral-900 hover:text-green-500"
-                  >
-                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                    New project
-                  </button>
-                )}
-              </div>
-            </>
-          )}
-        </div>
 
         {/* Model settings (temperature + context window) */}
         <div className="relative">
@@ -1559,6 +1485,23 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                 </div>
               )}
 
+              {projCreating && (
+                <div className="mb-2">
+                  <input
+                    autoFocus
+                    value={projNewName}
+                    onChange={(e) => setProjNewName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') createAndAssignProject();
+                      if (e.key === 'Escape') { setProjCreating(false); setProjNewName(''); }
+                    }}
+                    onBlur={createAndAssignProject}
+                    placeholder="New project name…  (Enter to create, Esc to cancel)"
+                    className="w-full rounded-md border border-green-500 bg-neutral-900 px-3 py-2 text-xs text-white placeholder-neutral-600 outline-none"
+                  />
+                </div>
+              )}
+
               {/* Unified composer block */}
               <div className="relative rounded-2xl border border-neutral-800 bg-neutral-950 shadow-sm transition-colors focus-within:border-neutral-600">
                 {skillMatches.length > 0 && (
@@ -1631,7 +1574,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                       <DropdownMenuItem disabled={!imageAvailable} onSelect={() => setMode('image')}>
                         <Sparkles /> Generate image
                       </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => setProjectMenuOpen(true)}>
+                      <DropdownMenuItem onSelect={() => setProjCreating(true)}>
                         <FolderPlus /> Add to project
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
@@ -1643,6 +1586,38 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                       <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">Coming soon</DropdownMenuLabel>
                       <DropdownMenuItem disabled><Search /> Web search</DropdownMenuItem>
                       <DropdownMenuItem disabled><Plug /> Connectors</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  {/* Memory scope — No memory / All memory / project */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        title="Scope this chat: ignore memory, use all memory, or a project"
+                        className={`h-8 gap-1.5 rounded-full ${activeProjectId ? 'border-green-500 text-primary' : 'text-neutral-400'}`}
+                      >
+                        <FolderOpen className="h-3.5 w-3.5" />
+                        <span className="max-w-[9rem] truncate">{activeProjectName ?? (noMemory ? 'No memory' : 'All memory')}</span>
+                        <CaretDown className="h-3 w-3 opacity-60" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" side="top" sideOffset={8} className="w-56">
+                      <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">Scope this chat</DropdownMenuLabel>
+                      <DropdownMenuItem onSelect={() => { setNoMemory(true); assignProject(null); }}>
+                        <span className={`flex-1 ${!activeProjectId && noMemory ? 'text-primary' : ''}`}>No memory</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => { setNoMemory(false); assignProject(null); }}>
+                        <span className={`flex-1 ${!activeProjectId && !noMemory ? 'text-primary' : ''}`}>All memory</span>
+                      </DropdownMenuItem>
+                      {projects.map(p => (
+                        <DropdownMenuItem key={p.id} onSelect={() => { setNoMemory(false); assignProject(p.id); }}>
+                          <span className={`flex-1 truncate ${activeProjectId === p.id ? 'text-primary' : ''}`}>{p.name}</span>
+                        </DropdownMenuItem>
+                      ))}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onSelect={() => setProjCreating(true)}><FolderPlus /> New project</DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                   <Tooltip>
