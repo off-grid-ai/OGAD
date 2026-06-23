@@ -95,14 +95,17 @@ function muxToMp4(screen: string, mic: string, out: string): Promise<void> {
     return fs.promises.copyFile(screen, out);
   }
   const hasMic = mic && fs.existsSync(mic) && fs.statSync(mic).size > 0;
-  // -movflags +faststart moves the mp4 index (moov atom) to the FRONT so the
-  // <video> player can render immediately instead of waiting for the whole file
-  // to download (otherwise it shows a black frame at 0:00).
+  // ScreenCaptureKit emits VARIABLE frame rate (a frame only on screen change) on
+  // an odd timebase. Copying that (-c:v copy) yields an mp4 whose first frame the
+  // <video> element can't decode on long recordings — metadata loads but playback
+  // sticks at 0:00. So re-encode to CONSTANT 10fps yuv420p (hardware h264 via
+  // VideoToolbox — fast) so it always plays. +faststart puts the moov up front.
+  const VID = ['-c:v', 'h264_videotoolbox', '-b:v', '2500k', '-pix_fmt', 'yuv420p'];
   const args = hasMic
     ? ['-y', '-i', screen, '-i', mic,
-       '-filter_complex', '[0:a][1:a]amix=inputs=2:duration=longest:normalize=0[a]',
-       '-map', '0:v', '-map', '[a]', '-c:v', 'copy', '-c:a', 'aac', '-movflags', '+faststart', out]
-    : ['-y', '-i', screen, '-c:v', 'copy', '-c:a', 'aac', '-movflags', '+faststart', out];
+       '-filter_complex', '[0:v]fps=10[v];[0:a][1:a]amix=inputs=2:duration=longest:normalize=0[a]',
+       '-map', '[v]', '-map', '[a]', ...VID, '-c:a', 'aac', '-movflags', '+faststart', out]
+    : ['-y', '-i', screen, '-vf', 'fps=10', '-map', '0:v', '-map', '0:a?', ...VID, '-c:a', 'aac', '-movflags', '+faststart', out];
   return execFileAsync(ff, args, { maxBuffer: 1024 * 1024 }).then(() => undefined);
 }
 
