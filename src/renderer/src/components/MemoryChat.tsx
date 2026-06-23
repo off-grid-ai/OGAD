@@ -920,9 +920,9 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
 
       {/* Body */}
       <div className="flex min-h-0 flex-1">
-        {/* History rail */}
-        {showHistory && (
-          <aside className="flex w-64 shrink-0 flex-col border-r border-neutral-900">
+        {/* History rail — animated collapse (width slides to 0) */}
+        <aside className={`shrink-0 overflow-hidden border-neutral-900 transition-[width] duration-300 ease-in-out ${showHistory ? 'w-64 border-r' : 'w-0'}`}>
+          <div className="flex h-full w-64 flex-col">
             <div className="p-3">
               <button
                 onClick={startNewConversation}
@@ -999,8 +999,8 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                 ));
               })()}
             </div>
-          </aside>
-        )}
+          </div>
+        </aside>
 
         {/* Main column */}
         <div className="flex min-w-0 flex-1 flex-col">
