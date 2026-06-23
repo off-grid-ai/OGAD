@@ -1462,6 +1462,10 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
       const { listTools } = await import('./tools');
       return listTools();
   });
+  ipcMain.handle('tools:set-enabled', async (_e, name: string, enabled: boolean) => {
+      const { setToolEnabled } = await import('./tools');
+      setToolEnabled(name, enabled);
+  });
   ipcMain.handle('tools:chat', async (_e, query: string, history?: { role: string; content: string }[]) => {
       const { toolChat } = await import('./tools');
       return toolChat(query, history || []);
@@ -1483,13 +1487,13 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
       const { artifactRuntime } = await import('./artifacts');
       return artifactRuntime(kind);
   });
-  ipcMain.handle('artifacts:save', async (_e, a: { kind: import('./artifacts').ArtifactKind; code: string; title?: string }) => {
+  ipcMain.handle('artifacts:save', async (_e, a: { kind: import('./artifacts').ArtifactKind; code: string; title?: string; conversationId?: string; projectId?: string | null }) => {
       const { saveArtifact } = await import('./artifacts');
       return saveArtifact(a);
   });
-  ipcMain.handle('artifacts:list', async () => {
+  ipcMain.handle('artifacts:list', async (_e, scope?: { conversationId?: string; projectId?: string | null }) => {
       const { listArtifacts } = await import('./artifacts');
-      return listArtifacts();
+      return listArtifacts(scope);
   });
   ipcMain.handle('artifacts:delete', async (_e, id: string) => {
       const { deleteArtifact } = await import('./artifacts');

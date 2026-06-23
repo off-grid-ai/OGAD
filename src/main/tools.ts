@@ -7,8 +7,19 @@
 // search + MCP connectors plug in here later.
 
 import { llm } from './llm';
+import { getSetting, saveSetting } from './database';
 
 const PORT = 8439;
+
+// Per-tool enable/disable, persisted as a list of disabled tool names.
+function disabledSet(): Set<string> {
+  try { return new Set(getSetting<string[]>('disabledTools', [])); } catch { return new Set(); }
+}
+export function setToolEnabled(name: string, enabled: boolean): void {
+  const set = disabledSet();
+  if (enabled) set.delete(name); else set.add(name);
+  saveSetting('disabledTools', Array.from(set));
+}
 
 type ToolDef = {
   name: string;
@@ -107,7 +118,8 @@ const TOOLS: ToolDef[] = [
 ];
 
 function schemas(): unknown[] {
-  return TOOLS.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }));
+  const off = disabledSet();
+  return TOOLS.filter((t) => !off.has(t.name)).map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }));
 }
 
 async function execute(name: string, args: Record<string, unknown>): Promise<string> {
@@ -160,7 +172,8 @@ export async function toolChat(
   return { answer: 'Stopped after too many tool steps.', toolCalls };
 }
 
-/** Names + descriptions of available tools (for the picker UI). */
-export function listTools(): { name: string; description: string }[] {
-  return TOOLS.map((t) => ({ name: t.name, description: t.description }));
+/** Names + descriptions + enabled state of all tools (for the settings UI). */
+export function listTools(): { name: string; description: string; enabled: boolean }[] {
+  const off = disabledSet();
+  return TOOLS.map((t) => ({ name: t.name, description: t.description, enabled: !off.has(t.name) }));
 }

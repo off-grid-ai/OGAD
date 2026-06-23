@@ -145,6 +145,7 @@ try {
 
     // --- Agentic tool-calling (built-in tools) ---
     listTools: () => ipcRenderer.invoke('tools:list'),
+    setToolEnabled: (name: string, enabled: boolean) => ipcRenderer.invoke('tools:set-enabled', name, enabled),
     toolChat: (query: string, history?: { role: string; content: string }[]) => ipcRenderer.invoke('tools:chat', query, history),
 
     // --- LLM inference settings ---
@@ -153,8 +154,8 @@ try {
 
     // --- Canvas / artifacts sandbox runtime + library ---
     artifactRuntime: (kind: 'html' | 'svg' | 'mermaid' | 'react') => ipcRenderer.invoke('artifacts:runtime', kind),
-    saveArtifact: (a: { kind: 'html' | 'svg' | 'mermaid' | 'react'; code: string; title?: string }) => ipcRenderer.invoke('artifacts:save', a),
-    listArtifacts: () => ipcRenderer.invoke('artifacts:list'),
+    saveArtifact: (a: { kind: 'html' | 'svg' | 'mermaid' | 'react'; code: string; title?: string; conversationId?: string; projectId?: string | null }) => ipcRenderer.invoke('artifacts:save', a),
+    listArtifacts: (scope?: { conversationId?: string; projectId?: string | null }) => ipcRenderer.invoke('artifacts:list', scope),
     deleteArtifact: (id: string) => ipcRenderer.invoke('artifacts:delete', id),
 
     // --- File attachments → text ---

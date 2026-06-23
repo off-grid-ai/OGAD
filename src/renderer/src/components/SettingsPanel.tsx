@@ -28,7 +28,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [s, setS] = useState<LlmSettings>({});
   const [voices, setVoices] = useState<string[]>([]);
   const [voice, setVoice] = useState<string>('af_heart');
-  const [tools, setTools] = useState<{ name: string; description: string }[]>([]);
+  const [tools, setTools] = useState<{ name: string; description: string; enabled?: boolean }[]>([]);
   const [connectors, setConnectors] = useState<Connector[]>([]);
   const [newConn, setNewConn] = useState({ name: '', url: '' });
   const [voiceState, setVoiceState] = useState<'idle' | 'generating' | 'playing' | 'error'>('idle');
@@ -154,9 +154,17 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             {tools.length === 0 ? <p className="text-xs text-neutral-600">No tools.</p> : (
               <div className="flex flex-col gap-2">
                 {tools.map(t => (
-                  <div key={t.name} className="rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2">
-                    <div className="text-sm text-green-500">{t.name}</div>
-                    <div className="text-[11px] text-neutral-500">{t.description}</div>
+                  <div key={t.name} className="flex items-start justify-between gap-3 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2">
+                    <div className="min-w-0">
+                      <div className={`text-sm ${t.enabled === false ? 'text-neutral-500' : 'text-green-500'}`}>{t.name}</div>
+                      <div className="text-[11px] text-neutral-500">{t.description}</div>
+                    </div>
+                    <button
+                      onClick={() => { const next = t.enabled === false; window.api.setToolEnabled?.(t.name, next); setTools(prev => prev.map(x => (x.name === t.name ? { ...x, enabled: next } : x))); }}
+                      className={`shrink-0 rounded px-2 py-1 text-[11px] ${t.enabled === false ? 'text-neutral-500' : 'text-green-500'}`}
+                    >
+                      {t.enabled === false ? 'Off' : 'On'}
+                    </button>
                   </div>
                 ))}
               </div>
