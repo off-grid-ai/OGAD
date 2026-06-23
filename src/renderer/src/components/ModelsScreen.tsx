@@ -188,7 +188,9 @@ export function ModelsScreen() {
   const [filterState, setFilterState] = useState<FilterState>(initialFilterState);
   useEffect(() => {
     const q = query.trim();
-    if (q.length < 2) {
+    // STT/TTS are curated-only — never hit HF for them.
+    const canSearch = activeKind !== 'voice' && activeKind !== 'transcription';
+    if (!canSearch || q.length < 2) {
       setHfResults([]);
       return;
     }
@@ -202,8 +204,13 @@ export function ModelsScreen() {
     return () => clearTimeout(t);
   }, [query, activeKind]);
 
+  // HF free-search is only meaningful where arbitrary HF repos run on our
+  // runtimes: text/vision/image (GGUF / sd.cpp). STT (whisper ggml) and TTS
+  // (Kokoro/Piper onnx) are curated-catalogue only — most HF ASR/TTS repos are
+  // incompatible formats, so a free search would mostly surface undownloadables.
+  const searchEnabled = activeKind !== 'voice' && activeKind !== 'transcription';
   const list = models.filter((m) => m.kind === activeKind);
-  const searchingMode = query.trim().length >= 2;
+  const searchingMode = searchEnabled && query.trim().length >= 2;
 
   // Map HF results into FilterableModel, then apply the shared filter/sort.
   const displayed = filterAndSort(
@@ -259,17 +266,25 @@ export function ModelsScreen() {
         ))}
       </div>
 
-      {/* Hugging Face search — scoped to the active tab's modality. */}
-      <div className="mt-4 flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2">
-        <IconSearch className="h-4 w-4 shrink-0 text-neutral-500" />
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={`Search Hugging Face for ${(KIND_LABELS[activeKind] ?? activeKind).toLowerCase()} models...`}
-          className="w-full bg-transparent text-sm text-white placeholder-neutral-600 outline-none"
-        />
-        {searching && <IconLoader2 className="h-4 w-4 animate-spin text-neutral-500" />}
-      </div>
+      {/* Hugging Face search — text/vision/image only (those run arbitrary HF
+          repos). STT/TTS are curated, since most HF ASR/TTS repos are formats our
+          runtimes can't load. */}
+      {searchEnabled ? (
+        <div className="mt-4 flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2">
+          <IconSearch className="h-4 w-4 shrink-0 text-neutral-500" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={`Search Hugging Face for ${(KIND_LABELS[activeKind] ?? activeKind).toLowerCase()} models...`}
+            className="w-full bg-transparent text-sm text-white placeholder-neutral-600 outline-none"
+          />
+          {searching && <IconLoader2 className="h-4 w-4 animate-spin text-neutral-500" />}
+        </div>
+      ) : (
+        <p className="mt-4 text-xs text-neutral-600">
+          Curated {(KIND_LABELS[activeKind] ?? activeKind).toLowerCase()} models — verified to run on-device.
+        </p>
+      )}
 
       {/* Filter + sort bar (shared @offgrid/models options) — always visible.
           The modality tab already scopes the type, so no separate type filter. */}
