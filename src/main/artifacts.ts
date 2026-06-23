@@ -26,10 +26,11 @@ function read(name: string): string {
   }
 }
 
-// 'text' is an uploaded INPUT (a file/pasted block the user attached), catalogued
-// alongside model-generated artifacts so a chat's/project's whole working set —
-// inputs and outputs — lives in one place. It isn't rendered in the sandbox.
-export type ArtifactKind = 'html' | 'svg' | 'mermaid' | 'react' | 'text';
+// 'text' and 'image' are uploaded INPUTS (files / pasted blocks / images the user
+// attached), catalogued alongside model-generated artifacts so a chat's/project's
+// whole working set — inputs and outputs — lives in one place. For 'text' the code
+// is the document body; for 'image' it's the on-disk path. Neither is sandboxed.
+export type ArtifactKind = 'html' | 'svg' | 'mermaid' | 'react' | 'text' | 'image';
 
 /** Return only the runtime libs an artifact kind needs (kept off the wire otherwise). */
 export function artifactRuntime(kind: ArtifactKind): Record<string, string> {
@@ -72,7 +73,7 @@ function deriveTitle(kind: ArtifactKind, code: string): string {
     const fn = /function\s+([A-Za-z0-9_]+)/.exec(code)?.[1];
     if (fn && fn !== 'App') return fn;
   }
-  return { html: 'HTML page', svg: 'SVG graphic', mermaid: 'Diagram', react: 'React component', text: 'Document' }[kind];
+  return { html: 'HTML page', svg: 'SVG graphic', mermaid: 'Diagram', react: 'React component', text: 'Document', image: 'Image' }[kind];
 }
 
 /** Persist an artifact (deduped by content + chat). Returns the saved record. */

@@ -88,6 +88,7 @@ type Attachment = {
   kind: 'text' | 'pdf' | 'docx' | 'image' | 'audio' | 'video' | 'pasted';
   text: string;
   path?: string; // images: persisted path passed to the vision model
+  preview?: string; // images: a local object URL shown immediately while processing
   status: 'loading' | 'ready' | 'error';
 };
 
@@ -121,6 +122,8 @@ function mapRagMessages(raw: any[]): ChatMessage[] {
       context: ctx,
       image: ctx?.image ? `ogcapture://${ctx.image}` : undefined,
       imagePath: ctx?.image,
+      // Attachments persisted on the user turn (clickable chips survive reload).
+      attachments: Array.isArray(ctx?.attachments) ? ctx.attachments : undefined,
     };
   });
 }
@@ -271,8 +274,10 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const sendingRef = useRef(false);
-  const queueRef = useRef<string[]>([]);
-  const [queued, setQueued] = useState<string[]>([]);
+  // Queued sends carry their attachments too, so a message waiting behind an
+  // in-flight generation keeps its image/files when it finally runs.
+  const queueRef = useRef<{ text: string; atts: Attachment[] }[]>([]);
+  const [queued, setQueued] = useState<{ text: string; atts: Attachment[] }[]>([]);
 
   const markdownComponents: Components = {
     p: ({ children }) => <p style={{ margin: 0 }}>{children}</p>,
@@ -500,14 +505,15 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
     }
   }, [activeConversationId]);
 
-  const sendMessage = async (override?: string, opts?: { regen?: boolean; voiceClip?: { url: string; duration: number } }) => {
+  const sendMessage = async (override?: string, opts?: { regen?: boolean; voiceClip?: { url: string; duration: number }; atts?: Attachment[] }) => {
     const isInput = override === undefined;
     // Regenerate/Resend: the user turn already exists in the thread — re-run it
     // in place instead of echoing another user bubble.
     const regen = opts?.regen ?? false;
-    // Attachments (pasted blocks + processed files) ride along only on a normal
-    // send from the composer, not on resend/regenerate/example.
-    const atts = isInput ? attachments.filter(a => a.status === 'ready' && (a.text || a.path)) : [];
+    // Attachments (pasted blocks + processed files) ride along on a normal send
+    // from the composer, or on a drained queue item (opts.atts) — not on
+    // resend/regenerate/example.
+    const atts = opts?.atts ?? (isInput ? attachments.filter(a => a.status === 'ready' && (a.text || a.path)) : []);
     const typed = (override ?? input).trim();
     // The user sees `trimmed`; the model also gets the attachment text folded in.
     const trimmed = typed || (atts.length ? `(${atts.length} attachment${atts.length > 1 ? 's' : ''})` : '');
@@ -519,9 +525,10 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
     // Don't block the user — if a generation is in flight, queue this message and
     // let them keep typing/sending. The queue drains in order when each finishes.
     if (sendingRef.current) {
-      queueRef.current.push(typed);
-      setQueued(q => [...q, typed]);
-      if (isInput) setInput('');
+      const item = { text: typed, atts };
+      queueRef.current.push(item);
+      setQueued(q => [...q, item]);
+      if (isInput) { setInput(''); setAttachments([]); }
       return;
     }
     sendingRef.current = true;
@@ -566,9 +573,13 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
     setLoading(true);
     setGeneratingConvId(convId); // so the thinking indicator only shows in this tab
 
-    // Persist user message (skip on regen — it's already in the thread)
+    // Persist user message (skip on regen — it's already in the thread). Stash
+    // the attachments in the message context so the clickable chips survive reload.
     try {
-      if (!regen) await window.api.addRagMessage(convId, 'user', trimmed);
+      if (!regen) {
+        const attMeta = atts.map(a => ({ name: a.name, kind: a.kind, text: a.text, path: a.path }));
+        await window.api.addRagMessage(convId, 'user', trimmed, attMeta.length ? { attachments: attMeta } : undefined);
+      }
     } catch (e) {
       console.error('Failed to persist user message:', e);
     }
@@ -577,7 +588,9 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
     // project, so the gallery holds the whole working set — inputs and outputs.
     if (!regen) {
       for (const a of atts) {
-        if (a.text && a.kind !== 'image') {
+        if (a.kind === 'image' && a.path) {
+          try { void window.api.saveArtifact?.({ kind: 'image', code: a.path, title: a.name, conversationId: convId, projectId: activeProjectId }); } catch { /* ignore */ }
+        } else if (a.text) {
           try { void window.api.saveArtifact?.({ kind: 'text', code: a.text, title: a.name, conversationId: convId, projectId: activeProjectId }); } catch { /* ignore */ }
         }
       }
@@ -724,7 +737,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
     const next = queueRef.current.shift();
     if (next === undefined) return;
     setQueued(q => q.slice(1));
-    setTimeout(() => { void sendMessage(next); }, 30);
+    setTimeout(() => { void sendMessage(next.text || ' ', { atts: next.atts }); }, 30);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -942,7 +955,11 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const addFiles = useCallback(async (files: FileList | File[]) => {
     for (const file of Array.from(files)) {
       const id = `att-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      setAttachments(prev => [...prev, { id, name: file.name, kind: 'text', text: '', status: 'loading' }]);
+      // Show images as images straight away (local preview) so an upload reads as
+      // an image while it captions in the background, not a generic TEXT box.
+      const isImg = file.type.startsWith('image/');
+      const preview = isImg ? URL.createObjectURL(file) : undefined;
+      setAttachments(prev => [...prev, { id, name: file.name, kind: isImg ? 'image' : 'text', text: '', preview, status: 'loading' }]);
       try {
         const buf = await file.arrayBuffer();
         const res = await window.api.processFile?.(buf, file.name);
@@ -950,7 +967,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
         // actual image still gets sent to the vision model.
         const ok = !!res && (!!res.text || (res.kind === 'image' && !!res.path));
         setAttachments(prev => prev.map(a => a.id === id
-          ? { ...a, kind: (res?.kind as Attachment['kind']) || 'text', text: res?.text || '', path: res?.path, status: ok ? 'ready' : 'error' }
+          ? { ...a, kind: (res?.kind as Attachment['kind']) || (isImg ? 'image' : 'text'), text: res?.text || '', path: res?.path, preview, status: ok ? 'ready' : 'error' }
           : a));
       } catch (e) {
         console.error('process file failed', e);
@@ -961,15 +978,22 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
 
   const removeAttachment = useCallback((id: string) => setAttachments(prev => prev.filter(a => a.id !== id)), []);
 
-  // Pasting a large blob becomes a "PASTED" chip instead of flooding the input.
+  // Pasting an image (e.g. a screenshot) attaches it; a large text blob becomes a
+  // "PASTED" chip instead of flooding the input.
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const imageFiles = Array.from(e.clipboardData.files).filter(f => f.type.startsWith('image/'));
+    if (imageFiles.length) {
+      e.preventDefault();
+      void addFiles(imageFiles);
+      return;
+    }
     const text = e.clipboardData.getData('text');
     if (text && text.length > 1200) {
       e.preventDefault();
       const id = `att-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       setAttachments(prev => [...prev, { id, name: 'Pasted text', kind: 'pasted', text, status: 'ready' }]);
     }
-  }, []);
+  }, [addFiles]);
 
   const examples = mode === 'image' ? IMAGE_EXAMPLES : ASK_EXAMPLES;
 
@@ -1799,7 +1823,16 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                   {queued.map((q, i) => (
                     <div key={i} className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-1.5 text-[11px] text-neutral-400">
                       <svg className="h-3 w-3 shrink-0 text-neutral-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                      <span className="flex-1 truncate">{q}</span>
+                      <span className="flex-1 select-text cursor-text whitespace-pre-wrap break-words">{q.text || `(${q.atts.length} attachment${q.atts.length > 1 ? 's' : ''})`}</span>
+                      {q.atts.length > 0 ? (
+                        <span className="flex shrink-0 items-center gap-1 text-neutral-500" title={q.atts.map(a => a.name).join(', ')}>
+                          <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                          {q.atts.length}
+                        </span>
+                      ) : null}
+                      <button onClick={() => copyText(q.text)} className="shrink-0 cursor-pointer text-neutral-600 transition-colors hover:text-green-500" title="Copy">
+                        <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16h8M8 12h8m-7 8h6a2 2 0 002-2V6a2 2 0 00-2-2h-3.586a1 1 0 00-.707.293l-2.414 2.414A1 1 0 009 7.414V18a2 2 0 002 2z" /></svg>
+                      </button>
                       <span className="shrink-0 text-neutral-600">queued</span>
                     </div>
                   ))}
@@ -1847,16 +1880,30 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                   <div className="flex flex-wrap gap-2 px-3 pt-3">
                     {attachments.map(a => (
                       <div key={a.id} className="group relative flex w-40 flex-col gap-1 rounded-lg border border-neutral-800 bg-neutral-900 p-2">
-                        <button onClick={() => removeAttachment(a.id)} className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full border border-neutral-700 bg-neutral-950 text-[10px] text-neutral-400 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100">✕</button>
-                        <button
-                          type="button"
-                          disabled={!a.text}
-                          onClick={() => { if (a.text) { closePanels(); setViewer({ title: a.kind === 'pasted' ? 'Pasted text' : a.name, text: a.text }); } }}
-                          title={a.text ? 'Click to expand' : undefined}
-                          className="line-clamp-3 h-[2.6rem] overflow-hidden text-left text-[10px] leading-snug text-neutral-500 enabled:hover:text-neutral-300"
-                        >
-                          {a.status === 'loading' ? 'Processing…' : a.status === 'error' ? 'Could not read this file.' : (a.text.slice(0, 140) || a.name)}
-                        </button>
+                        <button onClick={() => removeAttachment(a.id)} className="absolute -right-1.5 -top-1.5 z-10 flex h-4 w-4 items-center justify-center rounded-full border border-neutral-700 bg-neutral-950 text-[10px] text-neutral-400 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100">✕</button>
+                        {a.kind === 'image' ? (
+                          <button
+                            type="button"
+                            onClick={() => { const url = a.preview || (a.path ? `ogcapture://${a.path}` : ''); if (url) { closePanels(); setLightbox({ url, path: a.path }); } }}
+                            title="Click to view"
+                            className="relative h-[2.6rem] overflow-hidden rounded-md"
+                          >
+                            <img src={a.preview || (a.path ? `ogcapture://${a.path}` : '')} alt={a.name} className="h-full w-full object-cover" />
+                            {a.status === 'loading' ? (
+                              <span className="absolute inset-0 flex items-center justify-center bg-neutral-950/50 text-[9px] text-neutral-300">Reading…</span>
+                            ) : null}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={!a.text}
+                            onClick={() => { if (a.text) { closePanels(); setViewer({ title: a.kind === 'pasted' ? 'Pasted text' : a.name, text: a.text }); } }}
+                            title={a.text ? 'Click to expand' : undefined}
+                            className="line-clamp-3 h-[2.6rem] overflow-hidden text-left text-[10px] leading-snug text-neutral-500 enabled:hover:text-neutral-300"
+                          >
+                            {a.status === 'loading' ? 'Processing…' : a.status === 'error' ? 'Could not read this file.' : (a.text.slice(0, 140) || a.name)}
+                          </button>
+                        )}
                         <div className="flex items-center justify-between">
                           <span className="truncate text-[10px] text-neutral-400" title={a.name}>{a.kind === 'pasted' ? '' : a.name}</span>
                           <span className="rounded-sm border border-neutral-700 px-1 py-0.5 text-[9px] uppercase tracking-wide text-neutral-400">
@@ -2172,12 +2219,18 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                   {artifacts.map((a) => (
                     <div key={a.id} className="group flex items-center gap-2 rounded-md border border-neutral-800 p-2 transition-colors hover:border-green-500">
                       <button
-                        onClick={() => a.kind === 'text'
-                          ? (closePanels(), setViewer({ title: a.title, text: a.code }))
-                          : openCanvas({ kind: a.kind, code: a.code, title: a.title })}
+                        onClick={() => a.kind === 'image'
+                          ? (closePanels(), setLightbox({ url: `ogcapture://${a.code}`, path: a.code }))
+                          : a.kind === 'text'
+                            ? (closePanels(), setViewer({ title: a.title, text: a.code }))
+                            : openCanvas({ kind: a.kind, code: a.code, title: a.title })}
                         className="flex min-w-0 flex-1 items-center gap-2 text-left"
                       >
-                        <span className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-green-500">{a.kind === 'text' ? 'input' : a.kind}</span>
+                        {a.kind === 'image' ? (
+                          <img src={`ogcapture://${a.code}`} alt="" className="h-8 w-8 shrink-0 rounded-sm border border-neutral-800 object-cover" />
+                        ) : (
+                          <span className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-green-500">{a.kind === 'text' ? 'input' : a.kind}</span>
+                        )}
                         <span className="truncate text-xs text-neutral-200">{a.title}</span>
                       </button>
                       <button onClick={() => deleteArtifact(a.id)} className="text-neutral-600 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100" title="Delete">✕</button>
