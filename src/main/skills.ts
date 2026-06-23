@@ -1,0 +1,121 @@
+// Skills — reusable instruction packs the user drops into the .skills folder and
+// invokes from chat with /skill-name (like Claude Code skills). Each skill is a
+// folder under userData/.skills containing a SKILL.md with YAML-ish frontmatter
+// (name, description) followed by the instruction body. A bare <name>.md directly
+// under .skills also works. Everything is local; nothing leaves the machine.
+
+import { app } from 'electron';
+import path from 'path';
+import fs from 'fs';
+
+export interface Skill {
+  name: string;
+  description: string;
+  instructions: string;
+}
+
+export function skillsDir(): string {
+  return path.join(app.getPath('userData'), '.skills');
+}
+
+const SAMPLE = `---
+name: proofread
+description: Fix grammar, spelling, and clarity without changing meaning or tone.
+---
+You are a careful proofreader. Correct grammar, spelling, and punctuation, and
+improve clarity, but DO NOT change the meaning, voice, or tone. Return only the
+corrected text. If the input is already clean, return it unchanged.
+`;
+
+/** Create the .skills folder (and a sample skill) the first time it's needed. */
+function ensureSkillsDir(): string {
+  const dir = skillsDir();
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+    try {
+      const sample = path.join(dir, 'proofread');
+      fs.mkdirSync(sample, { recursive: true });
+      fs.writeFileSync(path.join(sample, 'SKILL.md'), SAMPLE);
+      fs.writeFileSync(
+        path.join(dir, 'README.txt'),
+        'Drop a skill here as <name>/SKILL.md (or <name>.md) with frontmatter:\n\n---\nname: my-skill\ndescription: what it does\n---\n<instructions>\n\nInvoke it in chat with /my-skill.\n'
+      );
+    } catch {
+      /* best effort */
+    }
+  }
+  return dir;
+}
+
+/** Parse `---\nname: ...\ndescription: ...\n---\n<body>` into its parts. */
+function parseSkill(md: string, fallbackName: string): Skill {
+  let name = fallbackName;
+  let description = '';
+  let body = md;
+  const fm = /^﻿?---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/.exec(md);
+  if (fm) {
+    body = fm[2];
+    for (const line of fm[1].split('\n')) {
+      const m = /^\s*([A-Za-z_]+)\s*:\s*(.+?)\s*$/.exec(line);
+      if (!m) continue;
+      const key = m[1].toLowerCase();
+      const val = m[2].replace(/^["']|["']$/g, '');
+      if (key === 'name') name = val;
+      else if (key === 'description') description = val;
+    }
+  }
+  return { name: name.trim(), description: description.trim(), instructions: body.trim() };
+}
+
+/** Read one skill from a .skills entry (folder with SKILL.md, or a .md file). */
+function readEntry(dir: string, entry: string): Skill | null {
+  const full = path.join(dir, entry);
+  try {
+    const stat = fs.statSync(full);
+    if (stat.isDirectory()) {
+      const md = path.join(full, 'SKILL.md');
+      if (fs.existsSync(md)) return parseSkill(fs.readFileSync(md, 'utf8'), entry);
+      return null;
+    }
+    if (entry.toLowerCase().endsWith('.md') && entry.toLowerCase() !== 'readme.md') {
+      return parseSkill(fs.readFileSync(full, 'utf8'), entry.replace(/\.md$/i, ''));
+    }
+  } catch {
+    /* skip */
+  }
+  return null;
+}
+
+/** All installed skills (name + description; instructions omitted for the list). */
+export function listSkills(): { name: string; description: string }[] {
+  const dir = ensureSkillsDir();
+  let entries: string[] = [];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const out: { name: string; description: string }[] = [];
+  for (const e of entries) {
+    const s = readEntry(dir, e);
+    if (s && s.name) out.push({ name: s.name, description: s.description });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Full skill (with instructions) by name, case-insensitive. */
+export function getSkill(name: string): Skill | null {
+  const target = name.trim().toLowerCase();
+  const dir = ensureSkillsDir();
+  let entries: string[] = [];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return null;
+  }
+  for (const e of entries) {
+    const s = readEntry(dir, e);
+    if (s && s.name.toLowerCase() === target) return s;
+  }
+  return null;
+}
