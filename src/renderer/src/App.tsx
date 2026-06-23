@@ -388,11 +388,12 @@ function AppContent() {
   // Universal-search result → jump to the exact thing: open its source URL, the
   // owning entity/memory/meeting, or seek Replay to that captured moment.
   const handleOpenHit = useCallback((hit: SearchHit) => {
-    if (hit.url) { window.open(hit.url, '_blank'); return; }
     if (hit.kind === 'entity' || hit.kind === 'fact') { handleSelectEntity(hit.refId); return; }
     if (hit.kind === 'memory') { handleSelectMemory(hit.refId); return; }
     if (hit.kind === 'meeting') { setViewMode('meetings'); return; }
-    setReplayTarget(hit.ts || null); // screen capture → seek Replay to that frame
+    // Screen capture → seek Replay to that exact moment (the captured frame is the
+    // point; the source URL may be stale/missing).
+    setReplayTarget(hit.ts || Date.now());
     setViewMode('replay');
   }, [handleSelectEntity, handleSelectMemory]);
 

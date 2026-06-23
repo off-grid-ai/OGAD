@@ -41,9 +41,10 @@ export function ReplayScreen({ seekToMs }: { seekToMs?: number } = {}) {
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(4);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // When arriving from a search result, seek to that exact moment instead of the
-  // latest frame. Frame.ts is in seconds; the target is epoch ms.
-  const pendingSeek = useRef<number | null>(null);
+  // When arriving from a search result, seek to that exact moment. Keyed by the
+  // target VALUE so it applies exactly once (per target) and live reloads never
+  // snap back to the latest frame. Frame.ts is in seconds; the target is epoch ms.
+  const appliedSeek = useRef<number | null>(null);
 
   const range = useCallback((): [number, number] => {
     const start = startOfDay(day).getTime();
@@ -56,45 +57,38 @@ export function ReplayScreen({ seekToMs }: { seekToMs?: number } = {}) {
       const [s, e] = range();
       const f: Frame[] = (await api.crmReplayFrames?.(s, e)) ?? [];
       setFrames(f);
-      // Default to the latest moment — UNLESS a search jump is pending, in which
-      // case the seek effect places the index once the right day has loaded.
-      if (pendingSeek.current == null) setIdx(f.length ? f.length - 1 : 0);
+      if (seekToMs == null) {
+        setIdx(f.length ? f.length - 1 : 0); // normal view → latest moment
+      } else if (appliedSeek.current !== seekToMs) {
+        // Place the index once we've loaded the day the target lives on.
+        const sameDayAsTarget = startOfDay(new Date(seekToMs)).getTime() === startOfDay(day).getTime();
+        if (sameDayAsTarget && f.length) {
+          let best = 0;
+          let bestD = Infinity;
+          f.forEach((fr, i) => {
+            const d = Math.abs(fr.ts * 1000 - seekToMs);
+            if (d < bestD) {
+              bestD = d;
+              best = i;
+            }
+          });
+          setIdx(best);
+          appliedSeek.current = seekToMs;
+        }
+        // wrong day → leave idx; the day effect navigates + reloads
+      }
+      // already-applied seek → leave idx untouched (don't snap to latest)
     } finally {
       setLoading(false);
     }
-  }, [range]);
+  }, [range, seekToMs, day]);
 
-  const dayRef = useRef(day);
-  useEffect(() => {
-    dayRef.current = day;
-  }, [day]);
-
-  // A search jump owns the day. Navigate to the target's day only if we're not
-  // already on it (avoids a redundant reload that would snap back to the latest).
+  // A search jump owns the day — navigate to the target's day (no-op if already there).
   useEffect(() => {
     if (seekToMs == null) return;
-    pendingSeek.current = seekToMs;
     const target = startOfDay(new Date(seekToMs));
-    if (startOfDay(dayRef.current).getTime() !== target.getTime()) setDay(target);
+    setDay((d) => (startOfDay(d).getTime() === target.getTime() ? d : target));
   }, [seekToMs]);
-
-  // Apply the pending seek once the matching day's frames are loaded.
-  useEffect(() => {
-    const target = pendingSeek.current;
-    if (target == null || !frames.length) return;
-    if (startOfDay(new Date(target)).getTime() !== startOfDay(day).getTime()) return;
-    let best = 0;
-    let bestD = Infinity;
-    frames.forEach((fr, i) => {
-      const d = Math.abs(fr.ts * 1000 - target);
-      if (d < bestD) {
-        bestD = d;
-        best = i;
-      }
-    });
-    setIdx(best);
-    pendingSeek.current = null;
-  }, [frames, day]);
 
   // Land on the day that actually has frames (handles just-after-midnight, when
   // "today" is empty but last evening is full). Skipped when a search jump owns it.
