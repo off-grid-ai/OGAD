@@ -213,6 +213,18 @@ export class LLMService {
       try { this.server.kill("SIGKILL"); } catch { /* ignore */ }
       this.server = null;
     }
+    // ALSO kill an ORPHANED server from a previous app process — when the app
+    // restarts, the old llama-server keeps holding the port, so a new spawn can't
+    // bind and config changes (ctx size, model) silently never take effect. Find
+    // whatever owns the port and kill it.
+    try {
+      const pids = execSync(`lsof -ti tcp:${this.port}`, { encoding: "utf-8" }).trim().split("\n").filter(Boolean);
+      for (const pid of pids) {
+        try { process.kill(Number(pid), "SIGKILL"); console.log(`[LLMService] killed orphaned process ${pid} on port ${this.port}`); } catch { /* gone */ }
+      }
+      if (pids.length) await new Promise((r) => setTimeout(r, 400)); // let the port free
+    } catch { /* nothing on the port */ }
+
     this.server = spawn(serverPath, args, {
       env: {
         ...process.env,
