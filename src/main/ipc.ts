@@ -1468,7 +1468,7 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
       const { llm } = await import('./llm');
       return llm.getSettings();
   });
-  ipcMain.handle('llm:set-settings', async (_e, s: { temperature?: number; ctxSize?: number }) => {
+  ipcMain.handle('llm:set-settings', async (_e, s: import('./llm').LlmSettings) => {
       const { llm } = await import('./llm');
       await llm.setSettings(s);
       return llm.getSettings();

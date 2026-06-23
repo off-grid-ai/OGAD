@@ -149,7 +149,7 @@ try {
 
     // --- LLM inference settings ---
     getLlmSettings: () => ipcRenderer.invoke('llm:get-settings'),
-    setLlmSettings: (s: { temperature?: number; ctxSize?: number }) => ipcRenderer.invoke('llm:set-settings', s),
+    setLlmSettings: (s: { temperature?: number; ctxSize?: number; topP?: number; topK?: number; minP?: number; repeatPenalty?: number; maxTokens?: number; systemPrompt?: string }) => ipcRenderer.invoke('llm:set-settings', s),
 
     // --- Canvas / artifacts sandbox runtime + library ---
     artifactRuntime: (kind: 'html' | 'svg' | 'mermaid' | 'react') => ipcRenderer.invoke('artifacts:runtime', kind),

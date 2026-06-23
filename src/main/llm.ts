@@ -11,6 +11,17 @@ function getModelsDir(): string {
     return path.join(app.getPath('userData'), 'models');
 }
 
+export interface LlmSettings {
+  temperature?: number;
+  ctxSize?: number;
+  topP?: number;
+  topK?: number;
+  minP?: number;
+  repeatPenalty?: number;
+  maxTokens?: number;
+  systemPrompt?: string;
+}
+
 export class LLMService {
   private server: ChildProcess | null = null;
   // Off the contested 8080 (collides with other local dev servers) onto a
@@ -32,6 +43,13 @@ export class LLMService {
   // respawn to take effect (it's a launch arg); temperature is per-request.
   private temperature = 0.7;
   private ctxSize = 32768;
+  // Advanced sampling (LM Studio-style). undefined = let llama.cpp use its default.
+  private topP: number | undefined;
+  private topK: number | undefined;
+  private minP: number | undefined;
+  private repeatPenalty: number | undefined;
+  private maxTokens = 2048;
+  private systemPrompt = '';
   private settingsFile = path.join(getModelsDir(), "llm-settings.json");
 
   constructor() {
@@ -40,19 +58,46 @@ export class LLMService {
       const s = JSON.parse(fs.readFileSync(this.settingsFile, "utf-8"));
       if (typeof s.temperature === "number") this.temperature = s.temperature;
       if (typeof s.ctxSize === "number") this.ctxSize = s.ctxSize;
+      if (typeof s.topP === "number") this.topP = s.topP;
+      if (typeof s.topK === "number") this.topK = s.topK;
+      if (typeof s.minP === "number") this.minP = s.minP;
+      if (typeof s.repeatPenalty === "number") this.repeatPenalty = s.repeatPenalty;
+      if (typeof s.maxTokens === "number") this.maxTokens = s.maxTokens;
+      if (typeof s.systemPrompt === "string") this.systemPrompt = s.systemPrompt;
     } catch { /* defaults */ }
   }
 
-  getSettings(): { temperature: number; ctxSize: number } {
-    return { temperature: this.temperature, ctxSize: this.ctxSize };
+  getSettings(): LlmSettings {
+    return {
+      temperature: this.temperature, ctxSize: this.ctxSize,
+      topP: this.topP, topK: this.topK, minP: this.minP,
+      repeatPenalty: this.repeatPenalty, maxTokens: this.maxTokens,
+      systemPrompt: this.systemPrompt,
+    };
+  }
+
+  /** Sampling params to merge into a request payload (only those the user set). */
+  private samplingPayload(): Record<string, number> {
+    const p: Record<string, number> = {};
+    if (typeof this.topP === "number") p.top_p = this.topP;
+    if (typeof this.topK === "number") p.top_k = this.topK;
+    if (typeof this.minP === "number") p.min_p = this.minP;
+    if (typeof this.repeatPenalty === "number") p.repeat_penalty = this.repeatPenalty;
+    return p;
   }
 
   /** Update inference settings; respawns the server if the context window changed. */
-  async setSettings(s: { temperature?: number; ctxSize?: number }): Promise<void> {
+  async setSettings(s: LlmSettings): Promise<void> {
     const ctxChanged = typeof s.ctxSize === "number" && s.ctxSize !== this.ctxSize;
     if (typeof s.temperature === "number") this.temperature = s.temperature;
     if (typeof s.ctxSize === "number") this.ctxSize = s.ctxSize;
-    try { fs.writeFileSync(this.settingsFile, JSON.stringify({ temperature: this.temperature, ctxSize: this.ctxSize })); } catch { /* ignore */ }
+    if (typeof s.topP === "number") this.topP = s.topP;
+    if (typeof s.topK === "number") this.topK = s.topK;
+    if (typeof s.minP === "number") this.minP = s.minP;
+    if (typeof s.repeatPenalty === "number") this.repeatPenalty = s.repeatPenalty;
+    if (typeof s.maxTokens === "number") this.maxTokens = s.maxTokens;
+    if (typeof s.systemPrompt === "string") this.systemPrompt = s.systemPrompt;
+    try { fs.writeFileSync(this.settingsFile, JSON.stringify(this.getSettings())); } catch { /* ignore */ }
     if (ctxChanged && !this.paused) {
       this.stop();
       await this.init();
@@ -295,10 +340,12 @@ export class LLMService {
         }
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        if (this.systemPrompt.trim()) messages.unshift({ role: "system", content: this.systemPrompt });
         const payload: any = {
             messages: messages,
             max_tokens: maxTokens,
-            temperature: opts.temperature ?? this.temperature
+            temperature: opts.temperature ?? this.temperature,
+            ...this.samplingPayload(),
         };
         // Grammar-constrained output: llama.cpp converts the JSON schema to a
         // GBNF grammar so the model can ONLY emit valid matching JSON.
@@ -352,10 +399,14 @@ export class LLMService {
       }
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const messages: any[] = [{ role: 'user', content }];
+    if (this.systemPrompt.trim()) messages.unshift({ role: 'system', content: this.systemPrompt });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const payload: any = {
-      messages: [{ role: 'user', content }],
-      max_tokens: maxTokens,
+      messages,
+      max_tokens: this.maxTokens || maxTokens,
       temperature: opts.temperature ?? this.temperature,
+      ...this.samplingPayload(),
       stream: true,
     };
     // Thinking control: when on, ask the template to emit reasoning and have
