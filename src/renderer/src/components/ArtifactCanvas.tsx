@@ -62,7 +62,7 @@ export function ArtifactCanvas({ artifact, onClose, width, onResize }: { artifac
       })
       .catch((e) => { console.error('[canvas] artifactRuntime FAILED', e); if (alive) setRuntime({}); });
     return () => { alive = false; };
-  }, [artifact.kind, artifact.code.length]);
+  }, [artifact.kind]);
 
   const srcdoc = useMemo(() => {
     if (!runtime) return '';
@@ -124,20 +124,13 @@ export function ArtifactCanvas({ artifact, onClose, width, onResize }: { artifac
   window.addEventListener('unhandledrejection',function(ev){ console.log('[artifact] rejection', ev.reason); __ogShow(ev.reason&&ev.reason.stack||ev.reason); });
 </script>
 <script>${runtime.react || ''}</script><script>${runtime.reactDom || ''}</script><script>${runtime.babel || ''}</script>
-</head><body><div id="root">Loading…</div><script type="text/babel" data-presets="react">
-console.log('[artifact] runner start; React=' + (typeof React) + ' ReactDOM=' + (typeof ReactDOM) + ' Babel=' + (typeof Babel));
+</head><body><div id="root"></div><script type="text/babel" data-presets="react">
 var __ogDefault;
 const { useState, useEffect, useRef, useMemo, useCallback, useReducer, useContext, useLayoutEffect, createContext, Fragment, memo } = React;
 ${stripped}
 const _root = document.getElementById('root');
 const _Comp = (typeof __ogDefault !== 'undefined' && __ogDefault) || (typeof App !== 'undefined' && App) || null;
-console.log('[artifact] component=' + (_Comp ? (_Comp.name || 'anonymous') : 'NONE FOUND'));
-_root.innerHTML = '';
-if (_Comp) {
-  ReactDOM.createRoot(_root).render(React.createElement(_Comp));
-  console.log('[artifact] render() called');
-  setTimeout(function(){ try { console.log('[artifact] post-render: root.children=' + _root.children.length + ' bodyBG=' + getComputedStyle(document.body).backgroundColor + ' rootHTML=' + _root.innerHTML.slice(0,200)); } catch(err){ console.log('[artifact] post-render check failed', err); } }, 300);
-}
+if (_Comp) { ReactDOM.createRoot(_root).render(React.createElement(_Comp)); }
 else { __ogShow('No React component found — define a component named App or a default export.'); }
 </script></body></html>`;
   }, [artifact, runtime]);
@@ -205,11 +198,11 @@ else { __ogShow('No React component found — define a component named App or a 
           <button onClick={onClose} className="rounded-md border border-neutral-700 px-3 py-1 text-xs text-neutral-300 transition-colors hover:text-white">Close</button>
         </div>
       </div>
-      <div className="min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col">
         {view === 'preview' ? (
-          <iframe title="artifact" sandbox="allow-scripts" srcDoc={srcdoc} className="h-full w-full border-0 bg-white" />
+          <iframe title="artifact" sandbox="allow-scripts" srcDoc={srcdoc} className="w-full flex-1 border-0 bg-white" style={{ minHeight: 0 }} />
         ) : (
-          <pre className="h-full overflow-auto bg-neutral-950 p-4 text-xs text-neutral-300">{artifact.code}</pre>
+          <pre className="min-h-0 flex-1 overflow-auto bg-neutral-950 p-4 text-xs text-neutral-300">{artifact.code}</pre>
         )}
       </div>
     </div>
