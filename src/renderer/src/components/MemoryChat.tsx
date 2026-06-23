@@ -181,6 +181,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const [skills, setSkills] = useState<{ name: string; description: string }[]>([]);
   const [askSel, setAskSel] = useState<Record<string, string[]>>({});
   const [loading, setLoading] = useState(false);
+  const [generatingConvId, setGeneratingConvId] = useState<string | null>(null); // which tab is generating
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [convSearch, setConvSearch] = useState('');
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -532,6 +533,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
     }
     setInput('');
     setLoading(true);
+    setGeneratingConvId(convId); // so the thinking indicator only shows in this tab
 
     // Persist user message (skip on regen — it's already in the thread)
     try {
@@ -670,6 +672,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
     } finally {
       sendingRef.current = false;
       setLoading(false);
+      setGeneratingConvId(null);
       await loadConversations();
       drainQueue();
     }
@@ -1556,7 +1559,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                     ) : null}
                   </div>
                 ))}
-                {loading && !messages.some(m => m.streaming) ? (
+                {loading && generatingConvId === activeConversationId && !messages.some(m => m.streaming) ? (
                   <div className="mb-5 flex flex-col items-start">
                     <div className="mb-1 text-[10px] uppercase tracking-wider text-neutral-600">Off Grid</div>
                     {mode === 'image' ? (
