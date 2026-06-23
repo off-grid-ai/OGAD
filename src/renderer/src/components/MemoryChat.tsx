@@ -207,6 +207,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [voiceOn, setVoiceOn] = useState(false);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const [speakLoadingId, setSpeakLoadingId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [lightbox, setLightbox] = useState<{ url: string; path?: string } | null>(null);
   const [canvasArtifact, setCanvasArtifact] = useState<Artifact | null>(null);
@@ -707,24 +708,25 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   // the same message stops playback.
   const speakMessage = useCallback(async (id: string, text: string) => {
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
-    if (speakingId === id) { setSpeakingId(null); return; }
-    setSpeakingId(id);
+    // Toggle off if this message is already loading or playing.
+    if (speakingId === id || speakLoadingId === id) { setSpeakingId(null); setSpeakLoadingId(null); return; }
+    setSpeakLoadingId(id); // generating on-device — show a loading state
     try {
-      console.log('[tts] speak() requested, chars=', text.length);
       const { dataUrl } = await window.api.speak(text);
-      console.log('[tts] got dataUrl bytes=', dataUrl?.length ?? 0);
       if (!dataUrl) throw new Error('empty dataUrl');
       const audio = new Audio(dataUrl);
       audioRef.current = audio;
-      audio.onended = () => { console.log('[tts] playback ended'); setSpeakingId(cur => (cur === id ? null : cur)); audioRef.current = null; };
-      audio.onerror = () => { console.error('[tts] audio element error', audio.error); setSpeakingId(cur => (cur === id ? null : cur)); };
+      audio.onended = () => { setSpeakingId(cur => (cur === id ? null : cur)); audioRef.current = null; };
+      audio.onerror = () => { console.error('[tts] audio element error', audio.error); setSpeakingId(cur => (cur === id ? null : cur)); setSpeakLoadingId(cur => (cur === id ? null : cur)); };
       await audio.play();
-      console.log('[tts] play() started');
+      setSpeakLoadingId(cur => (cur === id ? null : cur));
+      setSpeakingId(id); // now actually speaking
     } catch (e) {
       console.error('[tts] failed', e);
+      setSpeakLoadingId(cur => (cur === id ? null : cur));
       setSpeakingId(cur => (cur === id ? null : cur));
     }
-  }, [speakingId]);
+  }, [speakingId, speakLoadingId]);
 
   const refreshGallery = useCallback(async () => {
     try { setGallery((await window.api.listGeneratedImages?.()) || []); } catch (e) { console.error(e); }
@@ -1223,15 +1225,17 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                       <div className="mt-1.5 flex items-center gap-3">
                         <button
                           onClick={() => speakMessage(message.id, message.content)}
-                          className={`flex items-center gap-1 text-[11px] transition-colors ${speakingId === message.id ? 'text-green-500' : 'text-neutral-600 hover:text-green-500'}`}
-                          title={speakingId === message.id ? 'Stop' : 'Speak'}
+                          className={`flex items-center gap-1 text-[11px] transition-colors ${speakingId === message.id || speakLoadingId === message.id ? 'text-green-500' : 'text-neutral-600 hover:text-green-500'}`}
+                          title={speakLoadingId === message.id ? 'Generating…' : speakingId === message.id ? 'Stop' : 'Speak'}
                         >
-                          {speakingId === message.id ? (
+                          {speakLoadingId === message.id ? (
+                            <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                          ) : speakingId === message.id ? (
                             <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
                           ) : (
                             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5L6 9H2v6h4l5 4V5z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.54 8.46a5 5 0 010 7.07M19.07 4.93a10 10 0 010 14.14" /></svg>
                           )}
-                          {speakingId === message.id ? 'Stop' : 'Speak'}
+                          {speakLoadingId === message.id ? 'Generating…' : speakingId === message.id ? 'Stop' : 'Speak'}
                         </button>
                         <button
                           onClick={() => copyText(message.content)}
