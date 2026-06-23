@@ -14,7 +14,7 @@ import { getDayReflection, getWeekReflection } from './crm/reflect';
 import { listActionItems, setActionItemStatus } from './crm/actions';
 import { getIdentity, setIdentity, type Identity } from './identity';
 import { secretsAvailable, setSecret, deleteSecret, listSecretKeys } from './secrets';
-import { proposeApproval, listApprovals, getApproval, approve, reject, recordExecution, listAudit } from './crm/approvals';
+import { proposeApproval, listApprovals, getApproval, getApprovalProvenance, approve, reject, recordExecution, listAudit } from './crm/approvals';
 import { listConnectors, addConnector, setConnectorEnabled, removeConnector, testConnector, callConnectorTool, type NewConnector } from './mcp';
 import { ingestConnector, listConnectorItems } from './ingest';
 import { saveMeeting, listMeetings, deleteMeeting } from './meetings';
@@ -93,6 +93,7 @@ export function setupCrmIPC(): void {
 
   ipcMain.handle('approvals:propose', (_e, p: Parameters<typeof proposeApproval>[0]) => proposeApproval(p));
   ipcMain.handle('approvals:list', (_e, status?: string) => listApprovals(status));
+  ipcMain.handle('approvals:provenance', (_e, id: number) => getApprovalProvenance(id));
   ipcMain.handle('approvals:approve', async (_e, id: number) => {
     approve(id);
     // If the approval names a connector tool, execute it now (the ONLY path that

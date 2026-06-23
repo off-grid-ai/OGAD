@@ -12,6 +12,7 @@ import {
   IconChevronDown,
   IconChevronRight,
 } from '@tabler/icons-react';
+import { ProvenanceBlock } from './ProvenanceBlock';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const api = (window as any).api;
@@ -232,6 +233,7 @@ export function ActionsScreen({ initialMode }: { initialMode?: 'todo' | 'approva
                   {open && (
                     <div className="mt-2 space-y-2 border-t border-neutral-800 pt-2">
                       {it.detail && <p className="text-xs leading-relaxed text-neutral-400">{it.detail}</p>}
+                      <ProvenanceBlock approvalId={it.id} />
                       {args && <pre className="max-h-60 overflow-auto rounded bg-neutral-950 p-2 text-[11px] leading-relaxed text-neutral-400">{args}</pre>}
                       {it.result && <p className="text-[11px] text-neutral-500">Result: {it.result}</p>}
                     </div>

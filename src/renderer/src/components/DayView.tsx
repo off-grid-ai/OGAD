@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { IconChevronLeft, IconChevronRight, IconCalendar, IconLoader2, IconRefresh, IconCircleCheck, IconClock, IconMapPin, IconExternalLink, IconSparkles, IconCheck, IconX, IconBolt, IconChevronDown, IconListDetails } from '@tabler/icons-react';
+import { ProvenanceBlock } from './ProvenanceBlock';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const api = (window as any).api;
@@ -205,6 +206,7 @@ function Calendar({ events }: { events: UpcomingEvent[] }): React.ReactElement {
 function Secretary({ onViewAll }: { onViewAll: Navigate }): React.ReactElement {
   const [pending, setPending] = useState<Proposal[]>([]);
   const [busy, setBusy] = useState<number | null>(null);
+  const [openId, setOpenId] = useState<number | null>(null);
   const load = useCallback(async (): Promise<void> => {
     const all: Proposal[] = (await api.approvalsList?.()) ?? [];
     setPending(all.filter((a) => a.status === 'pending'));
@@ -234,21 +236,34 @@ function Secretary({ onViewAll }: { onViewAll: Navigate }): React.ReactElement {
         <p className="text-xs text-neutral-600">Nothing to approve right now — Off Grid surfaces actions here as it finds them.</p>
       ) : (
         <div className="space-y-2">
-          {pending.slice(0, SUGGEST_CAP).map((p) => (
-            <div key={p.id} className="flex items-start gap-3 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2.5 transition-colors hover:border-neutral-700">
-              <div className="min-w-0 flex-1">
-                <div className="text-sm text-neutral-100">{p.title}</div>
-                {p.detail && <div className="mt-0.5 text-xs text-neutral-400">{p.detail}</div>}
-                {(p.connector || p.tool) && <div className="mt-1 text-[11px] text-neutral-600">{[p.connector, p.tool].filter(Boolean).join(' · ')}</div>}
-              </div>
-              <div className="flex shrink-0 gap-1">
-                <button onClick={() => decide(p.id, true)} disabled={busy === p.id} className="flex items-center gap-1 rounded-md bg-green-500 px-2.5 py-1 text-xs text-neutral-950 hover:bg-green-400 disabled:opacity-50">
-                  {busy === p.id ? <IconLoader2 className="h-3.5 w-3.5 animate-spin" /> : <IconCheck className="h-3.5 w-3.5" />} Approve
+          {pending.slice(0, SUGGEST_CAP).map((p) => {
+            const open = openId === p.id;
+            return (
+            <div key={p.id} className="rounded-md border border-neutral-800 bg-neutral-900/40 transition-colors hover:border-neutral-700">
+              <div className="flex items-start gap-3 px-3 py-2.5">
+                <button onClick={() => setOpenId(open ? null : p.id)} className="min-w-0 flex-1 text-left" title="Where this came from">
+                  <div className="flex items-center gap-1.5 text-sm text-neutral-100">
+                    {open ? <IconChevronDown className="h-3.5 w-3.5 shrink-0 text-neutral-500" /> : <IconChevronRight className="h-3.5 w-3.5 shrink-0 text-neutral-500" />}
+                    <span className="truncate">{p.title}</span>
+                  </div>
+                  {p.detail && <div className="mt-0.5 pl-5 text-xs text-neutral-400">{p.detail}</div>}
+                  {(p.connector || p.tool) && <div className="mt-1 pl-5 text-[11px] text-neutral-600">{[p.connector, p.tool].filter(Boolean).join(' · ')}</div>}
                 </button>
-                <button onClick={() => decide(p.id, false)} disabled={busy === p.id} aria-label="Dismiss suggestion" className="rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-400 hover:border-neutral-500"><IconX className="h-3.5 w-3.5" /></button>
+                <div className="flex shrink-0 gap-1">
+                  <button onClick={() => decide(p.id, true)} disabled={busy === p.id} className="flex items-center gap-1 rounded-md bg-green-500 px-2.5 py-1 text-xs text-neutral-950 hover:bg-green-400 disabled:opacity-50">
+                    {busy === p.id ? <IconLoader2 className="h-3.5 w-3.5 animate-spin" /> : <IconCheck className="h-3.5 w-3.5" />} Approve
+                  </button>
+                  <button onClick={() => decide(p.id, false)} disabled={busy === p.id} aria-label="Dismiss suggestion" className="rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-400 hover:border-neutral-500"><IconX className="h-3.5 w-3.5" /></button>
+                </div>
               </div>
+              {open && (
+                <div className="border-t border-neutral-800 px-3 py-2.5 pl-8">
+                  <ProvenanceBlock approvalId={p.id} />
+                </div>
+              )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

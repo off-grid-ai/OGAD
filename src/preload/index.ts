@@ -300,6 +300,7 @@ try {
 
     // Approvals (the act-pillar spine)
     approvalsList: (status?: string) => ipcRenderer.invoke('approvals:list', status),
+    approvalsProvenance: (id: number) => ipcRenderer.invoke('approvals:provenance', id),
     approvalsApprove: (id: number) => ipcRenderer.invoke('approvals:approve', id),
     approvalsReject: (id: number) => ipcRenderer.invoke('approvals:reject', id),
     approvalsAudit: (limit?: number) => ipcRenderer.invoke('approvals:audit', limit),
