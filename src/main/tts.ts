@@ -66,18 +66,27 @@ export async function synthesize(text: string, voice = DEFAULT_VOICE): Promise<{
   if (busy) throw new Error('Already generating speech — please wait.');
   busy = true;
   const out = path.join(os.tmpdir(), `offgrid-tts-${process.pid}-${Date.now()}.wav`);
+  console.log(`[tts] synth start: voice=${voice || DEFAULT_VOICE} chars=${t.length} worker=${(() => { try { return workerPath(); } catch { return '??'; } })()}`);
+  const t0 = Date.now();
   try {
     const { err, code } = await runWorker(['speak', out, voice || DEFAULT_VOICE], t);
     // Success = a real WAV on disk (>44-byte header), regardless of exit code.
     let wav: Buffer | null = null;
+    let size = 0;
     try {
       const buf = await fs.promises.readFile(out);
+      size = buf.length;
       if (buf.length > 44) wav = buf;
     } catch {
       /* no file */
     }
+    console.log(`[tts] worker done in ${Date.now() - t0}ms exitCode=${String(code)} wavBytes=${size} stderr=${err.trim().slice(0, 300)}`);
     if (!wav) throw new Error(err.trim() || `tts worker failed (exit ${String(code)})`);
+    console.log(`[tts] returning dataUrl (${wav.length} bytes)`);
     return { dataUrl: `data:audio/wav;base64,${wav.toString('base64')}` };
+  } catch (e) {
+    console.error('[tts] synth failed:', (e as Error).message);
+    throw e;
   } finally {
     busy = false;
     fs.promises.unlink(out).catch(() => {});

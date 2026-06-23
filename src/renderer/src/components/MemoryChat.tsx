@@ -609,8 +609,9 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
         const art = parseArtifact(assistantContent);
         if (art) {
           // Inline-first: don't force the canvas open — the user opens the live
-          // preview via the artifact card when they want it. Still save it.
-          try { void window.api.saveArtifact?.({ kind: art.kind, code: art.code }); } catch { /* ignore */ }
+          // preview via the artifact card when they want it. Still save it, scoped
+          // to this chat + project so the gallery can filter.
+          try { void window.api.saveArtifact?.({ kind: art.kind, code: art.code, conversationId: convId, projectId: activeProjectId }); } catch { /* ignore */ }
         }
         if (voiceOn) speakMessage(streamId, assistantContent);
         try {
@@ -709,13 +710,18 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
     if (speakingId === id) { setSpeakingId(null); return; }
     setSpeakingId(id);
     try {
+      console.log('[tts] speak() requested, chars=', text.length);
       const { dataUrl } = await window.api.speak(text);
+      console.log('[tts] got dataUrl bytes=', dataUrl?.length ?? 0);
+      if (!dataUrl) throw new Error('empty dataUrl');
       const audio = new Audio(dataUrl);
       audioRef.current = audio;
-      audio.onended = () => { setSpeakingId(cur => (cur === id ? null : cur)); audioRef.current = null; };
+      audio.onended = () => { console.log('[tts] playback ended'); setSpeakingId(cur => (cur === id ? null : cur)); audioRef.current = null; };
+      audio.onerror = () => { console.error('[tts] audio element error', audio.error); setSpeakingId(cur => (cur === id ? null : cur)); };
       await audio.play();
+      console.log('[tts] play() started');
     } catch (e) {
-      console.error('TTS failed', e);
+      console.error('[tts] failed', e);
       setSpeakingId(cur => (cur === id ? null : cur));
     }
   }, [speakingId]);
