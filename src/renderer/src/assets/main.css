@@ -106,6 +106,14 @@ body {
   user-select: none;
 }
 
+/* Body disables selection for native-feel app chrome; re-enable it for actual
+   text content so chat messages (yours and the responses) can be selected/copied. */
+p, li, pre, code, h1, h2, h3, h4, h5, h6, blockquote, td, th, .selectable, [data-selectable] {
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: auto;
+}
+
 code {
   font-weight: 600;
   padding: 3px 5px;
