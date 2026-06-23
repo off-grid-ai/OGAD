@@ -587,6 +587,30 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
   });
 
   ipcMain.handle('rag:chat', async (event, query: string, appName?: string, conversationHistory?: { role: string; content: string }[], projectId?: string | null, conversationId?: string, noMemory?: boolean, streamId?: string, thinking?: boolean) => {
+      // Build/generate request — handled FIRST, before any memory branch, so it
+      // always gets the artifact prompt (even in No-memory mode). A lean, direct
+      // prompt: the small model otherwise narrates setup steps instead of building.
+      if (isGenerativeRequest(query)) {
+          let historyBlock = '';
+          if (conversationHistory && conversationHistory.length > 0) {
+              const historyLines = conversationHistory.map((msg) => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${clipText(msg.content, 400)}`).join('\n');
+              historyBlock = `Conversation so far:\n${historyLines}`;
+          }
+          const prompt = [
+              'You are Off Grid, an on-device assistant with a LIVE, sandboxed code canvas built in.',
+              'The user wants you to BUILD something. Output the FINISHED, self-contained code as ONE fenced block — it runs immediately in the canvas beside the chat:',
+              '- React app/component -> ```jsx — write idiomatic React (you may `import React, { useState } from "react"` and `export default function App() {…}`; the sandbox handles imports/exports). Define the main component as `App` or a default export.',
+              '- a plain web page / interactive UI (no React) -> ```html — one complete document, inline all CSS and JS.',
+              '- a diagram -> ```mermaid.  a static graphic -> ```svg.',
+              'You DO have a real execution sandbox — do NOT say "since I am on-device" or "copy this into a new project", do NOT give npm/Vite/Create-React-App setup steps, and do NOT split it into src/App.js + src/App.css instructions. Just write ONE runnable code block. At most one short sentence before it.',
+              historyBlock,
+              `User: ${query}`,
+              'Assistant:',
+          ].filter(Boolean).join('\n\n');
+          const answer = await streamAnswer(event, streamId, prompt, thinking);
+          return { answer, context: undefined };
+      }
+
       // No-memory mode: a plain on-device assistant — no retrieval at all.
       if (noMemory) {
           const { llm } = await import('./llm');
@@ -637,30 +661,6 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
                   projectChats: siblings.length,
               },
           };
-      }
-
-      // Generative/build request: lean, artifact-focused prompt, no retrieval. A
-      // short direct prompt beats the long RAG template here — the small model
-      // otherwise buries the "emit a runnable artifact" rule and gives setup steps.
-      if (isGenerativeRequest(query)) {
-          let historyBlock = '';
-          if (conversationHistory && conversationHistory.length > 0) {
-              const historyLines = conversationHistory.map((msg) => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${clipText(msg.content, 400)}`).join('\n');
-              historyBlock = `Conversation so far:\n${historyLines}`;
-          }
-          const prompt = [
-              'You are Off Grid, an on-device assistant with a LIVE, sandboxed code canvas built in.',
-              'The user wants you to BUILD something. Output the FINISHED, self-contained code as ONE fenced block — it runs immediately in the canvas beside the chat:',
-              '- React app/component -> ```jsx — one top-level component named `App`, plain JSX, NO import/export; React, ReactDOM and hooks (useState, useEffect…) are already global; it auto-renders into #root. Put everything in this one block.',
-              '- a plain web page / interactive UI (no React) -> ```html — one complete document, inline all CSS and JS, no external/CDN resources.',
-              '- a diagram -> ```mermaid.  a static graphic -> ```svg.',
-              'You do NOT have and do NOT need a terminal, npm, Vite, build tools, or the filesystem. NEVER give install/setup steps ("npm create", "npm install", "npm run dev"), NEVER tell them to create files, and NEVER say you "cannot build/execute" it — you can, right here. Write only the code. At most one short sentence before the block.',
-              historyBlock,
-              `User: ${query}`,
-              'Assistant:',
-          ].filter(Boolean).join('\n\n');
-          const answer = await streamAnswer(event, streamId, prompt, thinking);
-          return { answer, context: undefined };
       }
 
       if (streamId) event.sender?.send('rag:stream', { streamId, type: 'step', step: { kind: 'searching' } });
