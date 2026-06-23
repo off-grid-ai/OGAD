@@ -101,11 +101,15 @@ function muxToMp4(screen: string, mic: string, out: string): Promise<void> {
   // sticks at 0:00. So re-encode to CONSTANT 10fps yuv420p (hardware h264 via
   // VideoToolbox — fast) so it always plays. +faststart puts the moov up front.
   const VID = ['-c:v', 'h264_videotoolbox', '-b:v', '2500k', '-pix_fmt', 'yuv420p'];
+  // Audio balance: input 0 = screen (SYSTEM audio = the far side, usually loud);
+  // input 1 = mic (you, usually quiet). Boost the mic, mix, then dynamic-normalize
+  // so both sides sit at a comparable, audible level instead of "they're loud, you
+  // can't be heard". dynaudnorm also lifts quiet stretches for transcription.
   const args = hasMic
     ? ['-y', '-i', screen, '-i', mic,
-       '-filter_complex', '[0:v]fps=10[v];[0:a][1:a]amix=inputs=2:duration=longest:normalize=0[a]',
+       '-filter_complex', '[0:v]fps=10[v];[1:a]volume=3.0[m];[0:a][m]amix=inputs=2:duration=longest:normalize=0[mx];[mx]dynaudnorm[a]',
        '-map', '[v]', '-map', '[a]', ...VID, '-c:a', 'aac', '-movflags', '+faststart', out]
-    : ['-y', '-i', screen, '-vf', 'fps=10', '-map', '0:v', '-map', '0:a?', ...VID, '-c:a', 'aac', '-movflags', '+faststart', out];
+    : ['-y', '-i', screen, '-vf', 'fps=10', '-filter:a', 'dynaudnorm', '-map', '0:v', '-map', '0:a?', ...VID, '-c:a', 'aac', '-movflags', '+faststart', out];
   return execFileAsync(ff, args, { maxBuffer: 1024 * 1024 }).then(() => undefined);
 }
 
