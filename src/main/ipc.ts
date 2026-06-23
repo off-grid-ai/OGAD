@@ -639,25 +639,26 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
           };
       }
 
-      // Generative/build request: answer directly with artifact instructions, no retrieval.
+      // Generative/build request: lean, artifact-focused prompt, no retrieval. A
+      // short direct prompt beats the long RAG template here — the small model
+      // otherwise buries the "emit a runnable artifact" rule and gives setup steps.
       if (isGenerativeRequest(query)) {
-          let skillsBlock = 'None installed.';
-          try {
-              const { listSkills } = await import('./skills');
-              const sk = listSkills();
-              if (sk.length) skillsBlock = sk.map((s) => `- /${s.name}: ${s.description}`).join('\n');
-          } catch { /* skills optional */ }
           let historyBlock = '';
           if (conversationHistory && conversationHistory.length > 0) {
-              const historyLines = conversationHistory.map((msg) => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${clipText(msg.content, 500)}`).join('\n\n');
-              historyBlock = `\nCONVERSATION HISTORY:\n${historyLines}\n`;
+              const historyLines = conversationHistory.map((msg) => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${clipText(msg.content, 400)}`).join('\n');
+              historyBlock = `Conversation so far:\n${historyLines}`;
           }
-          const prompt = getPrompt('ragChat', {
-              HISTORY_BLOCK: historyBlock,
-              QUERY: query,
-              CONTEXT_BLOCK: '(No memory searched — this is a build/generate request. There are NO sources; do NOT cite [S#].)',
-              SKILLS_BLOCK: skillsBlock,
-          });
+          const prompt = [
+              'You are Off Grid, an on-device assistant with a LIVE, sandboxed code canvas built in.',
+              'The user wants you to BUILD something. Output the FINISHED, self-contained code as ONE fenced block — it runs immediately in the canvas beside the chat:',
+              '- React app/component -> ```jsx — one top-level component named `App`, plain JSX, NO import/export; React, ReactDOM and hooks (useState, useEffect…) are already global; it auto-renders into #root. Put everything in this one block.',
+              '- a plain web page / interactive UI (no React) -> ```html — one complete document, inline all CSS and JS, no external/CDN resources.',
+              '- a diagram -> ```mermaid.  a static graphic -> ```svg.',
+              'You do NOT have and do NOT need a terminal, npm, Vite, build tools, or the filesystem. NEVER give install/setup steps ("npm create", "npm install", "npm run dev"), NEVER tell them to create files, and NEVER say you "cannot build/execute" it — you can, right here. Write only the code. At most one short sentence before the block.',
+              historyBlock,
+              `User: ${query}`,
+              'Assistant:',
+          ].filter(Boolean).join('\n\n');
           const answer = await streamAnswer(event, streamId, prompt, thinking);
           return { answer, context: undefined };
       }
