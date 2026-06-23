@@ -225,6 +225,49 @@ function findInModels(re: RegExp): string | null {
   }
 }
 
+// A GGUF checkpoint is loadable via `-m` only if it's a FULL pipeline (UNET + VAE
+// + text encoder). Many SDXL quants on HF (e.g. animagine-xl, illustrious) ship
+// the UNET ONLY — sd.cpp then can't detect the version ("get sd version from file
+// failed") and aborts. Those need `--diffusion-model` + separate CLIP + VAE.
+// Detect by scanning the tensor-name table (near the file start) for VAE + CLIP
+// namespaces. On any read error we assume FULL so models that already work aren't
+// regressed. Cached by path+size+mtime. (Z-Image/FLUX are handled separately.)
+const ggufFullCache = new Map<string, boolean>();
+function ggufIsFullCheckpoint(p: string): boolean {
+  if (!/\.gguf$/i.test(p)) return true; // .safetensors checkpoints are full pipelines
+  let key: string;
+  try {
+    const st = fs.statSync(p);
+    key = `${p}:${st.size}:${st.mtimeMs}`;
+  } catch {
+    return true;
+  }
+  const cached = ggufFullCache.get(key);
+  if (cached !== undefined) return cached;
+  let full = true;
+  try {
+    const fd = fs.openSync(p, 'r');
+    try {
+      // The tensor-name table sits just after the (tiny) KV metadata, well within
+      // the first few MB even for 2600-tensor checkpoints.
+      const buf = Buffer.alloc(Math.min(4_000_000, fs.fstatSync(fd).size));
+      fs.readSync(fd, buf, 0, buf.length, 0);
+      const s = buf.toString('latin1');
+      const hasVae = s.includes('first_stage_model') || s.includes('vae.') || s.includes('.vae');
+      const hasClip =
+        s.includes('cond_stage_model') || s.includes('conditioner') ||
+        s.includes('text_encoder') || s.includes('text_model');
+      full = hasVae && hasClip;
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    full = true;
+  }
+  ggufFullCache.set(key, full);
+  return full;
+}
+
 /** Pick a model: the requested filename if present, else prefer the higher-quality v2.1, else any. */
 function resolveModel(preferred?: string): string | null {
   const dir = modelsDir();
@@ -508,9 +551,34 @@ export async function generateImage(
     // Full (non-distilled) XL stays at 1024 where the extra detail pays off.
     const defaultSize = isTurbo ? 512 : isLightning ? 768 : isXL ? 1024 : isV2 ? 768 : 512;
     const defaultSteps = isTurbo ? 4 : isLightning ? (nameStepMatch ? parseInt(nameStepMatch[1], 10) : 4) : 28;
+    // Full checkpoint → load with -m. UNET-only quant → load the diffusion model
+    // separately and supply SDXL CLIP-L/CLIP-G + VAE; if those companions aren't
+    // installed, fail with a clear message instead of the cryptic sd.cpp abort.
+    let modelFlags: string[];
+    if (ggufIsFullCheckpoint(model)) {
+      modelFlags = ['-m', model];
+    } else {
+      const clipL = findInModels(/clip[_-]?l.*\.(safetensors|gguf)$/i);
+      const clipG = findInModels(/clip[_-]?g.*\.(safetensors|gguf)$/i);
+      const sdxlVae = findInModels(/(sdxl[_-]?vae|vae[_-]?sdxl|sdxl.*vae).*\.(safetensors|gguf)$/i);
+      if (clipL && clipG && sdxlVae) {
+        modelFlags = ['--diffusion-model', model, '--clip_l', clipL, '--clip_g', clipG, '--vae', sdxlVae];
+      } else {
+        const dir = modelsDir();
+        const usable = listImageModels()
+          .filter((f) => /z[-_]?image|lightning/i.test(f) || ggufIsFullCheckpoint(path.join(dir, f)))
+          .map((f) => path.basename(f));
+        throw new Error(
+          `"${base}" is a UNET-only model — it has no built-in text encoder or VAE, so it can't generate on its own ` +
+          `(it needs SDXL CLIP-L, CLIP-G and a VAE, which aren't installed). ` +
+          (usable.length ? `Pick a complete model instead: ${usable.slice(0, 4).join(', ')}.`
+                          : `Download a complete checkpoint (e.g. SDXL-Lightning) or Z-Image.`)
+        );
+      }
+    }
     args = [
       '-M', 'img_gen',
-      '-m', model,
+      ...modelFlags,
       '-p', params.prompt,
       '-o', outPath,
       '-W', String(params.width ?? defaultSize),
