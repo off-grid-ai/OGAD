@@ -7,7 +7,7 @@ import { BorderBeam } from './ui/border-beam';
 import { cn } from '@renderer/lib/utils';
 import { UserQuestionnaire } from './UserQuestionnaire';
 
-import { ArrowRight, Check, Brain, Database, Network, MessageSquare } from 'lucide-react';
+import { ArrowRight, Check, Brain, Database, Network, Chat as MessageSquare } from '@phosphor-icons/react';
 
 // Brand SVG Icons
 const OpenAIIcon = ({ className }: { className?: string }) => (
@@ -118,19 +118,20 @@ const steps = [
     { id: 'welcome' },
     { id: 'connect' },
     { id: 'features' },
-    { id: 'ready' },
 ];
 
 export function Onboarding({ onComplete }: OnboardingProps) {
     const [currentStep, setCurrentStep] = useState(0);
-    const [showQuestionnaire, setShowQuestionnaire] = useState(false);
+    // Questionnaire removed; kept as a const-false guard so the legacy block below never renders.
+    const [showQuestionnaire] = useState(false);
 
     const handleNext = () => {
         if (currentStep < steps.length - 1) {
             setCurrentStep(currentStep + 1);
         } else {
-            // After main onboarding, show the questionnaire
-            setShowQuestionnaire(true);
+            // Questionnaire removed: complete onboarding directly.
+            localStorage.setItem('onboarding_completed', 'true');
+            onComplete();
         }
     };
 
@@ -488,7 +489,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                     className="flex items-center gap-2 px-8 py-3 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-300 hover:bg-neutral-800 hover:border-neutral-700 hover:text-white transition-all duration-200 group"
                 >
                     <span className="text-sm font-medium">
-                        {currentStep === steps.length - 1 ? 'Continue to Questions' : 'Continue'}
+                        {currentStep === steps.length - 1 ? 'Get Started' : 'Continue'}
                     </span>
                     <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
                 </motion.button>

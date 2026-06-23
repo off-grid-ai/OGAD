@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { StarsBackground } from './ui/stars-background';
 import { BorderBeam } from './ui/border-beam';
 import { cn } from '@renderer/lib/utils';
-import { ArrowLeft, ArrowRight } from 'lucide-react';
+import { ArrowLeft, ArrowRight } from '@phosphor-icons/react';
 
 // Types
 interface UserProfile {

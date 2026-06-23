@@ -4,7 +4,8 @@ import { StarsBackground } from './ui/stars-background';
 import { ShootingStars } from './ui/shooting-stars';
 import { BorderBeam } from './ui/border-beam';
 import { cn } from '@renderer/lib/utils';
-import { Shield, Eye, Check, X, Settings, RefreshCw, Download, Cpu } from 'lucide-react';
+import { Shield, Eye, Check, X, Gear as Settings, ArrowsClockwise as RefreshCw, Download, Cpu } from '@phosphor-icons/react';
+import { ModelsScreen } from './ModelsScreen';
 
 interface PermissionGateProps {
   children: React.ReactNode;
@@ -49,6 +50,7 @@ export function PermissionGate({ children }: PermissionGateProps) {
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<{ modelName: string; percent: number; downloadedMB: string; totalMB: string } | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [showModels, setShowModels] = useState(false);
 
   const checkPermissions = useCallback(async () => {
     try {
@@ -170,6 +172,24 @@ export function PermissionGate({ children }: PermissionGateProps) {
     );
   }
 
+  // Browse the full model catalog (text, vision, image, voice, transcription).
+  // Downloading + Using a text/vision model flips modelStatus and opens the app.
+  if (showModels) {
+    return (
+      <div className="fixed inset-0 z-50 h-screen w-screen overflow-hidden bg-neutral-950">
+        <button
+          onClick={() => setShowModels(false)}
+          className="absolute left-4 top-4 z-20 flex items-center gap-1 text-sm text-neutral-400 transition-colors hover:text-white"
+        >
+          ← Back to setup
+        </button>
+        <div className="h-full w-full pt-12">
+          <ModelsScreen />
+        </div>
+      </div>
+    );
+  }
+
   // Setup required - show permission/model request UI
   return (
     <div className="h-screen w-screen bg-neutral-950 fixed inset-0 overflow-hidden">
@@ -181,7 +201,7 @@ export function PermissionGate({ children }: PermissionGateProps) {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
-          className="w-full max-w-md"
+          className="w-full max-w-3xl"
         >
           {/* Icon */}
           <motion.div
@@ -214,8 +234,8 @@ export function PermissionGate({ children }: PermissionGateProps) {
             Grant permissions and download the AI model to get started. Everything runs locally on your device.
           </motion.p>
 
-          {/* Permission & Model Cards */}
-          <div className="space-y-3 mb-8">
+          {/* Permission & Model Cards - 3 columns on desktop */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-8">
             <PermissionCard
               title="Accessibility"
               description="Read text from AI chat windows"
@@ -234,15 +254,29 @@ export function PermissionGate({ children }: PermissionGateProps) {
               delay={0.7}
             />
 
-            {/* AI Model Card */}
-            <ModelCard
-              downloaded={modelStatus?.downloaded ?? false}
-              isDownloading={isDownloading}
-              downloadProgress={downloadProgress}
-              downloadError={downloadError}
-              onDownload={handleDownloadModel}
-              delay={0.8}
-            />
+            {/* AI Model - opens the catalog (text, vision, image, voice, transcription) */}
+            <motion.button
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.8, duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
+              onClick={() => setShowModels(true)}
+              className="flex h-full flex-col gap-3 rounded-xl border border-neutral-800 bg-neutral-900/60 p-4 text-left transition-colors hover:border-green-500/60"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-neutral-800 bg-neutral-800/60">
+                  <Cpu className="h-5 w-5 text-neutral-500" />
+                </div>
+                <span className="whitespace-nowrap text-xs text-green-500">
+                  {modelStatus?.downloaded ? 'Done' : 'Browse →'}
+                </span>
+              </div>
+              <div className="flex-1">
+                <div className="text-sm font-medium text-white">AI Model</div>
+                <div className="text-xs text-neutral-500">
+                  {modelStatus?.downloaded ? 'Model ready' : 'Choose & download a model'}
+                </div>
+              </div>
+            </motion.button>
           </div>
 
           {/* Instructions */}
@@ -260,7 +294,7 @@ export function PermissionGate({ children }: PermissionGateProps) {
             </div>
             <div className="space-y-2 text-sm text-neutral-500">
               <p>1. Click <span className="text-neutral-400">Open Settings</span> for each permission</p>
-              <p>2. Find <span className="text-neutral-400">My Memories</span> in the list</p>
+              <p>2. Find <span className="text-neutral-400">Off Grid AI Desktop</span> in the list</p>
               <p>3. Toggle the switch to enable</p>
               <p>4. Click <span className="text-neutral-400">Download Model</span> to get the AI</p>
             </div>
@@ -336,54 +370,47 @@ function PermissionCard({ title, description, icon, granted, onOpenSettings, del
         />
       )}
 
-      <div className="flex items-center gap-4">
-        {/* Icon */}
-        <div className={cn(
-          "w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 border transition-all duration-300",
-          granted
-            ? "bg-neutral-800 border-neutral-700 text-neutral-300"
-            : "bg-neutral-800/60 border-neutral-800 text-neutral-500"
-        )}>
-          {icon}
+      {/* Vertical column card (desktop grid) */}
+      <div className="flex h-full flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <div className={cn(
+            "w-12 h-12 rounded-xl flex items-center justify-center border transition-all duration-300",
+            granted
+              ? "bg-neutral-800 border-neutral-700 text-neutral-300"
+              : "bg-neutral-800/60 border-neutral-800 text-neutral-500"
+          )}>
+            {icon}
+          </div>
+          {granted && (
+            <span className="text-[10px] text-neutral-500 uppercase tracking-widest">Enabled</span>
+          )}
         </div>
 
-        {/* Content */}
-        <div className="flex-1 min-w-0">
+        <div className="flex-1">
           <div className="flex items-center gap-2 mb-0.5">
             <h3 className="font-medium text-white text-sm">{title}</h3>
             <div className={cn(
               "w-4 h-4 rounded-full flex items-center justify-center transition-all duration-300",
               granted ? "bg-neutral-700" : "bg-neutral-800/60"
             )}>
-              {granted ? (
-                <Check className="w-2.5 h-2.5 text-neutral-300" />
-              ) : (
-                <X className="w-2.5 h-2.5 text-neutral-600" />
-              )}
+              {granted ? <Check className="w-2.5 h-2.5 text-neutral-300" /> : <X className="w-2.5 h-2.5 text-neutral-600" />}
             </div>
           </div>
           <p className="text-xs text-neutral-500">{description}</p>
         </div>
 
-        {/* Status/Actions */}
-        <div className="flex-shrink-0">
-          {granted ? (
-            <span className="text-[10px] text-neutral-500 uppercase tracking-widest">
-              Enabled
-            </span>
-          ) : (
-            <button
-              onClick={onOpenSettings}
-              className={cn(
-                "px-3 py-1.5 text-xs font-medium rounded-lg transition-all duration-200",
-                "bg-neutral-800 border border-neutral-700 text-neutral-300",
-                "hover:bg-neutral-700 hover:text-white"
-              )}
-            >
-              Open Settings
-            </button>
-          )}
-        </div>
+        {!granted && (
+          <button
+            onClick={onOpenSettings}
+            className={cn(
+              "w-full px-3 py-1.5 text-xs font-medium rounded-lg transition-all duration-200",
+              "bg-neutral-800 border border-neutral-700 text-neutral-300",
+              "hover:bg-neutral-700 hover:text-white"
+            )}
+          >
+            Open Settings
+          </button>
+        )}
       </div>
     </motion.div>
   );
