@@ -291,6 +291,10 @@ export interface ImageGenProgress {
   step: number;
   total: number;
   secPerStep: number;
+  // sd-cli prints an "N/N - Xs/it" sequence for the denoising loop AND again for
+  // the VAE-tiling decode. Tag which one so the UI shows "Decoding" instead of a
+  // confusing second 0→N count.
+  phase?: 'sampling' | 'decoding';
 }
 
 let running = false;
@@ -395,11 +399,21 @@ export async function generateImage(
   // 7GB reserve would leave it ~1GB and reject everything).
   const totalGb = os.totalmem() / 1e9;
   const reserveGb = totalGb <= 10 ? 4 : 6;
-  const modelGb = coreml ? 0 : (fs.statSync(model).size / 1e9) * 1.4;
+  const safeSizeGb = (p: string | null | undefined): number => {
+    try { return p && fs.existsSync(p) ? fs.statSync(p).size / 1e9 : 0; } catch { return 0; }
+  };
+  // Z-Image is a 3-model stack (diffusion transformer + Qwen3-4B text encoder +
+  // FLUX VAE) all resident at once — the diffusion file alone wildly understates
+  // its footprint. Count the encoder + VAE too, or the guard waves through a
+  // combo that then overflows unified memory and freezes the box.
+  const zImageStack = /z[-_]?image/i.test(path.basename(model));
+  const zEncoderGb = zImageStack ? safeSizeGb(findInModels(/qwen3-4b-instruct.*\.gguf$/i)) : 0;
+  const zVaeGb = zImageStack ? safeSizeGb(findInModels(/^ae\.(safetensors|sft)$|^ae.*\.gguf$/i)) : 0;
+  const modelGb = coreml ? 0 : (safeSizeGb(model) + zEncoderGb + zVaeGb) * 1.4;
   const budgetGb = totalGb - reserveGb;
   if (modelGb > budgetGb) {
     throw new Error(
-      `Not enough memory to run ${path.basename(model)} (~${modelGb.toFixed(1)}GB) on this ${totalGb.toFixed(0)}GB machine. ` +
+      `Not enough memory to run ${path.basename(model)} (~${modelGb.toFixed(1)}GB resident) on this ${totalGb.toFixed(0)}GB machine. ` +
       `Pick a lighter image model (e.g. SDXL-Lightning or SD 1.5) in the image options.`
     );
   }
@@ -463,12 +477,18 @@ export async function generateImage(
       '--vae', vae,
       '-p', params.prompt,
       '-o', outPath,
-      '-W', String(params.width ?? 1024),
-      '-H', String(params.height ?? 1024),
+      // Default 768 (not 1024): a diffusion transformer's cost scales ~with pixel
+      // count, so 768² is ~44% less compute/memory than 1024² — the difference
+      // between "slow but works" and thrashing unified memory into a freeze.
+      '-W', String(params.width ?? 768),
+      '-H', String(params.height ?? 768),
       '--steps', String(params.steps ?? 8),
       '--cfg-scale', String(params.cfgScale ?? 1.0),
       '--sampling-method', 'euler',
+      // Keep weights + VAE off the Metal device between/at use so the resident
+      // footprint (DiT + 4B encoder + VAE) doesn't spike past unified memory.
       '--offload-to-cpu',
+      '--vae-on-cpu',
       '--diffusion-fa',
       '-t', threads,
       '-s', String(seed),
@@ -532,6 +552,11 @@ export async function generateImage(
       currentChild = child;
       let log = '';
       let resolvedSeed = seed;
+      // Track the denoise→decode transition: once a sampling pass reaches its
+      // total, a fresh "1/N" sequence is the VAE decode, not a second generation.
+      let samplingDone = false;
+      let prevStep = 0;
+      let phase: 'sampling' | 'decoding' = 'sampling';
       const capture = (d: Buffer): void => {
         const s = d.toString();
         log += s;
@@ -544,11 +569,16 @@ export async function generateImage(
           let last: RegExpExecArray | null = null;
           for (let mm = stepRe.exec(s); mm; mm = stepRe.exec(s)) last = mm;
           if (last) {
+            const step = parseInt(last[1], 10);
+            const total = parseInt(last[2], 10);
+            if (!samplingDone) { if (step >= total) samplingDone = true; }
+            else if (step < prevStep) { phase = 'decoding'; }
+            prevStep = step;
             let preview: string | undefined;
             try {
               if (fs.existsSync(previewPath)) preview = `data:image/png;base64,${fs.readFileSync(previewPath).toString('base64')}`;
             } catch { /* preview not ready */ }
-            onProgress({ step: parseInt(last[1], 10), total: parseInt(last[2], 10), secPerStep: parseFloat(last[3]), preview });
+            onProgress({ step, total, secPerStep: parseFloat(last[3]), preview, phase });
           }
         }
       };

@@ -189,7 +189,7 @@ try {
     },
     deleteGeneratedImage: (p: string) => ipcRenderer.invoke('imagegen:delete', p),
     exportGeneratedImage: (srcPath: string, suggestedName?: string) => ipcRenderer.invoke('imagegen:export', srcPath, suggestedName),
-    onImageGenProgress: (cb: (p: { step: number; total: number; secPerStep: number; preview?: string }) => void) => {
+    onImageGenProgress: (cb: (p: { step: number; total: number; secPerStep: number; preview?: string; phase?: 'sampling' | 'decoding' }) => void) => {
       const sub = (_: any, p: any) => cb(p)
       ipcRenderer.on('imagegen:progress', sub)
       return () => ipcRenderer.removeListener('imagegen:progress', sub)

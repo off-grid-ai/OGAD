@@ -210,7 +210,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const [activeStyle, setActiveStyle] = useState<string | null>(null);
   const [styleThumbs, setStyleThumbs] = useState<Record<string, string>>({});
   const [genThumbsBusy, setGenThumbsBusy] = useState(false);
-  const [imgProgress, setImgProgress] = useState<{ step: number; total: number; secPerStep: number; preview?: string } | null>(null);
+  const [imgProgress, setImgProgress] = useState<{ step: number; total: number; secPerStep: number; preview?: string; phase?: 'sampling' | 'decoding' } | null>(null);
   const [projects, setProjects] = useState<ProjectLite[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   // Memory scope: no memory (plain chat, default) · all memory · a project.
@@ -1711,7 +1711,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                         )}
                         <div className="flex items-center justify-between text-[11px] text-neutral-500">
                           <span>
-                            {imgProgress ? `Step ${imgProgress.step}/${imgProgress.total}` : 'Loading model…'}
+                            {imgProgress ? `${imgProgress.phase === 'decoding' ? 'Decoding' : 'Step'} ${imgProgress.step}/${imgProgress.total}` : 'Loading model…'}
                           </span>
                           {imgProgress ? (
                             <span className="text-neutral-600">
