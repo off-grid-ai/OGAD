@@ -114,6 +114,23 @@ p, li, pre, code, h1, h2, h3, h4, h5, h6, blockquote, td, th, .selectable, [data
   cursor: auto;
 }
 
+/* Clickable elements get the hand cursor (browsers don't do this for <button>
+   by default, and the rules above reset it to auto). */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+a[href],
+select,
+summary,
+label[for],
+[data-clickable],
+.cursor-pointer {
+  cursor: pointer;
+}
+button:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
 code {
   font-weight: 600;
   padding: 3px 5px;
