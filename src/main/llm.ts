@@ -1,4 +1,5 @@
 import { spawn, execSync, ChildProcess } from "child_process";
+import { Mutex } from "async-mutex";
 import path from "path";
 import { app } from "electron";
 import * as fs from "fs";
@@ -43,6 +44,11 @@ export class LLMService {
   // respawn to take effect (it's a launch arg); temperature is per-request.
   private temperature = 0.7;
   private ctxSize = 65536; // 64k — gemma-4 trains to 131k, so this is safe headroom and stops "context exceeded"
+  // ONE local gemma server, but many callers (capture distill, day-plan, the
+  // secretary, action extraction…). Concurrent requests contend and time out.
+  // Serialize them so each gets the server to itself; the per-call timeout sits
+  // INSIDE the lock, so it measures execution, not time spent waiting in line.
+  private chatMutex = new Mutex();
   // Advanced sampling (LM Studio-style). undefined = let llama.cpp use its default.
   private topP: number | undefined;
   private topK: number | undefined;
@@ -326,6 +332,7 @@ export class LLMService {
         }
     }
 
+    return this.chatMutex.runExclusive(async () => {
     try {
         const messages: any[] = [{
             role: "user",
@@ -378,6 +385,7 @@ export class LLMService {
         console.error("[LLMService] Chat error:", e.message || e);
         throw e;
     }
+    });
   }
 
   // Streaming variant of chat(): posts with stream:true and invokes `onDelta`
