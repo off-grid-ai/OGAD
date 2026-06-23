@@ -30,6 +30,7 @@ interface EntityListItem {
   hidden: number;
   imagePath: string | null;
   observationCount: number;
+  distinctDays: number;
   lastTs: string | null;
   latestSummary: string | null;
 }
@@ -119,12 +120,27 @@ export function EntitiesScreen() {
   };
 
   const [showHidden, setShowHidden] = useState(false);
+  const [showLatent, setShowLatent] = useState(false);
   const [tab, setTab] = useState('All');
   const hiddenCount = entities.filter((e) => e.hidden).length;
   const f = filter.toLowerCase();
-  const shown = entities
-    .filter((e) => e.name.toLowerCase().includes(f))
-    .filter((e) => showHidden || !e.hidden);
+
+  // Significance gate: an entity is SURFACED (worth bringing up) only once it
+  // recurs across days, has real weight, or is part of the project hierarchy.
+  // One-off mentions ("1000 Oaks" from a single chat) stay LATENT — still
+  // stored + searchable, just not cluttering the list until they matter.
+  const parentSet = new Set(entities.filter((e) => e.parentId != null).map((e) => e.parentId as number));
+  const isSurfaced = (e: EntityListItem): boolean =>
+    e.parentId != null || parentSet.has(e.id) || (e.distinctDays ?? 1) >= 2 || e.observationCount >= 6;
+
+  const matchesText = (e: EntityListItem): boolean => e.name.toLowerCase().includes(f);
+  const shown = entities.filter(matchesText).filter((e) => {
+    if (showHidden) return !!e.hidden; // archive view
+    if (e.hidden) return false;
+    if (f) return true; // an explicit search reveals latent matches too
+    return showLatent || isSurfaced(e);
+  });
+  const latentCount = entities.filter((e) => !e.hidden && !isSurfaced(e)).length;
 
   const onMerge = (e: EntityListItem): void => setMerging(e);
   const onHide = async (e: EntityListItem): Promise<void> => {
@@ -181,6 +197,17 @@ export function EntitiesScreen() {
               className="w-40 bg-transparent text-xs text-white placeholder-neutral-600 outline-none"
             />
           </div>
+          {latentCount > 0 && (
+            <button
+              onClick={() => setShowLatent((s) => !s)}
+              title="One-off mentions, stored but not surfaced until they recur"
+              className={`rounded-md border px-2.5 py-1.5 text-xs transition-colors ${
+                showLatent ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-400 hover:text-white'
+              }`}
+            >
+              {showLatent ? 'Hide latent' : `Latent (${latentCount})`}
+            </button>
+          )}
           {hiddenCount > 0 && (
             <button
               onClick={() => setShowHidden((s) => !s)}

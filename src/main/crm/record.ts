@@ -160,6 +160,7 @@ export function listEntitiesWithActivity(): {
     .prepare(
       `SELECT e.id, e.name, e.type, e.parent_id AS parentId, e.hidden AS hidden, e.image_path AS imagePath,
               COUNT(oe.observation_id) AS observationCount,
+              COUNT(DISTINCT substr(o.ts, 1, 10)) AS distinctDays,
               MAX(o.ts) AS lastTs,
               (SELECT o2.summary FROM observation_entities oe2
                  JOIN observations o2 ON o2.id = oe2.observation_id
@@ -177,6 +178,7 @@ export function listEntitiesWithActivity(): {
     hidden: number;
     imagePath: string | null;
     observationCount: number;
+    distinctDays: number;
     lastTs: string | null;
     latestSummary: string | null;
   }[];

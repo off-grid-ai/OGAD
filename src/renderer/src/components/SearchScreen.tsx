@@ -103,9 +103,7 @@ export function SearchScreen({ initialQuery = '', onOpen }: { initialQuery?: str
       </div>
 
       {status && status.pending > 0 && (
-        <p className="px-1 pt-2 text-[11px] text-neutral-600">
-          Indexing for semantic search — {status.pending.toLocaleString()} items left ({status.vectors.toLocaleString()} ready). Keyword search works now.
-        </p>
+        <p className="px-1 pt-2 text-[11px] text-neutral-600">Sharpening results…</p>
       )}
 
       <div className="mt-3 flex-1 space-y-2 overflow-y-auto pb-8">
