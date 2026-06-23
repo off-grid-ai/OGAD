@@ -8,7 +8,7 @@ type Tab = 'model' | 'voice' | 'tools' | 'connectors';
 type LlmSettings = { temperature?: number; ctxSize?: number; topP?: number; topK?: number; minP?: number; repeatPenalty?: number; maxTokens?: number; systemPrompt?: string };
 type Connector = { id: number; name: string; url?: string | null; transport?: string; enabled?: number | boolean };
 
-const CTX_OPTIONS = [4096, 8192, 16384, 32768, 65536];
+const CTX_OPTIONS = [4096, 8192, 16384, 32768, 65536, 131072];
 
 function Row({ label, hint, value, children }: { label: string; hint?: string; value?: string; children: React.ReactNode }) {
   return (
@@ -120,12 +120,12 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             <Row label="Repeat penalty" value={(s.repeatPenalty ?? 1.1).toFixed(2)} hint="Higher discourages repetition.">
               <input type="range" min={1} max={1.5} step={0.01} value={s.repeatPenalty ?? 1.1} onChange={e => set({ repeatPenalty: Number(e.target.value) })} className="w-full accent-green-500" />
             </Row>
-            <Row label="Max tokens" value={String(s.maxTokens ?? 2048)} hint="Cap on the response length.">
-              <input type="range" min={256} max={8192} step={256} value={s.maxTokens ?? 2048} onChange={e => set({ maxTokens: Number(e.target.value) })} className="w-full accent-green-500" />
+            <Row label="Max tokens" value={String(s.maxTokens ?? 2048)} hint="Cap on the response length (must fit within the context window).">
+              <input type="range" min={256} max={32768} step={256} value={s.maxTokens ?? 2048} onChange={e => set({ maxTokens: Number(e.target.value) })} className="w-full accent-green-500" />
             </Row>
             <Row label="Context window" hint="Larger holds more history; changing it reloads the model.">
               <select value={s.ctxSize ?? 32768} onChange={e => set({ ctxSize: Number(e.target.value) })} className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500">
-                {CTX_OPTIONS.map(c => <option key={c} value={c}>{c >= 1024 ? `${c / 1024}K` : c} tokens{c === 32768 ? ' (default)' : ''}</option>)}
+                {CTX_OPTIONS.map(c => <option key={c} value={c}>{c >= 1024 ? `${c / 1024}K` : c} tokens{c === 65536 ? ' (default)' : c === 131072 ? ' (max — heavy)' : ''}</option>)}
               </select>
             </Row>
             <Row label="System prompt" hint="Prepended to every chat as a system message. Leave blank for the default.">
