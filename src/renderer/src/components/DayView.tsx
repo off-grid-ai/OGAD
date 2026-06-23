@@ -4,6 +4,10 @@ import { IconChevronLeft, IconChevronRight, IconCalendar, IconLoader2, IconRefre
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const api = (window as any).api;
 
+// Where a "View all" link can take the user — handled by the parent (App).
+type NavTarget = 'actions' | 'replay';
+type Navigate = (view: NavTarget, opts?: { mode?: 'todo' | 'approvals' }) => void;
+
 interface Block {
   startSec: number;
   endSec: number;
@@ -21,6 +25,10 @@ interface EventPrep {
   recent: { summary: string; surface: string; ts: string }[];
   openItems: { id: number; text: string; due: string | null }[];
 }
+interface Proposal { id: number; title: string; detail: string | null; connector: string | null; tool: string | null; args: string | null; status: string }
+
+const SUGGEST_CAP = 3;
+const TODO_CAP = 6;
 
 const startOfDay = (d: Date): Date => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 const fmtTime = (sec: number): string => new Date(sec * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -29,8 +37,9 @@ function fmtDur(secs: number): string {
   return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
-// Small, consistent section label — tiny, uppercase, muted, emerald icon. Used as
-// the rhythm marker for every block on the page so the screen reads as one system.
+// Consistent section label — tiny, uppercase, muted, emerald icon. The rhythm
+// marker for every block so the screen reads as one system. `right` holds the
+// optional "View all" link.
 function Label({ icon: Icon, children, right }: { icon: typeof IconBolt; children: React.ReactNode; right?: React.ReactNode }): React.ReactElement {
   return (
     <div className="mb-3 flex items-center gap-2 text-[10px] uppercase tracking-wide text-neutral-500">
@@ -41,8 +50,15 @@ function Label({ icon: Icon, children, right }: { icon: typeof IconBolt; childre
   );
 }
 
-// "Your day" — the synthesized briefing (LLM over calendar + to-dos + email). The
-// lede: the shape of the day in a couple of tight lines, not a wall of prose.
+function ViewAll({ n, onClick }: { n: number; onClick: () => void }): React.ReactElement {
+  return (
+    <button onClick={onClick} className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-neutral-500 hover:text-green-500">
+      View all {n} <span aria-hidden>→</span>
+    </button>
+  );
+}
+
+// "Your day" — the synthesized briefing (LLM over calendar + to-dos + email).
 function DayPlan(): React.ReactElement | null {
   const [plan, setPlan] = useState('');
   const [loading, setLoading] = useState(false);
@@ -67,7 +83,7 @@ function DayPlan(): React.ReactElement | null {
 
   if (!plan && !loading) return null;
   return (
-    <section className="border-b border-neutral-800 px-8 py-5">
+    <div>
       <Label
         icon={IconSparkles}
         right={
@@ -79,19 +95,114 @@ function DayPlan(): React.ReactElement | null {
         Your day
       </Label>
       {plan ? (
-        <p className="max-w-4xl whitespace-pre-wrap text-sm leading-relaxed text-neutral-300">{plan}</p>
+        <p className="whitespace-pre-wrap text-sm leading-relaxed text-neutral-300">{plan}</p>
       ) : (
         <div className="flex items-center gap-2 text-xs text-neutral-500"><IconLoader2 className="h-4 w-4 animate-spin" /> Planning your day…</div>
       )}
-    </section>
+    </div>
   );
 }
 
-interface Proposal { id: number; title: string; detail: string | null; connector: string | null; tool: string | null; args: string | null; status: string }
+// Today's calendar — the right rail. Each event opens in Google Calendar and
+// expands into prep (who, recently discussed, open items) from on-device memory.
+function Calendar({ events }: { events: UpcomingEvent[] }): React.ReactElement {
+  const [prepFor, setPrepFor] = useState<number | null>(null);
+  const [prep, setPrep] = useState<EventPrep | null>(null);
+  const [prepLoading, setPrepLoading] = useState(false);
 
-// The secretary's proactive suggestions — actions Off Grid proposed on its own
-// (from your calendar/email/context + the tools it has). Approve/reject inline.
-function Secretary(): React.ReactElement | null {
+  const openInCalendar = (e: UpcomingEvent): void => { if (e.url) window.open(e.url, '_blank'); };
+  const togglePrep = async (e: UpcomingEvent): Promise<void> => {
+    if (prepFor === e.id) { setPrepFor(null); setPrep(null); return; }
+    setPrepFor(e.id);
+    setPrep(null);
+    setPrepLoading(true);
+    try {
+      const attendees = (e.attendees ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+      setPrep((await api.crmEventPrep?.(e.title, attendees)) ?? null);
+    } finally {
+      setPrepLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      <Label icon={IconCalendar}>Today’s meetings</Label>
+      {events.length === 0 ? (
+        <p className="text-xs text-neutral-600">Nothing left on your calendar today.</p>
+      ) : (
+        <div className="space-y-1.5">
+          {events.map((e) => (
+            <div key={e.id} className="overflow-hidden rounded-md border border-neutral-800 bg-neutral-900/40 transition-colors hover:border-neutral-700">
+              <div className="group flex items-start gap-3 px-3 py-2">
+                <div className="w-14 shrink-0 pt-0.5 text-[11px] tabular-nums text-neutral-400">{e.starts_at ? fmtTime(e.starts_at) : '—'}</div>
+                <button onClick={() => openInCalendar(e)} disabled={!e.url} className="min-w-0 flex-1 text-left disabled:cursor-default" title={e.url ? 'Open in Google Calendar' : undefined}>
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-sm text-neutral-100 group-hover:text-white">{e.title}</span>
+                    {e.url && <IconExternalLink className="h-3 w-3 shrink-0 text-neutral-600 group-hover:text-green-500" />}
+                  </div>
+                  {e.location && (
+                    <div className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-neutral-500">
+                      <IconMapPin className="h-3 w-3 shrink-0" /> {e.location}
+                    </div>
+                  )}
+                </button>
+                <button onClick={() => togglePrep(e)} aria-label="Toggle prep" className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${prepFor === e.id ? 'text-green-500' : 'text-neutral-500 hover:text-white'}`}>
+                  Prep {prepFor === e.id ? '▴' : '▾'}
+                </button>
+              </div>
+              {prepFor === e.id && (
+                <div className="border-t border-neutral-800 bg-neutral-950/40 px-3 py-2.5">
+                  {prepLoading ? (
+                    <div className="flex items-center gap-2 text-xs text-neutral-500"><IconLoader2 className="h-3.5 w-3.5 animate-spin" /> Pulling context…</div>
+                  ) : prep && (prep.people.length || prep.recent.length || prep.openItems.length) ? (
+                    <div className="space-y-3 text-xs">
+                      {prep.people.length > 0 && (
+                        <div>
+                          <div className="mb-1 text-[10px] uppercase tracking-wide text-neutral-600">Who</div>
+                          <div className="space-y-1">
+                            {prep.people.map((p) => (
+                              <div key={p.id}><span className="text-green-500">{p.name}</span>{p.summary && <span className="text-neutral-400"> — {p.summary}</span>}</div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {prep.recent.length > 0 && (
+                        <div>
+                          <div className="mb-1 text-[10px] uppercase tracking-wide text-neutral-600">Recently discussed</div>
+                          <div className="space-y-1">
+                            {prep.recent.slice(0, 6).map((r, i) => (
+                              <div key={i} className="text-neutral-400"><span className="text-neutral-600">{r.surface} · </span>{r.summary}</div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {prep.openItems.length > 0 && (
+                        <div>
+                          <div className="mb-1 text-[10px] uppercase tracking-wide text-neutral-600">Open items</div>
+                          <div className="space-y-1">
+                            {prep.openItems.map((o) => (
+                              <div key={o.id} className="text-neutral-300">• {o.text}{o.due && <span className="text-neutral-500"> ({o.due})</span>}</div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-neutral-600">No prior context found for this one yet.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// The secretary's proactive suggestions — actions Off Grid proposed on its own.
+// Shows a few; the rest live on the Actions screen via "View all".
+function Secretary({ onViewAll }: { onViewAll: Navigate }): React.ReactElement {
   const [pending, setPending] = useState<Proposal[]>([]);
   const [busy, setBusy] = useState<number | null>(null);
   const load = useCallback(async (): Promise<void> => {
@@ -114,175 +225,69 @@ function Secretary(): React.ReactElement | null {
       load();
     }
   };
-  if (!pending.length) return null;
   return (
-    <section className="border-b border-neutral-800 px-8 py-5">
-      <Label icon={IconBolt}>Off Grid suggests · {pending.length}</Label>
-      <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
-        {pending.map((p) => (
-          <div key={p.id} className="group flex items-start gap-3 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2.5 transition-colors hover:border-neutral-700">
-            <div className="min-w-0 flex-1">
-              <div className="text-sm text-neutral-100">{p.title}</div>
-              {p.detail && <div className="mt-0.5 text-xs text-neutral-400">{p.detail}</div>}
-              {(p.connector || p.tool) && <div className="mt-1 text-[11px] text-neutral-600">{[p.connector, p.tool].filter(Boolean).join(' · ')}</div>}
+    <div>
+      <Label icon={IconBolt} right={pending.length > SUGGEST_CAP ? <ViewAll n={pending.length} onClick={() => onViewAll('actions', { mode: 'approvals' })} /> : undefined}>
+        Off Grid suggests{pending.length ? ` · ${pending.length}` : ''}
+      </Label>
+      {pending.length === 0 ? (
+        <p className="text-xs text-neutral-600">Nothing to approve right now — Off Grid surfaces actions here as it finds them.</p>
+      ) : (
+        <div className="space-y-2">
+          {pending.slice(0, SUGGEST_CAP).map((p) => (
+            <div key={p.id} className="flex items-start gap-3 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2.5 transition-colors hover:border-neutral-700">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm text-neutral-100">{p.title}</div>
+                {p.detail && <div className="mt-0.5 text-xs text-neutral-400">{p.detail}</div>}
+                {(p.connector || p.tool) && <div className="mt-1 text-[11px] text-neutral-600">{[p.connector, p.tool].filter(Boolean).join(' · ')}</div>}
+              </div>
+              <div className="flex shrink-0 gap-1">
+                <button onClick={() => decide(p.id, true)} disabled={busy === p.id} className="flex items-center gap-1 rounded-md bg-green-500 px-2.5 py-1 text-xs text-neutral-950 hover:bg-green-400 disabled:opacity-50">
+                  {busy === p.id ? <IconLoader2 className="h-3.5 w-3.5 animate-spin" /> : <IconCheck className="h-3.5 w-3.5" />} Approve
+                </button>
+                <button onClick={() => decide(p.id, false)} disabled={busy === p.id} aria-label="Dismiss suggestion" className="rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-400 hover:border-neutral-500"><IconX className="h-3.5 w-3.5" /></button>
+              </div>
             </div>
-            <div className="flex shrink-0 gap-1">
-              <button onClick={() => decide(p.id, true)} disabled={busy === p.id} className="flex items-center gap-1 rounded-md bg-green-500 px-2.5 py-1 text-xs text-neutral-950 hover:bg-green-400 disabled:opacity-50">
-                {busy === p.id ? <IconLoader2 className="h-3.5 w-3.5 animate-spin" /> : <IconCheck className="h-3.5 w-3.5" />} Approve
-              </button>
-              <button onClick={() => decide(p.id, false)} disabled={busy === p.id} aria-label="Dismiss suggestion" className="rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-400 hover:border-neutral-500"><IconX className="h-3.5 w-3.5" /></button>
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
-// "Ahead" — TODAY's meetings + to-dos, side by side. Each event opens in Google
-// Calendar and expands into prep (who, recently discussed, open items) pulled from
-// on-device memory. The assistant, not a calendar app.
-function Ahead(): React.ReactElement | null {
-  const [ahead, setAhead] = useState<AheadView | null>(null);
-  const [prepFor, setPrepFor] = useState<number | null>(null);
-  const [prep, setPrep] = useState<EventPrep | null>(null);
-  const [prepLoading, setPrepLoading] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    const load = async (): Promise<void> => {
-      const a = (await api.crmAhead?.()) ?? null;
-      if (!cancelled) setAhead(a);
-    };
-    load();
-    const off = api.onCrmChanged?.(load);
-    const poll = setInterval(load, 30000);
-    return () => { cancelled = true; off?.(); clearInterval(poll); };
-  }, []);
-
-  const upcoming = ahead?.upcoming ?? [];
-  const priorities = ahead?.priorities ?? [];
-  if (!upcoming.length && !priorities.length) return null;
-
-  const openInCalendar = (e: UpcomingEvent): void => {
-    if (e.url) window.open(e.url, '_blank');
-  };
-  const togglePrep = async (e: UpcomingEvent): Promise<void> => {
-    if (prepFor === e.id) { setPrepFor(null); setPrep(null); return; }
-    setPrepFor(e.id);
-    setPrep(null);
-    setPrepLoading(true);
-    try {
-      const attendees = (e.attendees ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-      setPrep((await api.crmEventPrep?.(e.title, attendees)) ?? null);
-    } finally {
-      setPrepLoading(false);
-    }
-  };
-
+// To-dos — priorities from action items. Shows a few; rest on the Actions screen.
+function Todos({ items, onViewAll }: { items: Priority[]; onViewAll: Navigate }): React.ReactElement {
   return (
-    <section className="grid grid-cols-1 gap-x-10 gap-y-6 px-8 py-5 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
-      {/* Up next — TODAY only. Click → Google Calendar; "Prep" → context. */}
-      <div>
-        <Label icon={IconCalendar}>Today’s meetings</Label>
-        {upcoming.length === 0 ? (
-          <p className="text-xs text-neutral-600">Nothing left on your calendar today.</p>
-        ) : (
-          <div className="space-y-1.5">
-            {upcoming.map((e) => (
-              <div key={e.id} className="overflow-hidden rounded-md border border-neutral-800 bg-neutral-900/40 transition-colors hover:border-neutral-700">
-                <div className="group flex items-start gap-3 px-3 py-2">
-                  <div className="w-14 shrink-0 pt-0.5 text-[11px] tabular-nums text-neutral-400">{e.starts_at ? fmtTime(e.starts_at) : '—'}</div>
-                  <button onClick={() => openInCalendar(e)} disabled={!e.url} className="min-w-0 flex-1 text-left disabled:cursor-default" title={e.url ? 'Open in Google Calendar' : undefined}>
-                    <div className="flex items-center gap-1.5">
-                      <span className="truncate text-sm text-neutral-100 group-hover:text-white">{e.title}</span>
-                      {e.url && <IconExternalLink className="h-3 w-3 shrink-0 text-neutral-600 group-hover:text-green-500" />}
-                    </div>
-                    {e.location && (
-                      <div className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-neutral-500">
-                        <IconMapPin className="h-3 w-3 shrink-0" /> {e.location}
-                      </div>
-                    )}
-                  </button>
-                  <button onClick={() => togglePrep(e)} aria-label="Toggle prep" className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${prepFor === e.id ? 'text-green-500' : 'text-neutral-500 hover:text-white'}`}>
-                    Prep {prepFor === e.id ? '▴' : '▾'}
-                  </button>
-                </div>
-                {prepFor === e.id && (
-                  <div className="border-t border-neutral-800 bg-neutral-950/40 px-3 py-2.5 pl-[4.25rem]">
-                    {prepLoading ? (
-                      <div className="flex items-center gap-2 text-xs text-neutral-500"><IconLoader2 className="h-3.5 w-3.5 animate-spin" /> Pulling context…</div>
-                    ) : prep && (prep.people.length || prep.recent.length || prep.openItems.length) ? (
-                      <div className="space-y-3 text-xs">
-                        {prep.people.length > 0 && (
-                          <div>
-                            <div className="mb-1 text-[10px] uppercase tracking-wide text-neutral-600">Who</div>
-                            <div className="space-y-1">
-                              {prep.people.map((p) => (
-                                <div key={p.id}><span className="text-green-500">{p.name}</span>{p.summary && <span className="text-neutral-400"> — {p.summary}</span>}</div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        {prep.recent.length > 0 && (
-                          <div>
-                            <div className="mb-1 text-[10px] uppercase tracking-wide text-neutral-600">Recently discussed</div>
-                            <div className="space-y-1">
-                              {prep.recent.slice(0, 6).map((r, i) => (
-                                <div key={i} className="text-neutral-400"><span className="text-neutral-600">{r.surface} · </span>{r.summary}</div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        {prep.openItems.length > 0 && (
-                          <div>
-                            <div className="mb-1 text-[10px] uppercase tracking-wide text-neutral-600">Open items</div>
-                            <div className="space-y-1">
-                              {prep.openItems.map((o) => (
-                                <div key={o.id} className="text-neutral-300">• {o.text}{o.due && <span className="text-neutral-500"> ({o.due})</span>}</div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-neutral-600">No prior context found for this one yet.</p>
-                    )}
-                  </div>
+    <div>
+      <Label icon={IconCircleCheck} right={items.length > TODO_CAP ? <ViewAll n={items.length} onClick={() => onViewAll('actions', { mode: 'todo' })} /> : undefined}>
+        To do
+      </Label>
+      {items.length === 0 ? (
+        <p className="text-xs text-neutral-600">Nothing flagged yet — action items from your email/chats show up here.</p>
+      ) : (
+        <div className="space-y-1.5">
+          {items.slice(0, TODO_CAP).map((p) => (
+            <div key={p.id} className="rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2 transition-colors hover:border-neutral-700">
+              <div className="text-sm text-neutral-200">{p.text}</div>
+              <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-neutral-600">
+                {p.due && (
+                  <span className="flex items-center gap-1 text-neutral-400"><IconClock className="h-3 w-3" /> {p.due}</span>
                 )}
+                {p.entityName && <span>{p.entityName}</span>}
+                {p.sourceApp && <span className="text-neutral-700">· {p.sourceApp}</span>}
               </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* To do — priorities from action items */}
-      <div>
-        <Label icon={IconCircleCheck}>To do</Label>
-        {priorities.length === 0 ? (
-          <p className="text-xs text-neutral-600">Nothing flagged yet — action items from your email/chats show up here.</p>
-        ) : (
-          <div className="space-y-1.5">
-            {priorities.slice(0, 12).map((p) => (
-              <div key={p.id} className="rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2 transition-colors hover:border-neutral-700">
-                <div className="text-sm text-neutral-200">{p.text}</div>
-                <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-neutral-600">
-                  {p.due && (
-                    <span className="flex items-center gap-1 text-neutral-400"><IconClock className="h-3 w-3" /> {p.due}</span>
-                  )}
-                  {p.entityName && <span>{p.entityName}</span>}
-                  {p.sourceApp && <span className="text-neutral-700">· {p.sourceApp}</span>}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </section>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
-export function DayView(): React.ReactElement {
+export function DayView({ onNavigate }: { onNavigate?: Navigate }): React.ReactElement {
+  const navigate: Navigate = onNavigate ?? (() => {});
   const [day, setDay] = useState<Date>(() => startOfDay(new Date()));
+  const [ahead, setAhead] = useState<AheadView | null>(null);
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [journal, setJournal] = useState('');
   const [journalLoading, setJournalLoading] = useState(false);
@@ -316,6 +321,19 @@ export function DayView(): React.ReactElement {
     const poll = setInterval(loadBlocks, 10000);
     return () => { off?.(); clearInterval(poll); };
   }, [loadBlocks]);
+
+  // TODAY's calendar + to-dos (only relevant on the live day).
+  useEffect(() => {
+    let cancelled = false;
+    const load = async (): Promise<void> => {
+      const a = (await api.crmAhead?.()) ?? null;
+      if (!cancelled) setAhead(a);
+    };
+    load();
+    const off = api.onCrmChanged?.(load);
+    const poll = setInterval(load, 30000);
+    return () => { cancelled = true; off?.(); clearInterval(poll); };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -368,10 +386,20 @@ export function DayView(): React.ReactElement {
         </div>
       </div>
 
-      {/* FORWARD — the briefing, what Off Grid suggests, then meetings + to-dos. */}
-      {isToday && <DayPlan />}
-      {isToday && <Secretary />}
-      {isToday && <Ahead />}
+      {/* FORWARD — only on the live day. Row 1: briefing + today's calendar (right).
+          Row 2: Off Grid suggests | to-dos, half each. */}
+      {isToday && (
+        <>
+          <section className="grid grid-cols-1 gap-x-10 gap-y-6 border-b border-neutral-800 px-8 py-5 lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)]">
+            <DayPlan />
+            <Calendar events={ahead?.upcoming ?? []} />
+          </section>
+          <section className="grid grid-cols-1 gap-x-10 gap-y-6 border-b border-neutral-800 px-8 py-5 lg:grid-cols-2">
+            <Secretary onViewAll={navigate} />
+            <Todos items={ahead?.priorities ?? []} onViewAll={navigate} />
+          </section>
+        </>
+      )}
 
       {/* BEHIND — what happened. Collapsed by default on Today so the landing stays
           forward-first; one click expands the journal + time-spent + timeline. */}
@@ -382,6 +410,17 @@ export function DayView(): React.ReactElement {
         >
           {recapOpen ? <IconChevronDown className="h-3.5 w-3.5" /> : <IconChevronRight className="h-3.5 w-3.5" />}
           What happened{totalSecs > 0 ? ` · ${fmtDur(totalSecs)}` : ''}
+          {recapOpen && (
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => { e.stopPropagation(); navigate('replay'); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); navigate('replay'); } }}
+              className="ml-auto flex items-center gap-1 text-neutral-500 hover:text-green-500"
+            >
+              Open in Replay <span aria-hidden>→</span>
+            </span>
+          )}
         </button>
       )}
       {blocks.length === 0 ? (

@@ -116,6 +116,8 @@ function AppContent() {
   const [replayTarget, setReplayTarget] = useState<number | null>(null);
   // A search hit can deep-link to a specific meeting; cleared on leaving Meetings.
   const [meetingTarget, setMeetingTarget] = useState<number | null>(null);
+  // Which tab the Actions screen opens on when reached via a Day "View all" link.
+  const [actionsMode, setActionsMode] = useState<'todo' | 'approvals' | null>(null);
   // Target chat to open in the main Chat screen (from the Projects tab): an
   // existing conversation, or a request to start a new chat scoped to a project.
   const [chatTarget, setChatTarget] = useState<{ conversationId?: string; projectId?: string } | null>(null);
@@ -377,7 +379,8 @@ function AppContent() {
   useEffect(() => {
     if (viewMode !== 'replay' && replayTarget !== null) setReplayTarget(null);
     if (viewMode !== 'meetings' && meetingTarget !== null) setMeetingTarget(null);
-  }, [viewMode, replayTarget, meetingTarget]);
+    if (viewMode !== 'actions' && actionsMode !== null) setActionsMode(null);
+  }, [viewMode, replayTarget, meetingTarget, actionsMode]);
 
   // Open a project chat in the main Chat screen (existing convo or new-in-project).
   const handleOpenProjectChat = useCallback((target: { conversationId?: string; projectId?: string }) => {
@@ -558,13 +561,16 @@ function AppContent() {
                   className="p-6 h-full overflow-y-auto"
                 >
                   {viewMode === 'day' ? (
-                    <DayView />
+                    <DayView onNavigate={(view, opts) => {
+                      if (opts?.mode) setActionsMode(opts.mode);
+                      setViewMode(view);
+                    }} />
                   ) : viewMode === 'replay' ? (
                     <ReplayScreen seekToMs={replayTarget ?? undefined} />
                   ) : viewMode === 'reflect' ? (
                     <ReflectScreen />
                   ) : viewMode === 'actions' ? (
-                    <ActionsScreen />
+                    <ActionsScreen initialMode={actionsMode ?? undefined} />
                   ) : viewMode === 'connectors' ? (
                     <ConnectorsScreen />
                   ) : viewMode === 'meetings' ? (
