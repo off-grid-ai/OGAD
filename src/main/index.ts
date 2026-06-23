@@ -155,6 +155,22 @@ function setupTray(): void {
   }
 }
 
+// Only one instance may run: a second instance would share os.tmpdir() and the
+// meetings DB, so its orphan-recovery could adopt/kill the first instance's LIVE
+// recorder. Bail before whenReady if we can't get the lock; focus the existing
+// window instead.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win) {
+      if (win.isMinimized()) win.restore();
+      win.focus();
+    }
+  });
+}
+
 app.whenReady().then(() => {
   console.log("APP READY: Initializing Services...");
 
@@ -261,6 +277,8 @@ app.whenReady().then(() => {
      ipcMain.handle('meeting:set-recording', (_e, recording: boolean) => { meetingRecording = recording; trayRebuild?.(); });
      setupTray(); // menu-bar pause/recalibrate
      startModelServer(); // one OpenAI-compatible local gateway on :7878 (LLM + STT)
+     // Fleet Console node client — resumes the policy/audit/command loop if enrolled (opt-in).
+     setTimeout(() => { void import('./console').then((m) => m.startConsoleNode()); }, 5000);
      // Adopt any recording whose transcription was interrupted by a restart so it
      // can never be lost. Delayed so it doesn't compete with startup; non-blocking.
      setTimeout(() => { void recoverOrphanedMeetings(); }, 8000);
