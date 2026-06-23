@@ -51,20 +51,23 @@ const BROWSERS: { app: string; expr: string }[] = [
   { app: 'Safari', expr: 'URL of every tab of every window' },
 ];
 
-async function browserMeeting(): Promise<'meet' | 'teams' | null> {
+async function browserMeeting(): Promise<{ platform: 'meet' | 'teams' | null; errored: boolean }> {
+  let errored = false;
   for (const b of BROWSERS) {
     try {
       const { stdout } = await execAsync(
         `osascript -e 'if application "${b.app}" is running then tell application "${b.app}" to get ${b.expr}'`,
         { timeout: 4000 }
       );
-      if (/meet\.google\.com\/[a-z]/i.test(stdout)) return 'meet';
-      if (/teams\.(microsoft|live)\.com.*(meetup-join|call|conv)/i.test(stdout)) return 'teams';
+      if (/meet\.google\.com\/[a-z]/i.test(stdout)) return { platform: 'meet', errored: false };
+      if (/teams\.(microsoft|live)\.com.*(meetup-join|call|conv)/i.test(stdout)) return { platform: 'teams', errored: false };
     } catch {
-      /* app not running / not scriptable / permission denied — skip */
+      // A timeout or denied Automation permission is NOT evidence the call ended —
+      // it's inconclusive. We must never let a flaky scan stop a live recording.
+      errored = true;
     }
   }
-  return null;
+  return { platform: null, errored };
 }
 
 async function teamsNativeInCall(): Promise<boolean> {
@@ -77,32 +80,34 @@ async function teamsNativeInCall(): Promise<boolean> {
   }
 }
 
-async function detect(): Promise<{ active: boolean; platform: 'zoom' | 'meet' | 'teams' | null }> {
-  if (await zoomInMeeting()) return { active: true, platform: 'zoom' };
+async function detect(): Promise<{ active: boolean; platform: 'zoom' | 'meet' | 'teams' | null; errored: boolean }> {
+  if (await zoomInMeeting()) return { active: true, platform: 'zoom', errored: false };
   // Title/url heuristic first — instant, permission-free, covers the case the
   // user is actually looking at the call (which is when it starts).
   const t = activeWindowMeeting();
-  if (t) return { active: true, platform: t };
+  if (t) return { active: true, platform: t, errored: false };
   const b = await browserMeeting();
-  if (b) return { active: true, platform: b };
-  if (await teamsNativeInCall()) return { active: true, platform: 'teams' };
-  return { active: false, platform: null };
+  if (b.platform) return { active: true, platform: b.platform, errored: false };
+  if (await teamsNativeInCall()) return { active: true, platform: 'teams', errored: false };
+  // No positive signal. `errored` distinguishes "the call is gone" from "the scan
+  // couldn't tell" (permission/timeout) — we never end a recording on the latter.
+  return { active: false, platform: null, errored: b.errored };
 }
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let lastActive = false;
 let missStreak = 0;
-// Don't end a meeting on a single negative poll — a tab switch, a transient
-// AppleScript timeout, or a moment without the call in the front window would
-// otherwise stop the recording and split one meeting into many. Require several
-// consecutive misses (~50s at the 10s poll) before declaring the call over.
-const END_GRACE_MISSES = 5;
+// Don't end a meeting on a flaky read. We only count a CLEAN negative (the call
+// tab is genuinely gone) toward ending — scan errors/timeouts are inconclusive
+// and never end a recording. Require many consecutive clean misses (~5 min at the
+// 10s poll): losing a few minutes of tail is fine; cutting a live call is not.
+const END_GRACE_MISSES = 30;
 
 export function startMeetingDetector(): void {
   if (timer) return;
   const tick = async (): Promise<void> => {
     try {
-      const { active, platform } = await detect();
+      const { active, platform, errored } = await detect();
       if (active) {
         missStreak = 0;
         if (!lastActive) {
@@ -110,7 +115,8 @@ export function startMeetingDetector(): void {
           console.log(`[meeting-detect] ${platform} meeting detected`);
           BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('meeting:detected', platform));
         }
-      } else if (lastActive) {
+      } else if (lastActive && !errored) {
+        // Only a clean "no call" counts; an inconclusive scan keeps recording.
         missStreak += 1;
         if (missStreak >= END_GRACE_MISSES) {
           lastActive = false;
@@ -118,6 +124,8 @@ export function startMeetingDetector(): void {
           console.log('[meeting-detect] meeting ended (grace exhausted)');
           BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('meeting:ended'));
         }
+      } else if (errored) {
+        console.log('[meeting-detect] scan inconclusive — keeping recording alive');
       }
     } catch {
       /* ignore */
