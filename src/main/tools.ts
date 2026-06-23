@@ -139,6 +139,25 @@ const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'read_screen',
+    description: "Read what's recently been on the user's screen (the latest captured activity). Fully local, no network. Use to answer questions about what the user was just looking at.",
+    parameters: { type: 'object', properties: { limit: { type: 'number', description: 'how many recent items (default 5)' } } },
+    run: async (a) => {
+      try {
+        const { getDB } = await import('./database');
+        const db = getDB();
+        const n = Math.min(20, Math.max(1, Number(a.limit) || 5));
+        const rows = db.prepare(
+          `SELECT summary, surface, surface_app, ts FROM observations
+           WHERE COALESCE(surface_app,'') NOT LIKE '%Off Grid%' AND COALESCE(surface_app,'') NOT LIKE '%Electron%'
+           ORDER BY ts DESC LIMIT ?`
+        ).all(n) as { summary: string; surface: string | null; surface_app: string | null; ts: string }[];
+        if (!rows.length) return 'No recent screen activity captured.';
+        return rows.map((r) => `(${r.surface || r.surface_app || 'screen'} · ${r.ts}) ${r.summary}`).join('\n');
+      } catch (e) { return 'Error reading screen: ' + (e as Error).message; }
+    },
+  },
+  {
     name: 'get_datetime',
     description: 'Get the current local date and time.',
     parameters: { type: 'object', properties: {} },
