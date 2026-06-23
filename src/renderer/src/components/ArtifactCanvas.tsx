@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 // Renders a model-generated artifact (HTML / SVG / Mermaid / React) in a SANDBOXED
 // iframe — sandbox="allow-scripts" only, no same-origin, no network — so generated
@@ -36,6 +36,10 @@ export function ArtifactCanvas({ artifact, onClose, width, onResize }: { artifac
   const [runtime, setRuntime] = useState<Record<string, string> | null>(null);
   const [view, setView] = useState<'preview' | 'code'>('preview');
   const [resizing, setResizing] = useState(false);
+  // Holds the active drag's teardown so we can force it on unmount — otherwise
+  // closing the canvas mid-drag (e.g. switching chats) leaks the window listeners
+  // and keeps firing onResize on a stale setter.
+  const endDragRef = useRef<(() => void) | null>(null);
 
   // Drag the left edge to widen/narrow the canvas (right-anchored: width grows as
   // the cursor moves left). The key to smoothness: while dragging, an overlay sits
@@ -58,11 +62,16 @@ export function ArtifactCanvas({ artifact, onClose, width, onResize }: { artifac
       window.removeEventListener('mousemove', move);
       window.removeEventListener('mouseup', up);
       if (raf) cancelAnimationFrame(raf);
+      endDragRef.current = null;
       setResizing(false);
     };
+    endDragRef.current = up;
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
   };
+
+  // Force-teardown any in-flight drag if the canvas unmounts.
+  useEffect(() => () => { endDragRef.current?.(); }, []);
 
   useEffect(() => {
     let alive = true;

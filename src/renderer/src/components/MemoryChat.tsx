@@ -261,6 +261,10 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const [canvasArtifact, setCanvasArtifact] = useState<Artifact | null>(null);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
+  // The canvas / text viewer / gallery belong to a specific message, so they must
+  // not bleed across chats — close them whenever the active conversation changes
+  // (switch tab, new chat, close-to-fallback, open-from-projects, delete).
+  useEffect(() => { setCanvasArtifact(null); setViewer(null); setShowGallery(false); }, [activeConversationId]);
   const [gallery, setGallery] = useState<{ path: string; name: string; mtime: number }[]>([]);
   const [galleryTab, setGalleryTab] = useState<'images' | 'artifacts'>('images');
   const [galleryScope, setGalleryScope] = useState<'chat' | 'project' | 'all'>('all');
