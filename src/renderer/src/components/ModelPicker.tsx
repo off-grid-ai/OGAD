@@ -54,7 +54,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
   };
 
   return (
-    <div className="fixed right-0 top-0 bottom-0 z-50 flex w-[44vw] min-w-[420px] flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl">
+    <div className="fixed right-0 top-0 bottom-0 z-50 flex w-[30vw] min-w-[420px] flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl">
       <div className="flex items-center justify-between border-b border-neutral-900 px-4 py-3">
         <div className="flex items-center gap-2 text-sm text-white">
           <IconCpu className="h-4 w-4 text-green-500" aria-hidden /> Active models

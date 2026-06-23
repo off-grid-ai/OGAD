@@ -919,7 +919,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   return (
     <div
       className="flex h-full flex-col font-mono bg-neutral-950 transition-[padding] duration-200"
-      style={{ paddingRight: canvasArtifact || skillsOpen || settingsOpen || viewer || showGallery || modelPickerOpen ? 'max(420px, 44vw)' : undefined }}
+      style={{ paddingRight: canvasArtifact || skillsOpen || settingsOpen || viewer || showGallery || modelPickerOpen ? 'max(420px, 30vw)' : undefined }}
     >
       {/* Header */}
       <header className="flex items-center gap-3 border-b border-neutral-900 px-6 py-4">
@@ -1921,7 +1921,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
 
       {/* Text viewer — expand a pasted/attached file's full content */}
       {viewer && (
-        <div className="fixed right-0 top-0 bottom-0 z-50 flex w-[44vw] min-w-[420px] flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl">
+        <div className="fixed right-0 top-0 bottom-0 z-50 flex w-[30vw] min-w-[420px] flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl">
           <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2.5">
             <span className="truncate text-sm text-neutral-200">{viewer.title}</span>
             <button onClick={() => setViewer(null)} className="rounded-md border border-neutral-700 px-3 py-1 text-xs text-neutral-300 transition-colors hover:text-white">Close</button>
@@ -1964,7 +1964,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
       {/* Gallery — everything generated on-device: images + artifacts */}
       {showGallery && (
         <>
-          <div className="fixed right-0 top-0 bottom-0 z-50 flex w-[44vw] min-w-[420px] flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl">
+          <div className="fixed right-0 top-0 bottom-0 z-50 flex w-[30vw] min-w-[420px] flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl">
             <div className="flex items-center justify-between border-b border-neutral-900 px-4 py-3">
               <span className="text-sm text-neutral-200">Gallery</span>
               <button onClick={() => setShowGallery(false)} className="text-neutral-500 transition-colors hover:text-neutral-200">✕</button>
