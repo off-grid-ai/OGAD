@@ -115,6 +115,15 @@ interface ModelEntry {
   files: ModelFile[];
   imageModes?: string[];
   tags?: string[];
+  releaseDate?: string;
+}
+
+// "Mar 2026" from an ISO date; '' if absent/unparseable.
+function fmtReleaseDate(iso?: string): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
 }
 
 const MODE_LABELS: Record<string, string> = {
@@ -408,7 +417,8 @@ export function ModelsScreen() {
                     {(() => {
                       const bytes = (m.files || []).reduce((s, f) => s + (f.sizeBytes || 0), 0);
                       const size = bytes > 0 ? `${(bytes / 1e9).toFixed(1)}GB download` : null;
-                      return [m.org, m.params ? `${m.params}B` : null, size].filter(Boolean).join('  ·  ');
+                      const released = fmtReleaseDate(m.releaseDate);
+                      return [m.org, m.params ? `${m.params}B` : null, size, released].filter(Boolean).join('  ·  ');
                     })()}
                   </div>
                   {m.tags && m.tags.length > 0 && (
@@ -417,9 +427,11 @@ export function ModelsScreen() {
                         <span
                           key={t}
                           className={`rounded-sm px-1.5 py-0.5 text-[9px] uppercase tracking-wide ${
-                            /recommend|top quality/i.test(t)
-                              ? 'border border-green-500 text-green-500'
-                              : 'bg-neutral-800 text-neutral-400'
+                            /challenger/i.test(t)
+                              ? 'border border-amber-400 bg-amber-400/10 text-amber-400'
+                              : /recommend|top quality/i.test(t)
+                                ? 'border border-green-500 text-green-500'
+                                : 'bg-neutral-800 text-neutral-400'
                           }`}
                         >
                           {t}
