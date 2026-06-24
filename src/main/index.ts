@@ -24,6 +24,7 @@ import { distillPreferences } from './crm/preferences'
 import { syncAllConnectors } from './ingest'
 import { learnIdentityFromGoogle } from './google-rest'
 import { clearLayout } from './crm/layout'
+import { runProactive } from './crm/proactive'
 import { Tray, Menu, nativeImage } from 'electron'
 import { Watcher } from './watcher'
 import { purgeLegacyChatImports } from './database'
@@ -312,6 +313,11 @@ app.whenReady().then(() => {
      };
      setTimeout(() => { void refreshAndPropose(); }, 60_000);
      setInterval(() => { void refreshAndPropose(); }, 30 * 60_000);
+     // Proactive delivery: the assistant reaches out unprompted (morning briefing +
+     // meeting prep) via native notifications from the main process, so it works even
+     // when the window is closed. Cheap, deduped, and user-silenceable (proactive:enabled).
+     setTimeout(() => { void runProactive().catch((e) => console.error('[proactive]', e)); }, 30_000);
+     setInterval(() => { void runProactive().catch((e) => console.error('[proactive]', e)); }, 3 * 60_000);
      // Hourly: fold any new rejection reasons into the secretary's learned
      // preferences (one conservative LLM call; no-op when there's no new feedback).
      setInterval(() => {

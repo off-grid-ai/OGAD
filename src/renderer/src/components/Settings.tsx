@@ -3,6 +3,53 @@ import { motion } from 'motion/react';
 import { ProgressiveBlur } from './ui/progressive-blur';
 
 // ---------------------------------------------------------------------------
+// Proactive delivery — let Off Grid reach out unprompted
+// ---------------------------------------------------------------------------
+
+function ProactiveSection(): React.ReactElement {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const api = (window as any).api;
+  const [enabled, setEnabled] = useState(true);
+  useEffect(() => {
+    api.getSettings?.().then((s: Record<string, unknown>) => {
+      // default ON unless explicitly disabled
+      setEnabled(s?.['proactive:enabled'] !== false);
+    });
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, []);
+  const toggle = (): void => {
+    const next = !enabled;
+    setEnabled(next);
+    api.saveSetting?.('proactive:enabled', next);
+  };
+  return (
+    <motion.div
+      className="rounded-2xl bg-neutral-900/60 backdrop-blur-sm border border-neutral-800 p-6"
+      initial={{ opacity: 0, filter: 'blur(10px)' }}
+      animate={{ opacity: 1, filter: 'blur(0px)' }}
+      transition={{ duration: 0.6, delay: 0.18 }}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h3 className="text-white font-medium text-base mb-1">Proactive delivery</h3>
+          <p className="text-neutral-500 text-sm">
+            Off Grid reaches out on its own — a morning briefing of your day and a heads-up ~20 min before each meeting with who’s in it and your open items. Delivered as native notifications, even when the window is closed.
+          </p>
+        </div>
+        <button
+          onClick={toggle}
+          role="switch"
+          aria-checked={enabled}
+          className={`relative mt-1 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${enabled ? 'bg-emerald-500' : 'bg-neutral-700'}`}
+        >
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Secretary — what Off Grid has learned from your dismissals
 // ---------------------------------------------------------------------------
 
@@ -245,6 +292,9 @@ export function Settings() {
               />
             </div>
           </motion.div>
+
+          {/* Proactive delivery — briefings + meeting prep */}
+          <ProactiveSection />
 
           {/* Secretary — learned preferences from your dismissals */}
           <SecretaryPrefs />
