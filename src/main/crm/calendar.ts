@@ -22,9 +22,12 @@ function ensure(): void {
        source_app TEXT,
        source_ts INTEGER,           -- when we saw it
        dedup_key TEXT UNIQUE,       -- title + day, normalized
+       url TEXT,                    -- link to open the event (Google Calendar htmlLink)
        created_at INTEGER NOT NULL DEFAULT 0
      )`
   );
+  // Additive migration for DBs created before the url column existed.
+  try { getDB().exec('ALTER TABLE upcoming_events ADD COLUMN url TEXT'); } catch { /* exists */ }
   ready = true;
 }
 
@@ -37,6 +40,7 @@ export interface UpcomingEvent {
   attendees: string | null;
   source_app: string | null;
   source_ts: number | null;
+  url: string | null;
 }
 
 /** Is this surface/url likely a calendar we can harvest upcoming events from? */
@@ -132,12 +136,48 @@ ${material.slice(0, 4000)}
   return n;
 }
 
+/** Upsert structured events (e.g. from the Google Calendar REST API). Returns count. */
+export function upsertUpcomingEvents(
+  events: { title: string; startsAt: number | null; endsAt: number | null; location: string | null; attendees: string | null; sourceApp: string; url?: string | null }[]
+): number {
+  ensure();
+  const db = getDB();
+  const insert = db.prepare(
+    `INSERT INTO upcoming_events (title, starts_at, ends_at, location, attendees, source_app, source_ts, dedup_key, url, created_at)
+     VALUES (@title, @starts_at, @ends_at, @location, @attendees, @source_app, @source_ts, @dedup_key, @url, @created_at)
+     ON CONFLICT(dedup_key) DO UPDATE SET
+       starts_at = excluded.starts_at, ends_at = excluded.ends_at,
+       location = excluded.location, attendees = excluded.attendees, source_ts = excluded.source_ts,
+       url = COALESCE(excluded.url, url)`
+  );
+  const nowSec = Math.floor(Date.now() / 1000);
+  let n = 0;
+  for (const e of events) {
+    const title = (e.title || '').trim();
+    if (!title) continue;
+    insert.run({
+      title: title.slice(0, 200),
+      starts_at: e.startsAt,
+      ends_at: e.endsAt,
+      location: e.location,
+      attendees: e.attendees,
+      source_app: e.sourceApp,
+      source_ts: nowSec,
+      dedup_key: `${title.toLowerCase().slice(0, 80)}|${dayKey(e.startsAt)}`,
+      url: e.url ?? null,
+      created_at: nowSec,
+    });
+    n += 1;
+  }
+  return n;
+}
+
 /** Upcoming events from now through `horizonSec` seconds ahead. */
 export function listUpcomingEvents(nowSec: number, horizonSec = 7 * 86400): UpcomingEvent[] {
   ensure();
   return getDB()
     .prepare(
-      `SELECT id, title, starts_at, ends_at, location, attendees, source_app, source_ts
+      `SELECT id, title, starts_at, ends_at, location, attendees, source_app, source_ts, url
        FROM upcoming_events
        WHERE starts_at IS NOT NULL AND starts_at >= ? AND starts_at <= ?
        ORDER BY starts_at ASC`

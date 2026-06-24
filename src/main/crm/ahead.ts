@@ -8,6 +8,8 @@ import { getDB } from '../database';
 import { listActionItems } from './actions';
 import { listUpcomingEvents, type UpcomingEvent } from './calendar';
 import { listMeetings } from '../meetings';
+import { isMe } from '../identity';
+import { llm } from '../llm';
 
 export interface AheadPriority {
   id: number;
@@ -74,13 +76,147 @@ function topFocus(nowSec: number, windowSec: number, limit: number): AheadFocus[
     .all(String(nowSec - windowSec), limit) as AheadFocus[];
 }
 
+// ---------------------------------------------------------------------------
+// Day plan — the synthesized briefing. Turns calendar + to-dos + recent email
+// into a short, prioritized plan with the local LLM. Cached per day.
+// ---------------------------------------------------------------------------
+
+function ensureDayPlanTable(): void {
+  getDB().exec(`CREATE TABLE IF NOT EXISTS day_plans (day_key INTEGER PRIMARY KEY, text TEXT NOT NULL, updated_at INTEGER NOT NULL DEFAULT 0)`);
+}
+function dayKeyOf(nowSec: number): number {
+  const d = new Date(nowSec * 1000);
+  d.setHours(0, 0, 0, 0);
+  return Math.floor(d.getTime() / 1000);
+}
+function storedPlan(dayKey: number): string {
+  ensureDayPlanTable();
+  const row = getDB().prepare('SELECT text FROM day_plans WHERE day_key = ?').get(dayKey) as { text: string } | undefined;
+  return row?.text ?? '';
+}
+function hhmm(sec: number): string {
+  return new Date(sec * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+/** The cached plan for the day, instantly (no LLM). */
+export function getDayPlanCached(nowSec: number): string {
+  return storedPlan(dayKeyOf(nowSec));
+}
+
+/** Generate (and cache) the synthesized plan for today from calendar + to-dos + email. */
+export async function getDayPlan(nowSec: number): Promise<string> {
+  ensureDayPlanTable();
+  const key = dayKeyOf(nowSec);
+  const view = getAhead(nowSec);
+  const emails = getDB()
+    .prepare(`SELECT summary FROM observations WHERE surface = 'Gmail' ORDER BY ts DESC LIMIT 12`)
+    .all() as { summary: string }[];
+
+  const events = view.upcoming.length
+    ? view.upcoming.map((e) => `- ${e.starts_at ? hhmm(e.starts_at) : '?'} ${e.title}${e.attendees ? ` (with ${e.attendees})` : ''}`).join('\n')
+    : '(no meetings today)';
+  const todos = view.priorities.length
+    ? view.priorities.slice(0, 18).map((p) => `- ${p.text}${p.due ? ` [due ${p.due}]` : ''}${p.entityName ? ` (re ${p.entityName})` : ''}`).join('\n')
+    : '(none flagged)';
+  const mail = emails.length ? emails.map((e) => `- ${e.summary}`).join('\n') : '(none)';
+
+  const prompt = `You are my sharp, no-nonsense chief of staff. Using my calendar, to-dos, and recent emails for TODAY, write me a short daily plan that makes me feel organized and in control.
+
+Write it as:
+1. One or two sentences orienting me to the day — how many meetings, the overall shape, anything urgent or time-sensitive.
+2. A prioritized list of 3-6 concrete things to focus on, in the order I should tackle them. Weave in prep for the meetings and follow-ups implied by the emails. Reference specific people, projects, and times.
+
+Be decisive and specific — tell me what matters and what to ignore. No preamble, no headings, under 200 words. Address me as "you".
+
+TODAY'S MEETINGS:
+${events}
+
+OPEN TO-DOS:
+${todos}
+
+RECENT EMAILS (subjects/snippets):
+${mail}`;
+
+  try {
+    const text = (await llm.chat(prompt, [], 120_000, 600, { temperature: 0.4, disableThinking: true })).trim();
+    if (text) {
+      getDB()
+        .prepare(`INSERT INTO day_plans (day_key, text, updated_at) VALUES (?, ?, ?) ON CONFLICT(day_key) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at`)
+        .run(key, text, Date.now());
+    }
+    return text || storedPlan(key);
+  } catch (e) {
+    console.error('[day plan] failed:', e);
+    return storedPlan(key);
+  }
+}
+
+export interface EventPrep {
+  people: { id: number; name: string; type: string; summary: string | null }[];
+  recent: { summary: string; surface: string; ts: string }[];
+  openItems: { id: number; text: string; due: string | null }[];
+}
+
+// Candidate names from an event title — handles "Kunal <> Mac", "X and Y",
+// "Meeting with Z", "A / B". Liberal: the entity lookup filters to real ones.
+function titleNames(title: string): string[] {
+  return title
+    .replace(/\b(meeting|sync|call|with|between|and|the|weekly|biweekly|catch[- ]?up|1[:x ]?1|discovery|intro)\b/gi, '|')
+    .split(/[<>/|:,&]+|\s-\s/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 1 && /[A-Za-z]/.test(s));
+}
+
+/** Meeting prep: who's in it + what you've discussed + open items — from memory. */
+export function getEventPrep(title: string, attendees: string[]): EventPrep {
+  // Exclude the user themselves (any known alias) — prep is about the OTHER
+  // people, not you (otherwise "Kunal <> Mac" pulls all of your own activity).
+  const names = Array.from(
+    new Set([...attendees, ...titleNames(title)].map((s) => s.trim()).filter((n) => n.length > 1 && !isMe(n)))
+  ).slice(0, 12);
+  if (!names.length) return { people: [], recent: [], openItems: [] };
+  const db = getDB();
+  const ph = names.map(() => '?').join(',');
+
+  const people = db
+    .prepare(`SELECT id, name, type, summary FROM entities WHERE hidden = 0 AND name IN (${ph}) COLLATE NOCASE LIMIT 12`)
+    .all(...names) as EventPrep['people'];
+
+  let recent: EventPrep['recent'] = [];
+  if (people.length) {
+    const ids = people.map((p) => p.id);
+    const ip = ids.map(() => '?').join(',');
+    recent = db
+      .prepare(
+        `SELECT DISTINCT o.summary AS summary, o.surface AS surface, o.ts AS ts
+         FROM observations o JOIN observation_entities oe ON oe.observation_id = o.id
+         WHERE oe.entity_id IN (${ip})
+         ORDER BY o.ts DESC LIMIT 10`
+      )
+      .all(...ids) as EventPrep['recent'];
+  }
+
+  const openItems = db
+    .prepare(
+      `SELECT id, text, due FROM action_items
+       WHERE status = 'open' AND entity_name IN (${ph}) COLLATE NOCASE
+       ORDER BY COALESCE(source_ts, created_at) DESC LIMIT 10`
+    )
+    .all(...names) as EventPrep['openItems'];
+
+  return { people, recent, openItems };
+}
+
 /**
  * Build the prospective view. `nowSec` is "right now" in epoch seconds.
  * Everything is derived from data already on the device.
  */
 export function getAhead(nowSec: number): AheadView {
-  // Upcoming meetings (calendar-via-capture), next 7 days.
-  const upcoming = listUpcomingEvents(nowSec, 7 * 86400);
+  // TODAY only — this is a daily assistant, not a calendar app. Remaining events
+  // through end of the local day.
+  const eod = new Date(nowSec * 1000);
+  eod.setHours(23, 59, 59, 999);
+  const upcoming = listUpcomingEvents(nowSec, Math.max(0, Math.floor(eod.getTime() / 1000) - nowSec));
 
   // Priorities = open action items, soonest-due first.
   const priorities: AheadPriority[] = listActionItems()
