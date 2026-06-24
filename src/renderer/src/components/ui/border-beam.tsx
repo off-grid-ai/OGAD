@@ -54,8 +54,10 @@ export const BorderBeam = ({
   size = 50,
   delay = 0,
   duration = 6,
-  colorFrom = "#ffaa40",
-  colorTo = "#9c40ff",
+  // Off Grid is emerald-only: the beam rides the brand accent (theme-aware via
+  // the --og-* tokens), never the stock orange/purple gradient.
+  colorFrom = "var(--og-primary-light)",
+  colorTo = "var(--og-primary)",
   transition,
   style,
   reverse = false,
@@ -80,7 +82,9 @@ export const BorderBeam = ({
         style={
           {
             width: size,
-            offsetPath: `rect(0 auto auto 0 round ${size}px)`,
+            // Path radius must match the card's border-radius (rounded-xl = 12px),
+            // not the beam size, or the beam misaligns on wide/short cards.
+            offsetPath: `rect(0 auto auto 0 round 12px)`,
             "--color-from": colorFrom,
             "--color-to": colorTo,
             ...style,

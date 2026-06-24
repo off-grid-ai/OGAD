@@ -83,7 +83,7 @@ export const DesktopSidebar = ({
   children,
   ...props
 }: React.ComponentProps<typeof motion.div>) => {
-  const { open, setOpen, animate } = useSidebar();
+  const { open, animate } = useSidebar();
   return (
     <>
       <motion.div
@@ -91,11 +91,10 @@ export const DesktopSidebar = ({
           "h-full px-4 py-4 hidden  md:flex md:flex-col bg-neutral-100 dark:bg-neutral-800 w-[300px] shrink-0",
           className
         )}
+        // Constant — width is driven by an explicit open/close toggle, NOT hover.
         animate={{
-          width: animate ? (open ? "300px" : "66px") : "300px",
+          width: animate ? (open ? "260px" : "72px") : "260px",
         }}
-        onMouseEnter={() => setOpen(true)}
-        onMouseLeave={() => setOpen(false)}
         {...props}
       >
         {children}

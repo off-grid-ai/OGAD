@@ -1,34 +1,52 @@
+/* Off Grid design tokens (--og-* variables, dark by default) */
+@import '@offgrid/design/tokens.css';
+
+/*
+ * Electron-Vite boilerplate variables are remapped onto the Off Grid tokens so
+ * existing styles inherit the brutalist/terminal palette. Prefer using --og-*
+ * (or the Tailwind tokens) directly in new code.
+ */
 :root {
-  --ev-c-white: #ffffff;
-  --ev-c-white-soft: #f8f8f8;
-  --ev-c-white-mute: #f2f2f2;
+  --ev-c-white: var(--og-text);
+  --ev-c-white-soft: var(--og-surface);
+  --ev-c-white-mute: var(--og-surface-light);
 
-  --ev-c-black: #1b1b1f;
-  --ev-c-black-soft: #222222;
-  --ev-c-black-mute: #282828;
+  --ev-c-black: var(--og-background);
+  --ev-c-black-soft: var(--og-surface);
+  --ev-c-black-mute: var(--og-surface-light);
 
-  --ev-c-gray-1: #515c67;
-  --ev-c-gray-2: #414853;
-  --ev-c-gray-3: #32363f;
+  --ev-c-gray-1: var(--og-text-muted);
+  --ev-c-gray-2: var(--og-border-light);
+  --ev-c-gray-3: var(--og-border);
 
-  --ev-c-text-1: rgba(255, 255, 245, 0.86);
-  --ev-c-text-2: rgba(235, 235, 245, 0.6);
-  --ev-c-text-3: rgba(235, 235, 245, 0.38);
+  --ev-c-text-1: var(--og-text);
+  --ev-c-text-2: var(--og-text-secondary);
+  --ev-c-text-3: var(--og-text-muted);
 
-  --ev-button-alt-border: transparent;
-  --ev-button-alt-text: var(--ev-c-text-1);
-  --ev-button-alt-bg: var(--ev-c-gray-3);
-  --ev-button-alt-hover-border: transparent;
-  --ev-button-alt-hover-text: var(--ev-c-text-1);
-  --ev-button-alt-hover-bg: var(--ev-c-gray-2);
+  --ev-button-alt-border: var(--og-border);
+  --ev-button-alt-text: var(--og-text);
+  --ev-button-alt-bg: var(--og-surface);
+  --ev-button-alt-hover-border: var(--og-border-focus);
+  --ev-button-alt-hover-text: var(--og-text);
+  --ev-button-alt-hover-bg: var(--og-surface-hover);
 }
 
 :root {
-  --color-background: var(--ev-c-black);
-  --color-background-soft: var(--ev-c-black-soft);
-  --color-background-mute: var(--ev-c-black-mute);
+  --color-background: var(--og-background);
+  --color-background-soft: var(--og-surface);
+  --color-background-mute: var(--og-surface-light);
 
-  --color-text: var(--ev-c-text-1);
+  --color-text: var(--og-text);
+}
+
+/*
+ * Off Grid Mobile uses a 14px body. Tailwind's rem-based sizing is rooted at
+ * the browser default 16px, which makes every text-* / spacing class ~14% too
+ * large on desktop. Drop the root to 14px so the whole UI matches the mobile
+ * terminal density (text-sm -> ~12px, text-base -> 14px, etc.).
+ */
+html {
+  font-size: 14px;
 }
 
 *,
@@ -47,19 +65,7 @@ body {
   color: var(--color-text);
   background: var(--color-background);
   line-height: 1.6;
-  font-family:
-    Inter,
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    Roboto,
-    Oxygen,
-    Ubuntu,
-    Cantarell,
-    'Fira Sans',
-    'Droid Sans',
-    'Helvetica Neue',
-    sans-serif;
+  font-family: var(--og-font-mono);
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

@@ -452,15 +452,6 @@ export function EntityGraph({ }: EntityGraphProps) {
         <div className="flex gap-4 h-full overflow-hidden">
             {/* Graph Area - Fixed width to prevent drift */}
             <div className="flex-1 flex flex-col gap-3 min-w-0">
-                {/* Source filter tabs */}
-                <SourceFilterTabs
-                    activeSource={activeSource}
-                    onSourceChange={(source) => {
-                        setActiveSource(source);
-                        setSelectedNodeId(null);
-                    }}
-                />
-
                 {/* Header */}
                 <div className="flex items-center gap-3 flex-shrink-0">
                     <h2 className="text-lg font-semibold text-white">Entity Graph</h2>
@@ -739,21 +730,33 @@ export function EntityGraph({ }: EntityGraphProps) {
                     </AnimatePresence>
                 </div>
 
-                {/* Type Legend */}
-                <div className="p-4 rounded-xl border border-neutral-800 bg-neutral-900/50 flex-shrink-0">
-                    <h4 className="text-xs font-medium text-neutral-500 mb-3 uppercase tracking-wide">Entity Types</h4>
-                    <div className="grid grid-cols-2 gap-2.5">
-                        {Object.entries(typeColors).slice(0, 6).map(([type, color]) => (
-                            <div key={type} className="flex items-center gap-2.5 text-xs">
-                                <span
-                                    className="w-2.5 h-2.5 rounded-full ring-2 ring-offset-1 ring-offset-neutral-900"
-                                    style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}40` }}
-                                />
-                                <span className="text-neutral-400">{type}</span>
+                {/* Type Legend — reflects the entity types actually present
+                    (open/emergent), not a fixed taxonomy. Hidden when empty. */}
+                {(() => {
+                    const present = Array.from(
+                        new Set(graph.nodes.map((n) => (n.type || 'Unknown').trim()).filter(Boolean))
+                    ).slice(0, 12);
+                    if (present.length === 0) return null;
+                    return (
+                        <div className="p-4 rounded-xl border border-neutral-800 bg-neutral-900/50 flex-shrink-0">
+                            <h4 className="text-xs font-medium text-neutral-500 mb-3 uppercase tracking-wide">Entity Types</h4>
+                            <div className="grid grid-cols-2 gap-2.5">
+                                {present.map((type) => {
+                                    const color = getTypeColor(type);
+                                    return (
+                                        <div key={type} className="flex items-center gap-2.5 text-xs">
+                                            <span
+                                                className="w-2.5 h-2.5 rounded-full ring-2 ring-offset-1 ring-offset-neutral-900"
+                                                style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}40` }}
+                                            />
+                                            <span className="text-neutral-400">{type}</span>
+                                        </div>
+                                    );
+                                })}
                             </div>
-                        ))}
-                    </div>
-                </div>
+                        </div>
+                    );
+                })()}
             </div>
         </div>
     );
