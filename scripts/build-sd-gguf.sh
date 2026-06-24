@@ -28,7 +28,9 @@ else
 fi
 
 convert() { # <type> <suffix>
-  local type="$1" suf="$2" out="$BUILD/$OUT-$suf.gguf"
+  local type="$1"
+  local suf="$2"
+  local out="$BUILD/$OUT-$suf.gguf"
   echo "==> convert $type -> $(basename "$out")"
   DYLD_LIBRARY_PATH="$ROOT/resources/bin/sd" "$SD" -M convert -m "$ST" -o "$out" --type "$type"
   echo "==> verify $(basename "$out") is sd.cpp-loadable"
