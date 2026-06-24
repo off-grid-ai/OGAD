@@ -250,7 +250,9 @@ export function ModelsScreen() {
       ...m,
       org: m.org ?? '',
       params: m.params ?? parseParamCount(m.name) ?? undefined,
-      credibility: m.org ? determineCredibility(m.org) : undefined,
+      // Credibility from the HF author (id prefix), not the display org — so
+      // offgrid-ai -> Off Grid, unsloth -> Verified, google -> Official, etc.
+      credibility: determineCredibility((m.id || '').split('/')[0]),
     })),
     filterState
   ).filter((m) => sizeBucket == null || totalBytes(m) <= sizeBucket * 1e9);
