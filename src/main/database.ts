@@ -1,8 +1,49 @@
-import Database from 'better-sqlite3';
-import { app } from 'electron';
+// better-sqlite3-multiple-ciphers is a drop-in superset of better-sqlite3 that
+// adds SQLCipher-style `PRAGMA key` encryption. Same API surface + types.
+import Database from 'better-sqlite3-multiple-ciphers';
+import { app, safeStorage } from 'electron';
 import path from 'path';
+import fs from 'fs';
+import crypto from 'crypto';
 
 let db: Database.Database | null = null;
+
+// --- Encryption at rest (new DBs only) -------------------------------------
+// The DB key can't live inside the DB (it gates opening it), so it's stored as a
+// safeStorage-encrypted file alongside it. Policy:
+//   • .dbkey present            → encrypted DB (created by us) → open with the key
+//   • no .dbkey, DB file exists → legacy plaintext DB → open as-is (NO migration)
+//   • neither                   → fresh install → generate a key + create encrypted
+// If the OS can't provide real encryption (no Keychain), we fall back to plaintext
+// so the app still works rather than refusing to open.
+function loadOrCreateKey(dbPath: string): string | null {
+  const keyFile = path.join(path.dirname(dbPath), '.dbkey');
+  try {
+    if (fs.existsSync(keyFile)) {
+      const blob = fs.readFileSync(keyFile);
+      return safeStorage.decryptString(blob);
+    }
+  } catch (e) {
+    console.error('[db] failed to read DB key — opening without encryption', e);
+    return null;
+  }
+  // No key yet. Only create one (→ encrypted DB) if there's no existing DB to
+  // migrate and the OS gives us real encryption.
+  if (fs.existsSync(dbPath)) return null; // legacy plaintext DB — leave it
+  try {
+    if (!safeStorage.isEncryptionAvailable()) {
+      console.warn('[db] OS encryption unavailable — creating plaintext DB');
+      return null;
+    }
+    const key = crypto.randomBytes(32).toString('hex');
+    fs.writeFileSync(keyFile, safeStorage.encryptString(key), { mode: 0o600 });
+    console.log('[db] created encrypted database key');
+    return key;
+  } catch (e) {
+    console.error('[db] failed to create DB key — creating plaintext DB', e);
+    return null;
+  }
+}
 
 // Cosine similarity function for vector search
 // Returns similarity between 0 and 1 (1 = identical)
@@ -35,12 +76,18 @@ export function getDB() {
 
   const dbPath = path.join(app.getPath('userData'), 'memories.db');
   console.log("Opening database at:", dbPath);
-  
+
+  const key = loadOrCreateKey(dbPath);
   db = new Database(dbPath);
+  // PRAGMA key MUST run before any other access (it unlocks the file).
+  if (key) {
+    db.pragma(`key = '${key}'`);
+    console.log('[db] opened with encryption at rest');
+  }
   db.pragma('journal_mode = WAL');
 
   // Register custom function for vector search
-  db.function('cosine_similarity', cosineSimilarity);
+  db.function('cosine_similarity', (...args: unknown[]) => cosineSimilarity(args[0] as string, args[1] as string));
 
     // Initialize Schema
   db.exec(`
