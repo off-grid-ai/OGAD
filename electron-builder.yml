@@ -1,5 +1,5 @@
-appId: com.my-memories.ai
-productName: My Memories
+appId: ai.offgrid.desktop
+productName: Off Grid AI Desktop
 directories:
   buildResources: build
 files:
@@ -21,6 +21,8 @@ extraResources:
       - "*.swift"
   - from: electron/accessibility/watcher
     to: watcher
+  - from: scripts/meeting-recorder/meeting-recorder
+    to: bin/meeting-recorder
 win:
   executableName: my-memories
 nsis:

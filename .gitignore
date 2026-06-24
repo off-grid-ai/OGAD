@@ -4,3 +4,27 @@ out
 .DS_Store
 .eslintcache
 *.log*
+
+# Google OAuth client (secret) — do not commit
+src/main/google-client.ts
+
+# Local reference component library (not part of the app build)
+component-library-animations/
+
+# Bundled MLX (mflux) Python env — large, rebuilt via scripts/build-mflux-env.sh
+resources/bin/mflux/
+
+# Off Grid SD-GGUF conversion build dir
+build-sd-gguf/
+
+# Swift build artifacts (embedded repos)
+electron/coreml-sd/.build/
+electron/coreml-sd/.swiftpm/
+electron/accessibility/ocr
+
+# Large bundled runtime binaries (273MB — distribute via release/LFS, not git)
+resources/bin/
+# Gateway probe scratch output
+.gateway-probe/
+# TS build cache
+*.tsbuildinfo
