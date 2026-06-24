@@ -126,6 +126,13 @@ function fmtReleaseDate(iso?: string): string {
   return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
 }
 
+// Catalog featuring order: Off Grid flagship builds (RealVisXL / Juggernaut /
+// DreamShaper) first, then the rest of the Off Grid builds, then everyone else.
+function featureRank(m: { id?: string; credibility?: string }): number {
+  if (m.credibility !== 'offgrid') return 2;
+  return /realvis|juggernaut|dreamshaper/i.test(m.id || '') ? 0 : 1;
+}
+
 const MODE_LABELS: Record<string, string> = {
   txt2img: 'Text -> Image',
   img2img: 'Image -> Image',
@@ -255,7 +262,12 @@ export function ModelsScreen() {
       credibility: determineCredibility((m.id || '').split('/')[0]),
     })),
     filterState
-  ).filter((m) => sizeBucket == null || totalBytes(m) <= sizeBucket * 1e9);
+  )
+    .filter((m) => sizeBucket == null || totalBytes(m) <= sizeBucket * 1e9)
+    // Featuring order: Off Grid's flagship photoreal/versatile builds first, then
+    // the rest of the Off Grid builds, then everyone else. Stable sort preserves
+    // catalog order within each tier.
+    .sort((a, b) => featureRank(a) - featureRank(b));
 
   const resultCount = searchingMode ? displayed.length : displayedCatalog.length;
 
