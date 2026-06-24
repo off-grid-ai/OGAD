@@ -225,42 +225,6 @@ function findInModels(re: RegExp): string | null {
   }
 }
 
-// The shared SDXL text encoders + VAE that UNET-only SDXL quants need. Same set
-// the catalog bundles; fetched on demand here so a model downloaded BEFORE the
-// companions were bundled still works (filenames match findInModels detection).
-const SDXL_COMPONENT_FILES = [
-  { name: 'clip_l.safetensors', url: 'https://huggingface.co/Comfy-Org/stable-diffusion-3.5-fp8/resolve/main/text_encoders/clip_l.safetensors' },
-  { name: 'clip_g.safetensors', url: 'https://huggingface.co/Comfy-Org/stable-diffusion-3.5-fp8/resolve/main/text_encoders/clip_g.safetensors' },
-  { name: 'sdxl_vae.safetensors', url: 'https://huggingface.co/madebyollin/sdxl-vae-fp16-fix/resolve/main/sdxl_vae.safetensors' },
-];
-
-/** Download any missing SDXL CLIP/VAE companions into the models dir (once). */
-async function ensureSdxlComponents(): Promise<void> {
-  const dir = modelsDir();
-  fs.mkdirSync(dir, { recursive: true });
-  for (const c of SDXL_COMPONENT_FILES) {
-    const dest = path.join(dir, c.name);
-    if (fs.existsSync(dest) && fs.statSync(dest).size > 0) continue;
-    console.log(`[imagegen] fetching SDXL component ${c.name} …`);
-    const res = await fetch(c.url);
-    if (!res.ok || !res.body) throw new Error(`HTTP ${res.status} for ${c.name}`);
-    const part = `${dest}.part`;
-    const out = fs.createWriteStream(part);
-    const reader = res.body.getReader();
-    try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        out.write(Buffer.from(value));
-      }
-    } finally {
-      out.end();
-      await new Promise<void>((r) => out.on('finish', () => r()));
-    }
-    fs.renameSync(part, dest);
-    console.log(`[imagegen] SDXL component ready: ${c.name}`);
-  }
-}
 
 // A GGUF checkpoint is loadable via `-m` only if it's a FULL pipeline (UNET + VAE
 // + text encoder). Many SDXL quants on HF (e.g. animagine-xl, illustrious) ship
@@ -602,18 +566,9 @@ export async function generateImage(
     if (ggufIsFullCheckpoint(model)) {
       modelFlags = ['-m', model];
     } else {
-      const findComp = (): { clipL: string | null; clipG: string | null; sdxlVae: string | null } => ({
-        clipL: findInModels(/clip[_-]?l.*\.(safetensors|gguf)$/i),
-        clipG: findInModels(/clip[_-]?g.*\.(safetensors|gguf)$/i),
-        sdxlVae: findInModels(/(sdxl[_-]?vae|vae[_-]?sdxl|sdxl.*vae).*\.(safetensors|gguf)$/i),
-      });
-      let { clipL, clipG, sdxlVae } = findComp();
-      // Missing the shared SDXL CLIP+VAE (e.g. the UNET was downloaded before the
-      // companions were bundled) — fetch them once on demand, then re-resolve.
-      if (!(clipL && clipG && sdxlVae)) {
-        try { await ensureSdxlComponents(); ({ clipL, clipG, sdxlVae } = findComp()); }
-        catch (e) { console.error('[imagegen] SDXL component fetch failed', e); }
-      }
+      const clipL = findInModels(/clip[_-]?l.*\.(safetensors|gguf)$/i);
+      const clipG = findInModels(/clip[_-]?g.*\.(safetensors|gguf)$/i);
+      const sdxlVae = findInModels(/(sdxl[_-]?vae|vae[_-]?sdxl|sdxl.*vae).*\.(safetensors|gguf)$/i);
       if (clipL && clipG && sdxlVae) {
         modelFlags = ['--diffusion-model', model, '--clip_l', clipL, '--clip_g', clipG, '--vae', sdxlVae];
       } else {
