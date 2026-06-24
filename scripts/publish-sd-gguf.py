@@ -19,7 +19,7 @@ api.upload_folder(
     folder_path=build_dir,
     repo_id=repo_id,
     repo_type="model",
-    allow_patterns=["*.gguf", "README.md"],  # never the source safetensors
+    allow_patterns=["*.gguf", "README.md", "*.png"],  # never the source safetensors
     commit_message="Add Off Grid GGUF conversions (q8_0, q4_K)",
 )
 print(f"==> published: https://huggingface.co/{repo_id}")

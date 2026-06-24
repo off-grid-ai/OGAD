@@ -13,6 +13,7 @@ set -euo pipefail
 
 REPO="${1:?hf repo}"; SRC="${2:?safetensors filename}"; OUT="${3:?out basename}"
 NAME="${4:-$OUT}"; LICENSE="${5:-creativeml-openrail-m}"; ORIG_URL="${6:-https://huggingface.co/$REPO}"
+SAMPLE_PROMPT="${7:-a golden retriever on a beach, detailed, high quality}"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SD="$ROOT/resources/bin/sd/sd-cli"
@@ -39,39 +40,58 @@ convert() { # <type> <suffix>
 echo "==> [2/5] convert q8_0"; convert q8_0 Q8_0
 echo "==> [3/5] convert q4_K"; convert q4_K Q4_K
 
-echo "==> [4/5] test-generate a real image with q8 (gate before publish)"
-TIMG="$BUILD/_test.png"; rm -f "$TIMG"
+# Sample image — doubles as the publish gate (must produce a valid PNG) AND the
+# card showcase. Few-step models (lightning/turbo) need low steps + low cfg;
+# full models use more steps. Sized 768 for a crisp-but-fast sample.
+case "$OUT" in
+  *lightning*|*turbo*) S_STEPS=6;  S_CFG=1.5; S_SAMP=euler;;
+  *)                   S_STEPS=24; S_CFG=5;   S_SAMP="dpm++2m";;
+esac
+echo "==> [4/5] generate sample with q8 (gate + card showcase)"
+SAMPLE="$BUILD/sample.png"; rm -f "$SAMPLE"
 DYLD_LIBRARY_PATH="$ROOT/resources/bin/sd" "$SD" -M img_gen -m "$BUILD/$OUT-Q8_0.gguf" \
-  -p "a golden retriever on a beach, detailed, high quality" -n "lowres, blurry, deformed" \
-  -o "$TIMG" -W 512 -H 512 --steps 8 --cfg-scale 4 --sampling-method euler -t 6 -s 42 >/dev/null 2>&1 || true
-TSZ="$(stat -f%z "$TIMG" 2>/dev/null || echo 0)"
-if [ ! -s "$TIMG" ] || [ "$TSZ" -lt 51200 ]; then
-  echo "    TEST FAILED: no valid image produced ($TSZ bytes) — NOT publishing"; exit 3
+  -p "$SAMPLE_PROMPT" -n "lowres, blurry, deformed, watermark, text" \
+  -o "$SAMPLE" -W 768 -H 768 --steps "$S_STEPS" --cfg-scale "$S_CFG" --sampling-method "$S_SAMP" -t 6 -s 7 >/dev/null 2>&1 || true
+SSZ="$(stat -f%z "$SAMPLE" 2>/dev/null || echo 0)"
+if [ ! -s "$SAMPLE" ] || [ "$SSZ" -lt 51200 ]; then
+  echo "    SAMPLE/TEST FAILED: no valid image ($SSZ bytes) — NOT publishing"; exit 3
 fi
-echo "    test image OK ($TSZ bytes)"; rm -f "$TIMG"
+echo "    sample OK ($SSZ bytes)"
 
 echo "==> [5/5] write model card"
 cat > "$BUILD/README.md" <<EOF
 ---
 license: $LICENSE
 base_model: $REPO
-tags: [gguf, stable-diffusion, sdxl, off-grid, text-to-image]
+base_model_relation: quantized
+pipeline_tag: text-to-image
+tags: [gguf, stable-diffusion, sdxl, image-generation, quantized, off-grid]
 ---
 
 # $NAME — GGUF (Off Grid build)
 
-GGUF conversions of [$NAME]($ORIG_URL) for on-device generation with
-[stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) and
-[Off Grid AI Desktop](https://offgridmobileai.co/). Converted with sd.cpp's \`-M convert\`
-so the tensors are correctly named and load directly (the existing community GGUF
-quants are mis-exported and fail \`get sd version from file\`).
+GGUF conversions of [$NAME]($ORIG_URL) for **on-device** image generation with
+[stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp). Converted with
+sd.cpp's \`-M convert\` so the tensors are correctly named and load directly — the
+community GGUF quants of this model are mis-exported and fail \`get sd version from file\`.
 
-- \`$OUT-Q8_0.gguf\` — best quality, ~3.5GB
-- \`$OUT-Q4_K.gguf\` — lighter, ~2GB
+![sample](sample.png)
 
+## Files
+- \`$OUT-Q8_0.gguf\` — best quality
+- \`$OUT-Q4_K.gguf\` — lighter / lower RAM
+
+## Use with stable-diffusion.cpp
+\`\`\`bash
+sd -M img_gen -m $OUT-Q8_0.gguf -p "your prompt" -o out.png \\
+  -W 1024 -H 1024 --steps $S_STEPS --cfg-scale $S_CFG --sampling-method $S_SAMP
+\`\`\`
+Built for **Off Grid AI Desktop** — a private, fully on-device AI app ([offgridmobileai.co](https://offgridmobileai.co/)).
+
+## Credit & license
 **Original model:** $ORIG_URL — created by its respective authors.
-**License:** $LICENSE (carried over from the original; use restrictions apply).
-This is a format conversion only; all credit for the model belongs to the original creators.
+**License:** \`$LICENSE\` (carried over from the original; its use restrictions apply).
+This is a format conversion (quantization) only; all credit for the model belongs to the original creators.
 EOF
 
 echo "==> done. files in: $BUILD"
