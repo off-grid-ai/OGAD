@@ -22,6 +22,11 @@ log(){ echo "[$(date '+%H:%M:%S')] $*" | tee -a "$LOG"; }
 for spec in "${MODELS[@]}"; do
   IFS='|' read -r repo file out name lic url prompt <<< "$spec"
   log "=== $name ($repo) ==="
+  # Idempotent: skip if already published (repo has a Q8_0 gguf) — lets a re-run
+  # retry only the models that failed without redoing finished ones.
+  if python3 -c "import sys;from huggingface_hub import HfApi;sys.exit(0 if any(f.endswith('Q8_0.gguf') for f in HfApi().list_repo_files('offgrid-ai/$out-GGUF')) else 1)" 2>/dev/null; then
+    log "already published: $out — skipping"; continue
+  fi
   if "$ROOT/scripts/build-sd-gguf.sh" "$repo" "$file" "$out" "$name" "$lic" "$url" "$prompt" >>"$LOG" 2>&1; then
     log "converted+verified: $out — publishing offgrid-ai/$out-GGUF"
     if python3 "$ROOT/scripts/publish-sd-gguf.py" "$ROOT/build-sd-gguf/$out" "$out-GGUF" >>"$LOG" 2>&1; then

@@ -21,9 +21,16 @@ BUILD="$ROOT/build-sd-gguf/$OUT"
 mkdir -p "$BUILD"
 ST="$BUILD/$SRC"
 
-echo "==> [1/4] download $REPO/$SRC"
+echo "==> [1/5] download $REPO/$SRC"
 if [ ! -s "$ST" ]; then
-  curl -L --fail --retry 3 -o "$ST" "https://huggingface.co/$REPO/resolve/main/$SRC"
+  # hf_hub_download resumes partial transfers and retries HF connection resets —
+  # plain curl restarts from 0 on a reset and re-fails on big checkpoints.
+  python3 - "$REPO" "$SRC" "$BUILD" <<'PY'
+import sys
+from huggingface_hub import hf_hub_download
+repo, src, build = sys.argv[1], sys.argv[2], sys.argv[3]
+hf_hub_download(repo_id=repo, filename=src, local_dir=build)
+PY
 else
   echo "    (cached)"
 fi
