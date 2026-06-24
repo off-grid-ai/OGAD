@@ -26,6 +26,18 @@ export function isCapturePaused(): boolean {
 export function getActiveAppName(): string {
   return currentApp;
 }
+
+// When Off Grid itself is frontmost, the renderer reports which screen is showing
+// so the capture gate can skip the "memory-mirror" views (Day/Replay/Entities/…)
+// that just render stored memory back — capturing those would loop the graph onto
+// itself. All other Off Grid screens are captured normally.
+let selfView = '';
+export function setSelfView(v: string): void {
+  selfView = (v || '').trim();
+}
+export function getSelfView(): string {
+  return selfView;
+}
 /** Latest focused window info — used by the meeting detector (title carries the
  *  browser's "… Microphone recording …" in-call indicator, no AppleScript needed). */
 export function getActiveWindowInfo(): { app: string; title: string; url: string } {

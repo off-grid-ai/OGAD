@@ -13,6 +13,7 @@ import { extractActionItems } from './actions';
 import { isCalendarSurface, extractCalendarEvents } from './calendar';
 import { getDB } from '../database';
 import { noiseReason } from './noise';
+import { getSelfView } from '../focus';
 
 // Behavioral pre-filters (cheap, before any LLM call). We gate on title+content
 // combined, since for many apps the window TITLE is the richest entity signal
@@ -32,8 +33,16 @@ let lastActionScan = 0;
 const CALENDAR_SCAN_INTERVAL_MS = 60_000;
 let lastCalendarScan = 0;
 
-// Apps whose content is our own UI or pure noise — never worth extracting.
-const IGNORED_APPS = new Set(['Off Grid AI Desktop', 'Electron', 'my-memories']);
+// Off Grid now captures its OWN window too — your activity inside the app should
+// be as searchable as everything else. (Kept as a set so genuinely-noisy apps can
+// be excluded later.)
+const IGNORED_APPS = new Set<string>([]);
+// The names this app reports as (packaged / dev / legacy).
+const SELF_APPS = new Set(['Off Grid AI Desktop', 'Electron', 'my-memories']);
+// Off Grid screens that just RE-RENDER stored memory — OCR'ing them would feed
+// the graph its own summaries (an echo loop), so we skip capture on these. Every
+// other Off Grid screen (chat, models, connectors, settings, …) is captured.
+const SELF_MIRROR_VIEWS = new Set(['day', 'replay', 'reflect', 'entities', 'graph', 'search', 'memories']);
 
 function extractJsonObject(s: string): string {
   const start = s.indexOf('{');
@@ -137,6 +146,9 @@ export async function extractObservationFromScreen(params: {
   const title = (params.windowTitle || '').trim();
   const ax = (params.content || '').trim();
   if (!app || IGNORED_APPS.has(app)) return false;
+  // Capture Off Grid itself, EXCEPT the screens that just re-render stored memory
+  // (those would loop the graph onto its own summaries).
+  if (SELF_APPS.has(app) && SELF_MIRROR_VIEWS.has(getSelfView())) return false;
 
   // Per-app interval gate FIRST — claim the slot before the expensive
   // screenshot/OCR so we capture at most once per interval per app.

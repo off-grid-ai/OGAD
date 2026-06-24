@@ -16,6 +16,7 @@ import { getIdentity, setIdentity, type Identity } from './identity';
 import { secretsAvailable, setSecret, deleteSecret, listSecretKeys } from './secrets';
 import { proposeApproval, listApprovals, getApproval, getApprovalProvenance, approve, reject, recordExecution, listAudit } from './crm/approvals';
 import { recordFeedback, getPreferences, setPreferences, distillPreferences } from './crm/preferences';
+import { setSelfView } from './focus';
 import { listConnectors, addConnector, setConnectorEnabled, removeConnector, testConnector, callConnectorTool, type NewConnector } from './mcp';
 import { ingestConnector, listConnectorItems } from './ingest';
 import { saveMeeting, listMeetings, deleteMeeting } from './meetings';
@@ -114,6 +115,7 @@ export function setupCrmIPC(): void {
       recordFeedback({ approvalId: id, title: a.title, connector: a.connector, tool: a.tool, entityName: a.entity_name, reason });
     }
   });
+  ipcMain.handle('capture:self-view', (_e, view: string) => setSelfView(view));
   ipcMain.handle('secretary:prefs:get', () => getPreferences());
   ipcMain.handle('secretary:prefs:set', (_e, doc: string) => setPreferences(doc ?? ''));
   ipcMain.handle('secretary:prefs:distill', () => distillPreferences());

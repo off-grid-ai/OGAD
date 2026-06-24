@@ -163,6 +163,13 @@ function AppContent() {
     (window as any).api.meetingSetRecording?.(rec.recording);
   }, [rec.recording]);
 
+  // Tell the capture layer which screen is showing, so self-capture can skip the
+  // memory-mirror views (Day/Replay/Entities/…) and avoid looping the graph.
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window.api as any)?.reportSelfView?.(viewMode);
+  }, [viewMode]);
+
   // Navigation history stacks (back and forward)
   const navigationHistory = useRef<NavigationState[]>([]);
   const forwardHistory = useRef<NavigationState[]>([]);
