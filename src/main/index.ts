@@ -25,6 +25,7 @@ import { syncAllConnectors } from './ingest'
 import { learnIdentityFromGoogle } from './google-rest'
 import { clearLayout } from './crm/layout'
 import { runProactive } from './crm/proactive'
+import { runSkillTriggers } from './crm/skills-engine'
 import { Tray, Menu, nativeImage } from 'electron'
 import { Watcher } from './watcher'
 import { purgeLegacyChatImports } from './database'
@@ -318,6 +319,11 @@ app.whenReady().then(() => {
      // when the window is closed. Cheap, deduped, and user-silenceable (proactive:enabled).
      setTimeout(() => { void runProactive().catch((e) => console.error('[proactive]', e)); }, 30_000);
      setInterval(() => { void runProactive().catch((e) => console.error('[proactive]', e)); }, 3 * 60_000);
+     // Skills engine: trigger→action skills (schedule / keyword / event) evaluated
+     // on the same cadence. Matches run the skill's action through the agentic tool
+     // loop (connectors → writes still gated by approval) and notify with the result.
+     setTimeout(() => { void runSkillTriggers().catch((e) => console.error('[skills]', e)); }, 45_000);
+     setInterval(() => { void runSkillTriggers().catch((e) => console.error('[skills]', e)); }, 3 * 60_000);
      // Hourly: fold any new rejection reasons into the secretary's learned
      // preferences (one conservative LLM call; no-op when there's no new feedback).
      setInterval(() => {

@@ -163,7 +163,7 @@ try {
     // --- Skills ---
     listSkills: () => ipcRenderer.invoke('skills:list'),
     getSkill: (name: string) => ipcRenderer.invoke('skills:get', name),
-    saveSkill: (input: { name: string; description: string; instructions: string; originalName?: string }) => ipcRenderer.invoke('skills:save', input),
+    saveSkill: (input: { name: string; description: string; instructions: string; originalName?: string; trigger?: { kind: 'schedule'; at: string } | { kind: 'keyword'; keywords: string[] } | { kind: 'event'; on: 'calendar' | 'approval' } | null; action?: string; connectors?: boolean }) => ipcRenderer.invoke('skills:save', input),
     deleteSkill: (name: string) => ipcRenderer.invoke('skills:delete', name),
     skillsDir: () => ipcRenderer.invoke('skills:dir'),
 

@@ -8,10 +8,41 @@ import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
 
+// A skill can optionally fire on its own (trigger → action) instead of only
+// being invoked manually with /name in chat:
+//  • schedule — once a day at a local HH:MM
+//  • keyword  — when a keyword appears in a newly captured observation
+//  • event    — when a new calendar event or approval appears
+export type SkillTrigger =
+  | { kind: 'schedule'; at: string } // 'HH:MM' local time, daily
+  | { kind: 'keyword'; keywords: string[] }
+  | { kind: 'event'; on: 'calendar' | 'approval' };
+
 export interface Skill {
   name: string;
   description: string;
   instructions: string;
+  // Automation (optional; absent = manual /name skill, unchanged behavior):
+  trigger?: SkillTrigger;
+  action?: string; // prompt run when triggered (falls back to instructions)
+  connectors?: boolean; // expose MCP connector tools to the action (default true)
+}
+
+function parseTrigger(kind: string, config: string): SkillTrigger | undefined {
+  const c = config.trim();
+  if (kind === 'schedule') return { kind: 'schedule', at: /^\d{1,2}:\d{2}$/.test(c) ? c : '08:00' };
+  if (kind === 'keyword') {
+    const keywords = c.split(',').map((s) => s.trim()).filter(Boolean);
+    return keywords.length ? { kind: 'keyword', keywords } : undefined;
+  }
+  if (kind === 'event') return { kind: 'event', on: c.toLowerCase() === 'approval' ? 'approval' : 'calendar' };
+  return undefined;
+}
+
+function triggerToFrontmatter(t: SkillTrigger): { trigger: string; trigger_config: string } {
+  if (t.kind === 'schedule') return { trigger: 'schedule', trigger_config: t.at };
+  if (t.kind === 'keyword') return { trigger: 'keyword', trigger_config: t.keywords.join(', ') };
+  return { trigger: 'event', trigger_config: t.on };
 }
 
 export function skillsDir(): string {
@@ -52,6 +83,10 @@ function parseSkill(md: string, fallbackName: string): Skill {
   let name = fallbackName;
   let description = '';
   let body = md;
+  let triggerKind = '';
+  let triggerConfig = '';
+  let action = '';
+  let connectors = true;
   const fm = /^﻿?---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/.exec(md);
   if (fm) {
     body = fm[2];
@@ -62,9 +97,20 @@ function parseSkill(md: string, fallbackName: string): Skill {
       const val = m[2].replace(/^["']|["']$/g, '');
       if (key === 'name') name = val;
       else if (key === 'description') description = val;
+      else if (key === 'trigger') triggerKind = val.toLowerCase();
+      else if (key === 'trigger_config') triggerConfig = val;
+      else if (key === 'action') action = val;
+      else if (key === 'connectors') connectors = val.toLowerCase() !== 'false';
     }
   }
-  return { name: name.trim(), description: description.trim(), instructions: body.trim() };
+  const skill: Skill = { name: name.trim(), description: description.trim(), instructions: body.trim() };
+  const trigger = triggerKind ? parseTrigger(triggerKind, triggerConfig) : undefined;
+  if (trigger) {
+    skill.trigger = trigger;
+    skill.action = action.trim();
+    skill.connectors = connectors;
+  }
+  return skill;
 }
 
 /** Read one skill from a .skills entry (folder with SKILL.md, or a .md file). */
@@ -107,8 +153,18 @@ function slugify(name: string): string {
   return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'skill';
 }
 
+export interface SkillSaveInput {
+  name: string;
+  description: string;
+  instructions: string;
+  originalName?: string;
+  trigger?: SkillTrigger | null;
+  action?: string;
+  connectors?: boolean;
+}
+
 /** Create or update a skill folder (<slug>/SKILL.md). Renaming removes the old one. */
-export function saveSkill(input: { name: string; description: string; instructions: string; originalName?: string }): Skill {
+export function saveSkill(input: SkillSaveInput): Skill {
   const dir = ensureSkillsDir();
   const name = input.name.trim() || 'skill';
   if (input.originalName && input.originalName.trim().toLowerCase() !== name.toLowerCase()) {
@@ -116,9 +172,16 @@ export function saveSkill(input: { name: string; description: string; instructio
   }
   const folder = path.join(dir, slugify(name));
   fs.mkdirSync(folder, { recursive: true });
-  const md = `---\nname: ${name}\ndescription: ${input.description.trim()}\n---\n${input.instructions.trim()}\n`;
+  const lines = [`name: ${name}`, `description: ${input.description.trim()}`];
+  if (input.trigger) {
+    const { trigger, trigger_config } = triggerToFrontmatter(input.trigger);
+    lines.push(`trigger: ${trigger}`, `trigger_config: ${trigger_config}`);
+    if (input.action && input.action.trim()) lines.push(`action: ${input.action.trim().replace(/\n/g, ' ')}`);
+    lines.push(`connectors: ${input.connectors === false ? 'false' : 'true'}`);
+  }
+  const md = `---\n${lines.join('\n')}\n---\n${input.instructions.trim()}\n`;
   fs.writeFileSync(path.join(folder, 'SKILL.md'), md);
-  return { name, description: input.description.trim(), instructions: input.instructions.trim() };
+  return parseSkill(md, name);
 }
 
 /** Delete a skill by name (removes its folder or .md file). */
@@ -134,6 +197,19 @@ export function deleteSkill(name: string): boolean {
     }
   }
   return false;
+}
+
+/** Full skills that have an automation trigger (for the skills engine). */
+export function listTriggeredSkills(): Skill[] {
+  const dir = ensureSkillsDir();
+  let entries: string[] = [];
+  try { entries = fs.readdirSync(dir); } catch { return []; }
+  const out: Skill[] = [];
+  for (const e of entries) {
+    const s = readEntry(dir, e);
+    if (s && s.name && s.trigger) out.push(s);
+  }
+  return out;
 }
 
 /** Full skill (with instructions) by name, case-insensitive. */

@@ -165,8 +165,8 @@ interface IElectronAPI {
 
   // Skills
   listSkills: () => Promise<{ name: string; description: string }[]>
-  getSkill: (name: string) => Promise<{ name: string; description: string; instructions: string } | null>
-  saveSkill: (input: { name: string; description: string; instructions: string; originalName?: string }) => Promise<{ name: string; description: string; instructions: string }>
+  getSkill: (name: string) => Promise<{ name: string; description: string; instructions: string; trigger?: { kind: 'schedule'; at: string } | { kind: 'keyword'; keywords: string[] } | { kind: 'event'; on: 'calendar' | 'approval' }; action?: string; connectors?: boolean } | null>
+  saveSkill: (input: { name: string; description: string; instructions: string; originalName?: string; trigger?: { kind: 'schedule'; at: string } | { kind: 'keyword'; keywords: string[] } | { kind: 'event'; on: 'calendar' | 'approval' } | null; action?: string; connectors?: boolean }) => Promise<{ name: string; description: string; instructions: string }>
   deleteSkill: (name: string) => Promise<boolean>
   skillsDir: () => Promise<string>
 

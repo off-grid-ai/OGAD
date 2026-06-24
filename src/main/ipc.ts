@@ -1674,7 +1674,7 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
       const { getSkill } = await import('./skills');
       return getSkill(name);
   });
-  ipcMain.handle('skills:save', async (_e, input: { name: string; description: string; instructions: string; originalName?: string }) => {
+  ipcMain.handle('skills:save', async (_e, input: import('./skills').SkillSaveInput) => {
       const { saveSkill } = await import('./skills');
       return saveSkill(input);
   });
