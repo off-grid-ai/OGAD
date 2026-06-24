@@ -36,10 +36,21 @@ convert() { # <type> <suffix>
   echo "==> verify $(basename "$out") is sd.cpp-loadable"
   python3 "$ROOT/scripts/verify-gguf-compat.py" "$out"
 }
-echo "==> [2/4] convert q8_0"; convert q8_0 Q8_0
-echo "==> [3/4] convert q4_K"; convert q4_K Q4_K
+echo "==> [2/5] convert q8_0"; convert q8_0 Q8_0
+echo "==> [3/5] convert q4_K"; convert q4_K Q4_K
 
-echo "==> [4/4] write model card"
+echo "==> [4/5] test-generate a real image with q8 (gate before publish)"
+TIMG="$BUILD/_test.png"; rm -f "$TIMG"
+DYLD_LIBRARY_PATH="$ROOT/resources/bin/sd" "$SD" -M img_gen -m "$BUILD/$OUT-Q8_0.gguf" \
+  -p "a golden retriever on a beach, detailed, high quality" -n "lowres, blurry, deformed" \
+  -o "$TIMG" -W 512 -H 512 --steps 8 --cfg-scale 4 --sampling-method euler -t 6 -s 42 >/dev/null 2>&1 || true
+TSZ="$(stat -f%z "$TIMG" 2>/dev/null || echo 0)"
+if [ ! -s "$TIMG" ] || [ "$TSZ" -lt 51200 ]; then
+  echo "    TEST FAILED: no valid image produced ($TSZ bytes) — NOT publishing"; exit 3
+fi
+echo "    test image OK ($TSZ bytes)"; rm -f "$TIMG"
+
+echo "==> [5/5] write model card"
 cat > "$BUILD/README.md" <<EOF
 ---
 license: $LICENSE
