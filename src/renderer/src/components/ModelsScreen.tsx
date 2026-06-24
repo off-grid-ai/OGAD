@@ -195,6 +195,12 @@ export function ModelsScreen() {
   >([]);
   const [searching, setSearching] = useState(false);
   const [filterState, setFilterState] = useState<FilterState>(initialFilterState);
+  // Download-size buckets (GB ceiling) — the headline filter: "what runs on my
+  // machine". null = all sizes. Filters by total download bytes of the model.
+  const [sizeBucket, setSizeBucket] = useState<number | null>(null);
+  const SIZE_BUCKETS = [2, 4, 6, 8, 16] as const;
+  const totalBytes = (m: { files?: { sizeBytes?: number }[] }): number =>
+    (m.files || []).reduce((s, f) => s + (f.sizeBytes || 0), 0);
   useEffect(() => {
     const q = query.trim();
     // STT/TTS are curated-only — never hit HF for them.
@@ -247,7 +253,7 @@ export function ModelsScreen() {
       credibility: m.org ? determineCredibility(m.org) : undefined,
     })),
     filterState
-  );
+  ).filter((m) => sizeBucket == null || totalBytes(m) <= sizeBucket * 1e9);
 
   const resultCount = searchingMode ? displayed.length : displayedCatalog.length;
 
@@ -293,6 +299,26 @@ export function ModelsScreen() {
         <p className="mt-4 text-xs text-neutral-600">
           Curated {(KIND_LABELS[activeKind] ?? activeKind).toLowerCase()} models — verified to run on-device.
         </p>
+      )}
+
+      {/* Size buckets — the headline filter: top models that fit your machine. */}
+      {!searchingMode && (
+        <div className="mt-4 flex flex-wrap items-center gap-1.5">
+          <span className="mr-1 text-[11px] uppercase tracking-wide text-neutral-600">Fits in</span>
+          {([null, ...SIZE_BUCKETS] as (number | null)[]).map((b) => (
+            <button
+              key={b ?? 'all'}
+              onClick={() => setSizeBucket(b)}
+              className={`cursor-pointer rounded-full border px-3 py-1 text-[11px] transition-colors ${
+                sizeBucket === b
+                  ? 'border-green-500 bg-green-500/10 text-green-500'
+                  : 'border-neutral-800 text-neutral-400 hover:border-neutral-600 hover:text-neutral-200'
+              }`}
+            >
+              {b == null ? 'All sizes' : `≤ ${b}GB`}
+            </button>
+          ))}
+        </div>
       )}
 
       {/* Filter + sort bar (shared @offgrid/models options) — always visible.
