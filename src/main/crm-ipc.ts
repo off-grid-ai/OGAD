@@ -15,6 +15,7 @@ import { listActionItems, setActionItemStatus } from './crm/actions';
 import { getIdentity, setIdentity, type Identity } from './identity';
 import { secretsAvailable, setSecret, deleteSecret, listSecretKeys } from './secrets';
 import { proposeApproval, listApprovals, getApproval, getApprovalProvenance, approve, reject, recordExecution, listAudit } from './crm/approvals';
+import { recordFeedback, getPreferences, setPreferences, distillPreferences } from './crm/preferences';
 import { listConnectors, addConnector, setConnectorEnabled, removeConnector, testConnector, callConnectorTool, type NewConnector } from './mcp';
 import { ingestConnector, listConnectorItems } from './ingest';
 import { saveMeeting, listMeetings, deleteMeeting } from './meetings';
@@ -106,7 +107,16 @@ export function setupCrmIPC(): void {
       recordExecution(id, res.ok, res.ok ? JSON.stringify(res.result).slice(0, 1000) : res.error ?? 'failed');
     }
   });
-  ipcMain.handle('approvals:reject', (_e, id: number) => reject(id));
+  ipcMain.handle('approvals:reject', (_e, id: number, reason?: string) => {
+    const a = getApproval(id);
+    reject(id);
+    if (reason && reason.trim() && a) {
+      recordFeedback({ approvalId: id, title: a.title, connector: a.connector, tool: a.tool, entityName: a.entity_name, reason });
+    }
+  });
+  ipcMain.handle('secretary:prefs:get', () => getPreferences());
+  ipcMain.handle('secretary:prefs:set', (_e, doc: string) => setPreferences(doc ?? ''));
+  ipcMain.handle('secretary:prefs:distill', () => distillPreferences());
   ipcMain.handle('approvals:audit', (_e, limit?: number) => listAudit(limit));
 
   // --- MCP connectors ---

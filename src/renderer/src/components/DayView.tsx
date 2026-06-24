@@ -207,6 +207,8 @@ function Secretary({ onViewAll }: { onViewAll: Navigate }): React.ReactElement {
   const [pending, setPending] = useState<Proposal[]>([]);
   const [busy, setBusy] = useState<number | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
+  const [rejectingId, setRejectingId] = useState<number | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
   const load = useCallback(async (): Promise<void> => {
     const all: Proposal[] = (await api.approvalsList?.()) ?? [];
     setPending(all.filter((a) => a.status === 'pending'));
@@ -217,13 +219,15 @@ function Secretary({ onViewAll }: { onViewAll: Navigate }): React.ReactElement {
     const poll = setInterval(load, 20000);
     return () => { off?.(); clearInterval(poll); };
   }, [load]);
-  const decide = async (id: number, ok: boolean): Promise<void> => {
+  const decide = async (id: number, ok: boolean, reason?: string): Promise<void> => {
     setBusy(id);
     try {
       if (ok) await api.approvalsApprove?.(id);
-      else await api.approvalsReject?.(id);
+      else await api.approvalsReject?.(id, reason);
     } finally {
       setBusy(null);
+      setRejectingId(null);
+      setRejectReason('');
       load();
     }
   };
@@ -253,12 +257,28 @@ function Secretary({ onViewAll }: { onViewAll: Navigate }): React.ReactElement {
                   <button onClick={() => decide(p.id, true)} disabled={busy === p.id} className="flex items-center gap-1 rounded-md bg-green-500 px-2.5 py-1 text-xs text-neutral-950 hover:bg-green-400 disabled:opacity-50">
                     {busy === p.id ? <IconLoader2 className="h-3.5 w-3.5 animate-spin" /> : <IconCheck className="h-3.5 w-3.5" />} Approve
                   </button>
-                  <button onClick={() => decide(p.id, false)} disabled={busy === p.id} aria-label="Dismiss suggestion" className="rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-400 hover:border-neutral-500"><IconX className="h-3.5 w-3.5" /></button>
+                  <button onClick={() => { setRejectingId(rejectingId === p.id ? null : p.id); setRejectReason(''); }} disabled={busy === p.id} aria-label="Dismiss suggestion" className="rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-400 hover:border-neutral-500"><IconX className="h-3.5 w-3.5" /></button>
                 </div>
               </div>
               {open && (
                 <div className="border-t border-neutral-800 px-3 py-2.5 pl-8">
                   <ProvenanceBlock approvalId={p.id} />
+                </div>
+              )}
+              {rejectingId === p.id && (
+                <div className="space-y-1.5 border-t border-neutral-800 px-3 py-2.5">
+                  <input
+                    value={rejectReason}
+                    autoFocus
+                    onChange={(e) => setRejectReason(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') decide(p.id, false, rejectReason); if (e.key === 'Escape') { setRejectingId(null); setRejectReason(''); } }}
+                    placeholder="Why isn't this relevant? (optional — Off Grid learns from it)"
+                    className="w-full rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs text-neutral-200 placeholder:text-neutral-600 focus:border-neutral-500 focus:outline-none"
+                  />
+                  <div className="flex gap-1">
+                    <button onClick={() => decide(p.id, false, rejectReason)} disabled={busy === p.id} className="rounded-md bg-neutral-800 px-2.5 py-1 text-xs text-neutral-200 hover:bg-neutral-700">Dismiss{rejectReason.trim() ? ' & teach' : ''}</button>
+                    <button onClick={() => { setRejectingId(null); setRejectReason(''); }} className="rounded-md border border-neutral-700 px-2.5 py-1 text-xs text-neutral-400 hover:border-neutral-500">Cancel</button>
+                  </div>
                 </div>
               )}
             </div>

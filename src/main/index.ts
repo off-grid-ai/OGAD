@@ -20,6 +20,7 @@ import { recoverOrphanTempDirs } from './meeting-native'
 import { startModelServer } from './model-server'
 import { runBackfill } from './search'
 import { proposeActions } from './crm/agent'
+import { distillPreferences } from './crm/preferences'
 import { syncAllConnectors } from './ingest'
 import { learnIdentityFromGoogle } from './google-rest'
 import { clearLayout } from './crm/layout'
@@ -311,6 +312,13 @@ app.whenReady().then(() => {
      };
      setTimeout(() => { void refreshAndPropose(); }, 60_000);
      setInterval(() => { void refreshAndPropose(); }, 30 * 60_000);
+     // Hourly: fold any new rejection reasons into the secretary's learned
+     // preferences (one conservative LLM call; no-op when there's no new feedback).
+     setInterval(() => {
+       void distillPreferences()
+         .then((r) => { if (r.updated) console.log('[secretary] learned preferences updated'); })
+         .catch((e) => console.error('[prefs]', e));
+     }, 60 * 60_000);
      // Backfill the semantic index (embed the observation/frame/transcript backlog
      // into LanceDB) so universal search has full NLP recall. Background + throttled.
      setTimeout(() => {

@@ -66,6 +66,8 @@ export function ActionsScreen({ initialMode }: { initialMode?: 'todo' | 'approva
   const [todoTab, setTodoTab] = useState<'open' | 'done' | 'dismissed'>('open');
   const [apprTab, setApprTab] = useState<'pending' | 'history'>('pending');
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [rejectingId, setRejectingId] = useState<number | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
   const [proposing, setProposing] = useState(false);
   const [proposeMsg, setProposeMsg] = useState('');
 
@@ -90,9 +92,11 @@ export function ActionsScreen({ initialMode }: { initialMode?: 'todo' | 'approva
     await api.crmSetActionStatus?.(id, status);
     load();
   };
-  const decide = async (id: number, ok: boolean): Promise<void> => {
+  const decide = async (id: number, ok: boolean, reason?: string): Promise<void> => {
     if (ok) await api.approvalsApprove?.(id);
-    else await api.approvalsReject?.(id);
+    else await api.approvalsReject?.(id, reason);
+    setRejectingId(null);
+    setRejectReason('');
     load();
   };
   // Have the secretary survey connected tools + context and propose actions.
@@ -219,10 +223,27 @@ export function ActionsScreen({ initialMode }: { initialMode?: 'todo' | 'approva
                   </div>
 
                   {it.status === 'pending' && (
-                    <div className="mt-3 flex gap-1">
-                      <button onClick={() => decide(it.id, true)} className="flex items-center gap-1 rounded-md bg-green-500 px-2.5 py-1 text-xs text-neutral-950 hover:bg-green-400"><IconCheck className="h-3.5 w-3.5" /> Approve</button>
-                      <button onClick={() => decide(it.id, false)} className="flex items-center gap-1 rounded-md border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 hover:border-neutral-500"><IconX className="h-3.5 w-3.5" /> Reject</button>
-                    </div>
+                    rejectingId === it.id ? (
+                      <div className="mt-3 space-y-1.5">
+                        <input
+                          value={rejectReason}
+                          autoFocus
+                          onChange={(e) => setRejectReason(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') decide(it.id, false, rejectReason); if (e.key === 'Escape') { setRejectingId(null); setRejectReason(''); } }}
+                          placeholder="Why isn't this relevant? (optional — Off Grid learns from it)"
+                          className="w-full rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs text-neutral-200 placeholder:text-neutral-600 focus:border-neutral-500 focus:outline-none"
+                        />
+                        <div className="flex gap-1">
+                          <button onClick={() => decide(it.id, false, rejectReason)} className="rounded-md bg-neutral-800 px-2.5 py-1 text-xs text-neutral-200 hover:bg-neutral-700">Dismiss{rejectReason.trim() ? ' & teach' : ''}</button>
+                          <button onClick={() => { setRejectingId(null); setRejectReason(''); }} className="rounded-md border border-neutral-700 px-2.5 py-1 text-xs text-neutral-400 hover:border-neutral-500">Cancel</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-3 flex gap-1">
+                        <button onClick={() => decide(it.id, true)} className="flex items-center gap-1 rounded-md bg-green-500 px-2.5 py-1 text-xs text-neutral-950 hover:bg-green-400"><IconCheck className="h-3.5 w-3.5" /> Approve</button>
+                        <button onClick={() => { setRejectingId(it.id); setRejectReason(''); }} className="flex items-center gap-1 rounded-md border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 hover:border-neutral-500"><IconX className="h-3.5 w-3.5" /> Reject</button>
+                      </div>
+                    )
                   )}
 
                   {(it.detail || args || it.result) && (

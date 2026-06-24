@@ -302,7 +302,10 @@ try {
     approvalsList: (status?: string) => ipcRenderer.invoke('approvals:list', status),
     approvalsProvenance: (id: number) => ipcRenderer.invoke('approvals:provenance', id),
     approvalsApprove: (id: number) => ipcRenderer.invoke('approvals:approve', id),
-    approvalsReject: (id: number) => ipcRenderer.invoke('approvals:reject', id),
+    approvalsReject: (id: number, reason?: string) => ipcRenderer.invoke('approvals:reject', id, reason),
+    secretaryPrefsGet: () => ipcRenderer.invoke('secretary:prefs:get'),
+    secretaryPrefsSet: (doc: string) => ipcRenderer.invoke('secretary:prefs:set', doc),
+    secretaryPrefsDistill: () => ipcRenderer.invoke('secretary:prefs:distill'),
     approvalsAudit: (limit?: number) => ipcRenderer.invoke('approvals:audit', limit),
 
     // MCP connectors

@@ -15,6 +15,7 @@ import { getAhead } from './ahead';
 import { getDB } from '../database';
 import { listMeetings } from '../meetings';
 import { getIdentity } from '../identity';
+import { getPreferenceDoc } from './preferences';
 
 // Automated / promotional / transactional mail never needs a personal reply —
 // keep it out of the secretary's context so it doesn't propose "reply to the
@@ -68,7 +69,7 @@ function extractJson(s: string): string {
   return a >= 0 && b > a ? s.slice(a, b + 1) : '{}';
 }
 
-interface Proposed { connector?: string; tool?: string; args?: Record<string, unknown>; title?: string; why?: string }
+interface Proposed { connector?: string; tool?: string; args?: Record<string, unknown>; title?: string; why?: string; entity?: string }
 
 /**
  * Look at the available tools + the user's context and propose helpful actions
@@ -85,6 +86,13 @@ export async function proposeActions(nowSec: number): Promise<{ proposed: number
   const view = getAhead(nowSec);
   const ident = getIdentity();
   const meLabel = [ident.name, ...ident.aliases].filter(Boolean).join(', ') || 'me';
+  const myEmails = [ident.email, ...ident.emails].filter(Boolean).join(', ') || '(unknown)';
+  // Distilled, user-taught preferences (built hourly from rejection reasons in
+  // crm/preferences.ts). Raw reasons never reach here — only this curated doc.
+  const prefDoc = getPreferenceDoc();
+  const learnedBlock = prefDoc
+    ? `\nLEARNED PREFERENCES (things I've taught you from past rejections — follow these strictly):\n${prefDoc}\n`
+    : '';
   // Real correspondence only — drop automated/promotional mail before it ever
   // reaches the model, so it can't propose replying to a security alert.
   const emails = (getDB().prepare(`SELECT summary FROM observations WHERE surface = 'Gmail' ORDER BY ts DESC LIMIT 25`).all() as { summary: string }[])
@@ -131,7 +139,7 @@ export async function proposeActions(nowSec: number): Promise<{ proposed: number
 
   const prompt = `You are my proactive personal secretary. You can use the TOOLS listed below (and ONLY those). Looking at my context, propose a few concrete, genuinely useful actions that move things forward.
 
-WHO I AM: I am ${ident.name || 'the user'} — also referred to as: ${meLabel}; my email is ${ident.email || '(unknown)'}. These all mean ME.
+WHO I AM: I am ${ident.name || 'the user'} — also referred to as: ${meLabel}; my email addresses: ${myEmails}. Any of these appearing in an email's from/to/cc means ME. Use it to judge my role: an email is "for me" only if I'm a direct recipient AND it's genuinely awaiting my response — if I'm only cc'd, or it's a conversation between OTHER people that I'm copied on, it is NOT mine to reply to.
 - NEVER draft a message TO me, never create a task to "meet/call/speak with/follow up with" me, never treat any of my own names as a contact or recipient. An email from me, or only involving me, is not something to reply to.
 
 What GOOD looks like:
@@ -140,17 +148,19 @@ What GOOD looks like:
 - Turn an open to-do into the right action (create the task/issue, draft the message to the person).
 - Act across ALL my tools, not just email: e.g. create a Jira/Linear issue for a bug or task surfaced in RECENT TOOL ACTIVITY, schedule a Google Calendar event for something that needs a slot, reply in Slack, add a Notion page — whatever the data warrants, using the matching tool.
 - A follow-up I'd otherwise forget.
-
+${learnedBlock}
 Rules:
 - Every action MUST use one of the listed tools, with connector + tool names EXACTLY as written.
 - Only act on REAL correspondence/people. Skip anything automated/promotional (security alerts, newsletters, notifications, receipts, no-reply) — it never needs a personal reply or a task.
 - Do NOT duplicate things that already exist — e.g. do NOT create a calendar event already in TODAY'S MEETINGS, and never propose two actions about the same person/topic — pick one.
 - Fill "args" with values grounded ONLY in the context — never invent emails, times, names, or IDs that aren't present. If you can't fill the required args from context, skip that action.
+- REPLIES: only draft a reply when the email is addressed TO me and is clearly awaiting MY response. If I'm only cc'd, or the exchange is between OTHER people (they're emailing each other and I'm just copied), do NOT propose a reply or follow-up — at most a CRM note if it's genuinely relevant. The "to"/"cc" on each email tells you my role.
 - Quality over quantity: 1-4 strong proposals, or zero if nothing is genuinely worth doing.
 - Each action is a PROPOSAL — I review and approve before anything runs.
+- "entity" = the ONE real person or company the action is about (the OTHER party, never me), named exactly as it appears in the context.
 
 Return JSON only:
-{"actions":[{"connector":"<exact>","tool":"<exact>","args":{...},"title":"<short imperative>","why":"<one sentence>"}]}
+{"actions":[{"connector":"<exact>","tool":"<exact>","args":{...},"title":"<short imperative>","why":"<one sentence>","entity":"<person or company>"}]}
 
 TOOLS:
 ${toolList}
@@ -265,6 +275,22 @@ ${list}`;
   // "draft reply to Mac"). Strong self-names only (not the ambiguous "ali").
   const selfTarget = /\b(mac|mohammed|chherawalla|alichherawalla)\b/i;
 
+  // Known entities, longest name first, for a fallback when the model doesn't
+  // name the entity itself — so a proposal can always be traced back to a source.
+  const knownEntities = (getDB().prepare('SELECT name FROM entities WHERE hidden = 0').all() as { name: string }[])
+    .map((r) => r.name)
+    .filter((nm) => nm && nm.length > 2 && !selfTarget.test(nm))
+    .sort((x, y) => y.length - x.length);
+  const matchEntity = (text: string): string | null => {
+    const low = (text || '').toLowerCase();
+    return knownEntities.find((nm) => low.includes(nm.toLowerCase())) ?? null;
+  };
+  const resolveEntity = (a: Proposed): string | null => {
+    const named = a.entity?.trim();
+    if (named && named.length > 1 && !selfTarget.test(named)) return named.slice(0, 120);
+    return matchEntity(a.title ?? '') ?? matchEntity(JSON.stringify(a.args ?? {}));
+  };
+
   let n = 0;
   for (const a of actions) {
     const entry = catalog.find((t) => t.connector === a.connector && t.tool === a.tool);
@@ -278,6 +304,7 @@ ${list}`;
       connector: entry.connector,
       tool: entry.tool,
       args: a.args ?? {},
+      entityName: resolveEntity(a) ?? undefined,
       source: 'secretary',
     });
     n += 1;
