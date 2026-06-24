@@ -186,17 +186,105 @@ async function execute(name: string, args: Record<string, unknown>): Promise<str
   try { return String(await tool.run(args)); } catch (e) { return `Error: ${(e as Error).message}`; }
 }
 
+// --- MCP connector tools (opt-in) ------------------------------------------
+// Connector tools are exposed to the model namespaced as `mcp__<id>__<tool>`.
+// Read-only tools run inline; anything mutating is routed to the approval queue
+// (nothing external is executed without the user's explicit OK).
+function isConnectorActionTool(tool: string): boolean {
+  return !/^(list|get|search|read|fetch|whoami|describe)[_-]/i.test(tool);
+}
+const MCP_PREFIX = 'mcp__';
+
+type ConnectorToolCtx = {
+  schemas: unknown[];
+  byName: Map<string, { id: number; tool: string; connector: string }>;
+};
+
+async function buildConnectorTools(): Promise<ConnectorToolCtx> {
+  const ctx: ConnectorToolCtx = { schemas: [], byName: new Map() };
+  try {
+    const { listConnectors, fetchTools } = await import('./mcp');
+    const enabled = listConnectors().filter((c) => c.enabled);
+    for (const c of enabled) {
+      let tools: { name: string; description?: string; inputSchema?: unknown }[] = [];
+      try { tools = await fetchTools(c.id); } catch (e) { console.error('[tools] fetchTools', c.name, e); continue; }
+      for (const t of tools) {
+        const fnName = `${MCP_PREFIX}${c.id}__${t.name}`;
+        ctx.byName.set(fnName, { id: c.id, tool: t.name, connector: c.name });
+        const action = isConnectorActionTool(t.name);
+        ctx.schemas.push({
+          type: 'function',
+          function: {
+            name: fnName,
+            description: `[${c.name}] ${t.description ?? t.name}${action ? ' (requires the user to approve before it runs)' : ''}`,
+            parameters: (t.inputSchema as Record<string, unknown>) ?? { type: 'object', properties: {} },
+          },
+        });
+      }
+    }
+  } catch (e) {
+    console.error('[tools] buildConnectorTools', e);
+  }
+  return ctx;
+}
+
+async function executeConnector(
+  fnName: string,
+  args: Record<string, unknown>,
+  ctx: ConnectorToolCtx,
+): Promise<string> {
+  const meta = ctx.byName.get(fnName);
+  if (!meta) return `Error: unknown connector tool ${fnName}`;
+  // Mutating tool → propose for approval instead of executing.
+  if (isConnectorActionTool(meta.tool)) {
+    try {
+      const { proposeApproval } = await import('./crm/approvals');
+      proposeApproval({
+        title: `${meta.tool} via ${meta.connector}`,
+        detail: `Requested from chat. Arguments: ${JSON.stringify(args)}`,
+        connector: meta.connector,
+        tool: meta.tool,
+        args,
+        source: 'chat',
+      });
+      return `Queued for the user's approval — "${meta.tool}" on ${meta.connector} will run only after they approve it in the Approvals queue. Do not assume it has happened; tell the user it's pending approval.`;
+    } catch (e) {
+      return `Error queuing approval: ${(e as Error).message}`;
+    }
+  }
+  // Read-only tool → run inline.
+  try {
+    const { callConnectorTool } = await import('./mcp');
+    const r = await callConnectorTool(meta.id, meta.tool, args);
+    if (!r.ok) return `Error: ${r.error ?? 'connector call failed'}`;
+    const out = typeof r.result === 'string' ? r.result : JSON.stringify(r.result);
+    return out.length > 8000 ? out.slice(0, 8000) + '… (truncated)' : out;
+  } catch (e) {
+    return `Error: ${(e as Error).message}`;
+  }
+}
+
 export type ToolCall = { name: string; args: Record<string, unknown>; result: string };
 
 /** Run a chat turn with tool-calling. Returns the final answer + the calls made. */
 export async function toolChat(
   query: string,
   history: { role: string; content: string }[] = [],
+  opts: { connectors?: boolean } = {},
 ): Promise<{ answer: string; toolCalls: ToolCall[] }> {
   await llm.init(); // respects pause; ensures the server is up
+
+  // Opt-in: expose enabled MCP connector tools alongside the built-ins. Built
+  // once per turn (each fetchTools opens a connection) and reused every step.
+  const conn = opts.connectors ? await buildConnectorTools() : null;
+  const tools = conn && conn.schemas.length ? [...schemas(), ...conn.schemas] : schemas();
+  const sys = conn && conn.schemas.length
+    ? 'You are Off Grid, a private on-device assistant. Use the provided tools when they help answer precisely. Connector tools that change anything (send, create, update, delete, etc.) are NOT executed directly — calling them queues the action for the user to approve, so never claim such an action is done. Keep answers concise.'
+    : 'You are Off Grid, a private on-device assistant. Use the provided tools when they help answer precisely. Keep answers concise.';
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const messages: any[] = [
-    { role: 'system', content: 'You are Off Grid, a private on-device assistant. Use the provided tools when they help answer precisely. Keep answers concise.' },
+    { role: 'system', content: sys },
     ...history.slice(-10).map((m) => ({ role: m.role, content: m.content })),
     { role: 'user', content: query },
   ];
@@ -206,7 +294,7 @@ export async function toolChat(
     const res = await fetch(`http://127.0.0.1:${PORT}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages, tools: schemas(), tool_choice: 'auto', temperature: 0.3, max_tokens: 1024 }),
+      body: JSON.stringify({ messages, tools, tool_choice: 'auto', temperature: 0.3, max_tokens: 1024 }),
     });
     if (!res.ok) throw new Error(`tool chat failed: ${res.status}`);
     const data = await res.json();
@@ -219,7 +307,9 @@ export async function toolChat(
       for (const c of calls) {
         let args: Record<string, unknown> = {};
         try { args = JSON.parse(c.function.arguments || '{}'); } catch { /* keep empty */ }
-        const result = await execute(c.function.name, args);
+        const result = c.function.name.startsWith(MCP_PREFIX) && conn
+          ? await executeConnector(c.function.name, args, conn)
+          : await execute(c.function.name, args);
         toolCalls.push({ name: c.function.name, args, result });
         messages.push({ role: 'tool', tool_call_id: c.id, content: result });
       }

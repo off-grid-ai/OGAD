@@ -1625,9 +1625,9 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
       const { setToolEnabled } = await import('./tools');
       setToolEnabled(name, enabled);
   });
-  ipcMain.handle('tools:chat', async (_e, query: string, history?: { role: string; content: string }[]) => {
+  ipcMain.handle('tools:chat', async (_e, query: string, history?: { role: string; content: string }[], opts?: { connectors?: boolean }) => {
       const { toolChat } = await import('./tools');
-      return toolChat(query, history || []);
+      return toolChat(query, history || [], opts || {});
   });
 
   // --- LLM inference settings (temperature, context window) ---------------

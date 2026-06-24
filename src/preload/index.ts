@@ -145,7 +145,7 @@ try {
     // --- Agentic tool-calling (built-in tools) ---
     listTools: () => ipcRenderer.invoke('tools:list'),
     setToolEnabled: (name: string, enabled: boolean) => ipcRenderer.invoke('tools:set-enabled', name, enabled),
-    toolChat: (query: string, history?: { role: string; content: string }[]) => ipcRenderer.invoke('tools:chat', query, history),
+    toolChat: (query: string, history?: { role: string; content: string }[], opts?: { connectors?: boolean }) => ipcRenderer.invoke('tools:chat', query, history, opts),
 
     // --- LLM inference settings ---
     getLlmSettings: () => ipcRenderer.invoke('llm:get-settings'),
