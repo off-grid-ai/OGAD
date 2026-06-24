@@ -62,7 +62,7 @@ tags: [gguf, stable-diffusion, sdxl, off-grid, text-to-image]
 
 GGUF conversions of [$NAME]($ORIG_URL) for on-device generation with
 [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) and
-[Off Grid AI Desktop](https://offgrid.ai). Converted with sd.cpp's \`-M convert\`
+[Off Grid AI Desktop](https://offgridmobileai.co/). Converted with sd.cpp's \`-M convert\`
 so the tensors are correctly named and load directly (the existing community GGUF
 quants are mis-exported and fail \`get sd version from file\`).
 
