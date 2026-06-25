@@ -213,8 +213,11 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const [imgProgress, setImgProgress] = useState<{ step: number; total: number; secPerStep: number; preview?: string; phase?: 'sampling' | 'decoding' } | null>(null);
   const [projects, setProjects] = useState<ProjectLite[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  // Memory scope: no memory (plain chat, default) · all memory · a project.
-  const [noMemory, setNoMemory] = useState(true);
+  // Captured-memory context is a Pro ("remembers") feature; core chats are plain
+  // (no memory) or scoped to a project. The UI never says "memory".
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const isPro = !!(window as any).api?.isPro;
+  const [noMemory, setNoMemory] = useState(!isPro);
   const [, setProjectMenuOpen] = useState(false);
   const [projCreating, setProjCreating] = useState(false);
   const [projNewName, setProjNewName] = useState('');
@@ -1032,7 +1035,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
         </div>
         <div className="min-w-0 flex-1">
           <h2 className="text-sm font-medium tracking-wide text-neutral-200">OFF GRID</h2>
-          <p className="truncate text-xs text-neutral-500">Private, on-device — ask your memory or generate images</p>
+          <p className="truncate text-xs text-neutral-500">Private, on-device — chat, generate, and build</p>
         </div>
 
 
@@ -1953,7 +1956,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                     onKeyDown={handleKeyDown}
                     onPaste={handlePaste}
                     rows={1}
-                    placeholder={mode === 'image' ? 'Describe an image to generate…' : activeProjectName ? `Ask about “${activeProjectName}”…` : 'Ask about your memory…'}
+                    placeholder={mode === 'image' ? 'Describe an image to generate…' : activeProjectName ? `Ask about “${activeProjectName}”…` : 'Ask anything…'}
                     className="max-h-52 w-full resize-none overflow-y-auto bg-transparent px-3.5 pt-3 text-sm text-neutral-200 placeholder-neutral-600 outline-none"
                   />
                 )}
@@ -1994,28 +1997,25 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                       <DropdownMenuItem disabled><Search /> Web search</DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
-                  {/* Memory scope — No memory / All memory / project */}
+                  {/* Scope — Off Grid (default) or a project */}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
-                        title="Scope this chat: ignore memory, use all memory, or a project"
+                        title="Scope this chat to Off Grid or a project"
                         className={`h-8 gap-1.5 rounded-full ${activeProjectId ? 'border-green-500 text-primary' : 'text-neutral-400'}`}
                       >
                         <FolderOpen className="h-3.5 w-3.5" />
-                        <span className="max-w-[9rem] truncate">{activeProjectName ?? (noMemory ? 'No memory' : 'All memory')}</span>
+                        <span className="max-w-[9rem] truncate">{activeProjectName ?? 'Off Grid AI'}</span>
                         <CaretDown className="h-3 w-3 opacity-60" />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start" side="top" sideOffset={8} className="w-56">
                       <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">Scope this chat</DropdownMenuLabel>
-                      <DropdownMenuItem onSelect={() => { setNoMemory(true); assignProject(null); }}>
-                        <span className={`flex-1 ${!activeProjectId && noMemory ? 'text-primary' : ''}`}>No memory</span>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => { setNoMemory(false); assignProject(null); }}>
-                        <span className={`flex-1 ${!activeProjectId && !noMemory ? 'text-primary' : ''}`}>All memory</span>
+                      <DropdownMenuItem onSelect={() => { setNoMemory(!isPro); assignProject(null); }}>
+                        <span className={`flex-1 ${!activeProjectId ? 'text-primary' : ''}`}>Off Grid AI</span>
                       </DropdownMenuItem>
                       {projects.map(p => (
                         <DropdownMenuItem key={p.id} onSelect={() => { setNoMemory(false); assignProject(p.id); }}>
