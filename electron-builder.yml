@@ -36,7 +36,7 @@ mac:
     - NSCameraUsageDescription: Off Grid AI may use the camera for on-device vision features. Frames are processed locally and never leave your device.
     - NSDocumentsFolderUsageDescription: Off Grid AI reads documents you add to a project so it can answer questions about them — locally, on your device.
     - NSDownloadsFolderUsageDescription: Off Grid AI reads files you add to a project so it can answer questions about them — locally, on your device.
-  notarize: false
+  notarize: true
   icon: resources/icon.png
 afterSign: scripts/resign.js
 dmg:
