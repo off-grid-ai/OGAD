@@ -1,19 +1,24 @@
 // Demo seeder — populates an "Off Grid AI" project with chats that exercise every
 // surface (text, image, markdown/HTML/React artifacts, voice/speech, skills,
-// connectors) so the whole app can be tested end-to-end. Professional, on-brand,
-// Off Grid only. Idempotent. Run with OFFGRID_SEED=1 (or IPC dev:seed).
+// connectors). When OFFGRID_SEED=force it generates LIVE via the local models
+// (LLM for artifacts, image-gen for the picture); otherwise it falls back to
+// curated content so it always completes. Idempotent. On-brand, Off Grid only.
 
 import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
-import { createRagConversation, addRagMessage, getSetting, saveSetting } from './database';
-import { createProject, listProjects } from './rag/store';
-import { saveArtifact } from './artifacts';
+import { createRagConversation, addRagMessage, getRagConversations, deleteRagConversation, getSetting, saveSetting } from './database';
+import { createProject, deleteProject } from './rag/store';
+import { saveArtifact, listArtifacts, deleteArtifact } from './artifacts';
 import { saveSkill } from './skills';
 import { addConnector, listConnectors } from './mcp';
+import { llm } from './llm';
+import { generateImage } from './imagegen';
+import { ragService } from './rag/index';
 
 const PROJECT_ID = 'offgrid-demo';
 
+// Curated fallbacks (used if a live generation fails or live mode is off).
 const MD = `# Off Grid AI — overview
 
 **Run open models entirely on your device.** One local, OpenAI-compatible gateway
@@ -23,123 +28,165 @@ serves text, vision, image, voice, and speech — no cloud, no accounts, no API 
 - **Private by default** — nothing leaves your machine.
 - **Every modality, one endpoint** — \`http://127.0.0.1:7878/v1\`.
 - **Bring any GGUF** — download from the catalog or Hugging Face.
-
-## Free vs Pro
-| | Free | Pro (July 2026) |
-|---|---|---|
-| Local model runner | ✅ | ✅ |
-| Chat · Projects · Image · Voice | ✅ | ✅ |
-| MCP connectors | ✅ | ✅ |
-| Sees / remembers / acts | — | ✅ |
 `;
 
 const HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
   body{margin:0;font-family:ui-monospace,Menlo,monospace;background:#0a0a0a;color:#fff;
        display:flex;align-items:center;justify-content:center;height:100vh}
-  .card{text-align:center;padding:48px}
-  h1{font-size:44px;margin:0 0 12px;background:linear-gradient(90deg,#fff,#34D399);
-     -webkit-background-clip:text;-webkit-text-fill-color:transparent}
-  p{color:#a3a3a3;max-width:480px;margin:0 auto 24px}
-  a{display:inline-block;background:#059669;color:#fff;padding:12px 22px;border-radius:10px;text-decoration:none}
-</style></head><body>
-  <div class="card">
-    <h1>Off Grid AI</h1>
-    <p>Private, on-device AI. Your models, your data — no cloud, no accounts.</p>
-    <a href="#">Download for macOS</a>
-  </div>
-</body></html>`;
+  h1{font-size:44px;background:linear-gradient(90deg,#fff,#34D399);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+  p{color:#a3a3a3}a{background:#059669;color:#fff;padding:12px 22px;border-radius:10px;text-decoration:none}
+</style></head><body><div style="text-align:center">
+  <h1>Off Grid AI</h1><p>Private, on-device AI. No cloud, no accounts.</p><a href="#">Download for macOS</a>
+</div></body></html>`;
 
-const REACT = `export default function Pricing() {
-  const tiers = [
-    { name: 'Free', price: '$0', items: ['Local model runner', 'Chat · Projects · Image · Voice', 'MCP connectors'] },
-    { name: 'Pro', price: 'July 2026', items: ['Everything in Free', 'Always-on memory + unified search', 'Proactive secretary'] },
-  ];
+const REACT = `export default function Hero() {
   return (
-    <div style={{ display: 'flex', gap: 16, padding: 24, fontFamily: 'Menlo, monospace', background: '#0a0a0a' }}>
-      {tiers.map((t) => (
-        <div key={t.name} style={{ flex: 1, border: '1px solid #262626', borderRadius: 14, padding: 24, color: '#fff' }}>
-          <div style={{ color: '#34D399', fontWeight: 600 }}>{t.name}</div>
-          <div style={{ fontSize: 28, margin: '8px 0 16px' }}>{t.price}</div>
-          {t.items.map((i) => <div key={i} style={{ color: '#a3a3a3', fontSize: 13, margin: '6px 0' }}>✓ {i}</div>)}
-        </div>
-      ))}
+    <div style={{ fontFamily: 'Menlo, monospace', background: '#0a0a0a', color: '#fff', padding: 48, textAlign: 'center' }}>
+      <h1 style={{ color: '#34D399' }}>Off Grid AI</h1>
+      <p style={{ color: '#a3a3a3' }}>Run open models locally — text, vision, image, voice.</p>
     </div>
   );
 }`;
 
-/** A user→assistant turn in one conversation. */
-function chat(title: string, user: string, assistant: string, ctx?: unknown): string {
-  const id = createRagConversation(`demo-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 32)}`, title, PROJECT_ID);
+function extractCode(text: string): string | null {
+  const m = /```[a-zA-Z]*\n([\s\S]*?)```/.exec(text);
+  return m ? m[1].trim() : null;
+}
+
+async function gen(prompt: string): Promise<string | null> {
+  try {
+    const out = await llm.chat(prompt, [], 120_000, 1500, { disableThinking: true });
+    return out?.trim() || null;
+  } catch (e) {
+    console.error('[seed] llm.chat failed', e);
+    return null;
+  }
+}
+
+function chatTurn(slug: string, title: string, user: string, assistant: string, ctx?: unknown): string {
+  const id = createRagConversation(`demo-${slug}`, title, PROJECT_ID);
   addRagMessage(id, 'user', user);
   addRagMessage(id, 'assistant', assistant, ctx);
   return id;
 }
 
-export function seedDemo(force = false): void {
-  if (!force && getSetting<boolean>('demo:seeded', false)) {
-    console.log('[seed] already seeded — skipping');
-    return;
-  }
-  try {
-    if (!listProjects().some((p) => p.id === PROJECT_ID)) {
-      createProject({ id: PROJECT_ID, name: 'Off Grid AI', description: 'Demo workspace showcasing Off Grid AI.', icon: '🟢' });
-    }
+// A minimal, valid one-page PDF with extractable text (no deps).
+function tinyPdf(line: string): Buffer {
+  const text = `BT /F1 16 Tf 72 720 Td (${line.replace(/[()\\]/g, '')}) Tj ET`;
+  const objs = [
+    '<</Type/Catalog/Pages 2 0 R>>',
+    '<</Type/Pages/Kids[3 0 R]/Count 1>>',
+    '<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>',
+    `<</Length ${text.length}>>\nstream\n${text}\nendstream`,
+    '<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>',
+  ];
+  let body = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  objs.forEach((o, i) => { offsets.push(body.length); body += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const xref = body.length;
+  body += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+  offsets.forEach((off) => { body += `${String(off).padStart(10, '0')} 00000 n \n`; });
+  body += `trailer\n<</Size ${objs.length + 1}/Root 1 0 R>>\nstartxref\n${xref}\n%%EOF`;
+  return Buffer.from(body, 'latin1');
+}
 
-    // 1) Text overview + a Markdown artifact.
-    chat('Off Grid overview', 'What is Off Grid AI? Give me a short overview doc.',
-      `Off Grid AI runs open models entirely on your device. Here's an overview:\n\n\`\`\`markdown\n${MD}\n\`\`\``);
-    saveArtifact({ kind: 'text', code: MD, title: 'Off Grid AI — overview', projectId: PROJECT_ID });
-
-    // 2) HTML artifact — a landing hero.
-    chat('Landing hero (HTML)', 'Build a simple landing hero for Off Grid AI.',
-      `Here's a self-contained landing hero:\n\n\`\`\`html\n${HTML}\n\`\`\``);
-    saveArtifact({ kind: 'html', code: HTML, title: 'Off Grid AI — landing hero', projectId: PROJECT_ID });
-
-    // 3) React artifact — a pricing component.
-    chat('Pricing card (React)', 'Make a React pricing component (Free vs Pro).',
-      `A React pricing component:\n\n\`\`\`jsx\n${REACT}\n\`\`\``);
-    saveArtifact({ kind: 'react', code: REACT, title: 'Off Grid AI — pricing', projectId: PROJECT_ID });
-
-    // 4) Image — seed a real PNG into generated-images + an image chat message.
+// Seed a few knowledge-base files (md + txt + pdf) and index them into the project.
+async function seedKnowledge(): Promise<void> {
+  const dir = path.join(app.getPath('userData'), 'demo-docs');
+  fs.mkdirSync(dir, { recursive: true });
+  const files: { name: string; write: () => void }[] = [
+    { name: 'offgrid-overview.md', write: () => fs.writeFileSync(path.join(dir, 'offgrid-overview.md'), MD) },
+    { name: 'offgrid-faq.txt', write: () => fs.writeFileSync(path.join(dir, 'offgrid-faq.txt'),
+      'Off Grid AI — FAQ\n\nQ: Does anything leave my device?\nA: No. All inference runs locally; no cloud, no accounts, no API keys.\n\nQ: What can it run?\nA: Open models for text, vision, image, voice and speech, via one OpenAI-compatible gateway on 127.0.0.1:7878.\n\nQ: What is Pro?\nA: The sees/remembers/acts layer — capture, unified search, a proactive secretary — launching July 2026.\n') },
+    { name: 'offgrid-onepager.pdf', write: () => fs.writeFileSync(path.join(dir, 'offgrid-onepager.pdf'), tinyPdf('Off Grid AI - private, on-device AI. Run open models locally. No cloud.')) },
+  ];
+  for (const f of files) {
     try {
-      const imgDir = path.join(app.getPath('userData'), 'generated-images');
-      fs.mkdirSync(imgDir, { recursive: true });
-      const dest = path.join(imgDir, 'offgrid-demo-mark.png');
-      const srcCandidates = [
-        path.join(app.getAppPath(), 'resources', 'icon.png'),
-        path.join(process.resourcesPath || '', 'icon.png'),
-      ];
-      const src = srcCandidates.find((p) => fs.existsSync(p));
-      if (src && !fs.existsSync(dest)) fs.copyFileSync(src, dest);
-      if (fs.existsSync(dest)) {
-        chat('Brand mark (image)', 'Generate the Off Grid AI brand mark.',
-          'Generated for: Off Grid AI brand mark', { image: dest });
-      }
-    } catch (e) { console.error('[seed] image', e); }
+      f.write();
+      const p = path.join(dir, f.name);
+      await ragService.indexDocument({ projectId: PROJECT_ID, path: p, fileName: f.name, size: fs.statSync(p).size }, () => {});
+      console.log('[seed] indexed', f.name);
+    } catch (e) { console.error('[seed] index failed', f.name, e); }
+  }
+}
 
-    // 5) Voice + Speech — a speakable assistant reply (test TTS via the speak
-    //    button; record a voice note to test STT).
-    chat('Voice & speech', 'Tell me about Off Grid in one line I can listen to.',
+function cleanup(): void {
+  for (const c of getRagConversations(PROJECT_ID)) deleteRagConversation(c.id);
+  for (const a of listArtifacts({ projectId: PROJECT_ID })) deleteArtifact(a.id);
+  try { deleteProject(PROJECT_ID); } catch { /* fresh */ }
+}
+
+export async function seedDemo(live = false): Promise<void> {
+  if (!live && getSetting<boolean>('demo:seeded', false)) { console.log('[seed] already seeded — skipping'); return; }
+  try {
+    cleanup();
+    createProject({ id: PROJECT_ID, name: 'Off Grid AI', description: 'Demo workspace showcasing Off Grid AI.', icon: '🟢' });
+    if (live) { try { await llm.init(); } catch (e) { console.error('[seed] llm init', e); } }
+
+    // Knowledge base: index a few docs (md + txt + pdf) into the project.
+    await seedKnowledge();
+
+    // Helper: generate an artifact live (or fall back), store the chat + artifact.
+    const artifactChat = async (slug: string, title: string, user: string, prompt: string, kind: 'text' | 'html' | 'react', lang: string, fallback: string): Promise<void> => {
+      let code = fallback;
+      if (live) { const out = await gen(prompt); const c = out && extractCode(out); if (c) code = c; }
+      const id = chatTurn(slug, title, user, `Here you go:\n\n\`\`\`${lang}\n${code}\n\`\`\``);
+      saveArtifact({ kind, code, title, conversationId: id, projectId: PROJECT_ID });
+    };
+
+    await artifactChat('overview', 'Off Grid overview', 'Write a short overview doc for Off Grid AI.',
+      'Write a concise Markdown overview of "Off Grid AI" — a private, on-device AI that runs open models (text, vision, image, voice) via one local OpenAI-compatible gateway, no cloud. Return ONLY a ```markdown code block.', 'text', 'markdown', MD);
+
+    await artifactChat('landing', 'Landing hero (HTML)', 'Build a landing hero for Off Grid AI.',
+      'Create a single self-contained HTML document for an "Off Grid AI" landing hero: dark background, emerald accent (#34D399), a headline, one line of copy, and a "Download for macOS" button. Return ONLY a ```html code block.', 'html', 'html', HTML);
+
+    await artifactChat('pricing', 'Hero (React)', 'Make a React hero component for Off Grid AI.',
+      'Write a single default-export React component (no imports) for an "Off Grid AI" hero with inline styles, dark background, emerald accent. Return ONLY a ```jsx code block.', 'react', 'jsx', REACT);
+
+    // Voice + speech (speakable reply; record to test STT).
+    chatTurn('voice', 'Voice & speech', 'Say one line about Off Grid I can listen to.',
       'Off Grid AI is private, on-device AI — your models and your data never leave your machine. Tap the speaker to hear this, or hold the mic to talk back.');
 
-    // 6) Skills — a manual /skill pack + a chat that uses it.
-    saveSkill({
-      name: 'offgrid-pitch',
-      description: 'Rewrite text as a crisp, on-brand Off Grid one-liner.',
-      instructions: 'Rewrite the input as a single confident sentence in the Off Grid voice: private, on-device, no cloud. No hype, no emojis.',
-    });
-    chat('Skills', '/offgrid-pitch we run AI models on your computer without the internet',
-      'Off Grid AI runs open models entirely on your device — no cloud, no accounts, nothing ever leaves your machine.');
+    // Skills — a manual /skill pack + a chat using it.
+    saveSkill({ name: 'offgrid-pitch', description: 'Rewrite text as a crisp Off Grid one-liner.', instructions: 'Rewrite the input as a single confident sentence in the Off Grid voice: private, on-device, no cloud. No hype, no emojis.' });
+    {
+      const u = 'we run AI models on your computer without the internet';
+      let a = 'Off Grid AI runs open models entirely on your device — no cloud, no accounts, nothing ever leaves your machine.';
+      if (live) { const out = await gen(`Rewrite as one confident Off Grid sentence (private, on-device, no cloud; no hype, no emojis): "${u}"`); if (out) a = out.replace(/^["']|["']$/g, ''); }
+      chatTurn('skills', 'Skills', `/offgrid-pitch ${u}`, a);
+    }
 
-    // 7) Connectors — add a demo MCP server (no-auth) so Integrations has an entry.
+    // Connectors — add a demo MCP server (no-auth) so Integrations has an entry.
     if (!listConnectors().some((c) => c.name === 'Demo MCP (Everything)')) {
       addConnector({ name: 'Demo MCP (Everything)', transport: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-everything'] });
     }
-    chat('Connectors', 'List the tools available from my connected MCP server.',
+    chatTurn('connectors', 'Connectors', 'What tools does my connected MCP server expose?',
       'Your "Demo MCP" exposes example tools (echo, add, longRunningOperation, …). Turn Connectors on in the composer to call them right from chat — reads run inline.');
 
+    // 7) Image LAST (image-gen pauses the LLM). Live generate, else copy the logo.
+    try {
+      const imgDir = path.join(app.getPath('userData'), 'generated-images');
+      fs.mkdirSync(imgDir, { recursive: true });
+      let imgPath: string | null = null;
+      if (live) {
+        try {
+          const out = await generateImage({ prompt: 'Off Grid AI brand mark — a minimalist emerald microchip glyph on a dark background, clean vector, centered', width: 768, height: 512, steps: 20 });
+          imgPath = out.path;
+        } catch (e) { console.error('[seed] generateImage', e); }
+      }
+      if (!imgPath) {
+        const src = [path.join(app.getAppPath(), 'resources', 'icon.png'), path.join(process.resourcesPath || '', 'icon.png')].find((p) => fs.existsSync(p));
+        if (src) { imgPath = path.join(imgDir, 'offgrid-demo-mark.png'); fs.copyFileSync(src, imgPath); }
+      }
+      if (imgPath) {
+        const id = chatTurn('image', 'Brand mark (image)', 'Generate the Off Grid AI brand mark.', `Generated for: Off Grid AI brand mark`, { image: imgPath });
+        // sidecar so the image scopes to this chat + project in the gallery.
+        try { fs.writeFileSync(`${imgPath}.json`, JSON.stringify({ conversationId: id, projectId: PROJECT_ID })); } catch { /* best effort */ }
+      }
+    } catch (e) { console.error('[seed] image', e); }
+
     saveSetting('demo:seeded', true);
-    console.log('[seed] demo project seeded ✓');
+    console.log(`[seed] demo project seeded ✓ (live=${live})`);
   } catch (e) {
     console.error('[seed] failed', e);
   }
