@@ -1,182 +1,135 @@
 <p align="center">
-  <img src="resources/icon.png" width="120" alt="My Memories Logo">
+  <img src="resources/icon.png" width="112" alt="Off Grid AI" />
 </p>
 
-<h1 align="center">My Memories</h1>
+<h1 align="center">Off Grid AI</h1>
 
 <p align="center">
-  <strong>Your personal AI knowledge base—100% offline</strong>
+  <strong>Private, on-device AI. Your models, your data — no cloud, no accounts, no API keys.</strong>
 </p>
 
 <p align="center">
-  All your AI conversations from ChatGPT, Claude, Gemini, and more—captured, connected, and searchable.<br/>
-  Everything runs on your device. Your data never leaves your machine.
+  Run open models — <em>text, vision, image, voice, and speech</em> — entirely on your machine,
+  through one local OpenAI-compatible gateway.
+</p>
+
+<p align="center">
+  <a href="https://github.com/off-grid-ai/desktop/releases/latest">Download for macOS</a> ·
+  <a href="https://getoffgridai.co">getoffgridai.co</a> ·
+  <a href="https://getoffgridai.co/early-access/">Pro early access</a>
+</p>
+
+<p align="center">
+  <img alt="platform" src="https://img.shields.io/badge/macOS-Apple%20Silicon-black" />
+  <img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-blue" />
+  <img alt="local" src="https://img.shields.io/badge/100%25-on--device-34D399" />
 </p>
 
 ---
 
-> **Status: work in progress.** This repo is My Memories, the app that's becoming **Off Grid Desktop**, part of the [Off Grid](https://github.com/off-grid-ai) ecosystem. What's documented below is what works today. Expect rough edges while the rebrand and integration land.
+## What it is
 
-## Where Off Grid Desktop is headed
+Off Grid AI is a **local-first AI runtime** for your desktop. Download open models from the
+built-in catalog (or any GGUF from Hugging Face) and use them across every modality — all
+inference runs on your hardware via bundled `llama.cpp`, `stable-diffusion.cpp`,
+`whisper.cpp`, and Kokoro. Nothing routes through a server we own; your conversations,
+files, and models never leave your device.
 
-My Memories came first, before Off Grid. It started as a way to keep my own thinking from getting trapped inside whatever AI tool I happened to be using that month. It watches the LLM apps and browser windows you already use, understands each conversation, and stores it as memory on your machine. It downloads a model locally and does everything on device. No vendor lock-in, no data collected.
+It's also an **OpenAI-compatible gateway**: point any OpenAI client at
+`http://127.0.0.1:7878/v1` (no key) and call chat, vision, image, audio, and embeddings
+locally — or run it headless as just the gateway.
 
-It's becoming Off Grid Desktop: the intelligence layer for your laptop. The goal is to capture your whole day where you work, not just chat history but meetings, email, and the work context that makes everything else useful, and to do all of it on device. Off Grid Desktop pairs with Off Grid Mobile in your pocket and Off Grid Sync, the private backbone that moves context between your devices.
+## Features (free & open source)
 
-Today it does the AI-conversation capture documented below. The rest is being built in the open. Parts will change, and some will break before they settle.
+- **Chat** — text + vision, streaming, with a reasoning ("thinking") mode.
+- **Image generation** — text→image and image→image via stable-diffusion.cpp (SDXL, etc.).
+- **Voice** — speech-to-text (whisper) and text-to-speech (Kokoro), plus a hands-free voice mode.
+- **Projects** — group chats, upload documents (txt/md/PDF/DOCX, audio, video) and chat grounded in them (RAG); per-project instructions.
+- **Artifacts** — generate and preview HTML, React, SVG, Mermaid diagrams, and Markdown documents in a sandboxed canvas; saved per chat & project.
+- **Connectors (MCP)** — add Model Context Protocol servers (none / token / OAuth), use them right inside chat. Preset catalog included.
+- **Model catalog** — curated, size-bucketed recommendations + direct Hugging Face search; download, manage, and set the active model per modality.
+- **The Gateway** — one OpenAI-compatible endpoint for everything; see below.
+- **Auto-update** — signed releases update themselves.
 
-- Off Grid Mobile, on-device intelligence in your pocket: https://github.com/off-grid-ai/mobile
-- Off Grid Sync, private device-to-device sync: https://github.com/off-grid-ai/sync
-- The full thesis: https://github.com/off-grid-ai
+## The Gateway
 
----
+One local server (`http://127.0.0.1:7878`) speaks the OpenAI API:
 
-## The Problem
-
-You've had hundreds of conversations with AI assistants. Important insights are scattered across ChatGPT, Claude, Gemini, and more. Finding "that one conversation" where you solved a problem takes forever. And syncing to the cloud means giving up control of your data.
-
-## The Solution
-
-**My Memories** automatically captures your AI conversations and transforms them into a searchable, connected knowledge base—entirely on your device.
-
-| Capture | Extract | Connect |
-|---------|---------|---------|
-| Automatically imports conversations from your AI assistants as you chat | Extracts key insights, entities, and facts from every conversation | Builds a knowledge graph linking related concepts and ideas |
-
----
-
-## Features
-
-### Multi-Source Capture
-Seamlessly imports from **ChatGPT**, **Claude Desktop**, **Claude (browser)**, and **Gemini**. Just chat as normal—My Memories watches and captures in the background.
-
-> **Coming soon:** Support for **Perplexity** and **Grok** is planned but not yet available.
-
-### Intelligent Extraction
-Local LLMs extract memories, entities (people, concepts, technologies), and facts from every conversation. Creates rich, searchable context automatically.
-
-### Knowledge Graph
-Interactive 3D visualization connects entities across all your conversations. See how concepts, people, and ideas relate to each other.
-
-### Memory Chat
-Ask questions about your past conversations. Get AI-powered answers grounded in your actual chat history.
-
-### Semantic Search
-Find conversations by meaning, not just keywords. Search your entire knowledge base with natural language.
-
-### 100% Local & Private
-- All AI processing happens on-device via GGUF models
-- Data stored in local SQLite database only
-- No cloud sync, no telemetry, no external API calls
-- You own your data completely
-
----
-
-## Quick Start
-
-### Prerequisites
-- **Node.js 18+** (recommended)
-- **npm**
-- macOS (primary), Windows/Linux (available)
-
-### Install & Run
+| Capability | Endpoint |
+|---|---|
+| Chat (text + vision) | `POST /v1/chat/completions` |
+| Text → Image | `POST /v1/images` (`/generations`, `/edits`) |
+| Speech → Text | `POST /v1/audio/transcriptions` |
+| Text → Speech | `POST /v1/audio/speech` |
+| Embeddings | `POST /v1/embeddings` |
+| Models | `GET /v1/models` |
 
 ```bash
-# Clone the repository
+curl http://127.0.0.1:7878/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"local","messages":[{"role":"user","content":"Hello!"}]}'
+```
+
+```python
+from openai import OpenAI
+client = OpenAI(base_url="http://127.0.0.1:7878/v1", api_key="not-needed")
+print(client.chat.completions.create(model="local",
+      messages=[{"role":"user","content":"Hello!"}]).choices[0].message.content)
+```
+
+Interactive API reference + an OpenAPI spec are served at `/docs` and `/openapi.json`.
+Run **just the gateway** (no UI/capture) with `OFFGRID_SERVER_ONLY=1` (or `--server-only`).
+
+## Off Grid Pro — coming July 2026
+
+The free app **runs** models. **Pro** adds the layer that *sees, remembers, and acts* —
+always on, on-device:
+
+- **Never forgets** — it quietly remembers everything you see and do.
+- **Unified search** — find anything across your captured activity, meetings, and connectors.
+- **Private CRM** — people, projects, and companies, auto-built with cross-source summaries.
+- **Day · Reflect · Replay** — your day planned, where your time goes, rewind your screen.
+- **Meetings** — record + transcribe locally.
+- **Proactive secretary** — surfaces what matters and drafts actions (approval-gated).
+- **Skills automation** — trigger → action (schedule / keyword / event).
+
+→ **[Join early access](https://getoffgridai.co/early-access/)** (free) — or
+**[pay now](https://getoffgridai.co/pay)** for lifetime free + first access when Pro ships.
+
+## Install
+
+Download the latest **macOS** DMG from [Releases](https://github.com/off-grid-ai/desktop/releases/latest)
+(Apple Silicon, signed + notarized). Windows and Linux builds are in progress.
+
+## Build from source
+
+```bash
 git clone https://github.com/off-grid-ai/desktop.git
 cd desktop
-
-# Install dependencies
 npm install
-
-# Start in development mode
-npm run dev
+npm run dev          # full app
+npm run gateway      # headless gateway only (:7878)
+npm run build:mac    # package a macOS app
 ```
 
-### Build for Production
+Stack: Electron + React 19 + Tailwind v4 (electron-vite), `better-sqlite3-multiple-ciphers`
+(encrypted local DB), `@lancedb/lancedb` (vectors), bundled `llama.cpp` / `whisper.cpp` /
+`stable-diffusion.cpp` / `ffmpeg` in `resources/bin`. Shared `@offgrid/*` packages (design,
+models, rag) come from the workspace.
 
-```bash
-npm run build:mac    # macOS
-npm run build:win    # Windows
-npm run build:linux  # Linux
-```
+## Architecture — open core
 
----
+This repository is the **open, AGPL core**: the model runner, gateway, chat, projects,
+artifacts, connectors, and the model catalog. Pro features live in a separate **private**
+package loaded as a git submodule (`pro/`). The core **never imports pro** — pro registers
+itself through small registries (an `activate()` pattern) and is simply absent in this build,
+so the open app compiles and runs entirely on its own.
 
-## Architecture
+## Privacy
 
-```
-src/
-├── main/              # Electron main process
-│   ├── parsers/       # Chat source parsers (Claude, ChatGPT, etc.)
-│   ├── database.ts    # SQLite database layer
-│   ├── embeddings.ts  # Local embedding generation
-│   ├── llm.ts         # Local LLM integration
-│   ├── vision.ts      # Screen capture & OCR
-│   └── watcher.ts     # App & file monitoring
-├── renderer/          # React UI
-│   └── components/    # UI components
-└── preload/           # Electron bridge
-
-resources/
-├── bin/               # Local inference binaries
-└── models/            # GGUF models
-```
-
-### Tech Stack
-
-| Layer | Technology |
-|-------|------------|
-| Desktop | Electron + Vite |
-| Frontend | React 19 + TypeScript |
-| Styling | Tailwind CSS 4 + Framer Motion |
-| 3D Graph | Three.js + react-force-graph-3d |
-| Database | better-sqlite3 |
-| LLM | node-llama-cpp |
-| Embeddings | Xenova Transformers |
-
----
-
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start development server |
-| `npm run build` | Typecheck & build |
-| `npm run build:mac` | Build macOS package |
-| `npm run test` | Run tests |
-| `npm run lint` | Run ESLint |
-| `npm run format` | Format with Prettier |
-
----
-
-## Privacy Promise
-
-| What stays local | What we never do |
-|------------------|------------------|
-| All your conversations | Send data to cloud servers |
-| Entity extraction & analysis | Track usage or telemetry |
-| Embeddings & search index | Require internet connection |
-| Generated summaries | Access external APIs* |
-
-*Optional Ollama integration requires a local Ollama server
-
----
-
-## Contributing
-
-Contributions welcome! Please read our contribution guidelines before submitting PRs.
-
----
+All model inference is local. Your conversations, documents, and models stay on your device
+— there's no cloud inference, no account, and no API key. You can run it fully offline.
 
 ## License
 
-Licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**. See [LICENSE](LICENSE).
-
-In short: you're free to use, study, modify, and share this code, but any version you distribute or run as a network service must also be released as open source under the same license. Copyright (C) 2026 Mohammed Ali Chherawalla.
-
----
-
-<p align="center">
-  <strong>Built for privacy-first AI users</strong>
-</p>
+[AGPL-3.0-only](LICENSE). © Off Grid AI / Wednesday Solutions, Inc.
