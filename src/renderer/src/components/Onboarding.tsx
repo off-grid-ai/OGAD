@@ -172,7 +172,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                 {[
                   { icon: Cpu, title: 'Run anything locally', body: 'Download the latest open models — text, vision, image, voice, speech — and run them through one local gateway. No API keys.' },
                   { icon: LockKey, title: 'Truly private', body: 'Nothing leaves your device. No cloud, no telemetry, no account. Your conversations and files stay on your machine.' },
-                  { icon: Sparkle, title: 'Never forgets', body: 'Upgrade to Pro and Off Grid is always on — it quietly remembers everything you see and do, makes it instantly findable with unified search, and a proactive secretary surfaces what matters and acts on your behalf.', pro: true },
+                  { icon: Sparkle, title: 'Never forgets', body: 'Pro lands July 2026: always on, it remembers everything you see and do, makes it instantly findable with unified search, and a proactive secretary surfaces what matters and acts for you. Join early access — or pay now for lifetime free + first access.', pro: true },
                 ].map(({ icon: Icon, title, body, pro }, i) => (
                   <motion.div
                     key={title}

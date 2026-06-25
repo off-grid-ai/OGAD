@@ -16,7 +16,11 @@ import type { ComponentType } from 'react';
 // pro/ submodule is present and activated, the real screens (registered via
 // screenRegistry/navRegistry) take over these same routes.
 
-/** Where the "Upgrade to Pro" buttons send the user. */
+/** When Pro launches. */
+export const PRO_LAUNCH = 'July 2026';
+/** Join the Pro early-access waitlist (free to register). */
+export const PRO_EARLY_ACCESS_URL = 'https://getoffgridai.co/early-access/';
+/** Pay now → lifetime free + first access when Pro ships. */
 export const PRO_PAY_URL = 'https://getoffgridai.co/pay';
 
 export interface ProFeature {
