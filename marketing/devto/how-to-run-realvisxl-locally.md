@@ -1,9 +1,9 @@
 ---
 title: How to Run RealVisXL 5.0 Locally on Your Desktop (Photorealism, Offline)
-published: false
+published: true
 description: Generate photorealistic images with RealVisXL 5.0 fully on-device, no cloud, no account, no API keys.
 tags: ai, stablediffusion, privacy, macos
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/how-to-run-realvisxl-locally.jpg
 ---
 
 The unified memory in an Apple Silicon Mac lets the GPU and CPU read the same pool, which is exactly what a photorealistic SDXL model wants. That hardware sits idle while you pay monthly to render images on someone else's GPU. Off Grid AI Desktop is a free, open-source app that runs RealVisXL 5.0 directly on your Mac or PC.

@@ -1,9 +1,9 @@
 ---
 title: How to Run LLMs Locally on Your Windows PC in 2026 (Completely Offline, No Subscription)
-published: false
+published: true
 description: Run real language models on your Windows GPU, fully on-device. CUDA, Vulkan, or CPU. No cloud, no account, no monthly bill.
 tags: ai, windows, llm, privacy
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/how-to-run-llms-locally-windows.jpg
 ---
 
 A mid-range gaming GPU like an RTX 4060 ships with 8 GB of VRAM, which is enough to hold a 7-billion-parameter language model and answer faster than you can read. That card spends most of its life rendering desktop wallpaper while you pay a monthly fee to run prompts on a rented server. Off Grid AI Desktop is a free, open-source app that runs language models directly on your Windows PC.

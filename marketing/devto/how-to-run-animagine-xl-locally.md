@@ -1,9 +1,9 @@
 ---
 title: How to Run Animagine XL 4.0 Locally in 2026 (Offline Anime AI Image Generation)
-published: false
+published: true
 description: Generate anime art on your own machine with Animagine XL 4.0, fully on-device, no cloud, no account, no API keys.
 tags: ai, stablediffusion, anime, privacy
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/how-to-run-animagine-xl-locally.jpg
 ---
 
 The GPU in a modern laptop can run a full SDXL anime model without ever touching the internet. That hardware sits idle most of the day while you pay a monthly subscription to generate images on someone else's server. Off Grid AI Desktop is a free, open-source app that runs Animagine XL 4.0 directly on your Mac or PC.

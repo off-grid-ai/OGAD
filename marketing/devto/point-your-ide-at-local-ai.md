@@ -1,9 +1,9 @@
 ---
 title: How to Point Your IDE and Apps at a Local AI Model (Private, On-Device)
-published: false
+published: true
 description: Point any OpenAI-compatible IDE extension, app, or script at a local endpoint for private, offline inference across your whole machine.
 tags: ai, privacy, productivity, opensource
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/point-your-ide-at-local-ai.jpg
 ---
 
 Your editor, your terminal scripts, and half the AI tools you installed last month all speak the same protocol: the OpenAI HTTP API. They all assume that protocol points at a server you pay for. It does not have to. Off Grid AI Desktop is a free, open-source app that puts an OpenAI-compatible endpoint on your own Mac or PC, so every one of those tools can run against on-device models instead.

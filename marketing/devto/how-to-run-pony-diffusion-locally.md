@@ -1,9 +1,9 @@
 ---
 title: How to Run Pony Diffusion V6 XL Locally on Your Desktop (Offline, No Cloud)
-published: false
+published: true
 description: Run Pony Diffusion V6 XL for character art, anime, and stylized illustration fully on-device, no cloud, no account, no API keys. Mac and Windows.
 tags: ai, stablediffusion, privacy, art
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/how-to-run-pony-diffusion-locally.jpg
 ---
 
 A mid-range gaming PC with an 8 GB graphics card has enough VRAM to run a full SDXL checkpoint without touching the cloud. That GPU sits idle while you pay a subscription to generate art on a remote server that logs every prompt and filters your output. Off Grid AI Desktop is a free, open-source app that runs Pony Diffusion V6 XL directly on your PC or Mac.

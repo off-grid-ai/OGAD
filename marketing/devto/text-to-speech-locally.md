@@ -1,9 +1,9 @@
 ---
 title: How to Run Text-to-Speech Locally on Your Desktop in 2026 (Kokoro, Offline Voice)
-published: false
+published: true
 description: Run open-weight TTS on your own Mac or PC with Kokoro-82M. Per-message Speak and an auto-speak voice mode, on-device, no cloud TTS API.
 tags: ai, privacy, tts, opensource
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/text-to-speech-locally.jpg
 ---
 
 Kokoro-82M is a text-to-speech model with 82 million parameters, small enough to fit in a few hundred megabytes, yet it produces voices that hold up against systems many times its size. That quality sits idle while you pay per character to a cloud TTS API that meters every word you synthesize. Off Grid AI Desktop is a free, open-source app that runs Kokoro directly on your Mac or PC.

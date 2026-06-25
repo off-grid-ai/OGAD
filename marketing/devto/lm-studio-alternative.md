@@ -1,9 +1,9 @@
 ---
 title: "LM Studio in 2026: Setup, and a Capture-Aware Alternative"
-published: false
+published: true
 description: Set up LM Studio for local LLM chat, then meet an open-source alternative that adds image gen, voice, RAG, and on-device memory.
 tags: ai, llm, privacy, opensource
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/lm-studio-alternative.jpg
 ---
 
 A consumer GPU with 12GB of VRAM can run a quantized 13B language model entirely on your own machine. That card sits mostly idle while you pay a monthly fee to run the same kind of model on someone else's hardware. Off Grid AI Desktop is a free, open-source app that runs local models directly on your Mac or PC, with the same download-and-chat feel as LM Studio plus a lot more.

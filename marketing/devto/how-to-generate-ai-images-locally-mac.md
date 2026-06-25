@@ -1,9 +1,9 @@
 ---
 title: How to Generate AI Images Locally on Your Mac in 2026 (No Cloud, No Subscription)
-published: false
+published: true
 description: Generate SDXL and Z-Image-Turbo images on your Mac with Metal acceleration. On-device, no cloud, no subscription, no account. Free and open source.
 tags: ai, macos, stablediffusion, privacy
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/how-to-generate-ai-images-locally-mac.jpg
 ---
 
 The M-series chip in your MacBook shares one pool of memory between CPU and GPU, so a 16GB Mac can hand most of that to an image model with no copying across a bus. That unified memory is exactly what Stable Diffusion wants, and it sits idle while you pay a monthly fee to generate images on a rented server. Off Grid AI Desktop is a free, open-source app that generates images directly on your Mac.

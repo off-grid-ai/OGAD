@@ -1,9 +1,9 @@
 ---
 title: How to Run Local AI on Your Windows PC in 2026 (No Cloud, No Account)
-published: false
+published: true
 description: Run chat, image generation, and voice AI on your own Windows PC. On-device, no cloud, no account, no API keys. Free and open source.
 tags: ai, windows, privacy, opensource
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/how-to-run-local-ai-windows.jpg
 ---
 
 A mid-range gaming GPU from 2023 ships with 12GB of VRAM and enough tensor cores to run a 7-billion-parameter language model faster than you can read. Most of that silicon sits idle while you type prompts into a browser tab and pay a monthly fee to rent compute on someone else's server. Off Grid AI Desktop is a free, open-source app that runs chat, image generation, and voice directly on your Windows PC.

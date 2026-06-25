@@ -1,9 +1,9 @@
 ---
 title: How to Connect Notion, Linear, and Jira to a Local AI (Private MCP)
-published: false
+published: true
 description: Connect Notion, Linear, and Jira to an on-device model that reasons over your data, with every action approval-gated and logged.
 tags: ai, privacy, mcp, productivity
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/connect-notion-linear-jira-local-ai.jpg
 ---
 
 Your laptop has a GPU and 16GB of RAM that mostly idle while you tab between Notion, Linear, and Jira copying context by hand. A cloud AI assistant could connect those tools, but it routes your tickets and docs through a server you do not own and bills you every month. Off Grid AI Desktop is a free, open-source app that connects those same tools to a model running directly on your Mac or PC.

@@ -1,9 +1,9 @@
 ---
 title: How to Run Gemma Locally on Your Computer in 2026 (Mac and Windows, No Cloud)
-published: false
+published: true
 description: Run Google's Gemma models on your own Mac or PC, fully on-device, with a free open-source app. No cloud, no account, no API keys.
 tags: ai, llm, gemma, privacy
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/how-to-run-gemma-locally.jpg
 ---
 
 A modern laptop ships with a GPU that can run a 4-billion-parameter language model in real time. That hardware sits idle while you pay a monthly subscription to send your prompts to someone else's server. Off Grid AI Desktop is a free, open-source app that runs Google's Gemma models directly on your Mac or PC.

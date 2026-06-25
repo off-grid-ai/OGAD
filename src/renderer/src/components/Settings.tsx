@@ -1,6 +1,26 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
+import { LockKey } from '@phosphor-icons/react';
 import { ProgressiveBlur } from './ui/progressive-blur';
+
+// A Pro section shown (disabled) in the free build: title + description + a
+// "Pro · July 2026" badge, dimmed and non-interactive.
+function ProPlaceholder({ title, description, delay = 0.18 }: { title: string; description: string; delay?: number }): React.ReactElement {
+  return (
+    <motion.div
+      className="relative rounded-2xl border border-neutral-800 bg-neutral-900/40 p-6"
+      initial={{ opacity: 0, filter: 'blur(10px)' }}
+      animate={{ opacity: 1, filter: 'blur(0px)' }}
+      transition={{ duration: 0.6, delay }}
+    >
+      <span className="absolute right-4 top-4 inline-flex items-center gap-1 rounded-full border border-green-500/30 bg-green-500/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-green-400">
+        <LockKey weight="bold" className="h-3 w-3" /> Pro · July 2026
+      </span>
+      <h3 className="mb-1 pr-28 text-base font-medium text-neutral-300">{title}</h3>
+      <p className="text-sm text-neutral-600">{description}</p>
+    </motion.div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Proactive delivery — let Off Grid reach out unprompted
@@ -224,16 +244,17 @@ export function Settings() {
   const [idName, setIdName] = useState('');
   const [idEmail, setIdEmail] = useState('');
 
-  // Load identity on mount
+  // Load identity on mount (Pro only — the handler lives in the pro layer).
   useEffect(() => {
+    if (!isPro) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window.api as any).idGet?.().then((id: { name: string; email: string }) => {
       if (id) {
         setIdName(id.name || '');
         setIdEmail(id.email || '');
       }
-    });
-  }, []);
+    }).catch(() => {});
+  }, [isPro]);
 
   const saveIdentity = (): void => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -264,52 +285,35 @@ export function Settings() {
             </div>
             <div>
               <h2 className="text-lg font-semibold text-white">Settings</h2>
-              <p className="text-sm text-neutral-500">{isPro ? 'Who you are, what Off Grid has learned, and your devices' : 'Who you are'}</p>
+              <p className="text-sm text-neutral-500">{isPro ? 'Who you are, what Off Grid has learned, and your devices' : 'Personalization & automation unlock with Pro'}</p>
             </div>
           </motion.div>
 
-          {/* Identity — who you are (foundation for the act pillar) */}
-          <motion.div
-            className="rounded-2xl bg-neutral-900/60 backdrop-blur-sm border border-neutral-800 p-6"
-            initial={{ opacity: 0, filter: 'blur(10px)' }}
-            animate={{ opacity: 1, filter: 'blur(0px)' }}
-            transition={{ duration: 0.6, delay: 0.15 }}
-          >
-            <h3 className="text-white font-medium text-base mb-1">You</h3>
-            <p className="text-neutral-500 text-sm mb-4">
-              Tells Off Grid who “you” are — so it can tell your messages and commitments apart from everyone else’s. Used to attribute action items and (soon) to make sense of your email and calendar.
-            </p>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <input
-                value={idName}
-                onChange={(e) => setIdName(e.target.value)}
-                onBlur={saveIdentity}
-                placeholder="Your name"
-                className="rounded-xl bg-neutral-950 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 outline-none focus:border-neutral-600"
-              />
-              <input
-                value={idEmail}
-                onChange={(e) => setIdEmail(e.target.value)}
-                onBlur={saveIdentity}
-                placeholder="you@email.com"
-                className="rounded-xl bg-neutral-950 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 outline-none focus:border-neutral-600"
-              />
-            </div>
-          </motion.div>
-
-          {/* Pro-only sections — hidden in the free build (Settings is pro/core aware). */}
-          {isPro && (
-            <>
-              {/* Proactive delivery — briefings + meeting prep */}
-              <ProactiveSection />
-
-              {/* Secretary — learned preferences from your dismissals */}
-              <SecretaryPrefs />
-
-              {/* Fleet Console */}
-              <ConsoleSection />
-            </>
+          {/* Identity — who you are (Pro: foundation for the act pillar) */}
+          {isPro ? (
+            <motion.div
+              className="rounded-2xl bg-neutral-900/60 backdrop-blur-sm border border-neutral-800 p-6"
+              initial={{ opacity: 0, filter: 'blur(10px)' }}
+              animate={{ opacity: 1, filter: 'blur(0px)' }}
+              transition={{ duration: 0.6, delay: 0.15 }}
+            >
+              <h3 className="text-white font-medium text-base mb-1">You</h3>
+              <p className="text-neutral-500 text-sm mb-4">
+                Tells Off Grid who “you” are — so it can tell your messages and commitments apart from everyone else’s. Used to attribute action items and to make sense of your email and calendar.
+              </p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <input value={idName} onChange={(e) => setIdName(e.target.value)} onBlur={saveIdentity} placeholder="Your name" className="rounded-xl bg-neutral-950 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 outline-none focus:border-neutral-600" />
+                <input value={idEmail} onChange={(e) => setIdEmail(e.target.value)} onBlur={saveIdentity} placeholder="you@email.com" className="rounded-xl bg-neutral-950 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 outline-none focus:border-neutral-600" />
+              </div>
+            </motion.div>
+          ) : (
+            <ProPlaceholder delay={0.15} title="You" description="Tell Off Grid who you are so it can attribute your messages, commitments, and calendar — part of the Pro intelligence layer." />
           )}
+
+          {/* Pro sections — shown but disabled in the free build. */}
+          {isPro ? <ProactiveSection /> : <ProPlaceholder title="Proactive delivery" description="A morning briefing and a heads-up before each meeting — native notifications, even when the window is closed." />}
+          {isPro ? <SecretaryPrefs /> : <ProPlaceholder title="What Off Grid has learned" description="Preferences distilled from the suggestions you dismiss, fed back to your assistant so it gets sharper over time." />}
+          {isPro ? <ConsoleSection /> : <ProPlaceholder title="Fleet Console" description="Optionally enroll this device in an Off Grid Console for org policy, fleet audit, and remote commands — fully local." />}
         </motion.div>
       </div>
 

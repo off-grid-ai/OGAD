@@ -1,9 +1,9 @@
 ---
 title: How to Run LLMs Locally on Your Mac in 2026 (Completely Offline, No Subscription)
-published: false
+published: true
 description: Run real language models on Apple Silicon, fully on-device. No cloud, no account, no monthly bill. Free and open source.
 tags: ai, macos, llm, privacy
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/how-to-run-llms-locally-mac.jpg
 ---
 
 Your M-series Mac shares one pool of memory between the CPU and the GPU, so a model can use almost all of your RAM as if it were a graphics card. That hardware sits idle most of the day while you pay 20 dollars a month to send your prompts to someone else's server. Off Grid AI Desktop is a free, open-source app that runs language models directly on your Mac.

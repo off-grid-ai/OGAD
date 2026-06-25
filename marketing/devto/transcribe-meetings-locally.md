@@ -1,9 +1,9 @@
 ---
 title: How to Transcribe Meetings Locally in 2026 (Whisper, On-Device)
-published: false
+published: true
 description: Record and transcribe Zoom and Google Meet calls entirely on-device with whisper.cpp. No cloud notetaker, no per-minute fees.
 tags: ai, privacy, productivity, whisper
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/transcribe-meetings-locally.jpg
 ---
 
 OpenAI's Whisper model runs accurate speech-to-text on a laptop GPU, and the C++ port runs it without Python or a cloud account. That capability sits unused while teams pay per-minute fees to upload their calls to a transcription service. Off Grid AI Desktop is a free, open-source app that records and transcribes your meetings directly on your Mac or PC.

@@ -1,9 +1,9 @@
 ---
 title: A Local, Offline Alternative to ChatGPT for Your Desktop in 2026
-published: false
+published: true
 description: Chat, images, voice in and out, and document Q&A like ChatGPT, but on-device. No account, no subscription, open source.
 tags: ai, chatgpt, privacy, opensource
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/local-chatgpt-alternative.jpg
 ---
 
 The laptop on your desk has enough memory and GPU to run a capable language model, generate images, and transcribe your voice, all on its own. That hardware sits mostly idle while you pay a monthly subscription to do those things on a server you do not control. Off Grid AI Desktop is a free, open-source app that runs the whole ChatGPT-style experience directly on your Mac or PC.

@@ -1,9 +1,9 @@
 ---
 title: The Most Optimised Way to Run AI Image Generation Locally in 2026 (GGUF, On-Device)
-published: false
+published: true
 description: Quantized GGUF checkpoints on stable-diffusion.cpp are the leanest way to generate AI images on-device. Mac and Windows, no cloud, no Python.
 tags: ai, stablediffusion, privacy, macos
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/best-gguf-image-models-local.jpg
 ---
 
 A modern SDXL checkpoint in full precision is roughly 6 to 7 GB and expects a fat Python stack to load it. The same model, quantized to GGUF and run through `stable-diffusion.cpp`, is a smaller file that fits in consumer memory and needs no Python at all. Off Grid AI Desktop is a free, open-source app that ships this path with a curated catalog you can run in a few clicks.

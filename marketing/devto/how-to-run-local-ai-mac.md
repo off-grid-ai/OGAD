@@ -1,9 +1,9 @@
 ---
 title: How to Run Local AI on Your Mac in 2026 (No Cloud, No Account)
-published: false
+published: true
 description: Chat, generate images, and talk to AI on your Mac, all on-device. No cloud, no account, no monthly bill. Free and open source.
 tags: ai, macos, privacy, opensource
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/how-to-run-local-ai-mac.jpg
 ---
 
 The same M-series chip that edits your video also runs language models, draws images, and transcribes speech, all on a single shared pool of memory. Most people rent three separate subscriptions to do those things on someone else's servers while that hardware sits idle. Off Grid AI Desktop is a free, open-source app that runs chat, image generation, and voice directly on your Mac.

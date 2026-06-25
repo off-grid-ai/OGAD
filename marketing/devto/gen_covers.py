@@ -157,6 +157,38 @@ SCENES = {
   ("A laptop's local models drawn as labeled tools on a pegboard, a cable handing them to an MCP client window. "
    "A cut cable to a crossed-out cloud.",
    ["MODELS AS MCP TOOLS", "LOCAL, NO CLOUD", "OFF GRID"]),
+ # positioning articles
+ "only-local-multimodal-ai":
+  ("A single laptop at the center drawn as a hub, with many small panels around it: a chat bubble, an eye, a framed image, a sound wave, a document, a brain. "
+   "Every panel connects inward to the one laptop. A cut cable to a crossed-out corner cloud.",
+   ["ONE APP, EVERY MODALITY", "ALL LOCAL", "OFF GRID"]),
+ "fully-open-source-private-ai":
+  ("A laptop drawn inside a thick protective enclosure like a strongbox, an open padlock on it marked with an open-source mark. "
+   "A cut cable to a crossed-out cloud. Nothing flows out. A tiny figure tends a contained flame inside.",
+   ["OPEN SOURCE", "NOTHING LEAVES", "OFF GRID"]),
+ "fast-local-ai-text-and-images":
+  ("A laptop with a bold charcoal lightning bolt across it, a chat bubble and a framed image both shooting out fast with motion lines. "
+   "A cut cable to a crossed-out cloud, with a tiny crossed-out clock to show no waiting.",
+   ["FAST, LOCAL", "NO QUEUE  NO CLOUD", "OFF GRID"]),
+ "all-in-one-local-voice-ai":
+  ("A laptop with a microphone on one side feeding a sound wave into text on the screen, and a speaker on the other side with text turning into a sound wave out. "
+   "A cut cable to a crossed-out cloud.",
+   ["VOICE IN + VOICE OUT", "ON DEVICE", "OFF GRID"]),
+ "local-ai-skills-automation":
+  ("A laptop with a row of labeled skill cards filed beside it, a small clock and a bell showing triggers, an arrow from a card running an action on the screen. "
+   "A cut cable to a crossed-out cloud.",
+   ["REUSABLE SKILLS", "TRIGGER -> ACTION", "OFF GRID"]),
+ "local-ai-artifacts":
+  ("A laptop whose screen splits into code on the left and a live rendered mini-app, chart, and diagram on the right. "
+   "A cut cable to a crossed-out cloud.",
+   ["LIVE ARTIFACTS", "RENDERED LOCALLY", "OFF GRID"]),
+ "local-code-sandbox":
+  ("A laptop screen showing code running inside a clearly drawn glass box, the box sealed, with a cut wire and a crossed-out cloud showing the sandbox cannot reach the network or files. ",
+   ["SANDBOXED PREVIEW", "NO NETWORK  NO FILES", "OFF GRID"]),
+ "local-ai-connector-support":
+  ("A laptop in the center with several labeled tool boxes plugged in by cables, and a clear gate with a checkmark in front of the laptop showing every action is approved first. "
+   "A cut cable to a crossed-out cloud.",
+   ["CONNECTORS", "APPROVAL-GATED", "OFF GRID"]),
 }
 
 def prompt_for(slug):

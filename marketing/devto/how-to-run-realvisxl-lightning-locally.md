@@ -1,9 +1,9 @@
 ---
 title: How to Run RealVisXL Lightning Locally in 2026 (Fast Photorealistic AI Images, Offline)
-published: false
+published: true
 description: Run RealVisXL v5.0 Lightning for fast photorealistic AI images on-device in 4-8 steps, no cloud, no account, no API keys. Mac and Windows.
 tags: ai, stablediffusion, privacy, windows
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/how-to-run-realvisxl-lightning-locally.jpg
 ---
 
 An RTX 4070 holds 12 GB of VRAM and pushes tens of teraflops, enough to run a distilled SDXL model in a handful of steps. That card sits idle while you wait in a cloud queue and pay per image to render on someone else's GPU. Off Grid AI Desktop is a free, open-source app that runs RealVisXL Lightning directly on your PC or Mac.

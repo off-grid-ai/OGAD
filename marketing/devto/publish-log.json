@@ -1,0 +1,162 @@
+{
+  "how-to-run-llms-locally-mac": {
+    "id": 3984581,
+    "url": "https://dev.to/alichherawalla/how-to-run-llms-locally-on-your-mac-in-2026-completely-offline-no-subscription-3g7f"
+  },
+  "how-to-run-llms-locally-windows": {
+    "id": 3984582,
+    "url": "https://dev.to/alichherawalla/how-to-run-llms-locally-on-your-windows-pc-in-2026-completely-offline-no-subscription-14oa"
+  },
+  "how-to-run-local-ai-mac": {
+    "id": 3984586,
+    "url": "https://dev.to/alichherawalla/how-to-run-local-ai-on-your-mac-in-2026-no-cloud-no-account-1899"
+  },
+  "how-to-run-local-ai-windows": {
+    "id": 3984587,
+    "url": "https://dev.to/alichherawalla/how-to-run-local-ai-on-your-windows-pc-in-2026-no-cloud-no-account-47k3"
+  },
+  "how-to-generate-ai-images-locally-mac": {
+    "id": 3984593,
+    "url": "https://dev.to/alichherawalla/how-to-generate-ai-images-locally-on-your-mac-in-2026-no-cloud-no-subscription-36i7"
+  },
+  "how-to-generate-ai-images-locally-windows": {
+    "id": 3984594,
+    "url": "https://dev.to/alichherawalla/how-to-generate-ai-images-locally-on-your-windows-pc-in-2026-no-cloud-no-subscription-1aod"
+  },
+  "ollama-alternative-local": {
+    "id": 3984597,
+    "url": "https://dev.to/alichherawalla/how-to-use-ollama-in-2026-no-configuration-required-plus-a-local-first-alternative-1h39"
+  },
+  "lm-studio-alternative": {
+    "id": 3984599,
+    "url": "https://dev.to/alichherawalla/lm-studio-in-2026-setup-and-a-capture-aware-alternative-590d"
+  },
+  "local-chatgpt-alternative": {
+    "id": 3984600,
+    "url": "https://dev.to/alichherawalla/a-local-offline-alternative-to-chatgpt-for-your-desktop-in-2026-58l2"
+  },
+  "how-to-run-stable-diffusion-desktop": {
+    "id": 3984601,
+    "url": "https://dev.to/alichherawalla/how-to-run-stable-diffusion-on-your-desktop-on-device-ai-image-generation-3a9a"
+  },
+  "how-to-run-gemma-locally": {
+    "id": 3984607,
+    "url": "https://dev.to/alichherawalla/how-to-run-gemma-locally-on-your-computer-in-2026-mac-and-windows-no-cloud-18mf"
+  },
+  "how-to-run-qwen-locally": {
+    "id": 3984610,
+    "url": "https://dev.to/alichherawalla/how-to-run-qwen-locally-on-your-computer-in-2026-completely-offline-3m0f"
+  },
+  "only-local-multimodal-ai": {
+    "id": 3984616,
+    "url": "https://dev.to/alichherawalla/off-grid-ai-desktop-the-only-fully-local-multimodal-ai-app-in-2026-4a7g"
+  },
+  "fully-open-source-private-ai": {
+    "id": 3984617,
+    "url": "https://dev.to/alichherawalla/fully-open-source-fully-private-how-off-grid-ai-desktop-keeps-your-ai-on-device-22m9"
+  },
+  "local-openai-compatible-api": {
+    "id": 3984622,
+    "url": "https://dev.to/alichherawalla/how-to-run-a-local-openai-compatible-api-on-your-desktop-in-2026-no-cloud-no-keys-4e0n"
+  },
+  "all-in-one-local-voice-ai": {
+    "id": 3984623,
+    "url": "https://dev.to/alichherawalla/the-all-in-one-local-voice-ai-built-in-tts-stt-and-audio-mode-on-device-2g4c"
+  },
+  "best-gguf-image-models-local": {
+    "id": 3984627,
+    "url": "https://dev.to/alichherawalla/the-most-optimised-way-to-run-ai-image-generation-locally-in-2026-gguf-on-device-2nho"
+  },
+  "chat-with-documents-locally": {
+    "id": 3984628,
+    "url": "https://dev.to/alichherawalla/how-to-chat-with-your-documents-locally-offline-rag-no-cloud-4bjd"
+  },
+  "connect-notion-linear-jira-local-ai": {
+    "id": 3984636,
+    "url": "https://dev.to/alichherawalla/how-to-connect-notion-linear-and-jira-to-a-local-ai-private-mcp-2f2h"
+  },
+  "fast-local-ai-text-and-images": {
+    "id": 3984637,
+    "url": "https://dev.to/alichherawalla/fast-local-ai-on-device-text-and-image-generation-without-the-cloud-2dok"
+  },
+  "how-to-run-animagine-xl-locally": {
+    "id": 3984641,
+    "url": "https://dev.to/alichherawalla/how-to-run-animagine-xl-40-locally-in-2026-offline-anime-ai-image-generation-1ghp"
+  },
+  "how-to-run-dreamshaper-xl-turbo-locally": {
+    "id": 3984642,
+    "url": "https://dev.to/alichherawalla/how-to-run-dreamshaper-xl-turbo-locally-on-your-desktop-fast-offline-ai-art-3akh"
+  },
+  "how-to-run-illustrious-xl-locally": {
+    "id": 3984647,
+    "url": "https://dev.to/alichherawalla/how-to-run-illustrious-xl-20-locally-in-2026-offline-anime-and-illustration-ai-5cif"
+  },
+  "how-to-run-juggernaut-xl-locally": {
+    "id": 3984648,
+    "url": "https://dev.to/alichherawalla/how-to-run-juggernaut-xl-locally-on-your-desktop-in-2026-photorealistic-ai-images-offline-15h5"
+  },
+  "how-to-run-pony-diffusion-locally": {
+    "id": 3984654,
+    "url": "https://dev.to/alichherawalla/how-to-run-pony-diffusion-v6-xl-locally-on-your-desktop-offline-no-cloud-448m"
+  },
+  "how-to-run-realvisxl-lightning-locally": {
+    "id": 3984656,
+    "url": "https://dev.to/alichherawalla/how-to-run-realvisxl-lightning-locally-in-2026-fast-photorealistic-ai-images-offline-182k"
+  },
+  "how-to-run-realvisxl-locally": {
+    "id": 3984664,
+    "url": "https://dev.to/alichherawalla/how-to-run-realvisxl-50-locally-on-your-desktop-photorealism-offline-19m"
+  },
+  "local-ai-artifacts": {
+    "id": 3984666,
+    "url": "https://dev.to/alichherawalla/local-artifacts-render-html-react-svg-and-mermaid-on-device-no-cloud-208e"
+  },
+  "local-ai-connector-support": {
+    "id": 3984673,
+    "url": "https://dev.to/alichherawalla/connector-support-in-off-grid-ai-desktop-private-approval-gated-integrations-433c"
+  },
+  "local-ai-image-studio": {
+    "id": 3984674,
+    "url": "https://dev.to/alichherawalla/how-to-run-a-local-ai-image-studio-on-your-desktop-sdxl-z-image-offline-2fhn"
+  },
+  "local-ai-models-as-mcp-tools": {
+    "id": 3984679,
+    "url": "https://dev.to/alichherawalla/how-to-expose-on-device-ai-models-as-mcp-tools-local-mcp-server-no-cloud-2f3"
+  },
+  "local-ai-second-brain": {
+    "id": 3984681,
+    "url": "https://dev.to/alichherawalla/how-to-build-a-local-ai-second-brain-on-your-desktop-in-2026-100-offline-1mhc"
+  },
+  "local-ai-skills-automation": {
+    "id": 3984684,
+    "url": "https://dev.to/alichherawalla/skills-give-your-local-ai-reusable-triggerable-automations-on-device-5gp1"
+  },
+  "local-code-sandbox": {
+    "id": 3984686,
+    "url": "https://dev.to/alichherawalla/a-local-code-sandbox-run-ai-generated-code-safely-on-device-no-cloud-1c7k"
+  },
+  "one-local-api-all-modalities": {
+    "id": 3984691,
+    "url": "https://dev.to/alichherawalla/one-local-api-for-chat-vision-images-speech-and-embeddings-on-device-2026-2c2p"
+  },
+  "point-your-ide-at-local-ai": {
+    "id": 3984692,
+    "url": "https://dev.to/alichherawalla/how-to-point-your-ide-and-apps-at-a-local-ai-model-private-on-device-1643"
+  },
+  "private-ai-meeting-notetaker": {
+    "id": 3984703,
+    "url": "https://dev.to/alichherawalla/how-to-run-a-private-ai-meeting-notetaker-zoom-and-google-meet-on-device-3jkc"
+  },
+  "text-to-speech-locally": {
+    "id": 3984706,
+    "url": "https://dev.to/alichherawalla/how-to-run-text-to-speech-locally-on-your-desktop-in-2026-kokoro-offline-voice-4a73"
+  },
+  "transcribe-meetings-locally": {
+    "id": 3984714,
+    "url": "https://dev.to/alichherawalla/how-to-transcribe-meetings-locally-in-2026-whisper-on-device-2ak7"
+  },
+  "voice-to-text-locally": {
+    "id": 3984717,
+    "url": "https://dev.to/alichherawalla/how-to-run-voice-to-text-locally-on-your-desktop-whisper-offline-dictation-349p"
+  }
+}

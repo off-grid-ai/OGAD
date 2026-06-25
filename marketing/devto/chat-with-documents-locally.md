@@ -1,9 +1,9 @@
 ---
 title: How to Chat With Your Documents Locally (Offline RAG, No Cloud)
-published: false
+published: true
 description: Upload PDFs, notes, and audio, then chat with cited sources entirely on-device. No cloud, no account, no API keys.
 tags: ai, privacy, rag, llm
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/chat-with-documents-locally.jpg
 ---
 
 A modern laptop has 16GB or more of RAM and a GPU that sits at 2 percent load while you read a PDF. That hardware can run a language model and a vector search index at the same time, but most "chat with your documents" tools ship your files to a server and charge you monthly for the privilege. Off Grid AI Desktop is a free, open-source app that runs the whole pipeline, embeddings, vector store, and chat, directly on your Mac or PC.

@@ -1,9 +1,9 @@
 ---
 title: One Local API for Chat, Vision, Images, Speech, and Embeddings (On-Device, 2026)
-published: false
+published: true
 description: A single OpenAI-compatible endpoint that does text, vision, image generation, transcription, TTS, and embeddings, all on-device with no cloud.
 tags: ai, privacy, multimodal, opensource
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/one-local-api-all-modalities.jpg
 ---
 
 A modern laptop has a GPU and unified memory that can run a chat model, a vision model, a diffusion model, and a whisper transcriber. Most of that silicon sits idle while you pay a monthly bill to call those same models on someone else's server, over the internet, with your data in transit. Off Grid AI Desktop is a free, open-source app that runs all of those models directly on your Mac or PC, and exposes them through one local HTTP API.

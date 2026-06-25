@@ -1,9 +1,9 @@
 ---
 title: How to Run a Private AI Meeting Notetaker (Zoom and Google Meet, On-Device)
-published: false
+published: true
 description: A consent-first meeting notetaker that records, transcribes, and summarizes on-device. A private alternative to Otter and Fireflies.
 tags: ai, privacy, productivity, meetings
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/private-ai-meeting-notetaker.jpg
 ---
 
 When you invite a cloud notetaker to a call, a bot joins, records everyone, and ships the audio to a vendor's servers. Half the room often does not know it is there. Off Grid AI Desktop is a free, open-source app that records, transcribes, and summarizes your meetings on your own Mac or PC, with the recording in plain sight and the data never leaving the machine.

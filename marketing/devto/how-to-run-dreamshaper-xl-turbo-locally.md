@@ -1,9 +1,9 @@
 ---
 title: How to Run DreamShaper XL Turbo Locally on Your Desktop (Fast Offline AI Art)
-published: false
+published: true
 description: Generate artwork in a handful of steps with DreamShaper XL Turbo, fully on-device, no cloud, no account, no API keys.
 tags: ai, stablediffusion, privacy, art
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/how-to-run-dreamshaper-xl-turbo-locally.jpg
 ---
 
 A Turbo-distilled SDXL model can produce a finished image in a handful of steps instead of dozens. That speed runs fine on the GPU already in your machine, the one sitting idle while you pay monthly to generate art on a rented server. Off Grid AI Desktop is a free, open-source app that runs DreamShaper XL Turbo directly on your Mac or PC.

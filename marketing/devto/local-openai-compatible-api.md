@@ -1,9 +1,9 @@
 ---
 title: How to Run a Local OpenAI-Compatible API on Your Desktop in 2026 (No Cloud, No Keys)
-published: false
+published: true
 description: Swap one base_url and your existing OpenAI code runs against on-device models for free, offline, with no API key.
 tags: ai, privacy, openai, opensource
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/local-openai-compatible-api.jpg
 ---
 
 The laptop on your desk has a GPU that can run a 7B model and a diffusion model without breaking a sweat. Most of the time that silicon sits idle while you pay a monthly bill to send your prompts to someone else's server. Off Grid AI Desktop is a free, open-source app that runs a full OpenAI-compatible API directly on your Mac or PC.

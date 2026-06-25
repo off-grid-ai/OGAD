@@ -1,9 +1,9 @@
 ---
 title: How to Run Stable Diffusion on Your Desktop (On-Device AI Image Generation)
-published: false
+published: true
 description: Generate images with Stable Diffusion on your own Mac or PC, fully on-device, with a free open-source app. No cloud, no account, no credits.
 tags: ai, stablediffusion, privacy, macos
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/how-to-run-stable-diffusion-desktop.jpg
 ---
 
 The GPU in a gaming PC or an Apple Silicon Mac can paint a 1024-pixel image from a text prompt in seconds. That silicon sits idle while you pay per image to a cloud service that watermarks the output and keeps your prompts. Off Grid AI Desktop is a free, open-source app that runs Stable Diffusion directly on your Mac or PC.

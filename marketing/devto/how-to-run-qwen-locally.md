@@ -1,9 +1,9 @@
 ---
 title: How to Run Qwen Locally on Your Computer in 2026 (Completely Offline)
-published: false
+published: true
 description: Run Alibaba's Qwen models on your own Mac or PC, fully on-device, with a free open-source app. No cloud, no account, no API keys.
 tags: ai, llm, qwen, privacy
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/how-to-run-qwen-locally.jpg
 ---
 
 The GPU in a mid-range laptop can run a 7-billion-parameter model fast enough to feel like a chat. That power sits unused while you pay a monthly fee to send every question to a remote server. Off Grid AI Desktop is a free, open-source app that runs Alibaba's Qwen models directly on your Mac or PC.

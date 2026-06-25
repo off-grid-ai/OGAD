@@ -1,9 +1,9 @@
 ---
 title: How to Run Illustrious XL 2.0 Locally in 2026 (Offline Anime and Illustration AI)
-published: false
+published: true
 description: Run Illustrious XL v2.0 anime and illustration AI fully on-device on Mac or Windows. No cloud, no account, no API keys.
 tags: ai, stablediffusion, anime, privacy
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/how-to-run-illustrious-xl-locally.jpg
 ---
 
 The laptop you already own has a GPU that can render a finished anime illustration in seconds. That same silicon usually sits at idle while you pay a monthly fee to send prompts to a server in another country. Off Grid AI Desktop is a free, open-source app that runs Illustrious XL v2.0 directly on your Mac or PC.

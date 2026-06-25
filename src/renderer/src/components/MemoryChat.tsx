@@ -873,10 +873,13 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
 
   const openGallery = useCallback(() => {
     if (showGallery) { setShowGallery(false); return; }
+    // Default the scope to the current context: a project → that project's items,
+    // otherwise this chat's items. (User can switch to All.)
+    setGalleryScope(activeProjectId ? 'project' : 'chat');
     // Close the OTHER panels (closePanels also clears showGallery), then open —
-    // setShowGallery(true) runs last so it wins.
-    closePanels(); refreshGallery(); setShowGallery(true);
-  }, [showGallery, refreshGallery, closePanels]);
+    // setShowGallery(true) runs last so it wins. The scope effect refreshes.
+    closePanels(); setShowGallery(true);
+  }, [showGallery, activeProjectId, closePanels]);
 
   const downloadImage = useCallback(async (path?: string, name?: string) => {
     if (!path) return;

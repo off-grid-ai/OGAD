@@ -1,9 +1,9 @@
 ---
 title: How to Run Voice-to-Text Locally on Your Desktop (Whisper, Offline Dictation)
-published: false
+published: true
 description: Run private speech-to-text on your own Mac or PC with bundled whisper.cpp. Mic to text in the composer, on-device, no cloud transcription.
 tags: ai, privacy, whisper, productivity
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/voice-to-text-locally.jpg
 ---
 
 OpenAI trained Whisper on 680,000 hours of audio, and the small models that came out of it run on a laptop CPU in real time. That power sits idle while you pay a monthly subscription to send every voice note to someone else's server for transcription. Off Grid AI Desktop is a free, open-source app that runs Whisper directly on your Mac or PC.

@@ -1,9 +1,9 @@
 ---
 title: How to Run Juggernaut XL Locally on Your Desktop in 2026 (Photorealistic AI Images, Offline)
-published: false
+published: true
 description: Run Juggernaut XL v9 for photorealistic AI images entirely on-device, no cloud, no account, no API keys. Works on Mac and Windows.
 tags: ai, stablediffusion, privacy, macos
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/how-to-run-juggernaut-xl-locally.jpg
 ---
 
 The M3 Max in your laptop ships with up to 40 GPU cores and shares memory with the CPU, so a 6 GB image model loads without copying anything across a bus. That hardware sits idle while you pay a monthly subscription to generate photos on someone else's server, where every prompt is logged. Off Grid AI Desktop is a free, open-source app that runs Juggernaut XL v9 directly on your Mac or PC.

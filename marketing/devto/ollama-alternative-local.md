@@ -1,9 +1,9 @@
 ---
 title: How to Use Ollama in 2026 (No Configuration Required), Plus a Local-First Alternative
-published: false
+published: true
 description: Run local LLMs with Ollama in minutes, then see a GUI alternative that adds image gen, voice, and on-device memory. No cloud.
 tags: ai, llm, ollama, privacy
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/ollama-alternative-local.jpg
 ---
 
 A modern laptop ships with 16GB or more of unified memory and a GPU that idles at single-digit percent most of the day. That hardware can run a 7B language model right now, no internet needed. Most people still pay a monthly subscription to send every prompt to a server they do not own. Off Grid AI Desktop is a free, open-source app that runs local models directly on your Mac or PC, and it does more than chat.

@@ -1,9 +1,9 @@
 ---
 title: How to Build a Local AI Second Brain on Your Desktop in 2026 (100% Offline)
-published: false
+published: true
 description: Build a private second brain that builds itself. Opt-in screen capture to OCR to local LLM distills memory, on-device, no cloud and no account.
 tags: ai, privacy, productivity, secondbrain
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/local-ai-second-brain.jpg
 ---
 
 A modern laptop GPU can run a capable language model and read text off a screenshot in the time it takes you to switch windows. That power sits idle while you pay a monthly subscription to a note-taking app that stores your life on someone else's server. Off Grid AI Desktop is a free, open-source app that turns your own machine into a second brain that builds itself.

@@ -1,9 +1,9 @@
 ---
 title: How to Expose On-Device AI Models as MCP Tools (Local MCP Server, No Cloud)
-published: false
+published: true
 description: Turn your local chat, vision, image, speech, and embedding models into MCP tools any client can call, fully offline and on-device.
 tags: ai, privacy, mcp, opensource
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/local-ai-models-as-mcp-tools.jpg
 ---
 
 Your laptop can run a chat model, a vision model, a diffusion model, and a transcriber on its own GPU. Most setups still route every tool call through a cloud model that bills per token and reads everything you send. Off Grid AI Desktop is a free, open-source app that runs those models on your Mac or PC and serves them to any MCP client through a local MCP endpoint.

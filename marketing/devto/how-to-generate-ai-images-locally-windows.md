@@ -1,9 +1,9 @@
 ---
 title: How to Generate AI Images Locally on Your Windows PC in 2026 (No Cloud, No Subscription)
-published: false
+published: true
 description: Generate SDXL and Z-Image-Turbo images on Windows with CUDA or Vulkan. On-device, no cloud, no subscription, no account. Free and open source.
 tags: ai, windows, stablediffusion, privacy
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/how-to-generate-ai-images-locally-windows.jpg
 ---
 
 An RTX card with 8GB of VRAM can denoise a full SDXL image in seconds, and a 12GB card barely notices the load. That hardware was built for exactly this kind of parallel math, yet it idles in your case while you wait in a web queue and watch a credit counter tick down. Off Grid AI Desktop is a free, open-source app that generates images directly on your Windows PC.

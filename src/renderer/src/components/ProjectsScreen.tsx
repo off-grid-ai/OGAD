@@ -13,9 +13,37 @@ import {
   IconMessage,
   IconSettings,
 } from '@tabler/icons-react';
+import { ArtifactCanvas, type Artifact } from './ArtifactCanvas';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const api = (window as any).api;
+
+// Artifacts saved within a project — listed (and openable) from the project view.
+function ProjectArtifacts({ projectId }: { projectId: string }): React.ReactElement {
+  const [items, setItems] = useState<(Artifact & { id: string; title: string; created: number })[]>([]);
+  const [open, setOpen] = useState<Artifact | null>(null);
+  useEffect(() => {
+    (async () => { try { setItems((await api.listArtifacts?.({ projectId })) || []); } catch { /* ignore */ } })();
+  }, [projectId]);
+  return (
+    <div>
+      <div className="mb-3 text-[11px] uppercase tracking-wide text-neutral-500">Artifacts</div>
+      {items.length === 0 ? (
+        <p className="text-sm text-neutral-600">No artifacts yet — generate HTML, React, SVG, or docs in a chat scoped to this project and they’ll appear here.</p>
+      ) : (
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {items.map((a) => (
+            <button key={a.id} onClick={() => setOpen(a)} className="flex items-center gap-3 rounded-md border border-neutral-800 bg-neutral-900/60 p-3 text-left transition-colors hover:border-green-500/50">
+              <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase text-green-400">{a.kind}</span>
+              <span className="min-w-0 flex-1 truncate text-sm text-neutral-200">{a.title}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {open && <ArtifactCanvas artifact={open} onClose={() => setOpen(null)} />}
+    </div>
+  );
+}
 
 interface Project {
   id: string;
@@ -290,6 +318,8 @@ function ProjectConfig({
   const [systemPrompt, setSystemPrompt] = useState(project.systemPrompt);
   const [includeMemory, setIncludeMemory] = useState(project.includeMemory);
   const [saving, setSaving] = useState(false);
+  // Captured-memory retrieval is a Pro feature — core projects use uploaded docs only.
+  const isPro = !!api?.isPro;
   const [savedAt, setSavedAt] = useState<string | null>(null);
 
   const dirty =
@@ -353,25 +383,33 @@ function ProjectConfig({
           />
         </Field>
 
-        <Field label="Knowledge sources">
-          <button
-            onClick={() => setIncludeMemory((v) => !v)}
-            className="flex items-center gap-3 text-left"
-          >
-            <span className={`h-4 w-7 shrink-0 rounded-full transition-colors ${includeMemory ? 'bg-green-500' : 'bg-neutral-700'}`}>
-              <span className={`block h-3 w-3 rounded-full bg-white transition-transform ${includeMemory ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
-            </span>
-            <span className="text-sm text-neutral-300">
-              Include captured memory
-              <span className="block text-[11px] text-neutral-600">
-                Retrieval spans uploaded documents{includeMemory ? ' + everything Off Grid has captured' : ' only'}.
+        {/* Captured-memory retrieval is Pro. Core projects retrieve over uploaded
+            documents only — no mention of memory/capture. */}
+        {isPro && (
+          <Field label="Knowledge sources">
+            <button
+              onClick={() => setIncludeMemory((v) => !v)}
+              className="flex items-center gap-3 text-left"
+            >
+              <span className={`h-4 w-7 shrink-0 rounded-full transition-colors ${includeMemory ? 'bg-green-500' : 'bg-neutral-700'}`}>
+                <span className={`block h-3 w-3 rounded-full bg-white transition-transform ${includeMemory ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
               </span>
-            </span>
-          </button>
-        </Field>
+              <span className="text-sm text-neutral-300">
+                Include captured memory
+                <span className="block text-[11px] text-neutral-600">
+                  Retrieval spans uploaded documents{includeMemory ? ' + everything Off Grid has captured' : ' only'}.
+                </span>
+              </span>
+            </button>
+          </Field>
+        )}
 
         <div className="border-t border-neutral-800 pt-6">
           <KnowledgeBase projectId={project.id} />
+        </div>
+
+        <div className="border-t border-neutral-800 pt-6">
+          <ProjectArtifacts projectId={project.id} />
         </div>
       </div>
     </div>

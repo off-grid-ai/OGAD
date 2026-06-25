@@ -1,9 +1,9 @@
 ---
 title: How to Run a Local AI Image Studio on Your Desktop (SDXL, Z-Image, Offline)
-published: false
+published: true
 description: Generate images with SDXL and Z-Image-Turbo entirely on-device. No subscription, no cloud, no prompts leaving your machine.
 tags: ai, stablediffusion, macos, privacy
-cover_image:
+cover_image: https://raw.githubusercontent.com/off-grid-ai/desktop/marketing-assets/covers/local-ai-image-studio.jpg
 ---
 
 The GPU in a modern laptop can run the same image models that power paid services like Midjourney. That hardware sits idle while you pay a monthly fee to generate pictures on someone else's server. Off Grid AI Desktop is a free, open-source app that runs Stable Diffusion XL and Z-Image-Turbo directly on your Mac or PC.
