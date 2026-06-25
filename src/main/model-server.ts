@@ -871,7 +871,7 @@ export function startModelServer(port = 7878): void {
     if (url === '/' || url === '/health') {
       const img = imageGenStatus();
       json(res, 200, {
-        name: 'Off Grid AI Desktop — local model gateway',
+        name: 'Off Grid AI — local model gateway',
         openai_compatible: true,
         base_url: `http://127.0.0.1:${port}/v1`,
         docs: `http://127.0.0.1:${port}/docs`,
@@ -922,7 +922,7 @@ export function startModelServer(port = 7878): void {
     // 404 from llama-server (which is what hitting GET /v1 directly would give).
     if (url === '/v1' || url === '/v1/') {
       json(res, 200, {
-        message: 'Off Grid AI Desktop local gateway. OpenAI-compatible API.',
+        message: 'Off Grid AI local gateway. OpenAI-compatible API.',
         endpoints: [
           'POST /v1/chat/completions',
           'POST /v1/embeddings',

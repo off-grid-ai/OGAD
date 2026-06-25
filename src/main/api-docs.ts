@@ -10,7 +10,7 @@
 
 export function docsText(port: number): string {
   const b = `http://127.0.0.1:${port}`;
-  return `Off Grid AI Desktop — Local Model Gateway
+  return `Off Grid AI — Local Model Gateway
 OpenAI-compatible. Base URL: ${b}/v1  (no API key required)
 
 TEXT -> TEXT          POST ${b}/v1/chat/completions   {model, messages, stream?}
@@ -34,7 +34,7 @@ export function docsHtml(port: number): string {
 <html lang="en"><head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Off Grid AI Desktop — Local API</title>
+  <title>Off Grid AI — Local API</title>
   <style>
     body{ margin:0; background:#0A0A0A; }
     /* Brand the Scalar theme: Menlo mono + emerald accent + near-black base. */
@@ -114,7 +114,7 @@ export function openApiSpec(
   return {
     openapi: '3.1.0',
     info: {
-      title: 'Off Grid AI Desktop — Local Model Gateway',
+      title: 'Off Grid AI — Local Model Gateway',
       version: '1.0.0',
       description: `One **OpenAI-compatible** API for every on-device modality. **No API key** — the server is bound to loopback and nothing leaves the machine.
 
