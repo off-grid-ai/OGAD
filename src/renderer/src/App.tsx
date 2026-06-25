@@ -9,6 +9,7 @@ import { Settings } from './components/Settings';
 import { ModelsScreen } from './components/ModelsScreen';
 import { ProjectsScreen } from './components/ProjectsScreen';
 import { ConnectorsScreen } from './components/ConnectorsScreen';
+import { GatewayScreen } from './components/GatewayScreen';
 import { Onboarding } from './components/Onboarding';
 import { PermissionGate } from './components/PermissionGate';
 import type { SearchHit } from './types';
@@ -31,6 +32,8 @@ import {
   IconDownload,
   IconFolders,
   IconPlug,
+  IconServer2,
+  IconLock,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
   IconLoader2,
@@ -40,7 +43,7 @@ import {
 import { cn } from './lib/utils';
 import { usePostHog } from 'posthog-js/react';
 
-type ViewMode = 'dashboard' | 'day' | 'replay' | 'reflect' | 'actions' | 'connectors' | 'meetings' | 'chats' | 'memories' | 'entities' | 'graph' | 'memory-chat' | 'models' | 'projects' | 'notifications' | 'settings' | 'search';
+type ViewMode = 'dashboard' | 'day' | 'replay' | 'reflect' | 'actions' | 'connectors' | 'meetings' | 'chats' | 'memories' | 'entities' | 'graph' | 'memory-chat' | 'models' | 'gateway' | 'projects' | 'notifications' | 'settings' | 'search';
 
 // Navigation state type for history tracking
 interface NavigationState {
@@ -203,6 +206,7 @@ function AppContent() {
       '/entities': 'entities',
       '/graph': 'graph',
       '/models': 'models',
+      '/gateway': 'gateway',
       '/projects': 'projects',
       '/notifications': 'notifications',
       '/search': 'search',
@@ -230,6 +234,7 @@ function AppContent() {
       'entities': '/entities',
       'graph': '/graph',
       'models': '/models',
+      'gateway': '/gateway',
       'projects': '/projects',
       'notifications': '/notifications',
       'search': '/search',
@@ -429,7 +434,8 @@ function AppContent() {
       locked: !isPro,
     };
   };
-  const navItems: { label: string; icon: React.ReactNode; view: ViewMode; locked?: boolean }[] = [
+  // Icons take no color — the nav button drives it (emerald when active).
+  const mainNav: { label: string; icon: React.ReactNode; view: ViewMode; locked?: boolean }[] = [
     proItem('search'),
     proItem('day'),
     proItem('replay'),
@@ -437,13 +443,41 @@ function AppContent() {
     proItem('meetings'),
     proItem('actions'),
     proItem('entities'),
-    { label: 'Projects', icon: <IconFolders className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'projects' as ViewMode },
-    { label: 'Chat', icon: <IconMessageCircle className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'memory-chat' as ViewMode },
-    { label: 'Integrations', icon: <IconPlug className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'connectors' as ViewMode },
-    { label: 'Models', icon: <IconDownload className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'models' as ViewMode },
+    { label: 'Projects', icon: <IconFolders className="h-5 w-5 shrink-0" />, view: 'projects' as ViewMode },
+    { label: 'Chat', icon: <IconMessageCircle className="h-5 w-5 shrink-0" />, view: 'memory-chat' as ViewMode },
+    { label: 'Integrations', icon: <IconPlug className="h-5 w-5 shrink-0" />, view: 'connectors' as ViewMode },
+    { label: 'Models', icon: <IconDownload className="h-5 w-5 shrink-0" />, view: 'models' as ViewMode },
+    { label: 'Gateway', icon: <IconServer2 className="h-5 w-5 shrink-0" />, view: 'gateway' as ViewMode },
     proItem('notifications'),
-    { label: 'Settings', icon: <IconSettings className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'settings' as ViewMode },
   ];
+  const bottomNav: { label: string; icon: React.ReactNode; view: ViewMode; locked?: boolean }[] = [
+    { label: 'Settings', icon: <IconSettings className="h-5 w-5 shrink-0" />, view: 'settings' as ViewMode },
+  ];
+  const renderNavItem = (item: { label: string; icon: React.ReactNode; view: ViewMode; locked?: boolean }): React.ReactElement => {
+    const active = viewMode === item.view;
+    return (
+      <button
+        key={item.view}
+        onClick={() => {
+          posthog.capture('button_clicked', { button_name: 'navigation_' + item.view })
+          setViewMode(item.view); setSelectedSessionId(null); setSelectedMemoryId(null); setSelectedEntityId(null); setReplayTarget(null);
+        }}
+        title={!sidebarOpen ? item.label : undefined}
+        className={cn(
+          'group/nav relative flex items-center gap-3 rounded-lg py-2 text-sm transition-colors',
+          sidebarOpen ? 'px-3' : 'justify-center px-0',
+          active
+            ? 'bg-green-500/10 text-green-600 dark:text-green-400'
+            : 'text-neutral-500 hover:bg-neutral-500/10 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white'
+        )}
+      >
+        {active && <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-green-500" />}
+        {item.icon}
+        {sidebarOpen && <span className="flex-1 text-left whitespace-pre">{item.label}</span>}
+        {sidebarOpen && item.locked && <IconLock className="h-3.5 w-3.5 shrink-0 text-neutral-400/60" title="Pro" />}
+      </button>
+    );
+  };
 
   return (
     <div className="h-screen w-full overflow-hidden bg-neutral-950 relative">
@@ -471,8 +505,8 @@ function AppContent() {
       <div className="flex h-full relative z-10">
         {/* Aceternity Sidebar */}
         <Sidebar open={sidebarOpen} setOpen={setSidebarOpen}>
-          <SidebarBody className="justify-between gap-10 bg-neutral-900/80 backdrop-blur-xl border-r border-neutral-800">
-            <div className="flex flex-col flex-1 overflow-y-auto overflow-x-hidden">
+          <SidebarBody className="justify-between gap-3 bg-neutral-900/80 backdrop-blur-xl border-r border-neutral-800">
+            <div className="flex min-h-0 flex-1 flex-col">
               {/* Brand + a dedicated collapse/expand toggle */}
               {sidebarOpen ? (
                 <div className="flex items-center gap-2 py-2">
@@ -527,35 +561,15 @@ function AppContent() {
                 )}
               </div>
 
-              {/* Navigation */}
-              <div className="mt-8 flex flex-col gap-2">
-                {navItems.map((item) => (
-                  <button
-                    key={item.view}
-                    onClick={() => {
-                      posthog.capture('button_clicked', { button_name: 'navigation_' + item.view })
-                      setViewMode(item.view); setSelectedSessionId(null); setSelectedMemoryId(null); setSelectedEntityId(null); setReplayTarget(null);
-                    }}
-                    className={cn(
-                      "flex items-center gap-2 py-2 px-2 rounded-lg transition-colors group/sidebar",
-                      viewMode === item.view
-                        ? "bg-neutral-800 text-white"
-                        : "text-neutral-400 hover:bg-neutral-800/50 hover:text-white"
-                    )}
-                  >
-                    {item.icon}
-                    <motion.span
-                      animate={{
-                        display: sidebarOpen ? 'inline-block' : 'none',
-                        opacity: sidebarOpen ? 1 : 0,
-                      }}
-                      className="text-sm whitespace-pre group-hover/sidebar:translate-x-1 transition duration-150"
-                    >
-                      {item.label}
-                    </motion.span>
-                  </button>
-                ))}
+              {/* Navigation (scrolls; Settings is pinned to the bottom) */}
+              <div className="mt-6 flex flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden pr-0.5">
+                {mainNav.map(renderNavItem)}
               </div>
+            </div>
+
+            {/* Pinned bottom */}
+            <div className="flex flex-col gap-1 border-t border-neutral-200 pt-2 dark:border-neutral-800">
+              {bottomNav.map(renderNavItem)}
             </div>
           </SidebarBody>
         </Sidebar>
@@ -618,6 +632,8 @@ function AppContent() {
                     <ProjectsScreen onOpenChat={handleOpenProjectChat} />
                   ) : viewMode === 'connectors' ? (
                     <ConnectorsScreen />
+                  ) : viewMode === 'gateway' ? (
+                    <GatewayScreen />
                   ) : viewMode === 'settings' ? (
                     <Settings />
                   ) : (

@@ -28,6 +28,8 @@ function findSdCli(): string | null {
 
 /** The Core ML (ANE) image-gen Swift helper, if bundled. */
 function findCoreMLBin(): string | null {
+  // Core ML is Apple-Silicon only — never offered off macOS (Windows/Linux use sd).
+  if (process.platform !== 'darwin') return null;
   for (const r of binRoots()) {
     const p = path.join(r, 'coreml-sd', 'coreml-sd');
     if (fs.existsSync(p)) return p;
@@ -37,6 +39,7 @@ function findCoreMLBin(): string | null {
 
 /** A Core ML model is a DIRECTORY of compiled .mlmodelc resources, not a GGUF. */
 function isCoreMLModelDir(p: string): boolean {
+  if (process.platform !== 'darwin') return false; // Core ML is macOS-only
   try {
     if (!fs.statSync(p).isDirectory()) return false;
     return fs.readdirSync(p).some((f) => /\.mlmodelc$/i.test(f));
