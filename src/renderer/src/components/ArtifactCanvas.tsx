@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 
 // Renders a model-generated artifact (HTML / SVG / Mermaid / React) in a SANDBOXED
 // iframe — sandbox="allow-scripts" only, no same-origin, no network — so generated
@@ -221,6 +222,10 @@ else { __ogShow('No React component found — define a component named App or a 
       <div className="relative min-h-0 flex-1 bg-white">
         {view === 'code' ? (
           <pre className="absolute inset-0 overflow-auto bg-neutral-950 p-4 text-xs text-neutral-300">{artifact.code}</pre>
+        ) : artifact.kind === 'text' ? (
+          <div className="prose prose-invert prose-sm absolute inset-0 max-w-none overflow-auto bg-neutral-950 px-6 py-5 text-sm leading-relaxed text-neutral-200 [&_a]:text-green-400 [&_code]:rounded [&_code]:bg-neutral-800 [&_code]:px-1 [&_h1]:mb-3 [&_h1]:mt-1 [&_h1]:text-xl [&_h1]:font-semibold [&_h1]:text-white [&_h2]:mb-2 [&_h2]:mt-5 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:text-white [&_li]:my-1 [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
+            <ReactMarkdown>{artifact.code}</ReactMarkdown>
+          </div>
         ) : srcdoc ? (
           <iframe key={artifact.code.length} title="artifact" sandbox="allow-scripts" srcDoc={srcdoc} className="absolute inset-0 h-full w-full border-0" style={{ background: '#fff' }} />
         ) : (
@@ -257,5 +262,9 @@ export function parseArtifact(content: string): Artifact | null {
   // A bare <svg>…</svg> with no fence is still a valid artifact.
   const svg = content.match(/<svg[\s\S]*<\/svg>/i);
   if (svg) return { kind: 'svg', code: svg[0] };
+
+  // A fenced markdown/doc block becomes a rendered document artifact.
+  const md = content.match(/```(?:markdown|md)\s*\n([\s\S]*?)```/i);
+  if (md) return { kind: 'text', code: md[1].trim() };
   return null;
 }
