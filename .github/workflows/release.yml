@@ -5,19 +5,52 @@ on:
     branches:
       - main
 
-jobs:
-  release:
-    runs-on: macos-latest
+concurrency:
+  group: release
+  cancel-in-progress: false
 
+jobs:
+  # Bump the version once (on Ubuntu) and push it, so every matrix job builds the
+  # same version. [skip ci] keeps it from re-triggering.
+  version:
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0  # Fetch all history for changelog
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Bump patch version
+        id: bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          npm version patch --no-git-tag-version
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          git add package.json package-lock.json
+          git commit -m "chore: bump version to $VERSION [skip ci]"
+          git push
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+  # Build + publish per-OS natively (native modules + platform binaries differ).
+  build:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main # the just-bumped commit
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
@@ -25,54 +58,49 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Bump patch version
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          npm version patch --no-git-tag-version
-          NEW_VERSION=$(node -p "require('./package.json').version")
-          echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
-          git add package.json package-lock.json
-          git commit -m "chore: bump version to $NEW_VERSION [skip ci]"
-          git push
+      # Windows needs win64 native runner binaries (the repo ships macOS ones).
+      - name: Fetch Windows binaries
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/fetch-win-binaries.ps1
 
-      - name: Generate release notes
-        run: |
-          # Get commits since last tag (or all commits if no tags)
-          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          if [ -z "$LAST_TAG" ]; then
-            COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges -20)
-          else
-            COMMITS=$(git log ${LAST_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
-          fi
-          
-          # Write release notes
-          echo "## What's Changed" > release-notes.md
-          echo "" >> release-notes.md
-          echo "$COMMITS" >> release-notes.md
-          echo "" >> release-notes.md
-          echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${LAST_TAG:-v0.0.0}...v${{ env.NEW_VERSION }}" >> release-notes.md
-          
-          cat release-notes.md
+      # macOS signing identity (no-op if the secret is absent → unsigned build).
+      - name: Import Apple signing certificate
+        if: runner.os == 'macOS' && env.CSC_LINK != ''
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+        run: echo "Signing cert provided via CSC_LINK"
 
-      - name: Build
+      - name: Build (typecheck + bundle)
         run: npm run build
 
-      - name: Package and publish
+      - name: Package & publish (macOS)
+        if: runner.os == 'macOS'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          EP_PRE_RELEASE: false
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npx electron-builder --mac --publish always
 
-      - name: Update release notes
+      - name: Package & publish (Windows)
+        if: runner.os == 'Windows'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release edit v${{ env.NEW_VERSION }} --notes-file release-notes.md || true
+          # Optional Windows code signing (no-op if absent → unsigned, SmartScreen warns)
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: npx electron-builder --win --publish always
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dist-macos
-          path: dist/*.dmg
+          name: dist-${{ matrix.os }}
+          path: |
+            dist/*.dmg
+            dist/*.exe
+            dist/*.zip
           if-no-files-found: ignore
