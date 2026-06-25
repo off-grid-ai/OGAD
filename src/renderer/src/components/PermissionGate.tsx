@@ -140,21 +140,17 @@ export function PermissionGate({ children }: PermissionGateProps) {
     );
   }
 
-  // Ready - render children (free: model only; pro: + capture permissions)
+  // Free build: never gate — let people into the app shell (with the sidebar) to
+  // look around. Model download lives in the Models tab; the app defaults there on
+  // first run (see App.tsx). No capture permissions to ask for.
+  if (!isPro) {
+    return children;
+  }
+
+  // Pro: ready when capture permissions are granted and a model is present.
   if (permsOk && modelStatus?.downloaded) {
     return (
       children
-    );
-  }
-
-  // Free build: onboarding has already run, and there are no capture permissions
-  // to grant — so go straight to model selection. Picking + Using a model flips
-  // modelStatus (polled every 2s) and the app opens.
-  if (!isPro && !modelStatus?.downloaded) {
-    return (
-      <div className="fixed inset-0 z-50 h-screen w-screen overflow-hidden bg-neutral-950">
-        <ModelsScreen />
-      </div>
     );
   }
 

@@ -107,8 +107,9 @@ function AppContent() {
     return () => { mounted = false; };
   }, []);
 
-  // Free users land on Chat (a core tab), not a locked Pro tab.
-  const [viewMode, setViewMode] = useState<ViewMode>(isPro ? 'day' : 'memory-chat');
+  // Free users land on Models (download a model first, with the sidebar to
+  // explore); pro lands on Day. Never a locked Pro tab.
+  const [viewMode, setViewMode] = useState<ViewMode>(isPro ? 'day' : 'models');
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [selectedMemoryId, setSelectedMemoryId] = useState<number | null>(null);
   const [selectedEntityId, setSelectedEntityId] = useState<number | null>(null);
