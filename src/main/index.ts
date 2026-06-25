@@ -239,6 +239,10 @@ app.whenReady().then(() => {
      // skills engine, console, tray) register their own IPC + intervals + watchers
      // here. No-op in the free build (the pro submodule is absent → stub).
      void loadProFeaturesMain().catch((e) => console.error('[pro] load failed', e));
+     // Demo seeder for testing: OFFGRID_SEED=1 seeds once; OFFGRID_SEED=force re-seeds.
+     if (process.env.OFFGRID_SEED) {
+       void import('./dev-seed').then((m) => m.seedDemo(process.env.OFFGRID_SEED === 'force')).catch((e) => console.error('[seed]', e));
+     }
      console.log("IPC Handlers Registered.");
   } catch (e) {
      console.error("FATAL: IPC Setup failed", e);
