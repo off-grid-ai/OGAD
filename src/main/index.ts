@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, systemPreferences, protocol, net, session, desktopCapturer, screen } from 'electron'
+import { app, shell, BrowserWindow, protocol, net, session, desktopCapturer, screen } from 'electron'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
 import fs from 'fs'
@@ -206,11 +206,8 @@ app.whenReady().then(() => {
     console.warn('[voice] permission handler setup failed', e);
   }
 
-  // Trigger permission prompt if not trusted
-  if (process.platform === 'darwin') {
-      const trusted = systemPreferences.isTrustedAccessibilityClient(true);
-      console.log("Accessibility Permission:", trusted ? "Granted" : "Denied/Prompted");
-  }
+  // NOTE: Accessibility is a Pro (capture) permission — the free build never asks
+  // for it. Pro requests it when capture starts (see pro focus/watcher).
 
   // Set app user model id for Windows notifications/taskbar grouping.
   electronApp.setAppUserModelId('co.getoffgridai.desktop')

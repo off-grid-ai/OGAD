@@ -13,8 +13,13 @@ const stub = resolve('src/bootstrap/proStub.ts')
 const proMain = proExists ? resolve('pro/main/index.ts') : stub
 const proRenderer = proExists ? resolve('pro/renderer/index.tsx') : stub
 
+// Baked into every bundle so runtime code can tell a pro build from a free build
+// without relying on an env var default (which can't distinguish "unset" from "pro").
+const proDefine = { __OFFGRID_PRO__: JSON.stringify(proExists) }
+
 export default defineConfig({
   main: {
+    define: proDefine,
     resolve: {
       alias: {
         '@offgrid/core': resolve('src'),
@@ -22,8 +27,11 @@ export default defineConfig({
       }
     }
   },
-  preload: {},
+  preload: {
+    define: proDefine
+  },
   renderer: {
+    define: proDefine,
     resolve: {
       alias: {
         '@renderer': resolve('src/renderer/src'),

@@ -23,7 +23,7 @@ export interface ProMainApi {
  *  set OFFGRID_PRO=0 to simulate a free user even with the pro code bundled.
  *  (Unset / any other value = pro on when the submodule is present.) */
 export function proEnabled(): boolean {
-  return process.env.OFFGRID_PRO !== '0';
+  return __OFFGRID_PRO__ && process.env.OFFGRID_PRO !== '0';
 }
 
 export async function loadProFeaturesMain(): Promise<void> {

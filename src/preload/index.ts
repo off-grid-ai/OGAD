@@ -4,10 +4,11 @@ console.log("PRELOAD SCRIPT LOADED");
 
 try {
   contextBridge.exposeInMainWorld('api', {
-    // Open-core: is the pro tier active in this build/session? Pro source is only
-    // present in paid builds; OFFGRID_PRO=0 simulates a free user locally. The
-    // renderer uses this to activate pro features and to lock/unlock pro tabs.
-    isPro: process.env.OFFGRID_PRO !== '0',
+    // Open-core: is the pro tier active in this build/session? True only when the
+    // pro submodule was bundled at build time (__OFFGRID_PRO__) AND not disabled
+    // via OFFGRID_PRO=0 (local override). The free build bundles no pro code, so
+    // this is always false there. The renderer uses it to lock/unlock pro tabs.
+    isPro: __OFFGRID_PRO__ && process.env.OFFGRID_PRO !== '0',
     // Generic passthrough so pro renderer code can reach pro IPC channels without
     // the core preload bundle enumerating them.
     proInvoke: (channel: string, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args),

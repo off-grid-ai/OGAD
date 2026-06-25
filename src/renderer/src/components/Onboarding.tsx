@@ -13,6 +13,7 @@ import {
   Eye,
   Image as ImageIcon,
   Microphone,
+  SpeakerHigh,
   FolderOpen,
   Cpu,
   LockKey,
@@ -71,6 +72,7 @@ const ORBIT = [
   { icon: Eye, label: 'Vision' },
   { icon: ImageIcon, label: 'Image' },
   { icon: Microphone, label: 'Voice' },
+  { icon: SpeakerHigh, label: 'Speech' },
   { icon: FolderOpen, label: 'Projects' },
 ];
 
@@ -119,7 +121,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
               <div className="mb-6 text-center">
                 <TextGenerate words="One app. Every model. On your Mac." className="text-3xl font-semibold tracking-tight text-white md:text-5xl" delay={0} />
                 <div className="mt-4">
-                  <TextGenerate words="Download open models and chat, see, draw, and speak — all on-device." className="text-neutral-400" delay={0.4} />
+                  <TextGenerate words="Download open models and chat, see, draw, listen, and speak — all on-device." className="text-neutral-400" delay={0.4} />
                 </div>
               </div>
 
@@ -151,7 +153,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
               </motion.div>
 
               <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1 }} className="mt-4 text-xs text-neutral-600">
-                Text · Vision · Image · Voice — one local gateway
+                Text · Vision · Image · Voice · Speech — one local gateway
               </motion.p>
             </div>
           </motion.div>
@@ -168,9 +170,9 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
               <div className="grid gap-6 md:grid-cols-3">
                 {[
-                  { icon: Cpu, title: 'Run anything locally', body: 'Download the latest open models — text, vision, image, voice — and run them through one local gateway. No API keys.' },
+                  { icon: Cpu, title: 'Run anything locally', body: 'Download the latest open models — text, vision, image, voice, speech — and run them through one local gateway. No API keys.' },
                   { icon: LockKey, title: 'Truly private', body: 'Nothing leaves your device. No cloud, no telemetry, no account. Your conversations and files stay on your machine.' },
-                  { icon: Sparkle, title: 'Grows with you', body: 'Upgrade to Pro for the layer that sees, remembers, and acts: screen capture, your private CRM, meetings, connectors, and a proactive secretary.', pro: true },
+                  { icon: Sparkle, title: 'Never forgets', body: 'Upgrade to Pro and Off Grid is always on — it quietly remembers everything you see and do, makes it instantly findable with unified search, and a proactive secretary surfaces what matters and acts on your behalf.', pro: true },
                 ].map(({ icon: Icon, title, body, pro }, i) => (
                   <motion.div
                     key={title}
