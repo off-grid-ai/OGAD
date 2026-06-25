@@ -5,7 +5,6 @@ import {
   Microphone,
   CheckSquare,
   Graph,
-  Plug,
   MagnifyingGlass,
   Broadcast,
 } from '@phosphor-icons/react';
@@ -92,15 +91,6 @@ export const PRO_FEATURES: ProFeature[] = [
     description:
       'Every person, project, and company you touch becomes a record with a synthesized story across your screen activity, meetings, and connectors — your own CRM that builds itself.',
     highlights: ['Auto-built people & project records', 'Cross-source narrative summaries', 'Relationship graph'],
-  },
-  {
-    route: 'connectors',
-    label: 'Integrations',
-    icon: Plug,
-    tagline: 'Bring Gmail, Slack, Notion & more into chat.',
-    description:
-      'Connect your tools via MCP and use them right inside chat. Reads happen instantly; anything that writes is routed to your approval queue first.',
-    highlights: ['Gmail, Calendar, Slack, Notion, Jira & more', 'Use connectors directly in chat', 'Writes require approval'],
   },
   {
     route: 'search',

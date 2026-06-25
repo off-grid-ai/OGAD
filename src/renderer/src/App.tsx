@@ -8,6 +8,7 @@ import { MemoryChat } from './components/MemoryChat';
 import { Settings } from './components/Settings';
 import { ModelsScreen } from './components/ModelsScreen';
 import { ProjectsScreen } from './components/ProjectsScreen';
+import { ConnectorsScreen } from './components/ConnectorsScreen';
 import { Onboarding } from './components/Onboarding';
 import { PermissionGate } from './components/PermissionGate';
 import type { SearchHit } from './types';
@@ -29,6 +30,7 @@ import {
   IconSettings,
   IconDownload,
   IconFolders,
+  IconPlug,
   IconChevronLeft,
   IconLoader2,
   IconArrowLeft,
@@ -433,10 +435,10 @@ function AppContent() {
     proItem('reflect'),
     proItem('meetings'),
     proItem('actions'),
-    proItem('connectors'),
     proItem('entities'),
     { label: 'Projects', icon: <IconFolders className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'projects' as ViewMode },
     { label: 'Chat', icon: <IconMessageCircle className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'memory-chat' as ViewMode },
+    { label: 'Integrations', icon: <IconPlug className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'connectors' as ViewMode },
     { label: 'Models', icon: <IconDownload className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'models' as ViewMode },
     proItem('notifications'),
     { label: 'Settings', icon: <IconSettings className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'settings' as ViewMode },
@@ -604,6 +606,8 @@ function AppContent() {
                     <ModelsScreen />
                   ) : viewMode === 'projects' ? (
                     <ProjectsScreen onOpenChat={handleOpenProjectChat} />
+                  ) : viewMode === 'connectors' ? (
+                    <ConnectorsScreen />
                   ) : viewMode === 'settings' ? (
                     <Settings />
                   ) : (

@@ -12,6 +12,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { setupIPC } from './ipc' // IMPORT FROM IPC ONLY
 import { setupRagIPC } from './rag-ipc'
+import { setupMcpIpc } from './mcp-ipc'
 import { startModelServer } from './model-server'
 import { loadProFeaturesMain } from './bootstrap/loadProFeaturesMain'
 import { nativeImage } from 'electron'
@@ -232,6 +233,7 @@ app.whenReady().then(() => {
   try {
      setupIPC();
      setupRagIPC();
+     setupMcpIpc(); // basic MCP connectors (management + chat tool extension)
      startModelServer(); // one OpenAI-compatible local gateway on :7878 (LLM + STT)
      // Pro features (capture, CRM, meetings, connectors, secretary, proactive,
      // skills engine, console, tray) register their own IPC + intervals + watchers

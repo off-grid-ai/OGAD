@@ -222,9 +222,6 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const [transcribing, setTranscribing] = useState(false);
   const [toolsOn, setToolsOn] = useState(false);
   const [connectorsOn, setConnectorsOn] = useState(false);
-  // Connectors are a Pro feature; the toggle is hidden in the free build.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const isProBuild = !!(window as any).api?.isPro;
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false); // voice mode: messages exchanged as voice notes
   useEffect(() => { if (!voiceMode) stopAllVoicePlayback(); }, [voiceMode]);
@@ -672,8 +669,8 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
       // Agentic tools path (opt-in, non-project). The model calls built-in tools,
       // plus (when Connectors is on) MCP connector tools — reads run inline, writes
       // are routed to the approval queue.
-      if ((toolsOn || (isProBuild && connectorsOn)) && !activeProjectId) {
-        const tr = await window.api.toolChat(modelQuery, history, { connectors: isProBuild && connectorsOn });
+      if ((toolsOn || connectorsOn) && !activeProjectId) {
+        const tr = await window.api.toolChat(modelQuery, history, { connectors: connectorsOn });
         const am: ChatMessage = {
           id: `a-${Date.now()}`,
           role: 'assistant',
@@ -1988,12 +1985,10 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                         <Wrench /> <span className="flex-1">Tools</span>
                         <span className={`text-xs ${toolsOn ? 'text-primary' : 'text-muted-foreground'}`}>{toolsOn ? 'On' : 'Off'}</span>
                       </DropdownMenuItem>
-                      {isProBuild && (
-                        <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setConnectorsOn(t => !t); }}>
-                          <Plug /> <span className="flex-1">Connectors</span>
-                          <span className={`text-xs ${connectorsOn ? 'text-primary' : 'text-muted-foreground'}`}>{connectorsOn ? 'On' : 'Off'}</span>
-                        </DropdownMenuItem>
-                      )}
+                      <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setConnectorsOn(t => !t); }}>
+                        <Plug /> <span className="flex-1">Connectors</span>
+                        <span className={`text-xs ${connectorsOn ? 'text-primary' : 'text-muted-foreground'}`}>{connectorsOn ? 'On' : 'Off'}</span>
+                      </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">Coming soon</DropdownMenuLabel>
                       <DropdownMenuItem disabled><Search /> Web search</DropdownMenuItem>
