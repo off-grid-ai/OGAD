@@ -21,6 +21,13 @@ import { purgeLegacyChatImports } from './database'
 // name, and migrate data from the legacy split dirs ("My Memories" had the
 // models, "my-memories" had the DB) so nothing is lost / re-downloaded. Must run
 // before app 'ready' and before any getPath('userData') usage.
+// Brand the app name as early as possible (before ready) so the menu bar, the
+// about panel, and notifications read "Off Grid AI" rather than the Electron
+// default. (In `electron-vite dev` the macOS Dock tooltip still reads "Electron"
+// because that's the dev binary's bundle name; the packaged build's CFBundleName
+// comes from electron-builder `productName`, so it's correct there.)
+app.setName('Off Grid AI')
+
 ;(function unifyUserDataPath(): void {
   try {
     const appData = app.getPath('appData')
@@ -55,6 +62,7 @@ function createWindow(): void {
     width: 900,
     height: 670,
     show: false,
+    title: 'Off Grid AI',
     autoHideMenuBar: true,
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
@@ -204,8 +212,18 @@ app.whenReady().then(() => {
       console.log("Accessibility Permission:", trusted ? "Granted" : "Denied/Prompted");
   }
 
-  // Set app user model id for windows
-  electronApp.setAppUserModelId('com.electron')
+  // Set app user model id for Windows notifications/taskbar grouping.
+  electronApp.setAppUserModelId('co.getoffgridai.desktop')
+
+  // Native About panel branding (macOS / Linux).
+  try {
+    app.setAboutPanelOptions({
+      applicationName: 'Off Grid AI',
+      applicationVersion: app.getVersion(),
+      copyright: 'Off Grid AI — private, on-device AI',
+      website: 'https://getoffgridai.co',
+    })
+  } catch { /* not supported on this platform */ }
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)

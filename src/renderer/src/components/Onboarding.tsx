@@ -100,7 +100,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                 className="text-center"
               >
                 <h1 className="bg-gradient-to-br from-white to-neutral-400 py-4 bg-clip-text text-4xl font-semibold tracking-tight text-transparent md:text-7xl">
-                  Off Grid AI Desktop
+                  Off Grid AI
                 </h1>
                 <p className="mx-auto mt-4 max-w-xl text-lg text-neutral-400">
                   Private AI that runs on <span className="text-green-400">your</span> machine.

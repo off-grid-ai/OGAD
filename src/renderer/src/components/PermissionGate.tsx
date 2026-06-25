@@ -4,7 +4,7 @@ import { StarsBackground } from './ui/stars-background';
 import { ShootingStars } from './ui/shooting-stars';
 import { BorderBeam } from './ui/border-beam';
 import { cn } from '@renderer/lib/utils';
-import { Shield, Eye, Check, X, Gear as Settings, ArrowsClockwise as RefreshCw, Download, Cpu } from '@phosphor-icons/react';
+import { Shield, Eye, Check, X, Gear as Settings, ArrowsClockwise as RefreshCw, Cpu } from '@phosphor-icons/react';
 import { ModelsScreen } from './ModelsScreen';
 
 interface PermissionGateProps {
@@ -47,10 +47,14 @@ export function PermissionGate({ children }: PermissionGateProps) {
   const [permissionStatus, setPermissionStatus] = useState<PermissionStatus | null>(null);
   const [isChecking, setIsChecking] = useState(true);
   const [modelStatus, setModelStatus] = useState<{ downloaded: boolean; modelsDir: string } | null>(null);
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState<{ modelName: string; percent: number; downloadedMB: string; totalMB: string } | null>(null);
-  const [downloadError, setDownloadError] = useState<string | null>(null);
   const [showModels, setShowModels] = useState(false);
+
+  // Capture permissions (Accessibility + Screen Recording) are only needed by the
+  // Pro "sees" layer. The free build runs chat/projects/models and gates on the
+  // model alone.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const isPro = !!(window as any).api?.isPro;
+  const permsOk = isPro ? (permissionStatus?.allGranted ?? false) : true;
 
   const checkPermissions = useCallback(async () => {
     try {
@@ -86,23 +90,15 @@ export function PermissionGate({ children }: PermissionGateProps) {
 
   // Poll for permission changes when permissions are not granted
   useEffect(() => {
-    if (permissionStatus?.allGranted && modelStatus?.downloaded) return;
+    if (permsOk && modelStatus?.downloaded) return;
 
     const interval = setInterval(() => {
-      checkPermissions();
+      if (isPro) checkPermissions();
       checkModelStatus();
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [permissionStatus?.allGranted, modelStatus?.downloaded, checkPermissions, checkModelStatus]);
-
-  // Subscribe to download progress
-  useEffect(() => {
-    const unsubscribe = window.api.onModelDownloadProgress((data) => {
-      setDownloadProgress(data);
-    });
-    return unsubscribe;
-  }, []);
+  }, [permsOk, isPro, modelStatus?.downloaded, checkPermissions, checkModelStatus]);
 
   const handleOpenAccessibilitySettings = async () => {
     try {
@@ -117,27 +113,6 @@ export function PermissionGate({ children }: PermissionGateProps) {
       await window.api.openScreenRecordingSettings();
     } catch (e) {
       console.error('Failed to open screen recording settings:', e);
-    }
-  };
-
-  const handleDownloadModel = async () => {
-    setIsDownloading(true);
-    setDownloadError(null);
-    setDownloadProgress(null);
-
-    try {
-      const result = await window.api.downloadModels();
-      if (result.success) {
-        await checkModelStatus();
-      } else {
-        setDownloadError(result.error || 'Download failed');
-      }
-    } catch (e: any) {
-      console.error('Failed to download model:', e);
-      setDownloadError(e.message || 'Download failed');
-    } finally {
-      setIsDownloading(false);
-      setDownloadProgress(null);
     }
   };
 
@@ -165,10 +140,21 @@ export function PermissionGate({ children }: PermissionGateProps) {
     );
   }
 
-  // Everything granted - render children
-  if (permissionStatus?.allGranted && modelStatus?.downloaded) {
+  // Ready - render children (free: model only; pro: + capture permissions)
+  if (permsOk && modelStatus?.downloaded) {
     return (
       children
+    );
+  }
+
+  // Free build: onboarding has already run, and there are no capture permissions
+  // to grant — so go straight to model selection. Picking + Using a model flips
+  // modelStatus (polled every 2s) and the app opens.
+  if (!isPro && !modelStatus?.downloaded) {
+    return (
+      <div className="fixed inset-0 z-50 h-screen w-screen overflow-hidden bg-neutral-950">
+        <ModelsScreen />
+      </div>
     );
   }
 
@@ -231,28 +217,34 @@ export function PermissionGate({ children }: PermissionGateProps) {
             transition={{ delay: 0.5, duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
             className="text-center text-neutral-500 text-sm mb-10 max-w-xs mx-auto leading-relaxed"
           >
-            Grant permissions and download the AI model to get started. Everything runs locally on your device.
+            {isPro
+              ? 'Grant permissions and download a model to get started. Everything runs locally on your device.'
+              : 'Download a model to get started. Everything runs locally on your device — no cloud, no account.'}
           </motion.p>
 
-          {/* Permission & Model Cards - 3 columns on desktop */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-8">
-            <PermissionCard
-              title="Accessibility"
-              description="Read text from AI chat windows"
-              icon={<Eye className="w-5 h-5" />}
-              granted={permissionStatus?.accessibility ?? false}
-              onOpenSettings={handleOpenAccessibilitySettings}
-              delay={0.6}
-            />
+          {/* Cards — capture permissions are Pro-only; the model is always required. */}
+          <div className={cn('grid gap-4 mb-8', isPro ? 'grid-cols-1 lg:grid-cols-3' : 'grid-cols-1 max-w-sm mx-auto')}>
+            {isPro && (
+              <PermissionCard
+                title="Accessibility"
+                description="Read text from AI chat windows"
+                icon={<Eye className="w-5 h-5" />}
+                granted={permissionStatus?.accessibility ?? false}
+                onOpenSettings={handleOpenAccessibilitySettings}
+                delay={0.6}
+              />
+            )}
 
-            <PermissionCard
-              title="Screen Recording"
-              description="Capture visual context for OCR"
-              icon={<Shield className="w-5 h-5" />}
-              granted={permissionStatus?.screenRecording ?? false}
-              onOpenSettings={handleOpenScreenRecordingSettings}
-              delay={0.7}
-            />
+            {isPro && (
+              <PermissionCard
+                title="Screen Recording"
+                description="Capture visual context for OCR"
+                icon={<Shield className="w-5 h-5" />}
+                granted={permissionStatus?.screenRecording ?? false}
+                onOpenSettings={handleOpenScreenRecordingSettings}
+                delay={0.7}
+              />
+            )}
 
             {/* AI Model - opens the catalog (text, vision, image, voice, transcription) */}
             <motion.button
@@ -289,14 +281,24 @@ export function PermissionGate({ children }: PermissionGateProps) {
             <div className="flex items-center gap-2 mb-3">
               <Settings className="w-3.5 h-3.5 text-neutral-600" />
               <span className="text-[10px] font-medium text-neutral-600 uppercase tracking-widest">
-                How to enable
+                {isPro ? 'How to enable' : 'Get started'}
               </span>
             </div>
             <div className="space-y-2 text-sm text-neutral-500">
-              <p>1. Click <span className="text-neutral-400">Open Settings</span> for each permission</p>
-              <p>2. Find <span className="text-neutral-400">Off Grid AI Desktop</span> in the list</p>
-              <p>3. Toggle the switch to enable</p>
-              <p>4. Click <span className="text-neutral-400">Download Model</span> to get the AI</p>
+              {isPro ? (
+                <>
+                  <p>1. Click <span className="text-neutral-400">Open Settings</span> for each permission</p>
+                  <p>2. Find <span className="text-neutral-400">Off Grid AI</span> in the list</p>
+                  <p>3. Toggle the switch to enable</p>
+                  <p>4. Click <span className="text-neutral-400">Browse</span> to download a model</p>
+                </>
+              ) : (
+                <>
+                  <p>1. Click <span className="text-neutral-400">Browse</span> on the AI Model card</p>
+                  <p>2. Pick a model and <span className="text-neutral-400">Download</span> it</p>
+                  <p>3. Hit <span className="text-neutral-400">Use</span> — the app opens automatically</p>
+                </>
+              )}
             </div>
           </motion.div>
 
@@ -411,115 +413,6 @@ function PermissionCard({ title, description, icon, granted, onOpenSettings, del
             Open Settings
           </button>
         )}
-      </div>
-    </motion.div>
-  );
-}
-
-interface ModelCardProps {
-  downloaded: boolean;
-  isDownloading: boolean;
-  downloadProgress: { modelName: string; percent: number; downloadedMB: string; totalMB: string } | null;
-  downloadError: string | null;
-  onDownload: () => void;
-  delay?: number;
-}
-
-function ModelCard({ downloaded, isDownloading, downloadProgress, downloadError, onDownload, delay = 0 }: ModelCardProps) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay, duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
-      whileHover={{ scale: 1.01 }}
-      className={cn(
-        "relative rounded-xl border p-4 transition-all duration-300 overflow-hidden",
-        downloaded
-          ? "bg-neutral-900/60 border-neutral-700"
-          : "bg-neutral-900/40 border-neutral-800 hover:border-neutral-700 hover:bg-neutral-900/60"
-      )}
-    >
-      {downloaded && (
-        <BorderBeam
-          size={200}
-          duration={10}
-          borderWidth={1.5}
-        />
-      )}
-
-      <div className="flex items-center gap-4">
-        {/* Icon */}
-        <div className={cn(
-          "w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 border transition-all duration-300",
-          downloaded
-            ? "bg-neutral-800 border-neutral-700 text-neutral-300"
-            : "bg-neutral-800/60 border-neutral-800 text-neutral-500"
-        )}>
-          <Cpu className="w-5 h-5" />
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
-            <h3 className="font-medium text-white text-sm">AI Model</h3>
-            <div className={cn(
-              "w-4 h-4 rounded-full flex items-center justify-center transition-all duration-300",
-              downloaded ? "bg-neutral-700" : "bg-neutral-800/60"
-            )}>
-              {downloaded ? (
-                <Check className="w-2.5 h-2.5 text-neutral-300" />
-              ) : (
-                <X className="w-2.5 h-2.5 text-neutral-600" />
-              )}
-            </div>
-          </div>
-
-          {isDownloading && downloadProgress ? (
-            <div className="space-y-1">
-              <p className="text-xs text-neutral-400">
-                {downloadProgress.modelName.split('-')[0]}... {downloadProgress.percent}%
-              </p>
-              <div className="w-full h-1.5 bg-neutral-800 rounded-full overflow-hidden">
-                <motion.div
-                  className="h-full bg-neutral-500 rounded-full"
-                  initial={{ width: 0 }}
-                  animate={{ width: `${downloadProgress.percent}%` }}
-                  transition={{ duration: 0.3 }}
-                />
-              </div>
-              <p className="text-[10px] text-neutral-600">
-                {downloadProgress.downloadedMB} / {downloadProgress.totalMB} MB
-              </p>
-            </div>
-          ) : downloadError ? (
-            <p className="text-xs text-red-400">{downloadError}</p>
-          ) : (
-            <p className="text-xs text-neutral-500">Qwen3-VL-4B (local processing)</p>
-          )}
-        </div>
-
-        {/* Status/Actions */}
-        <div className="flex-shrink-0">
-          {downloaded ? (
-            <span className="text-[10px] text-neutral-500 uppercase tracking-widest">
-              Ready
-            </span>
-          ) : (
-            <button
-              onClick={onDownload}
-              disabled={isDownloading}
-              className={cn(
-                "px-3 py-1.5 text-xs font-medium rounded-lg transition-all duration-200 flex items-center gap-1.5",
-                "bg-neutral-800 border border-neutral-700 text-neutral-300",
-                "hover:bg-neutral-700 hover:text-white",
-                "disabled:opacity-50 disabled:cursor-not-allowed"
-              )}
-            >
-              <Download className={cn("w-3 h-3", isDownloading && "animate-pulse")} />
-              {isDownloading ? 'Downloading...' : 'Download'}
-            </button>
-          )}
-        </div>
       </div>
     </motion.div>
   );

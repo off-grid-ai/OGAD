@@ -18,7 +18,7 @@ import type { ComponentType } from 'react';
 // screenRegistry/navRegistry) take over these same routes.
 
 /** Where the "Upgrade to Pro" buttons send the user. */
-export const PRO_PAY_URL = 'https://offgridmobileai.co/pay';
+export const PRO_PAY_URL = 'https://getoffgridai.co/pay';
 
 export interface ProFeature {
   /** Route name — matches the route a registered pro screen claims when unlocked. */

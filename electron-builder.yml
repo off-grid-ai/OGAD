@@ -1,42 +1,41 @@
-appId: ai.offgrid.desktop
-productName: Off Grid AI Desktop
+appId: co.getoffgridai.desktop
+productName: Off Grid AI
+copyright: © Off Grid AI
 directories:
   buildResources: build
 files:
   - '!**/.vscode/*'
   - '!src/*'
+  - '!pro/**'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
-  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json,tsconfig.web.tsbuildinfo}'
+  - '!**/*.tsbuildinfo'
+# Free build: bundles only the local model runner (llama/whisper/ffmpeg/sd in
+# resources/bin) + UI assets. The capture/meeting native binaries (Swift watcher,
+# meeting-recorder) are Pro and are added by the Pro build's own config.
 extraResources:
   - from: resources
     to: .
     filter:
       - "**/*"
       - "!models/**"
-  - from: scripts
-    to: scripts
-    filter:
-      - "*.swift"
-  - from: electron/accessibility/watcher
-    to: watcher
-  - from: scripts/meeting-recorder/meeting-recorder
-    to: bin/meeting-recorder
 win:
-  executableName: my-memories
+  executableName: off-grid-ai
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
 mac:
+  category: public.app-category.productivity
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
-    - NSCameraUsageDescription: Application requests access to the device's camera.
-    - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
-    - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
-    - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
+    - NSMicrophoneUsageDescription: Off Grid AI uses the microphone for on-device voice input. Audio is processed locally and never leaves your device.
+    - NSCameraUsageDescription: Off Grid AI may use the camera for on-device vision features. Frames are processed locally and never leave your device.
+    - NSDocumentsFolderUsageDescription: Off Grid AI reads documents you add to a project so it can answer questions about them — locally, on your device.
+    - NSDownloadsFolderUsageDescription: Off Grid AI reads files you add to a project so it can answer questions about them — locally, on your device.
   notarize: false
   icon: resources/icon.png
 afterSign: scripts/resign.js
@@ -45,9 +44,8 @@ dmg:
 linux:
   target:
     - AppImage
-    - snap
     - deb
-  maintainer: electronjs.org
+  maintainer: Off Grid AI <hello@getoffgridai.co>
   category: Utility
 appImage:
   artifactName: ${name}-${version}.${ext}

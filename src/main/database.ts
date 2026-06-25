@@ -71,7 +71,7 @@ function cosineSimilarity(v1Str: string, v2Str: string): number {
   }
 }
 
-export function getDB() {
+export function getDB(): Database.Database {
   if (db) return db;
 
   const dbPath = path.join(app.getPath('userData'), 'memories.db');

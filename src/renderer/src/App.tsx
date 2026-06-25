@@ -16,7 +16,7 @@ import type { SearchHit } from './types';
 import { loadProFeaturesRenderer } from './bootstrap/loadProFeaturesRenderer';
 import { renderProView, type ProViewContext } from './bootstrap/proView';
 import { UpgradeScreen } from './components/pro/UpgradeScreen';
-import { PRO_FEATURES, getProFeature } from './components/pro/proCatalog';
+import { getProFeature } from './components/pro/proCatalog';
 import { NotificationProvider, useNotifications } from './hooks/useNotifications';
 import { ReprocessingProvider, useReprocessing } from './hooks/useReprocessing';
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -95,7 +95,6 @@ function AppContent() {
 
   const posthog = usePostHog()
   const { addNotification } = useNotifications();
-  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState<boolean | null>(null);
 
   // Pro entitlement (preload reads OFFGRID_PRO; absent submodule => false at runtime).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -182,11 +181,6 @@ function AppContent() {
     setCanGoForward(forwardHistory.current.length > 0);
   }, []);
 
-  // Check onboarding status on mount
-  useEffect(() => {
-    const completed = localStorage.getItem('onboarding_completed') === 'true';
-    setHasCompletedOnboarding(completed);
-  }, []);
 
   // Handle browser URL changes
   useEffect(() => {
@@ -314,10 +308,6 @@ function AppContent() {
     };
   }, [addNotification]);
 
-  const handleOnboardingComplete = () => {
-    setHasCompletedOnboarding(true);
-  };
-
   // Navigate back using history stack
   const navigateBack = useCallback(() => {
     if (navigationHistory.current.length > 1) {
@@ -422,28 +412,32 @@ function AppContent() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [navigateBack, navigateForward]);
 
-  // Show loading state while checking onboarding status
-  if (hasCompletedOnboarding === null) {
-    return null;
-  }
-
-  // Show onboarding if not completed
-  if (!hasCompletedOnboarding) {
-    return <Onboarding onComplete={handleOnboardingComplete} />;
-  }
-
-  // Core (free) tabs first, then the Pro tabs from the static catalogue (shown in
-  // every build — locked in free, opening the UpgradeScreen), then Settings.
-  const navItems: { label: string; icon: React.ReactNode; view: ViewMode; locked?: boolean }[] = [
-    { label: 'Chat', icon: <IconMessageCircle className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'memory-chat' as ViewMode },
-    { label: 'Projects', icon: <IconFolders className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'projects' as ViewMode },
-    { label: 'Models', icon: <IconDownload className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'models' as ViewMode },
-    ...PRO_FEATURES.map((f) => ({
+  // Original sidebar order preserved. Pro tabs pull their icon/label from the
+  // static catalogue and are marked locked in the free build (open the
+  // UpgradeScreen); core tabs (Projects / Chat / Models / Settings) sit where
+  // they always did.
+  const proItem = (route: string): { label: string; icon: React.ReactNode; view: ViewMode; locked: boolean } => {
+    const f = getProFeature(route)!;
+    return {
       label: f.label,
       icon: <f.icon className="h-5 w-5 shrink-0 text-neutral-400" weight="regular" />,
       view: f.route as ViewMode,
       locked: !isPro,
-    })),
+    };
+  };
+  const navItems: { label: string; icon: React.ReactNode; view: ViewMode; locked?: boolean }[] = [
+    proItem('search'),
+    proItem('day'),
+    proItem('replay'),
+    proItem('reflect'),
+    proItem('meetings'),
+    proItem('actions'),
+    proItem('connectors'),
+    proItem('entities'),
+    { label: 'Projects', icon: <IconFolders className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'projects' as ViewMode },
+    { label: 'Chat', icon: <IconMessageCircle className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'memory-chat' as ViewMode },
+    { label: 'Models', icon: <IconDownload className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'models' as ViewMode },
+    proItem('notifications'),
     { label: 'Settings', icon: <IconSettings className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'settings' as ViewMode },
   ];
 
@@ -485,7 +479,7 @@ function AppContent() {
                   }}
                   className="flex-1 text-left font-semibold text-white whitespace-pre"
                 >
-                  Off Grid AI Desktop
+                  Off Grid AI
                 </motion.span>
                 {sidebarOpen && <IconChevronLeft className="h-4 w-4 shrink-0 text-neutral-500" />}
               </button>
@@ -640,6 +634,16 @@ function AppContent() {
 }
 
 function App() {
+  // Onboarding runs FIRST — before the model/permission gate — so a new user sees
+  // the intro, then goes straight to model selection (handled by PermissionGate).
+  const [onboarded, setOnboarded] = useState<boolean | null>(null);
+  useEffect(() => {
+    setOnboarded(localStorage.getItem('onboarding_completed') === 'true');
+  }, []);
+
+  if (onboarded === null) return null;
+  if (!onboarded) return <Onboarding onComplete={() => setOnboarded(true)} />;
+
   return (
     <PermissionGate>
       <NotificationProvider>

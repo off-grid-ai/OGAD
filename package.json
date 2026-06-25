@@ -1,12 +1,12 @@
 {
-  "name": "off-grid-ai-desktop",
-  "productName": "Off Grid AI Desktop",
+  "name": "off-grid-ai",
+  "productName": "Off Grid AI",
   "version": "0.0.5",
-  "description": "Off Grid AI Desktop — a private, local-first AI that sees what you do, remembers what matters, and helps you act on it. Everything runs on your device.",
+  "description": "Off Grid AI — a private, local-first AI that runs open models (text, vision, image, voice) entirely on your device. No cloud, no accounts.",
   "license": "AGPL-3.0-only",
   "main": "./out/main/index.js",
-  "author": "example.com",
-  "homepage": "https://electron-vite.org",
+  "author": "Off Grid AI <hello@getoffgridai.co>",
+  "homepage": "https://getoffgridai.co",
   "scripts": {
     "format": "prettier --write .",
     "lint": "eslint --cache .",
