@@ -13,7 +13,7 @@ import { saveArtifact, listArtifacts, deleteArtifact } from './artifacts';
 import { saveSkill } from './skills';
 import { addConnector, listConnectors } from './mcp';
 import { llm } from './llm';
-import { generateImage } from './imagegen';
+import { generateImage, listImageModels } from './imagegen';
 import { ragService } from './rag/index';
 
 const PROJECT_ID = 'offgrid-demo';
@@ -163,27 +163,33 @@ export async function seedDemo(live = false): Promise<void> {
     chatTurn('connectors', 'Connectors', 'What tools does my connected MCP server expose?',
       'Your "Demo MCP" exposes example tools (echo, add, longRunningOperation, …). Turn Connectors on in the composer to call them right from chat — reads run inline.');
 
-    // 7) Image LAST (image-gen pauses the LLM). Live generate, else copy the logo.
-    try {
-      const imgDir = path.join(app.getPath('userData'), 'generated-images');
-      fs.mkdirSync(imgDir, { recursive: true });
-      let imgPath: string | null = null;
-      if (live) {
-        try {
-          const out = await generateImage({ prompt: 'Off Grid AI brand mark — a minimalist emerald microchip glyph on a dark background, clean vector, centered', width: 768, height: 512, steps: 20 });
-          imgPath = out.path;
-        } catch (e) { console.error('[seed] generateImage', e); }
+    // 7) Images LAST (image-gen pauses the LLM). Generate one per installed image
+    //    model so every model is exercised in its own chat. Skip CoreML dirs +
+    //    the bare VAE (ae.safetensors). Falls back to the logo if none/failed.
+    const prompt = 'a serene off-grid cabin on a forested mountain at dawn, misty valley, warm light, highly detailed, no text';
+    const imgDir = path.join(app.getPath('userData'), 'generated-images');
+    fs.mkdirSync(imgDir, { recursive: true });
+    const pretty = (m: string): string => m.replace(/\.(gguf|safetensors)$/i, '').replace(/-Q\d.*$/i, '').replace(/[-_]/g, ' ').trim();
+    const slugify = (m: string): string => m.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 28);
+    let models = live ? listImageModels().filter((m) => /\.(gguf|safetensors)$/i.test(m) && !/^ae\./i.test(m)) : [];
+    let madeAny = false;
+    for (const model of models) {
+      try {
+        const out = await generateImage({ prompt, model, width: 768, height: 512, steps: 18 });
+        const id = chatTurn(`image-${slugify(model)}`, `Image · ${pretty(model)}`, `Generate an Off Grid scene with ${pretty(model)}.`, `Generated for: ${prompt}\n\nModel: ${model}`, { image: out.path });
+        try { fs.writeFileSync(`${out.path}.json`, JSON.stringify({ conversationId: id, projectId: PROJECT_ID })); } catch { /* best effort */ }
+        madeAny = true;
+        console.log('[seed] image via', model, '->', path.basename(out.path));
+      } catch (e) { console.error('[seed] image model failed', model, e); }
+    }
+    if (!madeAny) {
+      // Fallback: at least one image chat so the surface is testable.
+      const src = [path.join(app.getAppPath(), 'resources', 'icon.png'), path.join(process.resourcesPath || '', 'icon.png')].find((p) => fs.existsSync(p));
+      if (src) {
+        const dest = path.join(imgDir, 'offgrid-demo-mark.png');
+        try { fs.copyFileSync(src, dest); const id = chatTurn('image', 'Brand mark (image)', 'Generate the Off Grid AI brand mark.', 'Generated for: Off Grid AI brand mark', { image: dest }); fs.writeFileSync(`${dest}.json`, JSON.stringify({ conversationId: id, projectId: PROJECT_ID })); } catch (e) { console.error('[seed] image fallback', e); }
       }
-      if (!imgPath) {
-        const src = [path.join(app.getAppPath(), 'resources', 'icon.png'), path.join(process.resourcesPath || '', 'icon.png')].find((p) => fs.existsSync(p));
-        if (src) { imgPath = path.join(imgDir, 'offgrid-demo-mark.png'); fs.copyFileSync(src, imgPath); }
-      }
-      if (imgPath) {
-        const id = chatTurn('image', 'Brand mark (image)', 'Generate the Off Grid AI brand mark.', `Generated for: Off Grid AI brand mark`, { image: imgPath });
-        // sidecar so the image scopes to this chat + project in the gallery.
-        try { fs.writeFileSync(`${imgPath}.json`, JSON.stringify({ conversationId: id, projectId: PROJECT_ID })); } catch { /* best effort */ }
-      }
-    } catch (e) { console.error('[seed] image', e); }
+    }
 
     saveSetting('demo:seeded', true);
     console.log(`[seed] demo project seeded ✓ (live=${live})`);
