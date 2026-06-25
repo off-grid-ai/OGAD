@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, systemPreferences, protocol, net, session, desktopCapturer, screen, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, systemPreferences, protocol, net, session, desktopCapturer, screen } from 'electron'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
 import fs from 'fs'
@@ -12,24 +12,10 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { setupIPC } from './ipc' // IMPORT FROM IPC ONLY
 import { setupRagIPC } from './rag-ipc'
-import { setupCrmIPC } from './crm-ipc'
-import { startFocusLoop, setCapturePaused, isCapturePaused, getActiveAppName } from './focus'
-import { startMeetingDetector } from './meeting-detect'
-import { recoverOrphanedMeetings } from './meetings'
-import { recoverOrphanTempDirs } from './meeting-native'
 import { startModelServer } from './model-server'
-import { runBackfill } from './search'
-import { proposeActions } from './crm/agent'
-import { distillPreferences } from './crm/preferences'
-import { syncAllConnectors } from './ingest'
-import { learnIdentityFromGoogle } from './google-rest'
-import { clearLayout } from './crm/layout'
-import { runProactive } from './crm/proactive'
-import { runSkillTriggers } from './crm/skills-engine'
-import { Tray, Menu, nativeImage } from 'electron'
-import { Watcher } from './watcher'
+import { loadProFeaturesMain } from './bootstrap/loadProFeaturesMain'
+import { nativeImage } from 'electron'
 import { purgeLegacyChatImports } from './database'
-import { migrateCrm } from './crm/schema'
 
 // Pin one canonical userData dir ("Off Grid AI Desktop") regardless of package
 // name, and migrate data from the legacy split dirs ("My Memories" had the
@@ -101,62 +87,9 @@ function createWindow(): void {
   }
 }
 
-// Menu-bar (Tray) control surface for the always-on capture: pause/resume +
-// recalibrate the learned per-app layouts.
-let tray: Tray | null = null
-let meetingRecording = false
-let trayRebuild: (() => void) | null = null
-function setupTray(): void {
-  try {
-    // Use the green Off Grid chip logo (kept in color — NOT a template image, so
-    // the menu bar shows the brand mark, not a black silhouette).
-    let img = nativeImage.createFromPath(icon)
-    if (!img.isEmpty()) img = img.resize({ width: 18, height: 18 })
-    tray = new Tray(img.isEmpty() ? nativeImage.createEmpty() : img)
-    const rebuild = (): void => {
-      const paused = isCapturePaused()
-      const active = getActiveAppName()
-      tray?.setToolTip(meetingRecording ? 'Off Grid — recording meeting' : paused ? 'Off Grid — capture paused' : 'Off Grid — capturing')
-      tray?.setContextMenu(
-        Menu.buildFromTemplate([
-          ...(meetingRecording
-            ? [
-                { label: '🔴 Recording meeting…', enabled: false },
-                { label: 'Stop recording', click: () => { BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('meeting:stop')) } },
-                { type: 'separator' as const },
-              ]
-            : []),
-          { label: paused ? 'Capture: paused' : 'Capture: on', enabled: false },
-          { type: 'separator' },
-          { label: paused ? 'Resume capture' : 'Pause capture', click: () => { setCapturePaused(!paused); rebuild() } },
-          {
-            // Recalibrate just the app the user is currently in — the common case
-            // ("this app's capture looks wrong, re-learn it now").
-            label: active ? `Recalibrate “${active}”` : 'Recalibrate current app',
-            enabled: !!active,
-            click: () => { if (active) clearLayout(active) },
-          },
-          { label: 'Recalibrate all apps', click: () => clearLayout() },
-          { type: 'separator' },
-          {
-            label: 'Open Off Grid',
-            click: () => {
-              const w = BrowserWindow.getAllWindows()[0]
-              w?.show(); w?.focus()
-            },
-          },
-          { label: 'Quit', click: () => app.quit() },
-        ])
-      )
-    }
-    trayRebuild = rebuild
-    rebuild()
-    // Keep the "current app" label fresh so opening the menu shows the right app.
-    setInterval(rebuild, 4000)
-  } catch (e) {
-    console.error('[tray] setup failed', e)
-  }
-}
+// The menu-bar (Tray) control surface for always-on capture (pause/resume +
+// recalibrate) is a pro feature — pro's activateMain builds it. The free build
+// has no tray.
 
 // Only one instance may run: a second instance would share os.tmpdir() and the
 // meetings DB, so its orphan-recovery could adopt/kill the first instance's LIVE
@@ -184,7 +117,6 @@ app.whenReady().then(() => {
   if (serverOnly) {
     console.log('[gateway] server-only mode — gateway on :7878, no UI/capture');
     if (process.platform === 'darwin' && app.dock) { try { app.dock.hide(); } catch { /* ignore */ } }
-    try { migrateCrm(); } catch (e) { console.warn('[gateway] crm migrate failed', e); }
     try { startModelServer(); } catch (e) { console.error('[gateway] start failed', e); }
     void import('./llm').then(({ llm }) => llm.init().catch((err) => console.error('[gateway] LLM init failed', err)));
     return; // skip window, tray, watcher, IPC, capture, connectors — gateway only
@@ -192,10 +124,7 @@ app.whenReady().then(() => {
 
   console.log("APP READY: Initializing Services...");
 
-  // One-time, idempotent cleanup of the old "My Memories" AI-chat imports
-  // (Claude/ChatGPT/Gemini scrapes + derived memories/entities/profile). crm
-  // schema first so the orphan check can see observation_entities links.
-  try { migrateCrm(); } catch (e) { console.warn('[startup] crm migrate failed', e); }
+  // One-time, idempotent cleanup of the old "My Memories" AI-chat imports.
   try { purgeLegacyChatImports(); } catch (e) { console.warn('[startup] legacy purge failed', e); }
 
   // Dock icon = the Off Grid green chip logo (in dev macOS otherwise shows the
@@ -284,73 +213,21 @@ app.whenReady().then(() => {
 
 
 
-  // 2. Setup IPC Handlers
+  // 2. Setup IPC Handlers (core) + the local model gateway
   try {
      setupIPC();
      setupRagIPC();
-     setupCrmIPC();
-     startFocusLoop(); // get-windows-based focus capture (replaces the broken watcher path)
-     startMeetingDetector(); // detect Zoom/Meet/Teams calls → auto-record
-     // Renderer tells us when it's recording a meeting → reflect in the menu-bar tray.
-     ipcMain.handle('meeting:set-recording', (_e, recording: boolean) => { meetingRecording = recording; trayRebuild?.(); });
-     setupTray(); // menu-bar pause/recalibrate
      startModelServer(); // one OpenAI-compatible local gateway on :7878 (LLM + STT)
-     // Fleet Console node client — resumes the policy/audit/command loop if enrolled (opt-in).
-     setTimeout(() => { void import('./console').then((m) => m.startConsoleNode()); }, 5000);
-     // Adopt any recording whose transcription was interrupted by a restart so it
-     // can never be lost. Delayed so it doesn't compete with startup; non-blocking.
-     setTimeout(() => { void recoverOrphanedMeetings(); }, 8000);
-     // Adopt recordings orphaned by a crash/restart mid-call (a separate recorder
-     // process keeps writing to a temp dir after the app dies) — finalize + store.
-     setTimeout(() => { void recoverOrphanTempDirs().catch((e) => console.error('[meetings] temp recover', e)); }, 10000);
-     // Proactive loop: periodically PULL every connector (keep memory fresh), then
-     // the secretary surveys tools + fresh context and proposes actions on its own
-     // (no button). Proposals land in the approval queue and surface on the Day;
-     // nothing executes unapproved. Webhooks aren't viable for a local app, so poll.
-     const refreshAndPropose = async (): Promise<void> => {
-       try { await syncAllConnectors(); } catch (e) { console.error('[autosync]', e); }
-       try { await learnIdentityFromGoogle(); } catch (e) { console.error('[identity]', e); }
-       try { const r = await proposeActions(Math.floor(Date.now() / 1000)); console.log('[secretary]', JSON.stringify(r)); } catch (e) { console.error('[secretary]', e); }
-     };
-     setTimeout(() => { void refreshAndPropose(); }, 60_000);
-     setInterval(() => { void refreshAndPropose(); }, 30 * 60_000);
-     // Proactive delivery: the assistant reaches out unprompted (morning briefing +
-     // meeting prep) via native notifications from the main process, so it works even
-     // when the window is closed. Cheap, deduped, and user-silenceable (proactive:enabled).
-     setTimeout(() => { void runProactive().catch((e) => console.error('[proactive]', e)); }, 30_000);
-     setInterval(() => { void runProactive().catch((e) => console.error('[proactive]', e)); }, 3 * 60_000);
-     // Skills engine: trigger→action skills (schedule / keyword / event) evaluated
-     // on the same cadence. Matches run the skill's action through the agentic tool
-     // loop (connectors → writes still gated by approval) and notify with the result.
-     setTimeout(() => { void runSkillTriggers().catch((e) => console.error('[skills]', e)); }, 45_000);
-     setInterval(() => { void runSkillTriggers().catch((e) => console.error('[skills]', e)); }, 3 * 60_000);
-     // Hourly: fold any new rejection reasons into the secretary's learned
-     // preferences (one conservative LLM call; no-op when there's no new feedback).
-     setInterval(() => {
-       void distillPreferences()
-         .then((r) => { if (r.updated) console.log('[secretary] learned preferences updated'); })
-         .catch((e) => console.error('[prefs]', e));
-     }, 60 * 60_000);
-     // Backfill the semantic index (embed the observation/frame/transcript backlog
-     // into LanceDB) so universal search has full NLP recall. Background + throttled.
-     setTimeout(() => {
-       void runBackfill((p) => { if (p.remaining % 200 === 0) console.log(`[search index] ${p.done} embedded, ${p.remaining} left`); })
-         .catch((e) => console.error('[search index]', e));
-     }, 20_000);
+     // Pro features (capture, CRM, meetings, connectors, secretary, proactive,
+     // skills engine, console, tray) register their own IPC + intervals + watchers
+     // here. No-op in the free build (the pro submodule is absent → stub).
+     void loadProFeaturesMain().catch((e) => console.error('[pro] load failed', e));
      console.log("IPC Handlers Registered.");
   } catch (e) {
      console.error("FATAL: IPC Setup failed", e);
   }
 
-  // 3. Start Watcher
-  try {
-    Watcher.start();
-    console.log("Watcher Service Started.");
-  } catch (e) {
-    console.error("Watcher Start Failed", e);
-  }
-
-  // 4. Initialize LLM (Async)
+  // 3. Initialize LLM (Async)
   // We don't await this to avoid blocking window creation
   import('./llm').then(({ llm }) => {
       llm.init().catch(err => console.error("Failed to init LLM:", err));

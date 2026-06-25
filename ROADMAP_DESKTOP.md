@@ -112,10 +112,10 @@ The Off Grid chat (`MemoryChat.tsx`) is becoming a full local-first studio — l
 - ⬜ Team/org identity + roles; **scoped-sharing model** (share *intelligence*, never raw frames); right-person-right-time distribution across a team. The layer neither screenpipe nor Littlebird has
 
 ## Phase 8 — Productization ⬜
-- ⬜ Onboarding permission ladder (screen → Google OAuth → MCP)
-- ⬜ Settings consolidation; theme toggle wiring
+- ⬜ Onboarding permission ladder (screen → Google OAuth → MCP) — *deferred, not now*
+- ⬜ Settings consolidation; ✅ theme toggle wiring
 - ⬜ Packaging: signed/notarized DMG + auto-update
-- ⬜ Licensing: AGPL + CLA + open-core; device cap (2 free / 3+ paid)
+- ⬜ Licensing: AGPL + CLA + open-core; device cap (2 free / 3+ paid) — *deferred, not now*
 
 ---
 

@@ -28,3 +28,7 @@ resources/bin/
 .gateway-probe/
 # TS build cache
 *.tsbuildinfo
+
+# Private pro features — separate repo, added as a git submodule once the remote
+# exists. Ignored for now so the open repo never tracks pro source.
+/pro/

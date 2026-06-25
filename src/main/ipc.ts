@@ -1106,28 +1106,8 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
       return true;
   });
 
-  // === FLEET CONSOLE (node client) ===
-
-  ipcMain.handle('console:enroll', async (_, url: string, token: string) => {
-      const { enrollDevice } = await import('./console');
-      return enrollDevice(url, token);
-  });
-
-  ipcMain.handle('console:status', async () => {
-      const { getConsoleStatus } = await import('./console');
-      return getConsoleStatus();
-  });
-
-  ipcMain.handle('console:sync-now', async () => {
-      const { syncPolicyNow } = await import('./console');
-      return syncPolicyNow();
-  });
-
-  ipcMain.handle('console:disconnect', async () => {
-      const { disconnectConsole } = await import('./console');
-      disconnectConsole();
-      return true;
-  });
+  // Fleet console IPC (console:*) is a pro feature — registered by pro's
+  // activateMain, not here, so the open build doesn't ship it.
 
   // === PROMPT HANDLERS ===
 

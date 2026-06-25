@@ -1,5 +1,6 @@
 import { spawn, execSync, ChildProcess } from "child_process";
 import { Mutex } from "async-mutex";
+import { callHook } from "./bootstrap/hookRegistry";
 import path from "path";
 import { app } from "electron";
 import * as fs from "fs";
@@ -388,11 +389,13 @@ export class LLMService {
         const raw = await this.httpPost(body, timeoutMs);
         const data = JSON.parse(raw);
         console.log('[LLMService] LLM request completed');
-        // Best-effort fleet audit: record the local model call if enrolled in a console.
+        // Best-effort fleet audit: record the local model call if enrolled in a
+        // console. The fleet console is a pro feature — it registers this hook in
+        // its activation; the free build has no hook and this is a no-op.
         try {
             const tokens = data.usage?.total_tokens ?? 0;
             const modelName = path.basename(this.modelPath) || 'local-llm';
-            void import('./console').then((m) => m.recordModelCall(modelName, tokens, 'ok', false));
+            callHook('console.recordModelCall', modelName, tokens, 'ok', false);
         } catch { /* audit is never load-bearing */ }
         return data.choices?.[0]?.message?.content ?? "";
 
