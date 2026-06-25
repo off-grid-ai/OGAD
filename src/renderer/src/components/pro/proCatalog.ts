@@ -7,7 +7,6 @@ import {
   Graph,
   Plug,
   MagnifyingGlass,
-  Lightning,
   Broadcast,
 } from '@phosphor-icons/react';
 import type { ComponentType } from 'react';
@@ -113,22 +112,13 @@ export const PRO_FEATURES: ProFeature[] = [
     highlights: ['Unified semantic search', 'Across capture, meetings & connectors', 'Fully local'],
   },
   {
-    route: 'skills',
-    label: 'Skills',
-    icon: Lightning,
-    tagline: 'Automations that run themselves.',
-    description:
-      'Turn a skill into an automation: trigger it on a schedule, a keyword you capture, or a new meeting/approval — and let it act (approval-gated) without you lifting a finger.',
-    highlights: ['Schedule, keyword & event triggers', 'Runs through your connectors', 'Results delivered as notifications'],
-  },
-  {
-    route: 'proactive',
-    label: 'Proactive',
+    route: 'notifications',
+    label: 'Notifications',
     icon: Broadcast,
-    tagline: 'Off Grid reaches out first.',
+    tagline: 'Approvals & to-dos, surfaced.',
     description:
-      'Native nudges when they matter — a morning briefing and a heads-up before each meeting — even when the window is closed.',
-    highlights: ['Morning briefing', 'Pre-meeting prep alerts', 'Silenceable any time'],
+      'Off Grid reaches out first — a morning briefing, a heads-up before meetings, approvals waiting on your decision, and to-dos it pulled from your day — even when the window is closed.',
+    highlights: ['Proactive briefings & meeting prep', 'Approval queue for actions', 'Auto-extracted to-dos'],
   },
 ];
 

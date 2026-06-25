@@ -7,6 +7,7 @@ import { registerNav } from './navRegistry';
 import { registerSlot } from './slotRegistry';
 import { registerSettingsSection } from './sectionRegistry';
 import { registerHook } from './hookRegistry';
+import { registerProView } from './proView';
 
 export interface ProRendererApi {
   registerScreen: typeof registerScreen;
@@ -14,6 +15,7 @@ export interface ProRendererApi {
   registerSlot: typeof registerSlot;
   registerSettingsSection: typeof registerSettingsSection;
   registerHook: typeof registerHook;
+  registerProView: typeof registerProView;
 }
 
 export async function loadProFeaturesRenderer(): Promise<void> {
@@ -29,7 +31,7 @@ export async function loadProFeaturesRenderer(): Promise<void> {
   const activateRenderer = (pro as { activateRenderer?: (api: ProRendererApi) => void })?.activateRenderer;
   if (typeof activateRenderer !== 'function') return; // stub resolved to null
   try {
-    activateRenderer({ registerScreen, registerNav, registerSlot, registerSettingsSection, registerHook });
+    activateRenderer({ registerScreen, registerNav, registerSlot, registerSettingsSection, registerHook, registerProView });
     console.log('[pro] renderer features activated');
   } catch (e) {
     console.error('[pro] activateRenderer failed', e);

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { IconPhoto, IconUser, IconHash, IconVideo, IconBulb, IconSearch, IconCornerDownLeft } from '@tabler/icons-react';
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog';
 import { Command, CommandInput, CommandList, CommandItem, CommandGroup, CommandEmpty } from './ui/command';
-import type { SearchHit } from './SearchScreen';
+import type { SearchHit } from '@/types';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const api = (window as any).api;

@@ -96,6 +96,12 @@ interface AppSettings {
 }
 
 interface IElectronAPI {
+  // Open-core bridge
+  isPro?: boolean
+  proInvoke?: (channel: string, ...args: unknown[]) => Promise<unknown>
+  proOn?: (channel: string, cb: (...a: unknown[]) => void) => () => void
+  proOff?: (channel: string) => void
+  onMasterMemoryProgress?: (callback: (data: { current: number; total: number }) => void) => (() => void)
   getMemories: (limit: number, appName?: string) => Promise<any[]>
   addMemory: (content: string, source?: string) => Promise<{ id: number }>
   searchMemories: (query: string) => Promise<any[]>

@@ -1,26 +1,22 @@
 
 import { ChatList } from './components/ChatList';
 import { ChatDetail } from './components/ChatDetail';
-import { MemoryList } from './components/MemoryList';
-import { EntitiesScreen } from './components/EntitiesScreen';
-import { SearchScreen, type SearchHit } from './components/SearchScreen';
 import { CommandPalette } from './components/CommandPalette';
 import logo from './assets/logo.png';
 import { useMeetingRecorder } from './useMeetingRecorder';
-import { DayView } from './components/DayView';
-import { ReplayScreen } from './components/ReplayScreen';
-import { ReflectScreen } from './components/ReflectScreen';
-import { ActionsScreen } from './components/ActionsScreen';
-import { ConnectorsScreen } from './components/ConnectorsScreen';
-import { MeetingsScreen } from './components/MeetingsScreen';
-import { EntityGraph } from './components/EntityGraph';
 import { MemoryChat } from './components/MemoryChat';
 import { Settings } from './components/Settings';
 import { ModelsScreen } from './components/ModelsScreen';
 import { ProjectsScreen } from './components/ProjectsScreen';
 import { Onboarding } from './components/Onboarding';
-import { NotificationList } from './components/NotificationList';
 import { PermissionGate } from './components/PermissionGate';
+import type { SearchHit } from './types';
+// Open-core: pro screens live in the private pro package and render through the
+// pro view-router; the free build shows the UpgradeScreen for those tabs.
+import { loadProFeaturesRenderer } from './bootstrap/loadProFeaturesRenderer';
+import { renderProView, type ProViewContext } from './bootstrap/proView';
+import { UpgradeScreen } from './components/pro/UpgradeScreen';
+import { PRO_FEATURES, getProFeature } from './components/pro/proCatalog';
 import { NotificationProvider, useNotifications } from './hooks/useNotifications';
 import { ReprocessingProvider, useReprocessing } from './hooks/useReprocessing';
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -30,19 +26,10 @@ import { Sidebar, SidebarBody } from './components/ui/sidebar';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   IconMessageCircle,
-  IconUsers,
-  IconBell,
   IconSettings,
   IconDownload,
   IconFolders,
-  IconCalendar,
-  IconSearch,
-  IconMovie,
-  IconChartPie,
-  IconChecklist,
-  IconPlug,
   IconChevronLeft,
-  IconVideo,
   IconLoader2,
   IconArrowLeft,
   IconArrowRight
@@ -107,10 +94,22 @@ function ReprocessingBanner() {
 function AppContent() {
 
   const posthog = usePostHog()
-  const { addNotification, unreadCount } = useNotifications();
+  const { addNotification } = useNotifications();
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState<boolean | null>(null);
 
-  const [viewMode, setViewMode] = useState<ViewMode>('day');
+  // Pro entitlement (preload reads OFFGRID_PRO; absent submodule => false at runtime).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const isPro = !!(window as any).api?.isPro;
+  // Re-render once pro renderer features have activated (registers the view-router).
+  const [, setProReady] = useState(false);
+  useEffect(() => {
+    let mounted = true;
+    void loadProFeaturesRenderer().finally(() => { if (mounted) setProReady(true); });
+    return () => { mounted = false; };
+  }, []);
+
+  // Free users land on Chat (a core tab), not a locked Pro tab.
+  const [viewMode, setViewMode] = useState<ViewMode>(isPro ? 'day' : 'memory-chat');
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [selectedMemoryId, setSelectedMemoryId] = useState<number | null>(null);
   const [selectedEntityId, setSelectedEntityId] = useState<number | null>(null);
@@ -433,32 +432,18 @@ function AppContent() {
     return <Onboarding onComplete={handleOnboardingComplete} />;
   }
 
-  const navItems = [
-    { label: 'Search', icon: <IconSearch className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'search' as ViewMode },
-    { label: 'Day', icon: <IconCalendar className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'day' as ViewMode },
-    { label: 'Replay', icon: <IconMovie className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'replay' as ViewMode },
-    { label: 'Reflect', icon: <IconChartPie className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'reflect' as ViewMode },
-    { label: 'Meetings', icon: <IconVideo className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'meetings' as ViewMode },
-    { label: 'Actions', icon: <IconChecklist className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'actions' as ViewMode },
-    { label: 'Integrations', icon: <IconPlug className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'connectors' as ViewMode },
-    { label: 'Entities', icon: <IconUsers className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'entities' as ViewMode },
-    { label: 'Projects', icon: <IconFolders className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'projects' as ViewMode },
+  // Core (free) tabs first, then the Pro tabs from the static catalogue (shown in
+  // every build — locked in free, opening the UpgradeScreen), then Settings.
+  const navItems: { label: string; icon: React.ReactNode; view: ViewMode; locked?: boolean }[] = [
     { label: 'Chat', icon: <IconMessageCircle className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'memory-chat' as ViewMode },
+    { label: 'Projects', icon: <IconFolders className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'projects' as ViewMode },
     { label: 'Models', icon: <IconDownload className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'models' as ViewMode },
-    {
-      label: 'Notifications',
-      icon: (
-        <div className="relative">
-          <IconBell className="h-5 w-5 shrink-0 text-neutral-400" />
-          {unreadCount > 0 && (
-            <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] flex items-center justify-center rounded-full bg-red-500 text-[9px] font-medium text-white px-1">
-              {unreadCount > 9 ? '9+' : unreadCount}
-            </span>
-          )}
-        </div>
-      ),
-      view: 'notifications' as ViewMode
-    },
+    ...PRO_FEATURES.map((f) => ({
+      label: f.label,
+      icon: <f.icon className="h-5 w-5 shrink-0 text-neutral-400" weight="regular" />,
+      view: f.route as ViewMode,
+      locked: !isPro,
+    })),
     { label: 'Settings', icon: <IconSettings className="h-5 w-5 shrink-0 text-neutral-400" />, view: 'settings' as ViewMode },
   ];
 
@@ -610,22 +595,7 @@ function AppContent() {
                   transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
                   className="p-6 h-full overflow-y-auto"
                 >
-                  {viewMode === 'day' ? (
-                    <DayView onNavigate={(view, opts) => {
-                      if (opts?.mode) setActionsMode(opts.mode);
-                      setViewMode(view);
-                    }} />
-                  ) : viewMode === 'replay' ? (
-                    <ReplayScreen seekToMs={replayTarget ?? undefined} />
-                  ) : viewMode === 'reflect' ? (
-                    <ReflectScreen />
-                  ) : viewMode === 'actions' ? (
-                    <ActionsScreen initialMode={actionsMode ?? undefined} />
-                  ) : viewMode === 'connectors' ? (
-                    <ConnectorsScreen />
-                  ) : viewMode === 'meetings' ? (
-                    <MeetingsScreen rec={rec} initialId={meetingTarget} />
-                  ) : viewMode === 'memory-chat' ? (
+                  {viewMode === 'memory-chat' ? (
                     <MemoryChat
                       onNavigateToMemory={handleSelectMemory}
                       onNavigateToChat={handleSelectChat}
@@ -635,21 +605,6 @@ function AppContent() {
                     />
                   ) : viewMode === 'chats' ? (
                     <ChatList onSelectSession={setSelectedSessionId} />
-                  ) : viewMode === 'memories' ? (
-                    <MemoryList selectedMemoryId={selectedMemoryId} onClearSelection={() => setSelectedMemoryId(null)} />
-                  ) : viewMode === 'entities' ? (
-                    <EntitiesScreen />
-                  ) : viewMode === 'search' ? (
-                    <SearchScreen initialQuery={searchQuery} onOpen={handleOpenHit} />
-                  ) : viewMode === 'notifications' ? (
-                    <NotificationList
-                      onOpenActions={() => {
-                        setSelectedSessionId(null);
-                        setSelectedMemoryId(null);
-                        setSelectedEntityId(null);
-                        setViewMode('actions');
-                      }}
-                    />
                   ) : viewMode === 'models' ? (
                     <ModelsScreen />
                   ) : viewMode === 'projects' ? (
@@ -657,7 +612,22 @@ function AppContent() {
                   ) : viewMode === 'settings' ? (
                     <Settings />
                   ) : (
-                    <EntityGraph />
+                    // Pro tabs: render through the pro view-router when active,
+                    // otherwise show the upgrade writeup for that feature.
+                    renderProView(viewMode, {
+                      setView: (v) => setViewMode(v as ViewMode),
+                      replayTarget,
+                      meetingTarget,
+                      actionsMode,
+                      setActionsMode,
+                      searchQuery,
+                      selectedMemoryId,
+                      setSelectedMemoryId,
+                      rec,
+                      onSelectEntity: handleSelectEntity,
+                      onSelectMemory: handleSelectMemory,
+                      onOpenHit: handleOpenHit,
+                    } satisfies ProViewContext) ?? <UpgradeScreen feature={getProFeature(viewMode)} />
                   )}
                 </motion.div>
               )}
