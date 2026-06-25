@@ -869,11 +869,11 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const openCanvas = useCallback((a: Artifact) => { closePanels(); setCanvasArtifact(a); }, [closePanels]);
 
   const openGallery = useCallback(() => {
-    setShowGallery(v => {
-      if (v) return false;
-      closePanels(); refreshGallery(); return true;
-    });
-  }, [refreshGallery, closePanels]);
+    if (showGallery) { setShowGallery(false); return; }
+    // Close the OTHER panels (closePanels also clears showGallery), then open —
+    // setShowGallery(true) runs last so it wins.
+    closePanels(); refreshGallery(); setShowGallery(true);
+  }, [showGallery, refreshGallery, closePanels]);
 
   const downloadImage = useCallback(async (path?: string, name?: string) => {
     if (!path) return;
