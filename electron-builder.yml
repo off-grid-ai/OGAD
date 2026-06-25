@@ -52,4 +52,6 @@ appImage:
 npmRebuild: false
 publish:
   provider: github
+  owner: off-grid-ai
+  repo: desktop
   releaseType: release

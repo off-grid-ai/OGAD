@@ -252,6 +252,11 @@ app.whenReady().then(() => {
 
   createWindow()
 
+  // Auto-update from GitHub Releases (production only; dev has no update feed).
+  if (!is.dev) {
+    import('./updater').then((m) => m.startAutoUpdates()).catch((e) => console.error('[update] init', e))
+  }
+
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

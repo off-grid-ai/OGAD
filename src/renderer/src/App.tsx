@@ -31,7 +31,8 @@ import {
   IconDownload,
   IconFolders,
   IconPlug,
-  IconChevronLeft,
+  IconLayoutSidebarLeftCollapse,
+  IconLayoutSidebarLeftExpand,
   IconLoader2,
   IconArrowLeft,
   IconArrowRight
@@ -472,37 +473,46 @@ function AppContent() {
         <Sidebar open={sidebarOpen} setOpen={setSidebarOpen}>
           <SidebarBody className="justify-between gap-10 bg-neutral-900/80 backdrop-blur-xl border-r border-neutral-800">
             <div className="flex flex-col flex-1 overflow-y-auto overflow-x-hidden">
-              {/* Logo + open/close toggle (the whole row toggles the sidebar) */}
-              <button onClick={() => setSidebarOpen((o) => !o)} className="flex items-center gap-2 py-2 w-full" title={sidebarOpen ? 'Collapse' : 'Expand'}>
-                <img src={logo} alt="Off Grid" className="h-8 w-8 shrink-0 rounded-lg" />
-                <motion.span
-                  animate={{
-                    display: sidebarOpen ? 'inline-block' : 'none',
-                    opacity: sidebarOpen ? 1 : 0,
-                  }}
-                  className="flex-1 text-left font-semibold text-white whitespace-pre"
+              {/* Brand + a dedicated collapse/expand toggle */}
+              {sidebarOpen ? (
+                <div className="flex items-center gap-2 py-2">
+                  <img src={logo} alt="Off Grid" className="h-8 w-8 shrink-0 rounded-lg" />
+                  <span className="flex-1 text-left font-semibold text-white whitespace-pre">Off Grid AI</span>
+                  <button
+                    onClick={() => setSidebarOpen(false)}
+                    aria-label="Collapse sidebar"
+                    title="Collapse"
+                    className="shrink-0 rounded-lg p-1.5 text-neutral-400 transition-colors hover:bg-neutral-800/60 hover:text-white"
+                  >
+                    <IconLayoutSidebarLeftCollapse className="h-5 w-5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setSidebarOpen(true)}
+                  aria-label="Expand sidebar"
+                  title="Expand"
+                  className="group/exp flex w-full flex-col items-center gap-1 py-2"
                 >
-                  Off Grid AI
-                </motion.span>
-                {sidebarOpen && <IconChevronLeft className="h-4 w-4 shrink-0 text-neutral-500" />}
-              </button>
+                  <img src={logo} alt="Off Grid" className="h-8 w-8 shrink-0 rounded-lg" />
+                  <IconLayoutSidebarLeftExpand className="h-4 w-4 text-neutral-500 transition-colors group-hover/exp:text-white" />
+                </button>
+              )}
 
-              {/* In-app back / forward — available on every screen (also ⌘[ / ⌘]) */}
-              <div className="mt-3 flex items-center gap-1">
+              {/* Back / forward — a distinct control (filled), available everywhere (⌘[ / ⌘]) */}
+              <div className={cn('mt-3 flex items-center gap-1', !sidebarOpen && 'justify-center')}>
                 <button
                   onClick={navigateBack}
                   disabled={!canGoBack}
                   aria-label="Back"
                   title="Back (⌘[)"
-                  className="flex flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-neutral-400 transition-colors hover:bg-neutral-800/50 hover:text-white disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent"
+                  className={cn(
+                    'flex items-center justify-center gap-1.5 rounded-lg border border-neutral-800 bg-neutral-800/40 text-neutral-300 transition-colors hover:border-neutral-700 hover:bg-neutral-800 hover:text-white disabled:opacity-30 disabled:hover:bg-neutral-800/40',
+                    sidebarOpen ? 'flex-1 px-2 py-1.5' : 'h-9 w-9'
+                  )}
                 >
                   <IconArrowLeft className="h-4 w-4 shrink-0" />
-                  <motion.span
-                    animate={{ display: sidebarOpen ? 'inline-block' : 'none', opacity: sidebarOpen ? 1 : 0 }}
-                    className="text-sm whitespace-pre"
-                  >
-                    Back
-                  </motion.span>
+                  {sidebarOpen && <span className="text-xs font-medium">Back</span>}
                 </button>
                 {sidebarOpen && (
                   <button
@@ -510,7 +520,7 @@ function AppContent() {
                     disabled={!canGoForward}
                     aria-label="Forward"
                     title="Forward (⌘])"
-                    className="rounded-lg px-2 py-1.5 text-neutral-400 transition-colors hover:bg-neutral-800/50 hover:text-white disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent"
+                    className="flex items-center justify-center rounded-lg border border-neutral-800 bg-neutral-800/40 px-2 py-1.5 text-neutral-300 transition-colors hover:border-neutral-700 hover:bg-neutral-800 hover:text-white disabled:opacity-30 disabled:hover:bg-neutral-800/40"
                   >
                     <IconArrowRight className="h-4 w-4 shrink-0" />
                   </button>

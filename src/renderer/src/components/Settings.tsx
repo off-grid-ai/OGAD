@@ -217,6 +217,10 @@ function ConsoleSection() {
 }
 
 export function Settings() {
+  // Pro/core aware: the proactive / secretary / fleet-console sections are Pro
+  // and are hidden in the free build.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const isPro = !!(window as any).api?.isPro;
   const [idName, setIdName] = useState('');
   const [idEmail, setIdEmail] = useState('');
 
@@ -260,7 +264,7 @@ export function Settings() {
             </div>
             <div>
               <h2 className="text-lg font-semibold text-white">Settings</h2>
-              <p className="text-sm text-neutral-500">Who you are, what Off Grid has learned, and your devices</p>
+              <p className="text-sm text-neutral-500">{isPro ? 'Who you are, what Off Grid has learned, and your devices' : 'Who you are'}</p>
             </div>
           </motion.div>
 
@@ -293,14 +297,19 @@ export function Settings() {
             </div>
           </motion.div>
 
-          {/* Proactive delivery — briefings + meeting prep */}
-          <ProactiveSection />
+          {/* Pro-only sections — hidden in the free build (Settings is pro/core aware). */}
+          {isPro && (
+            <>
+              {/* Proactive delivery — briefings + meeting prep */}
+              <ProactiveSection />
 
-          {/* Secretary — learned preferences from your dismissals */}
-          <SecretaryPrefs />
+              {/* Secretary — learned preferences from your dismissals */}
+              <SecretaryPrefs />
 
-          {/* Fleet Console */}
-          <ConsoleSection />
+              {/* Fleet Console */}
+              <ConsoleSection />
+            </>
+          )}
         </motion.div>
       </div>
 
