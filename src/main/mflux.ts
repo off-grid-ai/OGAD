@@ -198,7 +198,6 @@ export function buildMfluxArgs(params: MfluxGenParams, outPath: string): string[
 
 // tqdm progress lines look like " 50%|█████ | 2/4 [00:05<00:05,  1.20s/it]".
 const STEP_RE = /(\d+)\/(\d+)\s*\[[^\]]*?([\d.]+)s\/it/;
-const PCT_RE = /(\d+)%\|/;
 
 export function parseMfluxProgress(s: string): { step: number; total: number; secPerStep: number } | null {
   const m = STEP_RE.exec(s);
