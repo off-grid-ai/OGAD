@@ -39,6 +39,9 @@ function buildTrigger(d: Draft): { kind: 'schedule'; at: string } | { kind: 'key
 }
 
 export function SkillsPanel({ onClose, onChanged }: { onClose: () => void; onChanged?: () => void }) {
+  // Skill automation (triggers) is Pro; the free build shows manual packs only.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const isProBuild = !!(window as any).api?.isPro;
   const [skills, setSkills] = useState<{ name: string; description: string }[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
@@ -129,7 +132,9 @@ export function SkillsPanel({ onClose, onChanged }: { onClose: () => void; onCha
               className="resize-none rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm leading-relaxed text-neutral-200 placeholder-neutral-600 outline-none focus:border-green-500"
             />
 
-            {/* Automation — optional trigger → action */}
+            {/* Automation (trigger → action) is a Pro feature — hidden in the free
+                build, which has manual /skill packs only. */}
+            {isProBuild && (<>
             <div className="mt-2 rounded-md border border-neutral-800 bg-neutral-900/30 p-3">
               <label className="text-[10px] uppercase tracking-wide text-neutral-500">Automation <span className="text-neutral-600">(optional — run this skill on its own)</span></label>
               <select
@@ -187,6 +192,7 @@ export function SkillsPanel({ onClose, onChanged }: { onClose: () => void; onCha
                 </>
               )}
             </div>
+            </>)}
 
             <div className="mt-1 flex items-center justify-between">
               <div className="flex gap-2">
