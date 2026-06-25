@@ -4,6 +4,19 @@ console.log("PRELOAD SCRIPT LOADED");
 
 try {
   contextBridge.exposeInMainWorld('api', {
+    // Open-core: is the pro tier active in this build/session? Pro source is only
+    // present in paid builds; OFFGRID_PRO=0 simulates a free user locally. The
+    // renderer uses this to activate pro features and to lock/unlock pro tabs.
+    isPro: process.env.OFFGRID_PRO !== '0',
+    // Generic passthrough so pro renderer code can reach pro IPC channels without
+    // the core preload bundle enumerating them.
+    proInvoke: (channel: string, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args),
+    proOn: (channel: string, cb: (...a: unknown[]) => void) => {
+      const sub = (_e: unknown, ...a: unknown[]): void => cb(...a);
+      ipcRenderer.on(channel, sub);
+      return () => ipcRenderer.removeListener(channel, sub);
+    },
+    proOff: (channel: string) => ipcRenderer.removeAllListeners(channel),
     getMemories: (limit: number, appName?: string) => ipcRenderer.invoke('db:get-memories', limit, appName),
     addMemory: (content: string, source?: string) => ipcRenderer.invoke('db:add-memory', content, source),
     searchMemories: (query: string) => ipcRenderer.invoke('db:search-memories', query),

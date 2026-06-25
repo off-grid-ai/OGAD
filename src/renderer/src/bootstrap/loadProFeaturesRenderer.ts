@@ -17,6 +17,9 @@ export interface ProRendererApi {
 }
 
 export async function loadProFeaturesRenderer(): Promise<void> {
+  // Gated on the pro entitlement surfaced by preload (OFFGRID_PRO=0 → free).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (!(window as any).api?.isPro) { console.log('[pro] renderer disabled (free tier)'); return; }
   let pro: unknown;
   try {
     pro = await import('@offgrid/pro/renderer');

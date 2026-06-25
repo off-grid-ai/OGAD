@@ -18,7 +18,16 @@ export interface ProMainApi {
   registerToolExtension: typeof registerToolExtension;
 }
 
+/** Whether pro features should activate. The pro submodule must be present AND
+ *  the user entitled. Licensing is deferred; for now a local override drives it:
+ *  set OFFGRID_PRO=0 to simulate a free user even with the pro code bundled.
+ *  (Unset / any other value = pro on when the submodule is present.) */
+export function proEnabled(): boolean {
+  return process.env.OFFGRID_PRO !== '0';
+}
+
 export async function loadProFeaturesMain(): Promise<void> {
+  if (!proEnabled()) { console.log('[pro] disabled via OFFGRID_PRO=0'); return; }
   let pro: unknown;
   try {
     pro = await import('@offgrid/pro/main');
