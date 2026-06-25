@@ -367,6 +367,13 @@ export function getDB() {
   return db;
 }
 
+/** Run an idempotent schema migration (CREATE TABLE IF NOT EXISTS …) on the
+ *  shared DB. Exposed so the pro package can create its own tables (observations,
+ *  entities, approvals, …) without core knowing about them. */
+export function runMigration(sql: string): void {
+  getDB().exec(sql);
+}
+
 // === NEW API ACCESSORS ===
 
 export function getChatSessions(appName?: string) {
