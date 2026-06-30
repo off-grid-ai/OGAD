@@ -331,6 +331,30 @@ function likeFrameHits(query: string, limit: number): RawHit[] {
     .all(...args, limit) as RawHit[];
 }
 
+// Recent feed for the EMPTY-query default state: the latest of everything you've
+// seen/said/saved — observations (all surfaces incl. connectors), your chats, and
+// meetings — newest first. The same source rail + sort tabs then filter it. Each
+// query is guarded so a missing table (free build / fresh db) just contributes none.
+function recentFeedLists(limit: number): RawHit[][] {
+  const db = getDB();
+  const q = (sql: string, n: number): RawHit[] => { try { return db.prepare(sql).all(n) as RawHit[]; } catch { return []; } };
+  return [
+    q(`SELECT 'obs:'||o.id AS key, 'screen' AS kind, o.id AS refId, COALESCE(o.surface,'Screen') AS title,
+              o.summary AS snippet, COALESCE(o.surface,'') AS surface, o.url AS url,
+              CAST(strftime('%s', o.ts) AS INTEGER)*1000 AS ts
+         FROM observations o WHERE o.summary IS NOT NULL AND TRIM(o.summary) != ''
+        ORDER BY o.ts DESC LIMIT ?`, limit),
+    q(`SELECT 'chat:'||rc.id AS key, 'chat' AS kind, 0 AS refId, COALESCE(rc.title,'Chat') AS title,
+              '' AS snippet, 'Chat' AS surface, rc.id AS url,
+              CAST(strftime('%s', rc.updated_at) AS INTEGER)*1000 AS ts
+         FROM rag_conversations rc ORDER BY rc.updated_at DESC LIMIT ?`, Math.min(limit, 25)),
+    q(`SELECT 'mtg:'||id AS key, 'meeting' AS kind, id AS refId, COALESCE(title,'Meeting') AS title,
+              substr(COALESCE(summary,transcript),1,300) AS snippet, 'Meeting' AS surface, NULL AS url,
+              COALESCE(started_at,0) AS ts
+         FROM meetings ORDER BY started_at DESC LIMIT ?`, Math.min(limit, 25)),
+  ];
+}
+
 async function semanticHits(query: string, limit: number): Promise<RawHit[]> {
   const vector = await embeddings.generateEmbedding(query);
   const hits = await searchVectors(vector, limit);
@@ -366,14 +390,15 @@ export async function universalSearch(
   opts: { limit?: number; semantic?: boolean; sources?: string[]; sort?: SearchSort; excludeChatId?: string } = {}
 ): Promise<SearchResult[]> {
   const q = query.trim();
-  if (!q) return [];
   const limit = opts.limit ?? 30;
   // When filtering by source, cast a wider net per source so enough survive the filter.
   const perSource = opts.sources?.length ? 80 : Math.min(40, limit + 10);
   const sourceSet = opts.sources?.length ? new Set(opts.sources.map((s) => s.toLowerCase())) : null;
 
-  const lists = keywordHits(q, perSource);
-  if (opts.semantic !== false) {
+  // Empty query → the recent feed (the default landing state). With a query →
+  // keyword + semantic hits.
+  const lists = q ? keywordHits(q, perSource) : recentFeedLists(Math.max(perSource, limit + 20));
+  if (q && opts.semantic !== false) {
     try {
       lists.push(await semanticHits(q, perSource));
     } catch {
@@ -419,7 +444,8 @@ export async function universalSearch(
   if (opts.excludeChatId) ordered = ordered.filter((r) => r.key !== `chat:${opts.excludeChatId}`);
   // Sort: relevance = blended score (default); recency = newest first; match =
   // strongest literal term overlap in title/snippet (ties broken by score).
-  const sort = opts.sort ?? 'relevance';
+  // Empty feed is always newest-first; with a query, honor the chosen sort.
+  const sort = q ? (opts.sort ?? 'relevance') : 'recency';
   if (sort === 'recency') {
     ordered.sort((a, b) => (b.ts || 0) - (a.ts || 0) || b.score - a.score);
   } else if (sort === 'match') {
