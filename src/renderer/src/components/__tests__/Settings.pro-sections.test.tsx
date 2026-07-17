@@ -13,7 +13,7 @@
 // resetModules per test so the freshly-imported Settings and sectionRegistry share
 // one registry instance (the registry is a module singleton).
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { render, screen, cleanup, waitFor } from '@testing-library/react'
+import { render, screen, cleanup, waitFor, act } from '@testing-library/react'
 
 function stubApi(platform = 'darwin'): void {
   const api = new Proxy(
@@ -68,6 +68,24 @@ describe('Settings pro-section registry seam (D31)', () => {
     await waitFor(() => expect(screen.getByTestId('fake-proactive')).toBeTruthy())
     // ...and the placeholder for that slot is gone.
     expect(screen.queryByText(/native notifications, even when the window is closed/i)).toBeNull()
+  })
+
+  it('reactively renders a core package section without a Pro catalog slot', async () => {
+    vi.resetModules()
+    stubApi()
+    const registry = await import('../../bootstrap/sectionRegistry')
+    const { Settings } = await import('../Settings')
+    render(<Settings />)
+    expect(screen.queryByTestId('fake-sync-settings')).toBeNull()
+
+    act(() => {
+      registry.registerCoreSettingsSection({
+        id: 'sync',
+        component: () => <div data-testid="fake-sync-settings">SYNC SETTINGS</div>
+      })
+    })
+
+    await waitFor(() => expect(screen.getByTestId('fake-sync-settings')).toBeTruthy())
   })
 
   it('Windows Pro build: withholds Mac-only sections but keeps account sections available', async () => {

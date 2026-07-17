@@ -1,4 +1,9 @@
 import type { ComponentType } from 'react'
+import {
+  getRegisteredFeatures,
+  registerFeatureNavigation,
+  type FeatureNavigation
+} from './featureRegistry'
 
 // Navigation seam. Pro registers sidebar nav entries during activation; App.tsx
 // renders core items + registered items in order. Each entry points at a route
@@ -21,18 +26,27 @@ export interface NavEntry {
   order?: number
 }
 
-const entries: NavEntry[] = []
+const legacyProRoutes = new Set<string>()
 
-export function registerNav(entry: NavEntry): void {
-  if (!entries.some((e) => e.route === entry.route)) entries.push(entry)
+export function registerNav(entry: NavEntry): () => void {
+  const unregister = registerFeatureNavigation(entry as FeatureNavigation)
+  legacyProRoutes.add(entry.route)
+  return () => {
+    unregister()
+    legacyProRoutes.delete(entry.route)
+  }
 }
 
 export function getRegisteredNav(): NavEntry[] {
-  return [...entries].sort((a, b) => (a.order ?? 100) - (b.order ?? 100))
+  return getRegisteredFeatures().map(({ route, label, icon, order }) => ({
+    route,
+    label,
+    icon,
+    order
+  }))
 }
 
-/** True once the pro package has registered at least one screen — used by the
- *  shell to decide between rendering the real screen vs the upgrade teaser. */
+/** Compatibility signal retained for the private package activation API. */
 export function isProActive(): boolean {
-  return entries.length > 0
+  return legacyProRoutes.size > 0
 }

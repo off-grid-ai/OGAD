@@ -15,6 +15,7 @@ import type { SearchHit } from './types'
 // Open-core: pro screens live in the private pro package and render through the
 // pro view-router; the free build shows the UpgradeScreen for those tabs.
 import { loadProFeaturesRenderer } from './bootstrap/loadProFeaturesRenderer'
+import { useCoreFeatures } from './bootstrap/featureRegistry'
 import { renderProView, type ProViewContext } from './bootstrap/proView'
 import { UpgradeScreen } from './components/pro/UpgradeScreen'
 import { getProFeature, proFeatureComingSoon } from './components/pro/proCatalog'
@@ -48,7 +49,7 @@ import {
 import { OFF_GRID_MOBILE_URL, openExternal } from './constants/links'
 import { cn } from './lib/utils'
 
-type ViewMode =
+type CoreViewMode =
   | 'dashboard'
   | 'day'
   | 'replay'
@@ -70,6 +71,8 @@ type ViewMode =
   | 'clipboard'
   | 'voice'
   | 'vault'
+
+type ViewMode = CoreViewMode | (string & {})
 
 // Navigation state type for history tracking
 interface NavigationState {
@@ -199,6 +202,7 @@ function ModelStatusDot({
 
 function AppContent() {
   const { addNotification } = useNotifications()
+  const registeredFeatures = useCoreFeatures()
 
   // Pro entitlement (preload reads OFFGRID_PRO; absent submodule => false at runtime).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -297,10 +301,15 @@ function AppContent() {
       '/voice': 'voice'
     }
 
-    if (viewMap[path]) {
-      setViewMode(viewMap[path])
-    }
-  }, [])
+    registeredFeatures.forEach((feature) => {
+      viewMap[`/${feature.route}`] = feature.route
+    })
+
+    const route = viewMap[path]
+    if (!route) return
+    const timeout = window.setTimeout(() => setViewMode(route), 0)
+    return () => window.clearTimeout(timeout)
+  }, [registeredFeatures])
 
   // Programmatic navigation from outside the shell (e.g. the first-run gate's
   // "pick a model yourself" CTA) — switch the active view without a remount.
@@ -320,7 +329,7 @@ function AppContent() {
 
   // Update browser URL when view mode changes
   useEffect(() => {
-    const urlMap: Record<ViewMode, string> = {
+    const urlMap: Record<string, string> = {
       day: '/day',
       replay: '/replay',
       reflect: '/reflect',
@@ -344,7 +353,7 @@ function AppContent() {
       vault: '/vault'
     }
 
-    const newPath = urlMap[viewMode]
+    const newPath = urlMap[viewMode] ?? `/${viewMode}`
     if (window.location.pathname !== newPath) {
       window.history.replaceState(null, '', newPath)
     }
@@ -651,6 +660,20 @@ function AppContent() {
       view: 'settings' as ViewMode
     }
   ]
+  const existingRoutes = new Set(mainNav.map((item) => item.view))
+  const packageNav = registeredFeatures
+    .filter((feature) => !existingRoutes.has(feature.route))
+    .map((feature) => {
+      const FeatureIcon = feature.icon
+      return {
+        label: feature.label,
+        icon: <FeatureIcon className="h-5 w-5 shrink-0" />,
+        view: feature.route
+      }
+    })
+  const RegisteredFeatureScreen = registeredFeatures.find(
+    (feature) => feature.route === viewMode
+  )?.component
   const renderNavItem = (item: {
     label: string
     icon: React.ReactNode
@@ -831,7 +854,7 @@ function AppContent() {
 
               {/* Navigation (scrolls; Settings is pinned to the bottom) */}
               <div className="mt-6 flex flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden pr-0.5">
-                {mainNav.map(renderNavItem)}
+                {[...mainNav, ...packageNav].map(renderNavItem)}
               </div>
             </div>
 
@@ -930,6 +953,8 @@ function AppContent() {
                     <GatewayScreen />
                   ) : viewMode === 'settings' ? (
                     <Settings />
+                  ) : RegisteredFeatureScreen ? (
+                    <RegisteredFeatureScreen />
                   ) : proFeatureComingSoon(viewMode, currentPlatform(), isPro) ? (
                     <UpgradeScreen variant="coming-soon" feature={getProFeature(viewMode)} />
                   ) : (

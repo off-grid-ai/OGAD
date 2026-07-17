@@ -1,4 +1,9 @@
 import type { ComponentType } from 'react'
+import {
+  getRegisteredFeature,
+  getRegisteredFeatures,
+  registerFeatureScreen
+} from './featureRegistry'
 
 // Screen seam. Pro registers full screens (route name → component) during
 // activation; App.tsx renders core screens + whatever is registered. Free build
@@ -11,16 +16,15 @@ export interface RegisteredScreen {
   component: ComponentType<any>
 }
 
-const screens: RegisteredScreen[] = []
-
-export function registerScreen(screen: RegisteredScreen): void {
-  if (!screens.some((s) => s.name === screen.name)) screens.push(screen)
+export function registerScreen(screen: RegisteredScreen): () => void {
+  return registerFeatureScreen(screen)
 }
 
 export function getRegisteredScreen(name: string): RegisteredScreen | undefined {
-  return screens.find((s) => s.name === name)
+  const feature = getRegisteredFeature(name)
+  return feature ? { name: feature.route, component: feature.component } : undefined
 }
 
 export function getRegisteredScreens(): RegisteredScreen[] {
-  return screens
+  return getRegisteredFeatures().map(({ route, component }) => ({ name: route, component }))
 }

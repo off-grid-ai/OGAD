@@ -8,10 +8,20 @@ type NavModule = typeof import('../../bootstrap/navRegistry')
 
 // A throwaway icon component - the registry only stores it, never renders it here.
 const Icon = (() => null) as unknown as ComponentType<Record<string, unknown>>
+const Screen = (() => null) as unknown as ComponentType<Record<string, unknown>>
 
 async function fresh(): Promise<NavModule> {
   vi.resetModules()
   return import('../../bootstrap/navRegistry')
+}
+
+async function registerCompleteFeature(
+  nav: NavModule,
+  entry: Parameters<NavModule['registerNav']>[0]
+): Promise<void> {
+  nav.registerNav(entry)
+  const screens = await import('../../bootstrap/screenRegistry')
+  screens.registerScreen({ name: entry.route, component: Screen })
 }
 
 describe('navRegistry', () => {
@@ -25,9 +35,12 @@ describe('navRegistry', () => {
     expect(m.isProActive()).toBe(false)
   })
 
-  it('registers a single entry and reports pro active', async () => {
+  it('publishes navigation after its matching screen registers', async () => {
     const m = await fresh()
     m.registerNav({ route: 'day', label: 'Day', icon: Icon })
+    expect(m.getRegisteredNav()).toEqual([])
+    const screens = await import('../../bootstrap/screenRegistry')
+    screens.registerScreen({ name: 'day', component: Screen })
     expect(m.getRegisteredNav()).toHaveLength(1)
     expect(m.getRegisteredNav()[0]!.route).toBe('day')
     expect(m.isProActive()).toBe(true)
@@ -35,8 +48,8 @@ describe('navRegistry', () => {
 
   it('dedupes by route - a second register of the same route is ignored', async () => {
     const m = await fresh()
-    m.registerNav({ route: 'day', label: 'Day', icon: Icon })
-    m.registerNav({ route: 'day', label: 'Day (again)', icon: Icon })
+    await registerCompleteFeature(m, { route: 'day', label: 'Day', icon: Icon })
+    await registerCompleteFeature(m, { route: 'day', label: 'Day (again)', icon: Icon })
     const nav = m.getRegisteredNav()
     expect(nav).toHaveLength(1)
     // First registration wins - the label is the original, not the duplicate.
@@ -45,31 +58,31 @@ describe('navRegistry', () => {
 
   it('keeps distinct routes', async () => {
     const m = await fresh()
-    m.registerNav({ route: 'day', label: 'Day', icon: Icon })
-    m.registerNav({ route: 'reflect', label: 'Reflect', icon: Icon })
+    await registerCompleteFeature(m, { route: 'day', label: 'Day', icon: Icon })
+    await registerCompleteFeature(m, { route: 'reflect', label: 'Reflect', icon: Icon })
     expect(m.getRegisteredNav().map((e) => e.route)).toEqual(['day', 'reflect'])
   })
 
   it('sorts by order ascending (lower first)', async () => {
     const m = await fresh()
-    m.registerNav({ route: 'b', label: 'B', icon: Icon, order: 200 })
-    m.registerNav({ route: 'a', label: 'A', icon: Icon, order: 100 })
-    m.registerNav({ route: 'c', label: 'C', icon: Icon, order: 150 })
+    await registerCompleteFeature(m, { route: 'b', label: 'B', icon: Icon, order: 200 })
+    await registerCompleteFeature(m, { route: 'a', label: 'A', icon: Icon, order: 100 })
+    await registerCompleteFeature(m, { route: 'c', label: 'C', icon: Icon, order: 150 })
     expect(m.getRegisteredNav().map((e) => e.route)).toEqual(['a', 'c', 'b'])
   })
 
   it('defaults a missing order to 100 for sorting', async () => {
     const m = await fresh()
     // no order => treated as 100; explicit 50 sorts before it, 150 after.
-    m.registerNav({ route: 'noOrder', label: 'None', icon: Icon })
-    m.registerNav({ route: 'low', label: 'Low', icon: Icon, order: 50 })
-    m.registerNav({ route: 'high', label: 'High', icon: Icon, order: 150 })
-    expect(m.getRegisteredNav().map((e) => e.route)).toEqual(['low', 'noOrder', 'high'])
+    await registerCompleteFeature(m, { route: 'no-order', label: 'None', icon: Icon })
+    await registerCompleteFeature(m, { route: 'low', label: 'Low', icon: Icon, order: 50 })
+    await registerCompleteFeature(m, { route: 'high', label: 'High', icon: Icon, order: 150 })
+    expect(m.getRegisteredNav().map((e) => e.route)).toEqual(['low', 'no-order', 'high'])
   })
 
-  it('getRegisteredNav returns a fresh sorted copy - not the live array', async () => {
+  it('getRegisteredNav returns a copy - not the registry snapshot', async () => {
     const m = await fresh()
-    m.registerNav({ route: 'a', label: 'A', icon: Icon })
+    await registerCompleteFeature(m, { route: 'a', label: 'A', icon: Icon })
     const first = m.getRegisteredNav()
     first.push({ route: 'injected', label: 'X', icon: Icon })
     // Mutating the returned array must not affect the registry.

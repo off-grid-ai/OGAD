@@ -5,7 +5,7 @@ import { ProgressiveBlur } from './ui/progressive-blur'
 import { SetupPanel } from './setup/SetupPanel'
 import { StoragePanel } from './setup/StoragePanel'
 import { DataPrivacyPanel } from './setup/DataPrivacyPanel'
-import { getRegisteredSettingsSections } from '../bootstrap/sectionRegistry'
+import { useCoreSettingsSections, useProSettingsSections } from '../bootstrap/sectionRegistry'
 import { PRO_SETTINGS_SLOTS } from './pro/proSettingsCatalog'
 // Shared card chrome, in its own light module so the pro package can reuse it without
 // importing this whole god-file (which pulls SetupPanel/etc. + their window.api types).
@@ -229,7 +229,8 @@ export function Settings() {
   const isPro = !!(window as any).api?.isPro
   const proComingSoon = proComingSoonHere(currentPlatform(), isPro)
   // Pro sections registered by the pro renderer at activation (empty in free build).
-  const registeredSections = getRegisteredSettingsSections()
+  const registeredProSections = useProSettingsSections()
+  const packageSections = useCoreSettingsSections()
   const [appVersion, setAppVersion] = useState('')
 
   useEffect(() => {
@@ -301,7 +302,7 @@ export function Settings() {
               placeholders. Slot list, order, and placeholder copy live in
               proSettingsCatalog — core owns the inert shell, pro owns the logic. */}
           {PRO_SETTINGS_SLOTS.map((slot) => {
-            const section = registeredSections.find((s) => s.id === slot.id)
+            const section = registeredProSections.find((registered) => registered.id === slot.id)
             if (section && proComingSoon && slot.macOnly) {
               return (
                 <ProPlaceholder
@@ -326,6 +327,13 @@ export function Settings() {
                 description={slot.placeholder.description}
               />
             )
+          })}
+
+          {/* Core packages register their settings sections directly. They do not
+              participate in the Pro placeholder or entitlement catalogue. */}
+          {packageSections.map((section) => {
+            const Section = section.component
+            return <Section key={section.id} />
           })}
 
           {/* Data & privacy — one place to delete on-device data. */}
