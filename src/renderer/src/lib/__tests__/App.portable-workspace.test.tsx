@@ -106,7 +106,7 @@ describe('App portable workspace composition', () => {
       )
     )
     expect((screen.getByRole('combobox') as HTMLSelectElement).disabled).toBe(true)
-    expect(screen.getByRole('option').textContent).toBe("Keep this device's version")
+    expect(screen.getByRole('option').textContent).toBe('Keep existing')
 
     await user.click(screen.getByRole('button', { name: 'EXPORT WORKSPACE' }))
     await screen.findByText('Exported 15 workspace items.')
