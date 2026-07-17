@@ -1,4 +1,5 @@
 import { useSyncExternalStore, type ComponentType } from 'react'
+import { isHostOwnedRoute } from './routes'
 
 export interface FeatureIconProps {
   className?: string
@@ -44,32 +45,6 @@ const pendingFeatures = new Map<string, PendingFeature>()
 const listeners = new Set<() => void>()
 let snapshot: readonly PublishedFeature[] = []
 let coreSnapshot: readonly PublishedFeature[] = []
-
-/** Routes composed directly by App.tsx or its existing Pro fallback. Packages
- * must choose a distinct route so their navigation cannot be silently shadowed. */
-const HOST_OWNED_ROUTES = new Set([
-  'dashboard',
-  'day',
-  'replay',
-  'reflect',
-  'actions',
-  'connectors',
-  'meetings',
-  'chats',
-  'memories',
-  'entities',
-  'graph',
-  'memory-chat',
-  'models',
-  'gateway',
-  'projects',
-  'notifications',
-  'settings',
-  'search',
-  'clipboard',
-  'voice',
-  'vault'
-])
 
 function publish(): void {
   snapshot = Object.freeze(
@@ -132,7 +107,7 @@ function updateFeature(route: string, update: Partial<PendingFeature>): () => vo
 /** Atomic registration API for package-owned core features. */
 export function registerFeature(feature: RegisteredFeature): () => void {
   validateRoute(feature.route)
-  if (HOST_OWNED_ROUTES.has(feature.route)) {
+  if (isHostOwnedRoute(feature.route)) {
     throw new Error(`Feature route is owned by the host: ${feature.route}`)
   }
   if (pendingFeatures.has(feature.route)) {
