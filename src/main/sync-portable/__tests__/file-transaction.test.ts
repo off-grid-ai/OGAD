@@ -1,17 +1,30 @@
 import { createHash } from 'crypto'
-import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import os from 'os'
 import path from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { FileTransaction } from '../file-transaction'
+import { ImportJournalStore } from '../import-journal'
 
 const roots: string[] = []
 const hash = (value: string): string => createHash('sha256').update(value).digest('hex')
 
+function journals(root: string): ImportJournalStore {
+  return new ImportJournalStore(root, {} as never)
+}
+
 async function paths(): Promise<{ root: string; staged: string; destination: string }> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'offgrid-file-transaction-'))
   roots.push(root)
-  return { root, staged: path.join(root, 'staged'), destination: path.join(root, 'destination') }
+  const stage = path.join(root, 'sync-portable', 'stages', 'stage-test')
+  const restore = path.join(root, 'sync-files')
+  await mkdir(stage, { recursive: true })
+  await mkdir(restore, { recursive: true })
+  return {
+    root,
+    staged: path.join(stage, 'staged'),
+    destination: path.join(restore, 'destination')
+  }
 }
 
 afterEach(async () => {
@@ -33,7 +46,8 @@ describe('FileTransaction collision policies', () => {
           sha256: hash('same')
         }
       ],
-      'keep-existing'
+      'keep-existing',
+      journals(files.root)
     )
     transaction.apply()
     expect(transaction.paths().get('file')).toBe(files.destination)
@@ -51,7 +65,8 @@ describe('FileTransaction collision policies', () => {
             sha256: hash('same')
           }
         ],
-        'keep-existing'
+        'keep-existing',
+        journals(files.root)
       )
     ).rejects.toThrow('conflicts')
   })
@@ -70,7 +85,8 @@ describe('FileTransaction collision policies', () => {
           sha256: hash('new')
         }
       ],
-      'duplicate'
+      'duplicate',
+      journals(duplicate.root)
     )
     duplicateTransaction.apply()
     expect(duplicateTransaction.paths().get('file')).not.toBe(duplicate.destination)
@@ -89,14 +105,15 @@ describe('FileTransaction collision policies', () => {
           sha256: hash('new')
         }
       ],
-      'replace-existing'
+      'replace-existing',
+      journals(replacement.root)
     )
     replacementTransaction.apply()
     expect(() => replacementTransaction.rollback(new Error('database failed'))).toThrow(
       'database failed'
     )
     expect(await readFile(replacement.destination, 'utf8')).toBe('old')
-    expect(await readFile(replacement.staged, 'utf8')).toBe('new')
+    await expect(readFile(replacement.staged, 'utf8')).rejects.toThrow()
   })
 
   it('rejects collisions before changing either file', async () => {
@@ -114,10 +131,40 @@ describe('FileTransaction collision policies', () => {
             sha256: hash('new')
           }
         ],
-        'reject'
+        'reject',
+        journals(files.root)
       )
     ).rejects.toThrow('already exists')
     expect(await readFile(files.destination, 'utf8')).toBe('old')
     expect(await readFile(files.staged, 'utf8')).toBe('new')
+  })
+
+  it('restores a replacement when staged installation fails after the backup move', async () => {
+    const files = await paths()
+    await writeFile(files.staged, 'new')
+    await writeFile(files.destination, 'old')
+    const transaction = await FileTransaction.create(
+      [
+        {
+          key: 'file',
+          stagedPath: files.staged,
+          destinationPath: files.destination,
+          size: 3,
+          sha256: hash('new')
+        }
+      ],
+      'replace-existing',
+      journals(files.root)
+    )
+    await rm(files.staged)
+
+    let failure: unknown
+    try {
+      transaction.apply()
+    } catch (error) {
+      failure = error
+    }
+    expect(() => transaction.rollback(failure)).toThrow()
+    expect(await readFile(files.destination, 'utf8')).toBe('old')
   })
 })

@@ -27,6 +27,12 @@ export function setupSyncPortableIpc(): void {
       }
     }
   })
+  try {
+    service.initialize()
+  } catch (error) {
+    console.error('[sync:portable] recovery failed; portable workspace IPC is disabled', error)
+    return
+  }
 
   ipcMain.handle(SYNC_PORTABLE_CHANNELS.exportAll, () => service.exportAll())
   ipcMain.handle(SYNC_PORTABLE_CHANNELS.exportProject, (_event, projectId: unknown) =>

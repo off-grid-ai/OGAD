@@ -7,18 +7,33 @@ how to reproduce, and the fix direction. Close with evidence; never hide.
 
 ## OPEN
 
-### Portable workspace import cannot recover from a process or power failure mid-commit
+### Portable workspace non-default collision policies need record-graph conformance coverage
 
-The desktop importer holds the SQLite transaction open while it atomically renames staged files and
-uses `.offgrid-rollback-*` siblings to compensate ordinary exceptions. A process or power failure
-between a rename and SQLite commit bypasses that in-process compensation and can leave rollback
-files or a database/filesystem mismatch. Reproduce by terminating Electron after a replacement
-rename and before the transaction commits. Fix direction: write and fsync a small import journal
-before mutation, then recover or finish it during startup before the data is opened.
+The filesystem behavior of `replace-existing`, `duplicate`, and `reject` is covered, but their full
+project → conversation → message → attachment and project → document/chunk reference graphs do not
+yet have real SQLite conformance tests. Replacement can also leave an old document path orphaned if
+an imported record changes its archive path. The integration UI must continue defaulting to
+`keep-existing` and must not advertise these policies until those graph tests pass and superseded
+files participate in the durable journal.
 
 ---
 
 ## RESOLVED
+
+### Portable workspace process/power crash recovery - CLOSED (2026-07-17)
+
+Desktop import now writes a validated version-1 journal under the app-owned user-data directory,
+fsyncs the staged files, journal, renames, and containing directories, and records the import ID in
+SQLite inside the same transaction as the restored records. Startup recovery runs before portable
+workspace IPC registration: no commit marker deterministically rolls files back, while a marker
+finishes backup cleanup. Corrupt, oversized, unsupported, or path-escaping journals fail closed and
+disable only portable workspace IPC with an observable main-process error. Recovery is idempotent.
+
+Evidence: `sync-portable-journal.dbtest.ts` uses real SQLite and real filesystem mutations to
+simulate termination before mutation, after a replacement backup rename, after final installation,
+after database commit, and for new-file creation; every case runs recovery twice. It also verifies
+corrupt-journal fail-closed behavior. `sync-portable-data.dbtest.ts` proves forced transaction failure
+compensation and searchable, file-backed import, including valid text-only mobile documents.
 
 ### Data-layer / presentation-layer drift sweep (2026-07-09) - CLOSED
 

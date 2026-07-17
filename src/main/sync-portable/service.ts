@@ -7,6 +7,7 @@ import type { SyncPortableExportResult } from '../../shared/sync-portable-contra
 import { DesktopArchivePort } from './archive'
 import { DesktopWorkspaceDataPort, type DesktopImportSummary } from './data'
 import { preparePortableDocument } from './prepare-document'
+import { ImportJournalStore } from './import-journal'
 
 export interface PortableDialogPort {
   saveWorkspace(suggestedName: string): Promise<string | null>
@@ -42,11 +43,21 @@ export class DesktopPortableService {
   private readonly data: DesktopWorkspaceDataPort
   private readonly archive: DesktopArchivePort
   private readonly sink: DesktopBackupSink
+  private readonly journals: ImportJournalStore
 
   constructor(options: DesktopPortableServiceOptions) {
-    this.data = new DesktopWorkspaceDataPort(options.database, preparePortableDocument)
+    this.journals = new ImportJournalStore(options.userData, options.database)
+    this.data = new DesktopWorkspaceDataPort(
+      options.database,
+      preparePortableDocument,
+      this.journals
+    )
     this.archive = new DesktopArchivePort(options.userData)
     this.sink = new DesktopBackupSink(options.dialogs)
+  }
+
+  initialize(): void {
+    this.journals.recover()
   }
 
   private engine(

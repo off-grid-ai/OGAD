@@ -19,6 +19,7 @@ import type {
   WorkspaceSnapshot
 } from '@offgrid/sync/portable'
 import { FileTransaction } from './file-transaction'
+import { ImportJournalStore } from './import-journal'
 
 type Db = Database.Database
 type JsonObject = { [key: string]: JsonValue }
@@ -269,14 +270,103 @@ function emptySummary(): DesktopImportSummary {
   }
 }
 
+interface PrepareImportOptions {
+  snapshot: WorkspaceSnapshot
+  context: AtomicImportContext
+  documentIds: Set<string>
+  messageIds: Set<string>
+  attachmentsByMessage: ReadonlyMap<string, AttachmentRecord[]>
+  shouldWrite: (exists: boolean) => boolean
+  prepareDocument: PortableDocumentPreparer
+  journals: ImportJournalStore
+}
+
+async function prepareImportFiles(options: PrepareImportOptions): Promise<{
+  fileTransaction: FileTransaction
+  filePaths: ReadonlyMap<string, string>
+  documentFileKeys: ReadonlyMap<string, string>
+  preparedDocuments: ReadonlyMap<string, PreparedPortableDocument>
+}> {
+  const { snapshot, context, shouldWrite, journals } = options
+  const requiredKeys = new Set<string>()
+  const documentFileKeys = new Map<string, string>()
+  const importFiles = [...context.files]
+  const generatedStagePaths: string[] = []
+  for (const document of snapshot.documents) {
+    if (
+      shouldWrite(options.documentIds.has(document.id)) &&
+      !document.archiveKey &&
+      !document.textContent?.trim()
+    ) {
+      throw new BundleError(
+        `Document ${document.id} must contain a file or non-empty extracted text.`
+      )
+    }
+  }
+  for (const document of snapshot.documents) {
+    if (!shouldWrite(options.documentIds.has(document.id))) continue
+    const staged = document.archiveKey
+      ? undefined
+      : journals.stageText(document.id, document.textContent!)
+    const key = document.archiveKey ?? staged!.key
+    if (staged) {
+      importFiles.push(staged)
+      generatedStagePaths.push(staged.stagedPath)
+    }
+    requiredKeys.add(key)
+    documentFileKeys.set(document.id, key)
+  }
+  for (const message of snapshot.messages) {
+    if (!shouldWrite(options.messageIds.has(message.id))) continue
+    for (const attachment of options.attachmentsByMessage.get(message.id) ?? []) {
+      if (attachment.archiveKey) requiredKeys.add(attachment.archiveKey)
+    }
+  }
+  const stagedByKey = new Map(importFiles.map((file) => [file.key, file.stagedPath]))
+  const preparedDocuments = new Map<string, PreparedPortableDocument>()
+  try {
+    for (const document of snapshot.documents) {
+      if (!shouldWrite(options.documentIds.has(document.id))) continue
+      const fileKey = documentFileKeys.get(document.id)
+      const stagedPath = fileKey ? stagedByKey.get(fileKey) : undefined
+      if (!stagedPath) throw new BundleError(`Document ${document.id} has no staged file.`)
+      const prepared = await options.prepareDocument(document, stagedPath)
+      if (
+        prepared.chunks.length === 0 ||
+        prepared.embeddings.length !== prepared.chunks.length ||
+        prepared.embeddings.some((embedding) => embedding.length === 0)
+      ) {
+        throw new BundleError(`Document ${document.name} could not be made searchable.`)
+      }
+      preparedDocuments.set(document.id, prepared)
+    }
+    const fileTransaction = await FileTransaction.create(
+      importFiles.filter(({ key }) => requiredKeys.has(key)),
+      context.collisionPolicy,
+      journals
+    )
+    return {
+      fileTransaction,
+      filePaths: fileTransaction.paths(),
+      documentFileKeys,
+      preparedDocuments
+    }
+  } catch (error) {
+    journals.discardStages(generatedStagePaths)
+    throw error
+  }
+}
+
 export class DesktopWorkspaceDataPort implements WorkspaceDataPort<DesktopImportSummary> {
   constructor(
     private readonly db: Db,
-    private readonly prepareDocument: PortableDocumentPreparer
+    private readonly prepareDocument: PortableDocumentPreparer,
+    private readonly journals: ImportJournalStore
   ) {}
 
   async collect(selection: WorkspaceSelection): Promise<WorkspaceExport | null> {
     ensurePortableSchema(this.db)
+    this.journals.ensureSchema()
     const conversationFilter = selection.kind === 'conversation' ? [selection.id] : []
     let conversations: ConversationRow[]
     if (selection.kind === 'project') {
@@ -411,6 +501,7 @@ export class DesktopWorkspaceDataPort implements WorkspaceDataPort<DesktopImport
     context: AtomicImportContext
   ): Promise<DesktopImportSummary> {
     ensurePortableSchema(this.db)
+    this.journals.ensureSchema()
     const sets = collisionSets(this.db)
     if (context.collisionPolicy === 'reject') requireNoCollisions(snapshot, sets)
     const duplicate = context.collisionPolicy === 'duplicate'
@@ -443,38 +534,17 @@ export class DesktopWorkspaceDataPort implements WorkspaceDataPort<DesktopImport
       list.push(attachment)
       attachmentsByMessage.set(attachment.messageId, list)
     }
-    const requiredKeys = new Set<string>()
-    for (const document of snapshot.documents) {
-      if (shouldWrite(sets.documents.has(document.id)) && document.archiveKey)
-        requiredKeys.add(document.archiveKey)
-    }
-    for (const message of snapshot.messages) {
-      if (!shouldWrite(sets.messages.has(message.id))) continue
-      for (const attachment of attachmentsByMessage.get(message.id) ?? []) {
-        if (attachment.archiveKey) requiredKeys.add(attachment.archiveKey)
-      }
-    }
-    const fileTransaction = await FileTransaction.create(
-      context.files.filter(({ key }) => requiredKeys.has(key)),
-      context.collisionPolicy
-    )
-    const filePaths = fileTransaction.paths()
-    const stagedByKey = new Map(context.files.map((file) => [file.key, file.stagedPath]))
-    const preparedDocuments = new Map<string, PreparedPortableDocument>()
-    for (const document of snapshot.documents) {
-      if (!shouldWrite(sets.documents.has(document.id)) || !document.archiveKey) continue
-      const stagedPath = stagedByKey.get(document.archiveKey)
-      if (!stagedPath) throw new BundleError(`Document ${document.id} has no staged file.`)
-      const prepared = await this.prepareDocument(document, stagedPath)
-      if (
-        prepared.chunks.length === 0 ||
-        prepared.embeddings.length !== prepared.chunks.length ||
-        prepared.embeddings.some((embedding) => embedding.length === 0)
-      ) {
-        throw new BundleError(`Document ${document.name} could not be made searchable.`)
-      }
-      preparedDocuments.set(document.id, prepared)
-    }
+    const { fileTransaction, filePaths, documentFileKeys, preparedDocuments } =
+      await prepareImportFiles({
+        snapshot,
+        context,
+        documentIds: sets.documents,
+        messageIds: sets.messages,
+        attachmentsByMessage,
+        shouldWrite,
+        prepareDocument: this.prepareDocument,
+        journals: this.journals
+      })
     const summary = emptySummary()
 
     const write = this.db.transaction(() => {
@@ -584,7 +654,8 @@ export class DesktopWorkspaceDataPort implements WorkspaceDataPort<DesktopImport
           summary.skipped++
           continue
         }
-        const documentPath = document.archiveKey ? filePaths.get(document.archiveKey) : undefined
+        const fileKey = documentFileKeys.get(document.id)
+        const documentPath = fileKey ? filePaths.get(fileKey) : undefined
         if (!documentPath) throw new BundleError(`Document ${document.id} has no restored file.`)
         this.db
           .prepare(
@@ -623,6 +694,7 @@ export class DesktopWorkspaceDataPort implements WorkspaceDataPort<DesktopImport
         )
         increment(summary, 'documents', exists && !duplicate)
       }
+      fileTransaction.markCommitted()
     })
 
     try {
