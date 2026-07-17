@@ -7,8 +7,48 @@ how to reproduce, and the fix direction. Close with evidence; never hide.
 
 ## OPEN
 
-_None._ The data-layer/presentation-layer drift sweep (2026-07-09) is fully closed - see RESOLVED
-below. No open bugs or regressions tracked.
+### Sync integration is not wired - package and renderer seams only
+
+- **Status:** code exists in separate completed lanes; there is no user-facing sync or workspace
+  export/import feature in Off Grid AI Desktop.
+- **Renderer evidence:** commits `3ab2e4a`, `bb1f8e2`, and `df0b04b` provide reactive feature and
+  settings registries. From `/tmp/offgrid-desktop-sync`,
+  `npx vitest run src/renderer/src/lib/__tests__/App.feature-registration.test.tsx src/renderer/src/lib/__tests__/featureRegistry.integration.test.tsx src/renderer/src/lib/__tests__/featureRegistry.test.ts src/renderer/src/lib/__tests__/navRegistry.test.ts src/renderer/src/lib/__tests__/screenRegistry.test.ts src/renderer/src/lib/__tests__/sectionRegistry.test.ts`
+  passed 29 tests in 6 files. `npm run typecheck` and `npm run build` passed. Existing Vite
+  dynamic/static chunk warnings remain informational.
+- **Shared evidence:** `@offgrid/sync/portable` commits `4ae1847` and `16d687e` pass their 26 focused
+  package tests, typecheck, and package build in `/tmp/offgrid-shared-integration`.
+- **Missing owner on this branch:** Desktop adapter work is active in a separate review lane but is
+  not landed or wired here. This branch has no sync controller, `WorkspaceDataPort`, `ArchivePort`,
+  `BackupSink`, secure credential adapter, IPC surface, registered feature, registered settings
+  section, or production dependency wiring.
+- **Close when:** the reviewed package is consumed by the Desktop main process, a real registered App
+  screen drives export/import through narrow IPC, and the synthetic-profile integration journey and
+  screenshots pass.
+
+### Core sync security review is a merge blocker
+
+- **Status:** active in a separate shared-package worktree; not part of this Desktop branch.
+- **Required closure:** adversarial pairing/reconnect/framing tests, safe one-time token lifecycle,
+  authenticated identity binding, cancellation-safe teardown, bounded unauthenticated resources,
+  and single-session ownership must pass before Desktop stores credentials or opens a listener.
+- **Close when:** the reviewed shared commit lands and Desktop pins that reviewed package revision.
+
+### No two-device verification harness
+
+- **Status:** no real Desktop-to-Desktop or Desktop-to-Mobile evidence exists for the current package
+  and host seams.
+- **Required coverage:** pairing, reconnect, transfer, portable export/import, tamper rejection,
+  collisions, disconnect/teardown, and synthetic-profile UI evidence.
+- **Order:** Desktop adapters and UI first; Desktop-to-Desktop harness next; Off Grid AI Mobile last;
+  Desktop-to-Mobile harness after its native adapters exist.
+
+### Historical sync branches are source material only
+
+- The recovered Claude session `9312c712-e8ad-49d6-8f82-e170d3204472`, branches `feature/sync` and
+  `feat/mobile-sync`, and pre-removal snapshots `3bea708` and `8eac748` are not canonical code or
+  verification evidence. Port only reviewed pieces into the current `@offgrid/sync` and Desktop host
+  contracts. Do not merge a historical branch wholesale.
 
 ---
 

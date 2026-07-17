@@ -1,6 +1,18 @@
-# Off Grid — Cross-Device Sync & Offload Plan
+# Off Grid AI cross-device sync and offload plan
 
-> **Vision:** every Off Grid device is a window onto _all_ of your information.
+> **Implementation status (2026-07-17):** this is a design plan, not a shipped-feature document.
+> `@offgrid/sync/portable` owns a tested, versioned workspace interchange package, and Off Grid AI
+> Desktop owns a tested renderer feature-registration seam. The package is not a Desktop dependency
+> on this branch. Desktop adapter work is active in a separate review lane but is not landed or
+> wired here; no screen, settings section, or two-device harness exists. Off Grid AI Mobile remains
+> last. See `docs/GAPS_BACKLOG.md` and the shared package contract
+> `shared/docs/SYNC_PACKAGE_INTEGRATION.md` before implementation.
+>
+> Historical branches `feature/sync` and `feat/mobile-sync`, snapshots `3bea708` and `8eac748`, and
+> recovered Claude session `9312c712-e8ad-49d6-8f82-e170d3204472` are source material only. They are
+> not canonical implementation or verification evidence.
+
+> **Vision:** every Off Grid AI device is a window onto _all_ of your information.
 > Open the phone, the laptop, the tablet — same chats, same projects, same
 > memory, same search — and when a more capable device is nearby, heavy work
 > (LLM inference, big search, media) transparently runs there. No cloud, no
@@ -12,15 +24,56 @@
 > and reflect across everything — every chat, project, and memory — no matter
 > which device created it.
 
-Status: **planning**. Nothing here is built yet except the pieces noted as
-"exists" below. This document is the thing to review before we start.
+Status: **package foundations coded; application flow not wired or device-verified**. The current
+delivery order is: close the core protocol security review, build Off Grid AI Desktop adapters and
+UI, run the Desktop-to-Desktop harness, build Off Grid AI Mobile last, then run Desktop-to-Mobile.
+
+## Current Desktop host contract
+
+The renderer may compose a future package screen with one atomic registration:
+
+```ts
+const unregister = registerFeature({
+  route: 'sync',
+  label: 'Sync',
+  icon: SyncIcon,
+  component: SyncScreen,
+  order: 80
+})
+```
+
+Registration returns an owner-scoped disposer. Routes use lowercase kebab case, cannot replace a
+host-owned route, and cannot duplicate another core registration. The App subscribes reactively, so
+late registration updates navigation, deep links, and screen rendering. A package-owned settings
+component uses `registerCoreSettingsSection` under the same ownership and teardown rules.
+
+This seam composes UI only. The main process must own sockets, credentials, archive staging, database
+transactions, and teardown. The renderer sends narrow intents and renders immutable state. Nothing
+currently calls either registration API for sync.
+
+## Portable workspace import contract
+
+The canonical format lives in `@offgrid/sync/portable`, not in Desktop. It is a ZIP containing one
+`workspace.json` envelope (`format: "offgrid-ai-workspace"`) plus exactly the declared document and
+attachment files. The package validates schema/reference integrity, archive paths, case/Unicode
+collisions, SHA-256 manifest entries, size/expansion limits, and staged bytes before one atomic host
+apply.
+
+The default collision policy is `keep-existing`: existing IDs and paths win and only missing data is
+added. `replace-existing`, `duplicate`, and `reject` are contract values passed to the host, but no
+Desktop adapter or conformance test implements them yet. Duplicate requires new IDs/paths plus atomic
+reference rewriting; reject must leave both database and filesystem unchanged. Until those adapters
+and tests exist, Desktop must expose only `keep-existing`.
+
+The archive is integrity-checked, not encrypted or authenticated. Do not describe an export as a
+confidential backup without a separately reviewed encryption layer.
 
 ---
 
 ## 1. Principles (do not drift)
 
 - **Local-first, no cloud.** Devices talk **directly** over the LAN. Not a
-  single byte goes to a server we own. (Same posture as the rest of Off Grid.)
+  single byte goes to a server we own. (Same posture as the rest of Off Grid AI.)
 - **One encrypted session, reused for everything.** All cross-device traffic
   rides the existing `@offgrid/sync` NaCl-encrypted, paired channel. We do **not**
   open a second unauthenticated LAN port.
@@ -113,7 +166,7 @@ gating for free. "In vicinity" is simply: the paired peer is visible on mDNS.
 
 ## 4. Cross-platform feasibility — four OSes, two codebases
 
-Off Grid is **two products**: the Electron **desktop** (macOS + Windows) and the
+Off Grid AI currently has two application surfaces: the Electron **desktop** (macOS + Windows) and the
 RN **mobile** app (iOS + Android). The mesh must span all four. Every sync
 primitive is already cross-platform, so this is two adapter implementations
 (one Node, one RN), not four.
@@ -282,7 +335,7 @@ ping) and then joins replication. Recommended order, easiest/most-built first:
 
 1. **macOS desktop** — the anchor. Most mature (gateway + search already work);
    build the Node `@offgrid/sync` adapter and the desktop side here first.
-2. **Android** — first mobile target. EasyShare's RN `tcp-socket` + `zeroconf`
+2. **Android** — first mobile target. The historical prototype's RN `tcp-socket` + `zeroconf`
    code already exists and there's no Local-Network-permission gate, so it
    proves the RN adapter and Node↔RN wire parity fastest.
 3. **iOS** — same RN binary; delta is the two `Info.plist` keys + the one-time
@@ -296,12 +349,12 @@ the replication/RPC layers don't change per OS.
 
 ---
 
-## 7. Seamlessness — the UX contract
+## 7. Automatic behavior — the UX contract
 
-This is the part that has to feel magical, so it's explicit:
+These proposed operational behaviors need explicit verification:
 
 - **Discovery is automatic & continuous.** Devices advertise on launch; browse
-  refreshes (~every 15s, as EasyShare does) so a device that wakes/joins is
+  refreshes (~every 15s, as the historical prototype did) so a device that wakes/joins is
   found in 1–2s.
 - **Reconnect is automatic.** A previously-paired peer that reappears resumes
   without re-pairing (the `DiscoveryOrchestrator` already models this).
@@ -338,7 +391,7 @@ This is the part that has to feel magical, so it's explicit:
 | Token streaming over framed encrypted channel | Stream deltas as small `app` frames (wire format already frames); backpressure aware                                             |
 | Autoincrement message IDs break sync          | UUID migration in Phase B before bidirectional                                                                                   |
 | Op-log divergence / clock skew                | Lamport clock (not wall-clock) for ordering; LWW only as tiebreak                                                                |
-| Battery / radio on mobile                     | Pause browse in background; keepalive paused during transfers (EasyShare pattern)                                                |
+| Battery / radio on mobile                     | Pause browse in background; keepalive paused during transfers (historical prototype pattern, to be revalidated)                  |
 | RN ↔ Node framing parity                      | Same `@offgrid/sync` wire code on both; conformance test across all 4 OSes                                                       |
 | Windows firewall blocks listen / mDNS         | Installer adds an allow-rule (inbound TCP + UDP 5353); bind 5353 with `SO_REUSEADDR` to coexist with Windows' own mDNS responder |
 | Android drops multicast mDNS packets          | Acquire `WifiManager.MulticastLock` while browsing; release when idle to save battery                                            |
