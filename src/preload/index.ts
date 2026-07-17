@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { ArtifactKindContract } from '../shared/ipc-contracts'
+import { createSyncPortableApi } from './sync-portable'
 
 console.log('PRELOAD SCRIPT LOADED')
 
@@ -12,6 +13,7 @@ function unsubscribe(channel: string, listener: IpcListener): () => void {
 }
 
 const offGridApi = {
+  sync: createSyncPortableApi((channel, ...args) => ipcRenderer.invoke(channel, ...args)),
   // Open-core: is the pro tier active in this build/session? The main process
   // owns the decision (pro code bundled AND a valid Keygen license / env override)
   // and we read it synchronously at preload time so the renderer can lock/unlock

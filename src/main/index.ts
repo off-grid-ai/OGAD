@@ -28,6 +28,7 @@ import { purgeLegacyChatImports, getSetting } from './database'
 import { modalityQueue } from './modality-queue/queue'
 import { registerRuntime } from './runtime-manager'
 import { guardConsoleStreams } from './stream-guards'
+import { setupSyncPortableIpc } from './sync-portable/ipc'
 
 // Before anything logs: a broken stdout/stderr pipe (parent/e2e-harness exited, closed pipe)
 // must never crash main via an uncaught EPIPE. See stream-guards.ts.
@@ -293,6 +294,7 @@ app.whenReady().then(() => {
     setupLicenseIpc()
     setupIPC()
     setupRagIPC()
+    setupSyncPortableIpc()
     setupMcpIpc() // basic MCP connectors (management + chat tool extension)
     startModelServer() // one OpenAI-compatible local gateway on :7878 (LLM + STT)
     startMediaServer() // loopback HTTP for seekable local media (meeting videos)

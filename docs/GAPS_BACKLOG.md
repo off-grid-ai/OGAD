@@ -7,8 +7,14 @@ how to reproduce, and the fix direction. Close with evidence; never hide.
 
 ## OPEN
 
-_None._ The data-layer/presentation-layer drift sweep (2026-07-09) is fully closed - see RESOLVED
-below. No open bugs or regressions tracked.
+### Portable workspace import cannot recover from a process or power failure mid-commit
+
+The desktop importer holds the SQLite transaction open while it atomically renames staged files and
+uses `.offgrid-rollback-*` siblings to compensate ordinary exceptions. A process or power failure
+between a rename and SQLite commit bypasses that in-process compensation and can leave rollback
+files or a database/filesystem mismatch. Reproduce by terminating Electron after a replacement
+rename and before the transaction commits. Fix direction: write and fsync a small import journal
+before mutation, then recover or finish it during startup before the data is opened.
 
 ---
 

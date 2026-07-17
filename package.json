@@ -48,6 +48,7 @@
     "@offgrid/design": "file:./packages/design",
     "@offgrid/models": "file:./packages/models",
     "@offgrid/rag": "file:./packages/rag",
+    "@offgrid/sync": "file:../shared/packages/sync",
     "@phosphor-icons/react": "^2.1.10",
     "@scure/bip39": "^2.2.0",
     "@tabler/icons-react": "^3.36.1",
@@ -79,7 +80,8 @@
     "remark-gfm": "^4.0.0",
     "sharp": "^0.35.2",
     "tailwind-merge": "^3.4.0",
-    "three": "^0.182.0"
+    "three": "^0.182.0",
+    "yauzl": "^3.4.0"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
@@ -93,6 +95,7 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@types/three": "^0.182.0",
+    "@types/yauzl": "^3.4.0",
     "@vitejs/plugin-react": "^5.1.1",
     "@vitest/coverage-v8": "^4.1.10",
     "autoprefixer": "^10.4.23",
