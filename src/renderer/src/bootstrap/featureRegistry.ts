@@ -45,6 +45,32 @@ const listeners = new Set<() => void>()
 let snapshot: readonly PublishedFeature[] = []
 let coreSnapshot: readonly PublishedFeature[] = []
 
+/** Routes composed directly by App.tsx or its existing Pro fallback. Packages
+ * must choose a distinct route so their navigation cannot be silently shadowed. */
+const HOST_OWNED_ROUTES = new Set([
+  'dashboard',
+  'day',
+  'replay',
+  'reflect',
+  'actions',
+  'connectors',
+  'meetings',
+  'chats',
+  'memories',
+  'entities',
+  'graph',
+  'memory-chat',
+  'models',
+  'gateway',
+  'projects',
+  'notifications',
+  'settings',
+  'search',
+  'clipboard',
+  'voice',
+  'vault'
+])
+
 function publish(): void {
   snapshot = Object.freeze(
     [...pendingFeatures.values()]
@@ -106,6 +132,9 @@ function updateFeature(route: string, update: Partial<PendingFeature>): () => vo
 /** Atomic registration API for package-owned core features. */
 export function registerFeature(feature: RegisteredFeature): () => void {
   validateRoute(feature.route)
+  if (HOST_OWNED_ROUTES.has(feature.route)) {
+    throw new Error(`Feature route is owned by the host: ${feature.route}`)
+  }
   if (pendingFeatures.has(feature.route)) {
     throw new Error(`Feature route is already registered: ${feature.route}`)
   }
@@ -141,6 +170,10 @@ export function registerFeatureScreen(screen: FeatureScreen): () => void {
   return updateFeature(screen.name, {
     screen: { owner: Symbol(screen.name), kind: 'legacy-pro', value: screen }
   })
+}
+
+export function hasFeatureNavigation(route: string): boolean {
+  return pendingFeatures.get(route)?.navigation !== undefined
 }
 
 export function getRegisteredFeature(route: string): PublishedFeature | undefined {
