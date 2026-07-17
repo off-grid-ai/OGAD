@@ -17,6 +17,7 @@ import * as ProRenderer from '@offgrid/pro/renderer'
 const ClipboardPopup: FC = (ProRenderer as { ClipboardPopup?: FC }).ClipboardPopup ?? (() => null)
 // DictationOverlay is a free-tier / open-core feature — lives in core, not pro.
 import { DictationOverlay } from './components/DictationOverlay'
+import { registerPortableWorkspace } from './features/portable-workspace/register'
 
 // The global-hotkey quick-paste popup and the dictation overlay load this same
 // renderer with a hash (#clip-popup / #dictation); render just that surface there
@@ -24,6 +25,8 @@ import { DictationOverlay } from './components/DictationOverlay'
 const hash = window.location.hash
 const isClipPopup = hash === '#clip-popup'
 const isDictation = hash === '#dictation'
+
+if (!isClipPopup && !isDictation) registerPortableWorkspace()
 
 // The dictation overlay is a transparent floating panel — strip the app's opaque
 // theme background off <html>/<body> so only the pill shows (no white box).

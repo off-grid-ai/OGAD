@@ -100,6 +100,13 @@ describe('DesktopWorkspaceDataPort (real SQLite and filesystem)', () => {
         expect.objectContaining({ content: 'searchable private fact', embedding: [1, 0, 0] })
       ])
     )
+    expect(adapter.summary()).toMatchObject({
+      projects: 1,
+      conversations: 0,
+      messages: 0,
+      documents: 1,
+      attachments: 0
+    })
 
     const textOnly = snapshot('project-text-only', 'document-text-only')
     delete textOnly.documents[0]!.archiveKey

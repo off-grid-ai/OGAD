@@ -48,6 +48,11 @@ function migrate(): void {
   migrated = true
 }
 
+/** Initializes the owning RAG schema for cross-feature main-process adapters. */
+export function ensureRagSchema(): void {
+  migrate()
+}
+
 function parseEmbedding(s: string | null): number[] {
   if (!s) return []
   try {
@@ -201,7 +206,16 @@ export const desktopVectorStore: VectorStore = {
 
 export function listProjects(): (Project & { includeMemory: boolean })[] {
   migrate()
-  const rows = getDB().prepare('SELECT * FROM projects ORDER BY updated_at DESC').all() as any[]
+  const rows = getDB().prepare('SELECT * FROM projects ORDER BY updated_at DESC').all() as {
+    id: string
+    name: string
+    description: string
+    system_prompt: string
+    icon: string | null
+    include_memory: number
+    created_at: string
+    updated_at: string
+  }[]
   return rows.map((r) => ({
     id: r.id,
     name: r.name,

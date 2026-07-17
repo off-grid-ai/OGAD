@@ -5,6 +5,7 @@ type Invoke = (channel: string, ...args: unknown[]) => Promise<unknown>
 
 export function createSyncPortableApi(invoke: Invoke): SyncPortableApi {
   return {
+    summary: () => invoke(SYNC_PORTABLE_CHANNELS.summary) as ReturnType<SyncPortableApi['summary']>,
     exportAll: () =>
       invoke(SYNC_PORTABLE_CHANNELS.exportAll) as ReturnType<SyncPortableApi['exportAll']>,
     exportProject: (projectId) =>
@@ -15,8 +16,8 @@ export function createSyncPortableApi(invoke: Invoke): SyncPortableApi {
       invoke(SYNC_PORTABLE_CHANNELS.exportConversation, conversationId) as ReturnType<
         SyncPortableApi['exportConversation']
       >,
-    importPicker: (collisionPolicy) =>
-      invoke(SYNC_PORTABLE_CHANNELS.importPicker, collisionPolicy) as ReturnType<
+    importPicker: () =>
+      invoke(SYNC_PORTABLE_CHANNELS.importPicker, 'keep-existing') as ReturnType<
         SyncPortableApi['importPicker']
       >
   }

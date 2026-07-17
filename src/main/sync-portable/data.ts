@@ -83,6 +83,7 @@ export interface DesktopImportSummary {
   messagesUpdated: number
   documentsAdded: number
   documentsUpdated: number
+  attachmentsImported: number
   skipped: number
   warnings: string[]
 }
@@ -265,6 +266,7 @@ function emptySummary(): DesktopImportSummary {
     messagesUpdated: 0,
     documentsAdded: 0,
     documentsUpdated: 0,
+    attachmentsImported: 0,
     skipped: 0,
     warnings: []
   }
@@ -363,6 +365,32 @@ export class DesktopWorkspaceDataPort implements WorkspaceDataPort<DesktopImport
     private readonly prepareDocument: PortableDocumentPreparer,
     private readonly journals: ImportJournalStore
   ) {}
+
+  summary(): {
+    projects: number
+    conversations: number
+    messages: number
+    documents: number
+    attachments: number
+  } {
+    ensurePortableSchema(this.db)
+    const count = (table: string): number =>
+      (this.db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count
+    const contexts = this.db.prepare('SELECT context FROM rag_messages').all() as {
+      context: string | null
+    }[]
+    const attachments = contexts.reduce((total, { context }) => {
+      const value = parseObject(context).attachments
+      return total + (Array.isArray(value) ? value.length : 0)
+    }, 0)
+    return {
+      projects: count('projects'),
+      conversations: count('rag_conversations'),
+      messages: contexts.length,
+      documents: count('rag_documents'),
+      attachments
+    }
+  }
 
   async collect(selection: WorkspaceSelection): Promise<WorkspaceExport | null> {
     ensurePortableSchema(this.db)
@@ -625,6 +653,7 @@ export class DesktopWorkspaceDataPort implements WorkspaceDataPort<DesktopImport
             status: 'ready'
           })
         )
+        summary.attachmentsImported += restoredAttachments.length
         const restoredContext = {
           ...desktopContext,
           portableMetadata: message.metadata,

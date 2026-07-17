@@ -49,6 +49,7 @@
     "@offgrid/models": "file:./packages/models",
     "@offgrid/rag": "file:./packages/rag",
     "@offgrid/sync": "file:../shared/packages/sync",
+    "@offgrid/sync-desktop": "file:../shared/packages/sync-desktop",
     "@phosphor-icons/react": "^2.1.10",
     "@scure/bip39": "^2.2.0",
     "@tabler/icons-react": "^3.36.1",

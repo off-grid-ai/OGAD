@@ -35,6 +35,7 @@ export function setupSyncPortableIpc(): void {
   }
 
   ipcMain.handle(SYNC_PORTABLE_CHANNELS.exportAll, () => service.exportAll())
+  ipcMain.handle(SYNC_PORTABLE_CHANNELS.summary, () => service.summary())
   ipcMain.handle(SYNC_PORTABLE_CHANNELS.exportProject, (_event, projectId: unknown) =>
     service.exportProject(boundedId(projectId, 'Project ID'))
   )

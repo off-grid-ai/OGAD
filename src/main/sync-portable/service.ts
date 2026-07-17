@@ -4,10 +4,12 @@ import { Mutex } from 'async-mutex'
 import { BackupEngine } from '@offgrid/sync/portable'
 import type { BackupSink, CollisionPolicy } from '@offgrid/sync/portable'
 import type { SyncPortableExportResult } from '../../shared/sync-portable-contract'
+import type { SyncPortableSummary } from '../../shared/sync-portable-contract'
 import { DesktopArchivePort } from './archive'
 import { DesktopWorkspaceDataPort, type DesktopImportSummary } from './data'
 import { preparePortableDocument } from './prepare-document'
 import { ImportJournalStore } from './import-journal'
+import { ensureRagSchema } from '../rag/store'
 
 export interface PortableDialogPort {
   saveWorkspace(suggestedName: string): Promise<string | null>
@@ -57,7 +59,12 @@ export class DesktopPortableService {
   }
 
   initialize(): void {
+    ensureRagSchema()
     this.journals.recover()
+  }
+
+  summary(): SyncPortableSummary {
+    return this.data.summary()
   }
 
   private engine(
