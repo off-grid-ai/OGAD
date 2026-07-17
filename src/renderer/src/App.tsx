@@ -16,6 +16,7 @@ import type { SearchHit } from './types'
 // pro view-router; the free build shows the UpgradeScreen for those tabs.
 import { loadProFeaturesRenderer } from './bootstrap/loadProFeaturesRenderer'
 import { useCoreFeatures } from './bootstrap/featureRegistry'
+import type { CoreViewMode } from './bootstrap/routes'
 import { renderProView, type ProViewContext } from './bootstrap/proView'
 import { UpgradeScreen } from './components/pro/UpgradeScreen'
 import { getProFeature, proFeatureComingSoon } from './components/pro/proCatalog'
@@ -48,29 +49,6 @@ import {
 } from '@tabler/icons-react'
 import { OFF_GRID_MOBILE_URL, openExternal } from './constants/links'
 import { cn } from './lib/utils'
-
-type CoreViewMode =
-  | 'dashboard'
-  | 'day'
-  | 'replay'
-  | 'reflect'
-  | 'actions'
-  | 'connectors'
-  | 'meetings'
-  | 'chats'
-  | 'memories'
-  | 'entities'
-  | 'graph'
-  | 'memory-chat'
-  | 'models'
-  | 'gateway'
-  | 'projects'
-  | 'notifications'
-  | 'settings'
-  | 'search'
-  | 'clipboard'
-  | 'voice'
-  | 'vault'
 
 type ViewMode = CoreViewMode | (string & {})
 
