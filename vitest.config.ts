@@ -23,12 +23,15 @@ export default defineConfig({
   // in the app build, but vitest has no tsconfig-paths plugin), so the *.test.tsx glob
   // above is inert until they exist. Additive only — no gate/threshold/include change.
   resolve: {
-    alias: {
-      '@renderer': resolve(__dirname, 'src/renderer/src'),
-      '@offgrid/core': resolve(__dirname, 'src'),
-      '@offgrid/pro': resolve(__dirname, 'src/bootstrap/proStub.ts'),
-      '@': resolve(__dirname, 'src/renderer/src')
-    }
+    alias: [
+      { find: '@renderer', replacement: resolve(__dirname, 'src/renderer/src') },
+      { find: '@offgrid/core', replacement: resolve(__dirname, 'src') },
+      {
+        find: /^@offgrid\/pro(?:\/.*)?$/,
+        replacement: resolve(__dirname, 'src/bootstrap/proStub.ts')
+      },
+      { find: '@', replacement: resolve(__dirname, 'src/renderer/src') }
+    ]
   },
   test: {
     // jsdom render tests (userEvent + waitFor over real DOM) and DB/crypto integration

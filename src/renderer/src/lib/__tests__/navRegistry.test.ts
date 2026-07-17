@@ -56,6 +56,17 @@ describe('navRegistry', () => {
     expect(nav[0]!.label).toBe('Day')
   })
 
+  it('a duplicate unregister cannot clear the original Pro ownership signal', async () => {
+    const m = await fresh()
+    const unregisterOriginal = m.registerNav({ route: 'day', label: 'Day', icon: Icon })
+    const unregisterDuplicate = m.registerNav({ route: 'day', label: 'Again', icon: Icon })
+
+    unregisterDuplicate()
+    expect(m.isProActive()).toBe(true)
+    unregisterOriginal()
+    expect(m.isProActive()).toBe(false)
+  })
+
   it('keeps distinct routes', async () => {
     const m = await fresh()
     await registerCompleteFeature(m, { route: 'day', label: 'Day', icon: Icon })

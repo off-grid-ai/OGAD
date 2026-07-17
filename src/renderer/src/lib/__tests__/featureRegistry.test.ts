@@ -103,4 +103,19 @@ describe('featureRegistry', () => {
       registry.registerFeature({ route: 'sync', label: 'Other', icon: Icon, component: Screen })
     ).toThrow(/already registered/i)
   })
+
+  it('rejects routes whose navigation and screen composition belongs to the host', async () => {
+    const registry = await fresh()
+    expect(() =>
+      registry.registerFeature({
+        route: 'settings',
+        label: 'Replacement settings',
+        icon: Icon,
+        component: Screen
+      })
+    ).toThrow(/owned by the host/i)
+    expect(() =>
+      registry.registerFeature({ route: 'models', label: 'Models', icon: Icon, component: Screen })
+    ).toThrow(/owned by the host/i)
+  })
 })

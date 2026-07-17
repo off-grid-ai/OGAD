@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react'
 import {
   getRegisteredFeatures,
+  hasFeatureNavigation,
   registerFeatureNavigation,
   type FeatureNavigation
 } from './featureRegistry'
@@ -29,6 +30,7 @@ export interface NavEntry {
 const legacyProRoutes = new Set<string>()
 
 export function registerNav(entry: NavEntry): () => void {
+  if (hasFeatureNavigation(entry.route)) return () => {}
   const unregister = registerFeatureNavigation(entry as FeatureNavigation)
   legacyProRoutes.add(entry.route)
   return () => {
