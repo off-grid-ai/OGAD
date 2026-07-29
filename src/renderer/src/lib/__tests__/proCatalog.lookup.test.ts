@@ -76,10 +76,25 @@ describe('featureSupportsPlatform (per-feature seam)', () => {
     expect(featureSupportsPlatform(winPorted('x'), 'linux')).toBe(false)
   })
 
-  it('every shipped feature is still macOS-only today (nothing ported yet)', () => {
+  // Ported-to-Windows features, by route. Grows one entry per shipped Windows port;
+  // asserted against the catalog so a flipped `platforms` and this list can't drift.
+  const WIN_PORTED = new Set(['vault'])
+
+  it('vault is the first feature live on Windows', () => {
+    expect(featureSupportsPlatform(getProFeature('vault')!, 'win32')).toBe(true)
+  })
+
+  it('exactly the ported features are win32-supported; the rest stay macOS-only', () => {
     for (const f of PRO_FEATURES) {
-      expect(featureSupportsPlatform(f, 'win32'), `win32 support for ${f.route}`).toBe(false)
+      expect(featureSupportsPlatform(f, 'win32'), `win32 support for ${f.route}`).toBe(
+        WIN_PORTED.has(f.route)
+      )
     }
+  })
+
+  it('a Windows port does not imply Linux (each platform is explicit)', () => {
+    // Guards against a lazy `['darwin', ...allNonMac]` — vault is win32 only, not linux.
+    expect(featureSupportsPlatform(getProFeature('vault')!, 'linux')).toBe(false)
   })
 })
 
@@ -109,12 +124,20 @@ describe('proComingSoonHere', () => {
 })
 
 describe('proFeatureComingSoon', () => {
-  it('gates every Pro route for a Windows Pro subscriber', () => {
+  it('does NOT gate a Windows-ported route — vault renders live on win32', () => {
+    expect(proFeatureComingSoon('vault', 'win32', true)).toBe(false)
+    // still live on macOS, and still upsell (not coming-soon) for free users.
+    expect(proFeatureComingSoon('vault', 'darwin', true)).toBe(false)
+    expect(proFeatureComingSoon('vault', 'win32', false)).toBe(false)
+  })
+
+  it('gates every NOT-yet-ported catalog route for a Windows Pro subscriber', () => {
     for (const feature of PRO_FEATURES) {
+      const ported = featureSupportsPlatform(feature, 'win32')
       expect(
         proFeatureComingSoon(feature.route, 'win32', true),
         `coming-soon for ${feature.route}`
-      ).toBe(true)
+      ).toBe(!ported)
     }
   })
 

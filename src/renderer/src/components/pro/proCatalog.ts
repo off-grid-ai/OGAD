@@ -183,7 +183,10 @@ export const PRO_FEATURES: ProFeature[] = [
       'Logins, app passwords, API keys, notes, and files',
       'KDBX4 format - compatible with KeePassXC'
     ],
-    platforms: ['darwin']
+    // First Pro feature ported to Windows: the vault engine is fully cross-platform
+    // (KDBX4 via kdbxweb, Argon2id via hash-wasm WASM, BIP39 recovery, device key
+    // via node-machine-id) - no macOS-native code. Verified on Windows.
+    platforms: ['darwin', 'win32']
   },
   {
     route: 'clipboard',
