@@ -90,7 +90,12 @@ export const PRO_FEATURES: ProFeature[] = [
       'Jump straight to the moment',
       'Stays on your machine'
     ],
-    platforms: ['darwin']
+    // Ported to Windows: the capture pipeline is vision-model-first, so the macOS OCR
+    // binary is no longer on the path. Screenshots come from Electron desktopCapturer
+    // and the frame store, replay reader and screen carry no platform-native code.
+    // Accessibility text is macOS-only enrichment that never gates analysis, so on
+    // Windows a vision model is what produces frame summaries.
+    platforms: ['darwin', 'win32']
   },
   {
     route: 'meetings',
