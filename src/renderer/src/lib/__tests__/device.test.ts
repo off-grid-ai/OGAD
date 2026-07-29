@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { deviceNoun, isMac, currentPlatform } from '../device'
+import { deviceNoun, isMac, currentPlatform, primaryModifier } from '../device'
 
 // The renderer wrapper resolves the platform from the preload-bridged
 // `window.api.platform` and delegates the naming rule to shared/device.ts.
@@ -43,5 +43,14 @@ describe('renderer deviceNoun wrapper', () => {
     expect(currentPlatform()).toBe('linux')
     vi.stubGlobal('window', {})
     expect(currentPlatform()).toBe('unknown')
+  })
+
+  it('primaryModifier() reflects the bridged platform', () => {
+    vi.stubGlobal('window', { api: { platform: 'darwin' } })
+    expect(primaryModifier()).toBe('Cmd')
+    vi.stubGlobal('window', { api: { platform: 'win32' } })
+    expect(primaryModifier()).toBe('Ctrl')
+    vi.stubGlobal('window', {})
+    expect(primaryModifier()).toBe('Ctrl')
   })
 })

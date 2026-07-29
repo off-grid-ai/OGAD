@@ -1,6 +1,7 @@
 import {
   deviceNoun as nounForPlatform,
   isMac as isMacForPlatform,
+  primaryModifier as modifierForPlatform,
   type DevicePlatform
 } from '@offgrid/core/shared/device'
 
@@ -24,4 +25,9 @@ export function deviceNoun(opts?: { capitalize?: boolean }): string {
 /** True when running on macOS. The device flag for platform-gating Pro features. */
 export function isMac(): boolean {
   return isMacForPlatform(currentPlatform())
+}
+
+/** The primary modifier label for shortcut copy ('Cmd' on macOS, else 'Ctrl'). */
+export function primaryModifier(): string {
+  return modifierForPlatform(currentPlatform())
 }

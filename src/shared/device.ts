@@ -34,3 +34,14 @@ export function deviceNoun(platform: DevicePlatform, opts?: { capitalize?: boole
 export function isMac(platform: DevicePlatform): boolean {
   return platform === 'darwin'
 }
+
+/**
+ * The primary keyboard modifier label for the platform, for showing shortcuts in
+ * copy: `'Cmd'` on macOS, `'Ctrl'` everywhere else. Mirrors Electron's
+ * `CommandOrControl` accelerator (which maps to ⌘ on Mac, Ctrl on Windows/Linux),
+ * so a hotkey described in the UI matches the key the app actually registers.
+ * Single source of truth so shortcut copy never drifts between platforms.
+ */
+export function primaryModifier(platform: DevicePlatform): string {
+  return isMac(platform) ? 'Cmd' : 'Ctrl'
+}

@@ -12,7 +12,7 @@ import {
   ShieldCheck
 } from '@phosphor-icons/react'
 import type { ComponentType } from 'react'
-import { deviceNoun } from '@renderer/lib/device'
+import { deviceNoun, primaryModifier } from '@renderer/lib/device'
 import { isMac, type DevicePlatform } from '@offgrid/core/shared/device'
 import { PRO_PURCHASE_URL } from '@offgrid/core/shared/product-links'
 
@@ -190,14 +190,16 @@ export const PRO_FEATURES: ProFeature[] = [
     label: 'Clipboard',
     icon: ClipboardText,
     tagline: 'Every copy, kept and searchable.',
-    description:
-      'A local clipboard history that saves what you copy - text, images, and files - with a global hotkey (Cmd+Shift+C) quick-paste popup to drop any past copy into whatever app you are in. Stored on-device, nothing leaves your machine.',
+    description: `A local clipboard history that saves what you copy - text, images, and files - with a global hotkey (${primaryModifier()}+Shift+C) quick-paste popup to drop any past copy into whatever app you are in. Stored on-device, nothing leaves your machine.`,
     highlights: [
       'Searchable history of text, images & files',
-      'Cmd+Shift+C quick-paste popup anywhere',
+      `${primaryModifier()}+Shift+C quick-paste popup anywhere`,
       'Stored locally in your encrypted database'
     ],
-    platforms: ['darwin']
+    // Ported to Windows: the store + popup + global hotkey (CommandOrControl+Shift+C)
+    // are all cross-platform Electron; auto-paste is synthesized per-platform in
+    // pro text-injection (osascript on macOS, PowerShell SendKeys on Windows).
+    platforms: ['darwin', 'win32']
   }
 ]
 

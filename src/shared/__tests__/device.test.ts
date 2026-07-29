@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { deviceNoun, isMac } from '../device'
+import { deviceNoun, isMac, primaryModifier } from '../device'
 
 describe('deviceNoun', () => {
   it('names macOS the Mac (brand proper noun)', () => {
@@ -48,5 +48,18 @@ describe('isMac', () => {
     expect(isMac('freebsd')).toBe(false)
     expect(isMac('unknown')).toBe(false)
     expect(isMac('')).toBe(false)
+  })
+})
+
+describe('primaryModifier', () => {
+  it('is "Cmd" on macOS', () => {
+    expect(primaryModifier('darwin')).toBe('Cmd')
+  })
+
+  it('is "Ctrl" on Windows/Linux/other (matches CommandOrControl)', () => {
+    expect(primaryModifier('win32')).toBe('Ctrl')
+    expect(primaryModifier('linux')).toBe('Ctrl')
+    expect(primaryModifier('unknown')).toBe('Ctrl')
+    expect(primaryModifier('')).toBe('Ctrl')
   })
 })
