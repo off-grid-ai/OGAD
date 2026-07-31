@@ -62,7 +62,13 @@ export const PRO_FEATURES: ProFeature[] = [
       'Per-meeting prep: who’s in it and your open items',
       'Priorities surfaced from what you actually did'
     ],
-    platforms: ['darwin']
+    // Ported to Windows: the whole Day path is portable - day.ts, day-layout.ts,
+    // ahead.ts and calendar.ts carry no platform-native code. Its two data sources
+    // both work on Windows now: the calendar comes from connectors (HTTP), and the
+    // activity half reads observations, which Replay's port put on Windows. Landing
+    // on Day now routes through `landingView` rather than an `isMac()` check, so nav,
+    // gating, copy and the landing screen all agree.
+    platforms: ['darwin', 'win32']
   },
   {
     route: 'reflect',
@@ -161,7 +167,12 @@ export const PRO_FEATURES: ProFeature[] = [
       'Approval queue for actions',
       'Auto-extracted to-dos'
     ],
-    platforms: ['darwin']
+    // Ported to Windows alongside Day, which produces its content: proactive.ts builds
+    // notifications from getDayPlan / getEventPrep, so shipping this without Day would
+    // have delivered an empty surface. Delivery is Electron's Notification (guarded by
+    // isSupported()), and core already sets the AppUserModelID that Windows requires
+    // for a toast to appear at all. notify.ts / proactive.ts carry no platform code.
+    platforms: ['darwin', 'win32']
   },
   {
     route: 'voice',
@@ -261,4 +272,24 @@ export function proFeatureComingSoon(
     return false
   }
   return !featureSupportsPlatform(feature, platform)
+}
+
+/**
+ * Which view the app should OPEN on. Free users land on Models (they need a model
+ * before anything else works); Pro users land on Day — but only where Day is
+ * actually available.
+ *
+ * This lives here, beside the seam, because it is a per-feature platform decision and
+ * `platforms` is the single source of truth for those. It previously sat in App.tsx as
+ * `isPro && isMac() ? 'day' : 'models'`, which was right only by accident: it agreed
+ * with the catalog while Day was macOS-only, and would have stranded a ported Day on
+ * Windows — nav and gating would light Day up from `platforms` while the landing
+ * screen still asked `isMac()`. Route the decision through the seam so porting a
+ * feature never leaves a second place to update.
+ *
+ * Never land on a locked or unavailable tab.
+ */
+export function landingView(platform: DevicePlatform, isPro: boolean): 'day' | 'models' {
+  const day = getProFeature('day')
+  return isPro && day && featureSupportsPlatform(day, platform) ? 'day' : 'models'
 }
