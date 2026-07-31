@@ -17,8 +17,8 @@ import type { SearchHit } from './types'
 import { loadProFeaturesRenderer } from './bootstrap/loadProFeaturesRenderer'
 import { renderProView, type ProViewContext } from './bootstrap/proView'
 import { UpgradeScreen } from './components/pro/UpgradeScreen'
-import { getProFeature, proFeatureComingSoon } from './components/pro/proCatalog'
-import { currentPlatform, isMac } from './lib/device'
+import { getProFeature, proFeatureComingSoon, landingView } from './components/pro/proCatalog'
+import { currentPlatform } from './lib/device'
 import { NotificationProvider } from './hooks/NotificationProvider'
 import { useNotifications } from './hooks/useNotifications'
 import { ToastProvider } from './hooks/ToastProvider'
@@ -226,9 +226,10 @@ function AppContent() {
     }
   }, [])
 
-  // Free users land on Models (download a model first, with the sidebar to
-  // explore); Mac Pro users land on Day. Never land on a locked or unavailable tab.
-  const [viewMode, setViewMode] = useState<ViewMode>(isPro && isMac() ? 'day' : 'models')
+  // Where to open: derived from the per-feature capability seam (see landingView), so
+  // the landing screen can never disagree with nav and gating about whether Day is
+  // available on this platform.
+  const [viewMode, setViewMode] = useState<ViewMode>(landingView(currentPlatform(), isPro))
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [selectedMemoryId, setSelectedMemoryId] = useState<number | null>(null)
   // Version of a downloaded-and-staged update (null = none). Surfaced as a banner
