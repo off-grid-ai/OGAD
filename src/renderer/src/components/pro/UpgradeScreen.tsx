@@ -121,11 +121,11 @@ export function UpgradeScreen({
         <div className="flex flex-col gap-5">
           {comingSoon ? (
             <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-neutral-700 bg-neutral-800/50 px-3 py-1 text-[11px] uppercase tracking-wide text-neutral-300">
-              <Clock weight="fill" className="h-3.5 w-3.5" /> Off Grid Pro · Coming soon
+              <Clock weight="fill" className="h-3.5 w-3.5" /> Off Grid AI Pro · Coming soon
             </span>
           ) : (
             <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-[11px] uppercase tracking-wide text-green-400">
-              <Sparkle weight="fill" className="h-3.5 w-3.5" /> Off Grid Pro · Available now
+              <Sparkle weight="fill" className="h-3.5 w-3.5" /> Off Grid AI Pro · Available now
             </span>
           )}
 
@@ -139,7 +139,7 @@ export function UpgradeScreen({
             </div>
             <div className="min-w-0">
               <h1 className="text-3xl font-semibold tracking-tight text-white">
-                {f ? f.label : 'Off Grid Pro is here'}
+                {f ? f.label : 'Off Grid AI Pro is here'}
               </h1>
               {f && <p className="mt-1 text-base text-neutral-300">{f.tagline}</p>}
             </div>
@@ -190,7 +190,7 @@ export function UpgradeScreen({
                 You have Pro
               </div>
               <p className="text-sm leading-relaxed text-neutral-300">
-                Your Pro features run on Mac and in the Off Grid phone app today - your license
+                Your Pro features run on Mac and in the Off Grid AI phone app today - your license
                 covers both, up to 5 devices. Support for your {deviceNoun()} is on the way; it will
                 be enabled once it is tested.
               </p>
@@ -232,8 +232,8 @@ export function UpgradeScreen({
                     <span className="font-medium text-neutral-200">
                       Coming soon to your {deviceNoun()}.
                     </span>{' '}
-                    Off Grid Pro is macOS-tested today. Your purchase works now on Mac and the Off
-                    Grid phone app - up to 5 devices. Support for this {deviceNoun()} will be
+                    Off Grid AI Pro is macOS-tested today. Your purchase works now on Mac and the Off
+                    Grid AI phone app - up to 5 devices. Support for this {deviceNoun()} will be
                     enabled once it is tested.
                   </span>
                 </div>

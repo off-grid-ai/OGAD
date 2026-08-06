@@ -308,7 +308,7 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
             <div className="relative z-10 mx-auto max-w-5xl">
               <div className="mb-2 text-center">
                 <span className="rounded-full border border-green-500/30 bg-green-500/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-green-400">
-                  Off Grid Pro · live now
+                  Off Grid AI Pro · live now
                 </span>
               </div>
               <div className="mb-3 text-center">
