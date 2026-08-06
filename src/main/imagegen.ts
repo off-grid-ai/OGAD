@@ -22,7 +22,8 @@ import {
   MFLUX_MODELS
 } from './mflux'
 import { getActiveModal } from './active-models'
-import { binRoots, dataDir, modelsDir, exe } from './runtime-env'
+import { binRoots, dataDir, modelsDir } from './runtime-env'
+import { sdBinaryCandidates } from './sd-bin'
 import { sdServer } from './sd-server'
 import { standardModelDefaults, taesdFilename } from '../shared/image-defaults'
 import { defaultImageModelFilename } from './image-default'
@@ -53,8 +54,8 @@ import {
 } from '../shared/image-generation-contract'
 
 function findSdCli(): string | null {
-  for (const r of binRoots()) {
-    const p = path.join(r, 'sd', exe('sd-cli'))
+  // Vulkan (GPU) build in sd/ first, CPU fallback in sd-cpu/ (Windows ships both).
+  for (const p of sdBinaryCandidates(binRoots(), 'sd-cli')) {
     if (fs.existsSync(p)) return p
   }
   return null

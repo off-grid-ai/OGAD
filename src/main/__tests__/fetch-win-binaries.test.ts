@@ -32,11 +32,17 @@ describe.skipIf(!SRC)('fetch-win-binaries.ps1 — stable-diffusion.cpp asset', (
     expect(activeAvx2).toBe(false)
   })
 
-  it('matches a currently-published Windows sd asset (cpu x64)', () => {
-    // CPU build is deliberate: the default one-shot sd-cli path has no launch-
-    // failure fallback, so the bundled binary must load without a GPU/Vulkan
-    // loader. See the script comment.
+  it('fetches the Vulkan (GPU) sd build as the primary into bin/sd', () => {
+    // feat/win-gpu-imagegen: the GPU build is primary so Windows image gen runs on
+    // the GPU (mirrors the llama bin/llama Vulkan primary). sd-bin.ts resolves sd/ first.
+    expect(SRC).toMatch(/leejet\/stable-diffusion\.cpp'\s+'bin-win-vulkan-x64\\\.zip\$'/)
+    expect(SRC).toMatch(/Copy-Runtime \$x 'sd'/)
+  })
+
+  it('still fetches the CPU sd build as the fallback into bin/sd-cpu', () => {
+    // CPU fallback for a box with no Vulkan loader (mirrors llama bin/llama-cpu).
     expect(SRC).toMatch(/leejet\/stable-diffusion\.cpp'\s+'bin-win-cpu-x64\\\.zip\$'/)
+    expect(SRC).toMatch(/Copy-Runtime \$x 'sd-cpu'/)
   })
 
   it('still renames upstream sd.exe to the sd-cli.exe the app resolves', () => {

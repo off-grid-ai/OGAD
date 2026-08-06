@@ -21,7 +21,8 @@ import { spawn, type ChildProcess, execSync } from 'child_process'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
-import { binRoots, isPackaged, exe } from './runtime-env'
+import { binRoots, isPackaged } from './runtime-env'
+import { sdBinaryCandidates } from './sd-bin'
 import { killOrphansOnPort as reapOrphansOnPort } from './kill-orphan-port'
 
 /** Off the LLM's 8439 so both engines can bind (they never run at once, but a
@@ -209,8 +210,8 @@ class SdServerService {
   }
 
   private findBinary(): string | null {
-    for (const r of binRoots()) {
-      const p = path.join(r, 'sd', exe('sd-server'))
+    // Vulkan (GPU) build in sd/ first, CPU fallback in sd-cpu/ (Windows ships both).
+    for (const p of sdBinaryCandidates(binRoots(), 'sd-server')) {
       if (fs.existsSync(p)) return p
     }
     return null
