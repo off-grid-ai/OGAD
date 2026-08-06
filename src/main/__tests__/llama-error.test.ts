@@ -6,7 +6,7 @@
  * code-signing problem for days. This maps the real stderr to a clear reason.
  */
 import { describe, it, expect } from 'vitest'
-import { classifyLlamaError } from '../llama-error'
+import { classifyLlamaError, isContextOverflowError } from '../llama-error'
 
 describe('classifyLlamaError', () => {
   it('flags an engine too old for the model architecture (the reported bug)', () => {
@@ -117,5 +117,28 @@ main: exiting due to model loading error`
   it('returns null for healthy / unrecognized output (caller falls back)', () => {
     expect(classifyLlamaError('srv  load_model: loading model ... server is listening')).toBeNull()
     expect(classifyLlamaError('')).toBeNull()
+  })
+})
+
+describe('isContextOverflowError', () => {
+  it('detects the "exceeds the available context size" family (the observed silent-fail cause)', () => {
+    expect(
+      isContextOverflowError(
+        'the request exceeds the available context size. try increasing the context size or enable context shift'
+      )
+    ).toBe(true)
+  })
+
+  it('detects prompt/input too-long phrasings across engine versions', () => {
+    expect(isContextOverflowError('input is too large to process')).toBe(true)
+    expect(isContextOverflowError('prompt is too long for this context')).toBe(true)
+    expect(isContextOverflowError('the prompt is larger than the context window')).toBe(true)
+    expect(isContextOverflowError('requested tokens (5000) exceed context window (2048)')).toBe(true)
+  })
+
+  it('is not fooled by an unreachable / dead engine (that must stay retryable)', () => {
+    expect(isContextOverflowError('fetch failed: ECONNREFUSED 127.0.0.1:8439')).toBe(false)
+    expect(isContextOverflowError('llama-server is not running')).toBe(false)
+    expect(isContextOverflowError('')).toBe(false)
   })
 })

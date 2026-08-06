@@ -7,6 +7,15 @@
 
 export const DEFAULT_CTX_SIZE = 16384
 
+// The smallest EFFECTIVE context window the on-device capture pipeline needs to distill a
+// screen frame into an observation. The distill prompt (system instructions + the KNOWN
+// ENTITIES list + up to ~4000 chars of frame text + the reserved output tokens) overflows a
+// window near the 2048 clamp floor, which silently stops observations - so Day and Reflect
+// never populate. Used to WARN in Settings and to classify the failure, not to hard-block:
+// a short frame can still fit under this, and a RAM-constrained machine must not lose capture
+// entirely. Keep in sync with the distill prompt budget in pro's crm/extract.ts.
+export const MIN_OBSERVATION_CTX = 4096
+
 // Max-output sentinel: the setting value meaning "auto" — let a reply run until the model emits its
 // natural stop (EOS) or the context window fills, rather than a fixed token cap that truncated long
 // answers. Stored as 0 (a literal 0-token cap is meaningless) and mapped to the engine's unlimited

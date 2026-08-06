@@ -58,4 +58,17 @@ describe('contextWindowHint', () => {
       'Capped to this'
     )
   })
+
+  it('warns that a small context stops on-device observations (the silent-fail cause)', () => {
+    const hint = contextWindowHint({ ctxSize: 2048, effectiveCtxSize: 2048, modelMaxCtx: 131072 })
+    expect(hint).toContain('observations (Day, Reflect) may stop processing')
+    expect(hint).toContain('at least 4K')
+  })
+
+  it('warns on the small EFFECTIVE window even when the user picked a large value (RAM clamped below the floor)', () => {
+    // A big requested ctx clamped by RAM to below the observation floor must warn about the
+    // consequence, not just say "clamped" — this is exactly how it fails silently.
+    const hint = contextWindowHint({ ctxSize: 16384, effectiveCtxSize: 2048 })
+    expect(hint).toContain('observations (Day, Reflect) may stop processing')
+  })
 })
