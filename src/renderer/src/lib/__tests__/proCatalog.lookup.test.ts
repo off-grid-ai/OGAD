@@ -10,6 +10,7 @@ import {
   featureSupportsPlatform,
   proComingSoonHere,
   proFeatureComingSoon,
+  landingView,
   PRO_FEATURES,
   PRO_PAY_URL,
   type ProFeature
@@ -38,7 +39,7 @@ const winPorted = (route: string): ProFeature => ({
 // asserted against the catalog so a flipped `platforms` and this list can't drift.
 // Module-scoped because both the featureSupportsPlatform and proFeatureComingSoon
 // describes read it — the gate and the capability check must agree on one list.
-const WIN_PORTED = new Set(['vault', 'clipboard', 'replay'])
+const WIN_PORTED = new Set(['vault', 'clipboard', 'replay', 'reflect', 'day', 'notifications'])
 
 describe('getProFeature', () => {
   it('returns the matching feature for a known route', () => {
@@ -166,6 +167,46 @@ describe('proFeatureComingSoon', () => {
     expect(proFeatureComingSoon('models', 'win32', true)).toBe(false)
     expect(proFeatureComingSoon('does-not-exist', 'win32', true)).toBe(false)
     expect(proFeatureComingSoon('', 'win32', true)).toBe(false)
+  })
+})
+
+describe('landingView reads the seam, not isMac (the stranded-Day guard)', () => {
+  it('sends free users to Models on every platform (they need a model first)', () => {
+    for (const p of ['darwin', 'win32', 'linux', 'unknown'] as const) {
+      expect(landingView(p, false), `free on ${p}`).toBe('models')
+    }
+  })
+
+  it('lands a Pro user on Day on macOS', () => {
+    expect(landingView('darwin', true)).toBe('day')
+  })
+
+  // THE regression guard for the rule this replaced. The old landing default was
+  // `isPro && isMac() ? 'day' : 'models'`, which returns 'models' on win32 no matter
+  // what the catalog says. With Day ported, nav and gating light it up from
+  // `platforms` — so an isMac-based landing screen would strand a Pro Windows user on
+  // Models. This fails the moment anything reintroduces that check.
+  it('lands a Pro user on Day on Windows now that Day is ported', () => {
+    expect(landingView('win32', true)).toBe('day')
+  })
+
+  // The other half: not "any non-Mac gets Day" either. Day is not ported to linux, so
+  // a Pro linux user must NOT be dropped onto an unavailable tab.
+  it('does not land a Pro user on Day where Day is unsupported', () => {
+    expect(landingView('linux', true)).toBe('models')
+    expect(landingView('unknown', true)).toBe('models')
+  })
+
+  // DRY: assert against the catalog rather than re-hardcoding the platform list, so
+  // this test and `platforms` can never drift. Porting Day to a new platform updates
+  // both sides from the one edit.
+  it('agrees with the day feature’s own platforms list on every platform', () => {
+    const day = getProFeature('day')
+    expect(day).toBeDefined()
+    for (const p of ['darwin', 'win32', 'linux', 'unknown'] as const) {
+      const expected = featureSupportsPlatform(day!, p) ? 'day' : 'models'
+      expect(landingView(p, true), `pro landing on ${p}`).toBe(expected)
+    }
   })
 })
 

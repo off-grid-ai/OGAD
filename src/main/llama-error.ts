@@ -28,6 +28,26 @@ export function modelPortConflictReason(port: number): string {
 }
 
 /**
+ * True when a chat/completions failure is the model rejecting a prompt that does not fit the
+ * running context window (n_ctx). Distinct from a dead/unreachable engine: retrying is useless
+ * until the context is raised or the prompt shrunk, so callers treat this as TERMINAL rather
+ * than backing off forever. Pure + Electron-free so it is unit-tested. llama-server phrases this
+ * a few ways across versions ("the request exceeds the available context size", "input is too
+ * large", "prompt is too long", "n_ctx" overflow), so match the family, not one string.
+ */
+export function isContextOverflowError(text: string): boolean {
+  const s = (text || '').toLowerCase()
+  if (!s.trim()) return false
+  return (
+    /exceed(s|ed)?\s+the\s+(available\s+)?context/.test(s) ||
+    /context\s+(size|window|length)\s+(exceeded|too\s+small)/.test(s) ||
+    /(prompt|input)\s+(is\s+)?(too\s+(long|large)|larger\s+than)/.test(s) ||
+    /(tokens?|prompt)\b.*\bexceed(s|ed)?\b.*\b(n_?ctx|context)/.test(s) ||
+    /requested\s+tokens.*exceed.*context/.test(s)
+  )
+}
+
+/**
  * Classify the most recent llama-server stderr. Returns null if nothing in the
  * text looks like a known fatal cause (so callers can fall back to a generic
  * message). Order matters: most specific first.

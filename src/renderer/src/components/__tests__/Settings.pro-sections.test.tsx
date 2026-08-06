@@ -83,7 +83,11 @@ describe('Settings pro-section registry seam (D31)', () => {
     ).toBeNull()
   })
 
-  it('Windows Pro build withholds native capture while keeping account sections available', async () => {
+  it('Windows Pro build renders the registered capture section (capture is ported to Windows)', async () => {
+    // Capture, Day, Reflect and Proactive delivery run on Windows Pro now, so the Settings
+    // Capture section must render its registered owner on win32 exactly like macOS - not fall
+    // back to the "Pro on macOS" placeholder. Guards the fix for the gate that stayed Mac-only
+    // after the feature nav was ported, hiding the frame/observation health panel on Windows.
     vi.resetModules()
     stubApi('win32')
     const { registerSettingsSection } = await import('../../bootstrap/sectionRegistry')
@@ -102,10 +106,9 @@ describe('Settings pro-section registry seam (D31)', () => {
 
     await waitFor(() => expect(screen.getByTestId('fake-identity')).toBeTruthy())
     await user.click(screen.getByText('Capture & processing'))
-    expect(screen.queryByTestId('fake-capture')).toBeNull()
-    expect(
-      screen.getByText(/screen capture, backlog recovery, and proactive delivery/i)
-    ).toBeTruthy()
+    await waitFor(() => expect(screen.getByTestId('fake-capture')).toBeTruthy())
+    // The free-build "part of Pro" placeholder must NOT show for an entitled Windows user.
+    expect(screen.queryByText(/screen capture, backlog recovery, and proactive delivery/i)).toBeNull()
     expect(screen.getByText('Processing priority')).toBeTruthy()
   })
 })
