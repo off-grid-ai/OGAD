@@ -1,0 +1,81 @@
+# A Windows installer for MANUAL TESTING. Publishes nothing.
+#
+# release.yml already builds Windows, but it publishes to the update feed as part of a release - which
+# is the wrong tool for "put a build on the test VM": an accidental run moves the beta feed for real
+# users. This job is the same build with the publishing removed and the installer left as a CI
+# artifact instead, so it can be run from any branch as often as needed with no outward effect.
+#
+# It mirrors build-win in release.yml deliberately (same runner pin, same Python pin, same
+# fetch-win-binaries.ps1, same pro checkout) - if that job's constraints change, change them here too.
+# Windows targets x64: electron-builder pins no arch and the runner is x64, so the installer runs on a
+# Windows-on-ARM guest under emulation. Fine for the sync surfaces (pairing, transfer, clipboard);
+# generation is slow because the fetched llama binaries are x64 as well.
+name: Windows test build (no publish)
+on:
+  workflow_dispatch:
+    inputs:
+      pro_ref:
+        description: 'desktop-pro branch/tag/sha to bundle (empty = its default branch)'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  build-win-artifact:
+    # windows-2022 = VS 2022 toolchain. windows-latest ships VS 2026, which node-gyp 11 can't parse,
+    # breaking the better-sqlite3 compile. Pinned for the same reason release.yml pins it.
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          lfs: false # Windows runtimes come from fetch-win-binaries.ps1, not the macOS LFS dylibs
+          persist-credentials: false
+      - name: Check out private pro source into pro/
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: off-grid-ai/desktop-pro
+          ref: ${{ inputs.pro_ref }}
+          token: ${{ secrets.PRO_REPO_TOKEN }}
+          path: pro
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Drop nested .git from pro/
+        shell: bash
+        run: rm -rf pro/.git
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      # node-gyp (better-sqlite3-multiple-ciphers) fails on Python 3.13+; pin 3.12.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: npm ci
+      - name: Fetch Windows native binaries (llama/whisper/sd/ffmpeg)
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/fetch-win-binaries.ps1
+      - name: Build (typecheck + bundle)
+        run: npm run build
+      - name: Package the NSIS installer (no publish)
+        shell: bash
+        env:
+          # Optional signing - absent secrets are a no-op and the installer is simply unsigned, which
+          # SmartScreen warns about. Acceptable for a VM we install onto deliberately.
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: npx electron-builder --win --publish never
+      - name: Upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: |
+            dist/*-setup.exe
+            dist/*.blockmap
+          if-no-files-found: error
+          retention-days: 7
