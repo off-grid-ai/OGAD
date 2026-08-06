@@ -190,9 +190,8 @@ export function UpgradeScreen({
                 You have Pro
               </div>
               <p className="text-sm leading-relaxed text-neutral-300">
-                Your Pro features run on Mac and in the Off Grid AI phone app today - your license
-                covers both, up to 5 devices. Support for your {deviceNoun()} is on the way; it will
-                be enabled once it is tested.
+                Your license covers Mac, Windows and the Off Grid AI phone app - up to 5 devices.
+                This feature is not on your {deviceNoun()} yet; the ones that are work here today.
               </p>
               <p className="text-[11px] leading-relaxed text-neutral-600">
                 Everything else in Off Grid works on your {deviceNoun()} today.
@@ -232,9 +231,8 @@ export function UpgradeScreen({
                     <span className="font-medium text-neutral-200">
                       Coming soon to your {deviceNoun()}.
                     </span>{' '}
-                    Off Grid AI Pro is macOS-tested today. Your purchase works now on Mac and the Off
-                    Grid AI phone app - up to 5 devices. Support for this {deviceNoun()} will be
-                    enabled once it is tested.
+                    This one runs on Mac today. Your license covers Mac, Windows and the Off Grid AI
+                    phone app - up to 5 devices.
                   </span>
                 </div>
               )}
