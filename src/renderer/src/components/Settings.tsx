@@ -101,15 +101,20 @@ export function Settings(): React.ReactElement {
               summary="See capture health, recover pending frames, and control model scheduling in one place."
               delay={0.14}
             >
-              {CaptureContribution && !(proComingSoon && currentPlatform() !== 'darwin') ? (
+              {/* Capture runs wherever Pro is active (macOS + Windows), so render the real
+                  registered section on every platform - the engine, its status, and the
+                  Proactive-delivery toggle it hosts are all ported. The placeholder is only for
+                  the free build, where pro never registers a contribution. Previously this was
+                  gated to darwin, which stranded Windows Pro users with no capture controls and no
+                  way to see the frame/observation health even though capture was running. */}
+              {CaptureContribution ? (
                 <CaptureContribution />
               ) : (
                 <div className="mb-5 border border-neutral-800 bg-neutral-950/40 p-3 text-xs text-neutral-500">
                   <span className="mr-2 text-[10px] uppercase tracking-wide text-emerald-500">
                     Pro
                   </span>
-                  Screen capture, backlog recovery, and proactive delivery are available with Pro on
-                  macOS.
+                  Screen capture, backlog recovery, and proactive delivery are part of Pro.
                 </div>
               )}
               <ProcessingControls />

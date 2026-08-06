@@ -30,9 +30,8 @@ export const PRO_SETTINGS_SLOTS: ProSettingsSlot[] = [
   {
     id: 'capture',
     delay: 0.14,
-    macOnly: true,
-    comingSoonDescription:
-      'Screen capture controls are available on Mac today. Support for this device is coming soon.',
+    // Ported to Windows alongside Replay/Day/Reflect - the capture engine runs on every Pro
+    // platform, so this control (and the Proactive-delivery toggle it hosts) is no longer Mac-only.
     placeholder: {
       title: 'Capture',
       description:
@@ -51,9 +50,8 @@ export const PRO_SETTINGS_SLOTS: ProSettingsSlot[] = [
   {
     id: 'proactive',
     delay: 0.18,
-    macOnly: true,
-    comingSoonDescription:
-      'Morning briefings and meeting alerts are available on Mac and phone today. Support for this device is coming soon.',
+    // Ported to Windows with the Notifications feature (native Electron notifications work on
+    // win32). Rendered inside the Capture section, so it follows the same cross-platform rule.
     placeholder: {
       title: 'Proactive delivery',
       description:
