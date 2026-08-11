@@ -11,13 +11,15 @@ Companion to `COMPUTER_USE.md` (the approach). This doc is the execution plan: p
 
 ## Timeline at a glance
 
-| Phase | Dates | Length | Checkpoint (demoable) |
-| --- | --- | --- | --- |
-| 0. Foundations | Aug 12 - Aug 14 | 3 days | approval seam widened with risk classes; entitlements land; decisions locked |
-| 1. Semantic rail | Aug 17 - Aug 26 | 1.5 wk | "create a calendar event Thursday 3pm" end to end, approval-gated, bundled model |
-| 2. `@offgrid/use` engine | Aug 27 - Sep 9 | 2 wk | engine suite green against a scripted fake device |
-| 3. Desktop adapter + vision | Sep 10 - Sep 29 | 3 wk | multi-step GUI task on a native app, verified per step, live step view |
-| 4. Hard targets + hardening | Sep 30 - Oct 14 | 2 wk | WhatsApp album task supervised end to end; safety checklist passes |
+| Phase | Dates | Length | Repo | Checkpoint (demoable) |
+| --- | --- | --- | --- | --- |
+| 0. Foundations | Aug 12 - Aug 14 | 3 days | this repo + `desktop-pro` | approval seam widened with risk classes; entitlements land; decisions locked |
+| 1. Semantic rail | Aug 17 - Aug 26 | 1.5 wk | this repo | "create a calendar event Thursday 3pm" end to end, approval-gated, bundled model |
+| 2. `@offgrid/use` engine | Aug 27 - Sep 9 | 2 wk | `shared` | engine suite green against a scripted fake device |
+| 3. Desktop adapter + vision | Sep 10 - Sep 29 | 3 wk | this repo + `desktop-pro` | multi-step GUI task on a native app, verified per step, live step view |
+| 4. Hard targets + hardening | Sep 30 - Oct 14 | 2 wk | this repo + `desktop-pro` | WhatsApp album task supervised end to end; safety checklist passes |
+
+The split to remember: `shared` holds the durable, cross-platform brain (2 of the 9 weeks, reused later by mobile); this repo holds the hands and the product integration (everything else).
 
 Nine weeks total. Phase 1 is independently shippable - calendar, messages, mail, photos, reminders actions with approvals deliver user value on Aug 26 regardless of what follows. Where the compression came from: the engine phase is pure TypeScript against a fake device (ideal AI-authoring territory, 4 wk to 2 wk); the semantic rail is many small similar wrappers (3 wk to 1.5 wk). Phase 3 keeps the most slack because it mixes Swift interop, a model install, and real-device iteration; phase 4 is paced by WhatsApp itself, not by code.
 
@@ -78,6 +80,7 @@ Paced by iteration against real apps, not by code volume.
 | `off-grid-ai/shared` CI for the new package | Aug 27 | one-time setup, ~half a day |
 | Dev-machine TCC grants (Accessibility, Automation) with a stable dev signing identity - grants key to code signature | Aug 17 and Sep 10 | per `local-build.local.md`; keep one identity or grants orphan |
 | `desktop-pro` changes for the approval executor | Aug 12 - 14 | separate repo commits + submodule bump here |
+| Push access to `off-grid-ai/OGAD` (and `desktop-pro` if not held) | before the first push - local commits proceed without it | as of Aug 11 the account is pull-only on OGAD; `shared` already has push. Ask the lead |
 
 ## Risks
 
