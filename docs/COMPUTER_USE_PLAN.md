@@ -93,9 +93,15 @@ Paced by iteration against real apps, not by code volume.
 
 ## Out of scope for v1
 
-Windows adapter, mobile adapter, teach-and-repeat recording, background/headless runs, Mac App Store distribution (sandbox blocks the Accessibility path - we ship Developer ID).
+Windows adapter, teach-and-repeat recording, background/headless runs, Mac App Store distribution (sandbox blocks the Accessibility path - we ship Developer ID).
 
-**Mobile sequencing:** desktop ships first; mobile follows as an adapter-only project on the same `@offgrid/use` engine (Android: accessibility-service portal + intents; iOS: intents-only - the platform does not allow an app to read or drive other apps). The engine phase already does all the mobile prep that matters: a platform-free `DeviceController` seam, an action schema aligned with the mobile-use frameworks, and a suite that runs on a fake device. OGAM also does not consume the shared monorepo yet, so a mobile adapter has that migration as a prerequisite regardless of when we start it.
+## After v1 - the mobile adapter (unscheduled)
+
+Desktop ships first; mobile follows as an adapter-only project on the same `@offgrid/use` engine. The engine phase already does the mobile prep that matters - a platform-free `DeviceController` seam, an action schema aligned with the mobile-use frameworks, a suite that runs on a fake device - and the vision model family (GUI-Owl-1.5) is trained for mobile as well as desktop. Prerequisites before scheduling it:
+
+1. OGAM adopts the shared monorepo - it does not consume `@offgrid/*` packages yet; that migration is a standing roadmap item and a prerequisite regardless of computer use.
+2. Android portal: an accessibility-service app (the droidrun-portal pattern) for tree reading + input, MediaProjection for screens, Android intents/deep links as the semantic rail.
+3. iOS stays intents-only (App Intents / Shortcuts) - the platform does not allow an app to read or drive other apps, so no vision fallback exists there. Set expectations accordingly.
 
 ## Tracking
 

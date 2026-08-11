@@ -125,13 +125,16 @@ The shipped-product template is Gemini Intelligence's UX, which matches our appr
 | 3. Desktop adapter + vision fallback | helper act-primitives, tree serialization, window-scoped capture, GUI-Owl/Holo catalog entries, Cortex on the vision model | a multi-step GUI task on a well-behaved app, verified per step |
 | 4. Hard targets | Electron AX wake, WhatsApp flow, per-app recipes where trees are dead | the WhatsApp album task, supervised, send behind approval |
 
-## 8. Open questions
+## 8. Decisions and open questions
 
-1. Default Cortex model: GUI-Owl-1.5-8B-Instruct (MIT, best desktop) or Holo3.1 (fastest local)? Both ship as catalog entries either way.
-2. Package name: `@offgrid/use` proposed (adapters make it computer use on desktop, phone use later on mobile).
-3. How much of minitap's graph do we port in v1 - full eight roles, or start with Planner/Cortex/Executor/Reflector and add Orchestrator/Summarizer when task length demands them?
-4. Approval UX for multi-step runs: per-risky-step approval, or plan-level approval with a live step view and hold-to-stop?
-5. Do we adopt OSWorld-MCP/macOSWorld as a CI-adjacent eval harness from phase 3, so regressions in the loop are measured rather than felt?
+Status as of August 11, 2026 (details live in `COMPUTER_USE_PLAN.md`):
+
+1. **Cortex model - narrowed, decided at install time.** GUI-Owl-1.5-8B-Instruct (working default) or Qwen3-VL-8B. Same Qwen3-VL architecture, so all engine and adapter work is identical for either; the pick is a phase 3 catalog decision and blocks nothing before that.
+2. **Package name - proposed, pending lead confirm.** `@offgrid/use`, consumed as `file:../shared/packages/use` from a sibling checkout per the shared README (not a vendored copy under this repo's `packages/`). Confirm both with the lead in phase 0.
+3. **v1 graph - decided.** Planner / Cortex / Executor / Reflector; Orchestrator and Summarizer are added when task length demands them.
+4. **Approval UX - proposed.** Plan-level approval + live step view + hold-to-stop, with per-step gates on irreversible actions. Validate against real runs in phase 3.
+5. **Eval harness - decided.** macOSWorld subset as a non-blocking sanity gate from phase 3.
+6. **Sequencing - decided.** Desktop first; mobile follows as an adapter-only project on the same engine (see the plan's "After v1" section; iOS is intents-only by platform rules).
 
 ## 9. Sources
 
