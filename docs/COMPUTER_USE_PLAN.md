@@ -29,6 +29,7 @@ Nine weeks total. Phase 1 is independently shippable - calendar, messages, mail,
 | Widen the approval seam | `mcp:proposeApproval` becomes transport-agnostic `actions:proposeApproval` carrying `{kind, title, detail, risk, args, source}`; per-executor `riskOf(name, args)` replaces the name regex; MCP extension migrates onto it | existing approval tests stay green (`mcp-connector-tool-extension.dbtest.ts`); new tests per risk class; pro executor updated in `desktop-pro`, submodule bumped |
 | Packaging groundwork | `com.apple.security.automation.apple-events` entitlement + `NSAppleEventsUsageDescription` + Calendars/Contacts/Photos usage keys in the electron-builder config | local packaged build per `local-build.local.md`; TCC prompts name the app |
 | Permission onboarding design | sequence of grants (Accessibility held check exists, Automation per target, per-framework) behind an explicit "enable computer actions" flow | design reviewed; no dead-end states |
+| Shared repo setup | sibling clone of `off-grid-ai/shared` next to this repo (CLAUDE.md already assumes `../shared`); decide the consumption pattern for `@offgrid/use` - proposed: the README's `file:../shared/packages/use`, NOT a fifth vendored copy under `packages/` (confirm with the lead; makes a sibling checkout a build requirement on this branch) | checkout builds; decision recorded here |
 
 ## Phase 1 - semantic rail (Aug 17 - Aug 26)
 
@@ -93,6 +94,8 @@ Paced by iteration against real apps, not by code volume.
 ## Out of scope for v1
 
 Windows adapter, mobile adapter, teach-and-repeat recording, background/headless runs, Mac App Store distribution (sandbox blocks the Accessibility path - we ship Developer ID).
+
+**Mobile sequencing:** desktop ships first; mobile follows as an adapter-only project on the same `@offgrid/use` engine (Android: accessibility-service portal + intents; iOS: intents-only - the platform does not allow an app to read or drive other apps). The engine phase already does all the mobile prep that matters: a platform-free `DeviceController` seam, an action schema aligned with the mobile-use frameworks, and a suite that runs on a fake device. OGAM also does not consume the shared monorepo yet, so a mobile adapter has that migration as a prerequisite regardless of when we start it.
 
 ## Tracking
 
