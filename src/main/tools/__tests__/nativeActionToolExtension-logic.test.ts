@@ -15,7 +15,8 @@ describe('native tool specs', () => {
       'reminders_list',
       'contacts_search',
       'messages_send',
-      'mail_send'
+      'mail_send',
+      'open_url'
     ])
     expect(findNativeToolSpec('calendar_create_event')?.command).toBe('calendar.createEvent')
     expect(findNativeToolSpec('calendar_list_events')?.command).toBe('calendar.listEvents')
@@ -24,6 +25,7 @@ describe('native tool specs', () => {
     expect(findNativeToolSpec('contacts_search')?.command).toBe('contacts.search')
     expect(findNativeToolSpec('messages_send')?.command).toBe('messages.send')
     expect(findNativeToolSpec('mail_send')?.command).toBe('mail.send')
+    expect(findNativeToolSpec('open_url')?.command).toBe('system.openURL')
   })
 
   it('gates the send actions and runs the read lookups without approval', () => {
@@ -31,6 +33,11 @@ describe('native tool specs', () => {
       expect(shouldGate(findNativeToolSpec(name)!.risk)).toBe(true)
     }
     expect(shouldGate(findNativeToolSpec('contacts_search')!.risk)).toBe(false)
+  })
+
+  it('treats open_url as a navigate that runs without approval', () => {
+    expect(findNativeToolSpec('open_url')!.risk).toBe('navigate')
+    expect(shouldGate(findNativeToolSpec('open_url')!.risk)).toBe(false)
   })
 
   it('confirms a sent message and email without echoing arguments', () => {

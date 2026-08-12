@@ -167,6 +167,23 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
     buildArgs: (a) => a,
     title: (a) => `Email ${asString(a.to)}`,
     formatResult: () => 'Sent the email.'
+  },
+  {
+    name: 'open_url',
+    description:
+      "Open a URL or app link on the user's Mac - a web page, a mailto: draft, or an app scheme like whatsapp://send. Opens only; it does not submit or send anything.",
+    parameters: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'The URL or app-scheme link to open' }
+      },
+      required: ['url']
+    },
+    command: 'system.openURL',
+    risk: 'navigate',
+    buildArgs: (a) => a,
+    title: (a) => `Open ${asString(a.url)}`,
+    formatResult: () => 'Opened it.'
   }
 ]
 

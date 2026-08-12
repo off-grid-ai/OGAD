@@ -1,6 +1,7 @@
 import Foundation
 import EventKit
 import Contacts
+import AppKit
 
 // Off Grid AI Desktop - native actions helper (macOS), the backend of the computer-use
 // semantic rail. One-shot CLI: reads a single JSON command argument, performs one
@@ -274,6 +275,17 @@ func sendMail(_ args: [String: Any]) -> Never {
     ok(["sent": true])
 }
 
+func openURL(_ args: [String: Any]) -> Never {
+    guard let urlString = args["url"] as? String, let url = URL(string: urlString) else {
+        fail("openURL requires a valid 'url'")
+    }
+    if NSWorkspace.shared.open(url) {
+        ok(["opened": true])
+    } else {
+        fail("failed to open URL: \(urlString)")
+    }
+}
+
 let arguments = CommandLine.arguments
 guard arguments.count >= 2 else { fail("no command provided") }
 guard let data = arguments[1].data(using: .utf8),
@@ -298,6 +310,8 @@ case "messages.send":
     sendMessage(commandArgs)
 case "mail.send":
     sendMail(commandArgs)
+case "system.openURL":
+    openURL(commandArgs)
 default:
     fail("unknown command: \(command)")
 }

@@ -39,7 +39,7 @@ export class NativeActionToolExtension implements ToolExtension {
   }
 
   systemHint(): string {
-    return "You can act on the user's Mac: manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Use ISO 8601 for all times. Anything that creates or sends needs the user's approval; tell them it is pending until they approve."
+    return "You can act on the user's Mac: manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme (like whatsapp://send) with open_url. Use ISO 8601 for all times. Anything that creates or sends needs the user's approval; tell them it is pending until they approve."
   }
 
   async execute(name: string, args: Record<string, unknown>): Promise<string> {
