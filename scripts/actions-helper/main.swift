@@ -29,9 +29,20 @@ func ok(_ result: [String: Any]) -> Never { emit(["ok": true, "result": result])
 
 let iso = ISO8601DateFormatter()
 
+// Accept a full ISO 8601 string (with timezone) first, then fall back to the
+// timezone-less local forms a model commonly emits (2026-08-13T15:00:00,
+// 2026-08-13T15:00, 2026-08-13) interpreted in the user's local timezone.
 func parseDate(_ value: Any?) -> Date? {
     guard let raw = value as? String else { return nil }
-    return iso.date(from: raw)
+    if let date = iso.date(from: raw) { return date }
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = TimeZone.current
+    for pattern in ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd"] {
+        formatter.dateFormat = pattern
+        if let date = formatter.date(from: raw) { return date }
+    }
+    return nil
 }
 
 // Request EventKit access synchronously. The completion handler runs off the calling
