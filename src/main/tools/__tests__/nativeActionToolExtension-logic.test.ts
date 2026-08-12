@@ -1,0 +1,48 @@
+import { describe, expect, it } from 'vitest'
+import {
+  NATIVE_TOOL_SPECS,
+  findNativeToolSpec,
+  buildNativeToolSchemas
+} from '../nativeActionToolExtension-logic'
+import { shouldGate } from '../../actions/approval'
+
+describe('native tool specs', () => {
+  it('exposes calendar create and list with matching helper commands', () => {
+    expect(NATIVE_TOOL_SPECS.map((s) => s.name)).toEqual([
+      'calendar_create_event',
+      'calendar_list_events'
+    ])
+    expect(findNativeToolSpec('calendar_create_event')?.command).toBe('calendar.createEvent')
+    expect(findNativeToolSpec('calendar_list_events')?.command).toBe('calendar.listEvents')
+  })
+
+  it('returns undefined for an unknown tool name', () => {
+    expect(findNativeToolSpec('calendar_delete_everything')).toBeUndefined()
+  })
+
+  it('gates the mutating create tool and runs the read-only list tool freely', () => {
+    expect(shouldGate(findNativeToolSpec('calendar_create_event')!.risk)).toBe(true)
+    expect(shouldGate(findNativeToolSpec('calendar_list_events')!.risk)).toBe(false)
+  })
+
+  it('builds an approval title from the event title', () => {
+    expect(findNativeToolSpec('calendar_create_event')!.title({ title: 'Sync with Ali' })).toBe(
+      'Create the calendar event "Sync with Ali"'
+    )
+  })
+
+  it('formats a create result into a confirmation, with and without an id', () => {
+    const spec = findNativeToolSpec('calendar_create_event')!
+    expect(spec.formatResult({ id: 'E1' })).toBe('Created the calendar event (id E1).')
+    expect(spec.formatResult({})).toBe('Created the calendar event.')
+  })
+
+  it('builds OpenAI function schemas for every spec', () => {
+    const schemas = buildNativeToolSchemas()
+    expect(schemas).toHaveLength(NATIVE_TOOL_SPECS.length)
+    expect(schemas[0]).toMatchObject({
+      type: 'function',
+      function: { name: 'calendar_create_event', parameters: { required: ['title', 'start'] } }
+    })
+  })
+})

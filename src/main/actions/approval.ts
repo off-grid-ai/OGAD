@@ -22,8 +22,12 @@ import { callHook, hasHook, HOOKS } from '../bootstrap/hookRegistry'
 export type ActionRisk = 'read' | 'navigate' | 'mutate' | 'irreversible'
 
 /** Which executor raised the action — lets the approval UI and audit log group and
- *  label without branching on executor-specific fields. */
-export type ActionKind = 'mcp' | 'computer' | 'browser'
+ *  label without branching on executor-specific fields.
+ *  - mcp: a connector tool call
+ *  - native: a semantic OS action (EventKit, AppleScript, Shortcuts) — the rail-1 path
+ *  - browser: the embedded agent browser
+ *  - computer: GUI automation (accessibility tree + synthetic input) */
+export type ActionKind = 'mcp' | 'native' | 'browser' | 'computer'
 
 export interface ActionApprovalRequest {
   kind: ActionKind
