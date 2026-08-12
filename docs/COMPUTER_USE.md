@@ -1,193 +1,184 @@
-# Computer use - replicate the mobile-use stack on desktop
+# Off Grid AI - the proactive assistant (the act pillar)
 
-**Status:** direction decided August 11, 2026; agent-browser rail and build guidelines added August 12 after the Clawbot / product-UX research. Intents + MCP are the primary action paths; an embedded agent browser handles web tasks; the vision-based agent is the fallback for native apps. We do not innovate on agent architecture - we study the mobile-use ecosystem and replicate it, with the browser UX replicated from Codex desktop and Claude Desktop. The engine is built in the shared repo (`off-grid-ai/shared`) as an `@offgrid/*` package. Model size is not a design constraint - local models keep improving and the vision model ships as a downloadable catalog entry.
-**Constraint (standing):** local models only. No hosted APIs. No screenshot ever leaves the device.
+**Status:** product model agreed August 12, 2026. This supersedes the earlier "replicate the mobile-use stack" framing: that described one rail (GUI automation), not the product. The product is a proactive, context-grounded local assistant. Computer use is the last rail it reaches for, not the point.
+**Standing constraints:** local models only, nothing leaves the device; all UI and copy follow `off-grid-ai/brand` (see 11).
 
 ---
 
-## 1. The decision
+## 1. What we are building
 
-The agent executes actions on the user's Mac - from "create a calendar event Thursday 3pm" to "pick the best photo from the vacation album in the family WhatsApp chat and send it". The decided shape:
+An assistant that **notices what you need and acts on it**, grounded in what OGAD already remembers about your day. Not a chatbot you command, and not a pixel-clicking robot - an assistant that:
 
-1. **Intents + MCP first.** Deterministic action surfaces - MCP connectors, URL schemes, AppleScript/Apple Events, EventKit and friends, Shortcuts - handle everything they can. No pixels, no coordinates.
-2. **Agent browser for the web.** An embedded browser pane inside the app (clean profile, separate cookie jar) that the agent drives while the user watches - the surface Codex desktop and Claude Desktop both converged on in 2026. It handles research, forms, portals, and orders, and it needs zero OS permissions, so it ships before any native-GUI control. See 2.3.
-3. **Vision-based agent as the native fallback.** When no deterministic surface or web path exists, a multi-agent GUI loop takes over, perceiving through the accessibility tree plus screenshots and acting through synthetic input.
-4. **Replicate, do not invent.** The mobile-use ecosystem solved the agent loop (100% on AndroidWorld); Codex and Claude Desktop solved the browser UX; OpenClaw proved the capability composition - and its incident record is our avoid-list (see 2.4). We port, we do not design from scratch.
-5. **Engine in shared.** The agent loop, action schema, router, and verification logic are platform-agnostic and land as a package in `off-grid-ai/shared`, with a desktop adapter in this repo - the same engine + adapter split `@offgrid/clipboard` already uses. A mobile adapter can follow later.
-6. **The setup bar: none.** The target outcome is OpenClaw-class capability with zero setup. Our structure already delivers it: the model is bundled (no API keys), everything runs in-process (no gateway, no ports, no daemon), and permissions are just-in-time OS prompts, never config files.
+- **knows you** - Replay already captures your day (screen -> OCR -> observations -> entities). That memory is the raw material.
+- **is proactive** - it surfaces the flight you have not checked in for, the presentation you promised, the routine you run every morning - before you ask.
+- **is private** - all of it is on-device. That is the only reason a person would let something watch their whole day, and it is the moat.
+- **routes to the cheapest reliable rail** - a deep link or a connector before a scripted action before driving a GUI before pixels. It acts through the app and content you actually mean, resolved from your context - "put on the show we were just talking about, in the app you use" - not a UI-clicking gamble.
 
-## 2. What we are replicating
+The differentiator is that combination, not raw GUI prowess. Local models will not beat frontier cloud agents at clicking arbitrary pixels this year, and chasing that is a trap. Knowing you, noticing, staying private, and routing well is the product.
 
-Three systems define the mobile-use pattern; their published numbers are the calibration:
+## 2. Two ways a task is born (the generators)
 
-| System | What it is | Score | License |
+Every task the assistant acts on comes from one of two generators. Both emit the same thing: **a proposed action with open slots** (the structure is known; the content is filled later, see 4).
+
+### 2.1 Routine proactivity - repetition
+
+The same flow, done again. Two authoring paths, one artifact (a routine = a trigger + an ordered, AX-anchored action trace):
+
+- **Auto-detected** - mined from the Replay observation log: "every weekday ~9am you open Mail then Slack and scan unread." Low fidelity (we know the sequence, not every exact target), so it is used to *propose*, then confirmed by a recording.
+- **Demonstrated** - you hit record and do it once. High fidelity: the exact trace, directly replayable. See 5.
+
+Detection *proposes*; demonstration *records the reliable version*. "I noticed you do this every morning - show me once so I can do it exactly." They are one loop, not two features.
+
+### 2.2 Reasoned proactivity - situation
+
+No repetition at all. Given your situation, something *should* have happened and has not. The flight case:
+
+1. **Detect the commitment/event** - "flight tonight" from a conversation Replay captured, or a confirmation email.
+2. **Know what it implies** - world knowledge the LLM already has: a flight means check-in, a boarding pass, a gate. Nobody programs "a flight entails check-in."
+3. **Gap-check the actual state** - the agent goes and looks, read-only: is there a boarding pass in Gmail? any sign of check-in?
+4. **Surface the gap** - "You fly tonight and haven't checked in. Want me to?"
+5. **Act, then gate** - check in or open the check-in page; anything with identity or payment confirms first.
+
+Steps 1-4 - the *smart* part - are pure memory + LLM + read-only connectors. No vision, no risky automation. That is the most magical and the most reliable part, and it ships first.
+
+**The routine engine gives reliable *doing*; the reasoning engine gives an assistant that *notices*.** Same spine underneath.
+
+## 3. One gated spine
+
+Both generators feed one path:
+
+```mermaid
+flowchart TD
+    RG["routine generator\n(detected + demonstrated)"] --> P[proposed action + open slots]
+    XG["reasoning generator\n(commitment + world-knowledge + gap-check)"] --> P
+    P --> R["resolve slots\n(RAG over Replay + conversation + entities + files)"]
+    R --> C{gate}
+    C -->|read / reversible / high-confidence| X
+    C -->|sensitive OR low-confidence| A["approval card\nshows the RESOLVED values"]
+    A --> X[execute via the rails]
+    X --> V[verify: AX diff / screenshot / connector result]
+    V --> P
+```
+
+- **Resolve** - the slots ("the presentation", "the person I promised") are filled from memory at run time, each with a confidence. This is the "which presentation" intelligence (see 6).
+- **Gate** - the approval card shows the *resolved* values: "Send `Q3-strategy.pptx` to Ali Chherawalla." One glance confirms the AI inferred correctly *and* that the action is safe. The gate is where inference and safety are confirmed together - it is the guard against a confident-but-wrong resolution, and the same mechanism handles "is it right" and "is it allowed."
+- **Trust graduation** - suggest -> approve-each-run -> auto-run trusted routines. Irreversible steps (send, pay, delete, account-create) gate by default even inside a trusted routine.
+
+## 4. The rail hierarchy - cheapest reliable first
+
+The router picks the cheapest rail that will reliably do the step. Vision is the last resort, not the engine.
+
+| Rail | What it is | Reliability | Status |
 | --- | --- | --- | --- |
-| **minitap/mobile-use** | multi-agent framework (LangGraph-style), a11y-tree-primary + vision-selective | **100% AndroidWorld** (116/116; human ~80%) | Apache-2.0 |
-| **mobilerun** (ex-droidrun) | Manager/Executor framework over an on-device accessibility portal | 91.4% AndroidWorld | MIT |
-| **Alibaba Mobile-Agent-v3 / GUI-Owl-1.5** | 4-role framework + open-weight GUI models (2B-32B, Qwen3-VL base) | 73.3% AndroidWorld; GUI-Owl-1.5 is open SOTA on desktop (56.5 OSWorld) | MIT weights |
+| 0. Perception | Replay OCR + the accessibility tree - structured "sight", no ML grounding model | n/a | capture ships; AX reader exists |
+| 1. Semantic | deep links / URL schemes, AppleScript / Apple Events, EventKit, Shortcuts, MCP connectors | ~100%, deterministic | **built** (calendar, reminders, contacts, messages, mail, open_url) |
+| 2. Agent browser | embedded browser pane driven in-process, for novel web tasks (check-in, ordering) | good; no OS permissions | designed, not built |
+| 3. AX-tree GUI | structured native control (AXPress / set-value) + replay of a demonstrated trace | good on well-behaved apps | AX read exists; act primitives not built |
+| 4. Vision grounding | a downloadable model (GUI-Owl / Qwen3-VL) mapping pixels -> coordinates | the frontier ceiling (~35-45% novel, local) | fallback, last to build |
 
-The field converged on one architecture, and it matches the decided direction exactly:
+**Three different things get called "seeing", and only rail 4 is the heavy one:** Replay OCR (rail 0, ships) powers detection and context; the AX tree (rail 0/3, exists) powers precise recording and reliable replay with no ML model; the grounding vision model (rail 4) only earns its place when the AX tree is dead (WhatsApp-class apps) or a recorded step drifted. So the assistant can do a great deal - and ship real value - before rail 4 exists.
 
-- **Route to the cheapest surface.** Deterministic path if one exists (MCP, CLI, deep link/intent) - structured UI action second - vision-grounded action last. The 2026 benchmarks (MobileWorld, PhoneHarness, OSWorld-MCP) all show hybrid routing beating GUI-only.
-- **A11y tree is the primary perception, vision is selective.** mobilerun's measurement: the tree is ~2 KB against ~1 MB screenshots - smaller, faster, semantically richer. The decision model receives tree and screenshot together; structure targets, pixels disambiguate.
-- **Cognitive separation across small agents.** Role-scoped contexts, most roles on small models, one strong vision model where it counts. minitap's ablation: this separation alone is worth +21 points.
-- **Deterministic verification.** Fragile operations (typing) are verified procedures: act, re-read device state, diff. Worth +7 points. A reflector step classifies each transition SUCCESS/FAILURE and feeds replanning. Cycle detection with forced strategy change is worth +9.
+Your examples, mapped to rails:
 
-### 2.1 The loop (minitap's graph, the richest reference)
+- **Open Maps** - rail 1, `open_url` (`maps://`). Built. Flawless.
+- **Call a cab** - rail 1, deep link (`uber://?action=setPickup&dropoff=...`) opens the ride pre-filled; you confirm. Reliable.
+- **Put on a movie** - rail 1 if the app has a title deep link (many do); rail 2/4 if it means driving the streaming UI. Mixed.
+- **Order from Amazon** - rail 2, the agent browser driving the real site (no consumer API), ideally a pre-authored recipe for the reorder flow, payment behind the gate. Best-effort, improving.
 
-| Role | Job | Model class needed |
-| --- | --- | --- |
-| Planner | decompose the goal into ordered subgoals | small text model |
-| Orchestrator | subgoal lifecycle (pending / in-progress / completed / failed), decides what runs next | small text model |
-| Contextor | fetch fresh device state before each decision: a11y tree + screenshot + focused app | small text model |
-| **Cortex** | the one decision maker: gets tree + screenshot, emits one structured JSON decision; detects action cycles and forces strategy changes | **the strong vision model** |
-| Executor | parse the decision into concrete tool calls, deterministically - no free-form reasoning | none (code) |
-| Summarizer | compact history so context never overflows | small text model |
-| Reflector (Mobile-Agent-v3) | compare intended vs actual state transition, SUCCESS/FAILURE + diagnosis | vision model |
-| Notetaker (Mobile-Agent-v3) | persist critical on-screen facts (codes, names) across subgoals | small text model |
+The rule is always: does the service expose a clean surface (deep link / API / connector / AppleScript)? If yes, reliable and cheap. If it is GUI-only, it is the hard long tail - the same ceiling every agent hits, worse with local models. "Does everything" is honest as a direction, delivered as: the clean-surface majority done flawlessly, the GUI long tail done assistively and improving, always honest about confidence.
 
-The 100% AndroidWorld run mixed models per role and only the Cortex was frontier-grade. That maps directly onto our stack: bundled Gemma runs planner/orchestrator/contextor/summarizer; the downloadable vision model runs Cortex and Reflector.
+## 5. The demonstration recorder
 
-### 2.3 The agent browser (the web rail) - added August 12
+Record-by-showing turns "novel GUI automation is ~40% reliable" into "replay a known trace", because replaying a *known* path is a far easier task than figuring out a UI from scratch.
 
-The standalone AI browsers died in 2026 (OpenAI shut down Atlas, Google shut down Project Mariner); what survived at both OpenAI and Anthropic is a **tabbed browser pane embedded in the app**: clean profile, separate cookie jar, the user logs into sites deliberately in-pane, the agent drives the page in a live shared view, per-site permission cards gate actions. Codex desktop ships this in the thread; Claude Desktop ships it as the Browser pane. We adopt it as the preferred rail for every web task:
+- **Capture the action trace, not raw input** - for each meaningful step: the app, the AX element (fallback coordinate), the action (click/type/scroll/navigate), any typed text. The AX context is what turns a raw click into "clicked Send in Slack" and what makes replay survive window moves and resizes.
+- **Primitives we already have** - the CGEvent tap (we ship the *listening* half in dictation-hotkey), the AX reader, and Replay frames for context and step verification. The recorder is Replay-with-intent plus AX-tagging, a new mode, not a new system.
+- **Review + edit** - after recording we show the steps in plain language ("Open Slack", "Click Send", "Type: ..."); you delete, reorder, or **mark a step as a variable slot** (see 6).
+- **Store** - as a skill with a trigger (manual / schedule / event), reusing the existing skills format.
+- **Never record secrets** - secure-input detection (`IsSecureEventInputEnabled()`) hard-skips keystrokes into password fields. Recording credentials would be a serious mistake.
 
-- **Electron `WebContentsView`, driven in-process via `webContents.debugger`** (raw CDP - no debug port, no new dependencies; browser-use itself moved from Playwright to raw CDP for speed and control).
-- **Perception is an indexed DOM/accessibility snapshot** (port of nanobrowser's TypeScript serialization) - multiple-choice element targeting that suits the bundled model - with screenshots as the fallback, per Agent TARS's dom / visual-grounding / hybrid strategy.
-- **Zero OS permissions.** The pane is our own surface: no Accessibility grant, no Screen Recording, no TCC prompts at all. This makes it the first GUI capability we can ship.
-- **Per-site cards** (allow once / always allow / deny; localhost exempt), **takeover mode** at logins and payments - agent input pauses and frame capture stops while the user types - and opt-in session persistence per site.
+On replay, deterministic trace execution runs through the rails; the LLM/vision comes in only as **recovery** when a step's AX target is gone or a verification fails. Deterministic automation with model fallback is strictly more reliable than model-drives-everything.
 
-### 2.4 What we reuse directly
+## 6. Memory-grounded resolution (the recording gives the *how*, memory gives the *what*)
+
+A demonstrated trace stores the reliable UI path but leaves the content open. The slots - "the presentation I mentioned", "the person I promised" - resolve at run time by RAG over the memory spine: Replay observations + recent conversation + entity graph + files you touched, scoped by temporal and entity proximity, returning a value **plus a confidence**.
+
+- A generic assistant cannot do "send the deck I promised" - it has no record of your day. OGAD can, because it has both halves (the memory and the action).
+- **Confidence drives the gate**: high + non-sensitive -> preview-and-go; sensitive -> gate with the resolved preview; ambiguous ("which of three decks?") -> disambiguate or show the top candidate for one-tap confirm.
+- **Honest edges**: recency window needs temporal decay (grab *this* deck, not last month's); resolution quality rises and falls with what Replay captured (a healthy incentive to invest in memory); the dangerous case is confident-and-wrong, which the preview-at-gate catches for sensitive actions and a higher confidence bar catches for auto-run.
+
+**Slot resolution (data, from memory) is a different intelligence from UI-drift recovery (elements, from AX + vision).** Keep them separate: one finds content, one finds buttons.
+
+## 7. What is already built (the reliable foundation)
+
+The semantic rail and the shared gate exist on this branch (11 commits), and they are exactly the reliable execution layer this assistant needs:
+
+- **Transport-agnostic approval seam** - `actions:proposeApproval` with a read/navigate/mutate/irreversible risk taxonomy; the single gate every rail routes through. Backward-compatible with the current pro build.
+- **Native actions helper (macOS)** - one Swift one-shot backend behind `runNativeAction`, covering calendar (create/list), reminders (create/list), contacts (search), Messages send, Mail send, and `open_url`. Mutations gate; reads run free; lenient date parsing; AppleScript values escaped against injection.
+- **Wired into the chat tool loop** macOS-only, and shipped in CI. Fully unit-tested through an injected boundary.
+- **TCC packaging** - the Info.plist usage strings and apple-events entitlement a signed build needs, brand-clean, guarded by a test.
+
+None of this is wasted by the reframe. It is rail 1, and rail 1 carries most of the value.
+
+## 8. What is genuinely new to build
+
+On top of the existing foundation:
+
+1. **The reasoning engine** - commitment/event detection + world-knowledge of required steps + read-only gap-checking + surfacing. Memory + LLM + connectors. The sharpest first thing to prove: it is the magic and needs none of the risky automation.
+2. **The slot/resolve layer** - RAG over the memory spine to fill "the presentation" with a confidence.
+3. **The demonstration recorder** - CGEvent tap + AX tagging + review UI (5).
+4. **The routine store + trigger** - skills with schedule/event triggers; auto-detection feeding the "record this?" proposal.
+5. **The agent browser** (rail 2) - for the reasoned novel web tasks (check-in, ordering); higher priority than a pure-routine product implied, because that is where reasoned tasks execute, and it needs no OS permissions.
+6. **AX act-primitives + the grounding vision model** (rails 3-4) - native GUI control and the dead-AX / drift-recovery fallback. Last.
+
+## 9. What we reuse (do not reinvent)
 
 | Source | License | What we take |
 | --- | --- | --- |
-| `@ui-tars/sdk` + the UI-TARS desktop app | Apache-2.0 | two-method Operator seam + action parser; the ScreenMarker overlay trio (animated screen border, content-protected pause widget, pre-action click markers); desktopCapturer screenshot scaling; the macOS permission gate |
-| nanobrowser | Apache-2.0 | TypeScript DOM-to-indexed-elements serialization for the browser rail |
-| `@computer-use/nut-js` (or `@nut-tree-fork/nut-js`) | Apache-2.0 | input synthesis on the native rail, alongside our Swift helper |
-| macos-automator-mcp | MIT | wrapped as an intents layer: AppleScript/JXA execution plus its recipe knowledge base |
-| bytebot (archived) | Apache-2.0 | takeover-as-recorded-actions (the human demonstration lands in the same action log the agent uses) and the explicit needs_help task state |
-| Peekaboo (OpenClaw org) | MIT | reference implementation for the a11y-tree + vision hybrid on the native rail |
-| OpenClaw | AGPL (patterns only) | the capability composition and the proactive cron/skills pattern. Equally its incident record as the avoid-list: 30,000+ exposed gateways, sandbox-off default, weak local auth, unvetted skills. We ship none of those surfaces - no gateway, no ports, no BYO keys, skills approval-gated |
+| `@ui-tars/sdk` + the UI-TARS desktop app | Apache-2.0 | Operator seam + action parser; the ScreenMarker overlay trio (animated border, content-protected control widget, pre-action markers); desktopCapturer scaling; the macOS permission gate |
+| nanobrowser | Apache-2.0 | TypeScript DOM-to-indexed-elements serialization for the agent browser |
+| `@computer-use/nut-js` (or the community fork) | Apache-2.0 | input synthesis on the native rail |
+| macos-automator-mcp | MIT | wrapped AppleScript/JXA intents plus its recipe knowledge base |
+| bytebot (archived) | Apache-2.0 | takeover-as-recorded-actions (the human demonstration lands in the same action log) and the needs_help state - directly relevant to the recorder |
+| Peekaboo (OpenClaw org) | MIT | reference for the AX-tree + vision hybrid on the native rail |
+| OpenClaw | AGPL (patterns only) | the proactive cron/skills pattern and the killer briefing workflow; equally its incident record as the avoid-list (exposed gateways, sandbox-off, weak auth, unvetted skills) - we ship none of those surfaces |
 
-Everything adopted as code is Apache-2.0 or MIT - clean for the AGPL core + proprietary pro split (ported files keep their license headers).
+Everything adopted as code is Apache-2.0 or MIT - clean for the AGPL core + proprietary pro split.
 
-### 2.2 The action schema
+## 10. Safety
 
-A small closed enum with structured arguments, not an open toolbox. mobilerun ships nine tools: `click, long_press, type, system_button, swipe, open_app, get_state, take_screenshot, complete`. Mobile-Agent-v3's desktop set: `key, type, mouse_move, click, drag, right_click, middle_click, double_click, scroll, wait, terminate`. Element targeting always has a fallback chain: stable ID - text match - coordinates. We adopt the same shape (our chain: AXIdentifier/role+title - text match - coordinates).
+- The **gate** is the confirmation of inference and safety together (3): irreversible classes (send, pay, delete, account-create) confirm even inside trusted routines; the card shows resolved values so a confident-but-wrong resolution is caught before it acts.
+- **Screen content is untrusted input** - published studies show 86% attack success from adversarial pop-ups against GUI agents; prompt-level defenses fail, so the gate and an app allowlist are system-level.
+- **Never see or type credentials** - secure-input detection hands password fields to the user; the recorder hard-skips them.
+- **Takeover with a guarantee** - at logins and payments the agent pauses and frame capture stops while the user controls the surface.
+- **Kill switch** - user input / Esc halts execution with the keypress consumed; the existing abort guard already guarantees a cancelled turn fires no side effects.
+- **Everything executed lands in the approvals audit log.**
+- **Trust graduates** - suggest -> approve-each -> auto-run; never jump to autonomous (the OpenClaw MoltMatch lesson).
 
-## 3. Desktop translation - what maps, what does not
+## 11. Build guidelines (binding, all surfaces)
 
-The macOS automation research (unchanged, still the ground truth for the adapter):
+- **Design** - `off-grid-ai/brand` `DESIGN_PHILOSOPHY.md`: brutalist/terminal, Menlo, emerald as the only accent, black/white base, hierarchy by size and weight not color, no gradients, no emojis. All values from `@offgrid/design` tokens (`off-grid-ai/shared`) - no hardcoded hex. Desktop density per this repo's `docs/DESIGN.md`.
+- **Copy** - `off-grid-ai/brand` `brand_tone_voice.md` + the outcomes-first rule: lead with what the user gets, mechanism as proof; no em dashes, no curly quotes, no exclamation marks, banned-word list applies. Applies to every approval card, suggestion, and notification.
 
-| Mobile concept | macOS equivalent |
-| --- | --- |
-| Accessibility portal APK / UIAutomator2 / ADB | none needed - our app runs on the target machine and IS the portal: `AXUIElement` (read + `AXPress` + set `AXValue`), `CGEvent` post, ScreenCaptureKit capture we already have |
-| Android intents / deep links | URL schemes (`open -u`), `open -b <bundle-id>` launch, AppleScript/Apple Events, `shortcuts run` (App Intents), MCP connectors |
-| `resource-id` targeting | AXIdentifier / AXRole+AXTitle - text - coordinates |
-| One fullscreen app | multi-window, multi-display, z-order: window-scoped capture + per-window AX trees; Retina points-vs-pixels scaling (2x) handled in the adapter |
-| Uniformly rich Android a11y trees | uneven: AppKit good, Electron needs `AXManualAccessibility` poked on (Electron 25+), Catalyst varies, canvas apps expose nothing. **The vision fallback carries a larger share of steps on macOS than on Android - which is why the vision model is a first-class component, not an afterthought** |
-| Sideloaded accessibility service | TCC permissions: Accessibility (AX + CGEvent), Automation per target app (`com.apple.security.automation.apple-events` entitlement + usage strings in the build), Calendars/Contacts/Photos usage keys, Screen Recording (held). Sequenced behind an explicit onboarding |
-| AndroidWorld benchmark | OSWorld-Verified + OSWorld-MCP + macOSWorld for sanity checks. Expect desktop scores 20-30 points below mobile headlines for the same models - desktop is the harder domain |
+## 12. Open-core placement
 
-Known hard target, kept as the acceptance case: WhatsApp Desktop (Catalyst, near-dead AX tree). Route: `whatsapp://send?phone=...` URL scheme to open the chat (intent path), keyboard-first navigation, vision-grounded clicks for the gaps, photo ranking by the vision model, the send click behind the approval gate.
+Rail-1 helper primitives and adapter plumbing are core infrastructure (like OCR). The reasoning engine, the recorder, the routine store, the resolve layer, and the approvals integration follow the existing pro spine. `pro/` changes land in `desktop-pro` first, submodule bump after. The engine (agent loop / router / resolver) lives in `off-grid-ai/shared` as `@offgrid/use`, consumed via `file:../shared/packages/use`.
 
-## 4. Models
+## 13. Decisions and open questions
 
-No size constraint. The vision model is a downloadable catalog entry (our catalog already gates on RAM and ships mmproj projectors), and it is swappable as the space improves - which it does quarterly.
+1. **Decided** - the model above: two generators (routine + reasoned) on one gated spine, rails cheapest-first, memory-grounded resolution, vision last.
+2. **Decided** - `@offgrid/use` package name and `file:../shared/packages/use` consumption; the sibling `../shared` checkout is a build requirement (main already adopted it).
+3. **Decided** - the semantic rail (rail 1) is the foundation and is built.
+4. **Open** - parameterization depth: start faithful-with-marked-slots resolved by memory, layer richer LLM generalization on top. Confirmed lean: start faithful.
+5. **Open** - first build milestone: the reasoning engine (notice + surface, memory-driven, no risky automation) vs the recorder + faithful replay. Lean: reasoning engine, because it is the magic and the safest.
+6. **Open** - default grounding model when rail 4 arrives: GUI-Owl-1.5-8B-Instruct (MIT, desktop-trained) vs Qwen3-VL-8B. Not on the critical path.
 
-| Model | Sizes | License | Why | Scores |
-| --- | --- | --- | --- | --- |
-| **GUI-Owl-1.5** (Alibaba) | 2B/4B/8B/32B, Instruct + Thinking | MIT, Qwen3-VL base (llama.cpp-supported) | trained natively for desktop + mobile + browser; best open desktop numbers | family 56.5 OSWorld; 8B-Instruct: 52.3 OSWorld-Verified, 69.0 AndroidWorld |
-| **Holo3.1** (H Company) | 0.8B-9B dense, 35B-A3B MoE | Apache-2.0, official Q4 GGUF | built for local: ~140 ms step time, MoE decodes fast | 79.3 AndroidWorld (35B-A3B), 71.0 (4B) |
-| UI-TARS-2 lineage | 7B+ | Apache-2.0 stack | single-model alternative if we ever want end-to-end | 47.5 OSWorld |
+## 14. Sources
 
-Working recommendation: **GUI-Owl-1.5-8B-Instruct as the default Cortex/Reflector model** (MIT, best desktop training), 32B for big Macs, Holo3.1 as the speed-focused alternative; bundled Gemma for every other role. Decide in review; the engine treats the model as per-role config (minitap's `llm-config` pattern), so this is not a one-way door.
-
-## 5. Where the code lives
-
-### 5.1 `@offgrid/use` - new package in `off-grid-ai/shared`
-
-Platform-agnostic engine, mirroring the `@offgrid/clipboard` engine + adapter pattern and slotting into the roadmap's syscalls layer next to `@offgrid/skills`:
-
-- the agent graph (planner / orchestrator / contextor / cortex / executor / summarizer / reflector / notetaker) with per-role model config against an OpenAI-compatible endpoint (our gateway)
-- the closed action schema + structured decision types
-- the router: deterministic surface - structured UI - vision, chosen by the orchestrator
-- verification: deterministic post-condition checks, SUCCESS/FAILURE reflection, cycle detection
-- risk classification + an approval-callback seam (the host app decides how approval happens)
-- a `DeviceController` interface the platform adapters implement: `getState()` (serialized tree + screenshot + focused app), `act(action)`, `openIntent(url)`, `listSemanticSurfaces()`
-
-Tested in the package against a fake `DeviceController` before any surface wires it in (the shared repo's standing rule).
-
-### 5.2 Desktop adapter - this repo
-
-| Seam | Today | Change |
-| --- | --- | --- |
-| Swift helper | AX read-only (`electron/accessibility/main.swift`); CGEvent tap listens only | add `AXUIElementPerformAction`, set-`AXValue`, `AXManualAccessibility` wake, `CGEvent` post, indexed-element serialization; same `execFile` pattern as `src/main/ocr.ts` |
-| Perception | `src/main/vision.ts` capture + Vision-framework OCR | window-scoped capture into `getState()`; OCR emits `{text, bbox}` |
-| Semantic surfaces | MCP connectors via `ToolExtension` (`src/main/tools.ts:401`) | add EventKit/Contacts/PhotoKit Swift-helper tools, AppleScript tools, `shortcuts run`, URL-scheme opener |
-| Tool dispatch | agentic loop `toolChat`, abort guard already drops unexecuted side effects on cancel | the use-engine runs as a new extension; `ToolResult` side channel (`src/main/tools.ts:50`) extended so state fetches can return images |
-| Approvals | `mcp:proposeApproval` hook, name-regex risk | widen to transport-agnostic `actions:proposeApproval` with `{kind, title, risk, args, source}`; engine supplies per-action risk |
-| Scheduling | capture at modality-queue tier 3 | agent actions at tier 2 alongside chat, so background capture cannot evict the model mid-task |
-| Packaging | Developer ID + hardened runtime | apple-events entitlement + usage-description keys |
-
-Open-core: helper primitives and adapter plumbing in core; the wired agent surface and approvals integration follow the existing pro spine. `pro/` changes land in `desktop-pro` first, submodule bump after.
-
-### 5.3 Build guidelines (brand and design) - binding on all phases
-
-Every computer-use surface (browser pane chrome, run view, approval cards, overlays, onboarding) follows the canonical guidelines:
-
-- **`off-grid-ai/brand`** - `DESIGN_PHILOSOPHY.md` is the cross-platform design source of truth: brutalist/terminal aesthetic, Menlo everywhere, emerald as the only accent (`#34D399` dark / `#059669` light), black/white base, hierarchy through size and weight rather than color, and every color/spacing/type value from `@offgrid/design` tokens - no hardcoded hex. Copy follows `brand_tone_voice.md` plus the outcomes-first rule in the brand README: lead with what the user gets, mechanism as proof.
-- **`off-grid-ai/shared`** - `@offgrid/design` is where the tokens live; components inherit light/dark through the token mapping.
-- **This repo's `docs/DESIGN.md`** - the desktop-first density rules (multi-column grids, tight 4/8/12 spacing, progressive disclosure, sticky context, micro-interactions).
-- The agent's overlay widgets and permission cards are product UI like any other: no emojis, no gradients, no second accent, quiet by default.
-
-## 6. Safety
-
-The shipped-product template is Gemini Intelligence's UX, which matches our approvals spine:
-
-- agent acts only on explicit user start; always-visible progress with a hard stop (user input halts execution; the existing abort guard already guarantees a cancelled turn fires no side effects)
-- actions classified read / navigate / mutate / irreversible; the last two gate through the approval queue; everything lands in the audit log
-- screen content is untrusted input: published studies show 86% attack success from adversarial pop-ups against GUI agents, and prompt-level defenses do not work - the gate and the app allowlist are system-level for that reason
-- never see or type credentials: secure-input detection (`IsSecureEventInputEnabled()`) hands password fields to the user
-- **hard-blocked action classes** no permission can unlock (the Claude in Chrome / Gemini precedent): purchases and financial transactions, account creation, permanent deletions, CAPTCHA bypass. Protected actions that always confirm even on always-allowed sites: sends, downloads, sensitive-data entry, authorization grants
-- **takeover with a stated guarantee**: at logins and payments the agent pauses and frame capture stops while the user controls the surface; the human's actions during takeover are recorded into the same action log (the bytebot pattern) so the agent resumes with context
-- **the agent cannot see or dismiss its own controls**: overlay widgets call `setContentProtection(true)` so they never appear in screenshots; Esc aborts globally and the keypress is consumed so on-screen content cannot dismiss an approval dialog
-- **per-surface grants**: allow once / always allow / deny per site on the browser rail (localhost exempt); per-app grants on the native rail
-
-## 7. Phasing
-
-| Phase | Scope | Exit test |
-| --- | --- | --- |
-| 1. Intents + semantic rail | Swift helper (EventKit, Contacts, PhotoKit), AppleScript tools, `shortcuts run`, URL schemes, widened approval hook with risk classes, morning-briefing skill template | "create a calendar event Thursday 3pm" end to end, approval-gated, with the bundled model |
-| 2. `@offgrid/use` engine | agent graph + action schema (including the browser action set) + router + verification in shared, tested against a fake `DeviceController` | engine passes its suite with a scripted fake device |
-| 3. Agent browser | `WebContentsView` pane + CDP driver + indexed snapshot + per-site cards + takeover + live overlays | a multi-step web task in-pane, watched live, with a login takeover - shippable on its own |
-| 4. Desktop adapter + vision fallback | helper act-primitives, tree serialization, window-scoped capture, GUI-Owl/Qwen3-VL catalog entries, Cortex on the vision model | a multi-step GUI task on a well-behaved app, verified per step |
-| 5. Hard targets | Electron AX wake, WhatsApp flow, per-app recipes where trees are dead | the WhatsApp album task, supervised, send behind approval |
-
-## 8. Decisions and open questions
-
-Status as of August 11, 2026 (details live in `COMPUTER_USE_PLAN.md`):
-
-1. **Cortex model - narrowed, decided at install time.** GUI-Owl-1.5-8B-Instruct (working default) or Qwen3-VL-8B. Same Qwen3-VL architecture, so all engine and adapter work is identical for either; the pick is a phase 3 catalog decision and blocks nothing before that.
-2. **Package name - decided (August 12).** `@offgrid/use`, consumed as `file:../shared/packages/use` from a sibling checkout per the shared README (not a vendored copy under this repo's `packages/`).
-3. **v1 graph - decided.** Planner / Cortex / Executor / Reflector; Orchestrator and Summarizer are added when task length demands them.
-4. **Approval UX - proposed.** Plan-level approval + live step view + hold-to-stop, with per-step gates on irreversible actions. Validate against real runs in phase 3.
-5. **Eval harness - decided.** macOSWorld subset as a non-blocking sanity gate from phase 3.
-6. **Sequencing - decided.** Desktop first; mobile follows as an adapter-only project on the same engine (see the plan's "After v1" section; iOS is intents-only by platform rules).
-7. **Agent browser rail - decided August 12.** Embedded pane over `WebContentsView` + `webContents.debugger`, indexed-snapshot perception, per-site cards, takeover mode. Ships before the native rail (zero OS permissions, no new models).
-8. **Build guidelines - binding.** All UI and copy follow `off-grid-ai/brand` (design philosophy + tone), `@offgrid/design` tokens from `off-grid-ai/shared`, and this repo's `docs/DESIGN.md` (see 5.3).
-
-## 9. Sources
-
-- minitap/mobile-use: https://github.com/minitap-ai/mobile-use - paper (100% AndroidWorld, ablations): arXiv:2602.07787
-- mobilerun (ex-droidrun): https://github.com/droidrun/mobilerun - tree-vs-screenshot payload data: https://www.mobilerun.ai/benchmark
-- Mobile-Agent-v3 / GUI-Owl: https://github.com/X-PLUG/MobileAgent - arXiv:2508.15144, v3.5: arXiv:2602.16855 - GUI-Owl-1.5-8B: https://huggingface.co/mPLUG/GUI-Owl-1.5-8B-Instruct
-- Holo3.1: https://huggingface.co/blog/Hcompany/holo31
-- Hybrid-routing benchmarks: MobileWorld https://github.com/Tongyi-MAI/MobileWorld - PhoneHarness https://phoneharness.github.io/
-- Gemini Intelligence safety UX: https://www.engadget.com/2170770/gemini-intelligence-brings-app-automation-to-android/
-- UI-TARS: https://github.com/bytedance/UI-TARS - OSWorld: https://os-world.github.io/
-- Pop-up injection attacks (86% success): arXiv:2411.02391
-- macOS surface: Electron `AXManualAccessibility` https://www.electronjs.org/docs/latest/tutorial/accessibility/ + electron/electron#38102 - secure input TN2150: https://developer.apple.com/library/mac/technotes/tn2150/_index.html - Shortcuts CLI: https://blakecrosley.com/guides/shortcuts - node-mac-permissions: https://github.com/codebytere/node-mac-permissions - WhatsApp Desktop AX findings: https://gist.github.com/hakanensari/99a7ddafbf1b92ce040dc68f43aa25d4
-- Agent browser + product UX: Electron debugger API https://www.electronjs.org/docs/latest/api/debugger - Claude Desktop browser pane https://code.claude.com/docs/en/desktop - Claude in Chrome permissions https://support.claude.com/en/articles/12902446-claude-in-chrome-permissions-guide - Codex embedded browser https://chierhu.medium.com/openai-codexs-browser-use-feature-b7dffa761d45 - browser-use's move to raw CDP https://browser-use.com/posts/playwright-to-cdp - nanobrowser https://github.com/nanobrowser/nanobrowser - UI-TARS desktop https://github.com/bytedance/UI-TARS-desktop - bytebot takeover https://github.com/bytebot-ai/bytebot - chrome-devtools-mcp https://github.com/ChromeDevTools/chrome-devtools-mcp - macos-automator-mcp https://github.com/steipete/macos-automator-mcp
-- OpenClaw teardown: https://github.com/openclaw/openclaw - Peekaboo https://github.com/openclaw/Peekaboo - exposed-gateway findings https://www.bitsight.com/blog/openclaw-ai-security-risks-exposed-instances - ClawJacked https://www.infosecurity-magazine.com/news/clawjacked-bug-covert-ai-agent/
-- Brand and design: https://github.com/off-grid-ai/brand (DESIGN_PHILOSOPHY.md, brand_tone_voice.md, copywriting-rulebook.md) - `@offgrid/design` in https://github.com/off-grid-ai/shared
+- Mobile-use agent loop: minitap/mobile-use (100% AndroidWorld) https://github.com/minitap-ai/mobile-use ; Mobile-Agent-v3 / GUI-Owl https://github.com/X-PLUG/MobileAgent
+- Product UX: Claude Desktop browser pane https://code.claude.com/docs/en/desktop ; Codex embedded browser https://chierhu.medium.com/openai-codexs-browser-use-feature-b7dffa761d45 ; browser-use raw CDP https://browser-use.com/posts/playwright-to-cdp ; nanobrowser https://github.com/nanobrowser/nanobrowser ; UI-TARS desktop https://github.com/bytedance/UI-TARS-desktop ; bytebot takeover https://github.com/bytebot-ai/bytebot
+- OpenClaw teardown: https://github.com/openclaw/openclaw ; Peekaboo https://github.com/openclaw/Peekaboo ; exposed gateways https://www.bitsight.com/blog/openclaw-ai-security-risks-exposed-instances
+- Reliability calibration: OSWorld https://os-world.github.io/ ; pop-up injection (86%) arXiv:2411.02391
+- Grounding models: GUI-Owl-1.5-8B https://huggingface.co/mPLUG/GUI-Owl-1.5-8B-Instruct ; Qwen3-VL grounding arXiv:2511.21631 ; Holo3.1 https://huggingface.co/blog/Hcompany/holo31
+- macOS surface: Electron `AXManualAccessibility` https://www.electronjs.org/docs/latest/tutorial/accessibility/ ; secure input TN2150 https://developer.apple.com/library/mac/technotes/tn2150/_index.html ; Electron debugger https://www.electronjs.org/docs/latest/api/debugger ; node-mac-permissions https://github.com/codebytere/node-mac-permissions
+- Brand: https://github.com/off-grid-ai/brand ; `@offgrid/design` in https://github.com/off-grid-ai/shared
