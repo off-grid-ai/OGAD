@@ -25,6 +25,7 @@ import {
   type McpConnectorToolBoundary
 } from '../tools/mcpConnectorToolExtension'
 import type { ConnectorToolDefinition } from '../tools/mcpConnectorToolExtension-logic'
+import type { ActionApprovalRequest } from '../actions/approval'
 
 interface ToolExecution {
   connectorId: number
@@ -38,7 +39,7 @@ class FakeMcpBoundary implements McpConnectorToolBoundary {
   readonly tools = new Map<number, ConnectorToolDefinition[] | Error>()
   readonly results = new Map<string, ToolResult | Error>()
   readonly executions: ToolExecution[] = []
-  readonly approvals: Record<string, unknown>[] = []
+  readonly approvals: ActionApprovalRequest[] = []
   approveWrites = false
 
   async fetchTools(connectorId: number): Promise<ConnectorToolDefinition[]> {
@@ -62,7 +63,7 @@ class FakeMcpBoundary implements McpConnectorToolBoundary {
     return result
   }
 
-  proposeApproval(request: Record<string, unknown>): boolean {
+  proposeApproval(request: ActionApprovalRequest): boolean {
     this.approvals.push(request)
     return this.approveWrites
   }
@@ -149,6 +150,8 @@ describe('McpConnectorToolExtension with real connector state', () => {
     expect(output).toContain('Queued for the user')
     expect(boundary.approvals).toEqual([
       expect.objectContaining({
+        kind: 'mcp',
+        risk: 'mutate',
         connectorId,
         tool: 'send_message',
         connector: 'Slack',

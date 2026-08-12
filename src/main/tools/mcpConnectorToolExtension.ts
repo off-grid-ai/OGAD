@@ -2,18 +2,19 @@
 // loop via registerToolExtension. Connector tools are exposed to the model
 // namespaced as `mcp__<id>__<tool>` and executed directly.
 //
-// Open-core seam: write tools first offer themselves to the `mcp:proposeApproval`
-// hook — Pro registers it to route writes through its approval queue. In the free
-// build no hook is registered, so connector tools just run.
+// Open-core seam: mutating tools first offer themselves to the shared
+// `actions:proposeApproval` hook via proposeActionApproval — Pro registers it to
+// route writes through its approval queue. In the free build no hook is registered,
+// so connector tools just run.
 
 import type { ToolExtension } from '../tools'
 import { listConnectors, fetchTools, callConnectorTool, setConnectorStatus } from '../mcp'
-import { callHook } from '../bootstrap/hookRegistry'
+import { proposeActionApproval, shouldGate, type ActionApprovalRequest } from '../actions/approval'
 import {
   MCP_TOOL_PREFIX,
   buildConnectorToolSchema,
   formatConnectorToolResult,
-  isActionTool,
+  riskOf,
   type ConnectorToolDefinition
 } from './mcpConnectorToolExtension-logic'
 
@@ -30,13 +31,13 @@ export interface McpConnectorToolBoundary {
     tool: string,
     args: Record<string, unknown>
   ) => Promise<ConnectorCallResult>
-  proposeApproval: (request: Record<string, unknown>) => boolean | undefined
+  proposeApproval: (request: ActionApprovalRequest) => boolean | undefined
 }
 
 const productionBoundary: McpConnectorToolBoundary = {
   fetchTools,
   callTool: callConnectorTool,
-  proposeApproval: (request) => callHook<boolean>('mcp:proposeApproval', request)
+  proposeApproval: proposeActionApproval
 }
 
 export class McpConnectorToolExtension implements ToolExtension {
@@ -90,11 +91,14 @@ export class McpConnectorToolExtension implements ToolExtension {
   async execute(name: string, args: Record<string, unknown>): Promise<string> {
     const meta = this.byName.get(name)
     if (!meta) return `Error: unknown connector tool ${name}`
-    // Pro can intercept writes for approval; returns true if it queued the action.
-    if (isActionTool(meta.tool)) {
+    // Pro can intercept mutating tools for approval; returns true if it queued them.
+    const risk = riskOf(meta.tool)
+    if (shouldGate(risk)) {
       const queued = this.boundary.proposeApproval({
+        kind: 'mcp',
         title: `${meta.tool} via ${meta.connector}`,
         detail: `Requested from chat. Arguments: ${JSON.stringify(args)}`,
+        risk,
         connectorId: meta.id,
         connector: meta.connector,
         tool: meta.tool,

@@ -16,6 +16,19 @@ export function registerHook(name: string, fn: HookFn): void {
   hooks[name] = fn
 }
 
+/** Remove a registered hook. No-op when absent. Mainly for test isolation and
+ *  for retiring a legacy hook name once its replacement is registered. */
+export function unregisterHook(name: string): void {
+  delete hooks[name]
+}
+
+/** Whether a hook is currently registered. Lets a caller distinguish "no handler"
+ *  from "handler ran and returned undefined" — needed when falling back from a new
+ *  hook name to a legacy one. */
+export function hasHook(name: string): boolean {
+  return name in hooks
+}
+
 /** Call a hook if registered; returns its result, or undefined when absent. */
 export function callHook<R = unknown>(name: string, ...args: unknown[]): R | undefined {
   const fn = hooks[name]
@@ -38,5 +51,13 @@ export const HOOKS = {
    *  system/context with captured memory + entity/observation context (pro). */
   chatAugmentContext: 'chat.augmentContext',
   /** () => Promise<SearchSource[]> — extra universal-search sources (pro). */
-  searchExtraSources: 'search.extraSources'
+  searchExtraSources: 'search.extraSources',
+  /** (request: ActionApprovalRequest) => boolean — offer a consequential action
+   *  for approval; returns true when queued (caller must not execute). Pro
+   *  registers it to route the action through its approval queue + audit log. */
+  actionsProposeApproval: 'actions:proposeApproval',
+  /** Legacy MCP-only predecessor of actionsProposeApproval. Kept so a pro build
+   *  that has not yet migrated still gates connector writes; remove once
+   *  desktop-pro registers actionsProposeApproval. */
+  legacyMcpProposeApproval: 'mcp:proposeApproval'
 } as const

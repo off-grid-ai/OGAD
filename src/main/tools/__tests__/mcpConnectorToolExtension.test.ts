@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   buildConnectorToolSchema,
   formatConnectorToolResult,
-  isActionTool
+  isActionTool,
+  riskOf
 } from '../mcpConnectorToolExtension-logic'
+import { shouldGate } from '../../actions/approval'
 
 describe('isActionTool', () => {
   it.each([
@@ -34,6 +36,28 @@ describe('isActionTool', () => {
   it('matches read verbs case-insensitively with a hyphen separator', () => {
     expect(isActionTool('LIST-things')).toBe(false)
     expect(isActionTool('Get-Thing')).toBe(false)
+  })
+})
+
+describe('riskOf', () => {
+  it('maps read-verb tools to a non-gating read risk', () => {
+    for (const tool of ['list_channels', 'get_user', 'search_docs', 'read_file']) {
+      expect(riskOf(tool)).toBe('read')
+      expect(shouldGate(riskOf(tool))).toBe(false)
+    }
+  })
+
+  it('maps every other tool to a gating mutate risk', () => {
+    for (const tool of ['send_message', 'create_issue', 'delete_record']) {
+      expect(riskOf(tool)).toBe('mutate')
+      expect(shouldGate(riskOf(tool))).toBe(true)
+    }
+  })
+
+  it('agrees with isActionTool on which tools gate', () => {
+    for (const tool of ['list_channels', 'send_message', 'get_user', 'delete_record']) {
+      expect(shouldGate(riskOf(tool))).toBe(isActionTool(tool))
+    }
   })
 })
 
