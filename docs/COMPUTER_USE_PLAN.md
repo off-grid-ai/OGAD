@@ -4,8 +4,8 @@ Companion to `COMPUTER_USE.md` (the model). This is the execution plan. It is th
 
 **Assumptions**
 
-- Solo developer, AI doing the code authoring end to end. Durations are paced by what does NOT compress: review, on-device verification, TCC flows, and iteration against real apps and memory data.
-- Dates start Wednesday, August 12, 2026. Phases 0-1 are already done (see below).
+- Solo developer, AI doing the code authoring end to end, working fast. This is an aggressive **2-week sprint** (Aug 13 - Aug 26) for the remaining phases; phases 0-1 are already done. If a phase slips, move the dates here - never skip a checkpoint.
+- Dates start Wednesday, August 12, 2026.
 - Checkpoint discipline: a checkpoint is a verifiable, demoable milestone; the next phase does not start until it passes.
 - **The order follows the model in `COMPUTER_USE.md`:** the reliable, memory-driven, low-risk layers first; the risky GUI automation and the grounding vision model last. Value and reliability lead; pixels trail.
 
@@ -23,11 +23,11 @@ Binding on every surface and string (suggestions, approval cards, the recorder U
 | --- | --- | --- | --- |
 | 0. Foundations | done | this repo | approval seam with risk classes; TCC packaging |
 | 1. Semantic rail (rail 1) | done | this repo | calendar / reminders / contacts / messages / mail / open_url, gated, shipped |
-| 2. Notices you (reasoning + resolve) | Aug 13 - Sep 3 | this repo + `desktop-pro` | it surfaces "you haven't checked in for tonight's flight"; it sends "the deck I promised" resolved from context, gated |
-| 3. `@offgrid/use` engine | Sep 4 - Sep 17 | `shared` | router + trace model + verification green on a fake device |
-| 4. Demonstration recorder + replay (rail 3) | Sep 18 - Oct 8 | this repo + `desktop-pro` | record a routine by showing it; replay it faithfully on a native app, per-step verified |
-| 5. Agent browser (rail 2) | Oct 9 - Oct 22 | this repo | a reasoned web task (open a check-in page, fill known fields) in-pane, watched, login by takeover |
-| 6. Vision fallback + hard targets (rail 4) | Oct 23 - Nov 5 | this repo + `desktop-pro` | GUI-Owl/Qwen3-VL catalog entry; the WhatsApp album task supervised; drift recovery on a demonstrated routine |
+| 2. Notices you (reasoning + resolve) | Aug 13 - Aug 16 | this repo + `desktop-pro` | it surfaces "you haven't checked in for tonight's flight"; it sends "the deck I promised" resolved from context, gated |
+| 3. `@offgrid/use` engine | Aug 17 - Aug 18 | `shared` | router + trace model + verification green on a fake device |
+| 4. Demonstration recorder + replay (rail 3) | Aug 19 - Aug 22 | this repo + `desktop-pro` | record a routine by showing it; replay it faithfully on a native app, per-step verified |
+| 5. Agent browser (rail 2) | Aug 23 - Aug 24 | this repo | a reasoned web task (open a check-in page, fill known fields) in-pane, watched, login by takeover |
+| 6. Vision fallback + hard targets (rail 4) | Aug 25 - Aug 26 | this repo + `desktop-pro` | GUI-Owl/Qwen3-VL catalog entry; the WhatsApp album task supervised; drift recovery on a demonstrated routine |
 
 The split: `shared` holds the durable cross-platform brain (reused by mobile later); this repo holds the rails, the recorder, the reasoning surfaces, and the product integration.
 
@@ -39,23 +39,23 @@ Approval seam (`actions:proposeApproval` + risk taxonomy, backward-compatible wi
 
 The native actions helper (calendar create/list, reminders create/list, contacts search, Messages send, Mail send, open_url) behind `runNativeAction`, wired into the chat tool loop macOS-only, mutations gated, shipped in CI, unit-tested through an injected boundary. This is the reliable execution layer the whole assistant routes to first.
 
-## Phase 2 - notices you: the reasoning engine + resolve layer (Aug 13 - Sep 3)
+## Phase 2 - notices you: the reasoning engine + resolve layer (Aug 13 - Aug 16)
 
 The magic, and the safest thing to build: it needs memory + LLM + read-only connectors, no risky automation. This is where the product becomes an assistant rather than a tool.
 
-- **Aug 13 - 19: commitment/gap detection.** Over the Replay observation + entity spine: detect commitments and events ("flight tonight", "I'll send the deck by tonight"), infer their required steps from the LLM's world knowledge, and gap-check state read-only (a boarding pass in Gmail via connector, an unchecked step). Output: candidate proposals with a confidence. Pure logic pulled out and unit-tested against seeded memory fixtures.
-- **Aug 20 - 26: the resolve layer.** RAG over Replay + conversation + entities + recent files to fill an action's open slots ("the presentation" -> the actual file), scoped by temporal and entity proximity, returning value + confidence. Unit-tested with seeded memory.
-- **Aug 27 - Sep 3: surface + gate.** Proposals become notifications/suggestions; the approval card shows the RESOLVED values ("Send `Q3.pptx` to Ali"); confidence drives gate vs disambiguate. Executes through rail 1. Trust starts at suggest-only. Tests: detection precision on fixtures, resolution correctness, the gate showing resolved values.
+- **Aug 13 - 14: commitment/gap detection.** Over the Replay observation + entity spine: detect commitments and events ("flight tonight", "I'll send the deck by tonight"), infer their required steps from the LLM's world knowledge, and gap-check state read-only (a boarding pass in Gmail via connector, an unchecked step). Output: candidate proposals with a confidence. Pure logic pulled out and unit-tested against seeded memory fixtures.
+- **Aug 15: the resolve layer.** RAG over Replay + conversation + entities + recent files to fill an action's open slots ("the presentation" -> the actual file), scoped by temporal and entity proximity, returning value + confidence. Unit-tested with seeded memory.
+- **Aug 16: surface + gate.** Proposals become notifications/suggestions; the approval card shows the RESOLVED values ("Send `Q3.pptx` to Ali"); confidence drives gate vs disambiguate. Executes through rail 1. Trust starts at suggest-only. Tests: detection precision on fixtures, resolution correctness, the gate showing resolved values.
 
-**Checkpoint (Sep 3):** on a seeded demo profile, the assistant surfaces an un-actioned commitment and proposes it; approving "send the deck I promised" resolves the file from context and sends it via rail 1, gated. The reasoning + resolve + gate spine works end to end with zero GUI automation.
+**Checkpoint (Aug 16):** on a seeded demo profile, the assistant surfaces an un-actioned commitment and proposes it; approving "send the deck I promised" resolves the file from context and sends it via rail 1, gated. The reasoning + resolve + gate spine works end to end with zero GUI automation.
 
-## Phase 3 - the `@offgrid/use` engine in shared (Sep 4 - Sep 17)
+## Phase 3 - the `@offgrid/use` engine in shared (Aug 17 - Aug 18)
 
 The reusable brain: the router (cheapest reliable rail first), the routine trace model, slot types, verification, and the risk/approval callback seam - platform-free, tested on a fake `DeviceController`. Mirrors the `@offgrid/clipboard` engine+adapter split; a mobile adapter can follow later.
 
-**Checkpoint (Sep 17):** the engine suite is green on a fake device, including a routed action (semantic vs GUI), a resolved slot, and a verification-retry scenario.
+**Checkpoint (Aug 18):** the engine suite is green on a fake device, including a routed action (semantic vs GUI), a resolved slot, and a verification-retry scenario.
 
-## Phase 4 - demonstration recorder + faithful replay, rail 3 (Sep 18 - Oct 8)
+## Phase 4 - demonstration recorder + faithful replay, rail 3 (Aug 19 - Aug 22)
 
 Record-by-showing and reliable replay on well-behaved apps.
 
@@ -64,15 +64,15 @@ Record-by-showing and reliable replay on well-behaved apps.
 - Replay: deterministic trace execution via the Swift helper's new AX act-primitives (`AXUIElementPerformAction`, set-value); verify-after-each-step; model recovery only when a target is gone.
 - Store as a skill with a trigger (manual / schedule / event).
 
-**Checkpoint (Oct 8):** record a small routine on a native app by showing it once; it replays faithfully with per-step verification, and a marked slot resolves from memory at run time.
+**Checkpoint (Aug 22):** record a small routine on a native app by showing it once; it replays faithfully with per-step verification, and a marked slot resolves from memory at run time.
 
-## Phase 5 - agent browser, rail 2 (Oct 9 - Oct 22)
+## Phase 5 - agent browser, rail 2 (Aug 23 - Aug 24)
 
 The embedded browser pane (`WebContentsView` + `webContents.debugger` CDP, indexed-snapshot perception, per-site cards, takeover), for the reasoned novel web tasks (check-in, ordering) where there is no connector. Zero OS permissions, no new model. Reuses nanobrowser serialization and the UI-TARS overlay UX.
 
-**Checkpoint (Oct 22):** a reasoned web task runs in-pane - open an airline check-in page, fill the known fields from resolved context, hand off at login via takeover - watched live, gated at the identity step.
+**Checkpoint (Aug 24):** a reasoned web task runs in-pane - open an airline check-in page, fill the known fields from resolved context, hand off at login via takeover - watched live, gated at the identity step.
 
-## Phase 6 - vision fallback + hard targets, rail 4 (Oct 23 - Nov 5)
+## Phase 6 - vision fallback + hard targets, rail 4 (Aug 25 - Aug 26)
 
 The last resort: dead-AX apps and drift recovery.
 
@@ -81,7 +81,7 @@ The last resort: dead-AX apps and drift recovery.
 - The WhatsApp acceptance case (`whatsapp://` open + keyboard + vision-grounded clicks + photo ranking + send behind the gate), as a per-app recipe.
 - Injection-resistance review, kill-switch e2e, release-readiness pass.
 
-**Checkpoint (Nov 5):** the WhatsApp album task runs supervised end to end; a demonstrated routine recovers from a drifted step via vision; the safety checklist passes.
+**Checkpoint (Aug 26):** the WhatsApp album task runs supervised end to end; a demonstrated routine recovers from a drifted step via vision; the safety checklist passes.
 
 ## Dependencies
 
@@ -90,7 +90,7 @@ The last resort: dead-AX apps and drift recovery.
 | `desktop-pro` access | phase 2 | the reasoning engine, resolve layer, and approvals integration are pro; stub if access lags |
 | Sibling `../shared` + `../brand` clones | now | build requirement (main adopted `@offgrid/sync`); done this session |
 | Seeded memory fixtures (Replay observations, entities, commitments) | phase 2 | needed to test detection + resolution without a live profile; extend the demo seeders |
-| Vision model install (GUI-Owl-1.5-8B or Qwen3-VL-8B GGUF + mmproj) | Oct 23 | nothing before phase 6 needs it |
+| Vision model install (GUI-Owl-1.5-8B or Qwen3-VL-8B GGUF + mmproj) | Aug 25 | nothing before phase 6 needs it |
 | `desktop-pro` approval-executor migration to `actions:proposeApproval` | phase 2 | the fallback covers it until then |
 
 ## Risks
