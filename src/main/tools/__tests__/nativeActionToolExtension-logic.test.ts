@@ -7,13 +7,32 @@ import {
 import { shouldGate } from '../../actions/approval'
 
 describe('native tool specs', () => {
-  it('exposes calendar create and list with matching helper commands', () => {
+  it('exposes calendar and reminder tools with matching helper commands', () => {
     expect(NATIVE_TOOL_SPECS.map((s) => s.name)).toEqual([
       'calendar_create_event',
-      'calendar_list_events'
+      'calendar_list_events',
+      'reminders_create',
+      'reminders_list'
     ])
     expect(findNativeToolSpec('calendar_create_event')?.command).toBe('calendar.createEvent')
     expect(findNativeToolSpec('calendar_list_events')?.command).toBe('calendar.listEvents')
+    expect(findNativeToolSpec('reminders_create')?.command).toBe('reminders.create')
+    expect(findNativeToolSpec('reminders_list')?.command).toBe('reminders.list')
+  })
+
+  it('classifies every create tool as a gating mutate and every list tool as a read', () => {
+    for (const name of ['calendar_create_event', 'reminders_create']) {
+      expect(shouldGate(findNativeToolSpec(name)!.risk)).toBe(true)
+    }
+    for (const name of ['calendar_list_events', 'reminders_list']) {
+      expect(shouldGate(findNativeToolSpec(name)!.risk)).toBe(false)
+    }
+  })
+
+  it('formats a created reminder with the shared confirmation shape', () => {
+    expect(findNativeToolSpec('reminders_create')!.formatResult({ id: 'R1' })).toBe(
+      'Created the reminder (id R1).'
+    )
   })
 
   it('returns undefined for an unknown tool name', () => {

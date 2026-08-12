@@ -86,6 +86,72 @@ func createEvent(_ args: [String: Any]) -> Never {
     }
 }
 
+// Reminders share EKEventStore with calendar but need their own access grant.
+func requestReminderAccess(_ store: EKEventStore) -> (granted: Bool, error: String?) {
+    let semaphore = DispatchSemaphore(value: 0)
+    var granted = false
+    var errorMessage: String?
+    let handler: (Bool, Error?) -> Void = { allowed, err in
+        granted = allowed
+        if let err = err { errorMessage = err.localizedDescription }
+        semaphore.signal()
+    }
+    if #available(macOS 14.0, *) {
+        store.requestFullAccessToReminders(completion: handler)
+    } else {
+        store.requestAccess(to: .reminder, completion: handler)
+    }
+    semaphore.wait()
+    return (granted, errorMessage)
+}
+
+func createReminder(_ args: [String: Any]) -> Never {
+    guard let title = args["title"] as? String, !title.isEmpty else {
+        fail("createReminder requires a non-empty title")
+    }
+    let store = EKEventStore()
+    let access = requestReminderAccess(store)
+    if !access.granted { fail(access.error ?? "reminders access was not granted") }
+
+    let reminder = EKReminder(eventStore: store)
+    reminder.title = title
+    reminder.calendar = store.defaultCalendarForNewReminders()
+    if let notes = args["notes"] as? String { reminder.notes = notes }
+    if let due = parseDate(args["due"]) {
+        reminder.dueDateComponents = Calendar.current.dateComponents(
+            [.year, .month, .day, .hour, .minute], from: due)
+    }
+    do {
+        try store.save(reminder, commit: true)
+        ok(["id": reminder.calendarItemIdentifier])
+    } catch {
+        fail("failed to save reminder: \(error.localizedDescription)")
+    }
+}
+
+func listReminders(_ args: [String: Any]) -> Never {
+    let store = EKEventStore()
+    let access = requestReminderAccess(store)
+    if !access.granted { fail(access.error ?? "reminders access was not granted") }
+
+    let predicate = store.predicateForIncompleteReminders(
+        withDueDateStarting: nil, ending: nil, calendars: nil)
+    let semaphore = DispatchSemaphore(value: 0)
+    var out: [[String: Any]] = []
+    store.fetchReminders(matching: predicate) { reminders in
+        for reminder in reminders ?? [] {
+            var item: [String: Any] = ["id": reminder.calendarItemIdentifier, "title": reminder.title ?? ""]
+            if let due = reminder.dueDateComponents, let date = Calendar.current.date(from: due) {
+                item["due"] = iso.string(from: date)
+            }
+            out.append(item)
+        }
+        semaphore.signal()
+    }
+    semaphore.wait()
+    ok(["reminders": out])
+}
+
 func listEvents(_ args: [String: Any]) -> Never {
     guard let start = parseDate(args["start"]), let end = parseDate(args["end"]) else {
         fail("listEvents requires ISO8601 start and end dates")
@@ -122,6 +188,10 @@ case "calendar.createEvent":
     createEvent(commandArgs)
 case "calendar.listEvents":
     listEvents(commandArgs)
+case "reminders.create":
+    createReminder(commandArgs)
+case "reminders.list":
+    listReminders(commandArgs)
 default:
     fail("unknown command: \(command)")
 }

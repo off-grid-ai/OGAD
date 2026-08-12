@@ -29,6 +29,18 @@ function asString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback
 }
 
+/** Shared "Created the <label> (id …)" formatter for the create tools, so each new
+ *  create row reuses one confirmation shape instead of re-encoding it. */
+function formatCreated(label: string): (result: unknown) => string {
+  return (result) => {
+    const id =
+      typeof result === 'object' && result !== null
+        ? asString((result as Record<string, unknown>).id)
+        : ''
+    return id ? `Created the ${label} (id ${id}).` : `Created the ${label}.`
+  }
+}
+
 export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
   {
     name: 'calendar_create_event',
@@ -53,13 +65,7 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
     risk: 'mutate',
     buildArgs: (a) => a,
     title: (a) => `Create the calendar event "${asString(a.title, 'Untitled')}"`,
-    formatResult: (result) => {
-      const id =
-        typeof result === 'object' && result !== null
-          ? asString((result as Record<string, unknown>).id)
-          : ''
-      return id ? `Created the calendar event (id ${id}).` : 'Created the calendar event.'
-    }
+    formatResult: formatCreated('calendar event')
   },
   {
     name: 'calendar_list_events',
@@ -77,6 +83,35 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
     risk: 'read',
     buildArgs: (a) => a,
     title: (a) => `List calendar events from ${asString(a.start)} to ${asString(a.end)}`,
+    formatResult: (result) => JSON.stringify(result)
+  },
+  {
+    name: 'reminders_create',
+    description:
+      "Create a reminder in the user's macOS Reminders. Optional due time is ISO 8601. Needs the user to approve before it is written.",
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Reminder title' },
+        notes: { type: 'string', description: 'Optional notes for the reminder' },
+        due: { type: 'string', description: 'Optional due time, ISO 8601' }
+      },
+      required: ['title']
+    },
+    command: 'reminders.create',
+    risk: 'mutate',
+    buildArgs: (a) => a,
+    title: (a) => `Create the reminder "${asString(a.title, 'Untitled')}"`,
+    formatResult: formatCreated('reminder')
+  },
+  {
+    name: 'reminders_list',
+    description: "List the user's incomplete macOS reminders. Read-only; runs without approval.",
+    parameters: { type: 'object', properties: {} },
+    command: 'reminders.list',
+    risk: 'read',
+    buildArgs: (a) => a,
+    title: () => 'List incomplete reminders',
     formatResult: (result) => JSON.stringify(result)
   }
 ]
