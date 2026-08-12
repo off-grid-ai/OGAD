@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { formatContextWindow, resolveModelName } from '../lib/model-summary'
+import { recommendedContextWindow } from '../lib/ctx-options'
 
 type ActiveModelApi = Partial<
   Pick<typeof window.api, 'getModelCatalog' | 'getActiveModel' | 'getLlmSettings'>
@@ -10,6 +11,10 @@ export interface ActiveModelSummary {
   name: string | null
   /** Compact running context window, e.g. "8K", or null if unknown. */
   ctx: string | null
+  /** Stored selection before model/RAM clamps. */
+  configuredCtx: string | null
+  /** Capture-safe recommendation for this model. */
+  recommendedCtx: string | null
 }
 
 /** Read the active text model + its running context window for the composer indicator.
@@ -17,7 +22,12 @@ export interface ActiveModelSummary {
  *  open flag) so the chip refreshes after a switch. All formatting lives in the pure
  *  model-summary helpers; this hook only does the IPC reads. */
 export function useActiveModelSummary(refreshWhen: unknown): ActiveModelSummary {
-  const [summary, setSummary] = useState<ActiveModelSummary>({ name: null, ctx: null })
+  const [summary, setSummary] = useState<ActiveModelSummary>({
+    name: null,
+    ctx: null,
+    configuredCtx: null,
+    recommendedCtx: null
+  })
 
   useEffect(() => {
     const request = { active: true }
@@ -32,10 +42,13 @@ export function useActiveModelSummary(refreshWhen: unknown): ActiveModelSummary 
         }
         setSummary({
           name: resolveModelName(catalog?.models ?? [], activeId),
-          ctx: formatContextWindow(settings?.ctxSize)
+          ctx: formatContextWindow(settings?.effectiveCtxSize ?? settings?.ctxSize),
+          configuredCtx: formatContextWindow(settings?.ctxSize),
+          recommendedCtx: formatContextWindow(recommendedContextWindow(settings?.modelMaxCtx))
         })
       } catch {
-        if (request.active) setSummary({ name: null, ctx: null })
+        if (request.active)
+          setSummary({ name: null, ctx: null, configuredCtx: null, recommendedCtx: null })
       }
     })()
     return () => {

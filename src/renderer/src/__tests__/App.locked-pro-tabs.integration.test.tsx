@@ -58,7 +58,11 @@ describe('<App/> locked Pro navigation integration', () => {
     })
 
     render(<App />)
-    await user.click(await screen.findByRole('button', { name: 'Expand sidebar' }))
+    // The sidebar opens expanded, so the labels this test reads are already on screen and there is no
+    // "Expand sidebar" control to click - it exists only on the collapsed rail. Assert the expanded state
+    // rather than assuming it, so a change of default fails here with the reason rather than as a
+    // missing-label mystery further down.
+    expect(await screen.findByRole('button', { name: 'Collapse sidebar' })).toBeTruthy()
     const navigation = screen.getByRole('navigation', { name: 'Primary navigation' })
 
     for (const feature of PRO_FEATURES) {

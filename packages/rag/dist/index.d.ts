@@ -13,6 +13,8 @@ interface Project {
 /** A file added to a project's knowledge base. */
 interface RagDocument {
     id: number;
+    /** Stable RFC 4122 identity used across devices. The integer id remains local-only. */
+    syncId: string;
     projectId: string;
     name: string;
     path: string;
@@ -82,11 +84,14 @@ interface ChunkCandidate {
  */
 interface VectorStore {
     addDocument(doc: {
+        syncId?: string;
         projectId: string;
         name: string;
         path: string;
         size: number;
         kind: MediaKind;
+        createdAt?: string;
+        enabled?: boolean;
     }): Promise<number>;
     addChunks(docId: number, chunks: {
         content: string;
@@ -161,17 +166,21 @@ interface IndexResult {
     chunkCount: number;
     kind: RagDocument['kind'];
 }
+interface IndexDocumentParams {
+    projectId: string;
+    path: string;
+    fileName: string;
+    size: number;
+    extract?: ExtractOptions;
+    syncId?: string;
+    createdAt?: string;
+    enabled?: boolean;
+}
 declare class RagService {
     private readonly deps;
     constructor(deps: RagServiceDeps);
     /** Ingest a file into a project's knowledge base. */
-    indexDocument(params: {
-        projectId: string;
-        path: string;
-        fileName: string;
-        size: number;
-        extract?: ExtractOptions;
-    }, onProgress?: (stage: IndexStage) => void): Promise<IndexResult>;
+    indexDocument(params: IndexDocumentParams, onProgress?: (stage: IndexStage) => void): Promise<IndexResult>;
     /** Retrieve the most relevant excerpts for a query within a project. */
     searchProject(projectId: string, query: string, opts?: {
         topK?: number;
@@ -208,4 +217,4 @@ declare function makeSearchKnowledgeBaseHandler(searcher: {
     query: string;
 }, projectId?: string) => Promise<string>;
 
-export { type Chunk, type ChunkCandidate, type ChunkOptions, type EmbeddingProvider, type ExtractOptions, type ExtractedContent, type ExtractionBridges, type IndexResult, type IndexStage, type MediaKind, type Project, type RagDocument, type RagSearchResult, RagService, type RagServiceDeps, SEARCH_KB_TOOL, type SearchResult, type SimilarityResult, type VectorStore, chunkText, cosineSimilarity, detectKind, dotProduct, estimateCharBudget, extensionOf, extractContent, formatForPrompt, makeSearchKnowledgeBaseHandler, rankBySimilarity, selectWithinBudget, topKSimilar };
+export { type Chunk, type ChunkCandidate, type ChunkOptions, type EmbeddingProvider, type ExtractOptions, type ExtractedContent, type ExtractionBridges, type IndexDocumentParams, type IndexResult, type IndexStage, type MediaKind, type Project, type RagDocument, type RagSearchResult, RagService, type RagServiceDeps, SEARCH_KB_TOOL, type SearchResult, type SimilarityResult, type VectorStore, chunkText, cosineSimilarity, detectKind, dotProduct, estimateCharBudget, extensionOf, extractContent, formatForPrompt, makeSearchKnowledgeBaseHandler, rankBySimilarity, selectWithinBudget, topKSimilar };

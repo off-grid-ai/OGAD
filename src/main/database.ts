@@ -6,6 +6,7 @@ import path from 'path'
 import fs from 'fs'
 import crypto from 'crypto'
 import { createSettingsStore, initializeSettingsStore } from './settings-store'
+import { CORE_SYNC_ENTITIES, emitSyncMutation } from './sync-mutation'
 import type {
   RagConversationContract,
   RagMessageContract,
@@ -253,6 +254,8 @@ export function getDB(): Database.Database {
     CREATE TABLE IF NOT EXISTS rag_conversations (
       id TEXT PRIMARY KEY,
       title TEXT,
+      origin_device_id TEXT,
+      origin_device_name TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -266,6 +269,8 @@ export function getDB(): Database.Database {
       role TEXT NOT NULL,
       content TEXT NOT NULL,
       context TEXT,
+      origin_device_id TEXT,
+      origin_device_name TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(conversation_id) REFERENCES rag_conversations(id) ON DELETE CASCADE
     );
@@ -373,6 +378,48 @@ export function getDB(): Database.Database {
   } catch {
     // Column already exists, ignore
   }
+  for (const column of ['origin_device_id', 'origin_device_name']) {
+    try {
+      db.exec(`ALTER TABLE rag_conversations ADD COLUMN ${column} TEXT`)
+    } catch {
+      // Column already exists, ignore
+    }
+  }
+
+  // Migration: Add a stable UUID to rag_messages so chat messages can replicate across devices.
+  //
+  // WHY: `rag_messages.id` is INTEGER AUTOINCREMENT, which is device-local. Cross-device sync keys
+  // every record by a globally-unique id, so device A's row 7 and device B's row 7 would look like
+  // the SAME message and silently overwrite each other. The autoincrement id stays as the local
+  // primary key; `uuid` is the cross-device identity. Mobile uses the same column name and the same
+  // 'message' entity name — they must match or the two platforms will not converge.
+  try {
+    db.exec(`ALTER TABLE rag_messages ADD COLUMN uuid TEXT`)
+  } catch {
+    // Column already exists, ignore
+  }
+  for (const column of ['origin_device_id', 'origin_device_name']) {
+    try {
+      db.exec(`ALTER TABLE rag_messages ADD COLUMN ${column} TEXT`)
+    } catch {
+      // Column already exists, ignore
+    }
+  }
+  // Backfill rows that predate the column. Done in JS because SQLite has no uuid() function.
+  try {
+    const needsUuid = db
+      .prepare('SELECT id FROM rag_messages WHERE uuid IS NULL OR uuid = ?')
+      .all('') as Array<{ id: number }>
+    if (needsUuid.length > 0) {
+      const assign = db.prepare('UPDATE rag_messages SET uuid = ? WHERE id = ?')
+      for (const row of needsUuid) assign.run(crypto.randomUUID(), row.id)
+    }
+  } catch {
+    // Table may not exist yet on a brand-new profile; the CREATE above covers that path.
+  }
+  // Unique so a replayed remote op upserts instead of duplicating. SQLite treats NULLs as
+  // distinct, so this is safe to create even if a backfill ever misses a row.
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_rag_messages_uuid ON rag_messages(uuid)')
 
   return db
 }
@@ -652,131 +699,6 @@ export function upsertEntitySession(entityId: number, sessionId: string): void {
   stmt.run(entityId, sessionId)
 }
 
-function normalizeEdgePair(a: number, b: number): [number, number] {
-  return a < b ? [a, b] : [b, a]
-}
-
-function escapeRegExp(input: string): string {
-  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-export function rebuildEntityEdgesForSession(sessionId: string): void {
-  const db = getDB()
-  const entities = db
-    .prepare(
-      `
-      SELECT entity_id FROM entity_sessions WHERE session_id = ?
-    `
-    )
-    .all(sessionId) as { entity_id: number }[]
-
-  const entityIds = entities.map((e) => e.entity_id).filter(Boolean)
-  if (entityIds.length < 2) return
-
-  const upsertEdge = db.prepare(`
-      INSERT INTO entity_edges (source_entity_id, target_entity_id, type, weight, evidence_count, last_session_id, updated_at)
-      VALUES (?, ?, 'cooccurrence', 1, 1, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(source_entity_id, target_entity_id, type) DO UPDATE SET
-        weight = entity_edges.weight + 1,
-        evidence_count = entity_edges.evidence_count + 1,
-        last_session_id = excluded.last_session_id,
-        updated_at = excluded.updated_at
-    `)
-
-  for (let i = 0; i < entityIds.length; i++) {
-    for (let j = i + 1; j < entityIds.length; j++) {
-      const [sourceId, targetId] = normalizeEdgePair(entityIds[i]!, entityIds[j]!)
-      upsertEdge.run(sourceId, targetId, sessionId)
-    }
-  }
-}
-
-function rebuildEntityEdgesFromMentions(): void {
-  const db = getDB()
-  const entities = db
-    .prepare(
-      `
-      SELECT id, name, summary FROM entities
-    `
-    )
-    .all() as { id: number; name: string; summary: string | null }[]
-
-  if (entities.length < 2) return
-
-  const matchers = entities.map((e) => ({
-    id: e.id,
-    name: e.name,
-    regex: new RegExp(`\\b${escapeRegExp(e.name)}\\b`, 'i')
-  }))
-
-  const upsertMention = db.prepare(`
-      INSERT INTO entity_edges (source_entity_id, target_entity_id, type, weight, evidence_count, last_session_id, updated_at)
-      VALUES (?, ?, 'mention', 1, 1, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(source_entity_id, target_entity_id, type) DO UPDATE SET
-      weight = entity_edges.weight + 1,
-      evidence_count = entity_edges.evidence_count + 1,
-      last_session_id = COALESCE(excluded.last_session_id, entity_edges.last_session_id),
-      updated_at = excluded.updated_at
-    `)
-
-  const facts = db
-    .prepare(
-      `
-      SELECT entity_id, fact, source_session_id FROM entity_facts
-    `
-    )
-    .all() as { entity_id: number; fact: string; source_session_id: string | null }[]
-
-  for (const factRow of facts) {
-    const text = factRow.fact || ''
-    if (!text) continue
-    for (const matcher of matchers) {
-      if (matcher.id === factRow.entity_id) continue
-      if (matcher.regex.test(text)) {
-        const [sourceId, targetId] = normalizeEdgePair(factRow.entity_id, matcher.id)
-        upsertMention.run(sourceId, targetId, factRow.source_session_id || null)
-      }
-    }
-  }
-
-  for (const entity of entities) {
-    const text = entity.summary || ''
-    if (!text) continue
-    for (const matcher of matchers) {
-      if (matcher.id === entity.id) continue
-      if (matcher.regex.test(text)) {
-        const [sourceId, targetId] = normalizeEdgePair(entity.id, matcher.id)
-        upsertMention.run(sourceId, targetId, null)
-      }
-    }
-  }
-}
-
-export function rebuildEntityEdgesForAllSessions(): void {
-  const db = getDB()
-  db.prepare(
-    `
-      INSERT OR IGNORE INTO entity_sessions (entity_id, session_id)
-      SELECT entity_id, source_session_id
-      FROM entity_facts
-      WHERE source_session_id IS NOT NULL
-    `
-  ).run()
-
-  // Core owns chat co-occurrence + fact-mention projections. Pro may register
-  // other durable relationship projections (for example observation evidence),
-  // so rebuilding chat must not erase another domain's edges.
-  db.prepare("DELETE FROM entity_edges WHERE type IN ('cooccurrence', 'mention')").run()
-
-  const sessions = db.prepare('SELECT DISTINCT session_id FROM entity_sessions').all() as {
-    session_id: string
-  }[]
-  for (const row of sessions) {
-    rebuildEntityEdgesForSession(row.session_id)
-  }
-
-  rebuildEntityEdgesFromMentions()
-}
 
 export interface EntityRecord {
   id: number
@@ -807,23 +729,6 @@ export interface EntityDetailsRecord {
   facts: EntityFactRecord[]
 }
 
-export interface EntityGraphNode extends EntityListRecord {
-  facts: string[]
-}
-
-export interface EntityGraphEdge {
-  source: number
-  target: number
-  type: string
-  weight: number
-  evidence_count: number
-  updated_at: string
-}
-
-export interface EntityGraphRecord {
-  nodes: EntityGraphNode[]
-  edges: EntityGraphEdge[]
-}
 
 export function getEntities(appName?: string): EntityListRecord[] {
   const db = getDB()
@@ -891,166 +796,6 @@ export function getEntitiesForSession(sessionId: string): SessionEntityRecord[] 
   return stmt.all(sessionId) as SessionEntityRecord[]
 }
 
-export function getEntityGraph(
-  appName?: string,
-  focusEntityId?: number,
-  edgeLimit: number = 200,
-  factsPerNode: number = 3
-): EntityGraphRecord {
-  const db = getDB()
-
-  let allowedEntityIds: number[] | null = null
-  if (appName && appName !== 'All') {
-    const rows = db
-      .prepare(
-        `
-        SELECT DISTINCT es.entity_id
-        FROM entity_sessions es
-        JOIN conversations c ON es.session_id = c.id
-        WHERE c.app_name LIKE ?
-      `
-      )
-      .all(`%${appName}%`) as { entity_id: number }[]
-    allowedEntityIds = rows.map((r) => r.entity_id)
-    if (allowedEntityIds.length === 0) {
-      return { nodes: [], edges: [] }
-    }
-  }
-
-  const edgeParams: unknown[] = []
-  let edgeQuery = `
-      SELECT source_entity_id as source, target_entity_id as target, type, weight, evidence_count, updated_at
-      FROM entity_edges
-    `
-
-  const whereClauses: string[] = []
-  if (typeof focusEntityId === 'number') {
-    whereClauses.push('(source_entity_id = ? OR target_entity_id = ?)')
-    edgeParams.push(focusEntityId, focusEntityId)
-  }
-
-  if (allowedEntityIds) {
-    const placeholders = allowedEntityIds.map(() => '?').join(',')
-    whereClauses.push(`source_entity_id IN (${placeholders})`)
-    whereClauses.push(`target_entity_id IN (${placeholders})`)
-    edgeParams.push(...allowedEntityIds, ...allowedEntityIds)
-  }
-
-  if (whereClauses.length > 0) {
-    edgeQuery += ` WHERE ${whereClauses.join(' AND ')}`
-  }
-
-  edgeQuery += ` ORDER BY weight DESC LIMIT ?`
-  edgeParams.push(edgeLimit)
-
-  const edges = db.prepare(edgeQuery).all(...edgeParams) as EntityGraphEdge[]
-
-  if (edges.length === 0 && typeof focusEntityId !== 'number') {
-    let nodeQuery = `
-        SELECT e.id, e.name, e.type, e.summary, e.updated_at,
-           COUNT(DISTINCT f.id) as fact_count,
-           COUNT(DISTINCT es.session_id) as session_count
-        FROM entities e
-        LEFT JOIN entity_facts f ON f.entity_id = e.id
-        LEFT JOIN entity_sessions es ON es.entity_id = e.id
-      `
-    const nodeParams: unknown[] = []
-    if (allowedEntityIds) {
-      const placeholders = allowedEntityIds.map(() => '?').join(',')
-      nodeQuery += ` WHERE e.id IN (${placeholders}) `
-      nodeParams.push(...allowedEntityIds)
-    }
-    nodeQuery += ` GROUP BY e.id ORDER BY e.updated_at DESC LIMIT 50`
-
-    const nodes = db.prepare(nodeQuery).all(...nodeParams) as EntityListRecord[]
-
-    const nodeIds = nodes.map((n) => n.id)
-    if (nodeIds.length === 0) return { nodes: [], edges: [] }
-
-    const nodePlaceholders = nodeIds.map(() => '?').join(',')
-    const facts = db
-      .prepare(
-        `
-        SELECT entity_id, fact, created_at
-        FROM entity_facts
-        WHERE entity_id IN (${nodePlaceholders})
-        ORDER BY created_at DESC
-      `
-      )
-      .all(...nodeIds) as { entity_id: number; fact: string; created_at: string }[]
-
-    const factsByEntity = new Map<number, string[]>()
-    for (const row of facts) {
-      const list = factsByEntity.get(row.entity_id) || []
-      if (list.length < factsPerNode) {
-        list.push(row.fact)
-        factsByEntity.set(row.entity_id, list)
-      }
-    }
-
-    const nodesWithFacts = nodes.map((n) => ({
-      ...n,
-      facts: factsByEntity.get(n.id) || []
-    }))
-
-    return { nodes: nodesWithFacts, edges: [] }
-  }
-
-  const nodeIdSet = new Set<number>()
-  edges.forEach((e) => {
-    nodeIdSet.add(e.source)
-    nodeIdSet.add(e.target)
-  })
-  if (typeof focusEntityId === 'number') nodeIdSet.add(focusEntityId)
-
-  const nodeIds = Array.from(nodeIdSet)
-  if (nodeIds.length === 0) {
-    return { nodes: [], edges: [] }
-  }
-
-  const nodePlaceholders = nodeIds.map(() => '?').join(',')
-  const nodes = db
-    .prepare(
-      `
-      SELECT e.id, e.name, e.type, e.summary, e.updated_at,
-         COUNT(DISTINCT f.id) as fact_count,
-         COUNT(DISTINCT es.session_id) as session_count
-      FROM entities e
-      LEFT JOIN entity_facts f ON f.entity_id = e.id
-      LEFT JOIN entity_sessions es ON es.entity_id = e.id
-      WHERE e.id IN (${nodePlaceholders})
-      GROUP BY e.id
-    `
-    )
-    .all(...nodeIds) as EntityListRecord[]
-
-  const facts = db
-    .prepare(
-      `
-      SELECT entity_id, fact, created_at
-      FROM entity_facts
-      WHERE entity_id IN (${nodePlaceholders})
-      ORDER BY created_at DESC
-    `
-    )
-    .all(...nodeIds) as { entity_id: number; fact: string; created_at: string }[]
-
-  const factsByEntity = new Map<number, string[]>()
-  for (const row of facts) {
-    const list = factsByEntity.get(row.entity_id) || []
-    if (list.length < factsPerNode) {
-      list.push(row.fact)
-      factsByEntity.set(row.entity_id, list)
-    }
-  }
-
-  const nodesWithFacts = nodes.map((n) => ({
-    ...n,
-    facts: factsByEntity.get(n.id) || []
-  }))
-
-  return { nodes: nodesWithFacts, edges }
-}
 
 // === DELETE FUNCTIONS ===
 
@@ -1346,6 +1091,7 @@ export function createRagConversation(
         VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `
   ).run(id, title || null, projectId || null)
+  emitSyncMutation({ entity: CORE_SYNC_ENTITIES.conversation, entityId: id, kind: 'put' })
   return id
 }
 
@@ -1362,9 +1108,17 @@ export function getRagConversations(projectId?: string | null): RagConversation[
             rc.id,
             rc.title,
             rc.project_id,
+            rc.origin_device_id,
+            rc.origin_device_name,
             rc.created_at,
             rc.updated_at,
-            (SELECT COUNT(*) FROM rag_messages rm WHERE rm.conversation_id = rc.id) as message_count
+            (SELECT COUNT(*) FROM rag_messages rm WHERE rm.conversation_id = rc.id) as message_count,
+            -- The last turn, for the list's one-line preview. A conversation synced from a phone
+            -- otherwise listed as a title with nothing under it.
+            (SELECT rm.role FROM rag_messages rm WHERE rm.conversation_id = rc.id
+               ORDER BY rm.created_at DESC, rm.id DESC LIMIT 1) as last_role,
+            (SELECT rm.content FROM rag_messages rm WHERE rm.conversation_id = rc.id
+               ORDER BY rm.created_at DESC, rm.id DESC LIMIT 1) as last_content
         FROM rag_conversations rc
         ${where}
         ORDER BY rc.updated_at DESC
@@ -1377,7 +1131,7 @@ export function getRagConversation(id: string): RagConversation | null {
   return db
     .prepare(
       `
-        SELECT id, title, project_id, created_at, updated_at
+        SELECT id, title, project_id, origin_device_id, origin_device_name, created_at, updated_at
         FROM rag_conversations
         WHERE id = ?
     `
@@ -1387,9 +1141,14 @@ export function getRagConversation(id: string): RagConversation | null {
 
 export function setRagConversationProject(id: string, projectId: string | null): void {
   const db = getDB()
-  db.prepare(
-    `UPDATE rag_conversations SET project_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-  ).run(projectId, id)
+  const result = db
+    .prepare(
+      `UPDATE rag_conversations SET project_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+    )
+    .run(projectId, id)
+  if (result.changes === 1) {
+    emitSyncMutation({ entity: CORE_SYNC_ENTITIES.conversation, entityId: id, kind: 'put' })
+  }
 }
 
 /** Conversation ids whose MESSAGE CONTENT matches a query (all terms, AND) — so the
@@ -1454,35 +1213,64 @@ export function updateRagConversationTitle(id: string, title: string): RagConver
   if (result.changes !== 1) {
     throw new Error(`Conversation not found: ${id}`)
   }
+  emitSyncMutation({ entity: CORE_SYNC_ENTITIES.conversation, entityId: id, kind: 'put' })
   return getRagConversation(id)!
 }
 
 export function deleteRagConversation(id: string): boolean {
   const db = getDB()
+  const messages = db
+    .prepare('SELECT uuid FROM rag_messages WHERE conversation_id = ?')
+    .all(id) as Array<{ uuid: string }>
   // FKs are off (no PRAGMA foreign_keys), so rag_messages' ON DELETE CASCADE never
   // fires — delete the conversation's messages explicitly or they orphan (D23).
   db.prepare('DELETE FROM rag_messages WHERE conversation_id = ?').run(id)
   const info = db.prepare('DELETE FROM rag_conversations WHERE id = ?').run(id)
-  return info.changes > 0
+  if (info.changes === 0) return false
+  for (const message of messages) {
+    emitSyncMutation({
+      entity: CORE_SYNC_ENTITIES.message,
+      entityId: message.uuid,
+      kind: 'delete'
+    })
+  }
+  emitSyncMutation({ entity: CORE_SYNC_ENTITIES.conversation, entityId: id, kind: 'delete' })
+  return true
 }
 
+/** The stored message: the device-local row id, and the uuid every device knows it by. */
+export interface AddedRagMessage {
+  id: number
+  uuid: string
+}
+
+/**
+ * The uuid is RETURNED, not discarded.
+ *
+ * It is the cross-device identity of the message, and it was minted here and thrown away, so a
+ * caller could not name the message it had just created. Anything that had to point at that message
+ * from elsewhere therefore pointed at something device-local instead - which is how a generated
+ * image came to be named by an absolute path on one Mac.
+ */
 export function addRagMessage(
   conversationId: string,
   role: 'user' | 'assistant',
   content: string,
   context?: unknown
-): number {
+): AddedRagMessage {
   const db = getDB()
   const contextJson = context ? JSON.stringify(context) : null
+  const uuid = crypto.randomUUID()
 
+  // uuid is the cross-device identity for sync (the autoincrement id is device-local).
   const info = db
     .prepare(
       `
-        INSERT INTO rag_messages (conversation_id, role, content, context, created_at)
-        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO rag_messages (uuid, conversation_id, role, content, context, created_at)
+        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `
     )
-    .run(conversationId, role, content, contextJson)
+    .run(uuid, conversationId, role, content, contextJson)
 
   // Update conversation updated_at timestamp
   db.prepare(
@@ -1491,7 +1279,13 @@ export function addRagMessage(
     `
   ).run(conversationId)
 
-  return Number(info.lastInsertRowid)
+  emitSyncMutation({ entity: CORE_SYNC_ENTITIES.message, entityId: uuid, kind: 'put' })
+  emitSyncMutation({
+    entity: CORE_SYNC_ENTITIES.conversation,
+    entityId: conversationId,
+    kind: 'put'
+  })
+  return { id: Number(info.lastInsertRowid), uuid }
 }
 
 // Keep the first `keepCount` messages of a conversation (chronological) and
@@ -1499,12 +1293,22 @@ export function addRagMessage(
 export function truncateRagMessages(conversationId: string, keepCount: number): number {
   const db = getDB()
   const rows = db
-    .prepare(`SELECT id FROM rag_messages WHERE conversation_id = ? ORDER BY id ASC`)
-    .all(conversationId) as { id: number }[]
-  const toDelete = rows.slice(Math.max(0, keepCount)).map((r) => r.id)
+    .prepare(`SELECT id, uuid FROM rag_messages WHERE conversation_id = ? ORDER BY id ASC`)
+    .all(conversationId) as Array<{ id: number; uuid: string }>
+  const toDelete = rows.slice(Math.max(0, keepCount))
   if (!toDelete.length) return 0
   const ph = toDelete.map(() => '?').join(',')
-  return db.prepare(`DELETE FROM rag_messages WHERE id IN (${ph})`).run(...toDelete).changes
+  const result = db
+    .prepare(`DELETE FROM rag_messages WHERE id IN (${ph})`)
+    .run(...toDelete.map(({ id }) => id))
+  for (const message of toDelete) {
+    emitSyncMutation({
+      entity: CORE_SYNC_ENTITIES.message,
+      entityId: message.uuid,
+      kind: 'delete'
+    })
+  }
+  return result.changes
 }
 
 export function getRagMessages(conversationId: string): RagMessage[] {
@@ -1512,7 +1316,8 @@ export function getRagMessages(conversationId: string): RagMessage[] {
   return db
     .prepare(
       `
-        SELECT id, conversation_id, role, content, context, created_at
+        SELECT id, uuid, conversation_id, role, content, context,
+               origin_device_id, origin_device_name, created_at
         FROM rag_messages
         WHERE conversation_id = ?
         ORDER BY created_at ASC

@@ -11,6 +11,12 @@ import { modalityQueue, IMAGE_JOB, CHAT_JOB } from './modality-queue/queue'
 import { getResidencyMode } from './runtime-residency'
 import { llm } from './llm'
 import { getSetting } from './database'
+import {
+  generatedImageSidecarPath,
+  readGeneratedImageSidecar,
+  writeGeneratedImageSidecar,
+  type GeneratedImageSidecar
+} from './imagegen/gallery-sidecar'
 import { enhancePrompt } from './imagegen/prompt-enhance'
 import type { ManagedRuntime } from './runtime-manager'
 import {
@@ -110,6 +116,7 @@ export function listGeneratedImages(scope?: GeneratedImageScope): {
   path: string
   name: string
   mtime: number
+  syncId?: string
   conversationId?: string
   projectId?: string | null
 }[] {
@@ -120,17 +127,15 @@ export function listGeneratedImages(scope?: GeneratedImageScope): {
       .filter((f) => /\.png$/i.test(f) && !f.startsWith('preview-'))
       .map((f) => {
         const p = path.join(dir, f)
-        // Optional sidecar with chat/project scope, written by the ipc handler.
-        let meta: { conversationId?: string; projectId?: string | null } = {}
-        try {
-          meta = JSON.parse(fs.readFileSync(`${p}.json`, 'utf8'))
-        } catch {
-          /* no sidecar */
-        }
+        // The sidecar is the one owner of what is known about an image besides its bytes, including
+        // the syncId that names it on the mesh. Read through that module so this scan and the sync
+        // receiver cannot disagree about the shape.
+        const meta = readGeneratedImageSidecar(p)
         return {
           path: p,
           name: f,
           mtime: fs.statSync(p).mtimeMs,
+          syncId: meta.syncId,
           conversationId: meta.conversationId,
           projectId: meta.projectId ?? null
         }
@@ -151,7 +156,7 @@ export function deleteGeneratedImage(p: string): boolean {
     const ownedImage = resolveExistingOwnedPath(dir, p)
     if (!ownedImage || !/\.png$/i.test(ownedImage)) return false
     fs.unlinkSync(ownedImage)
-    fs.rmSync(`${ownedImage}.json`, { force: true })
+    fs.rmSync(generatedImageSidecarPath(ownedImage), { force: true })
     return true
   } catch {
     return false
@@ -409,6 +414,7 @@ export interface ImageGenProgress {
   phase?: 'sampling' | 'decoding'
 }
 
+/** Which chat or project to narrow the gallery to. A filter, not the facts about an image. */
 export interface GeneratedImageScope {
   conversationId?: string
   projectId?: string | null
@@ -420,26 +426,54 @@ export interface GeneratedImageScope {
  * export all depend on the same file boundary. Callers should not manufacture
  * sidecars themselves.
  */
-export function saveGeneratedImageScope(imagePath: string, scope: GeneratedImageScope): void {
+export function saveGeneratedImageScope(imagePath: string, facts: GeneratedImageSidecar): void {
   const dir = path.join(dataDir(), 'generated-images')
   const ownedImage = resolveExistingOwnedPath(dir, imagePath)
   if (!ownedImage || !/\.png$/i.test(ownedImage)) {
     throw new Error('Generated image is outside the app image library.')
   }
 
-  const sidecar = `${ownedImage}.json`
-  const temporarySidecar = `${sidecar}.tmp`
+  // Merged by the sidecar owner, not replaced here. The scope is saved AFTER the image has been
+  // given its mesh identity, and the write this replaced dropped that identity on every save.
+  writeGeneratedImageSidecar(ownedImage, facts)
+}
+
+/**
+ * Keep the app's own copy of the image a generation was based on.
+ *
+ * The user picks an init image from their own disk, and nothing kept it: the path was handed to the
+ * generator, used, and forgotten. So the moment that file moved or was deleted there was no record of
+ * what an img2img turn was made from - "convert this into light mode" with nothing to show for the
+ * thing being converted.
+ *
+ * Copies live in a `sources` subdirectory so the gallery scan, which reads PNG files in the directory
+ * itself, does not list an input as though the user had generated it. Returns the copy's path, or null
+ * when the source cannot be read - a generation is not worth failing over its provenance.
+ */
+export function preserveGeneratedImageSource(
+  syncId: string,
+  sourcePath: string
+): string | null {
   try {
-    fs.writeFileSync(
-      temporarySidecar,
-      JSON.stringify({
-        conversationId: scope.conversationId,
-        projectId: scope.projectId ?? null
-      })
+    const directory = path.join(dataDir(), 'generated-images', 'sources')
+    fs.mkdirSync(directory, { recursive: true })
+    const extension = path.extname(sourcePath).toLowerCase() || '.png'
+    const kept = path.join(directory, `${syncId}${extension}`)
+    const temporary = `${kept}.part`
+    try {
+      fs.copyFileSync(sourcePath, temporary)
+      fs.renameSync(temporary, kept)
+    } finally {
+      fs.rmSync(temporary, { force: true })
+    }
+    return kept
+  } catch (error) {
+    console.error(
+      `[imagegen] could not keep the init image: ${
+        error instanceof Error ? error.message : String(error)
+      }`
     )
-    fs.renameSync(temporarySidecar, sidecar)
-  } finally {
-    fs.rmSync(temporarySidecar, { force: true })
+    return null
   }
 }
 

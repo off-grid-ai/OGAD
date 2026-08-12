@@ -200,6 +200,45 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
+      # `@offgrid/sync` is a file: dependency on the shared monorepo, so it must sit BESIDE this
+      # checkout before `npm ci` runs - an install cannot resolve a path that does not exist, and the
+      # typecheck inside `npm run build` then fails on every import of it. `ci.yml` has done this since
+      # the sync work landed; this workflow did not, which is why no release has built since 2026-07-30.
+      #
+      # The release ref decides the shared ref: a release from `main` takes shared `main`, and a release
+      # from an integration branch takes the branch of the same name when one exists.
+      - name: Checkout shared at the matching ref
+        id: shared_branch
+        continue-on-error: true
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: off-grid-ai/shared
+          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          ref: ${{ github.ref_name }}
+          path: _shared
+          persist-credentials: false
+      - name: Fall back to shared main
+        if: ${{ steps.shared_branch.outcome != 'success' }}
+        continue-on-error: true
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: off-grid-ai/shared
+          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          path: _shared
+          persist-credentials: false
+      - name: Put shared beside this checkout
+        run: |
+          if [ ! -d _shared ]; then
+            echo "::error::off-grid-ai/shared was not checked out - @offgrid/sync cannot resolve. Check CI_CROSS_REPO_TOKEN."
+            exit 1
+          fi
+          rm -rf ../shared
+          mv _shared ../shared
+          # Install at the WORKSPACE ROOT: shared is an npm-workspaces monorepo whose lockfile and
+          # build tool live at the root, and packages/sync declares neither. A locked install, so a
+          # drifted lock stops the release instead of resolving a graph nobody committed.
+          npm --prefix ../shared ci
+          npm --prefix ../shared/packages/sync run build
       - name: Install dependencies
         run: npm ci
       # Stamp the resolved version into package.json so electron-builder picks the
@@ -398,6 +437,48 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      # `@offgrid/sync` is a file: dependency on the shared monorepo, so it must sit BESIDE this
+      # checkout before `npm ci` runs - an install cannot resolve a path that does not exist, and the
+      # typecheck inside `npm run build` then fails on every import of it. `ci.yml` has done this since
+      # the sync work landed; this workflow did not, which is why no release has built since 2026-07-30.
+      #
+      # The release ref decides the shared ref: a release from `main` takes shared `main`, and a release
+      # from an integration branch takes the branch of the same name when one exists.
+      - name: Checkout shared at the matching ref
+        id: shared_branch
+        continue-on-error: true
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: off-grid-ai/shared
+          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          ref: ${{ github.ref_name }}
+          path: _shared
+          persist-credentials: false
+      - name: Fall back to shared main
+        if: ${{ steps.shared_branch.outcome != 'success' }}
+        continue-on-error: true
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: off-grid-ai/shared
+          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          path: _shared
+          persist-credentials: false
+      - name: Put shared beside this checkout
+        # Git Bash, explicitly: a windows runner runs `run:` under PowerShell, which parsed this
+        # block as a .ps1 and failed before the first command.
+        shell: bash
+        run: |
+          if [ ! -d _shared ]; then
+            echo "::error::off-grid-ai/shared was not checked out - @offgrid/sync cannot resolve. Check CI_CROSS_REPO_TOKEN."
+            exit 1
+          fi
+          rm -rf ../shared
+          mv _shared ../shared
+          # Install at the WORKSPACE ROOT: shared is an npm-workspaces monorepo whose lockfile and
+          # build tool live at the root, and packages/sync declares neither. A locked install, so a
+          # drifted lock stops the release instead of resolving a graph nobody committed.
+          npm --prefix ../shared ci
+          npm --prefix ../shared/packages/sync run build
       - name: Install dependencies
         run: npm ci
       - name: Fetch Windows native binaries (llama/whisper/sd/ffmpeg)

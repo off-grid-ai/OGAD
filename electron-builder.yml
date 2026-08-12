@@ -56,20 +56,25 @@ mac:
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
-    - NSMicrophoneUsageDescription: Off Grid AI uses the microphone for on-device voice input. Audio is processed locally and never leaves your device.
-    - NSCameraUsageDescription: Off Grid AI may use the camera for on-device vision features. Frames are processed locally and never leave your device.
-    - NSDocumentsFolderUsageDescription: Off Grid AI reads documents you add to a project so it can answer questions about them — locally, on your device.
-    - NSDownloadsFolderUsageDescription: Off Grid AI reads files you add to a project so it can answer questions about them — locally, on your device.
+    NSMicrophoneUsageDescription: Off Grid AI uses the microphone for on-device voice input. Audio is processed locally and never leaves your device.
+    NSCameraUsageDescription: Off Grid AI may use the camera for on-device vision features. Frames are processed locally and never leave your device.
+    NSDocumentsFolderUsageDescription: Off Grid AI reads documents you add to a project so it can answer questions about them — locally, on your device.
+    NSDownloadsFolderUsageDescription: Off Grid AI reads files you add to a project so it can answer questions about them — locally, on your device.
+    NSLocalNetworkUsageDescription: Off Grid AI Desktop uses your local network to find and sync directly with your devices. Sync traffic is encrypted and no Off Grid server receives it.
+    NSBonjourServices:
+      - _offgrid._tcp
+      - _offgrid-sync._tcp
+      - _offgrid-sync._udp
     # Computer use — the semantic action rail. Each key is the OS prompt shown the
     # first time the agent uses that capability; without it a hardened-runtime build
     # is refused access before any prompt. Copy follows off-grid-ai/brand: lead with
     # what the user gets, privacy as the proof, no em dashes.
-    - NSAppleEventsUsageDescription: Off Grid AI controls apps like Messages, Mail, and Notes to carry out actions you approve. Everything runs on your Mac and nothing leaves the device.
-    - NSCalendarsFullAccessUsageDescription: Off Grid AI reads and creates calendar events when you ask, on your device. Your calendar never leaves your Mac.
-    - NSCalendarsUsageDescription: Off Grid AI reads and creates calendar events when you ask, on your device. Your calendar never leaves your Mac.
-    - NSRemindersFullAccessUsageDescription: Off Grid AI reads and creates reminders when you ask, on your device. Your reminders never leave your Mac.
-    - NSContactsUsageDescription: Off Grid AI reads your contacts to complete actions you ask for, like sending a message. Your contacts never leave your Mac.
-    - NSPhotoLibraryUsageDescription: Off Grid AI works with photos you ask it to, like picking one to send. Your photos never leave your Mac.
+    NSAppleEventsUsageDescription: Off Grid AI controls apps like Messages, Mail, and Notes to carry out actions you approve. Everything runs on your Mac and nothing leaves the device.
+    NSCalendarsFullAccessUsageDescription: Off Grid AI reads and creates calendar events when you ask, on your device. Your calendar never leaves your Mac.
+    NSCalendarsUsageDescription: Off Grid AI reads and creates calendar events when you ask, on your device. Your calendar never leaves your Mac.
+    NSRemindersFullAccessUsageDescription: Off Grid AI reads and creates reminders when you ask, on your device. Your reminders never leave your Mac.
+    NSContactsUsageDescription: Off Grid AI reads your contacts to complete actions you ask for, like sending a message. Your contacts never leave your Mac.
+    NSPhotoLibraryUsageDescription: Off Grid AI works with photos you ask it to, like picking one to send. Your photos never leave your Mac.
   notarize: true
   icon: resources/icon.png
   # NOTE: no afterSign re-sign hook. electron-builder already signs every nested

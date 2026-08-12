@@ -7,10 +7,6 @@ import { randomUUID } from 'node:crypto'
 import { ragService, listProjects, createProject, updateProject, deleteProject } from './rag'
 import { uploadPickerExtensions } from './files-classify'
 
-function genId(prefix: string): string {
-  return `${prefix}_${randomUUID()}`
-}
-
 // Built from the router's classify sets (files-classify) so the picker allowlist
 // and the processor can never drift: it used to hardcode a subset that omitted
 // gif/bmp/heic/opus/aiff/avi the router actually handles.
@@ -23,7 +19,7 @@ export function setupRagIPC(): void {
   ipcMain.handle(
     'projects:create',
     (_e, p: { name: string; description?: string; systemPrompt?: string; icon?: string }) => {
-      const id = genId('proj')
+      const id = randomUUID()
       createProject({ id, ...p })
       return id
     }

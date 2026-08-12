@@ -7,6 +7,12 @@ import {
   type SystemHealthContract
 } from '../shared/ipc-contracts'
 import type { ImageGenerationRequestContract } from '../shared/image-generation-contract'
+import {
+  BACKUP_EXPORT_ALL_CHANNEL,
+  BACKUP_IMPORT_CHANNEL,
+  type BackupDeliveryContract,
+  type BackupRestoreSummaryContract
+} from '../shared/backup-contracts'
 
 console.log('PRELOAD SCRIPT LOADED')
 
@@ -25,6 +31,8 @@ const offGridApi = {
   // pro tabs without an async round-trip. See main/license-ipc.ts (`pro:is-enabled`).
   // Falls back to false if the handler isn't registered (should never happen).
   isPro: ipcRenderer.sendSync('pro:is-enabled') === true,
+  proEntitlementBootstrapEnabled:
+    ipcRenderer.sendSync('pro:entitlement-bootstrap-enabled') === true,
   // Host OS, bridged once so renderer copy and availability rules use the same value.
   platform: process.platform,
   // License (Keygen) activation + status for the upgrade/settings UI.
@@ -33,6 +41,7 @@ const offGridApi = {
     activate: (key: string) => ipcRenderer.invoke('license:activate', key),
     listDevices: () => ipcRenderer.invoke('license:list-devices'),
     deactivate: (machineId: string) => ipcRenderer.invoke('license:deactivate', machineId),
+    resetCurrentDevice: () => ipcRenderer.invoke('license:reset-current-device'),
     clear: () => ipcRenderer.invoke('license:clear'),
     payUrl: () => ipcRenderer.invoke('license:pay-url'),
     openPay: () => ipcRenderer.invoke('license:open-pay'),
@@ -136,6 +145,16 @@ const offGridApi = {
     ipcRenderer.invoke('rag:create-conversation', id, title, projectId),
   getRagConversations: (projectId?: string | null) =>
     ipcRenderer.invoke('rag:get-conversations', projectId),
+  onRagConversationsChanged: (
+    callback: (data: { conversationId: string; projectId: string | null }) => void
+  ) => {
+    const subscription = (
+      _event: unknown,
+      data: { conversationId: string; projectId: string | null }
+    ): void => callback(data)
+    ipcRenderer.on('rag:conversations-changed', subscription)
+    return unsubscribe('rag:conversations-changed', subscription)
+  },
   searchRagConversationIds: (query: string) =>
     ipcRenderer.invoke('rag:search-conversation-ids', query),
   setRagConversationProject: (id: string, projectId: string | null) =>
@@ -159,9 +178,6 @@ const offGridApi = {
   getEntities: (appName?: string) => ipcRenderer.invoke('db:get-entities', appName),
   getEntityDetails: (entityId: number, appName?: string) =>
     ipcRenderer.invoke('db:get-entity-details', entityId, appName),
-  getEntityGraph: (appName?: string, focusEntityId?: number, edgeLimit?: number) =>
-    ipcRenderer.invoke('db:get-entity-graph', appName, focusEntityId, edgeLimit),
-  rebuildEntityGraph: () => ipcRenderer.invoke('db:rebuild-entity-graph'),
   deleteEntity: (entityId: number) => ipcRenderer.invoke('db:delete-entity', entityId),
   deleteMemory: (memoryId: number) => ipcRenderer.invoke('db:delete-memory', memoryId),
 
@@ -291,7 +307,9 @@ const offGridApi = {
   openAccessibilitySettings: () => ipcRenderer.invoke('permissions:open-accessibility-settings'),
   openScreenRecordingSettings: () =>
     ipcRenderer.invoke('permissions:open-screen-recording-settings'),
+  relaunchForPermissions: () => ipcRenderer.invoke('permissions:relaunch'),
   openMicrophoneSettings: () => ipcRenderer.invoke('permissions:open-microphone-settings'),
+  openLocalNetworkSettings: () => ipcRenderer.invoke('permissions:open-local-network-settings'),
   getAppVersion: () => ipcRenderer.invoke('app:version'),
   openExternal: (url: string) => ipcRenderer.invoke('app:open-external', url),
 
@@ -383,6 +401,10 @@ const offGridApi = {
   clearDataCategory: (id: string, olderThanDays?: number) =>
     ipcRenderer.invoke('data:clear', id, olderThanDays),
   deleteAllData: () => ipcRenderer.invoke('data:delete-all'),
+  exportBackup: () =>
+    ipcRenderer.invoke(BACKUP_EXPORT_ALL_CHANNEL) as Promise<BackupDeliveryContract | null>,
+  importBackup: () =>
+    ipcRenderer.invoke(BACKUP_IMPORT_CHANNEL) as Promise<BackupRestoreSummaryContract | null>,
   onSetupProgress: (callback: (data: unknown) => void) => {
     const subscription = (_event: unknown, data: unknown): void => callback(data)
     ipcRenderer.on('setup:progress', subscription)
@@ -494,8 +516,8 @@ const offGridApi = {
   imageGenStatus: () => ipcRenderer.invoke('imagegen:status'),
   imageGenJobStatus: () => ipcRenderer.invoke('imagegen:job-status'),
   cancelImageGen: () => ipcRenderer.invoke('imagegen:cancel'),
-  imageGenConversationPersisted: (conversationId: string) =>
-    ipcRenderer.invoke('imagegen:conversation-persisted', conversationId),
+  imageGenConversationPersisted: (conversationId: string, messageId?: string) =>
+    ipcRenderer.invoke('imagegen:conversation-persisted', conversationId, messageId),
   listGeneratedImages: (scope?: { conversationId?: string; projectId?: string | null }) =>
     ipcRenderer.invoke('imagegen:list', scope),
   styleThumbs: () => ipcRenderer.invoke('imagegen:style-thumbs'),
@@ -551,6 +573,11 @@ const offGridApi = {
     return unsubscribe('imagegen:conversation-updated', sub)
   },
   pickImageForGen: () => ipcRenderer.invoke('imagegen:pick-image'),
+  keepInitImage: (sourcePath: string) =>
+    ipcRenderer.invoke('imagegen:keep-init-image', sourcePath) as Promise<{
+      id: string
+      path: string
+    } | null>,
   generateImage: (
     params: ImageGenerationRequestContract & {
       conversationId?: string
@@ -580,6 +607,11 @@ const offGridApi = {
     const subscription = (_event: unknown, data: unknown): void => callback(data)
     ipcRenderer.on('projects:index-progress', subscription)
     return unsubscribe('projects:index-progress', subscription)
+  },
+  onProjectDocumentsChanged: (callback: (data: { projectId: string }) => void) => {
+    const subscription = (_event: unknown, data: { projectId: string }): void => callback(data)
+    ipcRenderer.on('projects:documents-changed', subscription)
+    return unsubscribe('projects:documents-changed', subscription)
   },
 
   // --- CRM: entity records (Entity -> App -> frames) + resolution/corrections ---

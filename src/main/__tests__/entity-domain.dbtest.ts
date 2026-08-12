@@ -17,7 +17,6 @@ vi.mock('electron', () => ({
 import {
   addEntityFact,
   getDB,
-  rebuildEntityEdgesForAllSessions,
   upsertEntitySession
 } from '../database'
 import {
@@ -108,28 +107,6 @@ describe('EntityDomain port', () => {
 })
 
 describe('EntityDomain SQLite lifecycle', () => {
-  it('rebuilds core chat relationships without deleting another producer projection', () => {
-    const db = getDB()
-    const maya = resolve('Projection Maya', 'Person')
-    const starling = resolve('Projection Starling', 'Project')
-    db.prepare(
-      `INSERT INTO entity_edges
-         (source_entity_id, target_entity_id, type, weight, evidence_count)
-       VALUES (?, ?, 'observation', 3, 3)`
-    ).run(Math.min(maya, starling), Math.max(maya, starling))
-
-    rebuildEntityEdgesForAllSessions()
-
-    expect(
-      db
-        .prepare(
-          `SELECT type, weight, evidence_count AS evidenceCount FROM entity_edges
-            WHERE source_entity_id = ? AND target_entity_id = ?`
-        )
-        .all(Math.min(maya, starling), Math.max(maya, starling))
-    ).toEqual([{ type: 'observation', weight: 3, evidenceCount: 3 }])
-  })
-
   it('explicitly removes every core dependent while foreign keys are disabled', () => {
     const db = getDB()
     db.pragma('foreign_keys = OFF')

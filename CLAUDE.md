@@ -108,7 +108,7 @@ When iterating (a request, a fix, a tweak the user just confirmed), add a test t
 
 ## E2E capture — SYNTHETIC data only, seeded via the demo script
 
-E2E and screenshot/video capture (including the Provit capture harness) run the app on a **fresh temp `OFFGRID_USER_DATA` profile** and must use **synthetic demo data only — never a real profile, never upload real user data.**
+E2E and screenshot/video capture (including any device capture harness) run the app on a **fresh temp `OFFGRID_USER_DATA` profile** and must use **synthetic demo data only — never a real profile, never upload real user data.**
 
 - **Seed with the demo script — BOTH seeders.** A blank profile is EMPTY, so any flow that _generates_ (chat, especially the "All memory" scope) will error with **"Sorry, something went wrong…"** — a **profile/RAG gap, not a bug**: no seeded memory store means the memory path throws before streaming. There are TWO independent seeders and a flow may need both: **`OFFGRID_SEED=force`** → core `seedDemo` (`src/main/index.ts` → `dev-seed.ts`) seeds chats / knowledge / RAG memory (this is what "All memory" chat queries); **`OFFGRID_SEED_PRO=force`** → pro `seedProDemo` (`pro/main/index.ts` → `pro/main/dev-seed.ts`) seeds observations / entities / clipboard / replay frames. `npm run demo` sets both — use it (or set both env vars) for any capture that exercises chat/generation.
 - **Model ports are single-owner.** Only one app instance can bind the model engine ports (`:7878` gateway, `:8439` llama-server, `:7879`). A running `npm run dev` will block a second capture instance's engine → generation errors that look like a bug but aren't. Free the ports (stop the dev app) before an e2e capture, or the recording exercises the error path only.
@@ -148,6 +148,53 @@ The `pro/` directory is a **git submodule** pointing at the private `desktop-pro
 
 **Settings sections follow the same rule.** A pro Settings section (proactive delivery, secretary/learned-prefs, identity, fleet console, etc.) is pro feature code — its component + logic live in `pro/renderer` and register into the core Settings screen via the section-registry seam (`pro/renderer/settings.ts` `registerProSettings` → core `registerSettingsSection`; core renders its own sections + all registered ones). Core must NOT hardcode pro section bodies in `Settings.tsx` gated by `isPro` — core only renders a dimmed `ProPlaceholder` for the locked preview when the section isn't registered (free build). Do not `if (isPro) <RealProSection/> : <ProPlaceholder/>` with the real section defined in core.
 
+<!-- BEGIN GENERATED: shared/CLAUDE.md#debugging-source-of-truth -->
+> **Generated from `shared/CLAUDE.md` - do not edit this section here.**
+> Run `node scripts/mirror-doctrine.mjs` in `shared/` after changing the canonical copy.
+> `--check` fails the build when a mirror drifts, so these cannot silently disagree.
+
+## Debugging — start with the source of truth
+
+**Most bugs here are source-of-truth bugs, and the fix is almost always to collapse two sources into
+one.** So before reading a stack trace or reaching for a log, ask three questions in order:
+
+1. **What is the source of truth for this fact?** Not "where is the bug" - "who is entitled to answer
+   this question". A device's connection state, a model's identity, whether a transfer finished.
+2. **Is anything else answering the same question?** Two answers is the bug, even when both are
+   individually correct. Look for a value derived twice, a rule written in two layers, a state
+   hardcoded next to a state that is computed.
+3. **Can we refactor so there is ONE source, and would that fix it?** If yes, that is the fix. Patching
+   the wrong answer leaves the second source in place, and it will disagree again somewhere else.
+
+If the answer to 3 is no, say so explicitly and fix the symptom - but say WHY one source is not
+achievable, because that is usually a design constraint worth writing down.
+
+### Why this is the default heuristic (a session's worth of evidence)
+
+Every one of these presented as a different bug and was the same bug:
+
+| Symptom | The two sources | The one source |
+|---|---|---|
+| A connected device had no actions at all on macOS | two hand-written button lists, one per section | one component driven by `device.actions.*.visible` |
+| "4 of 5 licensed devices" over a list of one | count from the registry, list from `saved` (which excludes devices that are ON the network) | the whole mesh |
+| One model appeared 35 times | absolute path as identity, and iOS moves it every reinstall | `fileName`, unique within the dir |
+| Sender said "sent", receiver said "could not receive" | the send loop's "I pushed bytes" vs the receiver's verdict | one package-state rule (`modelPackagePhase`) |
+| Activity said COMPLETED for a half-sent model | per-FILE rows vs a package the user asked for | package state, files underneath |
+| A live mesh read as half-down | each flow reading device rows its own way | the surface layer owns reading |
+| "Needs repair" after a deliberate disconnect | a flag set by one path and clearable only by another | one lifecycle, cleared on the next success |
+
+The tell is almost always the same: **two things that must agree, kept in step by hand.** A comment
+saying "these must match" is a bug waiting for a witness; so is a hardcoded literal sitting next to a
+computed value (`status: 'completed'` beside a record that also has a status).
+
+### Durability and resilience are SSOT problems too
+
+A fact that is not persisted has no source of truth after a restart - it silently becomes whatever the
+UI last remembered. Failures were dropped on the floor (`if (status !== 'completed') return`), so a
+failed transfer stopped existing the moment the view reset, and the surface confidently showed success.
+When you fix durability, fix the READ at the same time: persisting a failure while the renderer still
+hardcodes `status: 'completed'` converts a lost record into a durable lie.
+<!-- END GENERATED: shared/CLAUDE.md#debugging-source-of-truth -->
 ## Architecture & abstractions (SOLID)
 
 Design to abstractions, not concrete types. When implementations are interchangeable (model backends, TTS/STT engines, image/diffusion runtimes, connectors), the rest of the app depends on one service/interface — never branch on a concrete type in UI/stores (`if (engine === 'kokoro')`, `instanceof X`). Push the decision behind the abstraction; adding an implementation should need zero changes to callers. Normalize capability gaps inside the service, not the UI.

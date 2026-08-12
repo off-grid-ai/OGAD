@@ -79,6 +79,9 @@ try? FileManager.default.removeItem(at: micURL)
 // MARK: - Recorder
 
 final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
+    /// How long to wait between attempts to get the display back. A meeting outlives a few seconds.
+    private static let resumeRetryNs: UInt64 = 2_000_000_000
+
     private var stream: SCStream?
     private var writer: AVAssetWriter?
     private var videoInput: AVAssetWriterInput?
@@ -88,12 +91,28 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
     private var micRecorder: AVAudioRecorder?
     private var finished = false
     private var screenFrames = 0 // diagnostic: how many complete frames we actually wrote
+    /// Fixed by the first start: the writer's video input cannot change size mid-recording.
+    private var captureWidth: Int?
+    private var captureHeight: Int?
+    private var restarting = false
+    /// How badly the far side was interrupted, so the app can say so instead of guessing.
+    private var interruptions = 0
+    private var downSince: Date?
+    private var downSeconds: TimeInterval = 0
 
-    func start() async throws {
-        // DECISIVE for a black recording: ScreenCaptureKit hands back BLACK frames (no
-        // error) when THIS process isn't authorized for screen recording. Since we're a
-        // separate spawned binary, our authorization is independent of the parent app's.
-        errLog("[rec] screen-capture preauthorized=\(CGPreflightScreenCaptureAccess())")
+    /// What the recorder knows about its own gaps, for the caller to report.
+    var outage: (interruptions: Int, seconds: Int) {
+        let pending = downSince.map { Date().timeIntervalSince($0) } ?? 0
+        return (interruptions, Int((downSeconds + pending).rounded()))
+    }
+
+    /// Resolve the display to record and open a stream on it.
+    ///
+    /// The first start and every restart both come through here, so they cannot disagree about
+    /// which display holds the call. The size is fixed by the first start: the writer's video
+    /// input is created once with those dimensions, and a display that comes back at a different
+    /// resolution must still be scaled into it.
+    private func openStream(width: Int?, height: Int?) async throws -> (SCStream, Int, Int) {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
 
         // Capture the FULL display the call is on — the product records the SCREEN, and a
@@ -114,8 +133,8 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
         let selfApps = content.applications.filter { $0.applicationName.lowercased().contains("off grid") }
         errLog("[rec] capturing display \(display.displayID) \(display.width)x\(display.height); excluding \(selfApps.count) Off Grid app(s)")
         let filter = SCContentFilter(display: display, excludingApplications: selfApps, exceptingWindows: [])
-        let outW = display.width
-        let outH = display.height
+        let outW = width ?? display.width
+        let outH = height ?? display.height
 
         let cfg = SCStreamConfiguration()
         cfg.width = outW
@@ -126,6 +145,23 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
         cfg.capturesAudio = true            // <-- system audio (the far side)
         cfg.sampleRate = 48000
         cfg.channelCount = 2
+
+        let s = SCStream(filter: filter, configuration: cfg, delegate: self)
+        try s.addStreamOutput(self, type: .screen, sampleHandlerQueue: q)
+        try s.addStreamOutput(self, type: .audio, sampleHandlerQueue: q)
+        try await s.startCapture()
+        return (s, outW, outH)
+    }
+
+    func start() async throws {
+        // DECISIVE for a black recording: ScreenCaptureKit hands back BLACK frames (no
+        // error) when THIS process isn't authorized for screen recording. Since we're a
+        // separate spawned binary, our authorization is independent of the parent app's.
+        errLog("[rec] screen-capture preauthorized=\(CGPreflightScreenCaptureAccess())")
+        let (s, outW, outH) = try await openStream(width: nil, height: nil)
+        self.stream = s
+        self.captureWidth = outW
+        self.captureHeight = outH
 
         // AVAssetWriter: H.264 video + AAC audio into screen.mov
         let w = try AVAssetWriter(outputURL: screenURL, fileType: .mov)
@@ -159,13 +195,6 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
         self.writer = w
         self.videoInput = vIn
         self.audioInput = aIn
-
-        // SCStream
-        let s = SCStream(filter: filter, configuration: cfg, delegate: self)
-        try s.addStreamOutput(self, type: .screen, sampleHandlerQueue: q)
-        try s.addStreamOutput(self, type: .audio, sampleHandlerQueue: q)
-        self.stream = s
-        try await s.startCapture()
 
         // Mic — separate file, simplest reliable path (AVAudioRecorder records the
         // default input device). Muxed in later by ffmpeg. Best-effort: if the mic
@@ -218,8 +247,56 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
         }
     }
 
+    /**
+     A stopped stream is an interruption, not the end of the recording.
+
+     ScreenCaptureKit stops the stream when the display it was told to capture goes away, and a
+     browser quitting can take a whole display's space with it. That stream carries BOTH the screen
+     and the far side of the call, so when it stopped, the other people in the meeting stopped being
+     recorded. The microphone is a separate capture and carried on, which is why the result was a
+     confident thirty-four minute recording of one voice. Nothing tried again, and nobody was told.
+
+     A display that vanished usually comes back. So keep asking for it until it does, or until the
+     user stops the recording. The writer is untouched: later samples append to the same inputs and
+     the gap shows up as a still frame, which is the truth about that stretch.
+     */
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         errLog("[rec] stream stopped with error: \(error.localizedDescription)")
+        q.async { [weak self] in
+            guard let self = self, !self.finished, !self.restarting else { return }
+            self.restarting = true
+            self.interruptions += 1
+            self.downSince = Date()
+            self.resumeCapture()
+        }
+    }
+
+    private func resumeCapture() {
+        Task { [weak self] in
+            guard let self = self else { return }
+            var attempt = 0
+            while !self.finished {
+                attempt += 1
+                do {
+                    let (s, _, _) = try await self.openStream(
+                        width: self.captureWidth, height: self.captureHeight
+                    )
+                    self.stream = s
+                    let lost = Date().timeIntervalSince(self.downSince ?? Date())
+                    self.downSeconds += lost
+                    self.downSince = nil
+                    self.restarting = false
+                    errLog("[rec] capture resumed after \(attempt) attempt(s), \(Int(lost))s lost")
+                    return
+                } catch {
+                    if attempt == 1 || attempt % 10 == 0 {
+                        errLog("[rec] resume attempt \(attempt) failed: \(error.localizedDescription)")
+                    }
+                    try? await Task.sleep(nanoseconds: Self.resumeRetryNs)
+                }
+            }
+            self.restarting = false
+        }
     }
 
     func finish(_ completion: @escaping () -> Void) {
@@ -247,9 +324,14 @@ let sema = DispatchSemaphore(value: 0)
 func shutdown() {
     recorder.finish {
         let hasMic = FileManager.default.fileExists(atPath: micURL.path)
+        // The gaps travel with the files. A recording that lost the far side for half an hour must
+        // not reach the summariser looking like a complete one.
+        let outage = recorder.outage
         let payload: [String: Any] = [
             "screen": screenURL.path,
             "mic": hasMic ? micURL.path : "",
+            "interruptions": outage.interruptions,
+            "lostSeconds": outage.seconds,
         ]
         if let data = try? JSONSerialization.data(withJSONObject: payload),
            let line = String(data: data, encoding: .utf8) {

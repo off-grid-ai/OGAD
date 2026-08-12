@@ -24,13 +24,21 @@ function permissionComponents(
       detail: permissions.screenRecording
         ? 'Screen capture is allowed'
         : 'Grant access in System Settings'
+    },
+    {
+      id: 'permission-local-network',
+      label: 'Local Network permission',
+      status: permissions.localNetwork ? 'granted' : 'denied',
+      detail: permissions.localNetwork
+        ? 'Device discovery is allowed'
+        : 'Grant access in System Settings'
     }
   ]
 }
 
-function readPermissionComponents(): SystemHealthContract['components'] {
+async function readPermissionComponents(): Promise<SystemHealthContract['components']> {
   try {
-    return permissionComponents(getPermissionStatus())
+    return permissionComponents(await getPermissionStatus())
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
     return [
@@ -45,6 +53,12 @@ function readPermissionComponents(): SystemHealthContract['components'] {
         label: 'Screen Recording permission',
         status: 'down',
         detail: `Permission status unavailable: ${reason}`
+      },
+      {
+        id: 'permission-local-network',
+        label: 'Local Network permission',
+        status: 'down',
+        detail: `Permission status unavailable: ${reason}`
       }
     ]
   }
@@ -56,7 +70,7 @@ function readPermissionComponents(): SystemHealthContract['components'] {
 export async function getRenderedSystemHealth(): Promise<SystemHealthContract> {
   const [health, permissions] = await Promise.all([
     import('./setup').then((module) => module.getSystemHealth()),
-    Promise.resolve().then(readPermissionComponents)
+    readPermissionComponents()
   ])
   return { ...health, components: [...health.components, ...permissions] }
 }

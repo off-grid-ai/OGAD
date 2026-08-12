@@ -5,6 +5,7 @@ import logo from './assets/logo.png'
 import { useMeetingRecorder } from './useMeetingRecorder'
 import { MemoryChat } from './components/MemoryChat'
 import { Settings } from './components/Settings'
+import { SettingsPanel } from './components/SettingsPanel'
 import { ModelsScreen } from './components/ModelsScreen'
 import { ProjectsScreen } from './components/ProjectsScreen'
 import { ConnectorsScreen } from './components/ConnectorsScreen'
@@ -14,7 +15,10 @@ import { PermissionGate } from './components/PermissionGate'
 import type { SearchHit } from './types'
 // Open-core: pro screens live in the private pro package and render through the
 // pro view-router; the free build shows the UpgradeScreen for those tabs.
-import { loadProFeaturesRenderer } from './bootstrap/loadProFeaturesRenderer'
+import {
+  loadProFeaturesRenderer,
+  type ProRendererActivation
+} from './bootstrap/loadProFeaturesRenderer'
 import { renderProView, type ProViewContext } from './bootstrap/proView'
 import { UpgradeScreen } from './components/pro/UpgradeScreen'
 import { getProFeature, proFeatureComingSoon } from './components/pro/proCatalog'
@@ -50,11 +54,19 @@ import { OFF_GRID_MOBILE_URL, openExternal } from './constants/links'
 import { cn } from './lib/utils'
 import { normalizeProNavigationIntent, type ProNavigationIntent } from './lib/pro-navigation'
 import { navigateSearchHit } from './lib/search-navigation'
+import {
+  OPEN_MODEL_SETTINGS_PANEL_EVENT,
+  type ModelSettingsPanelTab
+} from './lib/model-settings-panel'
 import { callHook } from './bootstrap/hookRegistry'
 import {
   NOTIFICATION_METADATA_HOOK,
   NOTIFICATION_OPEN_TARGET_CHANNEL,
   NOTIFICATION_RESOLVE_TARGET_HOOK,
+  NOTIFICATION_SUBSCRIBE_EXTERNAL_ITEMS_HOOK,
+  NOTIFICATION_SUBSCRIBE_EXTERNAL_UNREAD_HOOK,
+  type NotificationExternalItemSubscriber,
+  type NotificationExternalUnreadSubscriber,
   type NotificationRoutingMetadata,
   type NotificationSourceRecord
 } from './lib/notification-hooks'
@@ -80,10 +92,19 @@ type ViewMode =
   | 'clipboard'
   | 'voice'
   | 'vault'
+  | 'devices'
+
+interface NavigationIntent {
+  view: ViewMode
+  section?: string
+  subroute?: string
+}
 
 // Navigation state type for history tracking
 interface NavigationState {
   viewMode: ViewMode
+  subroute: string | null
+  settingsSection: string | null
   selectedSessionId: string | null
   selectedMemoryId: number | null
   selectedEntityId: number | null
@@ -209,26 +230,55 @@ function ModelStatusDot({
 }
 
 function AppContent() {
-  const { addNotification } = useNotifications()
+  const { addNotification, unreadCount } = useNotifications()
 
   // Pro entitlement (preload reads OFFGRID_PRO; absent submodule => false at runtime).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const isPro = !!(window as any).api?.isPro
   // Re-render once pro renderer features have activated (registers the view-router).
   const [proReady, setProReady] = useState(false)
+  const [proActivation, setProActivation] = useState<ProRendererActivation>('none')
+  const [externalUnreadCount, setExternalUnreadCount] = useState(0)
   useEffect(() => {
     let mounted = true
-    void loadProFeaturesRenderer().finally(() => {
-      if (mounted) setProReady(true)
+    void loadProFeaturesRenderer().then((activation) => {
+      if (mounted) {
+        setProActivation(activation)
+        setProReady(true)
+      }
     })
     return () => {
       mounted = false
     }
   }, [])
 
+  useEffect(() => {
+    if (!proReady || !isPro) {
+      setExternalUnreadCount(0)
+      return
+    }
+    return callHook<ReturnType<NotificationExternalUnreadSubscriber>>(
+      NOTIFICATION_SUBSCRIBE_EXTERNAL_UNREAD_HOOK,
+      setExternalUnreadCount
+    )
+  }, [isPro, proReady])
+
+  useEffect(() => {
+    if (!proReady || !isPro) return
+    return callHook<ReturnType<NotificationExternalItemSubscriber>>(
+      NOTIFICATION_SUBSCRIBE_EXTERNAL_ITEMS_HOOK,
+      addNotification
+    )
+  }, [addNotification, isPro, proReady])
+
   // Free users land on Models (download a model first, with the sidebar to
   // explore); Mac Pro users land on Day. Never land on a locked or unavailable tab.
   const [viewMode, setViewMode] = useState<ViewMode>(isPro && isMac() ? 'day' : 'models')
+  const [settingsSection, setSettingsSection] = useState<string | null>(null)
+  const [settingsNavigationKey, setSettingsNavigationKey] = useState(0)
+  const [navigationSubroute, setNavigationSubroute] = useState<string | null>(null)
+  const [modelSettingsOpen, setModelSettingsOpen] = useState(false)
+  const [modelSettingsTab, setModelSettingsTab] = useState<ModelSettingsPanelTab>('model')
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [selectedMemoryId, setSelectedMemoryId] = useState<number | null>(null)
   // Version of a downloaded-and-staged update (null = none). Surfaced as a banner
@@ -259,8 +309,9 @@ function AppContent() {
   const [chatTarget, setChatTarget] = useState<{
     conversationId?: string
     projectId?: string
+    openGallery?: boolean
   } | null>(null)
-  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(true)
   const rec = useMeetingRecorder()
 
   // The meeting recording lifecycle (detect → record → warn → stop → finalize) is
@@ -308,10 +359,17 @@ function AppContent() {
       '/notifications': 'notifications',
       '/search': 'search',
       '/settings': 'settings',
-      '/voice': 'voice'
+      '/voice': 'voice',
+      '/devices': 'devices'
     }
 
-    if (viewMap[path]) {
+    if (path.startsWith('/settings/')) {
+      setSettingsSection(decodeURIComponent(path.slice('/settings/'.length)) || null)
+      setNavigationSubroute(null)
+      setViewMode('settings')
+    } else if (viewMap[path]) {
+      setNavigationSubroute(null)
+      setSettingsSection(null)
       setViewMode(viewMap[path])
     }
   }, [])
@@ -320,16 +378,42 @@ function AppContent() {
   // "pick a model yourself" CTA) — switch the active view without a remount.
   useEffect(() => {
     const onNav = (e: Event): void => {
-      const v = (e as CustomEvent).detail as ViewMode | undefined
-      if (v) setViewMode(v)
+      const intent = (e as CustomEvent<unknown>).detail
+      if (typeof intent === 'string') {
+        setSettingsSection(null)
+        setNavigationSubroute(null)
+        setViewMode(intent as ViewMode)
+        return
+      }
+      if (!intent || typeof intent !== 'object' || !('view' in intent)) return
+      const navigation = intent as NavigationIntent
+      setSettingsSection(navigation.view === 'settings' ? (navigation.section ?? null) : null)
+      if (navigation.view === 'settings') setSettingsNavigationKey((value) => value + 1)
+      setNavigationSubroute(navigation.view === 'devices' ? (navigation.subroute ?? null) : null)
+      setViewMode(navigation.view)
     }
     window.addEventListener('og:navigate', onNav)
     // Main-driven navigation (tray → a screen).
-    const offNav = window.api.onNavigate?.((v: string) => setViewMode(v as ViewMode))
+    const offNav = window.api.onNavigate?.((v: string) => {
+      setNavigationSubroute(null)
+      setSettingsSection(null)
+      setViewMode(v as ViewMode)
+    })
     return () => {
       window.removeEventListener('og:navigate', onNav)
       offNav?.()
     }
+  }, [])
+
+  useEffect(() => {
+    const open = (event: Event): void => {
+      const detail = (event as CustomEvent<{ tab?: ModelSettingsPanelTab } | undefined>).detail
+      const requestedTab = detail ? detail.tab : undefined
+      setModelSettingsTab(requestedTab ?? 'model')
+      setModelSettingsOpen(true)
+    }
+    window.addEventListener(OPEN_MODEL_SETTINGS_PANEL_EVENT, open)
+    return () => window.removeEventListener(OPEN_MODEL_SETTINGS_PANEL_EVENT, open)
   }, [])
 
   // Update browser URL when view mode changes
@@ -354,14 +438,18 @@ function AppContent() {
       settings: '/settings',
       clipboard: '/clipboard',
       voice: '/voice',
-      vault: '/vault'
+      vault: '/vault',
+      devices: '/devices'
     }
 
-    const newPath = urlMap[viewMode]
+    const newPath =
+      viewMode === 'settings' && settingsSection
+        ? `/settings/${encodeURIComponent(settingsSection)}`
+        : urlMap[viewMode]
     if (window.location.pathname !== newPath) {
       window.history.replaceState(null, '', newPath)
     }
-  }, [viewMode])
+  }, [navigationSubroute, settingsSection, viewMode])
 
   // Record the committed destination before paint so an immediate keyboard/back-button action
   // cannot observe the new screen while history still points at the previous screen. A passive
@@ -375,6 +463,8 @@ function AppContent() {
     // Avoid duplicating the same state
     const currentState: NavigationState = {
       viewMode,
+      subroute: viewMode === 'devices' ? navigationSubroute : null,
+      settingsSection: viewMode === 'settings' ? settingsSection : null,
       selectedSessionId,
       selectedMemoryId,
       selectedEntityId,
@@ -385,6 +475,8 @@ function AppContent() {
     const isSameState =
       lastState &&
       lastState.viewMode === currentState.viewMode &&
+      lastState.subroute === currentState.subroute &&
+      lastState.settingsSection === currentState.settingsSection &&
       lastState.selectedSessionId === currentState.selectedSessionId &&
       lastState.selectedMemoryId === currentState.selectedMemoryId &&
       lastState.selectedEntityId === currentState.selectedEntityId &&
@@ -402,6 +494,8 @@ function AppContent() {
     syncNavFlags()
   }, [
     viewMode,
+    navigationSubroute,
+    settingsSection,
     selectedSessionId,
     selectedMemoryId,
     selectedEntityId,
@@ -426,24 +520,6 @@ function AppContent() {
           title: data.entityName ? `Approval — ${data.entityName}` : 'Approval needed',
           message: data.detail ? `${data.title} — ${data.detail}` : data.title,
           approvalId: data.approvalId,
-          ...routing
-        })
-      })
-    )
-
-    // New to-do extracted from your activity
-    unsubscribers.push(
-      window.api.onNewAction((data) => {
-        const routing = callHook<NotificationRoutingMetadata>(NOTIFICATION_METADATA_HOOK, {
-          source: 'action',
-          recordId: data.actionId
-        } satisfies NotificationSourceRecord)
-        const where = [data.entityName, data.sourceApp].filter(Boolean).join(' · ')
-        addNotification({
-          type: 'todo',
-          title: data.due ? `New to-do — due ${data.due}` : 'New to-do',
-          message: where ? `${data.text} (${where})` : data.text,
-          actionId: data.actionId,
           ...routing
         })
       })
@@ -483,6 +559,8 @@ function AppContent() {
       const previousState = navigationHistory.current[navigationHistory.current.length - 1]
       if (previousState) {
         setViewMode(previousState.viewMode)
+        setNavigationSubroute(previousState.subroute)
+        setSettingsSection(previousState.settingsSection)
         setSelectedSessionId(previousState.selectedSessionId)
         setSelectedMemoryId(previousState.selectedMemoryId)
         setSelectedEntityId(previousState.selectedEntityId)
@@ -503,6 +581,8 @@ function AppContent() {
         navigationHistory.current.push(nextState)
         // Apply the state
         setViewMode(nextState.viewMode)
+        setNavigationSubroute(nextState.subroute)
+        setSettingsSection(nextState.settingsSection)
         setSelectedSessionId(nextState.selectedSessionId)
         setSelectedMemoryId(nextState.selectedMemoryId)
         setSelectedEntityId(nextState.selectedEntityId)
@@ -618,12 +698,21 @@ function AppContent() {
     []
   )
 
+  const handleOpenChatOwner = useCallback(
+    (target: { conversationId?: string; openGallery?: boolean }) => {
+      setChatTarget(target)
+      setViewMode('memory-chat')
+    },
+    []
+  )
+
   // Global keyboard shortcuts for back/forward navigation (Cmd+[ and Cmd+])
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === '[') {
         e.preventDefault()
-        navigateBack()
+        if (modelSettingsOpen) setModelSettingsOpen(false)
+        else navigateBack()
       } else if ((e.metaKey || e.ctrlKey) && e.key === ']') {
         e.preventDefault()
         navigateForward()
@@ -631,7 +720,7 @@ function AppContent() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [navigateBack, navigateForward])
+  }, [modelSettingsOpen, navigateBack, navigateForward])
 
   // Original sidebar order preserved. Pro tabs pull their icon/label from the
   // static catalogue and are marked locked in the free build (open the
@@ -653,7 +742,7 @@ function AppContent() {
       label: f.label,
       icon: <f.icon className="h-5 w-5 shrink-0 text-neutral-400" weight="regular" />,
       view: f.route as ViewMode,
-      locked: !isPro
+      locked: !isPro && !(route === 'devices' && proActivation === 'entitlement-bootstrap')
     }
   }
   // Icons take no color — the nav button drives it (emerald when active).
@@ -678,6 +767,7 @@ function AppContent() {
     proItem('voice'),
     proItem('vault'),
     proItem('clipboard'),
+    proItem('devices'),
     {
       label: 'Integrations',
       icon: <IconPlug className="h-5 w-5 shrink-0" />,
@@ -705,6 +795,17 @@ function AppContent() {
       view: 'settings' as ViewMode
     }
   ]
+  // One way in to a screen, used by the sidebar and by the command palette: switching screens also
+  // drops whatever row was selected in the old one, so a stale detail pane never rides along.
+  const goToView = (view: ViewMode): void => {
+    setNavigationSubroute(null)
+    setSettingsSection(null)
+    setViewMode(view)
+    setSelectedSessionId(null)
+    setSelectedMemoryId(null)
+    setSelectedEntityId(null)
+    setReplayTarget(null)
+  }
   const renderNavItem = (item: {
     label: string
     icon: React.ReactNode
@@ -712,22 +813,18 @@ function AppContent() {
     locked?: boolean
   }): React.ReactElement => {
     const active = viewMode === item.view
+    const notificationCount = item.view === 'notifications' ? unreadCount + externalUnreadCount : 0
+    const notificationCountLabel = notificationCount > 9 ? '9+' : String(notificationCount)
     return (
       <button
         key={item.view}
-        onClick={() => {
-          setViewMode(item.view)
-          setSelectedSessionId(null)
-          setSelectedMemoryId(null)
-          setSelectedEntityId(null)
-          setReplayTarget(null)
-        }}
+        onClick={() => goToView(item.view)}
         title={!sidebarOpen ? item.label : undefined}
         className={cn(
           'group/nav relative flex items-center gap-3 rounded-lg py-2 text-sm transition-colors',
           sidebarOpen ? 'px-3' : 'justify-center px-0',
           active
-            ? 'bg-green-500/10 text-green-600 dark:text-green-400'
+            ? 'bg-green-500/10 text-green-600 dark:text-emerald-400'
             : 'text-neutral-500 hover:bg-neutral-500/10 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white'
         )}
       >
@@ -736,6 +833,17 @@ function AppContent() {
         )}
         {item.icon}
         {sidebarOpen && <span className="flex-1 text-left whitespace-pre">{item.label}</span>}
+        {notificationCount > 0 && (
+          <span
+            aria-label={`${notificationCount} unread notifications`}
+            className={cn(
+              'flex h-4 min-w-4 items-center justify-center border border-green-500 bg-green-500 px-1 font-mono text-[9px] leading-none text-black',
+              !sidebarOpen && 'absolute right-0 top-0'
+            )}
+          >
+            {notificationCountLabel}
+          </span>
+        )}
         {sidebarOpen && item.locked && (
           <IconLock className="h-3.5 w-3.5 shrink-0 text-neutral-400/60" title="Pro" />
         )}
@@ -745,7 +853,17 @@ function AppContent() {
 
   return (
     <div className="h-screen w-full overflow-hidden bg-neutral-950 relative">
-      <CommandPalette onOpenHit={handleOpenHit} onSeeAll={openSearch} />
+      <CommandPalette
+        onOpenHit={handleOpenHit}
+        onSeeAll={openSearch}
+        /* The sidebar IS the list of screens - the palette searches that, never a second copy. */
+        screens={[...mainNav, ...bottomNav].map(({ label, view, locked }) => ({
+          label,
+          view,
+          locked
+        }))}
+        onGoTo={(view) => goToView(view as ViewMode)}
+      />
       {/* Recording indicator — auto-records detected meetings; always visible. */}
       {(rec.recording || rec.busy) && (
         <button
@@ -805,7 +923,7 @@ function AppContent() {
               }
             }}
             disabled={installing}
-            className="flex items-center gap-1.5 rounded-sm border border-green-500/50 bg-green-500/10 px-2.5 py-1 text-green-400 hover:bg-green-500/20 disabled:opacity-60"
+            className="flex items-center gap-1.5 rounded-sm border border-green-500/50 bg-green-500/10 px-2.5 py-1 text-emerald-400 hover:bg-green-500/20 disabled:opacity-60"
           >
             {installing ? (
               <>
@@ -897,7 +1015,15 @@ function AppContent() {
             <div className="flex flex-col gap-1 border-t border-neutral-200 pt-2 dark:border-neutral-800">
               <ModelStatusDot
                 open={sidebarOpen}
-                onClick={() => (sidebarOpen ? setViewMode('settings') : setSidebarOpen(true))}
+                onClick={() => {
+                  if (!sidebarOpen) {
+                    setSidebarOpen(true)
+                    return
+                  }
+                  setNavigationSubroute(null)
+                  setSettingsSection(null)
+                  setViewMode('settings')
+                }}
               />
               <NavThemeToggle expanded={sidebarOpen} />
               {bottomNav.map(renderNavItem)}
@@ -995,7 +1121,11 @@ function AppContent() {
                   ) : viewMode === 'gateway' ? (
                     <GatewayScreen />
                   ) : viewMode === 'settings' ? (
-                    <Settings />
+                    <Settings
+                      key={settingsNavigationKey}
+                      activeSection={settingsSection}
+                      onSectionChange={setSettingsSection}
+                    />
                   ) : proFeatureComingSoon(viewMode, currentPlatform(), isPro) ? (
                     <UpgradeScreen variant="coming-soon" feature={getProFeature(viewMode)} />
                   ) : (
@@ -1004,6 +1134,9 @@ function AppContent() {
                     (renderProView(viewMode, {
                       setView: (v) => setViewMode(v as ViewMode),
                       onNavigate: handleProNavigate,
+                      navigationSubroute,
+                      setNavigationSubroute,
+                      navigateBack,
                       replayTarget,
                       meetingTarget,
                       actionTarget,
@@ -1023,7 +1156,8 @@ function AppContent() {
                       rec,
                       onSelectEntity: handleSelectEntity,
                       onSelectMemory: handleSelectMemory,
-                      onOpenHit: handleOpenHit
+                      onOpenHit: handleOpenHit,
+                      openChatOwner: handleOpenChatOwner
                     } satisfies ProViewContext) ?? (
                       <UpgradeScreen feature={getProFeature(viewMode)} />
                     ))
@@ -1034,6 +1168,13 @@ function AppContent() {
           </div>
         </div>
       </div>
+      {modelSettingsOpen && (
+        <SettingsPanel
+          key={modelSettingsTab}
+          initialTab={modelSettingsTab}
+          onClose={() => setModelSettingsOpen(false)}
+        />
+      )}
     </div>
   )
 }

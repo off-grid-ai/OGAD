@@ -33,7 +33,10 @@ import {
 // The real app mounts MemoryChat inside a global TooltipProvider (App shell). Mirror
 // that here so the composer's tooltip-wrapped controls render — this wraps the REAL
 // component, it does not stub any of its behavior.
-function renderChat(openTarget?: { conversationId?: string }): ReturnType<typeof render> {
+function renderChat(openTarget?: {
+  conversationId?: string
+  openGallery?: boolean
+}): ReturnType<typeof render> {
   return render(
     <TooltipProvider>
       <MemoryChat openTarget={openTarget} />
@@ -158,7 +161,16 @@ function installApi(opts: InstallApiOptions): InstalledApi {
   >(async () => ({ answer: 'done', toolCalls: [], unified: [] }))
   const cancelImageGen = vi.fn<() => void>()
   const exportGeneratedImage = vi.fn<(...args: unknown[]) => Promise<void>>(async () => {})
-  const getRagMessages = vi.fn(async (id: string) => messages.get(id) ?? [])
+  // Timestamps are filled in where a seed omitted one. The renderer projects each row through
+  // projectSyncedMessageTurn, which returns null for a message it cannot order, so an untimestamped
+  // row is silently dropped and the conversation renders empty. The table this stands for always has
+  // one - SQLite's CURRENT_TIMESTAMP default, in this shape.
+  const getRagMessages = vi.fn(async (id: string) =>
+    (messages.get(id) ?? []).map((row, index) => ({
+      created_at: `2026-01-01 09:00:0${index}`,
+      ...(row as Record<string, unknown>)
+    }))
+  )
   const chatVisionAvailable = vi.fn(async () => opts.chatVision ?? true)
   const processFile =
     opts.processFile ??
@@ -242,6 +254,7 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     }),
     // --- misc mount-time calls (inert) ---
     listProjects: vi.fn(async () => []),
+    listArtifacts: vi.fn(async () => []),
     styleThumbs: vi.fn(async () => ({})),
     listSkills: vi.fn(async () => []),
     onRagStream: vi.fn(() => () => {}),
@@ -326,6 +339,13 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     })
   })
 
+  it('opens the real Gallery when a synced generated-file destination targets it', async () => {
+    installApi({ active: FULL, models: [FULL] })
+    renderChat({ openGallery: true })
+    expect(await screen.findByText('Gallery')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^images/i })).toBeTruthy()
+  })
+
   it('carries the USER-typed steps (10), not the model default (28), and the picked model', async () => {
     const user = userEvent.setup()
     // Engine reports the full checkpoint (default 28) active, plus the few-step one.
@@ -379,7 +399,9 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
       models: [FULL],
       conversations: [conv],
       // The user already sent the prompt before navigating away, so the conversation has a turn.
-      messages: { 'c-img': [{ id: 1, role: 'user', content: 'a glass observatory under an aurora' }] },
+      messages: {
+        'c-img': [{ id: 1, role: 'user', content: 'a glass observatory under an aurora' }]
+      },
       jobStatus: {
         id: 'job-1',
         phase: 'running',

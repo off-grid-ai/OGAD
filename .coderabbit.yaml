@@ -1,0 +1,45 @@
+# CodeRabbit configuration.
+#
+# Why this exists: on the sync release PRs CodeRabbit reported a GREEN check having reviewed nothing at all -
+# "Review skipped: 140 files exceed the limit of 100" (desktop) and "316 files exceed the limit of 300"
+# (mobile). A passing check that means "not reviewed" is worse than a missing one, so the file count is kept
+# honest here: screenshots, generated artefacts, lockfiles and docs are excluded from review, and therefore
+# from the count that trips the limit.
+#
+# This does NOT rescue a release-sized PR - desktop's diff is still 140 code files against a limit of 100.
+# The fix for those is smaller PRs; this keeps ordinary ones reviewable and the noise out.
+language: en
+reviews:
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+  path_filters:
+    # Binary and generated evidence: a reviewer cannot read these, and 27 PNGs alone pushed desktop over.
+    - '!**/*.png'
+    - '!**/*.jpg'
+    - '!**/*.jpeg'
+    - '!**/*.gif'
+    - '!**/*.pdf'
+    - '!**/e2e/screenshots/**'
+    - '!**/__tests__/device/screenshots/**'
+    # Lockfiles and dependency graphs: reviewed by the install gate, not by reading.
+    - '!**/package-lock.json'
+    - '!**/yarn.lock'
+    - '!**/Podfile.lock'
+    - '!**/Gemfile.lock'
+    # Build output and vendored trees.
+    - '!**/dist/**'
+    - '!**/out/**'
+    - '!**/build/**'
+    - '!**/coverage/**'
+    - '!**/node_modules/**'
+    - '!**/Pods/**'
+    - '!**/*.xcodeproj/**'
+    - '!**/.claude/**'
+  auto_review:
+    enabled: true
+    drafts: false
+chat:
+  auto_reply: true

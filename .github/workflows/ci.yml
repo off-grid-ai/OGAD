@@ -1,5 +1,6 @@
-# PR + main verification: typecheck (core + pro), lint, and the full vitest suite
-# (which includes the pro/ tests when the pro repo is checked out alongside).
+# PR + main verification, as ONE job: typecheck (core + pro), the full vitest suite with the coverage floor
+# (which includes the pro/ tests when the pro repo is checked out alongside), dependency boundaries, lint, and
+# the Playwright e2e tour on the built app.
 #
 # Cross-repo note: pro/ is a separate private repo (paid features). Set the repo
 # secret CI_CROSS_REPO_TOKEN (a PAT with read access to off-grid-ai/desktop-pro)
@@ -11,9 +12,17 @@ on:
   push:
     branches: [main]
 jobs:
-  verify:
+  # ONE job per repo, matching mobile and mobile-pro: typecheck, tests + coverage, boundaries, lint and the
+  # Playwright e2e all report as a single `ci` check.
+  #
+  # This used to be two parallel jobs (verify + e2e). Merging them costs ~7 minutes of wall clock - the e2e tour
+  # now runs after the unit gates instead of beside them - and buys one check to read instead of two, plus the
+  # deletion of a duplicated pro + shared checkout and a second `npm ci` that existed only to feed the second
+  # job. An earlier attempt at this was reverted because appending e2e "blew the 25-min job cap" (PR #68); that
+  # cap was this workflow's own timeout-minutes, so it is raised here deliberately rather than worked around.
+  ci:
     runs-on: ubuntu-latest
-    timeout-minutes: 25 # backstop: a hung step fails fast instead of running for hours
+    timeout-minutes: 50 # backstop: a hung step fails fast instead of running for hours (unit gates + e2e tour)
     steps:
       - uses: actions/checkout@v4
       # Check out pro on the branch that MATCHES this PR/push (so a coordinated
@@ -55,6 +64,49 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24' # node:sqlite (used by integration tests) is available unflagged
+      # @offgrid/sync is a file: dependency on the SIBLING shared monorepo ("file:../shared/packages/sync").
+      # It arrived with the sync work and CI never provisioned it, so every job that installs would fail on the
+      # same missing module. actions/checkout refuses a path outside the workspace, so it lands inside and is
+      # moved up one level - exactly where the file: specifier points.
+      #
+      # Matching branch first, main as the fallback, the same shape as the pro checkout above: a PR that changes
+      # the app and the shared package together must be tested against the package it expects.
+      - name: Check out the shared monorepo
+        id: shared_branch
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: off-grid-ai/shared
+          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          path: _shared
+          ref: ${{ github.head_ref || github.ref_name }}
+          persist-credentials: false
+      - name: Fall back to shared main
+        if: ${{ steps.shared_branch.outcome != 'success' }}
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: off-grid-ai/shared
+          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          path: _shared
+          persist-credentials: false
+      - name: Put shared beside this checkout
+        run: |
+          if [ ! -d _shared ]; then
+            echo "::error::off-grid-ai/shared was not checked out - @offgrid/sync cannot resolve. Check CI_CROSS_REPO_TOKEN."
+            exit 1
+          fi
+          rm -rf ../shared
+          mv _shared ../shared
+          # Install at the WORKSPACE ROOT, not inside packages/sync. shared is an npm-workspaces
+          # monorepo: the lockfile and the build tool (tsup) live at the root, and packages/sync
+          # declares neither. Installing inside the member failed `npm ci` (no lockfile there), fell
+          # through to `npm install`, pulled the member's five runtime deps, and left the build to
+          # die on `sh: 1: tsup: not found` (exit 127), taking both jobs with it.
+          # A LOCKED install, and no fallback: an unlocked install would resolve a different graph and let the
+          # later gates run against dependencies nobody committed. A drifted lock should stop the build.
+          npm --prefix ../shared ci
+          npm --prefix ../shared/packages/sync run build
       - run: npm ci
       # Hard gates: types + the full test suite.
       - name: Typecheck (core)
@@ -71,6 +123,32 @@ jobs:
       - name: Test + coverage thresholds
         timeout-minutes: 10
         run: npm run test:coverage
+      # The DB journeys - 74 files, 255 cases - which CI has NEVER run.
+      #
+      # They are excluded from the default vitest project because they load the real native SQLite and need
+      # better-sqlite3-multiple-ciphers rebuilt for the TEST RUNNER's node ABI (the app builds it for
+      # ELECTRON's). scripts/test-db.sh does that swap and restores Electron's build afterwards, which is why
+      # this is its own step: the rebuild mutates node_modules.
+      #
+      # Not running them had a measurable cost. The default config EXCLUDES database.ts, rag/store.ts,
+      # prompt-store and runtime-residency with the note "covered by the tests in *.dbtest.ts via
+      # npm run test:db" - a claim nothing verified. approval-lifecycle.ts measured 0% for the same reason
+      # while having tests all along.
+      #
+      # OFFGRID_DB_VITEST_CONFIG selects the coverage variant, which is "the db journeys that pass today": it
+      # skips four files whose causes are each documented in vitest.db.coverage.config.ts (one of them is the
+      # control-center projection bug still awaiting a decision). vitest writes no report at all when any test
+      # fails, so the variant is what makes a report possible; the exclusions are visible in that file rather
+      # than hidden here, and each is meant to be deleted as its cause is resolved.
+      - name: DB journeys (real native SQLite)
+        timeout-minutes: 12
+        env:
+          # The CI variant: the coverage variant plus four files that fail on a LINUX runner rather than in the
+          # code - a bundled macOS ffmpeg, a live engine port, the update feed, and one still undiagnosed. Each
+          # reason is recorded in vitest.db.ci.config.ts with the evidence from the run that found it. 243 of the
+          # 248 cases still run here.
+          OFFGRID_DB_VITEST_CONFIG: vitest.db.ci.config.ts
+        run: npm run test:db
       # Build/native/port integration tests (packaging, whisper build-staging, the
       # model-port + System Health seams that own :8439). These need a packaged
       # build / native toolchain / a live engine port the pure `verify` runner
@@ -95,72 +173,75 @@ jobs:
         timeout-minutes: 8
         continue-on-error: true
         run: npm run lint
-
-  # Full Playwright e2e tour on the BUILT app — its OWN job (parallel to verify) so its ~20-min
-  # runtime doesn't eat verify's budget (appending it to verify blew the 25-min job cap — PR #68).
-  # Specs needing real models/engine binaries (functional-real-engine, voice/tts) self-skip when
-  # those aren't present (they aren't in CI), so this gates the model-free surfaces: onboarding,
-  # nav, Settings, Models, Replay (incl. the capture toggle), Integrations (BYO Google). This is
-  # the one check unit/integration can't give: does the built app actually render + drive.
-  e2e:
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    steps:
-      - uses: actions/checkout@v4
-      - name: Check out pro (matching branch) into ./pro
-        id: pro_branch
-        uses: actions/checkout@v4
-        continue-on-error: true
-        with:
-          repository: off-grid-ai/desktop-pro
-          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          path: pro
-          ref: ${{ github.head_ref || github.ref_name }}
-          persist-credentials: false
-      - name: Fall back to pro main if no matching branch
-        if: ${{ steps.pro_branch.outcome != 'success' || hashFiles('pro/tsconfig.json') == '' }}
-        continue-on-error: true
-        uses: actions/checkout@v4
-        with:
-          repository: off-grid-ai/desktop-pro
-          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          path: pro
-          persist-credentials: false
-      - name: Require pro checkout to have succeeded
-        run: |
-          if [ ! -f pro/tsconfig.json ]; then
-            echo "::error::pro (desktop-pro) was not checked out — cannot run the open-core e2e. Check CI_CROSS_REPO_TOKEN / repo access."
-            exit 1
-          fi
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - run: npm ci
-      # Electron needs an X server on Linux; xvfb-run provides a virtual one. --no-sandbox via env
-      # (Electron's sandbox can't run under the CI user without SUID setup).
+      # The full Playwright tour on the BUILT app - the one check unit/integration cannot give: does the app
+      # actually render and drive. Specs needing real models/engine binaries (functional-real-engine, voice/tts)
+      # self-skip when those are absent, as they are here, so this gates the model-free surfaces: onboarding,
+      # nav, Settings, Models, Replay (incl. the capture toggle), Integrations (BYO Google).
       #
-      # ADVISORY (continue-on-error) for now — same policy as lint/test:heavy above. The remaining
-      # reason is headless-Electron launch instability on the ubuntu runner (waitForEvent 'window'
-      # timeouts, "page/context closed", clipboard/display-dependent specs), NOT product failures.
+      # Electron needs an X server on Linux; xvfb-run provides a virtual one. --no-sandbox via env (Electron's
+      # sandbox cannot run under the CI user without SUID setup).
       #
-      # NOTE: this being advisory hid four real spec defects on main for days (a selector that
-      # could never match, a section never opened, two stale accessible names) — the job was green
-      # while 7 specs failed. Every one is fixed and the full suite is 73/73 on a real display, so
-      # the ONLY thing still standing between this and BLOCKING is runner stability. Steps taken:
-      # retries: 2 in CI (playwright.config.ts) for whole-instance launch flakes, and fixed-port
-      # specs now self-skip instead of failing (e2e/helpers/ports.ts).
+      # ADVISORY (continue-on-error) for now - same policy as lint and test:heavy above. The remaining reason is
+      # headless-Electron launch instability on the ubuntu runner (waitForEvent 'window' timeouts, "page/context
+      # closed", clipboard/display-dependent specs), NOT product failures.
       #
-      # Graduate to BLOCKING (delete continue-on-error) once a few consecutive runs are green —
-      # do NOT flip it while the runner still drops instances, or the gate gets reverted and we
-      # lose the signal again. Tracked in docs/GAPS_BACKLOG.md.
+      # NOTE: this being advisory hid four real spec defects on main for days (a selector that could never match,
+      # a section never opened, two stale accessible names) - the job was green while 7 specs failed. Every one is
+      # fixed and the full suite is 73/73 on a real display, so the ONLY thing still standing between this and
+      # BLOCKING is runner stability. Steps taken: retries: 2 in CI (playwright.config.ts) for whole-instance
+      # launch flakes, and fixed-port specs now self-skip instead of failing (e2e/helpers/ports.ts).
+      #
+      # Graduate to BLOCKING (delete continue-on-error) once a few consecutive runs are green - do NOT flip it
+      # while the runner still drops instances, or the gate gets reverted and we lose the signal again. Tracked
+      # in docs/GAPS_BACKLOG.md.
+      #
+      # OFFGRID_E2E_COVERAGE makes this run COUNT. 25 specs drive the real app - devices-sync alone stands up a
+      # synthetic peer with a real SyncEngine - and none of it reached a coverage report before, because
+      # Playwright launches Electron as its own process. With the variable set, Node writes V8 coverage for the
+      # main process and the vite build emits the sourcemaps that map it back to src/**.ts; both are gated on this
+      # variable, so a normal run and every shipped artifact are byte-identical to before.
+      #
+      # OFF BY DEFAULT since 2026-08-11. It was advisory, so it never gated anything, and it spent up to
+      # 28 minutes of every run to say so. The suite now runs on a real macOS display through
+      # `scripts/e2e-on-box.sh`, which is where its failures are actionable: the specs added on 2026-08-09
+      # pass there and fail here, because a Linux runner cannot satisfy a fixture that needs Pro's
+      # macOS-only native layer.
+      #
+      # Set the repository variable OFFGRID_CI_E2E=1 to turn it back on - no code change needed. Do not
+      # make it blocking on this runner; read the note above first.
       - name: E2E (Playwright, xvfb)
+        if: ${{ vars.OFFGRID_CI_E2E == '1' }}
         timeout-minutes: 28
         continue-on-error: true
         env:
           ELECTRON_DISABLE_SANDBOX: '1'
+          OFFGRID_E2E_COVERAGE: ${{ github.workspace }}/coverage-e2e-raw
         run: xvfb-run -a npm run test:e2e
+      # c8 turns the raw V8 output into an Istanbul report. It lives in the shared monorepo's node_modules and
+      # needs no new dependency here.
+      #
+      # The report is a build ARTIFACT rather than a gate: its statement map comes from the bundle, so its
+      # denominators are whole-file and must not set a threshold - see shared/scripts/merge-line-coverage.mjs,
+      # which accepts it as --coarse and lets it contribute covered lines only.
+      - name: Convert e2e coverage
+        if: ${{ always() && vars.OFFGRID_CI_E2E == '1' }}
+        continue-on-error: true
+        run: |
+          if [ -d coverage-e2e-raw ] && [ -n "$(ls -A coverage-e2e-raw 2>/dev/null)" ]; then
+            npx c8 report --temp-directory=coverage-e2e-raw --reporter=json --reporter=text-summary \
+              --report-dir=coverage-e2e --all=false
+          else
+            echo "no e2e coverage captured (the suite may not have launched)"
+          fi
+      - name: Upload e2e coverage
+        if: ${{ always() && vars.OFFGRID_CI_E2E == '1' }}
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4
+        with:
+          name: e2e-coverage
+          path: coverage-e2e/
+          if-no-files-found: ignore
       - name: Upload e2e screenshots
-        if: always()
+        if: ${{ always() && vars.OFFGRID_CI_E2E == '1' }}
         uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4
         with:
           name: e2e-screenshots

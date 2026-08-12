@@ -91,6 +91,26 @@ describe('rendered storage usage', () => {
     expect(screen.getByText(/Images, artifacts, and thumbnails.*3 items.*8 MB/)).toBeTruthy()
   })
 
+  it('opens model settings only from the active installed model', async () => {
+    const openSettings = vi.fn()
+    window.addEventListener('og:open-model-settings-panel', openSettings)
+    try {
+      const user = userEvent.setup()
+      render(<StoragePanel />)
+
+      expect(
+        await screen.findByRole('button', { name: 'Settings for Local text model' })
+      ).toBeTruthy()
+      expect(screen.queryByRole('button', { name: 'Settings for Local vision model' })).toBeNull()
+      await user.click(screen.getByRole('button', { name: 'Settings for Local text model' }))
+
+      expect(openSettings).toHaveBeenCalledOnce()
+      expect((openSettings.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({ tab: 'model' })
+    } finally {
+      window.removeEventListener('og:open-model-settings-panel', openSettings)
+    }
+  })
+
   it('explains a disk-full download and keeps its retry action reachable', async () => {
     // This is the public IPC payload. The producer's ENOSPC normalization and
     // persistence are exercised separately by model-integrity.integration.test.ts.

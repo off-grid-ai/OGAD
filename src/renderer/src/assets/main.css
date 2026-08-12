@@ -34,6 +34,19 @@
   --color-slate-950: var(--og-background);
   --color-slate-900: var(--og-surface);
   /* Emerald is the only accent; fold blue/purple/green into primary. */
+  /*
+   * The light TEXT shades must map, or they stay #34D399 / #6EE7B7 in both themes —
+   * the dark-mode green on a white background, which is why the pairing code and
+   * Discoverable rendered as unreadable pale mint. --og-primary is theme-aware:
+   * #34D399 dark / #059669 light.
+   *
+   * Deliberately NOT mapping 500/600/700: those are the fill shades behind
+   * `bg-emerald-500 text-black` buttons and selected segments, and Tailwind's own
+   * values already read correctly on both themes. Remapping them only darkens
+   * filled controls for no readability gain.
+   */
+  --color-emerald-300: var(--og-primary);
+  --color-emerald-400: var(--og-primary);
   --color-green-400: var(--og-primary);
   --color-green-500: var(--og-primary);
   --color-blue-400: var(--og-primary);
@@ -91,18 +104,18 @@
       transform: translate(-50%, -40%) scale(1);
     }
   }
+}
 
-  /* Namespaced because onboarding.css also carries a legacy `orbit` keyframe.
-     Global keyframe names collide even when the rules live in separate files. */
-  @keyframes offgrid-orbit-circles {
-    0% {
-      transform: rotate(var(--angle, 0deg)) translateY(calc(-1 * var(--radius, 160px)))
-        rotate(calc(-1 * var(--angle, 0deg)));
-    }
-    100% {
-      transform: rotate(calc(var(--angle, 0deg) + 360deg))
-        translateY(calc(-1 * var(--radius, 160px))) rotate(calc(-1 * var(--angle, 0deg) - 360deg));
-    }
+/* This component applies its animation inline, so its keyframes must remain global.
+   Keeping them inside @theme lets Tailwind remove them as an unused theme utility. */
+@keyframes offgrid-orbit-circles {
+  0% {
+    transform: rotate(var(--angle, 0deg)) translateY(calc(-1 * var(--radius, 160px)))
+      rotate(calc(-1 * var(--angle, 0deg)));
+  }
+  100% {
+    transform: rotate(calc(var(--angle, 0deg) + 360deg)) translateY(calc(-1 * var(--radius, 160px)))
+      rotate(calc(-1 * var(--angle, 0deg) - 360deg));
   }
 }
 

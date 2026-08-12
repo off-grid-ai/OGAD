@@ -118,10 +118,17 @@ test('keyboard focus follows navigation, form, dialog, and primary-action order 
   await page.locator('body').click({ position: { x: 2, y: 2 } })
   await page.keyboard.press('Tab')
 
-  const expandSidebar = page.getByRole('button', { name: 'Expand sidebar' })
-  const searchNavigation = page.getByRole('button', { name: 'Search', exact: true })
-  const dayNavigation = page.getByRole('button', { name: 'Day', exact: true })
-  await expectVisibleKeyboardFocus(expandSidebar, 'sidebar toggle')
+  // 'Collapse sidebar': the rail opens EXPANDED, so its toggle offers the action available from here.
+  // There is no 'Expand sidebar' button to focus until someone collapses it. What this test is about is
+  // unchanged - the sidebar toggle is the first thing Tab reaches.
+  const sidebarToggle = page.getByRole('button', { name: 'Collapse sidebar' })
+  // Anchored regexes rather than exact names: in a free build (OFFGRID_PRO=0) these two are locked, and
+  // a locked item renders a lock icon whose title="Pro" joins the accessible name - the button is called
+  // "Search Pro" here and "Search" in a pro build. Matching the start covers both, and still pins WHICH
+  // destination receives focus, which is what this test is about.
+  const searchNavigation = page.getByRole('button', { name: /^Search( Pro)?$/ })
+  const dayNavigation = page.getByRole('button', { name: /^Day( Pro)?$/ })
+  await expectVisibleKeyboardFocus(sidebarToggle, 'sidebar toggle')
   await page.keyboard.press('Tab')
   await expectVisibleKeyboardFocus(searchNavigation, 'first navigation destination')
   await page.keyboard.press('Tab')
@@ -130,7 +137,7 @@ test('keyboard focus follows navigation, form, dialog, and primary-action order 
   // Continue through the rest of the real navigation and Models header. This keeps
   // Chromium in keyboard modality; a programmatic focus jump would not prove that
   // :focus-visible survives the user's actual traversal.
-  await tabUntilFocused(page.getByRole('button', { name: /^Storage\b/ }), 'Storage tab', 24)
+  await tabUntilFocused(page.getByRole('button', { name: /^Storage\b/ }), 'Storage tab', 32)
   await page.keyboard.press('Tab')
   const modelSearch = page.getByPlaceholder('Search HuggingFace…')
   await expectVisibleKeyboardFocus(modelSearch, 'model search field')
@@ -185,7 +192,11 @@ test('keyboard focus follows navigation, form, dialog, and primary-action order 
   await page.keyboard.press('Meta+K')
   const dialog = page.getByRole('dialog', { name: 'Search Off Grid' })
   await expect(dialog).toBeVisible()
-  const dialogSearch = dialog.getByPlaceholder('Search everything…')
+  // The REAL placeholder. This said 'Search everything…', which is not a substring of what the palette
+  // renders ('Search everything, or jump to a screen…'), so the locator matched nothing and the focus
+  // assertion failed against an element that was never there - the palette focuses its input correctly.
+  // Anchored on the stable half of the string so a copy tweak to the tail does not break it again.
+  const dialogSearch = dialog.getByPlaceholder(/^Search everything/)
   await expectVisibleKeyboardFocus(dialogSearch, 'dialog search field')
   await page.keyboard.press('Tab')
   await expectVisibleKeyboardFocus(dialogSearch, 'dialog focus trap')

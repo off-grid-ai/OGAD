@@ -1,7 +1,7 @@
 // A broken stdout/stderr pipe must never crash the app.
 //
-// When the main process is launched by a parent that captures its output (an e2e harness like
-// provit, a shell pipe) and that parent exits, the next write to the pipe raises EPIPE. From a
+// When the main process is launched by a parent that captures its output (an e2e harness, a
+// shell pipe) and that parent exits, the next write to the pipe raises EPIPE. From a
 // timer-based console.log that EPIPE is emitted as an 'error' on the stdout stream with no
 // listener, so it becomes an uncaught exception and Electron shows a fatal "A JavaScript error
 // occurred in the main process" dialog. That modal then blocks a clean exit and keeps the

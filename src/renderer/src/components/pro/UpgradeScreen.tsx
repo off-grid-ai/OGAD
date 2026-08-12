@@ -12,6 +12,7 @@ import {
 import { PRO_PAY_URL, PRO_FEATURES, featureSupportsPlatform, type ProFeature } from './proCatalog'
 import { OFF_GRID_MOBILE_URL, OFF_GRID_WEBSITE_URL, openExternal } from '../../constants/links'
 import { deviceNoun, currentPlatform } from '@renderer/lib/device'
+import { projectPersonalMeshActivationFailure } from '@offgrid/sync'
 
 // License-key activation. Only meaningful in a pro-capable build (__OFFGRID_PRO__);
 // a core build has no pro code bundled, so entering a key would unlock nothing.
@@ -32,13 +33,10 @@ function LicenseActivation(): React.ReactElement {
       if (r.ok) {
         setMsg({ kind: 'ok', text: 'Activated. Restart to finish unlocking Pro.' })
       } else {
-        const text =
-          r.reason === 'limit'
-            ? 'This license is already on the maximum number of devices. Deactivate one and try again.'
-            : r.reason === 'network'
-              ? 'Could not reach the licensing server. Check your connection and try again.'
-              : 'That license key is invalid, expired, or revoked.'
-        setMsg({ kind: 'err', text })
+        setMsg({
+          kind: 'err',
+          text: projectPersonalMeshActivationFailure(r.reason).description
+        })
       }
     } catch {
       setMsg({ kind: 'err', text: 'Activation failed. Please try again.' })
@@ -72,13 +70,22 @@ function LicenseActivation(): React.ReactElement {
       </div>
       {msg && (
         <div
-          className={`flex items-center justify-between gap-3 text-left text-xs ${msg.kind === 'ok' ? 'text-green-400' : 'text-red-400'}`}
+          className={`flex items-center justify-between gap-3 text-left text-xs ${
+            msg.kind === 'ok'
+              ? 'text-emerald-600 dark:text-emerald-400'
+              : 'text-red-600 dark:text-red-400'
+          }`}
         >
           <span>{msg.text}</span>
           {msg.kind === 'ok' && (
+            // Solid emerald, white text - the same treatment every other primary action in the app
+            // uses. This was green-300 text on a transparent background behind a 40%-opacity border,
+            // which is the lightest green in the scale on no fill at all: barely legible in dark mode
+            // and worse in light. It is also the one action a person must find right after activating,
+            // so it should read as the primary button it is.
             <button
               onClick={() => window.api.license?.relaunch()}
-              className="shrink-0 rounded-md border border-green-500/40 px-2.5 py-1 font-medium text-green-300 hover:bg-green-500/10"
+              className="shrink-0 rounded-md bg-emerald-600 px-2.5 py-1 font-medium text-white transition-colors duration-150 hover:bg-emerald-500 active:scale-95"
             >
               Restart now
             </button>
@@ -123,25 +130,25 @@ export function UpgradeScreen({
         <div className="flex flex-col gap-5">
           {comingSoon ? (
             <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-neutral-700 bg-neutral-800/50 px-3 py-1 text-[11px] uppercase tracking-wide text-neutral-300">
-              <Clock weight="fill" className="h-3.5 w-3.5" /> Off Grid Pro · Coming soon
+              <Clock weight="fill" className="h-3.5 w-3.5" /> Off Grid AI Pro · Coming soon
             </span>
           ) : (
-            <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-[11px] uppercase tracking-wide text-green-400">
-              <Sparkle weight="fill" className="h-3.5 w-3.5" /> Off Grid Pro · Available now
+            <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-[11px] uppercase tracking-wide text-emerald-400">
+              <Sparkle weight="fill" className="h-3.5 w-3.5" /> Off Grid AI Pro · Available now
             </span>
           )}
 
           <div className="flex items-start gap-4">
             <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-neutral-800 bg-neutral-900/60">
               {f ? (
-                <f.icon weight="duotone" className="h-7 w-7 text-green-400" />
+                <f.icon weight="duotone" className="h-7 w-7 text-emerald-600 dark:text-emerald-400" />
               ) : (
-                <Sparkle weight="duotone" className="h-7 w-7 text-green-400" />
+                <Sparkle weight="duotone" className="h-7 w-7 text-emerald-600 dark:text-emerald-400" />
               )}
             </div>
             <div className="min-w-0">
               <h1 className="text-3xl font-semibold tracking-tight text-white">
-                {f ? f.label : 'Off Grid Pro is here'}
+                {f ? f.label : 'Off Grid AI Pro is here'}
               </h1>
               {f && <p className="mt-1 text-base text-neutral-300">{f.tagline}</p>}
             </div>
@@ -157,7 +164,7 @@ export function UpgradeScreen({
             <ul className="grid gap-2 sm:grid-cols-2">
               {f.highlights.map((h) => (
                 <li key={h} className="flex items-start gap-2 text-sm text-neutral-300">
-                  <Check weight="bold" className="mt-0.5 h-4 w-4 shrink-0 text-green-400" /> {h}
+                  <Check weight="bold" className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" /> {h}
                 </li>
               ))}
             </ul>
@@ -172,7 +179,7 @@ export function UpgradeScreen({
               {PRO_FEATURES.map((x) => (
                 <span
                   key={x.route}
-                  className={`flex items-center gap-1.5 ${x.route === f?.route ? 'text-green-400' : ''}`}
+                  className={`flex items-center gap-1.5 ${x.route === f?.route ? 'text-emerald-600 dark:text-emerald-400' : ''}`}
                 >
                   <span
                     className={`h-1 w-1 rounded-full ${x.route === f?.route ? 'bg-green-400' : 'bg-neutral-600'}`}
@@ -192,9 +199,9 @@ export function UpgradeScreen({
                 You have Pro
               </div>
               <p className="text-sm leading-relaxed text-neutral-300">
-                Your Pro features run on Mac and in the Off Grid phone app today - your license
-                covers both, up to 5 devices. Support for your {deviceNoun()} is on the way; it will
-                be enabled once it is tested.
+                Your license covers desktop and mobile - up to 5 devices.
+                Windows is live and Pro features are arriving one at a time; this one is not on your{' '}
+                {deviceNoun()} yet, and the ones that are work here today.
               </p>
               <p className="text-[11px] leading-relaxed text-neutral-600">
                 Everything else in Off Grid works on your {deviceNoun()} today.
@@ -207,7 +214,7 @@ export function UpgradeScreen({
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-neutral-700 bg-neutral-800 transition-colors group-hover:border-green-500/30">
                   <Desktop
                     weight="regular"
-                    className="h-4 w-4 text-neutral-300 transition-colors group-hover:text-green-400"
+                    className="h-4 w-4 text-neutral-300 transition-colors group-hover:text-emerald-500"
                   />
                 </span>
                 <span className="min-w-0 flex-1">
@@ -234,9 +241,8 @@ export function UpgradeScreen({
                     <span className="font-medium text-neutral-200">
                       Coming soon to your {deviceNoun()}.
                     </span>{' '}
-                    Off Grid Pro is macOS-tested today. Your purchase works now on Mac and the Off
-                    Grid phone app - up to 5 devices. Support for this {deviceNoun()} will be
-                    enabled once it is tested.
+                    Windows is live and Pro features are arriving one at a time - this one runs on
+                    Mac today. Your license covers desktop and mobile - up to 5 devices.
                   </span>
                 </div>
               )}
@@ -273,7 +279,7 @@ export function UpgradeScreen({
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-neutral-700 bg-neutral-800 transition-colors group-hover:border-green-500/30">
               <DeviceMobile
                 weight="regular"
-                className="h-4 w-4 text-neutral-300 transition-colors group-hover:text-green-400"
+                className="h-4 w-4 text-neutral-300 transition-colors group-hover:text-emerald-500"
               />
             </span>
             <span className="min-w-0 flex-1">

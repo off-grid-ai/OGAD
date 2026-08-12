@@ -29,6 +29,8 @@ resources/bin/mflux/
 # Parakeet STT runtime — CI-staged via scripts/fetch-parakeet.sh (like mflux/coreml-sd),
 # not committed. Devs stage it locally with the same script.
 resources/bin/parakeet/
+# Pro MultipeerConnectivity helper - built from the private Pro repo and staged for packaging.
+resources/bin/proximity-helper
 # Gateway probe scratch output
 .gateway-probe/
 # TS build cache
@@ -67,3 +69,10 @@ swift-tests/**/.build/
 
 # Off Grid AI Pro early-bird campaign (customer PII + send tooling - do not commit)
 marketing/emails/pro-earlybird/
+
+# Coverage report from the DB journey suite (npm run test:db --coverage)
+coverage-db/
+
+# Raw V8 output and the converted report from the e2e coverage capture
+coverage-e2e-raw/
+coverage-e2e/

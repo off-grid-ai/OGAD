@@ -73,8 +73,23 @@ describe('model gateway network boundary', () => {
     })
   })
 
+  // The phone finds this Mac by scanning the subnet for :7878, so a loopback-only
+  // listener is invisible to it however healthy the gateway is. Binding every
+  // interface is the feature, and this asserts it stays that way.
   const lanAddress = nonLoopbackIpv4Address()
-  it.skipIf(!lanAddress)('does not listen on a non-loopback interface', async () => {
-    expect(await acceptsTcpConnection(lanAddress!)).toBe(false)
+  it.skipIf(!lanAddress)('listens on the LAN so a paired phone can reach it', async () => {
+    expect(await acceptsTcpConnection(lanAddress!)).toBe(true)
+  })
+
+  // Reachable does not mean writable: the gateway does not authenticate, so the routes
+  // that change this machine's state check the peer address rather than trusting the bind.
+  it.skipIf(!lanAddress)('still refuses settings mutations from off-machine', async () => {
+    const response = await fetch(`http://${lanAddress!}:${String(gatewayPort)}/v1/settings`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({})
+    })
+
+    expect(response.status).toBe(403)
   })
 })

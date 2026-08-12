@@ -28,18 +28,23 @@ export interface IndexResult {
   kind: RagDocument['kind']
 }
 
+export interface IndexDocumentParams {
+  projectId: string
+  path: string
+  fileName: string
+  size: number
+  extract?: ExtractOptions
+  syncId?: string
+  createdAt?: string
+  enabled?: boolean
+}
+
 export class RagService {
   constructor(private readonly deps: RagServiceDeps) {}
 
   /** Ingest a file into a project's knowledge base. */
   async indexDocument(
-    params: {
-      projectId: string
-      path: string
-      fileName: string
-      size: number
-      extract?: ExtractOptions
-    },
+    params: IndexDocumentParams,
     onProgress?: (stage: IndexStage) => void
   ): Promise<IndexResult> {
     onProgress?.('extracting')
@@ -54,11 +59,14 @@ export class RagService {
     const chunks = chunkText(text, this.deps.chunkOptions)
 
     const docId = await this.deps.store.addDocument({
+      syncId: params.syncId,
       projectId: params.projectId,
       name: params.fileName,
       path: params.path,
       size: params.size,
-      kind
+      kind,
+      createdAt: params.createdAt,
+      enabled: params.enabled
     })
 
     if (chunks.length === 0) {

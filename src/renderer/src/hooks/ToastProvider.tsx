@@ -66,7 +66,7 @@ export function ToastProvider({ children }: { children: ReactNode }): React.Reac
                   toast.onAction?.()
                   dismiss(toast.id)
                 }}
-                className="shrink-0 rounded-sm border border-green-500/50 bg-green-500/10 px-2 py-0.5 text-green-400 hover:bg-green-500/20"
+                className="shrink-0 rounded-sm border border-green-500/50 bg-green-500/10 px-2 py-0.5 text-emerald-400 hover:bg-green-500/20"
               >
                 {toast.actionLabel}
               </button>

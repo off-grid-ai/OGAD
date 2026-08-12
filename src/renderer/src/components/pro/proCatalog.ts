@@ -9,7 +9,8 @@ import {
   Broadcast,
   ClipboardText,
   Waveform,
-  ShieldCheck
+  ShieldCheck,
+  Devices as DevicesIcon
 } from '@phosphor-icons/react'
 import type { ComponentType } from 'react'
 import { deviceNoun, primaryModifier } from '@renderer/lib/device'
@@ -207,6 +208,25 @@ export const PRO_FEATURES: ProFeature[] = [
     // Ported to Windows: the store + popup + global hotkey (CommandOrControl+Shift+C)
     // are all cross-platform Electron; auto-paste is synthesized per-platform in
     // pro text-injection (osascript on macOS, PowerShell SendKeys on Windows).
+    platforms: ['darwin', 'win32']
+  },
+  {
+    route: 'devices',
+    label: 'Devices',
+    icon: DevicesIcon,
+    tagline: 'Your chats and settings, on every device.',
+    description:
+      'Pair your Mac and phone over your local network to keep chats, projects and model settings in step. Data moves through a direct encrypted connection between your devices. Nothing is uploaded to an Off Grid server.',
+    highlights: [
+      'Chats, projects and model settings stay in step across devices',
+      'Known devices reconnect when they return to the network',
+      'Direct encrypted transfer on your local network'
+    ],
+    // Both platforms: sync is cross-platform by construction. The transport is node:net and
+    // discovery is bonjour-service (pure JS mDNS), so a Windows install gets the LAN route with
+    // no native code. The single `process.platform === 'darwin'` branch in the activation path
+    // only ADDS the Apple proximity route on top - macOS ends up with LAN plus proximity,
+    // Windows with LAN. Gating this to darwin would dark-out a feature that works.
     platforms: ['darwin', 'win32']
   }
 ]

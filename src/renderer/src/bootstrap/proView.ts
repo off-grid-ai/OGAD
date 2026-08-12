@@ -11,6 +11,9 @@ import type { ProNavigationIntent } from '../lib/pro-navigation'
 export interface ProViewContext {
   setView: (view: string) => void
   onNavigate: (intent: ProNavigationIntent) => void
+  navigationSubroute: string | null
+  setNavigationSubroute: (subroute: string | null) => void
+  navigateBack: () => void
   replayTarget: number | null
   meetingTarget: number | null
   actionTarget: number | null
@@ -34,6 +37,7 @@ export interface ProViewContext {
   onSelectEntity: (id: number) => void
   onSelectMemory: (id: number) => void
   onOpenHit: (hit: SearchHit) => void
+  openChatOwner: (target: { conversationId?: string; openGallery?: boolean }) => void
 }
 
 export type ProViewRenderer = (viewMode: string, ctx: ProViewContext) => ReactNode | null

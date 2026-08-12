@@ -6,6 +6,8 @@
  * lifecycle methods are deliberately inert.
  */
 import { vi } from 'vitest'
+// The DOM globals jsdom lacks. One owner, shared with the db suite - see the file.
+import './dom-globals.setup'
 
 // motion/react (framer-motion) drives animations off requestAnimationFrame, which
 // jsdom stubs — so an AnimatePresence EXIT animation never completes and the
@@ -73,20 +75,3 @@ vi.mock('motion/react', async () => {
     useReducedMotion: () => true
   }
 })
-if (typeof window !== 'undefined' && typeof globalThis.ResizeObserver === 'undefined') {
-  class ResizeObserverBoundary implements ResizeObserver {
-    constructor(_callback: ResizeObserverCallback) {}
-
-    observe(_target: Element, _options?: ResizeObserverOptions): void {}
-
-    unobserve(_target: Element): void {}
-
-    disconnect(): void {}
-  }
-
-  Object.defineProperty(globalThis, 'ResizeObserver', {
-    configurable: true,
-    writable: true,
-    value: ResizeObserverBoundary
-  })
-}

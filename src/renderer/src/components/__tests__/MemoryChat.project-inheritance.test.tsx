@@ -101,7 +101,10 @@ describe('<MemoryChat/> - new chat inherits its project (#54)', () => {
 
     await waitFor(() => expect(createRagConversation).toHaveBeenCalledTimes(1))
     const [conversationId, title, persistedProjectId] = createRagConversation.mock.calls[0]!
-    expect(conversationId).toMatch(/^rag-/)
+    // A fresh id was minted for this conversation rather than an existing one reused. It is a UUID now
+    // (crypto.randomUUID) instead of the old rag- prefix, because the id has to be unique across every
+    // device that syncs the conversation, not just within one Mac's table.
+    expect(conversationId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
     expect(title).toBe('What is the launch date?')
     expect(persistedProjectId).toBe(project.id)
 

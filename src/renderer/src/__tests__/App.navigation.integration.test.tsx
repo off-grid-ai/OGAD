@@ -77,7 +77,10 @@ describe('<App/> desktop navigation integration', () => {
     })
     observer.observe(document.body, { childList: true, subtree: true })
     try {
-      await user.click(screen.getByTitle('Integrations'))
+      // By role and name, not by title: the sidebar starts expanded, and the title attribute is the
+      // COLLAPSED-rail affordance only (App.tsx sets title={!sidebarOpen ? item.label : undefined}), so
+      // the expanded nav carries its label as visible text instead.
+      await user.click(screen.getByRole('button', { name: 'Integrations' }))
       await waitFor(() => expect(shortcutDispatched).toBe(true))
     } finally {
       observer.disconnect()
@@ -116,7 +119,108 @@ describe('<App/> desktop navigation integration', () => {
     act(() => finishActivation?.())
 
     await waitFor(() => expect(onNewApproval).toHaveBeenCalledTimes(1))
-    expect(onNewAction).toHaveBeenCalledTimes(1)
+    // Approvals reach the bell; action candidates deliberately do NOT. 57a3e7d removed this
+    // subscription and excluded type 'todo' from notification state in the same change, so the unread
+    // count means "something is waiting on your decision" rather than counting suggestions the app
+    // made for itself. A to-do already has a home - DayView lists it, and opening one routes to
+    // { view: 'actions', mode: 'todo' } - so mirroring it into the bell would say the same thing twice.
+    //
+    // Asserted as an absence, because that is the behaviour worth protecting: re-adding the
+    // subscription would quietly restore the double-notification that commit set out to remove.
+    expect(onNewAction).not.toHaveBeenCalled()
     expect(proOn).toHaveBeenCalledWith('notification:open-target', expect.any(Function))
+  })
+
+  it('opens active-model settings over the originating screen and closes it with Cmd+[', async () => {
+    window.history.replaceState(null, '', '/models')
+    let llmSettings = {
+      ctxSize: 65536,
+      effectiveCtxSize: 32768,
+      modelMaxCtx: 262144
+    }
+    const setLlmSettings = vi.fn(async (patch: Partial<typeof llmSettings>) => {
+      llmSettings = { ...llmSettings, ...patch, effectiveCtxSize: patch.ctxSize ?? 32768 }
+    })
+    installAppBoundary({
+      getModelCatalog: async () => ({
+        kinds: ['vision'],
+        models: [
+          {
+            id: 'local/qwen',
+            name: 'Qwen 3.5 2B',
+            kind: 'vision',
+            files: [{ name: 'qwen.gguf', url: 'https://example.test/qwen.gguf', sizeBytes: 2e9 }]
+          }
+        ]
+      }),
+      getInstalledModels: async () => ['local/qwen'],
+      getActiveModelIds: async () => ['local/qwen'],
+      getActiveModel: async () => 'local/qwen',
+      getLlmSettings: async () => llmSettings,
+      setLlmSettings
+    })
+    render(<App />)
+    await waitFor(() => expect(window.location.pathname).toBe('/models'))
+    act(() => {
+      window.dispatchEvent(new CustomEvent('og:open-model-settings-panel'))
+    })
+
+    expect(await screen.findByRole('dialog', { name: 'Model settings' })).toBeTruthy()
+    expect(window.location.pathname).toBe('/models')
+    expect(await screen.findByText('Qwen 3.5 2B')).toBeTruthy()
+    expect(screen.getByText('64K')).toBeTruthy()
+    expect(screen.getByText('32K')).toBeTruthy()
+    expect(screen.getByText('16K')).toBeTruthy()
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: '[', metaKey: true, bubbles: true }))
+    })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Model settings' })).toBeNull())
+    expect(window.location.pathname).toBe('/models')
+  })
+
+  it('routes permission recovery into the existing Setup & health detail', async () => {
+    const user = userEvent.setup()
+    installAppBoundary({
+      isPro: true,
+      getPermissionStatus: async () => ({
+        accessibility: true,
+        screenRecording: false,
+        localNetwork: true,
+        allGranted: false
+      })
+    })
+    render(<App />)
+    expect(
+      await screen.findByRole('heading', { name: 'Projects' }, { timeout: 5_000 })
+    ).toBeTruthy()
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('og:navigate', {
+          detail: { view: 'settings', section: 'permissions' }
+        })
+      )
+    })
+
+    expect(await screen.findByRole('heading', { name: 'Settings' })).toBeTruthy()
+    expect(window.location.pathname).toBe('/settings/permissions')
+    expect(await screen.findByText('System permissions')).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Screen Recording' })).toBeTruthy()
+    expect(screen.getByText('Permission needed')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Permissions' })).toBeNull()
+
+    await user.click(screen.getByText('Setup & health'))
+    await waitFor(() => expect(screen.queryByText('System permissions')).toBeNull())
+    expect(window.location.pathname).toBe('/settings')
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('og:navigate', {
+          detail: { view: 'settings', section: 'permissions' }
+        })
+      )
+    })
+    expect(await screen.findByText('System permissions')).toBeTruthy()
   })
 })

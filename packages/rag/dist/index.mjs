@@ -32,6 +32,9 @@ ${para}` : para;
     }
   }
   flush();
+  if (chunks.length === 0) {
+    return [{ content: clean, position: 0 }];
+  }
   return chunks.map((content, position) => ({ content, position }));
 }
 
@@ -172,11 +175,14 @@ var RagService = class {
     onProgress?.("chunking");
     const chunks = chunkText(text, this.deps.chunkOptions);
     const docId = await this.deps.store.addDocument({
+      syncId: params.syncId,
       projectId: params.projectId,
       name: params.fileName,
       path: params.path,
       size: params.size,
-      kind
+      kind,
+      createdAt: params.createdAt,
+      enabled: params.enabled
     });
     if (chunks.length === 0) {
       onProgress?.("done");

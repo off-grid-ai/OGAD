@@ -13,8 +13,62 @@ export interface ShutdownOwner {
 }
 
 export interface ApplicationQuitSource {
-  on(event: 'before-quit', listener: () => void): unknown
-  removeListener(event: 'before-quit', listener: () => void): unknown
+  on(event: 'will-quit', listener: () => void): unknown
+  removeListener(event: 'will-quit', listener: () => void): unknown
+}
+
+export interface ApplicationRelaunchSource {
+  quit(): void
+  relaunch(options?: ApplicationRelaunchOptions): void
+}
+
+export interface ApplicationRelaunchOptions {
+  execPath?: string
+  args?: string[]
+}
+
+interface PendingApplicationRelaunch {
+  options?: ApplicationRelaunchOptions
+}
+
+let pendingRelaunch: PendingApplicationRelaunch | null = null
+
+function developmentRelaunchOptions(): ApplicationRelaunchOptions | undefined {
+  if (process.env.NODE_ENV_ELECTRON_VITE !== 'development') return undefined
+
+  const nodeExecutable = process.env.npm_node_execpath
+  const npmExecutable = process.env.npm_execpath
+  if (!nodeExecutable || !npmExecutable) {
+    console.error(
+      '[relaunch] development runtime is missing npm launch metadata; restarting Electron only'
+    )
+    return undefined
+  }
+
+  // electron-vite exits its renderer server when the Electron child quits. Relaunching only
+  // Electron therefore leaves the replacement window pointing at a dead localhost URL. Restart
+  // the complete npm dev command so main, preload, and renderer return as one runtime.
+  return {
+    execPath: nodeExecutable,
+    args: [npmExecutable, 'run', 'dev']
+  }
+}
+
+/**
+ * Defer spawning the replacement process until the current process has finished its asynchronous
+ * shutdown. Starting the replacement first can route it back into the still-alive single instance,
+ * leaving a new window backed by services that have already been torn down.
+ */
+export function requestApplicationRelaunch(source: ApplicationRelaunchSource): void {
+  pendingRelaunch = { options: developmentRelaunchOptions() }
+  source.quit()
+}
+
+export function commitApplicationRelaunch(source: ApplicationRelaunchSource): void {
+  if (!pendingRelaunch) return
+  const { options } = pendingRelaunch
+  pendingRelaunch = null
+  source.relaunch(options)
 }
 
 export interface ShutdownFailure {
@@ -89,7 +143,16 @@ export function registerCoreShutdownOwners(
 
 /** Connect the registry to the real Electron quit seam. The subscription removes
  * itself before cleanup starts, so repeated quit emission cannot create duplicate
- * work and no lifecycle listener survives teardown. */
+ * work and no lifecycle listener survives teardown.
+ *
+ * The seam is `will-quit`, NOT `before-quit`. `before-quit` announces that a quit was
+ * REQUESTED and any listener may cancel it — this app's own handler does exactly that, to
+ * unload the model engine before letting the quit through. Tearing down on the request made
+ * every cancelled or deferred quit permanent for the resources: teardown is one-way, so a
+ * process that kept running was left with its downloads refused for the rest of its life
+ * ("stuck at 0%", device-confirmed on macOS). `will-quit` fires only once the quit is
+ * COMMITTED, and never when a `before-quit` was prevented, so teardown now follows the
+ * application actually going away rather than someone asking whether it should. */
 export function installApplicationShutdown(
   source: ApplicationQuitSource,
   registry: ShutdownRegistry,
@@ -99,13 +162,13 @@ export function installApplicationShutdown(
   const remove = (): void => {
     if (!installed) return
     installed = false
-    source.removeListener('before-quit', listener)
+    source.removeListener('will-quit', listener)
   }
   const listener = (): void => {
     remove()
     void registry.shutdown().then((failures) => failures.forEach(reportFailure))
   }
-  source.on('before-quit', listener)
+  source.on('will-quit', listener)
   return remove
 }
 

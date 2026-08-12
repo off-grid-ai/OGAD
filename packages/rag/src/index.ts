@@ -17,6 +17,12 @@ export {
   type ExtractOptions,
   type ExtractedContent
 } from './extract'
-export { RagService, type RagServiceDeps, type IndexResult, type IndexStage } from './service'
+export {
+  RagService,
+  type RagServiceDeps,
+  type IndexDocumentParams,
+  type IndexResult,
+  type IndexStage
+} from './service'
 export { SEARCH_KB_TOOL, makeSearchKnowledgeBaseHandler } from './tools'
 export type { EmbeddingProvider, VectorStore, ChunkCandidate, ExtractionBridges } from './bridges'

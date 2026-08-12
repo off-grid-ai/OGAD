@@ -131,22 +131,25 @@ describe('parseMachines', () => {
         }
       ]
     }
+    // The raw machine, not a UI projection: the licensed-devices list does its own mapping, including
+    // the heartbeat-then-created fallback for last seen (license-service.listLicensedDevicesForUi).
     expect(parseMachines(body)).toEqual([
       {
         id: 'm1',
         fingerprint: 'fp-1',
+        hostname: null,
         platform: 'macos',
         name: 'Ada MBP',
-        lastSeen: '2026-01-01T00:00:00Z'
+        createdAt: '2025-01-01T00:00:00Z',
+        updatedAt: null,
+        lastActiveAt: '2026-01-01T00:00:00Z'
       }
     ])
   })
 
-  it('falls back to created when lastHeartbeat is absent, and defaults sparse fields', () => {
+  it('drops a machine with no fingerprint, because nothing can be matched to a device', () => {
     const body = { data: [{ id: 'm2', attributes: { created: '2025-06-01T00:00:00Z' } }] }
-    expect(parseMachines(body)).toEqual([
-      { id: 'm2', fingerprint: '', platform: null, name: null, lastSeen: '2025-06-01T00:00:00Z' }
-    ])
+    expect(parseMachines(body)).toEqual([])
   })
 
   it('returns [] for an empty or malformed body', () => {

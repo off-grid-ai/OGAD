@@ -37,6 +37,21 @@ vi.mock('electron', () => ({
   desktopCapturer: { getSources: async () => [] }
 }))
 
+vi.mock('node:dgram', () => ({
+  default: {
+    createSocket: () => ({
+      once: () => undefined,
+      send: (
+        _message: Buffer,
+        _port: number,
+        _host: string,
+        callback: (error: Error | null) => void
+      ) => callback(null),
+      close: () => undefined
+    })
+  }
+}))
+
 type IpcHandler = (event: unknown, ...args: unknown[]) => unknown
 
 class NativeIpcBoundary {
@@ -160,6 +175,7 @@ describe('<HealthPanel/> production status integration', () => {
     await expect(boundary.invoke('permissions:get-status')).resolves.toEqual({
       accessibility: true,
       screenRecording: false,
+      localNetwork: true,
       allGranted: false
     })
     expect(latestComponent('chat').status).toBe('ready')
@@ -172,6 +188,8 @@ describe('<HealthPanel/> production status integration', () => {
     expectRenderedRecord('permission-accessibility')
     expect(latestComponent('permission-screen-recording').status).toBe('denied')
     expectRenderedRecord('permission-screen-recording')
+    expect(latestComponent('permission-local-network').status).toBe('granted')
+    expectRenderedRecord('permission-local-network')
 
     tccBoundary.accessibility = false
     tccBoundary.screenRecording = true
@@ -192,6 +210,7 @@ describe('<HealthPanel/> production status integration', () => {
     await waitFor(() => expect(latestComponent('permission-accessibility').status).toBe('down'))
     expectRenderedRecord('permission-accessibility')
     expectRenderedRecord('permission-screen-recording')
+    expectRenderedRecord('permission-local-network')
 
     tccBoundary.error = 'TCC bridge unavailable'
     await user.click(screen.getByRole('button', { name: 'Refresh' }))
@@ -200,6 +219,7 @@ describe('<HealthPanel/> production status integration', () => {
     )
     expectRenderedRecord('permission-accessibility')
     expectRenderedRecord('permission-screen-recording')
+    expectRenderedRecord('permission-local-network')
 
     executable(
       enginePath,

@@ -33,14 +33,24 @@ function installApi(): {
     onRagStream: vi.fn(() => () => {}),
     getRagConversations: vi.fn(async () => [conversation]),
     getRagConversation: vi.fn(async () => conversation),
+    // created_at is not decoration: the renderer projects every row through projectSyncedMessageTurn,
+    // which refuses a message it cannot order and returns null, so an untimestamped row renders as
+    // nothing at all. The table these rows stand for defaults it to SQLite's CURRENT_TIMESTAMP, in this
+    // shape - naive UTC, space-separated.
     getRagMessages: vi.fn(async () => [
-      { id: 1, role: 'user', content: 'copy this exact text' },
-      { id: 2, role: 'assistant', content: 'assistant reply copied exactly' },
+      { id: 1, role: 'user', content: 'copy this exact text', created_at: '2026-01-01 09:00:00' },
+      {
+        id: 2,
+        role: 'assistant',
+        content: 'assistant reply copied exactly',
+        created_at: '2026-01-01 09:00:01'
+      },
       {
         id: 3,
         role: 'assistant',
         content: 'generated image',
-        context: JSON.stringify({ image: '/tmp/generated.png' })
+        context: JSON.stringify({ image: '/tmp/generated.png' }),
+        created_at: '2026-01-01 09:00:02'
       }
     ]),
     getSettings: vi.fn(async () => ({})),

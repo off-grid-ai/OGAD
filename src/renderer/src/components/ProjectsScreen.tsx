@@ -55,7 +55,7 @@ function ProjectArtifacts({ projectId }: { projectId: string }): React.ReactElem
               className="group flex flex-col gap-2 rounded-lg border border-neutral-800/80 bg-neutral-900/30 p-4 text-left transition-colors hover:border-green-500/50 hover:bg-neutral-900/60"
             >
               <div className="flex items-center justify-between">
-                <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-green-400">
+                <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-400">
                   {artifactKindLabel(a.kind)}
                 </span>
                 <span className="text-[10px] text-neutral-600">
@@ -165,7 +165,13 @@ export function ProjectsScreen({
   }
 
   const removeProject = async (id: string): Promise<void> => {
-    if (!window.confirm('Delete this project, its knowledge base and chats?')) return
+    if (
+      !window.confirm(
+        'Delete this project, its knowledge base, and generated artifacts? Its chats stay in Chat.'
+      )
+    ) {
+      return
+    }
     await api.deleteProject?.(id)
     selectProject(null)
     await refreshProjects()
@@ -305,14 +311,21 @@ function ProjectChats({
 
   useEffect(() => {
     let alive = true
-    api
-      .getRagConversations?.(project.id)
-      .then((c: RagConvo[]) => {
-        if (alive) setChats(c)
-      })
-      .catch(() => {})
+    const refresh = (): void => {
+      void api
+        .getRagConversations?.(project.id)
+        .then((c: RagConvo[]) => {
+          if (alive) setChats(c)
+        })
+        .catch(() => {})
+    }
+    refresh()
+    const offChanged = api.onRagConversationsChanged?.(() => {
+      refresh()
+    })
     return () => {
       alive = false
+      offChanged?.()
     }
   }, [project.id])
 
@@ -516,8 +529,16 @@ function KnowledgeBase({ projectId }: { projectId: string }) {
         } else setStatus(`${d.name}: ${d.stage}…`)
       }
     )
-    return () => off?.()
-  }, [refresh])
+    const offChanged = api.onProjectDocumentsChanged?.(
+      ({ projectId: changedProjectId }: { projectId: string }) => {
+        if (changedProjectId === projectId) refresh()
+      }
+    )
+    return () => {
+      off?.()
+      offChanged?.()
+    }
+  }, [projectId, refresh])
 
   const add = async (): Promise<void> => {
     setBusy(true)
@@ -576,6 +597,7 @@ function KnowledgeBase({ projectId }: { projectId: string }) {
                     cur.map((x) => (x.id === d.id ? { ...x, enabled: !x.enabled } : x))
                   )
                 }}
+                aria-label={`${d.enabled ? 'Disable' : 'Enable'} ${d.name}`}
                 title={d.enabled ? 'Enabled in retrieval' : 'Disabled'}
                 className={`h-4 w-7 shrink-0 rounded-full transition-colors ${d.enabled ? 'bg-green-500' : 'bg-neutral-700'}`}
               >
@@ -588,6 +610,7 @@ function KnowledgeBase({ projectId }: { projectId: string }) {
                   await api.deleteProjectDocument?.(d.id)
                   setDocs((cur) => cur.filter((x) => x.id !== d.id))
                 }}
+                aria-label={`Delete ${d.name}`}
                 className="shrink-0 text-neutral-600 transition-colors hover:text-red-500"
               >
                 <IconTrash className="h-4 w-4" />

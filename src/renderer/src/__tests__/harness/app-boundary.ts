@@ -20,6 +20,7 @@ export function installAppBoundary(overrides: Record<string, unknown> = {}): voi
     getPermissionStatus: async () => ({
       accessibility: true,
       screenRecording: true,
+      localNetwork: true,
       allGranted: true
     }),
     checkModelStatus: async () => ({ downloaded: true, modelsDir: '/tmp/models' }),
@@ -52,6 +53,16 @@ export function installAppBoundary(overrides: Record<string, unknown> = {}): voi
   const api = new Proxy(values, {
     get(target, property: string) {
       if (property in target) return target[property]
+      // A subscription is not a request, and standing in for one with an async stub hands the caller a
+      // Promise where it expects an unsubscribe function. ProjectsScreen keeps the return value of
+      // api.onRagConversationsChanged and calls it on unmount, so the async default made teardown throw
+      // "offChanged is not a function" - during React's cleanup, which surfaced as an unrelated
+      // navigation test failing on a screen it had already left.
+      //
+      // Every onX in the preload returns () => void synchronously, so the default has to as well. Named
+      // by the same on* convention the preload uses, which is what makes one rule cover all of them
+      // instead of listing each new subscription here.
+      if (/^on[A-Z]/.test(property) || property === 'proOn') return eventSubscription
       return async () => undefined
     }
   })

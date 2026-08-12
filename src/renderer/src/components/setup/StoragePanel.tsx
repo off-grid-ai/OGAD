@@ -3,6 +3,11 @@ import { HardDrives, Trash, ArrowsClockwise, X, Broom } from '@phosphor-icons/re
 import { cn } from '@renderer/lib/utils'
 import { modelKindLabel } from '@renderer/lib/model-kind-labels'
 import { companionDownloadLabel } from '@renderer/lib/download-label'
+import {
+  modelSettingsTabForKind,
+  openModelSettingsPanel,
+  supportsModelSettings
+} from '@renderer/lib/model-settings-panel'
 import { CacheCleanupControl } from './CacheCleanupControl'
 import { formatStorageBytes } from './storage-format'
 
@@ -129,6 +134,9 @@ export function StoragePanel(): React.ReactElement {
     } finally {
       setBusy(null)
     }
+  }
+  const openModelSettings = (kind?: string): void => {
+    openModelSettingsPanel(modelSettingsTabForKind(kind))
   }
   const active = downloads.filter((d) => d.status === 'downloading' || d.status === 'queued')
   const runningCount = active.filter((d) => d.status === 'downloading').length
@@ -295,7 +303,7 @@ export function StoragePanel(): React.ReactElement {
                           key={m.id}
                           className={`group flex h-7 items-center gap-2 rounded border px-2.5 transition-colors duration-150 hover:border-neutral-700 ${m.active ? 'border-green-500/50 bg-green-500/5' : 'border-neutral-800/60 bg-neutral-900/30'}`}
                         >
-                          {m.active && (
+                          {m.active && supportsModelSettings(m.kind) && (
                             <div className="h-1.5 w-1.5 shrink-0 rounded-full bg-green-500" />
                           )}
                           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-neutral-200">
@@ -306,7 +314,7 @@ export function StoragePanel(): React.ReactElement {
                             <button
                               onClick={() => use(m.id)}
                               disabled={busy === m.id}
-                              className="hidden shrink-0 rounded border border-neutral-700 px-1.5 text-[9px] leading-4 text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-green-400 active:scale-95 disabled:opacity-40 group-hover:block"
+                              className="hidden shrink-0 rounded border border-neutral-700 px-1.5 text-[9px] leading-4 text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95 disabled:opacity-40 group-hover:block"
                             >
                               {busy === m.id ? '…' : 'Use'}
                             </button>
@@ -316,6 +324,17 @@ export function StoragePanel(): React.ReactElement {
                           >
                             {formatStorageBytes(m.bytes)}
                           </span>
+                          {m.active && (
+                            <button
+                              type="button"
+                              onClick={() => openModelSettings(m.kind)}
+                              aria-label={`Settings for ${m.name}`}
+                              title="Open settings for the active model"
+                              className="shrink-0 rounded border border-neutral-700 px-1.5 text-[9px] leading-4 text-neutral-400 transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95"
+                            >
+                              Settings
+                            </button>
+                          )}
                           <button
                             onClick={() => del(m.id, m.name)}
                             disabled={busy === m.id || m.active}

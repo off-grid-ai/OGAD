@@ -166,9 +166,11 @@ describe('database.ts - RAG conversations CRUD', () => {
 describe('database.ts - RAG messages', () => {
   it('addRagMessage returns an incrementing rowid and getRagMessages returns them in order', () => {
     db.createRagConversation('msg-conv', 'msgs')
-    const id1 = db.addRagMessage('msg-conv', 'user', 'hello')
-    const id2 = db.addRagMessage('msg-conv', 'assistant', 'hi there')
-    expect(id2).toBeGreaterThan(id1)
+    const first = db.addRagMessage('msg-conv', 'user', 'hello')
+    const second = db.addRagMessage('msg-conv', 'assistant', 'hi there')
+    expect(second.id).toBeGreaterThan(first.id)
+    // The cross-device name comes back too, so a caller can point at the message it just made.
+    expect(first.uuid).not.toEqual(second.uuid)
     const msgs = db.getRagMessages('msg-conv')
     expect(msgs.map((m) => m.content)).toEqual(['hello', 'hi there'])
     expect(msgs.map((m) => m.role)).toEqual(['user', 'assistant'])

@@ -1,3 +1,5 @@
+import { DEFAULT_CTX_SIZE, MIN_CAPTURE_CTX_SIZE } from '@offgrid/core/shared/llm-defaults'
+
 // The context-window choices the Settings picker offers. We bound the base ladder by the model's
 // TRAINED maximum (from GGUF metadata, surfaced by the backend as modelMaxCtx): offering a window
 // the model wasn't trained for is pointless — the engine caps it back down — and misleading. The
@@ -24,6 +26,14 @@ export function contextWindowOptions(
 }
 
 const asK = (n: number): string => `${(n / 1024).toFixed(0)}K`
+
+/** A recommendation is independent of the user's current selection. The fresh 16K default leaves
+ * room for capture output; a model trained below the 8K capture floor cannot be recommended for
+ * capture at all. */
+export function recommendedContextWindow(modelMaxCtx?: number | null): number | null {
+  if (modelMaxCtx && modelMaxCtx > 0 && modelMaxCtx < MIN_CAPTURE_CTX_SIZE) return null
+  return modelMaxCtx && modelMaxCtx > 0 ? Math.min(DEFAULT_CTX_SIZE, modelMaxCtx) : DEFAULT_CTX_SIZE
+}
 
 /** The Context-window hint text. Priority: model-cap (selected exceeds the trained window) →
  *  RAM-clamp (effective below selected) → the model's supported max → the plain default. Pure so

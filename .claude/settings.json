@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm test)",
+      "Bash(npm run typecheck)",
+      "Bash(codesign -d*)",
+      "Bash(plutil -p *)",
+      "Bash(adb devices)",
+      "Bash(adb logcat *)",
+      "Bash(xcrun devicectl list *)",
+      "Bash(system_profiler *)"
+    ]
+  }
+}

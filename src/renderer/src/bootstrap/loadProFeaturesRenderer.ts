@@ -18,22 +18,41 @@ export interface ProRendererApi {
   registerProView: typeof registerProView
 }
 
-export async function loadProFeaturesRenderer(): Promise<void> {
-  // Gated on the pro entitlement surfaced by preload (OFFGRID_PRO=0 → free).
+export type ProRendererActivation = 'none' | 'entitlement-bootstrap' | 'full'
+
+export async function loadProFeaturesRenderer(): Promise<ProRendererActivation> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  if (!(window as any).api?.isPro) {
-    console.log('[pro] renderer disabled (free tier)')
-    return
-  }
+  const entitled = Boolean((window as any).api?.isPro)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const bootstrapEnabled = Boolean((window as any).api?.proEntitlementBootstrapEnabled)
   let pro: unknown
   try {
     pro = await import('@offgrid/pro/renderer')
   } catch {
-    return // free / contributor build
+    return 'none' // free / contributor build
   }
+  if (!entitled && bootstrapEnabled) {
+    const activateBootstrap = (
+      pro as {
+        activateEntitlementBootstrapRenderer?: (api: ProRendererApi) => void
+      }
+    ).activateEntitlementBootstrapRenderer
+    if (typeof activateBootstrap !== 'function') return 'none'
+    activateBootstrap({
+      registerScreen,
+      registerNav,
+      registerSlot,
+      registerSettingsSection,
+      registerHook,
+      registerProView
+    })
+    console.log('[pro] entitlement pairing renderer activated')
+    return 'entitlement-bootstrap'
+  }
+  if (!entitled) return 'none'
   const activateRenderer = (pro as { activateRenderer?: (api: ProRendererApi) => void })
     .activateRenderer
-  if (typeof activateRenderer !== 'function') return // stub resolved to null
+  if (typeof activateRenderer !== 'function') return 'none' // stub resolved to null
   try {
     activateRenderer({
       registerScreen,
@@ -44,7 +63,9 @@ export async function loadProFeaturesRenderer(): Promise<void> {
       registerProView
     })
     console.log('[pro] renderer features activated')
+    return 'full'
   } catch (e) {
     console.error('[pro] activateRenderer failed', e)
+    return 'none'
   }
 }

@@ -141,7 +141,8 @@ test('relaunch resumes onboarding progress and one interrupted transfer (#12)', 
     interrupted.partial
   )
 
-  await page.getByRole('button', { name: 'Expand sidebar' }).click()
+  // No expand step: the sidebar opens expanded, so Settings is already reachable by its label and there
+  // is no 'Expand sidebar' button to click - it exists only on the collapsed rail.
   await page.getByRole('button', { name: 'Settings', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
   await page.getByRole('button', { name: /Setup & health/ }).click()

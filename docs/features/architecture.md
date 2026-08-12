@@ -7,7 +7,7 @@ artifacts, connectors, and catalog. Pro features live in a separate **private** 
 loaded as a git submodule. The core **never imports pro**: pro registers itself through small
 registries (an `activate()` pattern) and is simply absent here, so the open app builds and
 runs entirely on its own. A build-time flag (`__OFFGRID_PRO__`) decides whether pro is
-present, and `OFFGRID_PRO=0` simulates the free tier locally.
+present, and `OFFGRID_PRO=0` simulates an unlicensed install locally.
 
 ## Stack
 

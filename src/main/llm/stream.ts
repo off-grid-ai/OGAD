@@ -13,7 +13,7 @@ import {
   createToolMarkupFilter,
   type AssembledToolCall
 } from './sse-stream'
-import { modelRequestOptions, describeServerError } from './http-post'
+import { modelRequestOptions, serverResponseError } from './http-post'
 
 export interface StreamResult {
   content: string
@@ -51,16 +51,23 @@ export function streamCompletion(
     let aborted = false
     // Stateful think-tag splitter: routes inline reasoning vs answer and
     // accumulates the answer text across chunk boundaries (see sse-stream.ts).
-    // Content is routed through a tool-markup filter so a model that emits a tool
-    // call AS TEXT doesn't flash the raw <tool_call>{…} at the user; reasoning is
-    // untouched. splitter.answer() still keeps the full text (with markup) so the
-    // loop can recover the text-form call — only the VISIBLE stream is filtered.
+    // BOTH channels are routed through a tool-markup filter, so a model that emits a tool call AS
+    // TEXT never flashes the raw <tool_call>{…} at the user wherever it puts it. splitter.answer()
+    // still keeps the full text (with markup) so the loop can recover the text-form call — only the
+    // VISIBLE stream is filtered.
     const markup = createToolMarkupFilter((t) => onDelta(t, 'content'))
+    // Reasoning gets its OWN filter, for the same reason content has one. A model that emits its
+    // tool call inside the thinking block sent raw `<tool_call><function=…><parameter=…>` straight
+    // to the screen: the call was recovered and executed correctly, and the markup was ALSO printed,
+    // because only one of the two channels was ever filtered. Separate instances, because each holds
+    // its own partial-opener state across chunk boundaries and sharing one would let a fragment from
+    // either channel suppress the other.
+    const reasoningMarkup = createToolMarkupFilter((t) => onDelta(t, 'reasoning'))
     const splitter = createThinkSplitter((ev) => {
       if (ev.kind === 'content') {
         markup.push(ev.text)
       } else {
-        onDelta(ev.text, 'reasoning')
+        reasoningMarkup.push(ev.text)
       }
     })
     const tools = createToolCallAccumulator()
@@ -108,7 +115,7 @@ export function streamCompletion(
         res.on('end', () => {
           cleanup()
           if (!timedOut && !aborted) {
-            reject(new Error(describeServerError(res.statusCode, err)))
+            reject(serverResponseError(res.statusCode, err))
           }
         })
         return
@@ -128,7 +135,10 @@ export function streamCompletion(
           const { delta } = frame
           if (frame.finishReason) finishReason = frame.finishReason
           if (delta.reasoning_content) {
-            onDelta(delta.reasoning_content, 'reasoning')
+            // Through the filter, not straight to the screen. A server that reports thinking in its
+            // own field skipped both the splitter and the filter, so a tool call the model wrote
+            // inside its reasoning was printed verbatim.
+            reasoningMarkup.push(delta.reasoning_content)
           }
           if (delta.content) {
             splitter.push(delta.content)
@@ -141,6 +151,7 @@ export function streamCompletion(
       res.on('end', () => {
         cleanup()
         markup.end() // flush any held-back tail that turned out not to be tool markup
+        reasoningMarkup.end() // the thinking channel holds a tail the same way
         if (!timedOut && !aborted) {
           resolve(done())
         }
@@ -158,6 +169,7 @@ export function streamCompletion(
         aborted = true
         cleanup()
         markup.end() // flush the held tail on cancellation too
+        reasoningMarkup.end()
         try {
           req.destroy()
         } catch {

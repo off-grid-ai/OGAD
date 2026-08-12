@@ -110,13 +110,17 @@ describe('NotificationProvider target deduplication', () => {
   })
 
   it('collapses persisted duplicates while keeping the newest target record', () => {
+    // 'approval', not 'todo': a todo is deliberately not kept as a notification at all - restore and add
+    // both drop it (notification-state.ts), because a to-do lives in the to-do list and mirroring it into
+    // the bell would tell the user the same thing twice. Seeding todos made this read as "persisted
+    // notifications are lost", when what it proved was that todos are never persisted.
     localStorage.setItem(
       NOTIFICATION_STORAGE_KEY,
       JSON.stringify([
         {
           id: 'new',
-          type: 'todo',
-          title: 'To-do',
+          type: 'approval',
+          title: 'Approval',
           message: 'newest persisted payload',
           timestamp: '2026-07-17T12:00:00.000Z',
           read: false,
@@ -124,8 +128,8 @@ describe('NotificationProvider target deduplication', () => {
         },
         {
           id: 'old',
-          type: 'todo',
-          title: 'To-do',
+          type: 'approval',
+          title: 'Approval',
           message: 'stale persisted payload',
           timestamp: '2026-07-17T11:00:00.000Z',
           read: true,

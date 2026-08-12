@@ -182,6 +182,25 @@ afterAll(async () => {
   else process.env.OFFGRID_USER_DATA = previousUserData
 })
 
+/**
+ * The reply as the TRANSCRIPT shows it, not the copy in the history rail.
+ *
+ * The chat list shows each conversation's last message as a preview, so a reply is legitimately on
+ * screen twice - once in its bubble and once in the rail - and a bare findByText throws "found multiple
+ * elements" for a UI that is behaving correctly. Scoping to the transcript keeps the assertion about the
+ * thing under test: the answer that came back through preload, IPC, the model socket and SQLite.
+ *
+ * The rail is the <aside> (role complementary), so anything outside it is transcript.
+ */
+async function inTranscript(text: string): Promise<HTMLElement> {
+  return waitFor(() => {
+    const rail = screen.queryByRole('complementary')
+    const shown = screen.getAllByText(text).filter((node) => !rail?.contains(node))
+    expect(shown.length).toBeGreaterThan(0)
+    return shown[0]!
+  })
+}
+
 describe('production workspace bridge', () => {
   it('sends a rendered chat turn through preload, IPC, the model socket, and SQLite', async () => {
     fake.enqueue(
@@ -195,7 +214,7 @@ describe('production workspace bridge', () => {
     await user.type(composer, 'Prove the complete local chat path')
     await user.click(screen.getByRole('button', { name: /^send$/i }))
 
-    expect(await screen.findByText('The production bridge persisted this answer.')).toBeTruthy()
+    expect(await inTranscript('The production bridge persisted this answer.')).toBeTruthy()
     const { getRagConversations, getRagMessages } = await import('../src/main/database')
     await waitFor(() => {
       const conversation = getRagConversations().find(
@@ -238,7 +257,7 @@ describe('production workspace bridge', () => {
 
     cleanup()
     renderChat({ conversationId: 'reopened-chat' })
-    expect(await screen.findByText('Keep this project context')).toBeTruthy()
-    expect(await screen.findByText('Context retained locally')).toBeTruthy()
+    expect(await inTranscript('Keep this project context')).toBeTruthy()
+    expect(await inTranscript('Context retained locally')).toBeTruthy()
   })
 })

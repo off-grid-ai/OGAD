@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import { SettingsCard, SettingsCardsGroup } from '../SettingsCard'
 
@@ -52,9 +52,26 @@ describe('SettingsCardsGroup — grid drills into one L2 detail', () => {
     expect(screen.getByText('Beta')).toBeTruthy() // not hidden — no group
   })
 
-  it('returns from a Settings detail with Command+]', async () => {
+  it('opens a requested detail on mount for programmatic navigation', () => {
     render(
-      <SettingsCardsGroup>
+      <SettingsCardsGroup initialOpenId="Setup & health">
+        <SettingsCard title="Setup & health" summary="setup">
+          <div>SYSTEM_PERMISSIONS</div>
+        </SettingsCard>
+        <SettingsCard title="Capture & processing" summary="capture">
+          <div>CAPTURE_BODY</div>
+        </SettingsCard>
+      </SettingsCardsGroup>
+    )
+
+    expect(screen.getByText('SYSTEM_PERMISSIONS')).toBeTruthy()
+    expect(screen.queryByText('Capture & processing')).toBeNull()
+  })
+
+  it('reports controlled detail changes to the navigation owner', async () => {
+    const onOpenIdChange = vi.fn()
+    render(
+      <SettingsCardsGroup openId="Capture & processing" onOpenIdChange={onOpenIdChange}>
         <SettingsCard title="Capture & processing" summary="capture">
           <div>CAPTURE_BODY</div>
         </SettingsCard>
@@ -64,12 +81,9 @@ describe('SettingsCardsGroup — grid drills into one L2 detail', () => {
       </SettingsCardsGroup>
     )
 
-    fireEvent.click(screen.getByText('Capture & processing'))
     await waitFor(() => expect(screen.queryByText('Data & privacy')).toBeNull())
 
-    fireEvent.keyDown(window, { key: ']', metaKey: true })
-
-    expect(screen.getByText('Data & privacy')).toBeTruthy()
-    await waitFor(() => expect(screen.queryByText('CAPTURE_BODY')).toBeNull())
+    fireEvent.click(screen.getByText('Capture & processing'))
+    expect(onOpenIdChange).toHaveBeenCalledWith(null)
   })
 })

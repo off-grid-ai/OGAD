@@ -57,7 +57,11 @@ test.beforeAll(async () => {
     }
   })
 
-  await page.getByTitle('Chat').click()
+  // By role and name, not by title: the sidebar opens EXPANDED, and App.tsx sets
+  // title={!sidebarOpen ? item.label : undefined} - the title attribute belongs to the collapsed rail
+  // only. An expanded nav carries its label as visible text, so getByTitle waits 30s for an attribute
+  // the app is right not to render.
+  await page.getByRole('button', { name: 'Chat', exact: true }).click()
   await expect(page.getByPlaceholder('Search conversations…')).toBeVisible()
 })
 

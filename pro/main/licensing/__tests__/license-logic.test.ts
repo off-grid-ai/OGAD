@@ -11,7 +11,7 @@
  * source of truth) rather than re-hardcoded here.
  */
 import { describe, it, expect } from 'vitest'
-import { PRO_PURCHASE_URL } from '../../../shared/product-links'
+import { PRO_PURCHASE_URL } from '@offgrid/core/shared/product-links'
 import {
   isProActive,
   toInfo,

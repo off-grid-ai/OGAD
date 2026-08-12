@@ -32,4 +32,10 @@ echo "[test:db] running DB integration tests..."
 # Native/model/UI DB journeys are intentionally serial. Parallel files compete for
 # process-wide engines, Electron module state, and timing-sensitive recorder owners,
 # which turns real integration coverage into suite-load flakes.
-npx vitest run --config vitest.db.config.ts --no-file-parallelism --maxWorkers=1 "$@"
+# Which config to run. Defaults to the full suite; OFFGRID_DB_VITEST_CONFIG selects the coverage
+# variant (vitest.db.coverage.config.ts), which skips the files with documented open failures so a
+# report gets written at all - vitest emits none when any test fails. Passing --config twice on the
+# command line breaks vitest's argument parser, hence an env var rather than an extra flag.
+DB_CONFIG="${OFFGRID_DB_VITEST_CONFIG:-vitest.db.config.ts}"
+echo "[test:db] config: $DB_CONFIG"
+npx vitest run --config "$DB_CONFIG" --no-file-parallelism --maxWorkers=1 "$@"

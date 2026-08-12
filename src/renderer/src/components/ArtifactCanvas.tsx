@@ -331,7 +331,7 @@ else { __ogShow('No React component found — define a component named App or a 
             {artifact.code}
           </pre>
         ) : artifact.kind === 'text' ? (
-          <div className="prose prose-invert prose-sm absolute inset-0 max-w-none overflow-auto bg-neutral-950 px-6 py-5 text-sm leading-relaxed text-neutral-200 [&_a]:text-green-400 [&_code]:rounded [&_code]:bg-neutral-800 [&_code]:px-1 [&_h1]:mb-3 [&_h1]:mt-1 [&_h1]:text-xl [&_h1]:font-semibold [&_h1]:text-white [&_h2]:mb-2 [&_h2]:mt-5 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:text-white [&_li]:my-1 [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
+          <div className="prose prose-invert prose-sm absolute inset-0 max-w-none overflow-auto bg-neutral-950 px-6 py-5 text-sm leading-relaxed text-neutral-200 [&_a]:text-emerald-400 [&_code]:rounded [&_code]:bg-neutral-800 [&_code]:px-1 [&_h1]:mb-3 [&_h1]:mt-1 [&_h1]:text-xl [&_h1]:font-semibold [&_h1]:text-white [&_h2]:mb-2 [&_h2]:mt-5 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:text-white [&_li]:my-1 [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
             <ReactMarkdown>{artifact.code}</ReactMarkdown>
           </div>
         ) : previewUrl ? (

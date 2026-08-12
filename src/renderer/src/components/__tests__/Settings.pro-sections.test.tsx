@@ -25,6 +25,25 @@ function stubApi(platform = 'darwin'): void {
         if (prop === 'platform') return platform
         if (prop === 'license') return { status: () => Promise.resolve({}) }
         if (prop === 'getAppVersion') return () => Promise.resolve('')
+        if (prop === 'getPermissionStatus') {
+          return () =>
+            Promise.resolve({
+              accessibility: true,
+              screenRecording: false,
+              localNetwork: true,
+              allGranted: false
+            })
+        }
+        if (prop === 'getLlmSettings') {
+          return () => Promise.resolve({ performanceMode: 'balanced' })
+        }
+        if (prop === 'setupPlan') return () => Promise.resolve(null)
+        if (prop === 'systemHealth') {
+          return () => Promise.resolve({ components: [], ramGb: 0, activeModel: null })
+        }
+        if (prop === 'getStorageInfo') return () => Promise.resolve(null)
+        if (prop === 'listDownloads') return () => Promise.resolve([])
+        if (prop === 'onSetupProgress' || prop === 'onModelProgress') return () => () => {}
         if (prop === 'queueConfigGet') {
           return () => Promise.resolve({ enabled: true, tier1Coexists: true })
         }
@@ -81,6 +100,20 @@ describe('Settings pro-section registry seam (D31)', () => {
     expect(
       screen.queryByText(/screen capture, backlog recovery, and proactive delivery/i)
     ).toBeNull()
+  })
+
+  it('opens permission recovery at the end of Setup & health instead of adding another card', async () => {
+    vi.resetModules()
+    stubApi()
+    const consumed = vi.fn()
+    const { Settings } = await import('../Settings')
+    render(<Settings initialSection="permissions" onInitialSectionConsumed={consumed} />)
+
+    expect(await screen.findByText('System permissions')).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Screen Recording' })).toBeTruthy()
+    expect(screen.getByText('Permission needed')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Permissions' })).toBeNull()
+    await waitFor(() => expect(consumed).toHaveBeenCalledOnce())
   })
 
   it('Windows Pro build withholds native capture while keeping account sections available', async () => {

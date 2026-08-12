@@ -52,10 +52,15 @@ describe('UpgradeScreen - per-feature "coming soon" notice on the buy screen', (
     expect(UPGRADE_BRANCH).toMatch(/platformNotice &&/)
   })
 
-  it('tells the user coming soon + works on Mac + phone when the notice shows (upgrade branch)', () => {
+  it('says coming soon here, and that the licence covers the platforms (upgrade branch)', () => {
     expect(UPGRADE_BRANCH).toMatch(/Coming soon to your \{deviceNoun\(\)\}/)
-    expect(UPGRADE_BRANCH).toMatch(/macOS-tested/)
-    expect(UPGRADE_BRANCH).toMatch(/phone app/)
+    // It used to assert /macOS-tested/. That claim is gone on purpose: Windows is a live platform now, so
+    // telling a Windows user Pro is "macOS-tested today" and will be enabled "once it is tested" was
+    // simply untrue - and it was the first thing they read. What must remain is the honest, narrower
+    // pair: this FEATURE runs on Mac today, and the licence covers the platforms.
+    expect(UPGRADE_BRANCH).toMatch(/Windows is live/)
+    expect(UPGRADE_BRANCH).toMatch(/license covers desktop and mobile/)
+    expect(UPGRADE_BRANCH).not.toMatch(/macOS-tested/)
   })
 
   it('keeps the buy CTA in the upgrade branch (not replaced by the notice)', () => {

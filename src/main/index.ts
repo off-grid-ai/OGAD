@@ -21,6 +21,7 @@ import { setupRagIPC } from './rag-ipc'
 import { setupMcpIpc } from './mcp-ipc'
 import { registerToolExtension } from './tools'
 import { registerNativeActionTools } from './tools/nativeActionToolExtension'
+import { setupDesktopBackupIPC } from './backup/ipc'
 import { preloadPath } from './preload-path'
 import { rendererHtmlPath } from './renderer-path'
 import { startModelServer, stopModelServer } from './model-server'
@@ -28,8 +29,16 @@ import { startMediaServer, stopMediaServer, mediaUrlFor } from './media-server'
 import { serveCaptureFile } from './ogcapture-serve'
 import { serveArtifactPreview } from './artifact-preview'
 import { ipcMain } from 'electron'
-import { loadProFeaturesMain } from './bootstrap/loadProFeaturesMain'
-import { initLicensing } from './licensing/license-service'
+import { loadProEntitlementProvider, loadProFeaturesMain } from './bootstrap/loadProFeaturesMain'
+import { resolveWindowPresentation } from './bootstrap/window-presentation'
+
+/**
+ * Whether this launch may put itself on screen or take the keyboard. Resolved ONCE: the main window, the Dock
+ * tile, the second-instance focus and every window pro opens must all give the same answer, or a headless run
+ * is only partly headless - which is exactly the bug this fixes.
+ */
+const windowPresentation = resolveWindowPresentation(process.env)
+import { initLicensing, revalidateProEntitlement } from './licensing/license-service'
 import { setupLicenseIpc } from './license-ipc'
 import { nativeImage } from 'electron'
 import { purgeLegacyChatImports, getSetting } from './database'
@@ -48,6 +57,7 @@ import {
 } from './diagnostics-log'
 import {
   applicationShutdown,
+  commitApplicationRelaunch,
   installApplicationShutdown,
   registerCoreShutdownOwners
 } from './shutdown'
@@ -121,10 +131,24 @@ registerCoreShutdownOwners(applicationShutdown, {
 console.log('MAIN PROCESS: LOADING CUSTOM ENTRY POINT (SHELL OVERWRITE)')
 
 function createWindow(): void {
-  // Create the browser window.
+  // Open filling the screen, because this is a desktop-first, dense app: multi-column grids, master
+  // detail lists and side panels. At 900x670 the Models grid collapsed to one card per row, the chat
+  // history rail ate a third of the width, and every screen looked like a phone layout stretched.
+  //
+  // The work area, not the display bounds - that excludes the menu bar and Dock, so the window fills
+  // what the user can actually use. maximize() on top of it because the work area is only the
+  // starting size; maximizing is what makes the OS treat the window as filled and keeps it that way
+  // through a display change.
+  //
+  // Not fullscreen: on macOS that moves the app to its own Space and hides the menu bar, so a user who
+  // just wanted a big window loses Mission Control and every other window alongside it.
+  const { workAreaSize } = screen.getPrimaryDisplay()
   const mainWindow = new BrowserWindow({
-    width: 900,
-    height: 670,
+    width: workAreaSize.width,
+    height: workAreaSize.height,
+    // The old default is now the floor: below this the dense layouts stop working.
+    minWidth: 900,
+    minHeight: 670,
     show: false,
     title: PRODUCT_NAME,
     autoHideMenuBar: true,
@@ -138,8 +162,17 @@ function createWindow(): void {
     }
   })
 
+  // Maximized before the first paint, not on ready-to-show: the window is still hidden here, so it
+  // opens at full size instead of appearing at the constructed size and jumping. It also means anything
+  // that reads the window as soon as it exists sees the real geometry - on ready-to-show the renderer
+  // can already have loaded, so the size depended on which happened first.
+  mainWindow.maximize()
+
+  // Nothing is shown in a headless (e2e) run - see window-presentation for why the suite needs that on
+  // macOS, where Playwright cannot make an Electron app headless and there is no xvfb to hide it behind.
+  // The renderer has already loaded and painted by now either way, which is all Playwright drives.
   mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+    if (windowPresentation.showWindow) mainWindow.show()
   })
 
   // Pin zoom to 100% (clear any persisted accidental Cmd+= zoom) and disable
@@ -176,12 +209,27 @@ if (!app.requestSingleInstanceLock()) {
     const win = BrowserWindow.getAllWindows()[0]
     if (win) {
       if (win.isMinimized()) win.restore()
-      win.focus()
+      if (windowPresentation.showWindow) win.focus()
     }
   })
 }
 
-app.whenReady().then(() => {
+// Windows this file does not own must obey the same answer. pro opens several that call show()+focus()
+// themselves - the clipboard quick-open popup, the tray and CRM notification surfaces, the meeting notice -
+// so hiding only the main window left a headless run still stealing the keyboard, once per spec that touches
+// them. Making every window non-focusable is the technique pro's dictation overlay already uses deliberately
+// (pro/main/dictation/overlay.ts: non-focusable + showInactive, so the user's target app keeps the keys);
+// here it is applied to all of them, from the one place that knows the launch is headless.
+//
+// Visibility is deliberately left alone. Popups stay visible and their isVisible()-gated logic keeps working,
+// which is what lets the clipboard quick-open journey pass headless - it just cannot take focus any more.
+if (!windowPresentation.showWindow) {
+  app.on('browser-window-created', (_event, win) => {
+    win.setFocusable(false)
+  })
+}
+
+app.whenReady().then(async () => {
   restoreCanonicalProductName()
 
   // Server-only (headless) mode: boot just the multimodal gateway + LLM runtime,
@@ -222,8 +270,14 @@ app.whenReady().then(() => {
   // default Electron icon; the packaged build uses build/icon from electron-builder).
   if (process.platform === 'darwin' && app.dock) {
     try {
-      const dockImg = nativeImage.createFromPath(icon)
-      if (!dockImg.isEmpty()) app.dock.setIcon(dockImg)
+      // Out of the Dock entirely in a headless run: an app with a Dock tile still becomes the frontmost
+      // application, which is the half of the interruption that is not the window itself.
+      if (!windowPresentation.showInDock) {
+        app.dock.hide()
+      } else {
+        const dockImg = nativeImage.createFromPath(icon)
+        if (!dockImg.isEmpty()) app.dock.setIcon(dockImg)
+      }
     } catch (e) {
       console.warn('[dock] setIcon failed', e)
     }
@@ -324,12 +378,15 @@ app.whenReady().then(() => {
     // Licensing first: load the cached Keygen entitlement into memory and register
     // the SYNC `pro:is-enabled` handler BEFORE createWindow() (line below) so the
     // preload's sendSync resolves and window.api.isPro reflects the real license.
+    await loadProEntitlementProvider()
     initLicensing()
+    await revalidateProEntitlement('launch')
     setupLicenseIpc()
     setupIPC()
     setupRagIPC()
     setupMcpIpc() // basic MCP connectors (management + chat tool extension)
     registerNativeActionTools(registerToolExtension) // computer use: semantic rail (macOS-only)
+    setupDesktopBackupIPC()
     // one OpenAI-compatible local gateway (LLM + STT); auto-picks a free port. Async, so handle a
     // rejection on the promise (a try/catch around a fire-and-forget async call can't catch it).
     startModelServer().catch((e) => console.error('[model-server] start failed', e))
@@ -391,6 +448,9 @@ app.whenReady().then(() => {
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+  app.on('browser-window-focus', () => {
+    void revalidateProEntitlement('foreground')
+  })
 })
 
 app.on('window-all-closed', () => {
@@ -416,6 +476,7 @@ app.on('before-quit', (event) => {
       /* best-effort — quit regardless so the app never hangs on exit */
     }
     engineUnloaded = true
+    commitApplicationRelaunch(app)
     app.quit()
   })()
 })

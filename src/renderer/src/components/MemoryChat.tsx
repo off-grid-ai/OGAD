@@ -2,31 +2,44 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { shouldQueue, enqueue, dequeue, queuedCount, clearQueue } from '@renderer/lib/chat-queue'
 import { buildSendHistory } from '@renderer/lib/chat-history'
 import { waitingLabel } from '@renderer/lib/chat-labels'
-import { timeAgo } from '@renderer/lib/time'
+import { parseSqliteUtc, timeAgo } from '@renderer/lib/time'
 import { writeClipboardWithFallback } from '@renderer/lib/clipboard-write'
 import { motion, AnimatePresence } from 'motion/react'
 import { toSpeakableText } from '@renderer/lib/speakable'
 import { isAgenticTurn } from '@renderer/lib/agentic-active'
 import { applyStreamEvent } from '@renderer/lib/stream-reducer'
 import { useActiveModelSummary } from '@renderer/hooks/useActiveModelSummary'
-import { createUiId } from '@renderer/lib/ui-id'
 import { shouldFollowBottom } from '@renderer/lib/scroll-follow'
+import {
+  chatListPreviewLine,
+  projectSyncedMessageTurn,
+  type ProjectedSyncedTool,
+  type RecordProvenance,
+  type SyncedMessageRole,
+  type SyncedTurnStatus
+} from '@offgrid/sync'
 import ReactMarkdown, { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
+import { getSlot, SLOTS } from '@/bootstrap/slotRegistry'
 import { ArtifactCanvas, parseArtifact, type Artifact } from './ArtifactCanvas'
 import { VoiceBubble, stopAllVoicePlayback } from './VoiceBubble'
 import { SkillsPanel } from './SkillsPanel'
-import { SettingsPanel } from './SettingsPanel'
 import { ModelPicker } from './ModelPicker'
+import { SettingsPanel } from './SettingsPanel'
 import { ConversationTitleActions } from './ConversationTitleActions'
 import { resolveImageParams, setOverride, type ImageParamStore } from '@renderer/lib/image-params'
+import { IMAGE_SETTINGS_CHANGED_EVENT } from '@renderer/lib/image-settings-events'
 import { shouldAutoRouteImage, cleanImagePrompt } from '@renderer/lib/image-intent'
 import {
   buildAssistantContext,
   readReasoning,
   readResponseCutoff
 } from '@renderer/lib/message-persistence'
+import {
+  readGeneratedImageReference,
+  withGeneratedImageReference
+} from '../../../shared/generated-image-reference'
 import type { RagConversationContract, ResponseCutoffContract } from '../../../shared/ipc-contracts'
 import {
   parseImageMemoryGuardError,
@@ -91,6 +104,7 @@ type RagContext = {
   image?: string
   imageMetadata?: ImageGenerationMetadata
   sources?: { name: string; position: number; score: number }[]
+  attachments?: { name: string; kind: string; text?: string; path?: string }[]
 }
 
 type ImageGenerationMetadata = {
@@ -104,13 +118,22 @@ type ImageGenerationMetadata = {
 
 type ChatMessage = {
   id: string
-  role: 'user' | 'assistant'
+  role: SyncedMessageRole
   content: string
   context?: RagContext
   image?: string
   imagePath?: string
   imageMetadata?: ImageGenerationMetadata
-  toolCalls?: { name: string; result: string }[]
+  toolCalls?: ProjectedSyncedTool[]
+  toolName?: string
+  toolCallId?: string
+  turnStatus?: SyncedTurnStatus
+  /** The app said this ("Model loaded: …"), not the model. Drawn as a quiet marker, never a bubble. */
+  notice?: boolean
+  /** What this turn's reasoning block is called, when it named itself ("Enhanced prompt"). */
+  reasoningLabel?: string
+  generationTimeMs?: number
+  provenance?: RecordProvenance
   reasoning?: string
   cutoff?: ResponseCutoffContract
   imageMemoryRetry?: {
@@ -130,12 +153,30 @@ type ChatMessage = {
 
 type ChatMode = 'ask' | 'image'
 
-async function announceImageMessagePersisted(conversationId: string): Promise<void> {
+/**
+ * Tell main the generated assistant message is durable, and WHICH message it is.
+ *
+ * The message id is the point. The image was offered to the mesh before the message existed, so the
+ * file record could not say what it hung under, and every peer filed the picture in its gallery and
+ * left the chat empty. Naming the message here is what completes the record.
+ */
+async function announceImageMessagePersisted(
+  conversationId: string,
+  messageId: string
+): Promise<void> {
   try {
-    await window.api.imageGenConversationPersisted?.(conversationId)
+    await window.api.imageGenConversationPersisted?.(conversationId, messageId)
   } catch {
     /* The message is already durable; a later mount still loads it from SQLite. */
   }
+}
+
+/**
+ * A notice is stored with markdown emphasis wrapped around it (`_Model loaded: Qwen3.5 0.8B_`),
+ * and this line is drawn as plain text, so the markers would otherwise be read out literally.
+ */
+function noticeText(content: string): string {
+  return content.replace(/^_([\s\S]*)_$/, '$1').trim()
 }
 
 type AskBlock = { question: string; options: string[]; multiSelect: boolean }
@@ -200,6 +241,9 @@ type Attachment = {
   kind: 'text' | 'pdf' | 'docx' | 'image' | 'audio' | 'video' | 'pasted'
   text: string
   path?: string // images: persisted path passed to the vision model
+  mimeType?: string
+  fileSize?: number
+  createdAt?: string
   preview?: string // images: a local object URL shown immediately while processing
   status: 'loading' | 'ready' | 'error'
   error?: string
@@ -218,32 +262,77 @@ interface MemoryChatProps {
   /** Open the Replay screen seeked to a capture's moment (epoch ms). */
   onSeekReplay?: (ts: number) => void
   /** Open a specific conversation, or start a new one scoped to a project. */
-  openTarget?: { conversationId?: string; projectId?: string } | null
+  openTarget?: { conversationId?: string; projectId?: string; openGallery?: boolean } | null
   onTargetConsumed?: () => void
 }
 
 function mapRagMessages(raw: any[]): ChatMessage[] {
-  return raw.map((m: any) => {
-    const ctx = m.context
-      ? typeof m.context === 'string'
-        ? JSON.parse(m.context)
-        : m.context
-      : undefined
-    return {
-      id: String(m.id),
-      role: m.role as 'user' | 'assistant',
-      content: m.content,
-      context: ctx,
-      // Reasoning rides in the context blob so the "Thinking" block survives reload.
-      reasoning: readReasoning(ctx),
-      cutoff: readResponseCutoff(ctx),
-      toolCalls: Array.isArray(ctx?.toolCalls) ? ctx.toolCalls : undefined,
-      image: ctx?.image ? `ogcapture://${ctx.image}` : undefined,
-      imagePath: ctx?.image,
-      imageMetadata: ctx?.imageMetadata,
-      // Attachments persisted on the user turn (clickable chips survive reload).
-      attachments: Array.isArray(ctx?.attachments) ? ctx.attachments : undefined
+  return raw.flatMap((m: any) => {
+    let ctx: RagContext | undefined
+    if (m.context && typeof m.context === 'string') {
+      try {
+        ctx = JSON.parse(m.context) as RagContext
+      } catch {
+        ctx = undefined
+      }
+    } else if (m.context && typeof m.context === 'object') {
+      ctx = m.context as RagContext
     }
+    const provenance =
+      typeof m.origin_device_id === 'string' && typeof m.origin_device_name === 'string'
+        ? {
+            originDeviceId: m.origin_device_id,
+            originDeviceName: m.origin_device_name
+          }
+        : undefined
+    const turn = projectSyncedMessageTurn({
+      id: String(m.uuid ?? m.id),
+      role: m.role,
+      content: m.content,
+      context: m.context,
+      createdAt: m.created_at,
+      provenance
+    })
+    if (!turn) return []
+    // Mobile tool turns can persist a delimiter-only intermediate assistant row before the
+    // tool result and final answer. It carries no thought content and must not become a visible
+    // "<think> </think>" bubble on Desktop.
+    // A turn with nothing in it is not a bubble. Mobile's tool loop persists a delimiter-only
+    // assistant row before the tool result and the final answer; it used to arrive as the literal
+    // "<think></think>" and was matched as that string. The shared projection now splits inline
+    // reasoning out, so the same row arrives empty instead - test emptiness, which covers both and
+    // any other way a turn can carry nothing.
+    if (turn.role === 'assistant' && !turn.content.trim() && turn.reasoning === undefined) {
+      return []
+    }
+    const imageReference = readGeneratedImageReference(ctx)
+    return [
+      {
+        id: turn.id,
+        role: turn.role,
+        // The cleaned view: `content` stays verbatim for hosts that store it back.
+        content: turn.role === 'assistant' ? (turn.answer ?? turn.content) : turn.content,
+        context: ctx,
+        // Reasoning rides in the context blob so the "Thinking" block survives reload.
+        reasoning: turn.reasoning ?? readReasoning(ctx),
+        cutoff: readResponseCutoff(ctx),
+        toolCalls: turn.role === 'assistant' && turn.tools.length > 0 ? turn.tools : undefined,
+        toolName: turn.role === 'tool' ? turn.tools[0]?.name : undefined,
+        toolCallId: turn.role === 'tool' ? turn.tools[0]?.id : undefined,
+        turnStatus: turn.status,
+        notice: turn.notice,
+        reasoningLabel: turn.reasoningLabel,
+        generationTimeMs: turn.role === 'tool' ? turn.tools[0]?.durationMs : turn.durationMs,
+        provenance: turn.provenance,
+        // Read through the one reader, so a row that names its image on the mesh and a row that
+        // only remembers a path both render, and neither is decoded here.
+        image: imageReference ? `ogcapture://${imageReference.path}` : undefined,
+        imagePath: imageReference?.path,
+        imageMetadata: ctx?.imageMetadata,
+        // Attachments persisted on the user turn (clickable chips survive reload).
+        attachments: Array.isArray(ctx?.attachments) ? ctx.attachments : undefined
+      }
+    ]
   })
 }
 
@@ -625,8 +714,8 @@ export function MemoryChat({
   const [speakingId, setSpeakingId] = useState<string | null>(null)
   const [speakLoadingId, setSpeakLoadingId] = useState<string | null>(null)
   const [speakError, setSpeakError] = useState<{ id: string; message: string } | null>(null)
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   // Active text model + running context window, shown in the composer. Refreshes when
   // the model picker closes (the selection may have changed).
   const modelSummary = useActiveModelSummary(modelPickerOpen)
@@ -663,6 +752,8 @@ export function MemoryChat({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   const [lightbox, setLightbox] = useState<{ url: string; path?: string } | null>(null)
+  // Rows pro appends after the message list, e.g. a peer's live reply. Empty in the free build.
+  const ChatMessagesFooter = getSlot(SLOTS.chatMessagesFooter)
   // Esc closes the open overlay (attachment viewer / image lightbox).
   useEffect(() => {
     if (!viewer && !lightbox) return
@@ -736,6 +827,8 @@ export function MemoryChat({
   // read could see undefined and the persisted 'Thinking' block would vanish on
   // reload (the exact T1f bug). A ref is written synchronously and read directly.
   const reasoningByStream = useRef<Record<string, string>>({})
+  /** What the model has actually said so far, per stream — see the stream handler for why. */
+  const answerByStream = useRef<Record<string, string>>({})
   // Conversations the user hit "stop" on. The in-flight send checks this at each of
   // its awaits and bails (no error bubble, no persisted junk) instead of finalizing a
   // turn the user abandoned. Cleared when the conversation's send settles.
@@ -850,6 +943,20 @@ export function MemoryChat({
       /* engine may be down; leave prior state */
     }
   }, [])
+  useEffect(() => {
+    const refreshImageSettings = (): void => {
+      void Promise.all([window.api.getSettings(), refreshImageModel()]).then(([settings]) => {
+        if (settings.imageParams && typeof settings.imageParams === 'object')
+          setImgParamStore(settings.imageParams as ImageParamStore)
+        if (typeof settings.imgSeed === 'string') setImgSeed(settings.imgSeed)
+        if (typeof settings.imgNegative === 'string') setImgNegative(settings.imgNegative)
+        if (typeof settings.enhanceImagePrompts === 'boolean')
+          setEnhanceImg(settings.enhanceImagePrompts)
+      })
+    }
+    window.addEventListener(IMAGE_SETTINGS_CHANGED_EVENT, refreshImageSettings)
+    return () => window.removeEventListener(IMAGE_SETTINGS_CHANGED_EVENT, refreshImageSettings)
+  }, [refreshImageModel])
   // When the model picker closes it may have changed the active image model
   // (setActiveModalModel). Re-read so the composer reflects the single source of
   // truth rather than a stale mirror.
@@ -1146,6 +1253,35 @@ export function MemoryChat({
     [activeConversationId, switchConversation]
   )
 
+  // A conversation changed underneath us - most often a message synced from another device. Reload
+  // that thread when it is the one on screen, and refresh the list either way so ordering follows.
+  //
+  // Skipped while THIS device is generating in that conversation: the in-flight reply lives in local
+  // state and re-reading the table mid-stream would drop it.
+  useEffect(() => {
+    const off = window.api.onRagConversationsChanged?.(({ conversationId }) => {
+      void (async () => {
+        try {
+          if (
+            conversationId &&
+            conversationId === activeConversationId &&
+            !generatingConvs.has(conversationId)
+          ) {
+            setConvMessages(
+              conversationId,
+              mapRagMessages(await window.api.getRagMessages(conversationId))
+            )
+          }
+          await loadConversations()
+        } catch (error) {
+          console.error('Failed to refresh a synced conversation:', error)
+        }
+      })()
+    })
+    return () => off?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeConversationId, generatingConvs])
+
   // Open a target passed from the Projects tab (an existing chat, or a new chat
   // scoped to a project). Resolves project from the DB to avoid stale state.
   useEffect(() => {
@@ -1164,6 +1300,7 @@ export function MemoryChat({
           setConvMessages(null, [])
           setActiveProjectId(openTarget.projectId)
         }
+        if (openTarget.openGallery) setShowGallery(true)
         await loadConversations()
       } catch (e) {
         console.error('Failed to open chat target:', e)
@@ -1284,7 +1421,7 @@ export function MemoryChat({
 
     // Create new conversation if none active
     if (!convId) {
-      convId = createUiId('rag')
+      convId = crypto.randomUUID()
       const title = trimmed.length > 50 ? trimmed.slice(0, 47) + '...' : trimmed
       try {
         await window.api.createRagConversation(convId, title, projectId)
@@ -1301,12 +1438,42 @@ export function MemoryChat({
     // conversation the user previously stopped can generate again.
     cancelledRef.current.delete(convId)
     markGenerating(convId, true)
+    // The image this turn is BASED on is an attachment on this turn, and saying so is the whole fix:
+    // it then travels, renders, and survives a reload by the same path every other attachment uses.
+    // Kept in app storage first, because the user's own copy can move or be deleted the moment the
+    // turn ends and its path means nothing on another device. The generation is pointed at the kept
+    // copy too, so there is one file and not two.
+    let keptInit: { id: string; path: string } | null = null
+    if (imgInit) {
+      try {
+        keptInit = await window.api.keepInitImage(imgInit)
+      } catch (e) {
+        // Not worth failing the turn over: the image still generates, it just has no before-picture.
+        console.error('Could not keep the init image', e)
+      }
+    }
+    const initAttachment = keptInit
+      ? {
+          id: keptInit.id,
+          name: keptInit.path.split('/').pop() || 'init image',
+          kind: 'image' as const,
+          path: keptInit.path
+        }
+      : undefined
+
     if (!regen) {
       const userMessage: ChatMessage = {
-        id: `u-${Date.now()}`,
+        id: crypto.randomUUID(),
         role: 'user',
         content: trimmed,
-        attachments: atts.map((a) => ({ name: a.name, kind: a.kind, text: a.text, path: a.path })),
+        attachments: [
+          ...atts.map((a) => ({ name: a.name, kind: a.kind, text: a.text, path: a.path })),
+          // Drawn now, not only after a reload. Persisting it without this left the turn looking as
+          // though nothing had been attached until the conversation was loaded again.
+          ...(initAttachment
+            ? [{ name: initAttachment.name, kind: initAttachment.kind, path: initAttachment.path }]
+            : [])
+        ],
         audioUrl: opts?.voiceClip?.url,
         audioDuration: opts?.voiceClip?.duration
       }
@@ -1320,16 +1487,23 @@ export function MemoryChat({
     try {
       if (!regen) {
         const attMeta = atts.map((a) => ({
+          id: a.id,
           name: a.name,
           kind: a.kind,
           text: a.text,
-          path: a.path
+          path: a.path,
+          mimeType: a.mimeType,
+          fileSize: a.fileSize,
+          createdAt: a.createdAt
         }))
+        // Appended, never folded into `atts`: those are what the MODEL is given, and the init image is
+        // an input to the image runtime rather than text for the language model to read.
+        const persisted = initAttachment ? [...attMeta, initAttachment] : attMeta
         await window.api.addRagMessage(
           convId,
           'user',
           trimmed,
-          attMeta.length ? { attachments: attMeta } : undefined
+          persisted.length ? { attachments: persisted } : undefined
         )
       }
     } catch (e) {
@@ -1399,7 +1573,8 @@ export function MemoryChat({
         cfgScale: imgCfgScale,
         seed: Number.isNaN(seedNum) ? -1 : seedNum,
         model: imgModel || undefined,
-        initImage: imgInit || undefined,
+        // The kept copy, so the record of what this was made from cannot outlive the file it names.
+        initImage: keptInit?.path ?? imgInit ?? undefined,
         strength: imgInit ? imgStrength : undefined
       }
       try {
@@ -1429,11 +1604,13 @@ export function MemoryChat({
         }
         setConvMessages(convId, (prev) => [...prev, assistantMessage])
         try {
-          await window.api.addRagMessage(convId, 'assistant', `Generated for: ${trimmed}`, {
-            image: img.path,
-            imageMetadata
-          })
-          await announceImageMessagePersisted(convId)
+          const stored = await window.api.addRagMessage(
+            convId,
+            'assistant',
+            `Generated for: ${trimmed}`,
+            withGeneratedImageReference({ imageMetadata }, { id: img.syncId, path: img.path })
+          )
+          await announceImageMessagePersisted(convId, stored.uuid)
         } catch {
           /* ignore */
         }
@@ -1515,30 +1692,14 @@ export function MemoryChat({
             ? { unified: tr?.unified ?? [], toolCalls }
             : undefined
         if (cancelledRef.current.has(convId)) {
-          const partial = (tr?.answer || '').trim()
-          if (partial) {
-            setConvMessages(convId, (prev) =>
-              prev.map((m) =>
-                m.id === toolStreamId
-                  ? {
-                      ...m,
-                      content: partial,
-                      context,
-                      toolCalls,
-                      activity: undefined,
-                      streaming: false
-                    }
-                  : m
-              )
-            )
-            try {
-              await window.api.addRagMessage(convId, 'assistant', partial, toolCtx)
-            } catch {
-              /* ignore */
-            }
-          } else {
-            setConvMessages(convId, (prev) => prev.filter((m) => m.id !== toolStreamId))
-          }
+          // The tool calls made before the stop are kept, exactly as a completed tool turn keeps
+          // them: rendered from `toolCalls`, stored in `toolCtx` beside the citation sources.
+          await finalizeStoppedTurn(convId, toolStreamId, {
+            answer: tr?.answer,
+            context,
+            persistContext: toolCtx,
+            toolCalls
+          })
           return
         }
         const answer = tr?.answer || 'No response returned.'
@@ -1547,6 +1708,7 @@ export function MemoryChat({
         // context blob so the 'Thinking' block survives reload (T1f).
         const toolReasoning = reasoningByStream.current[toolStreamId]
         delete reasoningByStream.current[toolStreamId] // done with this stream — free it
+        delete answerByStream.current[toolStreamId]
         // Finalize the streamed placeholder in place (never append a second bubble).
         setConvMessages(convId, (prev) =>
           prev.map((m) =>
@@ -1583,11 +1745,16 @@ export function MemoryChat({
               )
             )
             try {
-              await window.api.addRagMessage(convId, 'assistant', answer, {
-                ...(toolCtxWithReasoning ?? {}),
-                image: img.path
-              })
-              await announceImageMessagePersisted(convId)
+              const stored = await window.api.addRagMessage(
+                convId,
+                'assistant',
+                answer,
+                withGeneratedImageReference(toolCtxWithReasoning ?? {}, {
+                  id: img.syncId,
+                  path: img.path
+                })
+              )
+              await announceImageMessagePersisted(convId, stored.uuid)
             } catch {
               /* ignore */
             }
@@ -1642,27 +1809,13 @@ export function MemoryChat({
       )
       const resultContext = result.context as RagContext | undefined
 
-      // Stopped mid-stream: the abort keeps whatever streamed so far. Finalize the
-      // partial text if any arrived; otherwise drop the empty placeholder. Never write
-      // the "No response returned." filler or a fresh bubble for a cancelled turn.
+      // Stopped mid-stream — one owner decides what survives (finalizeStoppedTurn).
       if (cancelledRef.current.has(convId)) {
-        const partial = (result.answer || '').trim()
-        if (partial) {
-          setConvMessages(convId, (prev) =>
-            prev.map((m) =>
-              m.id === streamId
-                ? { ...m, content: partial, context: resultContext, streaming: false }
-                : m
-            )
-          )
-          try {
-            await window.api.addRagMessage(convId, 'assistant', partial, resultContext)
-          } catch {
-            /* ignore */
-          }
-        } else {
-          setConvMessages(convId, (prev) => prev.filter((m) => m.id !== streamId))
-        }
+        await finalizeStoppedTurn(convId, streamId, {
+          answer: result.answer,
+          context: resultContext,
+          cutoff: result.cutoff
+        })
         return
       }
       const assistantContent = result.answer || 'No response returned.'
@@ -1698,13 +1851,13 @@ export function MemoryChat({
             )
           )
           try {
-            await window.api.addRagMessage(
+            const stored = await window.api.addRagMessage(
               convId,
               'assistant',
               `Generated: ${imgPrompt.slice(0, 80)}`,
-              { image: img.path }
+              withGeneratedImageReference(undefined, { id: img.syncId, path: img.path })
             )
-            await announceImageMessagePersisted(convId)
+            await announceImageMessagePersisted(convId, stored.uuid)
           } catch {
             /* ignore */
           }
@@ -1725,6 +1878,7 @@ export function MemoryChat({
         // a setState-updater side effect. Rides the persisted context blob (T1f).
         const ragReasoning = reasoningByStream.current[streamId]
         delete reasoningByStream.current[streamId] // done with this stream — free it
+        delete answerByStream.current[streamId]
         setConvMessages(convId, (prev) =>
           prev.map((m) =>
             m.id === streamId
@@ -1772,14 +1926,12 @@ export function MemoryChat({
         }
       }
     } catch (e) {
-      // User stopped: no error bubble — drop the empty placeholder (any partial text
-      // was already finalized on the cancel path above).
+      // User stopped and the call REJECTED rather than returning, so there is no result to read.
+      // This is the path that used to save nothing at all: the turn stayed on screen and was gone
+      // the next time the conversation loaded. The refs still hold what streamed, so the same
+      // owner finalises it.
       if (cancelledRef.current.has(convId)) {
-        const sid = activeStreamId
-        if (sid)
-          setConvMessages(convId, (prev) =>
-            prev.filter((m) => !(m.id === sid && !m.content && !m.reasoning))
-          )
+        if (activeStreamId) await finalizeStoppedTurn(convId, activeStreamId)
         return
       }
       console.error('RAG chat failed', e)
@@ -1828,6 +1980,82 @@ export function MemoryChat({
   // return the UI to idle now. The in-flight sendMessage sees cancelledRef and bails at
   // its next await; this handles both the pre-stream ("Searching your memory…") window
   // and a live token stream.
+  /**
+   * Finalise a turn the user stopped. The ONE place that decides what a stopped turn keeps.
+   *
+   * There are three ways a stop lands: the plain reply settles with a partial result, the tool
+   * loop settles with one, or the call REJECTS and there is no result at all. Each used to answer
+   * this for itself and the three disagreed. The plain path saved the partial answer but dropped
+   * the reasoning; the tool path did the same; and the reject path saved NOTHING, so a turn the
+   * user could still see on screen was gone the next time the conversation loaded. All three also
+   * gated on the answer alone, so stopping while the model was still thinking deleted the turn and
+   * every word of reasoning with it.
+   *
+   * The rule, once: a stopped turn survives on EITHER partial answer or partial reasoning, and it
+   * is written through the same context builder a completed turn uses, so both reload the same.
+   * The answer and reasoning are read from the per-stream refs rather than from a result, because
+   * the reject path has no result and the refs always hold what actually arrived.
+   */
+  const finalizeStoppedTurn = useCallback(
+    async (
+      convId: string,
+      streamId: string,
+      settled?: {
+        answer?: string
+        /** The context the RENDERED message carries. */
+        context?: RagContext
+        /** What goes in the stored blob, when that differs from the rendered context: the tool
+         *  loop renders `{ unified }` but persists the tool calls alongside it. Defaults to
+         *  `context`, so a caller with one context passes one context. */
+        persistContext?: Record<string, unknown>
+        cutoff?: ResponseCutoffContract
+        toolCalls?: ChatMessage['toolCalls']
+      }
+    ): Promise<void> => {
+      const reasoning = reasoningByStream.current[streamId]?.trim() || undefined
+      const streamed = answerByStream.current[streamId] || ''
+      delete reasoningByStream.current[streamId]
+      delete answerByStream.current[streamId]
+
+      const answer = (settled?.answer ?? streamed).trim()
+      if (!answer && !reasoning) {
+        setConvMessages(convId, (prev) => prev.filter((m) => m.id !== streamId))
+        return
+      }
+
+      setConvMessages(convId, (prev) =>
+        prev.map((m) =>
+          m.id === streamId
+            ? {
+                ...m,
+                content: answer,
+                reasoning,
+                context: settled?.context ?? m.context,
+                cutoff: settled?.cutoff ?? m.cutoff,
+                toolCalls: settled?.toolCalls ?? m.toolCalls,
+                activity: undefined,
+                streaming: false
+              }
+            : m
+        )
+      )
+      try {
+        await window.api.addRagMessage(
+          convId,
+          'assistant',
+          answer,
+          buildAssistantContext(settled?.persistContext ?? settled?.context, {
+            reasoning,
+            cutoff: settled?.cutoff
+          })
+        )
+      } catch (e) {
+        console.error('Failed to persist stopped assistant message:', e)
+      }
+    },
+    [setConvMessages]
+  )
+
   const stopGeneration = useCallback(
     (cid: string | null): void => {
       const convId = cid ?? activeConversationId
@@ -2049,10 +2277,10 @@ export function MemoryChat({
   const closePanels = useCallback(() => {
     setCanvasArtifact(null)
     setSkillsOpen(false)
-    setSettingsOpen(false)
     setViewer(null)
     setShowGallery(false)
     setModelPickerOpen(false)
+    setSettingsOpen(false)
   }, [])
   const openCanvas = useCallback(
     (a: Artifact) => {
@@ -2132,6 +2360,13 @@ export function MemoryChat({
       if (data.type === 'reasoning') {
         reasoningByStream.current[data.streamId] =
           (reasoningByStream.current[data.streamId] || '') + (data.text || '')
+      }
+      // The answer is mirrored for the same reason: when the user stops, the call can REJECT
+      // rather than return, and then there is no result to read the partial answer out of. This
+      // ref is the one place that always has what arrived.
+      if (data.type === 'content') {
+        answerByStream.current[data.streamId] =
+          (answerByStream.current[data.streamId] || '') + (data.text || '')
       }
       setConvMessages(cid, (prev) =>
         prev.map((m) =>
@@ -2221,7 +2456,7 @@ export function MemoryChat({
       }
       const usable = chatVision ? arr : arr.filter((f) => !f.type.startsWith('image/'))
       for (const file of usable) {
-        const id = createUiId('att')
+        const id = crypto.randomUUID()
         // Show images as images straight away (local preview) so an upload reads as
         // an image while it captions in the background, not a generic TEXT box.
         const isImg = file.type.startsWith('image/')
@@ -2233,6 +2468,9 @@ export function MemoryChat({
             name: file.name,
             kind: isImg ? 'image' : 'text',
             text: '',
+            mimeType: file.type || undefined,
+            fileSize: file.size,
+            createdAt: new Date().toISOString(),
             preview,
             status: 'loading'
           }
@@ -2297,10 +2535,18 @@ export function MemoryChat({
       const text = dt.getData('text')
       if (text && text.length > 1200) {
         e.preventDefault()
-        const id = createUiId('att')
+        const id = crypto.randomUUID()
         setAttachments((prev) => [
           ...prev,
-          { id, name: 'Pasted text', kind: 'pasted', text, status: 'ready' }
+          {
+            id,
+            name: 'Pasted text',
+            kind: 'pasted',
+            text,
+            fileSize: new TextEncoder().encode(text).byteLength,
+            createdAt: new Date().toISOString(),
+            status: 'ready'
+          }
         ])
       }
     },
@@ -2386,7 +2632,7 @@ export function MemoryChat({
           </svg>
         </button>
 
-        {/* Settings — model params, voice, tools, connectors (right-side panel) */}
+        {/* Keep the conversation in place while its model settings drawer is open. */}
         <button
           onClick={() => {
             closePanels()
@@ -2550,8 +2796,17 @@ export function MemoryChat({
                   { label: 'This week', items: [] },
                   { label: 'Older', items: [] }
                 ]
-                for (const c of filtered) {
-                  const t = new Date(c.updated_at).getTime()
+                // Read through parseSqliteUtc, the SAME parser the row's label uses. These
+                // timestamps are UTC with no zone marker, and `new Date('2026-08-10 14:00:00')`
+                // reads a space-separated string as LOCAL - so the position said one thing and the
+                // words said another, off by the whole timezone offset. In IST that put "just now"
+                // below "5h ago" and dropped this morning's chats into Yesterday.
+                const ordered = [...filtered].sort(
+                  (a, b) =>
+                    parseSqliteUtc(b.updated_at).getTime() - parseSqliteUtc(a.updated_at).getTime()
+                )
+                for (const c of ordered) {
+                  const t = parseSqliteUtc(c.updated_at).getTime()
                   if (t >= startToday) groups[0]!.items.push(c)
                   else if (t >= startToday - 86400000) groups[1]!.items.push(c)
                   else if (t >= startToday - 6 * 86400000) groups[2]!.items.push(c)
@@ -2580,6 +2835,13 @@ export function MemoryChat({
                               onRenamed={conversationRenamed}
                               onDelete={() => deleteConversation(conv.id)}
                             />
+                            {/* The last thing said, from the shared rule the phone's list uses. A
+                                title alone told you nothing about a conversation you had elsewhere. */}
+                            {chatListPreviewLine(conv.last_role, conv.last_content) ? (
+                              <p className="mt-0.5 truncate text-[11px] text-neutral-500">
+                                {chatListPreviewLine(conv.last_role, conv.last_content)}
+                              </p>
+                            ) : null}
                             <div className="mt-0.5 flex items-center gap-2">
                               <span className="text-[10px] text-neutral-600">
                                 {timeAgo(conv.updated_at)}
@@ -2758,7 +3020,17 @@ export function MemoryChat({
             ) : (
               <div className="w-full px-6 py-5">
                 {messages.map((message) =>
-                  voiceMode ? (
+                  /* A runtime notice is not somebody speaking, so it gets no bubble and no side:
+                     a centred muted line in the timeline, the same shape the phone draws. Checked
+                     before voice mode for the same reason the phone checks it first - a notice
+                     reads as a notice whichever way the conversation is being shown. */
+                  message.notice ? (
+                    <div key={message.id} className="mb-4 flex justify-center">
+                      <span className="px-3 text-center text-[11px] leading-relaxed text-neutral-500">
+                        {noticeText(message.content)}
+                      </span>
+                    </div>
+                  ) : voiceMode && message.role !== 'tool' ? (
                     <div
                       key={message.id}
                       className={`mb-4 flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}
@@ -2838,7 +3110,7 @@ export function MemoryChat({
                                 d="M9.663 17h4.673M12 3a6 6 0 00-3.6 10.8c.3.225.45.6.45.975V16.5h6.3v-1.725c0-.375.15-.75.45-.975A6 6 0 0012 3z"
                               />
                             </svg>
-                            Thought process
+                            {message.reasoningLabel ?? 'Thought process'}
                             <svg
                               className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180"
                               fill="none"
@@ -2929,9 +3201,16 @@ export function MemoryChat({
                       })()}
                       <div
                         className={
+                          // An assistant turn with no answer draws no bubble - not while it is
+                          // streaming, and not when it finishes that way either. A reply that is
+                          // ALL reasoning ends up here: the thinking has its own block above, and
+                          // this box would be an empty rounded rectangle underneath it. The image
+                          // and the retry card live inside this box, so a turn carrying one keeps
+                          // its bubble even with no text.
                           message.role === 'assistant' &&
-                          message.streaming &&
-                          !message.content.trim()
+                          !message.content.trim() &&
+                          !message.image &&
+                          !message.imageMemoryRetry
                             ? 'hidden'
                             : `rounded-md px-3.5 py-2.5 text-sm leading-relaxed ${
                                 // While editing, expand to a full, usable width instead
@@ -2945,6 +3224,20 @@ export function MemoryChat({
                               }`
                         }
                       >
+                        {message.role === 'tool' ? (
+                          <div className="mb-2 flex items-center gap-2 border-b border-neutral-800 pb-2 text-[11px]">
+                            <Wrench className="h-3.5 w-3.5 text-green-500" />
+                            <span className="font-medium text-neutral-300">
+                              {message.toolName || 'Tool result'}
+                            </span>
+                            <span className="text-neutral-600">
+                              {message.turnStatus === 'failed' ? 'Failed' : 'Completed'}
+                              {message.generationTimeMs !== undefined
+                                ? ` in ${Math.round(message.generationTimeMs)} ms`
+                                : ''}
+                            </span>
+                          </div>
+                        ) : null}
                         {message.attachments && message.attachments.length > 0 ? (
                           <div className="mb-2 flex flex-wrap gap-1.5">
                             {message.attachments.map((att, i) => {
@@ -3453,7 +3746,7 @@ export function MemoryChat({
                                 const a = parseArtifact(message.content)
                                 if (a) openCanvas(a)
                               }}
-                              className="flex items-center gap-1 text-[11px] text-green-500 transition-colors hover:text-green-400"
+                              className="flex items-center gap-1 text-[11px] text-green-500 transition-colors hover:text-emerald-500"
                             >
                               <svg
                                 className="h-3.5 w-3.5"
@@ -3721,6 +4014,11 @@ export function MemoryChat({
                     </div>
                   )
                 )}
+                {/* A reply generating on another one of your devices, streaming here live. Pro
+                    registers the renderer; the free build has no slot and this is nothing. */}
+                {ChatMessagesFooter && activeConversationId ? (
+                  <ChatMessagesFooter conversationId={activeConversationId} />
+                ) : null}
                 {!!activeConversationId &&
                 generatingConvs.has(activeConversationId) &&
                 !messages.some((m) => m.streaming) ? (
@@ -4737,9 +5035,9 @@ export function MemoryChat({
         />
       )}
 
-      {/* Settings — model params, voice, tools, connectors */}
-      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
       {modelPickerOpen && <ModelPicker onClose={() => setModelPickerOpen(false)} />}
+
+      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
 
       {/* Attachment viewer — same full-screen overlay layout as the image lightbox
           (floating Download/Close top-right, content centered), for text/PDF/docs.

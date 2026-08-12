@@ -68,11 +68,12 @@ describe('concurrent workload shutdown and crash recovery', () => {
       import('../src/main/models-manager'),
       import('../src/main/shutdown')
     ])
-    const models = CATALOG.filter(
-      (candidate) =>
-        candidate.kind === 'text' && candidate.runtime !== 'mflux' && candidate.files.length === 1
-    ).slice(0, 4)
-    if (models.length < 4) throw new Error('Model catalog needs four single-file text fixtures')
+    // Chat models, which the catalog calls 'vision': no entry is kind 'text' any more, because every model
+    // shipped for chat is multimodal. The old filter also demanded a single file, and none qualify now
+    // either - a chat model carries an mmproj beside its weights - so this takes the first file of each,
+    // which is the one the transfer below interrupts and resumes.
+    const models = CATALOG.filter((candidate) => candidate.kind === 'vision').slice(0, 4)
+    if (models.length < 4) throw new Error('Model catalog needs four chat models for this journey')
 
     const conversationId = 'concurrent-workload-recovery'
     database.createRagConversation(conversationId, 'Concurrent workload recovery')
@@ -199,12 +200,27 @@ describe('concurrent workload shutdown and crash recovery', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((_input: string | URL | Request, init?: RequestInit) => {
-        expect(init?.headers).toEqual({ Range: `bytes=${String(resume.prefix.length)}-` })
-        const remainder = resume.full.subarray(resume.prefix.length)
+        // Two files per model, and they resume differently. The interrupted one asks to continue from the
+        // bytes already on disk and gets a 206 with the remainder; its companion (a chat model carries an
+        // mmproj beside its weights) was never started, so it asks for the whole file and gets a 200. A
+        // fake that demanded a Range on every request failed on the companion - and would have hidden a
+        // real bug the other way round, a resumed file re-fetched from zero.
+        const headers = (init?.headers ?? {}) as Record<string, string>
+        if (headers.Range) {
+          expect(headers).toEqual({ Range: `bytes=${String(resume.prefix.length)}-` })
+          const remainder = resume.full.subarray(resume.prefix.length)
+          return Promise.resolve(
+            new Response(new Uint8Array(remainder), {
+              status: 206,
+              headers: { 'content-length': String(remainder.length) }
+            })
+          )
+        }
+        const companion = gguf(90)
         return Promise.resolve(
-          new Response(new Uint8Array(remainder), {
-            status: 206,
-            headers: { 'content-length': String(remainder.length) }
+          new Response(new Uint8Array(companion), {
+            status: 200,
+            headers: { 'content-length': String(companion.length) }
           })
         )
       })

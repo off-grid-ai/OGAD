@@ -40,6 +40,15 @@ export const PRO_SETTINGS_SLOTS: ProSettingsSlot[] = [
     }
   },
   {
+    id: 'sync',
+    delay: 0.16,
+    placeholder: {
+      title: 'Device sync',
+      description:
+        'Pair your Mac and your phone and they stay in step - the same chats, projects and model settings on both. A direct encrypted link over your own network; nothing is uploaded.'
+    }
+  },
+  {
     id: 'identity',
     delay: 0.15,
     placeholder: {

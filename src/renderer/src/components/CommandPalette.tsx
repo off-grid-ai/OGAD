@@ -6,7 +6,9 @@ import {
   IconVideo,
   IconBulb,
   IconSearch,
-  IconCornerDownLeft
+  IconCornerDownLeft,
+  IconLayoutSidebar,
+  IconLock
 } from '@tabler/icons-react'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 import {
@@ -18,6 +20,7 @@ import {
   CommandEmpty
 } from './ui/command'
 import type { SearchHit } from '@/types'
+import { paletteScreenMatches, type PaletteScreen } from '../lib/paletteScreens'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const api = (window as any).api
@@ -33,12 +36,20 @@ const KIND_ICON = {
 interface CommandPaletteProps {
   onOpenHit: (hit: SearchHit) => void
   onSeeAll: (query: string) => void
+  /** Every navigable screen, in sidebar order. */
+  screens?: PaletteScreen[]
+  onGoTo?: (view: string) => void
 }
 
 // ⌘K universal search launcher. Fast (keyword-only) results; Enter opens, or jump
 // to the full Search screen for the semantic pass. Pre-ranked server-side, so
 // cmdk's own filtering is disabled (shouldFilter={false}).
-export function CommandPalette({ onOpenHit, onSeeAll }: CommandPaletteProps): React.ReactElement {
+export function CommandPalette({
+  onOpenHit,
+  onSeeAll,
+  screens = [],
+  onGoTo
+}: CommandPaletteProps): React.ReactElement {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<SearchHit[]>([])
@@ -82,16 +93,55 @@ export function CommandPalette({ onOpenHit, onSeeAll }: CommandPaletteProps): Re
       onSeeAll(query)
     }
   }, [query, onSeeAll])
+  const goTo = useCallback(
+    (view: string) => {
+      setOpen(false)
+      setQuery('')
+      onGoTo?.(view)
+    },
+    [onGoTo]
+  )
+
+  // Screens are known locally, so they resolve as you type rather than waiting on a search round
+  // trip. With nothing typed the palette is a jump list: ⌘K then a screen name, never a hunt.
+  const needle = query.trim().toLowerCase()
+  // Screens never crowd out content: a handful at most once something is typed, everything when not.
+  const screenMatches = onGoTo ? paletteScreenMatches(screens, needle, hits.length > 0 ? 3 : 6) : []
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent showCloseButton={false} className="overflow-hidden p-0">
         <DialogTitle className="sr-only">Search Off Grid</DialogTitle>
         <Command shouldFilter={false} className="font-mono">
-          <CommandInput value={query} onValueChange={setQuery} placeholder="Search everything…" />
+          <CommandInput
+            value={query}
+            onValueChange={setQuery}
+            placeholder="Search everything, or jump to a screen…"
+          />
           <CommandList>
-            {query.trim() && hits.length === 0 && (
+            {query.trim() && hits.length === 0 && screenMatches.length === 0 && (
               <CommandEmpty>No matches — press Enter for a deep search.</CommandEmpty>
+            )}
+            {screenMatches.length > 0 && (
+              <CommandGroup heading={needle ? 'Screens' : 'Go to'}>
+                {screenMatches.map((screen) => (
+                  <CommandItem
+                    key={screen.view}
+                    value={`__screen_${screen.view}`}
+                    onSelect={() => goTo(screen.view)}
+                    className="gap-3"
+                    data-testid={`palette-screen-${screen.view}`}
+                  >
+                    <IconLayoutSidebar className="h-4 w-4 shrink-0 text-neutral-500" aria-hidden />
+                    <span className="min-w-0 flex-1 truncate text-sm text-white">
+                      {screen.label}
+                    </span>
+                    {screen.locked && (
+                      <IconLock className="h-3.5 w-3.5 shrink-0 text-neutral-500" aria-hidden />
+                    )}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
             )}
             {hits.length > 0 && (
               <CommandGroup heading="Results">

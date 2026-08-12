@@ -35,8 +35,8 @@ describe('project IPC persistence', () => {
     const first = create!(undefined, { name: 'First project' }) as string
     const second = create!(undefined, { name: 'Second project' }) as string
 
-    expect(first).toMatch(/^proj_[0-9a-f-]{36}$/)
-    expect(second).toMatch(/^proj_[0-9a-f-]{36}$/)
+    expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+    expect(second).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
     expect(second).not.toBe(first)
     expect(listProjects().map(({ id, name }) => ({ id, name }))).toEqual(
       expect.arrayContaining([

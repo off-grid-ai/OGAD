@@ -14,9 +14,42 @@ import { currentPlatform } from '@renderer/lib/device'
 import { proComingSoonHere } from './pro/proCatalog'
 import { SoftwareUpdateSection } from './SoftwareUpdateSection'
 import { ProcessingControls } from './ProcessingControls'
+import { BackupRestoreSection } from './BackupRestoreSection'
+import { SettingsPermissionsPanel } from './PermissionsPanel'
 export { ModelPipelineSection } from './ProcessingControls'
 
-export function Settings(): React.ReactElement {
+const SETTINGS_SECTION_TITLES: Record<string, string> = {
+  setup: 'Setup & health',
+  permissions: 'Setup & health',
+  capture: 'Capture & processing',
+  sync: 'Device sync',
+  identity: 'You',
+  secretary: 'What Off Grid has learned',
+  'pro-plan': 'Your Pro plan',
+  privacy: 'Data & privacy',
+  backup: 'Backup & restore',
+  shortcuts: 'Keyboard shortcuts',
+  update: 'Software update'
+}
+
+const SETTINGS_TITLE_IDS = Object.fromEntries(
+  Object.entries(SETTINGS_SECTION_TITLES)
+    .filter(([id]) => id !== 'permissions')
+    .map(([id, title]) => [title, id])
+) as Record<string, string>
+
+export function Settings({
+  initialSection,
+  onInitialSectionConsumed,
+  activeSection,
+  onSectionChange
+}: {
+  initialSection?: string | null
+  onInitialSectionConsumed?: () => void
+  activeSection?: string | null
+  onSectionChange?: (section: string | null) => void
+} = {}): React.ReactElement {
+  const selectedSection = activeSection === undefined ? initialSection : activeSection
   // Pro/core aware: the pro Settings sections (identity / proactive / secretary /
   // plan) render only when the pro package has registered them (section registry);
   // the free build shows the catalogued placeholders. isPro still drives the header
@@ -37,6 +70,20 @@ export function Settings(): React.ReactElement {
       .then((v: string) => setAppVersion(v || ''))
       .catch(() => {})
   }, [])
+
+  useEffect(() => {
+    if (!selectedSection) return
+    const timer = window.setTimeout(() => {
+      if (selectedSection === 'permissions') {
+        const target: {
+          scrollIntoView?: (options?: ScrollIntoViewOptions) => void
+        } | null = document.getElementById('settings-permissions')
+        target?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+      }
+      onInitialSectionConsumed?.()
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [selectedSection, onInitialSectionConsumed])
 
   return (
     <div className="relative flex h-full flex-col">
@@ -83,7 +130,19 @@ export function Settings(): React.ReactElement {
         >
           {/* Grid of section cards; clicking one opens it as a full-width L2 detail
               (single-open) and hides the rest — one seam via SettingsCardsGroup. */}
-          <SettingsCardsGroup>
+          <SettingsCardsGroup
+            initialOpenId={selectedSection ? SETTINGS_SECTION_TITLES[selectedSection] : null}
+            openId={
+              onSectionChange
+                ? selectedSection
+                  ? (SETTINGS_SECTION_TITLES[selectedSection] ?? null)
+                  : null
+                : undefined
+            }
+            onOpenIdChange={(title) =>
+              onSectionChange?.(title ? (SETTINGS_TITLE_IDS[title] ?? null) : null)
+            }
+          >
             {/* Each section is a collapsed-by-default accordion (SettingsCard). */}
             <SettingsCard
               title="Setup & health"
@@ -94,6 +153,14 @@ export function Settings(): React.ReactElement {
               <div className="mt-4">
                 <StoragePanel />
               </div>
+              {isPro && currentPlatform() === 'darwin' ? (
+                <section id="settings-permissions" className="mt-6 scroll-mt-4">
+                  <div className="mb-3 text-[10px] font-medium uppercase tracking-widest text-neutral-600">
+                    System permissions
+                  </div>
+                  <SettingsPermissionsPanel />
+                </section>
+              ) : null}
             </SettingsCard>
 
             <SettingsCard
@@ -157,6 +224,14 @@ export function Settings(): React.ReactElement {
               delay={0.42}
             >
               <DataPrivacyPanel />
+            </SettingsCard>
+
+            <SettingsCard
+              title="Backup & restore"
+              summary="Save a portable copy of your chats, projects, and knowledge files."
+              delay={0.44}
+            >
+              <BackupRestoreSection />
             </SettingsCard>
 
             {/* Keyboard shortcuts — one reference for every hotkey (core + pro rows). */}

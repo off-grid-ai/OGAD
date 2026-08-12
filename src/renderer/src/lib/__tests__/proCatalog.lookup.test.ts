@@ -38,7 +38,7 @@ const winPorted = (route: string): ProFeature => ({
 // asserted against the catalog so a flipped `platforms` and this list can't drift.
 // Module-scoped because both the featureSupportsPlatform and proFeatureComingSoon
 // describes read it — the gate and the capability check must agree on one list.
-const WIN_PORTED = new Set(['vault', 'clipboard', 'replay'])
+const WIN_PORTED = new Set(['vault', 'clipboard', 'replay', 'devices'])
 
 describe('getProFeature', () => {
   it('returns the matching feature for a known route', () => {

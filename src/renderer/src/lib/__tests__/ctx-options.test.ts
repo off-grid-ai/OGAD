@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { contextWindowOptions, contextWindowHint } from '../ctx-options'
+import { contextWindowOptions, contextWindowHint, recommendedContextWindow } from '../ctx-options'
 
 const BASE = [4096, 8192, 16384, 32768, 65536, 131072]
 
@@ -31,7 +31,7 @@ describe('contextWindowOptions', () => {
 describe('contextWindowHint', () => {
   it('explains the model cap when the selected window exceeds the trained max', () => {
     const hint = contextWindowHint({ ctxSize: 65536, modelMaxCtx: 32768 })
-    expect(hint).toContain("trained 32K window")
+    expect(hint).toContain('trained 32K window')
     expect(hint).toContain("wasn't trained to go higher")
   })
 
@@ -41,7 +41,9 @@ describe('contextWindowHint', () => {
   })
 
   it('surfaces the model max when nothing is clamped or capped', () => {
-    expect(contextWindowHint({ ctxSize: 16384, effectiveCtxSize: 16384, modelMaxCtx: 131072 })).toBe(
+    expect(
+      contextWindowHint({ ctxSize: 16384, effectiveCtxSize: 16384, modelMaxCtx: 131072 })
+    ).toBe(
       'Larger holds more history; this model supports up to 128K. Changing it reloads the model.'
     )
   })
@@ -54,8 +56,20 @@ describe('contextWindowHint', () => {
 
   it('prioritizes the model cap over the RAM clamp', () => {
     // Both conditions true → the cap message wins (it's the harder ceiling).
-    expect(contextWindowHint({ ctxSize: 65536, effectiveCtxSize: 20480, modelMaxCtx: 32768 })).toContain(
-      'Capped to this'
-    )
+    expect(
+      contextWindowHint({ ctxSize: 65536, effectiveCtxSize: 20480, modelMaxCtx: 32768 })
+    ).toContain('Capped to this')
+  })
+})
+
+describe('recommendedContextWindow', () => {
+  it('recommends the 16K capture-safe default independently of the current selection', () => {
+    expect(recommendedContextWindow(262144)).toBe(16384)
+    expect(recommendedContextWindow(null)).toBe(16384)
+  })
+
+  it('uses a smaller trained window only when it still meets the 8K capture floor', () => {
+    expect(recommendedContextWindow(12288)).toBe(12288)
+    expect(recommendedContextWindow(4096)).toBeNull()
   })
 })

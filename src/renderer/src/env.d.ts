@@ -116,6 +116,7 @@ type ArtifactKind = import('../../shared/ipc-contracts').ArtifactKindContract
 interface RendererAPIOverrides {
   // Open-core bridge
   isPro?: boolean
+  proEntitlementBootstrapEnabled?: boolean
   // Host OS (process.platform), bridged at preload time. Used by lib/device.ts
   // to name the machine ('Mac' on darwin, else 'device').
   platform?: string
@@ -126,9 +127,7 @@ interface RendererAPIOverrides {
   // Keygen licensing (activation + status for the upgrade/settings UI)
   license?: {
     status: () => Promise<ProLicenseInfo>
-    activate: (
-      key: string
-    ) => Promise<{ ok: true } | { ok: false; reason: 'invalid' | 'limit' | 'network' }>
+    activate: (key: string) => Promise<import('@offgrid/sync').PersonalMeshActivationResult>
     listDevices: () => Promise<
       Array<{
         id: string
@@ -139,6 +138,7 @@ interface RendererAPIOverrides {
       }>
     >
     deactivate: (machineId: string) => Promise<boolean>
+    resetCurrentDevice: () => Promise<boolean>
     clear: () => Promise<void>
     payUrl: () => Promise<string>
     openPay: () => Promise<void>
@@ -191,6 +191,9 @@ interface RendererAPIOverrides {
   // RAG Conversations
   createRagConversation: (id: string, title?: string, projectId?: string | null) => Promise<string>
   getRagConversations: (projectId?: string | null) => Promise<RagConversation[]>
+  onRagConversationsChanged?: (
+    callback: (data: { conversationId: string; projectId: string | null }) => void
+  ) => () => void
   setRagConversationProject: (id: string, projectId: string | null) => Promise<boolean>
   getRagConversation: (id: string) => Promise<RagConversation | null>
   getRagMessages: (conversationId: string) => Promise<RagMessage[]>
@@ -199,7 +202,7 @@ interface RendererAPIOverrides {
     role: 'user' | 'assistant',
     content: string,
     context?: unknown
-  ) => Promise<number>
+  ) => Promise<{ id: number; uuid: string }>
   truncateRagMessages: (conversationId: string, keepCount: number) => Promise<number>
   updateRagConversationTitle: (id: string, title: string) => Promise<RagConversation>
   deleteRagConversation: (id: string) => Promise<void>
@@ -230,12 +233,6 @@ interface RendererAPIOverrides {
 
   getEntities: (appName?: string) => Promise<unknown[]>
   getEntityDetails: (entityId: number, appName?: string) => Promise<unknown>
-  getEntityGraph: (
-    appName?: string,
-    focusEntityId?: number,
-    edgeLimit?: number
-  ) => Promise<{ nodes: unknown[]; edges: unknown[] }>
-  rebuildEntityGraph: () => Promise<boolean>
   deleteEntity: (entityId: number) => Promise<boolean>
   deleteMemory: (memoryId: number) => Promise<boolean>
 
@@ -337,7 +334,9 @@ interface RendererAPIOverrides {
   requestScreenRecordingPermission: () => Promise<boolean>
   openAccessibilitySettings: () => Promise<boolean>
   openScreenRecordingSettings: () => Promise<boolean>
+  relaunchForPermissions: () => Promise<boolean>
   openMicrophoneSettings: () => Promise<boolean>
+  openLocalNetworkSettings: () => Promise<boolean>
 }
 
 type IElectronAPI = Omit<import('../../preload').OffGridAPI, keyof RendererAPIOverrides> &

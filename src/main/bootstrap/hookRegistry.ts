@@ -52,6 +52,24 @@ export const HOOKS = {
   chatAugmentContext: 'chat.augmentContext',
   /** () => Promise<SearchSource[]> — extra universal-search sources (pro). */
   searchExtraSources: 'search.extraSources',
+  /** (mutation: SyncMutation) => void - record a committed core data change in Pro sync. */
+  syncRecordLocalMutation: 'sync.recordLocalMutation',
+  /**
+   * (mutation: KnowledgeDocumentMutation) => void - a committed RAG document lifecycle change.
+   * Pro transfers/reconciles it; free builds leave the hook unregistered.
+   */
+  syncKnowledgeDocumentMutation: 'sync.knowledgeDocumentMutation',
+  /**
+   * (mutation: LocalSharedFileMutation) => void - committed generated media or attachment bytes.
+   * Pro owns transfer and consent; free builds leave this inert.
+   */
+  syncSharedFileMutation: 'sync.sharedFileMutation',
+  /**
+   * (snapshot: { conversationId, content, reasoning } | null) => void - the reply this device is
+   * generating, or null when it is generating nothing. Pro streams it live to paired devices; free
+   * builds leave it inert. A SNAPSHOT rather than a delta, so a consumer cannot miss the end.
+   */
+  syncStreamingState: 'sync.streamingState',
   /** (request: ActionApprovalRequest) => boolean — offer a consequential action
    *  for approval; returns true when queued (caller must not execute). Pro
    *  registers it to route the action through its approval queue + audit log. */

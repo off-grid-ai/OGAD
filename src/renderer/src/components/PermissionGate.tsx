@@ -1,12 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import { motion } from 'motion/react'
-import { BorderBeam } from './ui/border-beam'
 import { GridBackdrop } from './ui/grid-backdrop'
-import { cn } from '@renderer/lib/utils'
-import { Shield, Eye, Check, X, ArrowsClockwise as RefreshCw, Cpu } from '@phosphor-icons/react'
+import { X, Cpu } from '@phosphor-icons/react'
 import { SetupPanel } from './setup/SetupPanel'
 import { deviceNoun } from '@renderer/lib/device'
-import type { PermissionStatusContract } from '../../../shared/ipc-contracts'
+import { PermissionsPanel } from './PermissionsPanel'
+import { usePermissionController } from './use-permission-controller'
 
 interface PermissionGateProps {
   children: React.ReactNode
@@ -17,8 +16,7 @@ type VisionIssue =
   | { kind: 'choose-vision-model'; modelId: string | null; modelName: string | null }
 
 export function PermissionGate({ children }: PermissionGateProps) {
-  const [permissionStatus, setPermissionStatus] = useState<PermissionStatusContract | null>(null)
-  const [isChecking, setIsChecking] = useState(true)
+  const isPro = window.api.isPro === true
   const [modelStatus, setModelStatus] = useState<{ downloaded: boolean; modelsDir: string } | null>(
     null
   )
@@ -28,26 +26,14 @@ export function PermissionGate({ children }: PermissionGateProps) {
   const [setupDismissed, setSetupDismissed] = useState(false)
   const [visionIssue, setVisionIssue] = useState<VisionIssue | null>(null)
   const [visionDownloadPercent, setVisionDownloadPercent] = useState<number | null>(null)
+  const permissions = usePermissionController(isPro)
+  const permissionStatus = permissions.status
+  const isChecking = permissions.checking
 
   // Capture permissions (Accessibility + Screen Recording) are only needed by the
   // Pro "sees" layer. The free build runs chat/projects/models and gates on the
   // model alone.
-  const isPro = window.api.isPro === true
   const permsOk = isPro ? (permissionStatus?.allGranted ?? false) : true
-
-  const checkPermissions = useCallback(async () => {
-    try {
-      const status = await window.api.getPermissionStatus()
-      console.log('Permission status:', status)
-      setPermissionStatus(status)
-      setIsChecking(false)
-      return status.allGranted
-    } catch (e) {
-      console.error('Failed to check permissions:', e)
-      setIsChecking(false)
-      return false
-    }
-  }, [])
 
   const checkModelStatus = useCallback(async () => {
     try {
@@ -101,10 +87,9 @@ export function PermissionGate({ children }: PermissionGateProps) {
 
   // Initial check
   useEffect(() => {
-    checkPermissions()
     checkModelStatus()
     void checkCaptureVision()
-  }, [checkPermissions, checkModelStatus, checkCaptureVision])
+  }, [checkModelStatus, checkCaptureVision])
 
   useEffect(() => {
     if (!isPro) return
@@ -126,39 +111,17 @@ export function PermissionGate({ children }: PermissionGateProps) {
     }
   }, [checkCaptureVision, isPro, visionIssue?.modelId])
 
-  // Poll for permission changes when permissions are not granted
+  // Permission polling is owned by usePermissionController. Keep model polling here
+  // because model readiness is a separate setup boundary.
   useEffect(() => {
-    if (permsOk && modelStatus?.downloaded) return
+    if (modelStatus?.downloaded) return
 
     const interval = setInterval(() => {
-      if (isPro) checkPermissions()
       checkModelStatus()
     }, 2000)
 
     return () => clearInterval(interval)
-  }, [permsOk, isPro, modelStatus?.downloaded, checkPermissions, checkModelStatus])
-
-  const handleOpenAccessibilitySettings = async () => {
-    try {
-      await window.api.openAccessibilitySettings()
-    } catch (e) {
-      console.error('Failed to open accessibility settings:', e)
-    }
-  }
-
-  const handleOpenScreenRecordingSettings = async () => {
-    try {
-      await window.api.openScreenRecordingSettings()
-    } catch (e) {
-      console.error('Failed to open screen recording settings:', e)
-    }
-  }
-
-  const handleRefresh = () => {
-    setIsChecking(true)
-    checkPermissions()
-    checkModelStatus()
-  }
+  }, [modelStatus?.downloaded, checkModelStatus])
 
   const openModels = (): void => {
     window.dispatchEvent(new CustomEvent('og:navigate', { detail: 'models' }))
@@ -214,6 +177,7 @@ export function PermissionGate({ children }: PermissionGateProps) {
         {!ready && !setupDismissed && (
           <SetupNudge
             missingModel={!modelStatus?.downloaded}
+            missingLocalNetwork={isPro && permissionStatus?.localNetwork === false}
             onOpen={() => setShowSetup(true)}
             onDismiss={() => setSetupDismissed(true)}
           />
@@ -325,7 +289,7 @@ export function PermissionGate({ children }: PermissionGateProps) {
             </p>
           </motion.div>
 
-          {/* Capture permissions — Pro only. */}
+          {/* System permissions - Pro only. The same panel is always reachable in Settings. */}
           {isPro && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -334,65 +298,10 @@ export function PermissionGate({ children }: PermissionGateProps) {
               className="mb-8"
             >
               <div className="mb-3 text-[10px] font-medium uppercase tracking-widest text-neutral-600">
-                Capture permissions
+                System permissions
               </div>
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                <PermissionCard
-                  title="Accessibility"
-                  description="Read text from AI chat windows"
-                  icon={<Eye className="w-5 h-5" />}
-                  granted={permissionStatus?.accessibility ?? false}
-                  onOpenSettings={handleOpenAccessibilitySettings}
-                  delay={0.85}
-                />
-                <PermissionCard
-                  title="Screen Recording"
-                  description="Capture visual context for OCR"
-                  icon={<Shield className="w-5 h-5" />}
-                  granted={permissionStatus?.screenRecording ?? false}
-                  onOpenSettings={handleOpenScreenRecordingSettings}
-                  delay={0.9}
-                />
-              </div>
+              <PermissionsPanel controller={permissions} />
             </motion.div>
-          )}
-
-          {/* "Check Again" + auto-checking only make sense for Pro capture permissions
-              (you grant them in System Settings, then re-poll). For a model-only setup
-              there's nothing to re-check — Configure handles it. */}
-          {isPro && (
-            <>
-              <motion.button
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 1, duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
-                onClick={handleRefresh}
-                disabled={isChecking}
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.99 }}
-                className={cn(
-                  'w-full py-3 rounded-xl font-medium transition-all',
-                  'bg-neutral-900/80 border border-neutral-800 text-neutral-300',
-                  'hover:bg-neutral-800 hover:border-neutral-700 hover:text-white',
-                  'disabled:opacity-50 disabled:cursor-not-allowed',
-                  'flex items-center justify-center gap-2'
-                )}
-              >
-                <RefreshCw className={cn('w-4 h-4', isChecking && 'animate-spin')} />
-                {isChecking ? 'Checking' : 'Check permissions again'}
-              </motion.button>
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 1.1 }}
-                className="flex items-center justify-center gap-2 mt-4"
-              >
-                <div className="w-1.5 h-1.5 rounded-full bg-neutral-700 animate-pulse" />
-                <span className="text-[10px] text-neutral-600 uppercase tracking-widest">
-                  Auto-checking
-                </span>
-              </motion.div>
-            </>
           )}
         </motion.div>
       </div>
@@ -404,6 +313,7 @@ export function PermissionGate({ children }: PermissionGateProps) {
 // Non-blocking: people can explore the whole app and finish setup whenever.
 function SetupNudge({
   missingModel,
+  missingLocalNetwork,
   issue,
   modelName,
   progress,
@@ -411,6 +321,7 @@ function SetupNudge({
   onDismiss
 }: {
   missingModel?: boolean
+  missingLocalNetwork?: boolean
   issue?: VisionIssue['kind']
   modelName?: string | null
   progress?: number | null
@@ -427,7 +338,9 @@ function SetupNudge({
         ? 'Capture needs a vision model'
         : missingModel
           ? 'Set up your local AI'
-          : 'Finish setting up capture'
+          : missingLocalNetwork
+            ? 'Allow Local Network access'
+            : 'Finish setting up capture'
   const detail =
     issue === 'missing-projector'
       ? `${modelName ?? 'The active model'} can read images after its vision projector is downloaded.`
@@ -435,7 +348,9 @@ function SetupNudge({
         ? `${modelName ?? 'The active model'} cannot analyze Replay frames. Choose a vision-capable chat model.`
         : missingModel
           ? `Pick a model yourself, or let Off Grid configure one for your ${deviceNoun()}.`
-          : 'Grant screen and accessibility access so Off Grid can see and remember.'
+          : missingLocalNetwork
+            ? 'Allow this Mac to find and sync directly with your devices.'
+            : 'Grant screen and accessibility access so Off Grid can see and remember.'
   const cta =
     progress != null
       ? `Downloading ${String(progress)}%`
@@ -472,92 +387,6 @@ function SetupNudge({
       >
         <X className="h-3.5 w-3.5" />
       </button>
-    </motion.div>
-  )
-}
-
-interface PermissionCardProps {
-  title: string
-  description: string
-  icon: React.ReactNode
-  granted: boolean
-  onOpenSettings: () => void
-  delay?: number
-}
-
-function PermissionCard({
-  title,
-  description,
-  icon,
-  granted,
-  onOpenSettings,
-  delay = 0
-}: PermissionCardProps) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay, duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
-      whileHover={{ scale: 1.01 }}
-      className={cn(
-        'relative rounded-xl border p-4 transition-all duration-300 overflow-hidden',
-        granted
-          ? 'bg-neutral-900/60 border-neutral-700'
-          : 'bg-neutral-900/40 border-neutral-800 hover:border-neutral-700 hover:bg-neutral-900/60'
-      )}
-    >
-      {granted && <BorderBeam size={200} duration={10} borderWidth={1.5} />}
-
-      {/* Vertical column card (desktop grid) */}
-      <div className="flex h-full flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <div
-            className={cn(
-              'w-12 h-12 rounded-xl flex items-center justify-center border transition-all duration-300',
-              granted
-                ? 'bg-neutral-800 border-neutral-700 text-neutral-300'
-                : 'bg-neutral-800/60 border-neutral-800 text-neutral-500'
-            )}
-          >
-            {icon}
-          </div>
-          {granted && (
-            <span className="text-[10px] text-neutral-500 uppercase tracking-widest">Enabled</span>
-          )}
-        </div>
-
-        <div className="flex-1">
-          <div className="flex items-center gap-2 mb-0.5">
-            <h3 className="font-medium text-white text-sm">{title}</h3>
-            <div
-              className={cn(
-                'w-4 h-4 rounded-full flex items-center justify-center transition-all duration-300',
-                granted ? 'bg-neutral-700' : 'bg-neutral-800/60'
-              )}
-            >
-              {granted ? (
-                <Check className="w-2.5 h-2.5 text-neutral-300" />
-              ) : (
-                <X className="w-2.5 h-2.5 text-neutral-600" />
-              )}
-            </div>
-          </div>
-          <p className="text-xs text-neutral-500">{description}</p>
-        </div>
-
-        {!granted && (
-          <button
-            onClick={onOpenSettings}
-            className={cn(
-              'w-full px-3 py-1.5 text-xs font-medium rounded-lg transition-all duration-200',
-              'bg-neutral-800 border border-neutral-700 text-neutral-300',
-              'hover:bg-neutral-700 hover:text-white'
-            )}
-          >
-            Open Settings
-          </button>
-        )}
-      </div>
     </motion.div>
   )
 }

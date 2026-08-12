@@ -20,6 +20,10 @@ export function NotificationProvider({ children }: { children: ReactNode }): Rea
   })
 
   useEffect(() => {
+    setNotifications((current) => current.filter((notification) => notification.type !== 'todo'))
+  }, [])
+
+  useEffect(() => {
     try {
       localStorage.setItem(NOTIFICATION_STORAGE_KEY, JSON.stringify(notifications))
     } catch (error) {

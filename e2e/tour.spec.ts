@@ -121,7 +121,7 @@ test('every locked Pro navigation item renders its matching upgrade screen', asy
     const label = (await button.locator('span.flex-1').innerText()).trim()
     labels.push(label)
     await button.click()
-    await expect(page.getByText('Off Grid Pro · Available now')).toBeVisible()
+    await expect(page.getByText('Off Grid AI Pro · Available now')).toBeVisible()
     await expect(page.getByRole('heading', { name: label, exact: true })).toBeVisible()
   }
 
@@ -131,7 +131,7 @@ test('every locked Pro navigation item renders its matching upgrade screen', asy
 
 test('purchase and product links open externally without navigating Electron', async () => {
   await page.getByRole('button', { name: 'Replay Pro', exact: true }).click()
-  await expect(page.getByText('Off Grid Pro · Available now')).toBeVisible()
+  await expect(page.getByText('Off Grid AI Pro · Available now')).toBeVisible()
 
   const expectedPayUrl = await page.evaluate(() => window.api.license.payUrl())
   const electronUrl = page.url()

@@ -245,6 +245,20 @@ afterAll(async () => {
   fs.rmSync(root, { recursive: true, force: true })
 })
 
+/**
+ * The reply as the TRANSCRIPT shows it, not the history rail's preview of it.
+ *
+ * The chat list shows each conversation's last message, so a reply is legitimately on screen twice and a
+ * bare getByText throws "found multiple elements" for a UI that is behaving correctly. The rail is the
+ * <aside> (role complementary); anything outside it is transcript.
+ */
+const inTranscript = (text: string): HTMLElement => {
+  const rail = screen.queryByRole('complementary')
+  const shown = screen.getAllByText(text).filter((node) => !rail?.contains(node))
+  expect(shown.length).toBeGreaterThan(0)
+  return shown[0]!
+}
+
 describe('assistant reply speech integration (#105)', () => {
   it('synthesizes and plays the rendered assistant reply through the real TTS contract', async () => {
     const boundary = new ChatBoundary()
@@ -325,7 +339,7 @@ describe('assistant reply speech integration (#105)', () => {
     })
     for (const toggle of screen.getAllByText('Show transcript')) await user.click(toggle)
     expect(screen.getByText('Schedule the stable release review')).toBeTruthy()
-    expect(screen.getByText('The release review is scheduled locally.')).toBeTruthy()
+    expect(inTranscript('The release review is scheduled locally.')).toBeTruthy()
     expect((await screen.findByRole('alert')).textContent).toMatch(
       /speech could not be generated.*text-to-speech is installed in settings/i
     )
@@ -355,7 +369,7 @@ describe('assistant reply speech integration (#105)', () => {
     const reopenedTranscripts = await screen.findAllByText('Show transcript')
     expect(reopenedTranscripts).toHaveLength(2)
     await user.click(reopenedTranscripts[1]!)
-    expect(screen.getByText('The release review is scheduled locally.')).toBeTruthy()
+    expect(inTranscript('The release review is scheduled locally.')).toBeTruthy()
     expect(database.getSetting('ttsVoice', '')).toBe('af_bella')
     expect(database.getRagMessages(conversationId)).toHaveLength(2)
 

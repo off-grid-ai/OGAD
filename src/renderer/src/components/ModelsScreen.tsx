@@ -21,6 +21,11 @@ import { deviceNoun } from '@renderer/lib/device'
 import { modelKindLabel } from '@renderer/lib/model-kind-labels'
 import { collectTags, matchesAllTags, toggleTag } from '@renderer/lib/model-tag-filter'
 import { companionDownloadLabel } from '@renderer/lib/download-label'
+import {
+  modelSettingsTabForKind,
+  openModelSettingsPanel,
+  supportsModelSettings
+} from '@renderer/lib/model-settings-panel'
 import { fitTier, type FitTier, fitLevel, FIT_OK_FRAC } from '../../../shared/model-fit'
 import {
   filterAndSort,
@@ -194,13 +199,53 @@ function featureRank(
 
 const MODE_LABELS: Record<string, string> = { txt2img: 'Text→Image', img2img: 'Image→Image' }
 
+/** What the card needs to describe a download honestly: one percent for the WHOLE job, the bytes
+ *  behind it, which file is in flight and how many the job has, and why it failed if it did. */
+interface DownloadCardProgress {
+  percent: number
+  status?: string
+  currentFile?: string
+  error?: string
+  downloadedMB?: string
+  totalMB?: string
+  fileIndex?: number
+  fileCount?: number
+}
+
 function withoutProgressEntry(
-  progress: Record<string, { percent: number; status?: string; currentFile?: string }>,
+  progress: Record<string, DownloadCardProgress>,
   modelId: string
-): Record<string, { percent: number; status?: string; currentFile?: string }> {
+): Record<string, DownloadCardProgress> {
   const next = { ...progress }
   delete next[modelId]
   return next
+}
+
+/** Megabytes at human scale. "6296.4 MB" is a number you have to convert before it means anything;
+ *  "6.3 GB" is the number on the card above it. */
+function formatTransferred(megabytes: string): string {
+  const mb = Number(megabytes)
+  if (!Number.isFinite(mb)) return `${megabytes} MB`
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`
+}
+
+/** What part of the model is moving right now, as a quiet tail on the progress line. Empty for the
+ *  ordinary single-file case, where naming it adds words and no information. */
+function downloadPartLabel(prog: DownloadCardProgress): string {
+  const companion = companionDownloadLabel(prog.currentFile)
+  if (companion) return `· adding ${companion}`
+  if ((prog.fileCount ?? 0) > 1) return `· file ${prog.fileIndex} of ${prog.fileCount}`
+  return ''
+}
+
+/** Plain words for a download that failed. You need two things from this line: what happened, and
+ *  whether trying again is worth it. The raw engine string stays in the title attribute, where it
+ *  helps a bug report without shouting at everyone else. */
+function downloadFailureText(error?: string): string {
+  if (!error) return 'The download did not start.'
+  if (error.startsWith('interrupted')) return 'The download stopped before it finished.'
+  if (error === 'unknown model') return 'This model is not available to download.'
+  return error
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -220,9 +265,7 @@ export function ModelsScreen(): React.JSX.Element {
     void api.getModelVisionStatus?.().then((s) => setVisionSt(s ?? {}))
   }
   const [activeKind, setActiveKind] = useState<string>('text')
-  const [progress, setProgress] = useState<
-    Record<string, { percent: number; status?: string; currentFile?: string }>
-  >({})
+  const [progress, setProgress] = useState<Record<string, DownloadCardProgress>>({})
   // Active model ids across ALL modalities (chat + image/voice/transcription) —
   // one truth from the backend; the UI never re-derives "active" per kind.
   const [activeIds, setActiveIds] = useState<Set<string>>(new Set())
@@ -315,19 +358,29 @@ export function ModelsScreen(): React.JSX.Element {
     refreshVision()
     refreshActive()
     const off = api.onModelProgress?.(
-      (d: { modelId: string; percent?: number; status?: string; currentFile?: string }) => {
+      // Partial, because the main process sends only what changed on each tick. Typed off the
+      // card's own shape all the same, so a field the card renders cannot be dropped in transit.
+      (d: Partial<DownloadCardProgress> & { modelId: string }) => {
         if (d.status === 'cancelled') {
           setProgress((p) => withoutProgressEntry(p, d.modelId))
           return
         }
-        setProgress((p) => ({
-          ...p,
-          [d.modelId]: {
-            percent: d.percent ?? p[d.modelId]?.percent ?? 0,
-            status: d.status,
-            currentFile: d.currentFile ?? p[d.modelId]?.currentFile
+        // Spread the payload instead of copying named fields. Listing them by hand is what
+        // silently discarded the bytes and the file count: the main process sent them, this
+        // handler never copied them, and the card had nothing to show.
+        const { modelId, ...fields } = d
+        setProgress((p) => {
+          const prev = p[modelId]
+          return {
+            ...p,
+            [modelId]: {
+              ...prev,
+              ...fields,
+              percent: fields.percent ?? prev?.percent ?? 0,
+              currentFile: fields.currentFile ?? prev?.currentFile
+            }
           }
-        }))
+        })
         if (d.status === 'completed') {
           api.getInstalledModels?.().then(setInstalled)
           refreshVision()
@@ -346,8 +399,29 @@ export function ModelsScreen(): React.JSX.Element {
     setProgress((p) => withoutProgressEntry(p, id))
   }
   const download = (id: string): void => {
-    setProgress((p) => ({ ...p, [id]: { percent: 0, status: 'downloading' } }))
-    api.downloadModel?.(id)
+    // 'queued', not 'downloading': nothing has been downloaded yet, and claiming otherwise is what
+    // left a refused request showing a spinner at 0% forever. The main process moves it to
+    // 'downloading' when bytes actually start, and to 'failed' if it never gets that far.
+    setProgress((p) => ({ ...p, [id]: { percent: 0, status: 'queued' } }))
+    void Promise.resolve(api.downloadModel?.(id)).then(
+      (r?: { success: boolean; error?: string }) => {
+        if (!r || r.success) return
+        // You cancelled it, so there is nothing to report: the download resolves unsuccessfully by
+        // design, and the progress channel has already cleared the card. Treating that as a failure
+        // put a red "cancelled" box under a model you had just chosen to stop.
+        if (r.error === 'cancelled') return
+        // A refusal also arrives on the progress channel; recording it here too means the card
+        // still tells the truth if this window was not listening when the event went out.
+        setProgress((p) => ({
+          ...p,
+          [id]: { ...p[id], percent: 0, status: 'failed', error: r.error }
+        }))
+      }
+    )
+  }
+  const retryDownload = (id: string): void => {
+    setProgress((p) => withoutProgressEntry(p, id))
+    download(id)
   }
   const removeModel = async (id: string, label: string): Promise<void> => {
     if (!window.confirm(`Delete "${label}"? This removes its files from disk.`)) return
@@ -382,6 +456,9 @@ export function ModelsScreen(): React.JSX.Element {
     } finally {
       setSwitching(null)
     }
+  }
+  const openModelSettings = (kind?: string): void => {
+    openModelSettingsPanel(modelSettingsTabForKind(kind))
   }
 
   const searchEnabled = activeKind !== 'voice' && activeKind !== 'transcription'
@@ -508,7 +585,7 @@ export function ModelsScreen(): React.JSX.Element {
             <div className="flex flex-wrap items-center gap-1">
               <button
                 onClick={() => openDetail(m)}
-                className="truncate text-left text-xs text-neutral-100 transition-colors duration-100 hover:text-green-400"
+                className="truncate text-left text-xs text-neutral-100 transition-colors duration-100 hover:text-emerald-500"
               >
                 {m.name}
               </button>
@@ -599,7 +676,7 @@ export function ModelsScreen(): React.JSX.Element {
             <button
               onClick={() => activateModel(m.id)}
               disabled={!!switching}
-              className="flex items-center gap-1 rounded border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-green-400 active:scale-95 disabled:opacity-40"
+              className="flex items-center gap-1 rounded border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95 disabled:opacity-40"
             >
               {switching === m.id ? (
                 <>
@@ -610,42 +687,88 @@ export function ModelsScreen(): React.JSX.Element {
               )}
             </button>
           ) : downloading ? (
-            <button
-              onClick={() => cancelDownload(m.id)}
-              className="group/dl flex items-center gap-1 rounded border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-400 transition-all duration-150 hover:border-red-500/60 hover:text-red-400 active:scale-95"
-            >
-              {prog.status === 'queued' ? (
-                <IconClock className="h-3 w-3 group-hover/dl:hidden" />
-              ) : (
-                <IconLoader2 className="h-3 w-3 animate-spin group-hover/dl:hidden" />
-              )}
-              <IconX className="hidden h-3 w-3 group-hover/dl:block" />
-              <span className="group-hover/dl:hidden">
-                {prog.status === 'queued' ? 'Queued' : `${prog.percent}%`}
+            // Status left, action right, across the full width of the card. Stacked in a column on
+            // the left they left half the card empty and the whole thing read as lopsided; the row
+            // is already justify-between, so the pair simply uses the space that was there.
+            // The percent is NOT in the button: a control whose meaning is "Cancel" is the one place
+            // the card's main number should not live.
+            <>
+              <div className="flex min-w-0 items-baseline gap-1.5 text-[10px] text-neutral-500">
+                <span className="text-neutral-300">
+                  {prog.status === 'queued' ? 'Queued' : `${prog.percent}%`}
+                </span>
+                {prog.downloadedMB && prog.totalMB && (
+                  <span className="whitespace-nowrap">
+                    {formatTransferred(prog.downloadedMB)} of {formatTransferred(prog.totalMB)}
+                  </span>
+                )}
+                <span className="min-w-0 truncate">{downloadPartLabel(prog)}</span>
+              </div>
+              <button
+                onClick={() => cancelDownload(m.id)}
+                className="flex shrink-0 items-center gap-1 rounded border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-400 transition-all duration-150 hover:border-red-500/60 hover:text-red-400 active:scale-95"
+              >
+                {prog.status === 'queued' ? (
+                  <IconClock className="h-3 w-3" />
+                ) : (
+                  <IconX className="h-3 w-3" />
+                )}
+                Cancel
+              </button>
+            </>
+          ) : prog?.status === 'failed' ? (
+            // A failure is a STATE of the action row, not a banner under it. As its own block it
+            // stacked a second button beneath "Download" and asked you to choose between two ways
+            // of doing the same thing. Reason left, one button right, on the row that was already
+            // there.
+            <>
+              <span
+                className="min-w-0 truncate text-[10px] text-red-400/90"
+                title={prog.error}
+                role="status"
+              >
+                {downloadFailureText(prog.error)}
               </span>
-              <span className="hidden group-hover/dl:inline">Cancel</span>
-            </button>
+              <button
+                onClick={() => retryDownload(m.id)}
+                className="flex shrink-0 items-center gap-1 rounded border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95"
+              >
+                <IconDownload className="h-3 w-3" /> Try again
+              </button>
+            </>
           ) : (
             <button
               onClick={() => download(m.id)}
-              className="flex items-center gap-1 rounded border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-green-400 active:scale-95"
+              className="flex items-center gap-1 rounded border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95"
             >
               <IconDownload className="h-3 w-3" /> Download
             </button>
           )}
           {isInstalled && (
-            <button
-              onClick={() => removeModel(m.id, m.name)}
-              disabled={deleting === m.id || active}
-              title={active ? 'Switch to another model before deleting' : 'Delete from disk'}
-              className="rounded p-1 text-neutral-700 transition-all duration-150 hover:text-red-400 active:scale-90 disabled:opacity-30 group-hover:text-neutral-500"
-            >
-              {deleting === m.id ? (
-                <IconLoader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <IconTrash className="h-3 w-3" />
+            <div className="flex shrink-0 items-center gap-1">
+              {active && supportsModelSettings(m.kind) && (
+                <button
+                  onClick={() => openModelSettings(m.kind)}
+                  aria-label="Open model settings"
+                  title="Open settings for the active model"
+                  className="rounded border border-neutral-800 px-1.5 py-1 text-[9px] text-neutral-500 transition-all duration-150 hover:border-green-500/60 hover:text-emerald-500 active:scale-95"
+                >
+                  Settings
+                </button>
               )}
-            </button>
+              <button
+                onClick={() => removeModel(m.id, m.name)}
+                disabled={deleting === m.id || active}
+                title={active ? 'Switch to another model before deleting' : 'Delete from disk'}
+                className="rounded p-1 text-neutral-700 transition-all duration-150 hover:text-red-400 active:scale-90 disabled:opacity-30 group-hover:text-neutral-500"
+              >
+                {deleting === m.id ? (
+                  <IconLoader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <IconTrash className="h-3 w-3" />
+                )}
+              </button>
+            </div>
           )}
         </div>
 
@@ -661,24 +784,20 @@ export function ModelsScreen(): React.JSX.Element {
           </button>
         )}
 
-        {/* Download progress. Name the companion when that's all that's downloading
-            (e.g. adding a vision projector to a model already on disk) so it doesn't
-            read as a full re-download. */}
+        {/* Download progress: one bar, one line. It used to be four stacked rows — a percent chip,
+            a shouted status, the bytes, then the bar — which said the same thing three times and
+            grew the card by half while it ran. The bar carries the shape of the progress, the line
+            carries the exact amount, and the part being fetched is named at the end of it where it
+            belongs (adding a projector to a model already on disk is not a re-download). */}
         {downloading && (
-          <>
-            {companionDownloadLabel(prog.currentFile) && (
-              <div className="text-[9px] uppercase tracking-wide text-emerald-300">
-                Adding {companionDownloadLabel(prog.currentFile)} · {prog.percent}%
-              </div>
-            )}
-            <div className="h-0.5 w-full overflow-hidden rounded-full bg-neutral-800">
-              <div
-                className="h-full bg-green-500 transition-all"
-                style={{ width: `${prog.percent}%` }}
-              />
-            </div>
-          </>
+          <div className="h-0.5 w-full overflow-hidden rounded-full bg-neutral-800">
+            <div
+              className="h-full bg-green-500 transition-all"
+              style={{ width: `${prog.percent}%` }}
+            />
+          </div>
         )}
+
       </div>
     )
   }
@@ -694,7 +813,7 @@ export function ModelsScreen(): React.JSX.Element {
           <button
             onClick={importModel}
             disabled={importing}
-            className="flex items-center gap-1.5 rounded border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-400 transition-all duration-150 hover:border-green-500/60 hover:text-green-400 active:scale-95 disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-400 transition-all duration-150 hover:border-green-500/60 hover:text-emerald-500 active:scale-95 disabled:opacity-50"
           >
             {importing ? (
               <IconLoader2 className="h-3 w-3 animate-spin" />
@@ -809,7 +928,7 @@ export function ModelsScreen(): React.JSX.Element {
                   setFilterState(initialFilterState)
                   setSizeBucket(null)
                 }}
-                className="rounded border border-neutral-800 px-2 py-0.5 text-[9px] text-neutral-500 transition-all duration-150 hover:border-green-500/60 hover:text-green-400 active:scale-95"
+                className="rounded border border-neutral-800 px-2 py-0.5 text-[9px] text-neutral-500 transition-all duration-150 hover:border-green-500/60 hover:text-emerald-500 active:scale-95"
               >
                 Clear
               </button>
@@ -1032,7 +1151,7 @@ export function ModelsScreen(): React.JSX.Element {
                           window as { api?: { openExternal?: (u: string) => void } }
                         ).api?.openExternal?.(hfUrl)
                       }
-                      className="mt-4 flex items-center gap-1 text-[10px] text-green-500 transition-colors duration-150 hover:text-green-400"
+                      className="mt-4 flex items-center gap-1 text-[10px] text-green-500 transition-colors duration-150 hover:text-emerald-500"
                     >
                       <IconExternalLink className="h-3 w-3" /> View on Hugging Face
                     </button>
@@ -1052,7 +1171,7 @@ export function ModelsScreen(): React.JSX.Element {
                           closeDetail()
                         }}
                         disabled={!!switching}
-                        className="rounded border border-neutral-700 px-3 py-1.5 text-xs text-white transition-all duration-150 hover:border-green-500 hover:text-green-400 active:scale-95 disabled:opacity-50"
+                        className="rounded border border-neutral-700 px-3 py-1.5 text-xs text-white transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95 disabled:opacity-50"
                       >
                         Use this model
                       </button>
@@ -1068,10 +1187,12 @@ export function ModelsScreen(): React.JSX.Element {
                     </>
                   ) : downloading ? (
                     <span className="text-xs text-neutral-400">
+                      {/* Same rule as the card: the percent is the whole download, and the part
+                          being fetched is named beside it, never given a percent of its own. */}
                       {prog.status === 'queued'
                         ? 'Queued'
                         : companionDownloadLabel(prog.currentFile)
-                          ? `Adding ${companionDownloadLabel(prog.currentFile)} ${prog.percent}%…`
+                          ? `Downloading ${prog.percent}% · adding ${companionDownloadLabel(prog.currentFile)}`
                           : `Downloading ${prog.percent}%…`}
                     </span>
                   ) : (
@@ -1080,7 +1201,7 @@ export function ModelsScreen(): React.JSX.Element {
                         download(m.id)
                         closeDetail()
                       }}
-                      className="flex items-center gap-1 rounded border border-neutral-700 px-3 py-1.5 text-xs text-white transition-all duration-150 hover:border-green-500 hover:text-green-400 active:scale-95"
+                      className="flex items-center gap-1 rounded border border-neutral-700 px-3 py-1.5 text-xs text-white transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95"
                     >
                       <IconDownload className="h-3.5 w-3.5" /> Download
                     </button>

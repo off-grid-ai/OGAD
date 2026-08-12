@@ -120,8 +120,14 @@ describe('TTS model download integration', () => {
     expect(await manager.activateModel(ttsModel.id)).toEqual({ success: true })
     expect(manager.getActiveModalities().speech).toBe(ttsModel.id)
 
+    // Plain text, because that is what this service is handed. Turning markdown into speakable text is
+    // the RENDERER's job and deliberately so - src/main/tts.ts says as much, since the stripping reuses
+    // the chat UI's markdown AST, and toSpeakableText has its own cases in
+    // src/renderer/src/lib/__tests__/speakable.test.ts. Feeding markdown in here and expecting it back
+    // stripped asserted a responsibility this file does not own, and would go green only by duplicating
+    // the AST in the main process.
     const { synthesize } = await import('../tts')
-    const spoken = await synthesize('## A **local** [reply](https://example.invalid) with `code`')
+    const spoken = await synthesize('A local reply with code')
 
     expect(spoken.dataUrl).toMatch(/^data:audio\/wav;base64,/)
     expect(
@@ -136,6 +142,8 @@ describe('TTS model download integration', () => {
       .map((name) => ({ name, mtime: fs.statSync(path.join(os.tmpdir(), name)).mtimeMs }))
       .sort((a, b) => b.mtime - a.mtime)[0]
     expect(workerInput).toBeDefined()
+    // Byte-identical: whatever the caller asked to be spoken is exactly what reaches the worker, with
+    // nothing rewritten on the way through.
     expect(fs.readFileSync(path.join(os.tmpdir(), workerInput!.name), 'utf8')).toBe(
       'A local reply with code'
     )

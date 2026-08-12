@@ -1,6 +1,9 @@
 // Off Grid local inference gateway — ONE OpenAI-compatible endpoint for every
-// modality, on 127.0.0.1:7878. Any local tool (IDE, app, script) points here
-// and gets the on-device models. No cloud, no keys, no LAN listener.
+// modality, on :7878. Any local tool (IDE, app, script) points here and gets the
+// on-device models, and so does a phone on the same LAN - Off Grid Mobile scans the
+// subnet for this port. No cloud, no keys. It listens on every interface and does NOT
+// authenticate, so treat the machine's network as the trust boundary; the routes that
+// must stay private (settings mutations) check the peer address themselves.
 //
 //   GET  /                       -> gateway info + live modality status
 //   GET  /v1/models              -> the ACTIVE model per modality (text/vision +
@@ -34,7 +37,7 @@ import { embeddings } from './embeddings'
 import { docsText, docsHtml, openApiSpec } from './api-docs'
 import { handleMcpRequest } from './mcp-server'
 import { llm, type LlmSettings } from './llm'
-import { GATEWAY_HOST, GATEWAY_PORT } from '../shared/ports'
+import { GATEWAY_HOST, GATEWAY_BIND_HOST, GATEWAY_PORT } from '../shared/ports'
 import { pickFreePort } from './free-port'
 import { retryWithDeadline } from './lib/retry'
 import { resolveDims } from './model-server/dimensions'
@@ -50,6 +53,7 @@ import {
 import { errBody, errMeta } from './model-server/errors'
 import { isAsync, matchPollRoute } from './model-server/async-request'
 import { sanitizeChatMessages } from './model-server/chat-messages'
+import { applyThinkingPayload } from './llm/chat-payload'
 import { parseMultipart } from './model-server/multipart'
 import { tagLlmEntries, modelEntry, ollamaMirror } from './model-server/models-list'
 import { buildGatewayModalities, type GatewayModalities } from './model-server/health'
@@ -461,6 +465,10 @@ async function handleChat(
     // Gemma 4 (and others) reject system messages that aren't at position 0.
     // Consolidate them before forwarding so any client's ordering works.
     if (sanitizeChatMessages(body)) changed = true
+    // A client says WHETHER it wants thinking; this server decides HOW, because the second half
+    // of the answer (reasoning_format) is a property of the model server running here, not of the
+    // request. Without this a phone could ask for thinking and get a reply with nothing in it.
+    if (applyThinkingPayload(body)) changed = true
     if (changed) forward = Buffer.from(JSON.stringify(body))
   } catch {
     // Image fetch failed — forward the original valid request unchanged so the
@@ -1100,8 +1108,9 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
     // llama-server when launch-time args change.
     if (url === '/v1/settings' && method === 'GET') return json(res, 200, llm.getSettings())
     if (url === '/v1/settings' && method === 'POST') {
-      // Mutating launch-time LLM args triggers a llama-server respawn. Keep the
-      // route-level check as defense in depth behind the loopback-only listener.
+      // Mutating launch-time LLM args triggers a llama-server respawn. The listener is
+      // on every interface so a phone can reach the models, which makes this check the
+      // ONLY thing standing between the LAN and a respawn - not defense in depth.
       const remote = req.socket.remoteAddress
       const isLocalhost =
         remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1'
@@ -1243,7 +1252,7 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
       }
       listening.once('error', onError)
       listening.once('listening', onListening)
-      listening.listen(boundGatewayPort, GATEWAY_HOST)
+      listening.listen(boundGatewayPort, GATEWAY_BIND_HOST)
     })
   } catch (e) {
     // Bind failed — drop the dead server and reset so a retry starts clean.

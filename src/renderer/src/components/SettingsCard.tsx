@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useState } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { LockKey, CaretDown, CaretLeft, Clock } from '@phosphor-icons/react'
 import { cn } from '@renderer/lib/utils'
@@ -21,22 +21,22 @@ interface AccordionGroup {
 const GroupContext = createContext<AccordionGroup | null>(null)
 
 export function SettingsCardsGroup({
-  children
+  children,
+  initialOpenId = null,
+  openId: controlledOpenId,
+  onOpenIdChange
 }: {
   children: React.ReactNode
+  initialOpenId?: string | null
+  openId?: string | null
+  onOpenIdChange?: (id: string | null) => void
 }): React.ReactElement {
-  const [openId, setOpenId] = useState<string | null>(null)
-  useEffect(() => {
-    if (!openId) return
-    const collapseDetail = (event: KeyboardEvent): void => {
-      if (!(event.metaKey || event.ctrlKey) || event.key !== ']') return
-      event.preventDefault()
-      event.stopPropagation()
-      setOpenId(null)
-    }
-    window.addEventListener('keydown', collapseDetail, true)
-    return () => window.removeEventListener('keydown', collapseDetail, true)
-  }, [openId])
+  const [localOpenId, setLocalOpenId] = useState<string | null>(initialOpenId)
+  const openId = controlledOpenId === undefined ? localOpenId : controlledOpenId
+  const setOpenId = (id: string | null): void => {
+    if (controlledOpenId === undefined) setLocalOpenId(id)
+    onOpenIdChange?.(id)
+  }
   return <GroupContext.Provider value={{ openId, setOpenId }}>{children}</GroupContext.Provider>
 }
 
@@ -184,7 +184,7 @@ export function ProPlaceholder({
               <Clock weight="bold" className="h-3 w-3" /> Coming soon
             </span>
           ) : (
-            <span className="absolute right-4 top-4 inline-flex items-center gap-1 rounded-full border border-green-500/30 bg-green-500/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-green-400">
+            <span className="absolute right-4 top-4 inline-flex items-center gap-1 rounded-full border border-green-500/30 bg-green-500/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-emerald-400">
               <LockKey weight="bold" className="h-3 w-3" /> Pro
             </span>
           )}

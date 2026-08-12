@@ -19,6 +19,7 @@ import { classifyLlamaError, modelPortConflictReason } from './llama-error'
 import type { ManagedRuntime } from './runtime-manager'
 import { LLAMA_SERVER_PORT } from '../shared/ports'
 import { DEFAULT_CTX_SIZE } from '../shared/llm-defaults'
+import { acceleratorForEngine, type EngineAccelerator } from '../shared/engine-accelerator'
 import {
   applyModePreset,
   samplingPayload,
@@ -39,6 +40,7 @@ import {
   ENGINE_TEARDOWN_GRACE_MS,
   type TeardownOutcome
 } from './llm/engine-teardown'
+import { emitChangedLlmSettings } from './sync-mutation'
 
 export type { KvCacheType, PerformanceMode }
 
@@ -55,9 +57,14 @@ export interface LlmSettings {
   // Launch-time (require a server respawn to take effect):
   kvCacheType?: KvCacheType // quantize the KV cache to cut memory (needs flash-attn)
   flashAttn?: boolean // FlashAttention: faster + lower memory; required for quantized KV
-  gpuLayers?: number // -ngl: layers offloaded to GPU (Metal). 99 = all.
+  gpuLayers?: number // -ngl: layers offloaded to the GPU. 99 = all.
   threads?: number // CPU threads for inference
   batchSize?: number // -b: prompt batch size
+}
+
+export interface LlmSettingsUpdateOptions {
+  /** Remote sync applies the winning value without creating a new local op. */
+  emitSync?: boolean
 }
 
 export interface ChatStreamResult extends StreamResult {
@@ -81,6 +88,11 @@ export class LLMService {
   private modelMaxCtx: number | null = null
   private modelMaxCtxFor = ''
   private initialized = false
+  // Which engine binary the last spawn used. Windows ships a Vulkan build and a CPU-only
+  // fallback, so the path is the only record of which one actually took the model. Read
+  // ONLY through activeAccelerator(), which gates it on `initialized` — that flag stays the
+  // single authority on whether an engine is up, rather than a second flag kept in step.
+  private activeEnginePath = ''
   // A model selection is durable as soon as the manager writes active-model.json, but
   // replacing llama-server while it is answering destroys the user's in-flight turn.
   // LLMService owns that process, so it also owns the handoff: admitted generations
@@ -261,6 +273,17 @@ export class LLMService {
     return this.safeCtxSize(this.ctxSize)
   }
 
+  /** The accelerator the RUNNING engine offloads to, or null when none is up (or when the
+   *  platform ships no engine of ours to name). The UI renders this instead of assuming
+   *  Metal, which is what made a Windows box claim a Metal GPU. */
+  activeAccelerator(): EngineAccelerator | null {
+    if (!this.initialized) return null
+    return acceleratorForEngine({
+      platform: process.platform,
+      serverPath: this.activeEnginePath
+    })
+  }
+
   getSettings(): LlmSettings {
     return {
       temperature: this.temperature,
@@ -278,10 +301,16 @@ export class LLMService {
       batchSize: this.batchSize,
       performanceMode: this.performanceMode,
       // Report the EFFECTIVE (clamped) context so the UI can show what's really used, plus the
-      // model's trained maximum so the UI can offer the slider up to it (not a hardcoded cap).
+      // model's trained maximum so the UI can offer the slider up to it (not a hardcoded cap),
+      // plus the accelerator the running engine chose so the UI never has to guess one.
       effectiveCtxSize: this.safeCtxSize(this.ctxSize),
-      modelMaxCtx: this.trainedContext()
-    } as LlmSettings & { effectiveCtxSize: number; modelMaxCtx: number | null }
+      modelMaxCtx: this.trainedContext(),
+      gpuAccelerator: this.activeAccelerator()
+    } as LlmSettings & {
+      effectiveCtxSize: number
+      modelMaxCtx: number | null
+      gpuAccelerator: EngineAccelerator | null
+    }
   }
 
   /** The exact argv handed to `llama-server` for the CURRENT settings — the terminal
@@ -351,7 +380,8 @@ export class LLMService {
 
   /** Update inference settings; respawns the server if any launch-time arg changed
    *  (context, KV-cache type, flash-attn, GPU layers, threads, batch). */
-  async setSettings(s: LlmSettings): Promise<void> {
+  async setSettings(s: LlmSettings, options: LlmSettingsUpdateOptions = {}): Promise<void> {
+    const before = options.emitSync === false ? undefined : this.getSettings()
     // Granular launch-time fields the user sets in THIS patch become pinned: a mode
     // preset (now or on a future restart / mode re-pick) must NOT clobber them. Pin
     // BEFORE applying the preset so an explicit q8_0 in the same patch survives.
@@ -410,6 +440,12 @@ export class LLMService {
     // Quantized KV cache requires FlashAttention — auto-enable it so the pair is valid.
     if (this.kvCacheType !== 'f16' && !this.flashAttn) this.flashAttn = true
     this.persist()
+    if (before) {
+      emitChangedLlmSettings(
+        before as Record<string, unknown>,
+        this.getSettings() as Record<string, unknown>
+      )
+    }
     if (launchChanged && !this.paused) {
       this.stop()
       await this.init()
@@ -703,6 +739,7 @@ export class LLMService {
     // deliberate and auto-recovery is skipped.
     this.intentionalStop = false
     this.server = proc
+    this.activeEnginePath = serverPath
     this.stderrTail = []
     let abandoned = false // set when we give up on this proc so its close handler is inert
     // True until waitForReady() confirms THIS engine. A close while probing is a failed

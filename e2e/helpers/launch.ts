@@ -80,6 +80,36 @@ const seedLicense = (env: Record<string, string>): void => {
   }
 }
 
+/**
+ * Collect what the e2e run actually executes, so it stops being invisible.
+ *
+ * 25 specs drive the real app - devices-sync.spec.ts alone stands up a synthetic peer with a real
+ * SyncEngine, StateSync, FileTransferManager and ClipboardSyncCoordinator - and none of it counted
+ * towards coverage, because Playwright launches Electron as its own process and nothing instrumented it.
+ * Files exercised only here read 0%, and "absent from the report" read as "nothing executes this".
+ *
+ * Node writes V8 coverage itself when NODE_V8_COVERAGE names a directory, so the main process needs no
+ * instrumentation library - only the variable. Each launch appends its own JSON files, so a whole suite
+ * accumulates into one directory and c8 turns it into an Istanbul report afterwards:
+ *
+ *   OFFGRID_E2E_COVERAGE=/tmp/cov-e2e npm run test:e2e
+ *   ../shared/node_modules/.bin/c8 report --temp-directory=/tmp/cov-e2e \
+ *     --src=src --src=pro --reporter=json --report-dir=/tmp/cov-e2e-istanbul
+ *
+ * Off by default: writing coverage on every developer run costs time and disk for no benefit, and a
+ * variable that is absent leaves Electron behaving exactly as it did before.
+ *
+ * The RENDERER is not covered by this - V8 coverage here is the main process only. Renderer coverage
+ * needs page.coverage.startJSCoverage per spec plus a sourcemap remap through the electron-vite bundle,
+ * which is the remaining half of this job.
+ */
+const withCoverage = (env: Record<string, string>): Record<string, string> => {
+  const directory = process.env.OFFGRID_E2E_COVERAGE
+  if (!directory) return env
+  fs.mkdirSync(directory, { recursive: true })
+  return { ...env, NODE_V8_COVERAGE: directory }
+}
+
 export interface LaunchOptions {
   env?: Record<string, string | undefined>
   /** Extra Chromium/Electron flags (e.g. fake media devices). Applied to both targets. */
@@ -87,7 +117,7 @@ export interface LaunchOptions {
 }
 
 export const launchOffGrid = async (options: LaunchOptions = {}): Promise<ElectronApplication> => {
-  const env = { ...process.env, ...options.env } as Record<string, string>
+  const env = withCoverage({ ...process.env, ...options.env } as Record<string, string>)
   const extraArgs = options.extraArgs ?? []
 
   if (targetIsPackaged()) {
@@ -98,5 +128,11 @@ export const launchOffGrid = async (options: LaunchOptions = {}): Promise<Electr
     // A packaged app loads its own app.asar — passing '.' would point it at the repo instead.
     return electron.launch({ executablePath: packagedExecutable(), args: extraArgs, env })
   }
+  // The DEV target needs it too, and for a different reason than pro activation: OFFGRID_PRO=1 unlocks
+  // the pro SURFACES, but joining a mesh consumes a licensed seat, so pairing asks the entitlement layer
+  // for a credential and refuses with "Pro license pairing is unavailable on this device" when there is
+  // none. Seeding is a no-op when the spec asked for a free build or the fixture is absent, so specs that
+  // assert free-tier UI stay unlicensed and deterministic.
+  seedLicense(env)
   return electron.launch({ args: ['.', ...extraArgs], env })
 }

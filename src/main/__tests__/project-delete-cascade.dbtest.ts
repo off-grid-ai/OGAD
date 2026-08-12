@@ -1,14 +1,7 @@
-// D20 — deleting a project must remove its chats + artifacts (real temp SQLite).
+// Deleting a project removes project-owned data while preserving chat history (real temp SQLite).
 //
-// Product-correct outcome (the confirm dialog's own promise): "Delete this
-// project, its knowledge base and chats." So after deleteProject, the project's
-// chats (rag_conversations scoped to it, + their rag_messages) and its generated
-// artifacts are gone — not orphaned to a phantom project id.
-//
-// On HEAD this is RED: deleteProject sweeps rag_documents/rag_chunks and the DEAD
-// project_threads/project_messages backend, but never rag_conversations (the table
-// the UI actually writes project chats to — no FK, no cascade), and never the
-// artifacts. Both survive, badged to a deleted project.
+// Product outcome: the project, knowledge, and generated artifacts are gone. Its
+// conversations move back to unfiled Chat with every message intact.
 //
 // Integration over the REAL data layer: seed via the REAL insert paths
 // (createProject, createRagConversation, addRagMessage, saveArtifact), run the
@@ -52,8 +45,8 @@ afterAll(() => {
   }
 })
 
-describe("deleteProject — removes the project's chats + artifacts (D20)", () => {
-  it('orphans nothing: rag_conversations, rag_messages, and artifacts all gone', () => {
+describe('deleteProject', () => {
+  it('unfiles chats and preserves their messages while removing project-owned artifacts', () => {
     createProject({ id: 'p1', name: 'Roadmap' })
     dbmod.createRagConversation('c1', 'Planning chat', 'p1') // a PROJECT-scoped chat
     dbmod.addRagMessage('c1', 'user', 'what is next?')
@@ -73,9 +66,10 @@ describe("deleteProject — removes the project's chats + artifacts (D20)", () =
 
     deleteProject('p1')
 
-    // Terminal artifact: nothing scoped to the deleted project survives.
+    expect(count('SELECT COUNT(*) AS c FROM projects WHERE id = ?', 'p1')).toBe(0)
     expect(count('SELECT COUNT(*) AS c FROM rag_conversations WHERE project_id = ?', 'p1')).toBe(0)
-    expect(count('SELECT COUNT(*) AS c FROM rag_messages WHERE conversation_id = ?', 'c1')).toBe(0)
+    expect(count('SELECT COUNT(*) AS c FROM rag_conversations WHERE id = ?', 'c1')).toBe(1)
+    expect(count('SELECT COUNT(*) AS c FROM rag_messages WHERE conversation_id = ?', 'c1')).toBe(2)
     expect(listArtifacts({ projectId: 'p1' }).length).toBe(0)
   })
 })

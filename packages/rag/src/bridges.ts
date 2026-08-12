@@ -31,11 +31,14 @@ export interface ChunkCandidate {
  */
 export interface VectorStore {
   addDocument(doc: {
+    syncId?: string
     projectId: string
     name: string
     path: string
     size: number
     kind: MediaKind
+    createdAt?: string
+    enabled?: boolean
   }): Promise<number>
   addChunks(
     docId: number,

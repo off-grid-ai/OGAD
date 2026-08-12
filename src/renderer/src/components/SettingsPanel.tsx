@@ -1,17 +1,27 @@
 import { useEffect, useState } from 'react'
 import { persistToggle } from '@renderer/lib/persist-toggle'
 import { useEscapeToClose } from '@renderer/lib/use-escape-to-close'
-import { DEFAULT_CTX_SIZE, MAX_TOKENS_AUTO } from '@offgrid/core/shared/llm-defaults'
-import { contextWindowOptions, contextWindowHint } from '@renderer/lib/ctx-options'
+import {
+  DEFAULT_CTX_SIZE,
+  MAX_TOKENS_AUTO,
+  MIN_CAPTURE_CTX_SIZE
+} from '@offgrid/core/shared/llm-defaults'
+import { gpuLayersHint, type EngineAccelerator } from '@offgrid/core/shared/engine-accelerator'
+import {
+  contextWindowOptions,
+  contextWindowHint,
+  recommendedContextWindow
+} from '@renderer/lib/ctx-options'
+import { formatContextWindow, resolveModelName } from '@renderer/lib/model-summary'
+import type { ModelSettingsPanelTab as Tab } from '@renderer/lib/model-settings-panel'
+import { ImageSettingsTab } from './ImageSettingsTab'
 
 const MAX_OUTPUT_AUTO = MAX_TOKENS_AUTO
 const MAX_OUTPUT_OPTIONS = [2048, 4096, 8192, 16384, 32768]
 
 // Right-side Settings panel (same pattern as SkillsPanel/ArtifactCanvas).
-// Tabs: Model (inference params), Voice (Kokoro TTS), Tools (built-in, read-only),
+// Tabs: Model (inference params), Image, Voice (Kokoro TTS), Tools (built-in, read-only),
 // Connectors (MCP servers — the user's reusable tool library). All on-device.
-
-type Tab = 'model' | 'voice' | 'tools' | 'connectors'
 type KvCacheType = 'f16' | 'q8_0' | 'q4_0'
 type LlmSettings = {
   temperature?: number
@@ -29,6 +39,7 @@ type LlmSettings = {
   batchSize?: number
   effectiveCtxSize?: number // reported by the backend (RAM-clamped); read-only
   modelMaxCtx?: number | null // the model's TRAINED window (GGUF); read-only, bounds the picker
+  gpuAccelerator?: EngineAccelerator | null // the engine the backend actually spawned; read-only
 }
 type Connector = {
   id: number
@@ -79,9 +90,17 @@ function Row({
   )
 }
 
-export function SettingsPanel({ onClose }: { onClose: () => void }) {
+export function SettingsPanel({
+  onClose,
+  embedded = false,
+  initialTab = 'model'
+}: {
+  onClose: () => void
+  embedded?: boolean
+  initialTab?: Tab
+}) {
   useEscapeToClose(onClose)
-  const [tab, setTab] = useState<Tab>('model')
+  const [tab, setTab] = useState<Tab>(initialTab)
   const [s, setS] = useState<LlmSettings>({})
   const [voices, setVoices] = useState<string[]>([])
   const [voice, setVoice] = useState<string>('af_heart')
@@ -89,12 +108,23 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [connectors, setConnectors] = useState<Connector[]>([])
   const [newConn, setNewConn] = useState({ name: '', url: '' })
   const [voiceState, setVoiceState] = useState<'idle' | 'generating' | 'playing' | 'error'>('idle')
+  const [activeModelName, setActiveModelName] = useState<string | null>(null)
 
   useEffect(() => {
     window.api
       .getLlmSettings?.()
       .then((v: LlmSettings) => setS(v))
       .catch(() => {})
+    const modelApi = window.api as Partial<
+      Pick<typeof window.api, 'getModelCatalog' | 'getActiveModel'>
+    >
+    if (modelApi.getModelCatalog && modelApi.getActiveModel) {
+      Promise.all([modelApi.getModelCatalog(), modelApi.getActiveModel()])
+        .then(([catalog, activeId]) =>
+          setActiveModelName(resolveModelName(catalog.models, activeId))
+        )
+        .catch(() => setActiveModelName(null))
+    }
     window.api
       .ttsVoices?.()
       .then((v: string[]) => setVoices(v))
@@ -122,7 +152,17 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   // Persist one inference setting (optimistic) — backend applies it per-request.
   const set = (patch: LlmSettings): void => {
     setS((prev) => ({ ...prev, ...patch }))
-    window.api.setLlmSettings?.(patch)
+    void Promise.resolve(window.api.setLlmSettings?.(patch))
+      .then(() => window.api.getLlmSettings?.())
+      .then((next) => {
+        if (next) setS(next)
+      })
+      .catch(() => {
+        void window.api
+          .getLlmSettings?.()
+          .then((next) => setS(next))
+          .catch(() => {})
+      })
   }
 
   const resetDefaults = (): void => {
@@ -173,28 +213,41 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   return (
     <>
       {/* Click-outside scrim: any click off the panel closes it (paired with Escape). */}
+      {!embedded ? (
+        <div
+          className="fixed inset-0 z-40 bg-black/30 transition-opacity duration-150"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      ) : null}
       <div
-        className="fixed inset-0 z-40 bg-black/30 transition-opacity duration-150"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-      <div className="fixed right-0 top-0 bottom-0 z-50 flex w-[30vw] min-w-[420px] flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl">
-        <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2.5">
-          <div className="flex items-center gap-2 text-sm text-neutral-200">
-            <span className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-green-500">
-              Settings
-            </span>
+        role={embedded ? undefined : 'dialog'}
+        aria-modal={embedded ? undefined : true}
+        aria-label={embedded ? undefined : 'Model settings'}
+        className={
+          embedded
+            ? 'flex min-h-0 flex-col bg-neutral-950/20 font-mono'
+            : 'fixed bottom-0 right-0 top-0 z-50 flex w-[30vw] min-w-[420px] flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl'
+        }
+      >
+        {!embedded ? (
+          <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2.5">
+            <div className="flex items-center gap-2 text-sm text-neutral-200">
+              <span className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-green-500">
+                Settings
+              </span>
+            </div>
+            <button
+              onClick={onClose}
+              className="rounded-md border border-neutral-700 px-3 py-1 text-xs text-neutral-300 transition-colors hover:text-white"
+            >
+              Close
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            className="rounded-md border border-neutral-700 px-3 py-1 text-xs text-neutral-300 transition-colors hover:text-white"
-          >
-            Close
-          </button>
-        </div>
+        ) : null}
 
         <div className="flex items-center gap-1 border-b border-neutral-800 px-3 py-2">
-          {(['model', 'voice', 'tools', 'connectors'] as const).map((t) => (
+          {(['model', 'image', 'voice', 'tools', 'connectors'] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -205,9 +258,38 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           ))}
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-4 text-sm">
+        <div
+          className={embedded ? 'p-1 pt-4 text-sm' : 'min-h-0 flex-1 overflow-y-auto p-4 text-sm'}
+        >
           {tab === 'model' && (
             <>
+              <div
+                className="mb-5 grid grid-cols-2 gap-px border border-neutral-800 bg-neutral-800 lg:grid-cols-4"
+                role="status"
+              >
+                {[
+                  ['Current model', activeModelName ?? 'No active model'],
+                  ['Configured', formatContextWindow(s.ctxSize) ?? 'Checking'],
+                  ['Running', formatContextWindow(s.effectiveCtxSize) ?? 'Checking'],
+                  [
+                    'Recommended',
+                    formatContextWindow(recommendedContextWindow(s.modelMaxCtx)) ?? 'Not supported'
+                  ]
+                ].map(([label, value]) => (
+                  <div key={label} className="bg-neutral-950/90 p-3">
+                    <div className="text-[10px] uppercase tracking-wide text-neutral-600">
+                      {label}
+                    </div>
+                    <div className="mt-1 truncate text-xs text-neutral-200" title={value}>
+                      {value}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="mb-5 text-[11px] leading-5 text-neutral-500">
+                16K is recommended for capture and chat. Capture needs at least 8K; smaller windows
+                can save memory but leave captured frames waiting for analysis.
+              </p>
               <Row
                 label="Temperature"
                 value={(s.temperature ?? 0.7).toFixed(2)}
@@ -305,24 +387,29 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   ))}
                 </select>
               </Row>
-              <Row
-                label="Context window"
-                hint={contextWindowHint(s)}
-              >
+              <Row label="Context window" hint={contextWindowHint(s)}>
                 <select
                   aria-label="Context window"
                   value={s.ctxSize ?? DEFAULT_CTX_SIZE}
                   onChange={(e) => set({ ctxSize: Number(e.target.value) })}
                   className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
                 >
-                  {contextWindowOptions(CTX_OPTIONS, s.modelMaxCtx, s.ctxSize ?? DEFAULT_CTX_SIZE).map(
-                    (c) => (
-                      <option key={c} value={c}>
-                        {c >= 1024 ? `${c / 1024}K` : c} tokens
-                        {c === s.modelMaxCtx ? " (model's max)" : c === DEFAULT_CTX_SIZE ? ' (default)' : ''}
-                      </option>
-                    )
-                  )}
+                  {contextWindowOptions(
+                    CTX_OPTIONS,
+                    s.modelMaxCtx,
+                    s.ctxSize ?? DEFAULT_CTX_SIZE
+                  ).map((c) => (
+                    <option key={c} value={c}>
+                      {c >= 1024 ? `${c / 1024}K` : c} tokens
+                      {c === s.modelMaxCtx
+                        ? " (model's max)"
+                        : c === DEFAULT_CTX_SIZE
+                          ? ' (recommended)'
+                          : c < MIN_CAPTURE_CTX_SIZE
+                            ? ' (capture unavailable)'
+                            : ''}
+                    </option>
+                  ))}
                 </select>
               </Row>
               <Row
@@ -376,7 +463,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               <Row
                 label="GPU layers"
                 value={String(s.gpuLayers ?? 99)}
-                hint="Layers offloaded to the GPU (Metal). 99 = all. Lower only if you hit GPU-memory issues."
+                hint={gpuLayersHint(s.gpuAccelerator ?? null)}
               >
                 <input
                   type="range"
@@ -427,6 +514,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               </button>
             </>
           )}
+
+          {tab === 'image' && <ImageSettingsTab />}
 
           {tab === 'voice' && (
             <>

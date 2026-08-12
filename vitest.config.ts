@@ -113,7 +113,10 @@ export default defineConfig({
         'src/main/coreml-image.ts',
         // Entry/wiring that isn't logic (index barrels re-export; bootstrap boots Electron).
         'src/main/index.ts',
-        'src/preload/**',
+        // src/preload/** WAS excluded here as "wiring, exercised via e2e". It is unit-tested now
+        // (src/preload/__tests__/preload-bridge.test.ts sweeps all 152 exposed methods and proves each one
+        // reaches main), so excluding it would hide the one file whose failure mode - a method that forwards
+        // nothing - is invisible to types and shows up only as a dead button in front of a user.
         // CORE native/IPC-wiring/entry shells (recon-classified): pure logic already
         // extracted to measured siblings (ipc-query-logic, search-ranking, model-sizing,
         // models/*, llm/*, licensing/*-logic, files-classify, tts-logic, etc.). These husks
@@ -135,7 +138,10 @@ export default defineConfig({
         'src/main/vision.ts',
         'src/main/ocr.ts',
         'src/main/embeddings.ts',
-        'src/main/permissions.ts',
+        // permissions.ts is no longer excluded: it is unit-tested now, including the multicast probe's four
+        // outcomes (delivered, refused, socket error, silent) - the socket-error case is the one that would
+        // otherwise be an uncaught exception in main during setup, so it is worth measuring rather than
+        // trusting to a run on real hardware.
         'src/main/rag/extractors.ts',
         'src/main/rag/index.ts', // orchestrator; buildProjectPrompt extracted → rag/prompt.ts
         'src/main/licensing/license-service.ts', // Keychain/IPC shell; isProActive → license-service logic exports (tested)
@@ -157,7 +163,9 @@ export default defineConfig({
         // Renderer .ts that are pure IPC passthrough (no logic) or React hooks (e2e-covered).
         'src/renderer/src/lib/voiceApi.ts',
         'src/renderer/src/useMeetingRecorder.ts',
-        'src/renderer/src/bootstrap/loadProFeaturesRenderer.ts',
+        // loadProFeaturesRenderer.ts is no longer in this list: it decides which half of the app switches on
+        // at launch, which is a decision rather than passthrough, and it now has its own tests covering all
+        // three outcomes and every way each fails.
         'src/bootstrap/proStub.ts',
         // PRO renderer IPC-passthrough API wrappers (no logic — mirror the core voiceApi rule).
         'pro/renderer/api.ts',
@@ -204,19 +212,24 @@ export default defineConfig({
         'pro/renderer/**/*.tsx'
       ],
       thresholds: {
-        // Uniform 85% floor across every metric — the standard stated in CLAUDE.md. The floor had
-        // ratcheted up to ~95/96, which turned brittle against CI's legitimately-skipped ambient
-        // (macOS-helper / native-dep) journeys — a 0.1-0.3% swing flipped the gate red. 85% is a
-        // stable floor comfortably below current measured coverage (~95/90/96 in CI) while still
-        // blocking any real regression. Set deliberately per the maintainer's call.
-        statements: 85,
-        branches: 85,
-        functions: 85,
-        lines: 85,
-        // pro/** stays separately regression-guarded (mobile pattern), same uniform 85% floor.
+        // Uniform 80% floor across every metric. Set deliberately per the maintainer's call
+        // (2026-08-05), down from 85: pro BRANCHES sit right on the old line (85.5% local, ~85.2%
+        // measured in CI, because CI legitimately skips the native-dep ambient journeys), so a
+        // 0.3% environment swing decided whether the gate was red. That is a gate reporting the
+        // runner rather than the code.
+        //
+        // What 80 actually loosens is branches ALONE — statements, functions and lines all measure
+        // 91-93% in pro and higher in core, so they stay far above either line. It is a floor
+        // against regression, not a target: the standard in CLAUDE.md is still 85%, every change
+        // that adds logic adds tests, and this number only moves back UP.
+        statements: 80,
+        branches: 80,
+        functions: 80,
+        lines: 80,
+        // pro/** stays separately regression-guarded (mobile pattern), same uniform floor.
         // Only applied when pro is checked out (see hasPro) so a core-only CI run doesn't error.
         ...(hasPro
-          ? { 'pro/**': { statements: 85, branches: 85, functions: 85, lines: 85 } }
+          ? { 'pro/**': { statements: 80, branches: 80, functions: 80, lines: 80 } }
           : {})
       }
     }

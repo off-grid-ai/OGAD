@@ -45,6 +45,10 @@ export interface DownloadProgress {
   percent?: number
   status?: 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled'
   currentFile?: string
+  /** Which file of the job is in flight, 1-based, and how many the job has. percent/downloadedMB
+   *  measure the WHOLE job, so these exist to say what the named file is a part of. */
+  fileIndex?: number
+  fileCount?: number
   downloadedMB?: string
   totalMB?: string
   error?: string
@@ -148,6 +152,22 @@ export function cancelDownload(modelId: string): boolean {
   return cancelled
 }
 
+/** A download refused before it ever reached the queue is still an OUTCOME the watchers must see.
+ *  The refusal used to be returned to the caller only, so the status registry kept whatever the UI
+ *  had assumed and the card sat on a spinner forever. Publishing 'failed' the same way a mid-transfer
+ *  failure does means every client — the screen, a headless poller, the registry — learns the same
+ *  thing from one place, whether the download died at byte zero or at the last one. */
+function publishRefusal(
+  modelId: string,
+  error: string,
+  onProgress?: ProgressCb
+): { success: false; error: string } {
+  const p: DownloadProgress = { modelId, status: 'failed', percent: 0, error }
+  lastProgress.set(modelId, p)
+  onProgress?.(p)
+  return { success: false, error }
+}
+
 /** Download a catalog entry or any Hugging Face repo id. Progress via callback
  *  AND a status registry (so a headless poller can read it). */
 export async function downloadModel(
@@ -159,14 +179,14 @@ export async function downloadModel(
       modelId,
       reason: 'application_shutdown'
     })
-    return { success: false, error: DOWNLOAD_INTERRUPTED_ERROR }
+    return publishRefusal(modelId, DOWNLOAD_INTERRUPTED_ERROR, onProgress)
   }
   const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models')
   const inCatalog = CATALOG.find((m) => m.id === modelId)
   const entry = inCatalog ?? (await resolveHuggingFaceModel(modelId))
   if (!entry) {
     writeDiagnosticLog('models.download', 'request.rejected', { modelId, reason: 'unknown_model' })
-    return { success: false, error: 'unknown model' }
+    return publishRefusal(modelId, 'unknown model', onProgress)
   }
   writeDiagnosticLog('models.download', 'request.accepted', {
     modelId,
@@ -236,16 +256,31 @@ export async function downloadModel(
 
       let activePartPath: string | null = null
       try {
-        for (const file of entry.files) {
+        // Decide the JOB before reporting on it. A model is several files, and percent used to be
+        // per-file: a two-file download ran 0→100 for the weights and then 0→100 again for the
+        // projector, so the number reset halfway and meant something different each time. The job
+        // is the set of files this run must actually fetch (a file already on disk is not work),
+        // and one percent measures the whole of it.
+        const pending = entry.files.filter((file) => {
           const dest = path.join(dir, file.name)
-          if (fs.existsSync(dest) && fs.statSync(dest).size > 0) {
+          const present = fs.existsSync(dest) && fs.statSync(dest).size > 0
+          if (present) {
             writeDiagnosticLog('models.download', 'file.skipped', {
               modelId,
               file: file.name,
               reason: 'already_present'
             })
-            continue
           }
+          return !present
+        })
+        // Catalog sizes plan the denominator; the file being fetched contributes its REAL
+        // content-length instead, so the total sharpens as the job proceeds rather than drifting.
+        const plannedBytes = pending.map((file) => file.sizeBytes ?? 0)
+        const laterBytes = (index: number): number =>
+          plannedBytes.slice(index + 1).reduce((sum, bytes) => sum + bytes, 0)
+        let jobDoneBytes = 0
+        for (const [fileIndex, file] of pending.entries()) {
+          const dest = path.join(dir, file.name)
           const partPath = `${dest}.part`
           activePartPath = partPath
           // Resume from a partial .part if one exists (e.g. download interrupted by a
@@ -278,11 +313,15 @@ export async function downloadModel(
           // process, and never hangs on a 'finish' that won't come.
           await pumpToFile(reader, out, (n) => {
             written += n
+            const jobDone = jobDoneBytes + written
+            const jobTotal = jobDoneBytes + total + laterBytes(fileIndex)
             send({
               currentFile: file.name,
-              percent: total ? Math.round((written / total) * 100) : 0,
-              downloadedMB: (written / 1048576).toFixed(1),
-              totalMB: total ? (total / 1048576).toFixed(1) : '?',
+              fileIndex: fileIndex + 1,
+              fileCount: pending.length,
+              percent: jobTotal ? Math.round((jobDone / jobTotal) * 100) : 0,
+              downloadedMB: (jobDone / 1048576).toFixed(1),
+              totalMB: jobTotal ? (jobTotal / 1048576).toFixed(1) : '?',
               status: 'downloading'
             })
           })
@@ -304,6 +343,7 @@ export async function downloadModel(
           if (checksumErr) throw new Error(checksumErr)
           fs.renameSync(partPath, dest)
           activePartPath = null
+          jobDoneBytes += written // this file's real bytes now count toward the job, not a new 0%
           writeDiagnosticLog('models.download', 'file.completed', {
             modelId,
             file: file.name,
@@ -582,25 +622,216 @@ export interface LocalModel {
   sizeBytes: number
 }
 
-function localRegistryFile(): string {
-  return path.join(llm.getModelsDir(), 'local-models.json')
+export type TransferableModelSource = 'catalog' | 'downloaded' | 'local'
+
+export interface TransferableModelFile {
+  name: string
+  sizeBytes: number
+  path: string
 }
 
-export function getLocalModels(): LocalModel[] {
+export interface TransferableModel {
+  id: string
+  name: string
+  kind: string
+  source: TransferableModelSource
+  files: TransferableModelFile[]
+}
+
+export interface TransferredModelManifest {
+  id: string
+  name: string
+  kind: string
+  source: TransferableModelSource
+  files: Array<{ name: string; sizeBytes: number }>
+}
+
+function localRegistryFile(dir = llm.getModelsDir()): string {
+  return path.join(dir, 'local-models.json')
+}
+
+export function getLocalModels(dir = llm.getModelsDir()): LocalModel[] {
   try {
-    const arr = JSON.parse(fs.readFileSync(localRegistryFile(), 'utf-8'))
+    const arr = JSON.parse(fs.readFileSync(localRegistryFile(dir), 'utf-8'))
     return Array.isArray(arr) ? (arr as LocalModel[]) : []
   } catch {
     return []
   }
 }
-function saveLocalModels(list: LocalModel[]): void {
+function saveLocalModels(list: LocalModel[], dir = llm.getModelsDir()): void {
   try {
-    fs.writeFileSync(localRegistryFile(), JSON.stringify(list, null, 2))
+    fs.writeFileSync(localRegistryFile(dir), JSON.stringify(list, null, 2))
   } catch {
     /* best effort */
   }
 }
+
+function safeTransferredFileName(name: string): boolean {
+  return (
+    name.length > 0 &&
+    name.length <= 255 &&
+    path.basename(name) === name &&
+    name !== '.' &&
+    name !== '..'
+  )
+}
+
+function transferredFilesOnDisk(
+  dir: string,
+  files: Array<{ name: string; sizeBytes: number }>
+): { error?: string; files?: TransferableModelFile[] } {
+  if (files.length === 0) return { error: 'model has no transferable files' }
+  const names = new Set<string>()
+  const resolved: TransferableModelFile[] = []
+  for (const file of files) {
+    if (
+      !safeTransferredFileName(file.name) ||
+      !Number.isSafeInteger(file.sizeBytes) ||
+      file.sizeBytes <= 0 ||
+      names.has(file.name)
+    ) {
+      return { error: 'model manifest contains an invalid file' }
+    }
+    names.add(file.name)
+    const filePath = path.join(dir, file.name)
+    let actualSize = 0
+    try {
+      const stat = fs.lstatSync(filePath)
+      if (!stat.isFile() || stat.isSymbolicLink()) {
+        return { error: `${file.name}: transferred file is not a regular file` }
+      }
+      actualSize = stat.size
+    } catch {
+      return { error: `${file.name}: transferred file is missing` }
+    }
+    if (actualSize !== file.sizeBytes) {
+      return { error: `${file.name}: transferred file size does not match the manifest` }
+    }
+    if (/\.gguf$/i.test(file.name) && !isValidGgufFile(filePath, fs)) {
+      return { error: `${file.name}: transferred file is not a valid GGUF model` }
+    }
+    resolved.push({ ...file, path: filePath })
+  }
+  return { files: resolved }
+}
+
+/**
+ * Resolve one installed, file-backed model for device transfer. Runtime caches such as mflux are
+ * intentionally excluded because they are directory trees, not portable model files.
+ */
+export async function getTransferableModel(
+  modelId: string,
+  dir = llm.getModelsDir()
+): Promise<TransferableModel | null> {
+  const local = getLocalModels(dir).find((model) => model.id === modelId)
+  const downloaded = findDownloaded(dir, modelId)
+  const { CATALOG } = await import('@offgrid/models')
+  const catalog = CATALOG.find((model) => model.id === modelId)
+
+  const source: TransferableModelSource | null = local
+    ? 'local'
+    : downloaded
+      ? 'downloaded'
+      : catalog && catalog.runtime !== 'mflux'
+        ? 'catalog'
+        : null
+  if (!source) return null
+
+  const names = local
+    ? [local.primary, local.mmproj].filter((name): name is string => Boolean(name))
+    : downloaded
+      ? downloaded.files
+      : (catalog?.files.map((file) => file.name) ?? [])
+  const files = transferredFilesOnDisk(
+    dir,
+    names.map((name) => ({ name, sizeBytes: fileSizeOf(dir, name) }))
+  ).files
+  if (!files) return null
+
+  return {
+    id: modelId,
+    name: local?.name ?? downloaded?.name ?? catalog?.name ?? modelId,
+    kind: local?.kind ?? downloaded?.kind ?? catalog?.kind ?? 'text',
+    source,
+    files
+  }
+}
+
+/**
+ * Register model files only after the transfer owner has checksum-verified and atomically promoted
+ * every file into the models directory. The catalog remains the source of truth for known models;
+ * free-form and local models are recorded in their existing registries.
+ */
+export async function registerTransferredModel(
+  manifest: TransferredModelManifest,
+  dir = llm.getModelsDir()
+): Promise<{ success: boolean; error?: string; id?: string }> {
+  if (
+    !manifest.id ||
+    manifest.id.length > 512 ||
+    !manifest.name ||
+    manifest.name.length > 512 ||
+    !manifest.kind ||
+    manifest.kind.length > 128
+  ) {
+    return { success: false, error: 'model manifest is invalid' }
+  }
+
+  const resolved = transferredFilesOnDisk(dir, manifest.files)
+  if (!resolved.files) return { success: false, error: resolved.error }
+
+  const { CATALOG } = await import('@offgrid/models')
+  const catalog = CATALOG.find((model) => model.id === manifest.id)
+  if (catalog) {
+    const expected = new Set(catalog.files.map((file) => file.name))
+    const received = new Set(manifest.files.map((file) => file.name))
+    if (expected.size !== received.size || [...expected].some((name) => !received.has(name))) {
+      return { success: false, error: 'transferred catalog model files do not match the catalog' }
+    }
+    return { success: true, id: manifest.id }
+  }
+
+  if (manifest.source === 'local') {
+    const primary =
+      manifest.files.find(
+        (file) => /\.gguf$/i.test(file.name) && !/mmproj|projector/i.test(file.name)
+      ) ?? manifest.files.find((file) => /\.gguf$/i.test(file.name))
+    if (!primary) return { success: false, error: 'local model transfer requires a GGUF file' }
+    const mmproj = manifest.files.find(
+      (file) => file.name !== primary.name && /\.gguf$/i.test(file.name)
+    )
+    const id = `local:${primary.name}`
+    const list = getLocalModels(dir).filter((model) => model.id !== id)
+    list.push({
+      id,
+      name: manifest.name,
+      primary: primary.name,
+      mmproj: mmproj?.name,
+      kind: mmproj ? 'vision' : 'text',
+      sizeBytes: primary.sizeBytes
+    })
+    saveLocalModels(list, dir)
+    if (!getLocalModels(dir).some((model) => model.id === id)) {
+      return { success: false, error: 'could not register the transferred local model' }
+    }
+    return { success: true, id }
+  }
+
+  recordDownloaded(dir, {
+    id: manifest.id,
+    name: manifest.name,
+    kind: manifest.kind,
+    files: manifest.files.map((file) => file.name)
+  })
+  if (!findDownloaded(dir, manifest.id)) {
+    return { success: false, error: 'could not register the transferred model' }
+  }
+  if (dir === llm.getModelsDir()) {
+    await reconcileActiveModelProjector().catch(() => false)
+  }
+  return { success: true, id: manifest.id }
+}
+
 /** Set of every filename referenced by the local registry (primary + mmproj), so
  *  storage/orphan logic never deletes an imported model. */
 function localProtectedNames(): Set<string> {

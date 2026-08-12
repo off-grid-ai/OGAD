@@ -9,12 +9,14 @@
  *    can prompt a relaunch (main-process pro features only attach at boot).
  */
 import { ipcMain, BrowserWindow, app, shell } from 'electron'
-import { proEnabled } from './bootstrap/loadProFeaturesMain'
+import { proEnabled, proEntitlementBootstrapEnabled } from './bootstrap/loadProFeaturesMain'
+import { requestApplicationRelaunch } from './shutdown'
 import {
   activateProByKey,
   deactivateProDevice,
   getProLicenseInfo,
   listProDevices,
+  resetProCurrentDevice,
   clearPro,
   setLicenseChangeNotifier,
   PRO_PAY_PAGE_URL,
@@ -34,11 +36,15 @@ export function setupLicenseIpc(): void {
   ipcMain.on('pro:is-enabled', (e) => {
     e.returnValue = proEnabled()
   })
+  ipcMain.on('pro:entitlement-bootstrap-enabled', (e) => {
+    e.returnValue = proEntitlementBootstrapEnabled()
+  })
 
   ipcMain.handle('license:status', () => getProLicenseInfo())
   ipcMain.handle('license:activate', (_e, key: string) => activateProByKey(key))
   ipcMain.handle('license:list-devices', () => listProDevices())
   ipcMain.handle('license:deactivate', (_e, machineId: string) => deactivateProDevice(machineId))
+  ipcMain.handle('license:reset-current-device', () => resetProCurrentDevice())
   ipcMain.handle('license:clear', () => {
     clearPro()
   })
@@ -47,7 +53,6 @@ export function setupLicenseIpc(): void {
   // Pro main-process features (tray, capture, CRM loops) only attach at boot, so
   // a fresh activation needs a relaunch to fully light up.
   ipcMain.handle('license:relaunch', () => {
-    app.relaunch()
-    app.exit(0)
+    requestApplicationRelaunch(app)
   })
 }

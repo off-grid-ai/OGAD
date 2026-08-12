@@ -90,6 +90,23 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     )
   })
 
+  it('hides a delimiter-only assistant row synced from a mobile tool turn', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-a'] = [
+      { id: 1, role: 'user', content: 'Look this up' },
+      { id: 2, role: 'assistant', content: '<think>  </think>' },
+      { id: 3, role: 'assistant', content: 'Synthetic search result' },
+      { id: 4, role: 'assistant', content: 'Here is the final answer.' }
+    ]
+    installBoundary(boundary)
+
+    renderChat({ conversationId: 'conversation-a' })
+
+    expect(await screen.findByText('Synthetic search result')).toBeTruthy()
+    expect(screen.getByText('Here is the final answer.')).toBeTruthy()
+    expect(screen.queryByText(/<think>|<\/think>/i)).toBeNull()
+  })
+
   it('does not play a canceled synthesis and stops active speech on navigation (#106)', async () => {
     const boundary = new ChatBoundary()
     installBoundary(boundary)

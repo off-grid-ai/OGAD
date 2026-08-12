@@ -40,6 +40,21 @@ vi.mock('electron', () => ({
   }
 }))
 
+vi.mock('node:dgram', () => ({
+  default: {
+    createSocket: () => ({
+      once: () => undefined,
+      send: (
+        _message: Buffer,
+        _port: number,
+        _host: string,
+        callback: (error: Error | null) => void
+      ) => callback(null),
+      close: () => undefined
+    })
+  }
+}))
+
 const realPlatform = process.platform
 Object.defineProperty(process, 'platform', { configurable: true, value: 'darwin' })
 
@@ -96,9 +111,7 @@ installApi()
 const { PermissionGate } = await import('@renderer/components/PermissionGate')
 
 function permissionCard(title: string): HTMLElement {
-  const card = screen.getByRole('heading', { name: title }).closest('div.relative')
-  if (!(card instanceof HTMLElement)) throw new Error(`${title} permission card was not rendered`)
-  return card
+  return screen.getByRole('status', { name: `${title} permission` })
 }
 
 beforeEach(() => {
@@ -131,15 +144,16 @@ describe('capture permission recovery', () => {
     expect(boundary.accessibilityChecks).toEqual([true])
     expect(boundary.screenRequests).toBe(1)
 
-    expect(permissions.getPermissionStatus().allGranted).toBe(false)
-    expect(permissions.getPermissionStatus().allGranted).toBe(false)
+    expect((await permissions.getPermissionStatus()).allGranted).toBe(false)
+    expect((await permissions.getPermissionStatus()).allGranted).toBe(false)
     expect(boundary.accessibilityChecks).toEqual([true, false, false])
 
     boundary.accessibility = true
     boundary.screenRecording = 'granted'
-    expect(permissions.getPermissionStatus()).toEqual({
+    await expect(permissions.getPermissionStatus()).resolves.toEqual({
       accessibility: true,
       screenRecording: true,
+      localNetwork: true,
       allGranted: true
     })
     expect(boundary.accessibilityChecks.at(-1)).toBe(false)
@@ -162,12 +176,20 @@ describe('capture permission recovery', () => {
     await user.click(screen.getByRole('button', { name: 'Set up' }))
     const accessibilityCard = permissionCard('Accessibility')
     const screenRecordingCard = permissionCard('Screen Recording')
-    expect(within(accessibilityCard).getByRole('button', { name: 'Open Settings' })).not.toBeNull()
     expect(
-      within(screenRecordingCard).getByRole('button', { name: 'Open Settings' })
+      within(accessibilityCard).getByRole('button', { name: 'Open Accessibility settings' })
+    ).not.toBeNull()
+    // 'Enable Screen Recording', not 'Open ... settings': this card overrides the generic label because
+    // its action is not always the same action. Once macOS reports the toggle changed, the very same
+    // button becomes 'Relaunch Off Grid AI Desktop' - screen recording access only takes effect on a
+    // fresh launch. Accessibility keeps the generic label because opening settings is all it ever does.
+    expect(
+      within(screenRecordingCard).getByRole('button', { name: 'Enable Screen Recording' })
     ).not.toBeNull()
 
-    await user.click(within(screenRecordingCard).getByRole('button', { name: 'Open Settings' }))
+    await user.click(
+      within(screenRecordingCard).getByRole('button', { name: 'Enable Screen Recording' })
+    )
     expect(boundary.openedSettings).toEqual([
       'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
     ])
@@ -175,19 +197,24 @@ describe('capture permission recovery', () => {
     boundary.screenRecording = 'granted'
     await user.click(screen.getByRole('button', { name: 'Check permissions again' }))
     await waitFor(() =>
-      expect(within(permissionCard('Screen Recording')).getByText('Enabled')).not.toBeNull()
+      expect(within(permissionCard('Screen Recording')).getByText('Granted')).not.toBeNull()
     )
     expect(
-      within(permissionCard('Accessibility')).getByRole('button', { name: 'Open Settings' })
+      within(permissionCard('Accessibility')).getByRole('button', {
+        name: 'Open Accessibility settings'
+      })
     ).not.toBeNull()
-    expect(permissions.getPermissionStatus()).toEqual({
+    await expect(permissions.getPermissionStatus()).resolves.toEqual({
       accessibility: false,
       screenRecording: true,
+      localNetwork: true,
       allGranted: false
     })
 
     await user.click(
-      within(permissionCard('Accessibility')).getByRole('button', { name: 'Open Settings' })
+      within(permissionCard('Accessibility')).getByRole('button', {
+        name: 'Open Accessibility settings'
+      })
     )
     expect(boundary.openedSettings.at(-1)).toBe(
       'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'
@@ -199,9 +226,10 @@ describe('capture permission recovery', () => {
     await waitFor(() => expect(screen.queryByText('Capture permissions')).toBeNull())
     expect(screen.getByText('Application workspace')).not.toBeNull()
     expect(screen.queryByText('Finish setting up capture')).toBeNull()
-    expect(permissions.getPermissionStatus()).toEqual({
+    await expect(permissions.getPermissionStatus()).resolves.toEqual({
       accessibility: true,
       screenRecording: true,
+      localNetwork: true,
       allGranted: true
     })
   })

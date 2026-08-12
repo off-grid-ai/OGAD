@@ -15,7 +15,32 @@ export type ThinkSplitterFactory = (
   emit: (event: { text: string; kind: 'content' | 'reasoning' }) => void
 ) => ThinkSplitter
 type RagResult = RagChatResultContract
-type StoredMessage = { id: number; role: 'user' | 'assistant'; content: string; context?: unknown }
+type StoredMessage = {
+  id: number
+  role: 'user' | 'assistant'
+  content: string
+  context?: unknown
+  created_at?: string
+}
+
+/**
+ * Every persisted message carries a timestamp, so this fake has to give one too.
+ *
+ * The renderer projects each row through projectSyncedMessageTurn, which REFUSES a message with no
+ * usable createdAt and returns null - a message that cannot be ordered cannot be merged with one from
+ * another device, and sync will not guess. MemoryChat drops those rows, so a fixture without a
+ * timestamp renders as an empty conversation and every assertion about its content fails while
+ * pointing at the wrong thing (no Copy button, no Speak button, no reply text).
+ *
+ * The real boundary cannot produce that row: the messages table defaults created_at to SQLite's
+ * CURRENT_TIMESTAMP. Stamping here makes the fake match the seam it stands for, in the exact shape
+ * SQLite writes (naive UTC, space-separated), rather than asking every fixture to remember it.
+ *
+ * Deterministic and increasing, so message order is fixture order and no test depends on a clock.
+ */
+const FIXTURE_EPOCH = Date.UTC(2026, 0, 1, 9, 0, 0)
+const storedAt = (sequence: number): string =>
+  new Date(FIXTURE_EPOCH + sequence * 1000).toISOString().replace('T', ' ').slice(0, 19)
 type Conversation = {
   id: string
   title: string
@@ -95,7 +120,8 @@ export class ChatBoundary {
         id: this.nextMessageId++,
         role,
         content,
-        context
+        context,
+        created_at: storedAt(this.nextMessageId)
       })
       const conversation = this.conversations.find((item) => item.id === conversationId)
       if (conversation) conversation.message_count = this.messages[conversationId]!.length
@@ -127,7 +153,12 @@ export class ChatBoundary {
       return found ? { ...found } : null
     }),
     getRagMessages: vi.fn(async (id: string) =>
-      (this.messages[id] ?? []).map((item) => ({ ...item }))
+      // created_at is filled in where a fixture omitted it, because the table it stands for always has
+      // one and the renderer discards any row that does not.
+      (this.messages[id] ?? []).map((item, index) => ({
+        ...item,
+        created_at: item.created_at ?? storedAt(index)
+      }))
     ),
     createRagConversation: vi.fn(
       async (id: string, title = 'Untitled', projectId: string | null = null) => {

@@ -91,4 +91,47 @@ describe('<MemoryChat/> - response limit through public renderer contracts', () 
       await screen.findByText('Response stopped at the configured 4,096-token limit.')
     ).toBeTruthy()
   })
+
+  it('shows the active model context contract and refetches the running value after a change', async () => {
+    const boundary = new ChatBoundary()
+    let settings = { ctxSize: 65536, effectiveCtxSize: 32768, modelMaxCtx: 262144 }
+    const setLlmSettings = vi.fn(async (patch: { ctxSize?: number }) => {
+      settings = {
+        ...settings,
+        ...patch,
+        effectiveCtxSize: patch.ctxSize ?? settings.effectiveCtxSize
+      }
+    })
+    Object.assign(boundary.api, {
+      getModelCatalog: async () => ({
+        kinds: ['vision'],
+        models: [{ id: 'local/qwen', name: 'Qwen 3.5 2B' }]
+      }),
+      getActiveModel: async () => 'local/qwen',
+      getLlmSettings: async () => settings,
+      setLlmSettings,
+      ttsVoices: async () => [],
+      listTools: async () => [],
+      mcpList: async () => []
+    })
+    installBoundary(boundary)
+
+    render(
+      <TooltipProvider>
+        <SettingsPanel embedded onClose={() => {}} />
+      </TooltipProvider>
+    )
+
+    const status = await screen.findByRole('status')
+    await waitFor(() => expect(status.textContent).toContain('Qwen 3.5 2B'))
+    expect(status.textContent).toContain('Configured64K')
+    expect(status.textContent).toContain('Running32K')
+    expect(status.textContent).toContain('Recommended16K')
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Context window' }), {
+      target: { value: '16384' }
+    })
+    await waitFor(() => expect(setLlmSettings).toHaveBeenCalledWith({ ctxSize: 16384 }))
+    await waitFor(() => expect(status.textContent).toContain('Running16K'))
+  })
 })

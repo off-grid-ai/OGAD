@@ -19,6 +19,8 @@ export interface Project {
 /** A file added to a project's knowledge base. */
 export interface RagDocument {
   id: number
+  /** Stable RFC 4122 identity used across devices. The integer id remains local-only. */
+  syncId: string
   projectId: string
   name: string
   path: string

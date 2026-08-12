@@ -16,17 +16,25 @@ export interface RagConversationContract {
   id: string
   title: string | null
   project_id?: string | null
+  origin_device_id?: string | null
+  origin_device_name?: string | null
   created_at: string
   updated_at: string
   message_count?: number
+  /** The last turn, for the chat list's one-line preview (see chatListPreviewLine). */
+  last_role?: string | null
+  last_content?: string | null
 }
 
 export interface RagMessageContract {
   id: number
+  uuid?: string
   conversation_id: string
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
   context: string | null
+  origin_device_id?: string | null
+  origin_device_name?: string | null
   created_at: string
 }
 
@@ -44,6 +52,7 @@ export interface RagChatResultContract {
 export interface PermissionStatusContract {
   accessibility: boolean
   screenRecording: boolean
+  localNetwork: boolean
   allGranted: boolean
 }
 

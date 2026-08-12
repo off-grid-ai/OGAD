@@ -3,10 +3,14 @@
  * active + seeded demo data (TEMP profile only) and screenshots the surfaces this branch
  * touched: the Models screen (never-block fit chip), Settings -> Model pipeline controls,
  * and the Integrations screen (BYO Google OAuth client setup). Screenshots land in
- * e2e/screenshots/ for the PR body. Capture-only: navigation is best-effort and each shot is
- * validated by a human/vision pass before it goes in the PR.
+ * e2e/screenshots/ for the PR body.
+ *
+ * Each case ASSERTS that it reached the surface it is photographing. It used to assert nothing and swallow
+ * every failure, so a screenshot of a blank window, or of the wrong screen, passed exactly like a good one -
+ * and the PR body then carried that image as evidence. A screenshot that disproves the change is worse than no
+ * screenshot, so the navigation is now a precondition rather than best-effort.
  */
-import { test, type ElectronApplication, type Page } from '@playwright/test'
+import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
 import { launchOffGrid } from './helpers/launch'
 import os from 'os'
 import path from 'path'
@@ -69,12 +73,12 @@ test.afterAll(async () => {
 })
 
 test('capture Models screen — never-block fit chip', async () => {
-  await nav('Models')
+  expect(await nav('Models'), 'the Models screen has to be reachable from the sidebar').toBe(true)
   await shot('models-fit-chip')
 })
 
 test('capture Settings — model pipeline controls', async () => {
-  await nav('Settings')
+  expect(await nav('Settings'), 'Settings has to be reachable from the sidebar').toBe(true)
   // Scroll the Model pipeline section into view if present.
   const section = page.getByText('Model pipeline', { exact: false }).first()
   if (await section.isVisible().catch(() => false)) {
@@ -88,7 +92,7 @@ test('capture Settings — capture opt-in control', async () => {
   // main-process rule proven by unit + real-seam integration in desktop-pro; here we capture the
   // user-facing surface the opt-in is controlled through — the Settings "Capture" section with its
   // status label and pause/resume/restart controls — which is what a user sees to turn capture on.
-  await nav('Settings')
+  expect(await nav('Settings'), 'Settings has to be reachable from the sidebar').toBe(true)
   // The capture control lives inside the collapsed "Capture & processing" accordion — expand it.
   const header = page.getByText('Capture & processing', { exact: false }).first()
   if (await header.isVisible().catch(() => false)) {
@@ -101,10 +105,10 @@ test('capture Settings — capture opt-in control', async () => {
 
 test('capture Integrations — BYO Google OAuth client setup', async () => {
   const reached = (await nav('Integrations')) || (await nav('Connectors'))
-  if (!reached) {
-    await shot('integrations-not-reached')
-    return
-  }
+  if (!reached) await shot('integrations-not-reached')
+  // Named either way in this build; one of the two must exist, or the screenshot below is of whatever screen
+  // happened to be open.
+  expect(reached, 'Integrations (or Connectors) has to be reachable from the sidebar').toBe(true)
   await shot('integrations-overview')
   // Best-effort: open the Google client setup (BYO OAuth) if an entry is present.
   for (const label of [/set up your google client/i, /google/i, /set up/i]) {
@@ -122,11 +126,12 @@ test('capture Replay — enable/disable capture control', async () => {
   // Task 4: the Replay screen carries a compact enable/disable capture control in its header,
   // sharing the same seam as the Settings Capture section (useCaptureControl).
   const reached = await nav('Replay')
-  if (!reached) {
-    await shot('replay-not-reached')
-    return
-  }
+  if (!reached) await shot('replay-not-reached')
+  expect(reached, 'Replay has to be reachable from the sidebar').toBe(true)
   const toggle = page.getByRole('button', { name: /capture/i }).first()
   await toggle.scrollIntoViewIfNeeded().catch(() => {})
+  // The control this case exists to photograph. Without this the shot could be of a Replay screen that never
+  // rendered its header, which is precisely the evidence a reviewer would be misled by.
+  await expect(toggle).toBeVisible()
   await shot('replay-capture-toggle')
 })

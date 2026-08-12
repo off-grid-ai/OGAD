@@ -7,6 +7,7 @@
 // takes ALREADY-decoded image data (base64 + mime) so it is fully pure.
 
 import { mimeForExt } from '../mime'
+import { toWellFormedText } from './well-formed-text'
 
 export type ContentPart =
   | { type: 'text'; text: string }
@@ -29,7 +30,9 @@ export function imageMime(imgPath: string): string {
 /** Build the OpenAI-style multimodal content array: the text part first, then one
  *  image_url data-URI part per decoded image (in order). */
 export function buildContentParts(message: string, images: DecodedImage[]): ContentPart[] {
-  const content: ContentPart[] = [{ type: 'text', text: message }]
+  // Repair unpaired surrogates HERE, at the one place every request body is assembled: a lone
+  // surrogate anywhere in the text makes the whole body unparseable to the model server.
+  const content: ContentPart[] = [{ type: 'text', text: toWellFormedText(message) }]
   for (const img of images) {
     content.push({ type: 'image_url', image_url: { url: `data:${img.mime};base64,${img.base64}` } })
   }
@@ -47,7 +50,9 @@ export function buildMessages(
   const messages: { role: 'system' | 'user'; content: string | ContentPart[] }[] = [
     { role: 'user', content: buildContentParts(message, images) }
   ]
-  if (systemPrompt.trim()) messages.unshift({ role: 'system', content: systemPrompt })
+  if (systemPrompt.trim()) {
+    messages.unshift({ role: 'system', content: toWellFormedText(systemPrompt) })
+  }
   return messages
 }
 
@@ -63,4 +68,40 @@ export function thinkingPayload(thinking: boolean): {
     return { chat_template_kwargs: { enable_thinking: true }, reasoning_format: 'deepseek' }
   }
   return { chat_template_kwargs: { enable_thinking: false } }
+}
+
+/** What a client asked for, or undefined when it said nothing about thinking. */
+export function requestedThinking(body: Record<string, unknown>): boolean | undefined {
+  const kwargs = body.chat_template_kwargs
+  if (typeof kwargs !== 'object' || kwargs === null) return undefined
+  const asked = (kwargs as Record<string, unknown>).enable_thinking
+  return typeof asked === 'boolean' ? asked : undefined
+}
+
+/**
+ * Answer a client's thinking request the way this server answers its own.
+ *
+ * Turning thinking on for the loaded model takes TWO things: the template switch, and
+ * `reasoning_format` so llama.cpp separates the reasoning out instead of burying it. Only this
+ * process knows the second one, because it is a property of the model server it runs, not of the
+ * request. A client that sends the switch alone gets a model that reasons into nowhere: the phone
+ * asked for thinking, the reply came back with an empty reasoning field, and the toggle looked
+ * broken from the one side that could not see why.
+ *
+ * So a client says WHETHER it wants thinking, and this decides HOW. A request that says nothing is
+ * left exactly as it is, and keeps the model's own default.
+ *
+ * Returns whether the body changed.
+ */
+export function applyThinkingPayload(body: Record<string, unknown>): boolean {
+  const asked = requestedThinking(body)
+  if (asked === undefined) return false
+  const resolved = thinkingPayload(asked)
+  body.chat_template_kwargs = resolved.chat_template_kwargs
+  if (resolved.reasoning_format !== undefined) {
+    body.reasoning_format = resolved.reasoning_format
+  } else {
+    delete body.reasoning_format
+  }
+  return true
 }

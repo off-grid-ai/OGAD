@@ -12,9 +12,6 @@ import {
   getEntities,
   getEntityDetails,
   upsertEntitySession,
-  rebuildEntityEdgesForSession,
-  getEntityGraph,
-  rebuildEntityEdgesForAllSessions,
   deleteMemory,
   getEntitiesForSession,
   getDashboardStats,
@@ -46,7 +43,8 @@ import {
   requestScreenRecordingPermission,
   openAccessibilitySettings,
   openScreenRecordingSettings,
-  openMicrophoneSettings
+  openMicrophoneSettings,
+  openLocalNetworkSettings
 } from './permissions'
 import { setupSystemStatusIpc } from './system-status-ipc'
 import { CACHE_CLEANUP_CHANNEL } from '../shared/ipc-contracts'
@@ -62,6 +60,7 @@ import {
   isTrivialMessage,
   appNameLikeClause
 } from './ipc-query-logic'
+import { requestApplicationRelaunch } from './shutdown'
 // import { llm } from './llm'; // Moved to dynamic import to support ESM
 
 // Incrementally update master memory with a new conversation summary
@@ -91,6 +90,12 @@ async function regenerateMasterMemory(): Promise<string | null> {
 // arrive (inline chain-of-thought); otherwise fall back to a single blocking call.
 // Active streaming turns, keyed by streamId, so a renderer 'rag:cancel' can abort
 // an in-flight generation and keep whatever was produced so far.
+import {
+  bindChatStream,
+  endChatStream,
+  noteChatStreamDelta
+} from './chat-stream-state'
+
 const streamControllers = new Map<string, AbortController>()
 
 async function streamAnswer(
@@ -131,6 +136,7 @@ async function streamAnswer(
         prompt,
         images,
         (text, kind) => {
+          noteChatStreamDelta(streamId, text, kind)
           try {
             sender.send('rag:stream', { streamId, type: kind, text })
           } catch {
@@ -143,6 +149,7 @@ async function streamAnswer(
     })
   } finally {
     streamControllers.delete(streamId)
+    endChatStream(streamId)
   }
 }
 
@@ -362,7 +369,6 @@ async function extractEntitiesForSession(sessionId: string): Promise<void> {
 
     if (parsed.entities.length === 0) return
 
-    const touchedEntityIds = new Set<number>()
     for (const entity of parsed.entities) {
       const name = (entity.name || '').trim()
       if (!name) continue
@@ -380,7 +386,6 @@ async function extractEntitiesForSession(sessionId: string): Promise<void> {
       if (!resolution.admitted) continue
       const entityId = resolution.entityId
       if (!entityId) continue
-      touchedEntityIds.add(entityId)
       upsertEntitySession(entityId, sessionId)
 
       const newFacts: string[] = []
@@ -423,9 +428,6 @@ async function extractEntitiesForSession(sessionId: string): Promise<void> {
       }
     }
 
-    if (touchedEntityIds.size > 1) {
-      rebuildEntityEdgesForSession(sessionId)
-    }
   } catch (e) {
     console.error('[IPC] Entity extraction failed:', e)
   }
@@ -607,6 +609,9 @@ export function setupIPC() {
       images?: string[]
     ) => {
       const imgs = images || []
+      // Before the classifier, so the whole turn - including its thinking - is attributable to the
+      // conversation it belongs to.
+      bindChatStream(streamId, conversationId)
       // Intelligence layer: a grammar-constrained classifier picks the output
       // format (build / image / chat) and extracts URLs to read — replacing the
       // brittle keyword gate. Skip it in project mode (that path is its own thing).
@@ -1047,17 +1052,6 @@ export function setupIPC() {
     return getMemoryRecordsForSession(sessionId)
   })
 
-  ipcMain.handle(
-    'db:get-entity-graph',
-    (_, appName?: string, focusEntityId?: number, edgeLimit: number = 200) => {
-      return getEntityGraph(appName, focusEntityId, edgeLimit)
-    }
-  )
-
-  ipcMain.handle('db:rebuild-entity-graph', () => {
-    rebuildEntityEdgesForAllSessions()
-    return true
-  })
   ipcMain.handle('db:delete-session', async (_, sessionId: string) => {
     const db = getDB()
     // Delete from new tables (messages will cascade due to foreign key)
@@ -1128,8 +1122,18 @@ export function setupIPC() {
     return true
   })
 
+  ipcMain.handle('permissions:open-local-network-settings', () => {
+    openLocalNetworkSettings()
+    return true
+  })
+
   ipcMain.handle('permissions:request-screen-recording', async () => {
     return await requestScreenRecordingPermission()
+  })
+
+  ipcMain.handle('permissions:relaunch', () => {
+    requestApplicationRelaunch(app)
+    return true
   })
 
   // === RAG CONVERSATION HANDLERS ===
@@ -1154,6 +1158,9 @@ export function setupIPC() {
     async (_, id: string, projectId: string | null) => {
       const { setRagConversationProject } = await import('./database')
       setRagConversationProject(id, projectId)
+      for (const window of BrowserWindow.getAllWindows()) {
+        window.webContents.send('rag:conversations-changed', { conversationId: id, projectId })
+      }
       return true
     }
   )
@@ -1377,8 +1384,6 @@ export function setupIPC() {
         }
       }
 
-      // Rebuild entity edges from mentions across all entities
-      rebuildEntityEdgesForAllSessions()
     } else {
       // Additive reprocess: keep existing data, just re-run entity extraction on top
       console.log(
@@ -1737,10 +1742,13 @@ export function setupIPC() {
     return imageGenerationJobs.cancel()
   })
 
-  ipcMain.handle('imagegen:conversation-persisted', async (_event, conversationId: string) => {
-    const imageGenerationJobs = await imageJobPublisherReady
-    return imageGenerationJobs.acknowledgeConversation(conversationId)
-  })
+  ipcMain.handle(
+    'imagegen:conversation-persisted',
+    async (_event, conversationId: string, messageId?: string) => {
+      const imageGenerationJobs = await imageJobPublisherReady
+      return imageGenerationJobs.acknowledgeConversation(conversationId, messageId)
+    }
+  )
 
   ipcMain.handle(
     'imagegen:list',
@@ -1837,6 +1845,7 @@ export function setupIPC() {
       // thinking -> tool-call activity -> answer, and the stop button (rag:cancel) aborts it.
       const controller = new AbortController()
       streamControllers.set(streamId, controller)
+      bindChatStream(streamId, opts?.conversationId)
       try {
         return await modalityQueue.run(CHAT_JOB, () =>
           toolChat(query, history || [], {
@@ -1844,6 +1853,7 @@ export function setupIPC() {
             thinking: opts.thinking,
             signal: controller.signal,
             onDelta: (text, kind) => {
+              noteChatStreamDelta(streamId, text, kind)
               try {
                 sender.send('rag:stream', { streamId, type: kind, text })
               } catch {
@@ -1872,6 +1882,7 @@ export function setupIPC() {
         )
       } finally {
         streamControllers.delete(streamId)
+        endChatStream(streamId)
       }
     }
   )
@@ -2026,6 +2037,21 @@ export function setupIPC() {
     } finally {
       fs.promises.unlink(tmp).catch(() => {})
     }
+  })
+
+  /**
+   * Keep the image a generation will be based on, and give it a name the mesh can use.
+   *
+   * The user picks an init image from their own disk. Referring to it there is not enough for two
+   * reasons: the file can move or be deleted the moment the turn ends, and its path means nothing on
+   * any other device. So it is copied into the app's own storage and given a uuid, which is what lets
+   * it travel as an ordinary attachment on the message that used it.
+   */
+  ipcMain.handle('imagegen:keep-init-image', async (_e, sourcePath: string) => {
+    const { preserveGeneratedImageSource } = await import('./imagegen')
+    const id = crypto.randomUUID()
+    const kept = preserveGeneratedImageSource(id, sourcePath)
+    return kept ? { id, path: kept } : null
   })
 
   ipcMain.handle('imagegen:pick-image', async (e) => {
