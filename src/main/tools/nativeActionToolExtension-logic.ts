@@ -113,6 +113,23 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
     buildArgs: (a) => a,
     title: () => 'List incomplete reminders',
     formatResult: (result) => JSON.stringify(result)
+  },
+  {
+    name: 'contacts_search',
+    description:
+      "Search the user's macOS Contacts by name. Returns matching names with their phone numbers and emails. Read-only; runs without approval.",
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Name to search for' }
+      },
+      required: ['query']
+    },
+    command: 'contacts.search',
+    risk: 'read',
+    buildArgs: (a) => a,
+    title: (a) => `Search contacts for "${asString(a.query)}"`,
+    formatResult: (result) => JSON.stringify(result)
   }
 ]
 

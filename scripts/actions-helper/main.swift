@@ -1,5 +1,6 @@
 import Foundation
 import EventKit
+import Contacts
 
 // Off Grid AI Desktop - native actions helper (macOS), the backend of the computer-use
 // semantic rail. One-shot CLI: reads a single JSON command argument, performs one
@@ -174,6 +175,51 @@ func listEvents(_ args: [String: Any]) -> Never {
     ok(["events": events])
 }
 
+func requestContactsAccess(_ store: CNContactStore) -> (granted: Bool, error: String?) {
+    let semaphore = DispatchSemaphore(value: 0)
+    var granted = false
+    var errorMessage: String?
+    store.requestAccess(for: .contacts) { allowed, err in
+        granted = allowed
+        if let err = err { errorMessage = err.localizedDescription }
+        semaphore.signal()
+    }
+    semaphore.wait()
+    return (granted, errorMessage)
+}
+
+func searchContacts(_ args: [String: Any]) -> Never {
+    guard let query = args["query"] as? String, !query.isEmpty else {
+        fail("searchContacts requires a non-empty query")
+    }
+    let store = CNContactStore()
+    let access = requestContactsAccess(store)
+    if !access.granted { fail(access.error ?? "contacts access was not granted") }
+
+    let keys: [CNKeyDescriptor] = [
+        CNContactGivenNameKey as CNKeyDescriptor,
+        CNContactFamilyNameKey as CNKeyDescriptor,
+        CNContactPhoneNumbersKey as CNKeyDescriptor,
+        CNContactEmailAddressesKey as CNKeyDescriptor
+    ]
+    let predicate = CNContact.predicateForContacts(matchingName: query)
+    do {
+        let contacts = try store.unifiedContacts(matching: predicate, keysToFetch: keys)
+        let out = contacts.map { contact -> [String: Any] in
+            let name = CNContactFormatter.string(from: contact, style: .fullName)
+                ?? "\(contact.givenName) \(contact.familyName)"
+            return [
+                "name": name,
+                "phones": contact.phoneNumbers.map { $0.value.stringValue },
+                "emails": contact.emailAddresses.map { $0.value as String }
+            ]
+        }
+        ok(["contacts": out])
+    } catch {
+        fail("failed to search contacts: \(error.localizedDescription)")
+    }
+}
+
 let arguments = CommandLine.arguments
 guard arguments.count >= 2 else { fail("no command provided") }
 guard let data = arguments[1].data(using: .utf8),
@@ -192,6 +238,8 @@ case "reminders.create":
     createReminder(commandArgs)
 case "reminders.list":
     listReminders(commandArgs)
+case "contacts.search":
+    searchContacts(commandArgs)
 default:
     fail("unknown command: \(command)")
 }

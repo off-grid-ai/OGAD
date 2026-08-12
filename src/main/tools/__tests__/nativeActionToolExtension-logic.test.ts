@@ -12,12 +12,18 @@ describe('native tool specs', () => {
       'calendar_create_event',
       'calendar_list_events',
       'reminders_create',
-      'reminders_list'
+      'reminders_list',
+      'contacts_search'
     ])
     expect(findNativeToolSpec('calendar_create_event')?.command).toBe('calendar.createEvent')
     expect(findNativeToolSpec('calendar_list_events')?.command).toBe('calendar.listEvents')
     expect(findNativeToolSpec('reminders_create')?.command).toBe('reminders.create')
     expect(findNativeToolSpec('reminders_list')?.command).toBe('reminders.list')
+    expect(findNativeToolSpec('contacts_search')?.command).toBe('contacts.search')
+  })
+
+  it('classifies contacts search as a read that runs without approval', () => {
+    expect(shouldGate(findNativeToolSpec('contacts_search')!.risk)).toBe(false)
   })
 
   it('classifies every create tool as a gating mutate and every list tool as a read', () => {
