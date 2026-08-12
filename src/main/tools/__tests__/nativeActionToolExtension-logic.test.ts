@@ -13,17 +13,31 @@ describe('native tool specs', () => {
       'calendar_list_events',
       'reminders_create',
       'reminders_list',
-      'contacts_search'
+      'contacts_search',
+      'messages_send',
+      'mail_send'
     ])
     expect(findNativeToolSpec('calendar_create_event')?.command).toBe('calendar.createEvent')
     expect(findNativeToolSpec('calendar_list_events')?.command).toBe('calendar.listEvents')
     expect(findNativeToolSpec('reminders_create')?.command).toBe('reminders.create')
     expect(findNativeToolSpec('reminders_list')?.command).toBe('reminders.list')
     expect(findNativeToolSpec('contacts_search')?.command).toBe('contacts.search')
+    expect(findNativeToolSpec('messages_send')?.command).toBe('messages.send')
+    expect(findNativeToolSpec('mail_send')?.command).toBe('mail.send')
   })
 
-  it('classifies contacts search as a read that runs without approval', () => {
+  it('gates the send actions and runs the read lookups without approval', () => {
+    for (const name of ['messages_send', 'mail_send']) {
+      expect(shouldGate(findNativeToolSpec(name)!.risk)).toBe(true)
+    }
     expect(shouldGate(findNativeToolSpec('contacts_search')!.risk)).toBe(false)
+  })
+
+  it('confirms a sent message and email without echoing arguments', () => {
+    expect(findNativeToolSpec('messages_send')!.formatResult({ sent: true })).toBe(
+      'Sent the message.'
+    )
+    expect(findNativeToolSpec('mail_send')!.formatResult({ sent: true })).toBe('Sent the email.')
   })
 
   it('classifies every create tool as a gating mutate and every list tool as a read', () => {

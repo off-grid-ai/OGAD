@@ -80,6 +80,22 @@ describe('NativeActionToolExtension', () => {
     ])
   })
 
+  it('gates a message send and does not run the helper when queued', async () => {
+    boundary.queueApprovals = true
+    const out = await ext.execute('messages_send', { to: '+15551234567', text: 'on my way' })
+
+    expect(out).toContain('Queued for the user')
+    expect(boundary.approvals).toEqual([
+      expect.objectContaining({
+        kind: 'native',
+        risk: 'mutate',
+        command: 'messages.send',
+        args: { to: '+15551234567', text: 'on my way' }
+      })
+    ])
+    expect(boundary.commands).toEqual([])
+  })
+
   it('runs a read tool without ever offering it for approval', async () => {
     boundary.response = { ok: true, result: { events: [] } }
     const out = await ext.execute('calendar_list_events', {

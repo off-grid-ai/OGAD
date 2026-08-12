@@ -220,6 +220,60 @@ func searchContacts(_ args: [String: Any]) -> Never {
     }
 }
 
+// AppleScript backs the send actions (Messages, Mail). User-supplied values are
+// escaped before interpolation so a quote or backslash cannot break the script or
+// inject extra statements.
+func escapeForAppleScript(_ value: String) -> String {
+    return value
+        .replacingOccurrences(of: "\\", with: "\\\\")
+        .replacingOccurrences(of: "\"", with: "\\\"")
+}
+
+func runAppleScript(_ source: String) -> String? {
+    var errorDict: NSDictionary?
+    let script = NSAppleScript(source: source)
+    _ = script?.executeAndReturnError(&errorDict)
+    if let errorDict = errorDict {
+        return (errorDict[NSAppleScript.errorMessage] as? String) ?? "AppleScript error"
+    }
+    return nil
+}
+
+func sendMessage(_ args: [String: Any]) -> Never {
+    guard let to = args["to"] as? String, !to.isEmpty else {
+        fail("sendMessage requires a 'to' recipient")
+    }
+    guard let text = args["text"] as? String, !text.isEmpty else {
+        fail("sendMessage requires non-empty 'text'")
+    }
+    let script = """
+    tell application "Messages"
+        send "\(escapeForAppleScript(text))" to participant "\(escapeForAppleScript(to))" of (1st account whose service type = iMessage)
+    end tell
+    """
+    if let err = runAppleScript(script) { fail("failed to send message: \(err)") }
+    ok(["sent": true])
+}
+
+func sendMail(_ args: [String: Any]) -> Never {
+    guard let to = args["to"] as? String, !to.isEmpty else {
+        fail("sendMail requires a 'to' recipient")
+    }
+    let subject = (args["subject"] as? String) ?? ""
+    let body = (args["body"] as? String) ?? ""
+    let script = """
+    tell application "Mail"
+        set newMessage to make new outgoing message with properties {subject:"\(escapeForAppleScript(subject))", content:"\(escapeForAppleScript(body))", visible:false}
+        tell newMessage
+            make new to recipient at end of to recipients with properties {address:"\(escapeForAppleScript(to))"}
+            send
+        end tell
+    end tell
+    """
+    if let err = runAppleScript(script) { fail("failed to send mail: \(err)") }
+    ok(["sent": true])
+}
+
 let arguments = CommandLine.arguments
 guard arguments.count >= 2 else { fail("no command provided") }
 guard let data = arguments[1].data(using: .utf8),
@@ -240,6 +294,10 @@ case "reminders.list":
     listReminders(commandArgs)
 case "contacts.search":
     searchContacts(commandArgs)
+case "messages.send":
+    sendMessage(commandArgs)
+case "mail.send":
+    sendMail(commandArgs)
 default:
     fail("unknown command: \(command)")
 }

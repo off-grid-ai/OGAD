@@ -130,6 +130,43 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
     buildArgs: (a) => a,
     title: (a) => `Search contacts for "${asString(a.query)}"`,
     formatResult: (result) => JSON.stringify(result)
+  },
+  {
+    name: 'messages_send',
+    description:
+      "Send an iMessage from the user's Mac. 'to' is a phone number or email handle - use contacts_search first if you only have a name. Needs the user to approve before it is sent.",
+    parameters: {
+      type: 'object',
+      properties: {
+        to: { type: 'string', description: 'Phone number or email handle' },
+        text: { type: 'string', description: 'Message text' }
+      },
+      required: ['to', 'text']
+    },
+    command: 'messages.send',
+    risk: 'mutate',
+    buildArgs: (a) => a,
+    title: (a) => `Send a message to ${asString(a.to)}`,
+    formatResult: () => 'Sent the message.'
+  },
+  {
+    name: 'mail_send',
+    description:
+      "Send an email from the user's Mac Mail. Needs the user to approve before it is sent.",
+    parameters: {
+      type: 'object',
+      properties: {
+        to: { type: 'string', description: 'Recipient email address' },
+        subject: { type: 'string', description: 'Email subject' },
+        body: { type: 'string', description: 'Email body' }
+      },
+      required: ['to']
+    },
+    command: 'mail.send',
+    risk: 'mutate',
+    buildArgs: (a) => a,
+    title: (a) => `Email ${asString(a.to)}`,
+    formatResult: () => 'Sent the email.'
   }
 ]
 
