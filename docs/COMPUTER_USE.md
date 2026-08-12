@@ -169,7 +169,7 @@ The shipped-product template is Gemini Intelligence's UX, which matches our appr
 Status as of August 11, 2026 (details live in `COMPUTER_USE_PLAN.md`):
 
 1. **Cortex model - narrowed, decided at install time.** GUI-Owl-1.5-8B-Instruct (working default) or Qwen3-VL-8B. Same Qwen3-VL architecture, so all engine and adapter work is identical for either; the pick is a phase 3 catalog decision and blocks nothing before that.
-2. **Package name - proposed, pending lead confirm.** `@offgrid/use`, consumed as `file:../shared/packages/use` from a sibling checkout per the shared README (not a vendored copy under this repo's `packages/`). Confirm both with the lead in phase 0.
+2. **Package name - decided (August 12).** `@offgrid/use`, consumed as `file:../shared/packages/use` from a sibling checkout per the shared README (not a vendored copy under this repo's `packages/`).
 3. **v1 graph - decided.** Planner / Cortex / Executor / Reflector; Orchestrator and Summarizer are added when task length demands them.
 4. **Approval UX - proposed.** Plan-level approval + live step view + hold-to-stop, with per-step gates on irreversible actions. Validate against real runs in phase 3.
 5. **Eval harness - decided.** macOSWorld subset as a non-blocking sanity gate from phase 3.
