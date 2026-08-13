@@ -133,7 +133,7 @@ flowchart TB
 **Shared core (platform-free):** the Action model + durable queue + state machine; the reasoning engine (commitment / gap detection); the resolver (slot-filling over memory, with confidence); the router (cheapest reliable rail); verification + retry / idempotency policy; the action-handler registry; the gate seam (a callback the host implements).
 
 **Per-platform adapters (behind interfaces the core calls):**
-- **The rails (behind the `DeviceController` interface)** - how to actually run a thing. Desktop: the Swift helper (EventKit / AppleScript), the agent browser, AX + synthetic input, vision. Android: intents + content providers + an accessibility-service portal. iOS: App Intents / Shortcuts only (no GUI or vision rail - the platform forbids reading or driving other apps).
+- **The rails (behind the `DeviceController` interface)** - how to actually run a thing. **Desktop v1 is macOS + Windows, in scope from day 1.** macOS: the Swift helper (EventKit / AppleScript), the agent browser, AX + CGEvent, vision. Windows: Microsoft Graph / Outlook / the shell for the semantic rail, the agent browser (shared, Electron), UI Automation + SendInput, vision. Android: intents + content providers + an accessibility-service portal. iOS: App Intents / Shortcuts only (no GUI or vision rail - the platform forbids reading or driving other apps).
 - **MemoryStore** - read observations / entities / RAG.
 - **Scheduler** - fire time and event triggers.
 - **Approval and feed UI** - render the gate and the come-up feed (desktop renderer; mobile React Native).
