@@ -1,7 +1,7 @@
 # The assistant - system architecture (the act pipeline)
 
 **Status:** high-level design, August 13, 2026, from the architecture discussion. For team review.
-Companion to `COMPUTER_USE.md` (the product model), `COMPUTER_USE_PLAN.md` (the plan), and `COMPETITIVE_RESEARCH.md` (prior art). This doc is about the *system that executes actions* - how it stays reliable on a weak local model and identical across desktop and mobile.
+Companion to `COMPUTER_USE.md` (the product model), `COMPUTER_USE_PLAN.md` (the build doc + schedule), and `PORTING_MAP.md` (port-vs-bespoke). This is the *design reference* for the system that executes actions - how it stays reliable on a weak local model and identical across desktop and mobile. The build order and timeline live in `COMPUTER_USE_PLAN.md`; follow that to build.
 
 ---
 

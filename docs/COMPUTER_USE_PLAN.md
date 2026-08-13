@@ -1,6 +1,8 @@
 # The proactive assistant - build plan and timeline
 
-Companion to `COMPUTER_USE.md` (the model + Section 9 reuse shortlist), `PORTING_MAP.md` (the deep port-vs-bespoke research), and `ASSISTANT_ARCHITECTURE.md` (the system). This is the execution plan and the source of truth for schedule; adjust the plan here at each checkpoint, do not fork a second plan.
+Companion to `COMPUTER_USE.md` (the product model), `ASSISTANT_ARCHITECTURE.md` (the system design), and `PORTING_MAP.md` (the port-vs-bespoke research).
+
+> **This is the doc to build from.** Work release by release, top to bottom: a release is not done until its checkpoint passes, and the next release does not start until it does. The other three docs are references - *why* we build it (COMPUTER_USE), *how* the system is designed (ASSISTANT_ARCHITECTURE), and *what to port* (PORTING_MAP). This one is the what-to-do-next and in-what-order, and the single source of truth for schedule. Adjust the plan here at each checkpoint; never fork a second plan. Start at R1.
 
 **Assumptions**
 

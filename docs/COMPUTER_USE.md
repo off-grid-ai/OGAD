@@ -39,7 +39,7 @@ No repetition at all. Given your situation, something *should* have happened and
 4. **Surface the gap** - "You fly tonight and haven't checked in. Want me to?"
 5. **Act, then gate** - check in or open the check-in page; anything with identity or payment confirms first.
 
-Steps 1-4 - the *smart* part - are pure memory + LLM + read-only connectors. No vision, no risky automation. That is the most magical and the most reliable part, and it ships first.
+Steps 1-4 - the *smart* part - are pure memory + LLM + read-only connectors. No vision, no risky automation. That is the most magical and the most reliable part; it lands early - R2 in the build plan, right after the chat action tool is released (R1). See `COMPUTER_USE_PLAN.md` for the order.
 
 **The routine engine gives reliable *doing*; the reasoning engine gives an assistant that *notices*.** Same spine underneath.
 
@@ -122,14 +122,12 @@ None of this is wasted by the reframe. It is rail 1, and rail 1 carries most of 
 
 ## 8. What is genuinely new to build
 
-On top of the existing foundation:
+On top of the existing foundation. **The build order and schedule live in `COMPUTER_USE_PLAN.md` (the build doc), which sequences these as releases R1-R4** - the chat action tool ships first (R1, the lead's steer), then the reasoning/resolve layer, then routines, then the hard rails. Mapped to the releases:
 
-1. **The reasoning engine** - commitment/event detection + world-knowledge of required steps + read-only gap-checking + surfacing. Memory + LLM + connectors. The sharpest first thing to prove: it is the magic and needs none of the risky automation.
-2. **The slot/resolve layer** - RAG over the memory spine to fill "the presentation" with a confidence.
-3. **The demonstration recorder** - CGEvent tap + AX tagging + review UI (5).
-4. **The routine store + trigger** - skills with schedule/event triggers; auto-detection feeding the "record this?" proposal.
-5. **The agent browser** (rail 2) - for the reasoned novel web tasks (check-in, ordering); higher priority than a pure-routine product implied, because that is where reasoned tasks execute, and it needs no OS permissions.
-6. **AX act-primitives + the grounding vision model** (rails 3-4) - native GUI control and the dead-AX / drift-recovery fallback. Last.
+- **R1 - the chat action tool + the durable spine.** Turn the existing semantic rail (7) into a released, gated, verified tool the chat model calls, on a durable Action queue + state machine. This is the released foundation the rest layers on.
+- **R2 - the reasoning engine + the slot/resolve layer.** Commitment/event detection + world-knowledge of required steps + read-only gap-checking + surfacing (the magic, and the safest - no risky automation); and RAG over the memory spine to fill "the presentation" with a confidence.
+- **R3 - the demonstration recorder + the routine store.** Record-by-showing (recorder + AX tagging + review UI, see 5) and skills with schedule/event triggers; auto-detection feeds the "record this?" proposal.
+- **R4 - the agent browser (rail 2) + the AX act-primitives and grounding vision model (rails 3-4).** The reasoned novel web tasks (check-in, ordering) and the dead-AX / drift-recovery fallback. Last.
 
 ## 9. What we reuse (do not reinvent)
 
@@ -190,8 +188,8 @@ Rail-1 helper primitives and adapter plumbing are core infrastructure (like OCR)
 2. **Decided** - `@offgrid/use` package name and `file:../shared/packages/use` consumption; the sibling `../shared` checkout is a build requirement (main already adopted it).
 3. **Decided** - the semantic rail (rail 1) is the foundation and is built.
 4. **Open** - parameterization depth: start faithful-with-marked-slots resolved by memory, layer richer LLM generalization on top. Confirmed lean: start faithful.
-5. **Open** - first build milestone: the reasoning engine (notice + surface, memory-driven, no risky automation) vs the recorder + faithful replay. Lean: reasoning engine, because it is the magic and the safest.
-6. **Open** - default grounding model when rail 4 arrives: GUI-Owl-1.5-8B-Instruct (MIT, desktop-trained) vs Qwen3-VL-8B. Not on the critical path.
+5. **Decided** - build order is release-led (`COMPUTER_USE_PLAN.md`): the chat action tool + durable spine ships first (R1, the lead's steer), then the reasoning + resolve layer (R2), then routines (R3), then the hard rails (R4).
+6. **Decided** (per `PORTING_MAP.md` Section 6) - the default grounding model is UI-TARS-1.5-7B on desktop (Apache-2.0, GGUF + mmproj already published and mainline-runnable); GUI-Owl-1.5 / Qwen3-VL for mobile. Still not on the critical path (R4).
 
 ## 14. Sources
 
