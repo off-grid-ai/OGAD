@@ -36,7 +36,7 @@ Execution checklist for R1 of `COMPUTER_USE_PLAN.md` (the build doc). The plan s
 
 ## Day 3 - wire into the app (macOS end to end)
 
-- [ ] **9. The storage adapter in OGAD** (`src/main/actions/use-storage.ts`): the queue/state tables live in the app's existing better-sqlite3 DB (one DB is the SSOT), with a migration.
+- [x] **9. The storage adapter in OGAD** (`src/main/actions/use-driver.ts` + `src/main/__tests__/use-storage.integration.dbtest.ts`): the queue/state tables live in the app's existing better-sqlite3 DB (one DB is the SSOT), with a migration.
   *Done when:* an integration test runs the real engine against a temp app DB (no mocks at the DB seam).
 - [ ] **10. The semantic rail adapter** (`src/main/actions/semantic-rail.ts`): wrap the existing `runNativeAction` helper behind the DeviceController port; map the Action types to the helper's verbs (calendar, reminders, contacts, messages, mail, open_url).
   *Done when:* each mapped type has a test through an injected helper boundary; unknown types are refused, not guessed.
