@@ -204,3 +204,114 @@ Each is a real decision with a tradeoff. Where we have a lean, it is stated so t
 ## 9. How to present this
 
 The narrative for the team: the vision (the demo) is validated; the scope is a curated set of action types across two honest reliability tiers; the system is a durable action pipeline where the model only proposes and the pipeline guarantees, so it survives a weak local model and stays identical on desktop and mobile; the decisions in Section 7 are locked; and Section 8 is the six open questions we want the team to weigh in on. The natural next step after alignment is the detailed `@offgrid/use` spec - the Action schema, the handler interfaces, and the reliability policy in code form.
+
+---
+
+## 10. System architecture diagrams (C4, swimlane, user flows)
+
+The TRD / PRD deliverables, in the standard house style. The component diagram in Section 6 is the C4 **component** level (Level 3); the two views below add the **context** (Level 1) and **container** (Level 2) levels above it, then a runtime swimlane and the product user flows.
+
+### 10.1 System context (C4 - Level 1)
+
+Who uses the system and what it touches. The assistant is on-device; the only external things are the user and the apps and services it acts on.
+
+```mermaid
+C4Context
+    title System Context - Off Grid AI assistant
+    Person(user, "User", "Knowledge worker, on their Mac or phone")
+    System(oga, "Off Grid AI", "Private on-device assistant that notices what you need and acts, with approval")
+    System_Ext(apps, "The user's apps and services", "Calendar, Mail, Messages, WhatsApp, the browser, connectors")
+    Rel(user, oga, "Asks in chat, approves actions")
+    Rel(oga, user, "Surfaces come-ups, asks to confirm")
+    Rel(oga, apps, "Acts on the user's behalf, with approval")
+```
+
+### 10.2 Containers (C4 - Level 2)
+
+The parts inside Off Grid AI and how they talk. The assistant engine is the brain; the rails are the hands; everything runs on-device.
+
+```mermaid
+C4Container
+    title Container view - Off Grid AI assistant (all on-device)
+    Person(user, "User", "")
+    System_Boundary(oga, "Off Grid AI (on-device)") {
+        Container(ui, "Approval and feed UI", "React / React Native", "Day feed, approval card, routines")
+        Container(assistant, "Assistant engine", "@offgrid/use, shared TypeScript", "Reasoning, resolve, durable queue, router, gate, verify")
+        Container(rails, "The rails", "DeviceController adapters, native per platform", "Semantic, browser, accessibility, vision")
+        ContainerDb(memory, "Memory", "SQLite plus LanceDB", "Replay observations, entities, RAG")
+        Container(model, "Local model gateway", "llama.cpp, OpenAI-compatible", "On-device LLM, grammar-constrained")
+    }
+    System_Ext(apps, "The user's apps and services", "Calendar, Mail, Messages, WhatsApp, web, connectors")
+    Rel(user, ui, "Sees come-ups, approves")
+    Rel(ui, assistant, "Proposes and approves actions")
+    Rel(assistant, model, "Proposes a validated action")
+    Rel(assistant, memory, "Detects patterns, resolves slots")
+    Rel(assistant, rails, "execute(action)")
+    Rel(rails, apps, "Deep links, EventKit, AppleScript, GUI")
+```
+
+### 10.3 Sequence / swimlane
+
+Swimlane by actor: it makes clear who is responsible at each step, and which part of the system assists the user. Example flow: the user acts on a proactive come-up ("send the deck I promised Ali"). The lanes are the actors: User, Assistant, Memory, Gate, Rails, and the target app.
+
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant A as Assistant (brain)
+    participant M as Memory
+    participant G as Gate / Approval
+    participant R as Rails (DeviceController)
+    participant T as Target app (Mail)
+
+    Note over A: Reasoning engine notices a commitment
+    A->>U: Come-up "you promised Ali the deck"
+    U->>A: "Send it"
+    A->>A: Validate and enqueue a durable Action
+    A->>M: Resolve "the deck" and "Ali"
+    M-->>A: Q3-strategy.pptx, Ali Chherawalla (with confidence)
+    A->>G: Propose (mutate) with the evidence
+    G->>U: Approval card - resolved values plus evidence
+    U->>G: Approve and send
+    G-->>A: Approved, payload locked
+    A->>R: execute(action) on the cheapest reliable rail
+    R->>T: Send via Mail (semantic rail)
+    T-->>R: Sent
+    R-->>A: Result
+    A->>A: Verify the effect (retry once if needed)
+    A-->>U: "Sent to Ali" (real confirmation, not a guess)
+```
+
+For a GUI action (say a WhatsApp file share) the same lanes hold; only the rail changes to vision, and the target app is driven step by step with a pause at the send.
+
+### 10.4 User flows
+
+The paths a user can take through the product: the two entry points (the proactive Day feed, or asking in Chat) through the gate to a verified result, plus the two ways a routine is born.
+
+```mermaid
+flowchart TD
+    S([Open Off Grid AI]) --> DAY[Day - the Needs you feed]
+    ASK([Ask in Chat]) --> REV[Review the action]
+
+    DAY -->|reasoned come-up| REV
+    DAY -->|routine proposal| TR[Turn into routine]
+    DAY -->|record a routine| DEMO[Demonstrate it once]
+
+    REV --> CARD[Approval card:<br/>resolved values + evidence + confidence]
+    CARD -->|low confidence| PICK[Pick the right one]
+    PICK --> CARD
+    CARD -->|edit| CARD
+    CARD -->|dismiss| DAY
+    CARD -->|approve| EXE[Assistant runs it on a rail]
+
+    EXE --> VER{Verified?}
+    VER -->|yes| DONE([Done - toast confirms])
+    VER -->|no, retry once| EXE
+    VER -->|still no| HELP([Needs help - asks you])
+
+    TR --> CONF[Confirm the learned steps<br/>and set a trigger]
+    DEMO --> CONF
+    CONF --> SAVE([Saved - starts as Suggest])
+    SAVE -.runs on its trigger.-> REV
+```
+
+Two entry points - the proactive Day feed and Chat. Both land on the approval card, which shows the resolved values with their evidence and confidence; low confidence branches to a quick "which one did you mean" pick. Approve runs it on a rail, then verify decides done, retry-once, or ask you. A routine is born two ways - the assistant proposes a detected pattern, or you record one by demonstrating it - both converge on confirming the learned steps and setting a trigger, and a saved routine starts as Suggest until you trust it.
