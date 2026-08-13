@@ -23,6 +23,7 @@ import { getDB } from '../database'
 import { hasHook, HOOKS } from '../bootstrap/hookRegistry'
 import { makeUseDriver } from './use-driver'
 import { makeSemanticRailExecutor } from './semantic-rail'
+import { makeReadBackVerifiers } from './verification'
 import { runNativeAction } from './native-helper'
 import { gateHost, onGateParked, whenActionParked } from './gate-host'
 import { createActionWorker, type ActionWorker } from './use-worker'
@@ -40,20 +41,34 @@ export interface ActionsRuntime {
   approvalHookActive(): boolean
 }
 
-function buildRegistry(): HandlerRegistry {
+export function buildRegistry(run: typeof runNativeAction): HandlerRegistry {
   const registry = new HandlerRegistry()
-  // R1: every handler runs the semantic rail; verification starts as the
-  // executor's own verdict (none_fuzzy). Box 14 upgrades calendar and
-  // reminders to read-back verification.
-  const semantic = [
-    { type: 'calendar', defaultRisk: 'mutate' },
-    { type: 'reminder', defaultRisk: 'mutate' },
+  const verifiers = makeReadBackVerifiers(run)
+  // Calendar and reminders are observable: read back after create, so a
+  // failed write retries once and "done" means the item is really there.
+  registry.register({
+    type: 'calendar',
+    rail: 'semantic',
+    defaultRisk: 'mutate',
+    verification: 'read_back',
+    verify: verifiers.calendar
+  })
+  registry.register({
+    type: 'reminder',
+    rail: 'semantic',
+    defaultRisk: 'mutate',
+    verification: 'read_back',
+    verify: verifiers.reminder
+  })
+  // Sends have no reliable read-back ("did it send?"), so they are fuzzy
+  // and single-attempt behind the gate - a wrong verify can never double-
+  // send. open_url's launch result IS its verdict; lookups are reads.
+  for (const handler of [
     { type: 'message', defaultRisk: 'mutate' },
     { type: 'email', defaultRisk: 'mutate' },
     { type: 'open', defaultRisk: 'navigate' },
     { type: 'lookup', defaultRisk: 'read' }
-  ] as const
-  for (const handler of semantic) {
+  ] as const) {
     registry.register({
       type: handler.type,
       rail: 'semantic',
@@ -75,7 +90,7 @@ export function getActionsRuntime(): ActionsRuntime {
   const semanticExecute = makeSemanticRailExecutor(runNativeAction)
   const engine = new UseEngine({
     driver: makeUseDriver(getDB()),
-    registry: buildRegistry(),
+    registry: buildRegistry(runNativeAction),
     device: {
       async execute(action: ActionRecord, rail: Rail) {
         if (rail !== 'semantic') {
