@@ -161,7 +161,7 @@ Finding: llama.cpp multimodal is real but base-gated (Qwen2-VL / Qwen2.5-VL / Qw
 **Build these (the product - bespoke by nature):**
 
 1. The **Action contract + durable pipeline** (queue -> FSM -> gate -> execute -> verify glue).
-2. **Effect-verification** per connector (zero prior art anywhere).
+2. **Effect-verification** per connector (zero prior art anywhere) - lands in the R1 spine (the machine's verifying state + per-handler verify); R4's router only escalates through it, never rebuilds it.
 3. The **resolve layer** returning `{value, confidence}`.
 4. The **commitment-gap reasoner** (join a commitment against Replay observations).
 5. The unified **DeviceController + rail-selection/fallback** policy.
