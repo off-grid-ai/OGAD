@@ -90,6 +90,46 @@ The pipeline is the `@offgrid/use` engine in `shared` (consumed as `file:../shar
 
 **Naming (canonical).** Two layers: **the assistant** (the brain - reasoning, resolve, the queue, the router, the gate, verify) and **the rails** (the actuation layer - the executors that actually perform actions, behind the `DeviceController` interface). Each concrete path is a rail: the **semantic rail**, the **browser rail**, the **accessibility rail**, and the **vision rail**. "Computer use" means the vision rail specifically, not the whole layer - most actions never touch it.
 
+**The shape, at a glance.** This is a component diagram in the **ports-and-adapters (hexagonal)** pattern: the assistant is the core, the `DeviceController` is the port, and the rails are the swappable adapters implemented per platform.
+
+```mermaid
+flowchart TB
+  RE[Reasoning engine] --> IN
+  CH[Chat / routine] --> IN
+  SC[Scheduler / trigger] --> IN
+  MEM[(Memory:<br/>Replay, entities, RAG)] -.-> RE
+  MEM -.-> RS
+
+  subgraph BRAIN["THE ASSISTANT · brain · @offgrid/use (shared, platform-free)"]
+    direction TB
+    IN[Intake + validate<br/>grammar · schema · fail closed]
+    Q[(Durable queue · state machine)]
+    RS[Resolver · slots from memory + confidence]
+    GT{Gate · evidence + confidence}
+    RO[Router · cheapest reliable rail]
+    VF[Verify · retry once · else ask]
+    IN --> Q --> RS --> GT --> RO
+    VF -.re-queue on fail.-> Q
+  end
+
+  RO ==>|"execute(action)"| DC{{DeviceController · the port}}
+  DC -.result.-> VF
+
+  subgraph RAILS["THE RAILS · actuation · platform adapter"]
+    direction LR
+    R1[Semantic rail]
+    R2[Browser rail]
+    R3[Accessibility rail]
+    R4[Vision rail<br/>= computer use]
+  end
+  DC --> R1
+  DC --> R2
+  DC --> R3
+  DC --> R4
+
+  RAILS -.implemented per platform.-> PLAT["macOS · Windows · Android · iOS"]
+```
+
 **Shared core (platform-free):** the Action model + durable queue + state machine; the reasoning engine (commitment / gap detection); the resolver (slot-filling over memory, with confidence); the router (cheapest reliable rail); verification + retry / idempotency policy; the action-handler registry; the gate seam (a callback the host implements).
 
 **Per-platform adapters (behind interfaces the core calls):**
