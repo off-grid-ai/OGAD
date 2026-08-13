@@ -40,7 +40,7 @@ Execution checklist for R1 of `COMPUTER_USE_PLAN.md` (the build doc). The plan s
   *Done when:* an integration test runs the real engine against a temp app DB (no mocks at the DB seam).
 - [x] **10. The semantic rail adapter** (`src/main/actions/semantic-rail.ts`): wrap the existing `runNativeAction` helper behind the DeviceController port; map the Action types to the helper's verbs (calendar, reminders, contacts, messages, mail, open_url).
   *Done when:* each mapped type has a test through an injected helper boundary; unknown types are refused, not guessed.
-- [ ] **11. The gate host** : wire the existing `actions:proposeApproval` seam as the engine's gate callback; the approval card shows the resolved values from the bound payload.
+- [x] **11. The gate host**: wire the existing `actions:proposeApproval` seam as the engine's gate callback; the approval card shows the resolved values from the bound payload.
   *Done when:* an integration test proves approve runs exactly the approved payload and reject lands the Action in `rejected`.
 - [ ] **12. Emission hardening** (`src/main/actions/emit.ts`): the action tool's schema goes to llama-server as grammar-constrained `response_format`; a TS SAP coercer (ported from BAML's schema-aligned parsing, keyed to the Action schema) repairs near-misses; bounded Zod validate-and-retry feeds the error back.
   *Done when:* coercion tests per branch (markdown fence, trailing prose, unquoted keys, missing optional), and a test that an unrepairable emission is rejected, never guessed.
