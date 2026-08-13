@@ -88,10 +88,12 @@ The pipeline is identical across all of them; only the rail and the reliability 
 
 The pipeline is the `@offgrid/use` engine in `shared` (consumed as `file:../shared/packages/use`). The reliable parts are pure logic, so they are shared; only the platform-specific edges are adapters.
 
+**Naming (canonical).** Two layers: **the assistant** (the brain - reasoning, resolve, the queue, the router, the gate, verify) and **the rails** (the actuation layer - the executors that actually perform actions, behind the `DeviceController` interface). Each concrete path is a rail: the **semantic rail**, the **browser rail**, the **accessibility rail**, and the **vision rail**. "Computer use" means the vision rail specifically, not the whole layer - most actions never touch it.
+
 **Shared core (platform-free):** the Action model + durable queue + state machine; the reasoning engine (commitment / gap detection); the resolver (slot-filling over memory, with confidence); the router (cheapest reliable rail); verification + retry / idempotency policy; the action-handler registry; the gate seam (a callback the host implements).
 
 **Per-platform adapters (behind interfaces the core calls):**
-- **RailExecutor / DeviceController** - how to actually run a thing. Desktop: the Swift helper (EventKit / AppleScript), the agent browser, AX + synthetic input, vision. Android: intents + content providers + an accessibility-service portal. iOS: App Intents / Shortcuts only (no GUI rail - the platform forbids reading or driving other apps).
+- **The rails (behind the `DeviceController` interface)** - how to actually run a thing. Desktop: the Swift helper (EventKit / AppleScript), the agent browser, AX + synthetic input, vision. Android: intents + content providers + an accessibility-service portal. iOS: App Intents / Shortcuts only (no GUI or vision rail - the platform forbids reading or driving other apps).
 - **MemoryStore** - read observations / entities / RAG.
 - **Scheduler** - fire time and event triggers.
 - **Approval and feed UI** - render the gate and the come-up feed (desktop renderer; mobile React Native).
