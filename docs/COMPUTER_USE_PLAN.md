@@ -41,7 +41,7 @@ The split: `shared` holds the durable cross-platform brain (reused by mobile lat
 
 ## R1 - chat actions, the tool (Days 1 - 4) - first release
 
-Talk to the assistant in chat and it calls actions as gated, verified tools. Most of this exists on macOS (Phase 1); R1 turns it into a released, cross-platform foundation on a durable spine.
+Talk to the assistant in chat and it calls actions as gated, verified tools. Most of this exists on macOS (Phase 1); R1 turns it into a released, cross-platform foundation on a durable spine. **Execution checklist: `R1_CHECKLIST.md`** (19 commit-sized boxes with done-when criteria).
 
 - **Land the durable spine (assemble, do not invent).** The chat action tool enqueues a durable Action that flows through validate -> gate -> execute -> verify. Assembled from: **XState** (the Action state machine, snapshot to SQLite), **sqliteq / goqite** (the durable queue, a table in our better-sqlite3 DB), **cockatiel / p-retry** (retry-once), and the **LangGraph.js `interrupt -> resume` pattern** for the approval pause (a library pattern, not a server). Design spec from **DBOS** semantics + **Gunnar Morling's SQLite durable-execution blueprint**. All in-process, no server.
 - **Reliable Action emission.** Constrain the model's output with **llama.cpp GBNF / `response_format`** (already bundled), coerce near-misses with a **SAP** parser (ported from BAML), and **Instructor**-style validate-and-retry on the residue.
