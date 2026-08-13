@@ -20,7 +20,7 @@ Execution checklist for R1 of `COMPUTER_USE_PLAN.md` (the build doc). The plan s
   *Done when:* schema tests cover each risk class, each type, and reject malformed input (fail closed).
 - [x] **3. The state machine** (`packages/use/src/machine.ts`, XState v5): `proposed -> rejected | scheduled | resolving -> awaiting_approval | ready -> executing -> verifying -> done | executing(retry) | needs_help`, exactly as the architecture doc draws it. Persist via `getPersistedSnapshot()`; rehydrate on start.
   *Done when:* every transition has a test, plus a snapshot -> restore roundtrip test (the crash-resume guarantee).
-- [ ] **4. The durable queue** (`packages/use/src/queue.ts`): the goqite/sqliteq pattern - lease + visibility timeout + auto-extend + attempts + `UNIQUE(idempotencyKey)` dedup - behind a small `Storage` interface (the spine stays platform-free; hosts inject the DB).
+- [x] **4. The durable queue** (`packages/use/src/queue.ts`): the goqite/sqliteq pattern - lease + visibility timeout + auto-extend + attempts + `UNIQUE(idempotencyKey)` dedup - behind a small `Storage` interface (the spine stays platform-free; hosts inject the DB).
   *Done when:* tested against better-sqlite3 `:memory:` - lease expiry re-queues, a duplicate enqueue dedups, attempts increment, a held lease blocks a second worker.
 
 ## Day 2 - the guarantees
