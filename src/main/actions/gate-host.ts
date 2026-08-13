@@ -36,6 +36,45 @@ export function railToKind(rail: Rail | undefined): ActionKind {
 }
 
 const pending = new Map<string, (decision: GateDecision) => void>()
+const parkedWaiters = new Map<string, Array<() => void>>()
+
+/**
+ * Resolves as soon as the action parks at the gate (immediately when it is
+ * already parked). The chat tool races this against the action's outcome to
+ * answer "pending approval" instead of blocking on a human.
+ */
+export function whenActionParked(actionId: string): Promise<void> {
+  if (pending.has(actionId)) {
+    return Promise.resolve()
+  }
+  return new Promise((resolve) => {
+    const waiters = parkedWaiters.get(actionId) ?? []
+    waiters.push(resolve)
+    parkedWaiters.set(actionId, waiters)
+  })
+}
+
+const parkListeners = new Set<() => void>()
+
+/** Global "an action just parked at the gate" signal - the worker's cue to
+ *  move on to the next due message instead of blocking on a human. */
+export function onGateParked(listener: () => void): () => void {
+  parkListeners.add(listener)
+  return () => parkListeners.delete(listener)
+}
+
+function notifyParked(actionId: string): void {
+  const waiters = parkedWaiters.get(actionId)
+  if (waiters) {
+    parkedWaiters.delete(actionId)
+    for (const resolve of waiters) {
+      resolve()
+    }
+  }
+  for (const listener of parkListeners) {
+    listener()
+  }
+}
 
 /**
  * Called by the approval surface (IPC from the card, or pro's queue) with
@@ -85,5 +124,6 @@ export async function gateHost({ action }: { action: ActionRecord }): Promise<Ga
   }
   return new Promise<GateDecision>((resolve) => {
     pending.set(action.id, resolve)
+    notifyParked(action.id)
   })
 }

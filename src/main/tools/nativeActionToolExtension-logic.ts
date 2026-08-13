@@ -193,6 +193,27 @@ export function findNativeToolSpec(name: string): NativeToolSpec | undefined {
   return specsByName.get(name)
 }
 
+/**
+ * Which durable Action type a gated tool becomes when it routes through the
+ * @offgrid/use engine. Only the mutating tools appear here - reads and
+ * navigation run inline (architecture decision 5). Defined once; the
+ * extension and its tests both read this map.
+ */
+export const TOOL_ACTION_TYPES = {
+  calendar_create_event: 'calendar',
+  reminders_create: 'reminder',
+  messages_send: 'message',
+  mail_send: 'email'
+} as const
+
+export function actionTypeForTool(
+  name: string
+): (typeof TOOL_ACTION_TYPES)[keyof typeof TOOL_ACTION_TYPES] | undefined {
+  return (TOOL_ACTION_TYPES as Record<string, (typeof TOOL_ACTION_TYPES)[keyof typeof TOOL_ACTION_TYPES]>)[
+    name
+  ]
+}
+
 export interface NativeToolSchema {
   type: 'function'
   function: { name: string; description: string; parameters: Record<string, unknown> }
