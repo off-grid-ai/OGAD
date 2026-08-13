@@ -25,9 +25,9 @@ Execution checklist for R1 of `COMPUTER_USE_PLAN.md` (the build doc). The plan s
 
 ## Day 2 - the guarantees
 
-- [ ] **5. Retry policy** (`packages/use/src/retry.ts`, cockatiel or p-retry): retry-once-with-verify for reversible actions; single-attempt-behind-the-gate for irreversible ones (decision 8.1 lean).
+- [x] **5. Retry policy** (`packages/use/src/retry.ts`; pure policy - the machine owns the loop, so no promise-retry dep): retry-once-with-verify for reversible actions; single-attempt-behind-the-gate for irreversible ones (decision 8.1 lean).
   *Done when:* both policies are tested, including that an irreversible action never fires twice even when verify errors.
-- [ ] **6. The gate seam** (`packages/use/src/gate.ts`): the interrupt -> approve/edit/reject -> resume contract as a host callback; `payloadHash` computed at propose time and re-checked at execute time so the approved payload is exactly what runs.
+- [x] **6. The gate seam** (`packages/use/src/gate.ts`): the interrupt -> approve/edit/reject -> resume contract as a host callback; `payloadHash` computed at propose time and re-checked at execute time so the approved payload is exactly what runs.
   *Done when:* tests cover approve, reject, edit-then-approve (hash changes, re-gate), and a tampered payload refusing to execute.
 - [ ] **7. The DeviceController port + handler registry** (`packages/use/src/device.ts`, `registry.ts`): `execute(action)` port; each action handler declares its rail, risk default, and how it verifies (read-back / status / none-fuzzy).
   *Done when:* a fake DeviceController proves the seam - registering a second fake handler needs zero caller changes (the DSP test), and routing picks by declared rail.
