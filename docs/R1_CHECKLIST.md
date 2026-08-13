@@ -42,7 +42,7 @@ Execution checklist for R1 of `COMPUTER_USE_PLAN.md` (the build doc). The plan s
   *Done when:* each mapped type has a test through an injected helper boundary; unknown types are refused, not guessed.
 - [x] **11. The gate host**: wire the existing `actions:proposeApproval` seam as the engine's gate callback; the approval card shows the resolved values from the bound payload.
   *Done when:* an integration test proves approve runs exactly the approved payload and reject lands the Action in `rejected`.
-- [ ] **12. Emission hardening** (`src/main/actions/emit.ts`): the action tool's schema goes to llama-server as grammar-constrained `response_format`; a TS SAP coercer (ported from BAML's schema-aligned parsing, keyed to the Action schema) repairs near-misses; bounded Zod validate-and-retry feeds the error back.
+- [x] **12. Emission hardening** (`src/main/actions/emit.ts`): the action tool's schema goes to llama-server as grammar-constrained `response_format`; a TS SAP coercer (ported from BAML's schema-aligned parsing, keyed to the Action schema) repairs near-misses; bounded Zod validate-and-retry feeds the error back.
   *Done when:* coercion tests per branch (markdown fence, trailing prose, unquoted keys, missing optional), and a test that an unrepairable emission is rejected, never guessed.
 - [ ] **13. Chat tool integration**: mutations from the chat tool loop enqueue durable Actions through the engine; pure reads stay inline (decision 7.5). Existing native-tool behavior is preserved.
   *Done when:* the existing native-action tests still pass, plus new tests that a mutation goes through the queue and gate while a read does not.
