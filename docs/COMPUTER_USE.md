@@ -133,6 +133,8 @@ On top of the existing foundation:
 
 ## 9. What we reuse (do not reinvent)
 
+This is the curated shortlist. The deep, component-by-component port map for the whole system (durable queue, brain, memory, routines, rails, models) with a port-vs-bespoke verdict per component lives in `PORTING_MAP.md`.
+
 | Source | License | What we take |
 | --- | --- | --- |
 | `@ui-tars/sdk` + the UI-TARS desktop app | Apache-2.0 | Operator seam + action parser; the ScreenMarker overlay trio (animated border, content-protected control widget, pre-action markers); desktopCapturer scaling; the macOS permission gate |
