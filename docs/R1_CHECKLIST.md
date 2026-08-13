@@ -14,7 +14,7 @@ Execution checklist for R1 of `COMPUTER_USE_PLAN.md` (the build doc). The plan s
 
 ## Day 1 - the spine package (`@offgrid/use`, in `../shared`)
 
-- [ ] **1. Scaffold `packages/use`** in the shared repo: tsup + vitest, mirroring the `@offgrid/clipboard` engine layout; consumed from OGAD as `file:../shared/packages/use`.
+- [x] **1. Scaffold `packages/use`** in the shared repo: tsup + vitest, mirroring the `@offgrid/clipboard` engine layout; consumed from OGAD as `file:../shared/packages/use`.
   *Done when:* the package builds, an empty test runs, and OGAD's tsc still passes with the dependency declared.
 - [ ] **2. The Action contract** (`packages/use/src/action.ts`): Zod schema + types for `id, type, source, intent, args, payloadHash, risk, rail, idempotencyKey, attempts, verification, state, triggerAt`, audit refs. Closed `type` enum (message / email / calendar / reminder / open / lookup / file-share / web-task).
   *Done when:* schema tests cover each risk class, each type, and reject malformed input (fail closed).
