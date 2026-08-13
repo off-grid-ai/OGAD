@@ -46,7 +46,7 @@ Execution checklist for R1 of `COMPUTER_USE_PLAN.md` (the build doc). The plan s
   *Done when:* coercion tests per branch (markdown fence, trailing prose, unquoted keys, missing optional), and a test that an unrepairable emission is rejected, never guessed.
 - [x] **13. Chat tool integration**: mutations from the chat tool loop enqueue durable Actions through the engine; pure reads stay inline (decision 7.5). Existing native-tool behavior is preserved.
   *Done when:* the existing native-action tests still pass, plus new tests that a mutation goes through the queue and gate while a read does not.
-- [ ] **14. Verification per handler**: calendar and reminders verify by read-back (list after create); messages and mail declare fuzzy -> single-attempt; open_url verifies by launch result.
+- [x] **14. Verification per handler**: calendar and reminders verify by read-back (list after create); messages and mail declare fuzzy -> single-attempt; open_url verifies by launch result.
   *Done when:* each handler's declared verification has a test, including a failed read-back triggering the retry policy correctly.
 - [ ] **15. macOS checkpoint evidence**: on a seeded demo profile (`npm run demo` seeding rules), a chat ask ("remind me to send the deck at 6pm") produces gate -> execute -> verified -> confirmation. Capture screenshots into `e2e/screenshots/`.
   *Done when:* the flow runs clean and the screenshots show the approval card and the verified confirmation (validate the images before counting this done).
