@@ -638,7 +638,10 @@ export function MemoryChat({
   // Surfaced when a recording can't become a message (no audio, empty transcript, or a
   // transcription-engine failure) — never fail silently (the "nothing happened" bug).
   const [transcribeError, setTranscribeError] = useState<string | null>(null)
-  const [toolsOn, setToolsOn] = useState(false)
+  // Tools default ON: acting on this Mac is the assistant's own capability
+  // (approval-gated per action), not an opt-in integration. A user's saved
+  // preference still wins (loaded below).
+  const [toolsOn, setToolsOn] = useState(true)
   const [connectorsOn, setConnectorsOn] = useState(false)
   const [thinkingEnabled, setThinkingEnabled] = useState(false)
   const [voiceMode, setVoiceMode] = useState(false) // voice mode: messages exchanged as voice notes

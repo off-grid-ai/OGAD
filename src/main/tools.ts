@@ -16,6 +16,7 @@ import { buildUserContent } from './tool-content'
 import { stripTags, htmlToText, decodeDdgHref } from './tools-parsers'
 import { mimeFromExt } from './model-server/data-url'
 import { evaluateArithmetic } from './calculator'
+import { selectToolExtensions } from './tools/extension-select'
 
 // Per-tool enable/disable, persisted as a list of disabled tool names.
 function disabledSet(): Set<string> {
@@ -386,6 +387,12 @@ async function runTool(
 // Mirrors mobile/src/services/tools/extensions.ts.
 export interface ToolExtension {
   id: string
+  /** What kind of capability this is. 'tool' = the assistant's own on-device
+   *  abilities (native actions) - included in every agentic turn. 'connector'
+   *  = external service accounts (MCP) - included only when the user turns
+   *  Connectors on. Defaults to 'connector' (fail closed for anything that
+   *  might touch an external service). */
+  category?: 'tool' | 'connector'
   /** OpenAI tool schemas to add when extensions are enabled. Built once per turn;
    *  the extension may cache any per-turn state it needs for execute(). */
   schemas(): Promise<unknown[]> | unknown[]
@@ -470,7 +477,7 @@ export async function toolChat(
   // alongside the built-ins. Schemas are built once per turn; each extension
   // caches whatever per-turn state it needs for execute(). Free build registers
   // no extensions, so this is just the built-ins.
-  const exts = opts.connectors ? getToolExtensions() : []
+  const exts = selectToolExtensions(getToolExtensions(), { connectors: !!opts.connectors })
   const extSchemas: unknown[] = []
   const hints: string[] = []
   for (const e of exts) {

@@ -59,6 +59,7 @@ Execution checklist for R1 of `COMPUTER_USE_PLAN.md` (the build doc). The plan s
   *Done when:* handler tests through an injected Graph boundary; the registry proves macOS and Windows rails swap with zero caller changes.
 - [ ] **18. E2E + evidence**: a Playwright spec driving chat ask -> approval card -> done state on a fresh temp profile (`OFFGRID_PRO=0`, synthetic seed only); screenshots per surface, a short video of the golden path.
   *Done when:* `npm run test:e2e` includes the new spec and passes; evidence attached to the PR per the repo's PR rules.
+- [ ] **18b. Release UX notes**: Tools defaults ON (fresh installs) with native actions under the Tools category - verify in the e2e that a fresh profile can act without touching any toggle. Flag to the lead: the free-build inline-confirm question for mutate/irreversible actions (open-core line), and the R2 router retiring the per-turn toggle.
 - [ ] **19. Ship it**: version bump, release via CI, checkpoint sign-off against the plan ("on both macOS and Windows, a chat ask calls the action tool and the action runs gated and verified"). Update `COMPUTER_USE_PLAN.md` if any date moved.
   *Done when:* the release is out and the plan reflects reality.
 

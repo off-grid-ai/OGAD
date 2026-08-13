@@ -60,6 +60,9 @@ const productionBoundary: NativeActionToolBoundary = {
 
 export class NativeActionToolExtension implements ToolExtension {
   id = 'native-actions'
+  /** The assistant's own on-device abilities, not an external account:
+   *  available in every agentic turn, not gated behind Connectors. */
+  category = 'tool' as const
 
   constructor(private readonly boundary: NativeActionToolBoundary = productionBoundary) {}
 
