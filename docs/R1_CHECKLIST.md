@@ -14,9 +14,9 @@ Execution checklist for R1 of `COMPUTER_USE_PLAN.md` (the build doc). The plan s
 
 ## Day 1 - the spine package (`@offgrid/use`, in `../shared`)
 
-- [x] **1. Scaffold `packages/use`** in the shared repo: tsup + vitest, mirroring the `@offgrid/clipboard` engine layout; consumed from OGAD as `file:../shared/packages/use`.
+- [x] **1. Scaffold `packages/use`** in the shared repo: tsup + node --test (the shared-repo house pattern), mirroring the sync engine layout; consumed from OGAD as `file:../shared/packages/use`.
   *Done when:* the package builds, an empty test runs, and OGAD's tsc still passes with the dependency declared.
-- [ ] **2. The Action contract** (`packages/use/src/action.ts`): Zod schema + types for `id, type, source, intent, args, payloadHash, risk, rail, idempotencyKey, attempts, verification, state, triggerAt`, audit refs. Closed `type` enum (message / email / calendar / reminder / open / lookup / file-share / web-task).
+- [x] **2. The Action contract** (`packages/use/src/action.ts`): Zod schema + types for `id, type, source, intent, args, payloadHash, risk, rail, idempotencyKey, attempts, verification, state, triggerAt`, audit refs. Closed `type` enum (message / email / calendar / reminder / open / lookup / file-share / web-task).
   *Done when:* schema tests cover each risk class, each type, and reject malformed input (fail closed).
 - [ ] **3. The state machine** (`packages/use/src/machine.ts`, XState v5): `proposed -> rejected | scheduled | resolving -> awaiting_approval | ready -> executing -> verifying -> done | executing(retry) | needs_help`, exactly as the architecture doc draws it. Persist via `getPersistedSnapshot()`; rehydrate on start.
   *Done when:* every transition has a test, plus a snapshot -> restore roundtrip test (the crash-resume guarantee).
