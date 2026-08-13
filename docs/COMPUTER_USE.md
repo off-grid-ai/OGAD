@@ -141,9 +141,27 @@ On top of the existing foundation:
 | macos-automator-mcp | MIT | wrapped AppleScript/JXA intents plus its recipe knowledge base |
 | bytebot (archived) | Apache-2.0 | takeover-as-recorded-actions (the human demonstration lands in the same action log) and the needs_help state - directly relevant to the recorder |
 | Peekaboo (OpenClaw org) | MIT | reference for the AX-tree + vision hybrid on the native rail |
+| OpenAdapt (MLDSAI) | MIT | the recorder / routines rail (R3): record once -> deterministic, self-healing local replay; each step carries a template crop, an OCR label, geometry, a structural locator, and postconditions (our per-step verify), and the model touches the script only to repair on drift. Port the trace format + self-heal rather than build one. |
+| FlaUI / pywinauto | MIT / BSD-3 | the Windows UI Automation act-primitives reference for the accessibility rail (R3 Windows fast-follow) - UIA2/UIA3 element find + invoke / set-value, the analogue of the macOS AX act-primitives |
+| Agent-S2 (Simular) | Apache-2.0 | open computer-use agent loop + router structure as a reference for the brain |
 | OpenClaw | AGPL (patterns only) | the proactive cron/skills pattern and the killer briefing workflow; equally its incident record as the avoid-list (exposed gateways, sandbox-off, weak auth, unvetted skills) - we ship none of those surfaces |
 
-Everything adopted as code is Apache-2.0 or MIT - clean for the AGPL core + proprietary pro split.
+Everything adopted as code is Apache-2.0, MIT, or BSD - clean for the AGPL core + proprietary pro split (verify each license at the point of adoption; minitap/mobile-use asks for attribution).
+
+### Mobile (the adapter after v1)
+
+Mobile is a `DeviceController` adapter on the same engine (Section 6 and `ASSISTANT_ARCHITECTURE.md`), not a rewrite - and the actuation layer already exists to port rather than build:
+
+| Source | License | What we take |
+| --- | --- | --- |
+| Mobilerun (droidrun) | MIT | the mobile actuation rail for Android + iOS: inspect UI state, screenshot, tap / swipe / type, model-agnostic and local-model-capable (Ollama / OpenAI-compatible). The mobile `DeviceController` wraps this instead of writing driver glue. |
+| minitap/mobile-use | Apache-2.0 (credit Minitap) | the mobile agent loop reference (first to 100% on AndroidWorld), a LangGraph multi-agent over low-level control |
+| AppAgent / AppAgent-v2 (Tencent) | MIT | learn-by-demonstration + tagged-element perception (numeric tags over the Android view hierarchy) - mobile routines by showing |
+| Mobile-Agent-v3 / GUI-Owl (X-PLUG) | MIT | full mobile agent reference + GUI-Owl as the shared grounding model (desktop + mobile trained) |
+| Appium + appium-webdriveragent (iOS) + UiAutomator2 (Android) | Apache-2.0 | the low-level device drivers under the mobile rail (iOS via WebDriverAgent / XCTest, Android via UiAutomator2) |
+| Maestro (mobile.dev) | Apache-2.0 | the YAML flow format as inspiration for the mobile routine trace |
+
+iOS stays intents-only for driving other apps (App Intents / Shortcuts) - Apple forbids reading or driving other apps, so the mobile GUI / vision rails are Android-first, exactly as the plan states.
 
 ## 10. Safety
 
