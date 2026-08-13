@@ -31,7 +31,7 @@ Execution checklist for R1 of `COMPUTER_USE_PLAN.md` (the build doc). The plan s
   *Done when:* tests cover approve, reject, edit-then-approve (hash changes, re-gate), and a tampered payload refusing to execute.
 - [x] **7. The DeviceController port + handler registry** (`packages/use/src/device.ts`, `registry.ts`): `execute(action)` port; each action handler declares its rail, risk default, and how it verifies (read-back / status / none-fuzzy). Every attempt records the rail it ran on (the Action record is the effect journal), and escalation across rails is a re-fire governed by box 5's policy - a non-retryable action never escalates.
   *Done when:* a fake DeviceController proves the seam - registering a second fake handler needs zero caller changes (the DSP test), and routing picks by declared rail.
-- [ ] **8. The engine facade + worker** (`packages/use/src/engine.ts`): `propose()` validates and enqueues; a worker drains the queue through machine -> gate -> execute -> verify.
+- [x] **8. The engine facade + worker** (`packages/use/src/engine.ts`): `propose()` validates and enqueues; a worker drains the queue through machine -> gate -> execute -> verify.
   *Done when:* the fake-device suite is green end to end: a routed action, the gate flow, a verify-retry scenario, crash-resume (kill mid-execute, rehydrate, no double-fire thanks to the idempotency key), exactly-once under a duplicate enqueue. **This is the engine checkpoint.**
 
 ## Day 3 - wire into the app (macOS end to end)
