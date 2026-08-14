@@ -37,7 +37,10 @@ let ext: NativeActionToolExtension
 
 beforeEach(() => {
   boundary = new FakeBoundary()
-  ext = new NativeActionToolExtension(boundary)
+  // Pin darwin: these assert the full macOS tool set. Defaulting to
+  // process.platform makes specsForPlatform('linux') empty on CI, so every
+  // tool reads as unknown and the whole file fails.
+  ext = new NativeActionToolExtension(boundary, 'darwin')
 })
 
 describe('NativeActionToolExtension', () => {

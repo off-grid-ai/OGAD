@@ -37,8 +37,11 @@ function makePort(overrides: Partial<ActionsPort> = {}): ActionsPort & { propose
 const run = vi.fn(async () => ({ ok: true as const, result: { id: 'r1' } }))
 const proposeApproval = vi.fn(() => undefined)
 
+// Pin darwin: these assert the full macOS tool set (messages_send, the inline
+// reads, etc.). Without it the extension defaults to process.platform, and on
+// a Linux CI runner specsForPlatform('linux') is empty - every tool unknown.
 const makeExtension = (actions?: ActionsPort): NativeActionToolExtension =>
-  new NativeActionToolExtension({ run, proposeApproval, actions })
+  new NativeActionToolExtension({ run, proposeApproval, actions }, 'darwin')
 
 describe('the tool-to-action-type map', () => {
   it('covers exactly the mutating tools', () => {
@@ -215,11 +218,10 @@ describe('the engine path', () => {
     run.mockClear()
     const legacyPropose = vi.fn(() => true)
     const port = makePort({ approvalHookActive: () => true })
-    const extension = new NativeActionToolExtension({
-      run,
-      proposeApproval: legacyPropose,
-      actions: port
-    })
+    const extension = new NativeActionToolExtension(
+      { run, proposeApproval: legacyPropose, actions: port },
+      'darwin'
+    )
     const reply = await extension.execute('reminders_create', { title: 'x' })
     expect(port.proposed).toEqual([])
     expect(legacyPropose).toHaveBeenCalled()
@@ -229,7 +231,10 @@ describe('the engine path', () => {
   it('no actions port at all means the legacy path (existing behaviour)', async () => {
     run.mockClear()
     const legacyPropose = vi.fn(() => undefined)
-    const extension = new NativeActionToolExtension({ run, proposeApproval: legacyPropose })
+    const extension = new NativeActionToolExtension(
+      { run, proposeApproval: legacyPropose },
+      'darwin'
+    )
     await extension.execute('reminders_create', { title: 'x' })
     expect(legacyPropose).toHaveBeenCalled()
     expect(run).toHaveBeenCalled()
@@ -257,11 +262,10 @@ describe('the engine path', () => {
     run.mockClear()
     const legacyPropose = vi.fn(() => true)
     const port = makePort({ approvalHookActive: () => true })
-    const extension = new NativeActionToolExtension({
-      run,
-      proposeApproval: legacyPropose,
-      actions: port
-    })
+    const extension = new NativeActionToolExtension(
+      { run, proposeApproval: legacyPropose, actions: port },
+      'darwin'
+    )
     await extension.execute('web_task', { goal: 'order lunch' })
     // The engine path was taken; the legacy queue was NOT offered a web task.
     expect(port.proposed).toHaveLength(1)
@@ -270,7 +274,10 @@ describe('the engine path', () => {
 
   it('web_task refuses cleanly when no engine is wired, rather than falling to a connector', async () => {
     const legacyPropose = vi.fn(() => true)
-    const extension = new NativeActionToolExtension({ run, proposeApproval: legacyPropose })
+    const extension = new NativeActionToolExtension(
+      { run, proposeApproval: legacyPropose },
+      'darwin'
+    )
     const reply = await extension.execute('web_task', { goal: 'x' })
     expect(reply).toMatch(/need the on-device action engine/)
     expect(legacyPropose).not.toHaveBeenCalled()
