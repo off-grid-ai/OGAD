@@ -68,6 +68,26 @@ const offGridApi = {
       return unsubscribe('actions:outcome', sub)
     }
   },
+  // Browser rail (R2-C): the watched pane's step feed + the takeover handoff.
+  browser: {
+    resolveTakeover: (taskId: string, outcome: 'resumed' | 'cancelled') =>
+      ipcRenderer.invoke('browser:resolve-takeover', taskId, outcome),
+    onStep: (cb: (step: unknown) => void) => {
+      const sub = (_e: unknown, step: unknown): void => cb(step)
+      ipcRenderer.on('browser:step', sub)
+      return unsubscribe('browser:step', sub)
+    },
+    onTakeover: (cb: (request: unknown) => void) => {
+      const sub = (_e: unknown, request: unknown): void => cb(request)
+      ipcRenderer.on('browser:takeover', sub)
+      return unsubscribe('browser:takeover', sub)
+    },
+    onTaskState: (cb: (state: unknown) => void) => {
+      const sub = (_e: unknown, state: unknown): void => cb(state)
+      ipcRenderer.on('browser:task-state', sub)
+      return unsubscribe('browser:task-state', sub)
+    }
+  },
   // Generic passthrough so pro renderer code can reach pro IPC channels without
   // the core preload bundle enumerating them.
   proInvoke: (channel: string, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args),
