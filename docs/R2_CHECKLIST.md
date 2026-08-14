@@ -33,9 +33,11 @@ commit, port before writing, brand copy rules on every UI string.
   stamping, delete verbs on both platforms; remaining = the chat chip, lands with B3.)
 - [x] **B3. Inline approval card in chat**: resolved values + Approve / Edit / Reject
   driven by `resolveActionGate`; the Actions screen stays the unattended queue + audit.
-- [ ] **B4. The pro migration** (desktop-pro): pro's approval queue resolves the engine
+- [x] **B4. The pro migration** (desktop-pro): pro's approval queue resolves the engine
   gate instead of running its own executor - payload binding + verification hold on
   pro; outcome feedback lands back in the chat turn and on the card.
+  (desktop-pro PR #42: rows carry action_id; approve/reject resolve the gate; the row
+  records only the outcome the queue observes - the engine journal stays the SSOT.)
 
 ## C. The browser rail (~1.5-2 days)
 
@@ -66,5 +68,8 @@ commit, port before writing, brand copy rules on every UI string.
 - Windows browser/vision needs a human on a real Windows machine before E2.
 - B touches the live chat surface: behavior tests per branch; non-action turns stay on
   the plain path untouched.
-- Until B4 lands, the Windows PRO path (approval queue -> legacy executor) cannot run
-  Outlook actions; free-build Windows uses the engine path and works from A onward.
+- B4 landed (desktop-pro PR #42): the pro queue resolves the engine gate, so the
+  Windows PRO path runs Outlook actions through the semantic rail on approval. Verify
+  on the real-Windows pass with the rest of WINDOWS_TEST_PLAN.md.
+- Pro flaky watch: model-transfer-service.test.ts leaks a FileHandle at GC (an
+  unhandled-error line in every full run) - stabilize with the other sync flakes.
