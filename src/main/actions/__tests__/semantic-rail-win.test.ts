@@ -11,6 +11,7 @@ import {
   buildOutlookScript,
   isOutlookUnavailable,
   makeWindowsSemanticRailExecutor,
+  makeWinInlineRunner,
   psQuote,
   type GraphPort
 } from '../semantic-rail-win'
@@ -219,5 +220,39 @@ describe('the DeviceController swap (DSP)', () => {
     const reminder = action('reminder', { title: 'Send the deck' })
     expect((await dispatch(macExecute, reminder)).ok).toBe(true)
     expect((await dispatch(winExecute, reminder)).ok).toBe(true)
+  })
+})
+
+describe('makeWinInlineRunner (R2-A2)', () => {
+  it('opens links through the injected opener', async () => {
+    const opened: string[] = []
+    const run = makeWinInlineRunner(async (url) => {
+      opened.push(url)
+    })
+    expect(await run({ command: 'system.openURL', args: { url: 'https://x.test' } })).toEqual({
+      ok: true,
+      result: {}
+    })
+    expect(opened).toEqual(['https://x.test'])
+  })
+
+  it('a failing opener degrades to a reported error', async () => {
+    const run = makeWinInlineRunner(async () => {
+      throw new Error('no default browser')
+    })
+    const res = await run({ command: 'system.openURL', args: { url: 'x' } })
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.error).toMatch(/no default browser/)
+    }
+  })
+
+  it('every other verb refuses honestly - nothing impersonates the Swift helper', async () => {
+    const run = makeWinInlineRunner(async () => {})
+    const res = await run({ command: 'reminders.list', args: {} })
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.error).toMatch(/not available on Windows/)
+    }
   })
 })

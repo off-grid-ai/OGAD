@@ -101,6 +101,28 @@ export function buildOutlookScript(
   return lines.filter(Boolean).join('\n')
 }
 
+/**
+ * The win32 INLINE runner (R2-A2) - the Windows counterpart of the mac
+ * helper for the non-engine path. Only navigation exists inline on Windows
+ * (open_url); every other verb refuses honestly so nothing silently
+ * pretends to be the Swift helper.
+ */
+export function makeWinInlineRunner(
+  openExternal: (url: string) => Promise<void>
+): (cmd: { command: string; args: Record<string, unknown> }) => Promise<NativeActionResponse> {
+  return async (cmd) => {
+    if (cmd.command === 'system.openURL') {
+      try {
+        await openExternal(String(cmd.args.url ?? ''))
+        return { ok: true, result: {} }
+      } catch (error) {
+        return { ok: false, error: `could not open the link: ${(error as Error).message}` }
+      }
+    }
+    return { ok: false, error: `'${cmd.command}' is not available on Windows` }
+  }
+}
+
 /** COM error shapes that mean "Outlook is not installed / not registered". */
 export function isOutlookUnavailable(error: string): boolean {
   return /80040154|REGDB_E_CLASSNOTREG|Outlook\.Application|cannot create.*COM/i.test(error)

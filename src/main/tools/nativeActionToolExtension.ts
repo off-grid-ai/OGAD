@@ -11,10 +11,12 @@
 //   executor runs it on approve. An unmigrated pro build keeps its behaviour untouched.
 // Reads and navigation stay inline on both paths (architecture decision 5).
 
+import { shell } from 'electron'
 import type { ToolExtension } from '../tools'
 import type { ProposeOutcome, TickOutcome } from '@offgrid/use'
 import { proposeActionApproval, shouldGate, type ActionApprovalRequest } from '../actions/approval'
 import { getActionsRuntime } from '../actions/use-runtime'
+import { makeWinInlineRunner } from '../actions/semantic-rail-win'
 import { runNativeAction } from '../actions/native-helper'
 import type { NativeActionCommand, NativeActionResponse } from '../actions/native-helper-logic'
 import {
@@ -49,8 +51,18 @@ export interface NativeActionToolBoundary {
  *  it pending (the helper's own timeout is 20s). */
 const OUTCOME_WAIT_MS = 30_000
 
+// The inline (non-engine) runner, picked by platform in exactly one place:
+// mac runs the Swift helper; Windows opens links through the shell and
+// refuses everything else honestly (reads are not exposed there yet).
+const inlineRun =
+  process.platform === 'win32'
+    ? makeWinInlineRunner(async (url) => {
+        await shell.openExternal(url)
+      })
+    : runNativeAction
+
 const productionBoundary: NativeActionToolBoundary = {
-  run: runNativeAction,
+  run: inlineRun,
   proposeApproval: proposeActionApproval,
   get actions(): ActionsPort {
     // The import is static (the main bundle is one CJS chunk); the runtime
