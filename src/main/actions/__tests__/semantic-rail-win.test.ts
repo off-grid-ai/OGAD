@@ -8,13 +8,16 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ActionRecord } from '@offgrid/use'
 import {
+  buildOutlookListScript,
   buildOutlookScript,
   isOutlookUnavailable,
+  makeOutlookNativeReader,
   makeWindowsSemanticRailExecutor,
   makeWinInlineRunner,
   psQuote,
   type GraphPort
 } from '../semantic-rail-win'
+import { makeReadBackVerifiers } from '../verification'
 import { makeSemanticRailExecutor } from '../semantic-rail'
 
 const action = (type: string, args: Record<string, unknown> = {}) =>
@@ -254,5 +257,62 @@ describe('makeWinInlineRunner (R2-A2)', () => {
     if (!res.ok) {
       expect(res.error).toMatch(/not available on Windows/)
     }
+  })
+})
+
+describe('Outlook read-back (R2-A3)', () => {
+  it('the tasks script lists the tasks folder and speaks the mac shape', () => {
+    const script = buildOutlookListScript('tasks')
+    expect(script).toContain('GetDefaultFolder(13)')
+    expect(script).toContain('-not $i.Complete')
+    expect(script).toContain('reminders = @($out)')
+    expect(script).toContain('ConvertTo-Json -Compress')
+    expect(script).toContain('catch')
+  })
+
+  it('the events script restricts the calendar folder to the window', () => {
+    const script = buildOutlookListScript('events', {
+      start: '2026-08-15T09:29:00.000Z',
+      end: '2026-08-15T10:31:00.000Z'
+    })
+    expect(script).toContain('GetDefaultFolder(9)')
+    expect(script).toContain("[datetime]'2026-08-15T09:29:00.000Z'")
+    expect(script).toContain('IncludeRecurrences')
+    expect(script).toContain('$items.Restrict($filter)')
+    expect(script).toContain('events = @($out)')
+  })
+
+  it('the reader maps the mac command names and refuses the rest', async () => {
+    const scripts: string[] = []
+    const reader = makeOutlookNativeReader(async (script) => {
+      scripts.push(script)
+      return { ok: true, result: { reminders: [{ title: 'Send the deck' }] } }
+    })
+    const list = await reader({ command: 'reminders.list', args: {} })
+    expect(list.ok).toBe(true)
+    await reader({ command: 'calendar.listEvents', args: { start: 's', end: 'e' } })
+    expect(scripts[0]).toContain('GetDefaultFolder(13)')
+    expect(scripts[1]).toContain('GetDefaultFolder(9)')
+
+    const refused = await reader({ command: 'messages.send', args: {} })
+    expect(refused.ok).toBe(false)
+  })
+
+  it('the shared read-back verifiers work unchanged over the Outlook reader', async () => {
+    const reader = makeOutlookNativeReader(async (script) =>
+      script.includes('GetDefaultFolder(13)')
+        ? { ok: true, result: { reminders: [{ title: 'Send the deck' }] } }
+        : { ok: true, result: { events: [] } }
+    )
+    const verifiers = makeReadBackVerifiers(reader)
+    expect(
+      await verifiers.reminder({ type: 'reminder', args: { title: 'Send the deck' } } as never)
+    ).toBe(true)
+    expect(
+      await verifiers.calendar({
+        type: 'calendar',
+        args: { title: 'Standup', start: '2026-08-15T09:30:00.000Z' }
+      } as never)
+    ).toBe(false)
   })
 })

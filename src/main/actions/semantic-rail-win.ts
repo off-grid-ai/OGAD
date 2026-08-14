@@ -128,6 +128,65 @@ export function isOutlookUnavailable(error: string): boolean {
   return /80040154|REGDB_E_CLASSNOTREG|Outlook\.Application|cannot create.*COM/i.test(error)
 }
 
+/**
+ * Outlook read-back (R2-A3): list scripts speaking EXACTLY the mac helper's
+ * result shapes ({reminders:[{title}]} / {events:[{title}]}), so the shared
+ * read-back verifiers work unchanged over either OS. Folder ids: 13 =
+ * olFolderTasks, 9 = olFolderCalendar. Restrict wants the machine's locale
+ * date format, so dates parse from ISO and re-format with ToString('g') -
+ * the same convention Outlook's own filter examples use.
+ */
+export function buildOutlookListScript(
+  kind: 'tasks' | 'events',
+  args: Record<string, unknown> = {}
+): string {
+  if (kind === 'tasks') {
+    return [
+      `try {`,
+      `$o = New-Object -ComObject Outlook.Application`,
+      `$items = $o.GetNamespace('MAPI').GetDefaultFolder(13).Items`,
+      `$out = @()`,
+      `foreach ($i in $items) { if (-not $i.Complete) { $out += @{ title = $i.Subject } } }`,
+      `@{ ok = $true; result = @{ reminders = @($out) } } | ConvertTo-Json -Compress -Depth 5`,
+      CATCH
+    ].join('\n')
+  }
+  return [
+    `try {`,
+    `$start = [datetime]${psQuote(args.start)}`,
+    `$end = [datetime]${psQuote(args.end)}`,
+    `$o = New-Object -ComObject Outlook.Application`,
+    `$items = $o.GetNamespace('MAPI').GetDefaultFolder(9).Items`,
+    `$items.IncludeRecurrences = $true`,
+    `$items.Sort('[Start]')`,
+    `$filter = "[Start] >= '" + $start.ToString('g') + "' AND [Start] <= '" + $end.ToString('g') + "'"`,
+    `$restricted = $items.Restrict($filter)`,
+    `$out = @()`,
+    `foreach ($i in $restricted) { $out += @{ title = $i.Subject } }`,
+    `@{ ok = $true; result = @{ events = @($out) } } | ConvertTo-Json -Compress -Depth 5`,
+    CATCH
+  ].join('\n')
+}
+
+/**
+ * The Windows reader behind the mac helper's command names, so
+ * makeReadBackVerifiers (and buildRegistry) work unchanged per platform.
+ * Reads only; anything else refuses.
+ */
+export function makeOutlookNativeReader(
+  runPs: RunPowerShell
+): (cmd: { command: string; args: Record<string, unknown> }) => Promise<NativeActionResponse> {
+  return async (cmd) => {
+    if (cmd.command === 'reminders.list') {
+      return runPs(buildOutlookListScript('tasks'))
+    }
+    if (cmd.command === 'calendar.listEvents') {
+      return runPs(buildOutlookListScript('events', cmd.args))
+    }
+    return { ok: false, error: `'${cmd.command}' has no Outlook reader` }
+  }
+}
+
 const GRAPH_BY_TYPE = {
   calendar: 'createEvent',
   reminder: 'createTask',

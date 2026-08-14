@@ -24,7 +24,7 @@ import { hasHook, HOOKS } from '../bootstrap/hookRegistry'
 import { shell } from 'electron'
 import { makeUseDriver } from './use-driver'
 import { makeSemanticRailExecutor } from './semantic-rail'
-import { makeWindowsSemanticRailExecutor } from './semantic-rail-win'
+import { makeOutlookNativeReader, makeWindowsSemanticRailExecutor } from './semantic-rail-win'
 import { runPowerShell } from './win-powershell'
 import { makeReadBackVerifiers } from './verification'
 import { runNativeAction } from './native-helper'
@@ -92,10 +92,6 @@ export function getActionsRuntime(): ActionsRuntime {
 
   // The platform decides which semantic rail implements the port - the one
   // concrete choice, made once here; nothing above it branches on an OS.
-  // Windows note: read-back verification still speaks the mac helper's list
-  // verbs, so calendar/reminder read_back reports unverifiable there until
-  // the Outlook read-back lands (fast-follow) - the retry policy treats that
-  // as fuzzy-failure honestly rather than double-firing.
   const semanticExecute =
     process.platform === 'win32'
       ? makeWindowsSemanticRailExecutor({
@@ -108,7 +104,12 @@ export function getActionsRuntime(): ActionsRuntime {
       : makeSemanticRailExecutor(runNativeAction)
   const engine = new UseEngine({
     driver: makeUseDriver(getDB()),
-    registry: buildRegistry(runNativeAction),
+    // Read-back verification reads the world back through the platform's own
+    // surface: the Swift helper's list verbs on macOS, Outlook COM on
+    // Windows - the same command names, so buildRegistry is unchanged.
+    registry: buildRegistry(
+      process.platform === 'win32' ? makeOutlookNativeReader(runPowerShell) : runNativeAction
+    ),
     device: {
       async execute(action: ActionRecord, rail: Rail) {
         if (rail !== 'semantic') {

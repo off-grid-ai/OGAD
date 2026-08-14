@@ -6,17 +6,17 @@ commit, port before writing, brand copy rules on every UI string.
 
 ## A. Windows chat exposure (~1 day)
 
-- [ ] **A1. Per-platform tool specs**: `specsForPlatform(platform)` in the logic file -
+- [x] **A1. Per-platform tool specs**: `specsForPlatform(platform)` in the logic file -
   darwin keeps all eight; win32 exposes the engine-routed set the Outlook rail supports
   (calendar_create_event, reminders_create, mail_send, open_url); everything else none.
   A win32 system hint that never mentions iMessage or contacts.
   *Done when:* filtering + hints tested per platform; the extension's schemas/canHandle/
   systemHint follow the platform; registerNativeActionTools registers on win32.
-- [ ] **A2. The win32 inline runner**: open/navigate on Windows goes through the shell
+- [x] **A2. The win32 inline runner**: open/navigate on Windows goes through the shell
   (injected opener); every other inline verb refuses honestly. The production boundary
   picks the runner by platform in one place.
   *Done when:* runner tests through the injected opener; unknown verbs refuse.
-- [ ] **A3. Outlook read-back verifiers**: list scripts for tasks (olFolderTasks 13)
+- [x] **A3. Outlook read-back verifiers**: list scripts for tasks (olFolderTasks 13)
   and calendar range (olFolderCalendar 9, Restrict on [Start]) speaking the same
   {reminders|events:[{title}]} shape as the mac helper, exposed as a RunNative reader
   so `buildRegistry` works unchanged; the runtime picks the reader by platform.
