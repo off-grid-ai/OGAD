@@ -8,12 +8,15 @@ import { createVitestProjects } from './src/main/__tests__/vitest-projects'
 // pro-specific threshold group when pro is actually checked out, so a core-only
 // run measures + gates core alone instead of erroring on an empty pro/** glob.
 const hasPro = existsSync(resolve(__dirname, 'pro/tsconfig.json'))
+// The pro test globs are gated the same way the pro thresholds already are:
+// a core-only checkout can carry stray pro/ files (this repo tracks a handful
+// of pro test files with no implementations beside them), and collecting
+// orphan tests fails the suite for everyone without desktop-pro access.
 const productTestFiles = [
   'integration-tests/*.test.ts',
   'src/**/*.test.ts',
   'src/**/*.test.tsx',
-  'pro/**/*.test.ts',
-  'pro/**/*.test.tsx'
+  ...(hasPro ? ['pro/**/*.test.ts', 'pro/**/*.test.tsx'] : [])
 ]
 const commonExcludes = ['e2e/**', 'node_modules/**', 'out/**']
 

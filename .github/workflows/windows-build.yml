@@ -75,6 +75,43 @@ jobs:
         with:
           python-version: '3.12'
 
+      # `@offgrid/sync` and `@offgrid/use` are file: dependencies on the shared
+      # monorepo, so it must sit BESIDE this checkout before `npm ci` runs -
+      # mirrors release.yml's build-win. The branch ref decides the shared ref:
+      # a build from an integration branch takes the shared branch of the same
+      # name when one exists, else shared main.
+      - name: Checkout shared at the matching ref
+        id: shared_branch
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: off-grid-ai/shared
+          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          ref: ${{ github.ref_name }}
+          path: _shared
+          persist-credentials: false
+      - name: Fall back to shared main
+        if: ${{ steps.shared_branch.outcome != 'success' }}
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: off-grid-ai/shared
+          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          path: _shared
+          persist-credentials: false
+      - name: Put shared beside this checkout
+        shell: bash
+        run: |
+          if [ ! -d _shared ]; then
+            echo "::error::off-grid-ai/shared was not checked out - @offgrid/sync and @offgrid/use cannot resolve. Check CI_CROSS_REPO_TOKEN."
+            exit 1
+          fi
+          rm -rf ../shared
+          mv _shared ../shared
+          npm --prefix ../shared ci
+          npm --prefix ../shared/packages/sync run build
+          npm --prefix ../shared/packages/use run build
+
       - name: Install dependencies
         run: npm ci
 

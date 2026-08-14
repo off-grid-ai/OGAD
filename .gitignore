@@ -52,6 +52,7 @@ test-results/
 # Marketing material (dev.to drafts, emails, assets) — publishing, not app code
 /marketing/
 scripts/dictation-hotkey/dictation-hotkey
+scripts/actions-helper/actions-helper
 
 # Local demo profile — synthetic-data run target for `npm run demo` (never real userData)
 .demo-profile/

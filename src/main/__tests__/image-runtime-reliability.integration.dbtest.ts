@@ -338,7 +338,7 @@ describe('multimodal runtime reliability', () => {
   }, 20_000)
 
   it('keeps local chat usable when external network reachability is unavailable', async () => {
-    startModelServer(gatewayPort)
+    await startModelServer(gatewayPort)
     await expect(fetch('https://example.invalid/health')).rejects.toThrow(
       'network unavailable in offline integration fixture: https://example.invalid'
     )
@@ -437,7 +437,7 @@ describe('multimodal runtime reliability', () => {
 
     expect(llm.isReady()).toBe(true)
     expect(lineCount(fixture.llamaLog) - startsBefore).toBe(1)
-    startModelServer(gatewayPort)
+    await startModelServer(gatewayPort)
     const health = await fetch(`http://127.0.0.1:${String(gatewayPort)}/v1`)
     expect(health.status).toBe(200)
   })

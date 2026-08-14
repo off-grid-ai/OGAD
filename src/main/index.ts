@@ -19,6 +19,8 @@ import icon from '../../resources/icon.png?asset'
 import { setupIPC } from './ipc' // IMPORT FROM IPC ONLY
 import { setupRagIPC } from './rag-ipc'
 import { setupMcpIpc } from './mcp-ipc'
+import { registerToolExtension } from './tools'
+import { registerNativeActionTools } from './tools/nativeActionToolExtension'
 import { setupDesktopBackupIPC } from './backup/ipc'
 import { preloadPath } from './preload-path'
 import { rendererHtmlPath } from './renderer-path'
@@ -383,6 +385,7 @@ app.whenReady().then(async () => {
     setupIPC()
     setupRagIPC()
     setupMcpIpc() // basic MCP connectors (management + chat tool extension)
+    registerNativeActionTools(registerToolExtension) // computer use: semantic rail (macOS-only)
     setupDesktopBackupIPC()
     // one OpenAI-compatible local gateway (LLM + STT); auto-picks a free port. Async, so handle a
     // rejection on the promise (a try/catch around a fire-and-forget async call can't catch it).

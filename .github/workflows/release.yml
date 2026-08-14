@@ -160,6 +160,17 @@ jobs:
           mkdir -p resources/bin
           cp scripts/dictation-hotkey/dictation-hotkey resources/bin/dictation-hotkey
           chmod +x resources/bin/dictation-hotkey
+      # Compile the native actions helper (EventKit) and stage it into resources/bin so
+      # extraResources bundles it at Contents/Resources/bin — the path runNativeAction
+      # resolves. Self-contained: no committed binary, built fresh against the pinned
+      # target. If it ever fails to ship, the calendar tools report "not available" and
+      # the rest of the app is unaffected, so it can't break a release.
+      - name: Build native actions helper (computer use, semantic rail)
+        run: |
+          bash scripts/build-actions-helper.sh
+          mkdir -p resources/bin
+          cp scripts/actions-helper/actions-helper resources/bin/actions-helper
+          chmod +x resources/bin/actions-helper
       # Stage the Parakeet STT runtime (sherpa-onnx CLI + ONNX model) into
       # resources/bin/parakeet. Additive: with SHERPA_ONNX_URL / PARAKEET_MODEL_URL
       # unset this is a no-op and transcription stays on whisper, so it can't break a
@@ -228,6 +239,10 @@ jobs:
           # drifted lock stops the release instead of resolving a graph nobody committed.
           npm --prefix ../shared ci
           npm --prefix ../shared/packages/sync run build
+          # @offgrid/use (the durable action engine) is consumed the same way as sync
+          # and needs the same explicit build - file-dep prepare alone does not emit
+          # its dist/ types before the typecheck runs.
+          npm --prefix ../shared/packages/use run build
       - name: Install dependencies
         run: npm ci
       # Stamp the resolved version into package.json so electron-builder picks the
@@ -468,6 +483,10 @@ jobs:
           # drifted lock stops the release instead of resolving a graph nobody committed.
           npm --prefix ../shared ci
           npm --prefix ../shared/packages/sync run build
+          # @offgrid/use (the durable action engine) is consumed the same way as sync
+          # and needs the same explicit build - file-dep prepare alone does not emit
+          # its dist/ types before the typecheck runs.
+          npm --prefix ../shared/packages/use run build
       - name: Install dependencies
         run: npm ci
       - name: Fetch Windows native binaries (llama/whisper/sd/ffmpeg)
