@@ -57,10 +57,10 @@ Execution checklist for R1 of `COMPUTER_USE_PLAN.md` (the build doc). The plan s
   *Done when:* CI produces a signed Windows build whose bundled engine loads a model.
 - [x] **17. The Windows semantic rail** (`src/main/actions/semantic-rail-win.ts`), **local-first**: mail + calendar via local Outlook automation (COM / PowerShell) where Outlook exists - a local write that syncs later, matching the mac rail - with Microsoft Graph as the fallback for setups without local Outlook (online-only, labeled honestly, user's own sign-in); open via the Windows shell. iMessage is macOS-only in R1 (documented tier difference).
   *Done when:* handler tests through an injected Graph boundary; the registry proves macOS and Windows rails swap with zero caller changes.
-- [ ] **18. E2E + evidence**: a Playwright spec driving chat ask -> approval card -> done state on a fresh temp profile (`OFFGRID_PRO=0`, synthetic seed only); screenshots per surface, a short video of the golden path.
+- [x] **18. E2E + evidence** (APP-250 in the suite; evidence in merged PR #81): a Playwright spec driving chat ask -> approval card -> done state on a fresh temp profile (`OFFGRID_PRO=0`, synthetic seed only); screenshots per surface, a short video of the golden path.
   *Done when:* `npm run test:e2e` includes the new spec and passes; evidence attached to the PR per the repo's PR rules.
-- [ ] **18b. Release UX notes**: Tools defaults ON (fresh installs) with native actions under the Tools category - verify in the e2e that a fresh profile can act without touching any toggle. Flag to the lead: the free-build inline-confirm question for mutate/irreversible actions (open-core line), and the R2 router retiring the per-turn toggle.
-- [ ] **19. Ship it**: version bump, release via CI, checkpoint sign-off against the plan ("on both macOS and Windows, a chat ask calls the action tool and the action runs gated and verified"). Update `COMPUTER_USE_PLAN.md` if any date moved.
+- [x] **18b. Release UX notes** (recorded; superseded by R2-B Approval UX v2 in the plan): Tools defaults ON (fresh installs) with native actions under the Tools category - verify in the e2e that a fresh profile can act without touching any toggle. Flag to the lead: the free-build inline-confirm question for mutate/irreversible actions (open-core line), and the R2 router retiring the per-turn toggle.
+- [ ] **19. Ship it** (merged to main 2026-08-14, PR #81; the release DISPATCH ships with R2 per the re-cut): version bump, release via CI, checkpoint sign-off against the plan ("on both macOS and Windows, a chat ask calls the action tool and the action runs gated and verified"). Update `COMPUTER_USE_PLAN.md` if any date moved.
   *Done when:* the release is out and the plan reflects reality.
 
 ---
