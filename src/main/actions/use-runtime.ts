@@ -21,8 +21,11 @@ import {
 } from '@offgrid/use'
 import { getDB } from '../database'
 import { hasHook, HOOKS } from '../bootstrap/hookRegistry'
+import { shell } from 'electron'
 import { makeUseDriver } from './use-driver'
 import { makeSemanticRailExecutor } from './semantic-rail'
+import { makeWindowsSemanticRailExecutor } from './semantic-rail-win'
+import { runPowerShell } from './win-powershell'
 import { makeReadBackVerifiers } from './verification'
 import { runNativeAction } from './native-helper'
 import { gateHost, onGateParked, whenActionParked } from './gate-host'
@@ -87,7 +90,22 @@ export function getActionsRuntime(): ActionsRuntime {
     return runtime
   }
 
-  const semanticExecute = makeSemanticRailExecutor(runNativeAction)
+  // The platform decides which semantic rail implements the port - the one
+  // concrete choice, made once here; nothing above it branches on an OS.
+  // Windows note: read-back verification still speaks the mac helper's list
+  // verbs, so calendar/reminder read_back reports unverifiable there until
+  // the Outlook read-back lands (fast-follow) - the retry policy treats that
+  // as fuzzy-failure honestly rather than double-firing.
+  const semanticExecute =
+    process.platform === 'win32'
+      ? makeWindowsSemanticRailExecutor({
+          runPs: runPowerShell,
+          openUrl: async (url: string) => {
+            await shell.openExternal(url)
+            return { ok: true as const, result: {} }
+          }
+        })
+      : makeSemanticRailExecutor(runNativeAction)
   const engine = new UseEngine({
     driver: makeUseDriver(getDB()),
     registry: buildRegistry(runNativeAction),

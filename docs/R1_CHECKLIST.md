@@ -55,7 +55,7 @@ Execution checklist for R1 of `COMPUTER_USE_PLAN.md` (the build doc). The plan s
 
 - [ ] **16. Windows toolchain** (start this in parallel as early as Day 1 - it is the schedule floor and has CI latency): electron-builder Windows target, code-signing, and the `llama-server` Windows engine build in `release.yml` with the same gates the mac build learned (deployment target / staged deps / no foreign paths, adapted to Windows).
   *Done when:* CI produces a signed Windows build whose bundled engine loads a model.
-- [ ] **17. The Windows semantic rail** (`src/main/actions/semantic-rail-win.ts`), **local-first**: mail + calendar via local Outlook automation (COM / PowerShell) where Outlook exists - a local write that syncs later, matching the mac rail - with Microsoft Graph as the fallback for setups without local Outlook (online-only, labeled honestly, user's own sign-in); open via the Windows shell. iMessage is macOS-only in R1 (documented tier difference).
+- [x] **17. The Windows semantic rail** (`src/main/actions/semantic-rail-win.ts`), **local-first**: mail + calendar via local Outlook automation (COM / PowerShell) where Outlook exists - a local write that syncs later, matching the mac rail - with Microsoft Graph as the fallback for setups without local Outlook (online-only, labeled honestly, user's own sign-in); open via the Windows shell. iMessage is macOS-only in R1 (documented tier difference).
   *Done when:* handler tests through an injected Graph boundary; the registry proves macOS and Windows rails swap with zero caller changes.
 - [ ] **18. E2E + evidence**: a Playwright spec driving chat ask -> approval card -> done state on a fresh temp profile (`OFFGRID_PRO=0`, synthetic seed only); screenshots per surface, a short video of the golden path.
   *Done when:* `npm run test:e2e` includes the new spec and passes; evidence attached to the PR per the repo's PR rules.
@@ -64,6 +64,17 @@ Execution checklist for R1 of `COMPUTER_USE_PLAN.md` (the build doc). The plan s
   *Done when:* the release is out and the plan reflects reality.
 
 ---
+
+## Windows follow-ups (fast-follow, recorded during box 17)
+
+- Windows chat-tool exposure: registerNativeActionTools stays darwin-gated; enabling a
+  filtered spec subset on win32 (calendar/reminders/mail/open via the engine path)
+  needs per-platform specs and a win inline runner for reads.
+- Outlook read-back verifiers: calendar/reminder verification still speaks the mac
+  helper's list verbs; on Windows read_back reports unverifiable (retry policy treats
+  it honestly) until Outlook COM list scripts land.
+- Graph OAuth wiring: the port + fallback logic are boundary-tested; production
+  passes no Graph port until sign-in lands.
 
 ## Watch-list (honest risks inside R1)
 
