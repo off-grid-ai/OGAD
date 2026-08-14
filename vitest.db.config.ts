@@ -63,6 +63,13 @@ export default defineConfig({
         'src/main/actions/semantic-rail-win.ts',
         'src/main/tools/nativeActionToolExtension.ts',
         'src/main/tools/nativeActionToolExtension-logic.ts',
+        // The rail hosts (WebContentsView / robotjs / the vision-and-browser
+        // native glue) are excluded from the unit report too; this suite loads
+        // them through use-runtime's import graph but never drives a display,
+        // so measuring them here would drag the merged number for code the
+        // e2e/real-machine pass owns.
+        'src/main/browser/browser-host.ts',
+        'src/main/vision/vision-host.ts',
         // Renderer .tsx is rendered-behavior surface owned by the e2e tour + targeted
         // render tests, never by unit coverage (see vitest.config.ts) - the same rule
         // here, or a jsdom journey that merely MOUNTS a component makes this report own
