@@ -65,6 +65,18 @@ Execution checklist for R1 of `COMPUTER_USE_PLAN.md` (the build doc). The plan s
 
 ---
 
+## Field verdicts from the R1 pro-path smoke test (drive R2's Approval UX v2)
+
+- Approving a card gives no completion feedback - the chat message stays "pending"
+  and nothing reports the run. The engine path reports verified outcomes; the
+  legacy pro path is the old system. Fixed by the pro migration (approve resolves
+  the engine gate) in R2-B.
+- Reversible simple actions (a reminder) should not gate at all: R2-B ships the
+  risk-tiered policy (reversible mutations auto-run + verified confirmation +
+  Undo; sends keep the gate).
+- Chat-originated approvals belong INLINE in the conversation; the Actions screen
+  is the queue for unattended actions + audit.
+
 ## Windows follow-ups (fast-follow, recorded during box 17)
 
 - Windows chat-tool exposure: registerNativeActionTools stays darwin-gated; enabling a

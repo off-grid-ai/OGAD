@@ -2,139 +2,117 @@
 
 Companion to `COMPUTER_USE.md` (the product model), `ASSISTANT_ARCHITECTURE.md` (the system design), and `PORTING_MAP.md` (the port-vs-bespoke research).
 
-> **This is the doc to build from.** Work release by release, top to bottom: a release is not done until its checkpoint passes, and the next release does not start until it does. The other three docs are references - *why* we build it (COMPUTER_USE), *how* the system is designed (ASSISTANT_ARCHITECTURE), and *what to port* (PORTING_MAP). This one is the what-to-do-next and in-what-order, and the single source of truth for schedule. Adjust the plan here at each checkpoint; never fork a second plan. Start at R1.
+> **This is the doc to build from.** Work release by release, top to bottom: a release is not done until its checkpoint passes, and the next release does not start until it does. The other three docs are references. Adjust the plan here at each checkpoint; never fork a second plan.
 
-**Assumptions**
+**Re-cut (August 14, 2026 - the lead's steer + R1 field feedback).** The release after R1 is **all four rails, chat-driven, on both platforms**, plus the approval UX rebuild the R1 pro-path test demanded. The reasoning engine (proactive) and routines move after it. R1 itself is done: 17/19 checklist boxes, both PRs open and green (OGAD #81, shared #4).
 
-- Solo developer, AI authoring the code end to end, working fast.
-- **Release-led.** The chat action tool ships first and gets released; every later capability layers on top of that released base. Each release is a real, demoable, shippable increment.
-- **Desktop v1 is macOS + Windows, in scope from day 1.** The shared brain (`@offgrid/use`) and the browser rail are one codebase; the semantic, accessibility, and vision rails each get a per-OS adapter behind the `DeviceController` port.
-- **Port the plumbing, build the product.** Everything is on-device and offline - no server, no Postgres, no network for the core loop. Each release names the specific projects it ports (all MIT / Apache-2.0 / BSD, all in-process); the full component-by-component map with licenses is `PORTING_MAP.md`. What stays bespoke is bespoke by nature (the Action contract, effect-verification, the resolve+confidence layer, the commitment-gap reasoner, the DeviceController), not by choice.
-- **Offline scope, stated precisely.** The offline guarantee is about the brain: detection, resolution, gating, the queue, and verification logic run with zero network on every platform. An action whose effect lives on an external service (send an email) needs that service reachable at execution time on any OS - so the rails prefer local apps whose writes land locally and sync later (EventKit / Mail on macOS, local Outlook on Windows), and online-only actions are labeled honestly.
-- **Two reliability rules the router must honor** (architecture doc, Section 4 items 6-7): effect-verification lives in the R1 spine (the machine's `verifying` state + per-handler verify), and **a cross-rail escalation is a re-fire under the same retry policy** - a non-retryable action never escalates to another rail, which is what makes a cross-rail double-send impossible. R4's DeviceController routing is a thin layer over these, not a place to rebuild them.
-- **Schedule: a 10-working-day plan**, starting Wednesday, August 13, 2026; first release about day 4. R1 and R2 are cross-platform from day 1. R3 and R4 land macOS-first, with Windows parity for the two heavy native rails (routines, vision) as a short fast-follow after day 10.
-- **The one thing no port shortens:** the Windows build / sign / notarize + `llama-server` Windows engine setup in R1 is net-new infrastructure and is the schedule floor.
-- Checkpoint discipline: a checkpoint is a verifiable, demoable milestone; the next release does not start until it passes.
-- **Order:** the reliable, memory-driven, low-risk layers first; the risky GUI automation and the grounding vision model last.
+**Standing assumptions**
+
+- Solo developer, AI authoring the code end to end.
+- Release-led: each release is a real, demoable, shippable increment. Desktop = macOS + Windows.
+- **Port the plumbing, build the product** - each release names its ports (all MIT / Apache-2.0 / BSD, all in-process); the full map is `PORTING_MAP.md`.
+- **Offline scope, stated precisely.** The brain runs with zero network on every platform. An action whose effect lives on an external service needs that service reachable at execution time - so the rails prefer local apps whose writes land locally and sync later (EventKit / Mail on macOS, local Outlook on Windows), and online-only actions are labeled honestly.
+- **Reliability rules the router must honor** (architecture doc, Section 4): effect-verification lives in the engine; a cross-rail escalation is a re-fire under the same retry policy - a non-retryable action never escalates. The DeviceController routing is a thin layer over these.
+- Checkpoint discipline: a checkpoint is a verifiable, demoable milestone.
 
 ## Build guidelines (standing, all releases)
 
 - **Design** - `off-grid-ai/brand` `DESIGN_PHILOSOPHY.md`: brutalist/terminal, Menlo, emerald-only accent, black/white base, hierarchy by size and weight not color, no gradients, no emojis. All values from `@offgrid/design` tokens. Desktop density per `docs/DESIGN.md`.
 - **Copy** - `off-grid-ai/brand` `brand_tone_voice.md` + outcomes-first: no em dashes, no curly quotes, no exclamation marks, banned-word list applies.
-- **Cross-platform from the seam.** Callers depend on the `DeviceController` port and the shared engine, never on a concrete OS. Windows build via electron-builder (code-sign + the `llama-server` Windows engine build) is set up in R1.
-- **Port before writing.** Check `PORTING_MAP.md` / `COMPUTER_USE.md` Section 9 before building a rail or a spine piece from scratch; verify the license at the point of adoption; honor the AGPL / source-available avoid-list.
+- **Cross-platform from the seam.** Callers depend on the `DeviceController` port and the shared engine, never on a concrete OS.
+- **Port before writing.** Check `PORTING_MAP.md` / `COMPUTER_USE.md` Section 9 first; verify the license at the point of adoption; honor the AGPL / source-available avoid-list.
 
-## Already shipped (the base R1 builds on)
+## Releases
 
-- **Phase 0 - the approval seam.** `actions:proposeApproval` + the risk taxonomy (read / navigate / mutate / irreversible), backward-compatible with pro. TCC usage strings + apple-events entitlement. Landed.
-- **Phase 1 - the semantic rail on macOS.** The native actions helper (calendar, reminders, contacts, Messages, Mail, open_url) behind `runNativeAction`, wired into the chat tool loop, mutations gated, shipped in CI, unit-tested. This is the execution layer R1 turns into a released, cross-platform tool.
+| Release | What ships | Status |
+| --- | --- | --- |
+| **R1. Chat actions on the durable engine** | The semantic rail in chat on macOS (reminders, calendar, messages, mail, open, lookups) through the `@offgrid/use` engine: durable queue, payload-hash gate, retry-once-with-verify, read-back verification, effect journal. Windows toolchain green (installer artifact); the Windows semantic rail (local Outlook COM) built behind the port. | **Done.** PRs: OGAD #81, shared #4. Record: `R1_CHECKLIST.md` |
+| **R2. Full rails in chat, both platforms + Approval UX v2** | Windows chat exposure; the browser rail (watched web tasks, takeover at login); the vision rail (supervised GUI actions, UI-TARS-1.5-7B); the approval experience rebuilt (inline in chat, outcome feedback, risk-tiered auto-run); the safety pass. ~5-6 working days. | **next** |
+| **R3. Notices you** (was R2) | Reasoning + resolve + gate: commitment/gap detection over Replay, memory-resolved slots with confidence, the proactive Day surface. Cross-platform (memory + LLM). Pro-side code lands in desktop-pro (access in place). ~3 days. | after R2 |
+| **R4. Routines** (was R3) | Record-by-showing + self-healing, per-step-verified replay (OpenAdapt design). macOS-first; the Windows UIA adapter as the fast-follow (napi-rs over the `uiautomation` crate + SendInput, Terminator head-start). ~2-3 days + fast-follow. | after R3 |
 
-## Timeline at a glance (10 working days)
+The split: `shared` holds the durable cross-platform brain (`@offgrid/use`, reused by mobile later); this repo holds the rails, surfaces, and product integration; pro business logic lands in `desktop-pro`.
 
-| Release | Days | What ships | Ports (all in-process, offline) | Platforms |
-| --- | --- | --- | --- | --- |
-| R1. Chat actions (the tool) | 1 - 4 | Chat calls a gated, verified action tool; lands the durable spine + `DeviceController` port | **Spine:** XState + sqliteq/goqite + cockatiel + LangGraph interrupt pattern (spec: DBOS + Morling). **Emit:** llama.cpp GBNF + SAP + Instructor. **Tools:** MCP TS SDK. **Semantic:** macos-automator-mcp + Outlook COM (Graph fallback) | macOS (mostly built) + new Windows semantic rail |
-| R2. Notices you | 5 - 7 | Reasoning + resolve + gate; surfaces commitments, resolves from memory | sqlite-vec + LlamaIndex.TS memory blocks + Mem0 loop + Orama; embeddings via bundled llama-server; techniques: HippoRAG PPR, Zep bi-temporal | cross-platform (memory + LLM) |
-| R3. Routines | 8 - 9 | Record-by-showing + self-healing, per-step-verified replay | OpenAdapt design (resolution ladder + postconditions); Playwright codegen (browser recorder) | macOS-first; Windows UIA fast-follow |
-| R4. Hard cases | 10 | Browser rail + vision rail + safety pass | nanobrowser + browser-use + Stagehand (over Electron CDP); @ui-tars/sdk; robotjs/nut-fork; UI-TARS-1.5-7B; OmniParser v3 fallback | macOS + shared browser on both; Windows vision-input fast-follow |
-| Windows heavy-rail parity | fast-follow | UI Automation routines + SendInput vision input | napi-rs over `uiautomation` crate + Terminator head-start | Windows |
+## R1 - chat actions on the durable engine (DONE)
 
-The split: `shared` holds the durable cross-platform brain (reused by mobile later); this repo holds the rails, the recorder, the reasoning surfaces, and the product integration.
+Shipped scope, guarantees, and evidence live in `R1_CHECKLIST.md` and the PR bodies. Merge order: **shared #4 before OGAD #81** (main's CI resolves `@offgrid/use` from shared main). The release DISPATCH waits for R2 per the re-cut - one versioned release ships both.
 
-## R1 - chat actions, the tool (Days 1 - 4) - first release
+**R1 field verdicts driving R2** (from the pro-path smoke test):
 
-Talk to the assistant in chat and it calls actions as gated, verified tools. Most of this exists on macOS (Phase 1); R1 turns it into a released, cross-platform foundation on a durable spine. **Execution checklist: `R1_CHECKLIST.md`** (19 commit-sized boxes with done-when criteria).
+- Approving a card gives no completion feedback - the chat message says "pending" forever and nothing reports the run. (The engine path already reports verified outcomes; the legacy pro path is the old system.)
+- Reversible simple actions (a reminder) should not need a human gate at all.
+- Chat-originated approvals belong INLINE in the conversation, not on a separate screen; the Actions screen's job is unattended actions (proactive, scheduled) plus the audit log.
 
-- **Land the durable spine (assemble, do not invent).** The chat action tool enqueues a durable Action that flows through validate -> gate -> execute -> verify. Assembled from: **XState** (the Action state machine, snapshot to SQLite), **sqliteq / goqite** (the durable queue, a table in our better-sqlite3 DB), **cockatiel / p-retry** (retry-once), and the **LangGraph.js `interrupt -> resume` pattern** for the approval pause (a library pattern, not a server). Design spec from **DBOS** semantics + **Gunnar Morling's SQLite durable-execution blueprint**. All in-process, no server.
-- **Reliable Action emission.** Constrain the model's output with **llama.cpp GBNF / `response_format`** (already bundled), coerce near-misses with a **SAP** parser (ported from BAML), and **Instructor**-style validate-and-retry on the residue.
-- **Connectors via the MCP TypeScript SDK** (port-wholesale) - the act surface.
-- **Taxonomy + default (decided during R1):** the assistant's own on-device abilities are TOOLS (native actions ride every agentic turn; extension category 'tool'); CONNECTORS means external service accounts (MCP) and stays user-controlled. The composer's Tools toggle defaults ON for fresh installs (a saved preference wins); per-action safety lives at the gate, not the toggle. R2's cheap-first router then retires the per-turn toggle entirely (agentic-vs-plain becomes automatic) and Settings gains one master "can act on this Mac" switch.
-- **The Windows semantic rail** behind the same port, **local-first like the mac rail**: mail and calendar via **local Outlook automation (COM / PowerShell)** where Outlook exists - a local write that syncs when the network returns - with **Microsoft Graph as the fallback** for setups without a local Outlook (online-only, labeled honestly); open via the Windows shell; reminders via Outlook tasks or Microsoft To Do (Graph, online-only). macOS keeps **macos-automator-mcp**. iMessage maps to a Windows-appropriate target or is macOS-only in R1.
-- **Windows build + sign + engine setup** (electron-builder, code-signing, the `llama-server` Windows build) - the one-time cost and the schedule floor.
-- **Build (bespoke):** the Action schema, the pipeline glue that wires the four spine libraries together, the approval UX, the payload-binding.
+## R2 - full rails in chat, both platforms + Approval UX v2 (~5-6 days)
 
-**Checkpoint (day 4):** on both macOS and Windows, a chat ask calls the action tool and the action runs gated and verified through the semantic rail. Shipped as the first release.
+Everything chat-drivable on both OSes, honestly tiered, with an approval experience that reads like a conversation instead of a queue.
 
-## R2 - notices you: the reasoning + resolve layer (Days 5 - 7)
+### A. Windows chat exposure (~1 day)
 
-The magic, and the safest thing to add: memory + LLM + read-only context, no risky automation. Cross-platform for free.
+- Per-platform tool specs: win32 exposes the engine-routed set the Outlook rail supports (calendar_create_event, reminders_create, mail_send, open_url); reads stay macOS-only until the Outlook read verbs land.
+- A win32 inline runner for open/navigate; the engine path handles mutations end to end (the rail shipped in R1).
+- Outlook read-back verifiers (list verbs mirroring the mac ones) so Windows gets verified outcomes too.
 
-- **Memory + retrieval (port).** Vector search via **sqlite-vec** (lives inside the better-sqlite3 DB we already ship - one file, one backup, no new process); the memory tier from **LlamaIndex.TS memory blocks**; dedup-on-write from **Mem0's** loop; hybrid (BM25 + vector) ranking from **Orama** for OCR'd names/filenames. Embeddings from the **bundled llama-server `/embedding`** (Transformers.js as fallback).
-- **Techniques to reimplement (inspiration):** **HippoRAG's Personalized PageRank** over the entity graph for multi-hop resolve, **Zep/Graphiti bi-temporal facts** for the commitment lifecycle, and the **Microsoft WSDM 2019 commitment definition** ("sender-obligated + specific + not-yet-complete") as the LLM extraction rubric.
-- **Build (bespoke):** the resolve layer returning `{value, confidence}`, the entity-resolution pipeline (talisman/fuzzball + LLM adjudication), and the **commitment-gap reasoner** - detecting the unmet promise by joining it against Replay observations (no prior art, defined over our spine).
-- **Surface + gate:** proposals become suggestions; the approval card shows resolved values with evidence and confidence; low confidence -> disambiguate. Executes through the R1 tool. Suggest-only to start.
+### B. Approval UX v2 (~1-1.5 days, core + desktop-pro)
 
-**Checkpoint (day 7):** on a seeded profile, on both OSes, the assistant surfaces an un-actioned commitment; approving "send the deck I promised" resolves the file from context and runs it via the R1 tool, gated. Zero GUI automation.
+- **Inline approval card in chat**: resolved values + Approve / Edit / Reject in the conversation flow, driven by the engine gate (`resolveActionGate`). The Actions screen remains the queue for unattended actions plus the audit log.
+- **Outcome feedback everywhere**: approve -> the engine executes -> the verified result lands back in the chat turn and on the card ("Created - verified", or the honest failure). This is the pro approval-executor migration: pro's queue resolves the engine gate instead of running its own executor, so payload binding and verification hold on the pro path too.
+- **Risk-tiered gating** (decision 8.3's lean, now policy): reads/navigate free; reversible mutations (reminder, calendar) auto-run with a verified confirmation and an Undo affordance; sends and irreversible actions keep the gate.
 
-## R3 - routines: demonstration recorder + faithful replay (Days 8 - 9)
+### C. The browser rail (~1.5-2 days) - cross-platform on arrival
 
-Record-by-showing and reliable replay. **Ports OpenAdapt by design** - its record -> deterministic self-healing replay is our design, already built and benchmarked, so this is two days of porting and wiring, not three of inventing. macOS-first; the Windows UI Automation adapter is the fast-follow.
+- Embedded pane over Electron's `webContents.debugger` (raw CDP): **nanobrowser's** TS dom module + overlay as starting code, **browser-use's** snapshot + AX-merge + numeric-index as the algorithm, **Stagehand's** act/observe/extract + Zod as the API.
+- Chat-drivable web tasks (check-in, ordering) - watched live, takeover at any login/identity step, gated at the identity boundary.
 
-- **Port (design):** the OpenAdapt compiled-step schema (template crop + OCR label + geometry + structural locator + **postconditions**) and its **resolution ladder** (structural tree -> local template -> global template -> OCR label -> landmark geometry -> optional local grounding model); healthy runs never leave rung 1 and make zero model calls; a successful lower rung is written back as a reviewable diff. Browser-lane recorder from **Playwright codegen**.
-- **Build (bespoke):** memory-resolved variable slots (bind a slot to a memory query at run time), the plain-language review UI (reuse an existing viewer component), and the local-only postcondition oracle (verify via our memory layer, not the screen).
+### D. The vision rail (~1.5-2 days) - the supervised tier, labeled so
 
-**Checkpoint (day 9):** on macOS, record a routine by showing it once; it replays with per-step verification, and a marked slot resolves from memory. The Windows UIA + SendInput adapter follows in the fast-follow.
+- **UI-TARS-1.5-7B** catalog entry (Apache-2.0, GGUF + mmproj published; a ~5GB download via the Models screen); **OmniParser v3** (MIT) set-of-marks fallback for the bundled model.
+- The operator spine from **@ui-tars/sdk** (nut.js swapped for **@nut-tree-fork**/robotjs); mac input via CGEvent, Windows via SendInput.
+- Supervised UX: the ScreenMarker-style overlay, pause-on-user-input, the kill switch (Esc halts with the keypress consumed).
+- The WhatsApp file-share recipe as the showcase (behind the gate).
 
-## R4 - hard cases: browser rail + vision rail (Day 10) - full macOS v1
+### E. Safety pass + the release
 
-The supervised frontier. **Reuse-heavy**, which is why it fits in a day.
+- Injection-resistance review (screen content is untrusted input), kill-switch e2e, per-rail verification depth honored, release-readiness checklist.
+- **Checkpoint / release dispatch:** on macOS AND Windows - a semantic action, a watched web task with takeover, and a supervised vision action all run from chat, gated by tier, with verified outcomes reported inline. One versioned release: the signed/notarized .dmg + the Windows NSIS .exe (unsigned until the cert - decision open with the lead).
 
-- **Browser rail (port):** **nanobrowser's** TS `dom/` module + overlay as starting code, **browser-use's** CDP snapshot + AX-merge + numeric-index as the algorithm, **Stagehand's** act/observe/extract + Zod as the API - all over Electron's native `webContents.debugger` (raw CDP, no Playwright dependency). Cross-platform on both OSes from the start.
-- **Vision rail (port + model):** the desktop spine from **@ui-tars/sdk** (swap its nut.js operator for **`@nut-tree-fork`**), input via **robotjs / nut-fork**, and the grounding model **UI-TARS-1.5-7B** (Apache-2.0, GGUF + mmproj already published and mainline-runnable). **OmniParser v3** (MIT detector) as the set-of-marks fallback that lets the bundled gemma click without a grounder.
-- **Build (bespoke):** the **DeviceController + rail-selection/fallback** policy (semantic -> browser -> accessibility -> vision) as a thin router over the R1 spine - escalation is a re-fire under the R1 retry policy (a non-retryable action never escalates), and verification stays the spine's job, not re-built per rail. Plus the WhatsApp file-share recipe and the safety pass (injection review, kill-switch, release-readiness).
+**R2 risks:** the vision tier on a 7B local grounder is best-effort - ship it labeled supervised or not at all; Windows browser/vision needs a human on a real Windows machine (CI proves builds, not clicks); the model download adds a Models-screen surface; Approval UX v2 touches the live chat surface (the R1 lesson stands - behavior tests per branch, the plain path untouched for non-action turns).
 
-**Checkpoint (day 10):** on macOS, a web check-in runs in-pane with a takeover at login; the WhatsApp file-share runs supervised; a demonstrated routine recovers from a drifted step via vision; the safety checklist passes. Full macOS v1 plus the cross-platform core.
+## R3 - notices you (was R2, ~3 days)
 
-## Windows heavy-rail parity (fast-follow)
+Scope unchanged: commitment and gap detection over the Replay observation + entity spine; the resolve layer (RAG over memory returning value + confidence); proposals surfacing on the Day feed and executing through the same engine and inline approval UX. Ports: sqlite-vec (inside the app DB), LlamaIndex.TS memory blocks, Mem0's dedup loop, Orama hybrid ranking; techniques: HippoRAG PageRank, bi-temporal facts, the WSDM commitment rubric. Pro-side code (reasoning, resolve policy, feed UI) lands in desktop-pro. Checkpoint: on a seeded profile, on both OSes, an un-actioned commitment surfaces and "send the deck I promised" resolves from context and runs, gated by tier.
 
-Two adapters trail the 10-day line, both behind the same `DeviceController` port so no caller changes:
+## R4 - routines (was R3, ~2-3 days + the Windows fast-follow)
 
-- **Routines on Windows:** a **napi-rs addon over the `uiautomation` (leexgone) crate** for the tree + SendInput for input, with **Terminator (MIT)** as a Windows head-start; FlaUI / pywinauto are API references.
-- **Vision input on Windows:** SendInput for the grounded clicks/keystrokes (the vision model and browser rail are already shared).
-
-Estimated a couple of days once R3/R4 set the shape on macOS.
-
-## The macOS accessibility read (build, with a head-start)
-
-No pure-Node library reads the macOS AX tree; the accessibility rail's read side is a **napi-rs addon over the `axuielement` Rust crate** (MIT/Apache), with **MacosUseSDK** as a head-start. This lands with R3 (routines) on macOS and is the mac twin of the Windows `uiautomation` addon. **Policy: accessibility is primarily the eyes** - anchors, read-back, drift checks serving every rail; actuation through it stays capped at `AXPress` / set-value on macOS (the Swift helper already has them), and Windows acts through SendInput at UIA-located targets, never a second actuation surface.
-
-## Mobile (after v1, port-heavy)
-
-An adapter-only project on the same `@offgrid/use` engine: **Appium via WebdriverIO** (the cross-platform actuation substrate), **DroidRun's AccessibilityService Portal** (host-free Android), **minitap/mobile-use's** multi-transport seam, and **GUI-Owl-1.5 / Qwen3-VL** as the mobile grounding model. iOS stays intents-only (Apple forbids driving other apps; on-device actuation needs a Mac-signed WDA).
+Record-by-showing + faithful replay per the OpenAdapt design (compiled-step schema, resolution ladder, postconditions, repair-as-diff); Playwright codegen for the browser lane; memory-resolved variable slots; the plain-language review UI. macOS AX-as-eyes with actuation capped at press/set-value; the Windows UIA adapter (reader + SendInput) as the fast-follow. Checkpoint: record a routine once; it replays per-step-verified with a slot resolved from memory at run time.
 
 ## Dependencies
 
 | What | Needed by | Note |
 | --- | --- | --- |
-| `desktop-pro` access | R2 | the reasoning engine, resolve layer, approvals + routines UI are pro |
-| Sibling `../shared` + `../brand` clones | now | build requirement |
-| Windows toolchain (electron-builder, code-sign cert, `llama-server` Windows build) | R1 | one-time; the schedule floor |
-| Spine libraries (XState, sqliteq/goqite, cockatiel, MCP SDK) + SAP port | R1 | small, vendor/adapt |
-| sqlite-vec + LlamaIndex.TS memory blocks | R2 | the memory/retrieval layer |
-| OpenAdapt trace/replay port | R3 | the recorder + self-healing replay base |
-| axuielement (macOS) napi addon | R3 | the mac AX read |
-| nanobrowser + browser-use + @ui-tars/sdk ports | R4 | browser rail + vision spine |
-| UI-TARS-1.5-7B GGUF + mmproj | R4 | the grounding model |
-| `uiautomation` crate napi addon + Terminator | fast-follow | Windows AX read |
+| shared #4 merged before OGAD #81 | now | main's CI resolves `@offgrid/use` from shared main |
+| Windows signing cert | R2 release | wiring exists (WIN_CSC_LINK secrets); publishes unsigned until then |
+| A human on a real Windows machine | R2 | browser/vision click-through + the model-load smoke (`WINDOWS_TEST_PLAN.md`) |
+| UI-TARS-1.5-7B GGUF + mmproj catalog entry | R2-D | the vision model install |
+| desktop-pro access | R2-B, R3 | in place (cloned at pro/) |
+| Seeded memory fixtures | R3 | detection + resolution tests without a live profile |
+| OpenAdapt trace/replay port + the `axuielement` napi addon | R4 | the recorder + the mac AX read |
 
 ## Risks
 
 | Risk | Mitigation |
 | --- | --- |
-| Compressed tail (R3 = 2 days, R4 = 1 day) assumes ports drop in cleanly | ports are permissive and proven (OpenAdapt benchmarked; nanobrowser/UI-TARS in production); R4 is the slip-absorber; the released core (R1-R2) is unaffected |
-| Windows build / sign / engine setup is net-new and unshortenable | folded into R1 as a one-time cost, before any Windows rail work depends on it |
-| Spine assembly (four libs + glue) is more moving parts than one lib | each piece is small, MIT, in-process; the glue is spec'd from DBOS/Morling, not invented; covered by tests per branch |
-| Windows parity stretches the tail | R1/R2 cross-platform on the line; the two heavy native rails trail as a scoped fast-follow behind the port; the browser rail is shared |
-| Detection precision / confident-but-wrong resolution | confidence bar; suggest-only until trusted; the gate shows resolved values; reversibility for auto-run |
-| GUI automation reliability | cheaper rails first; demonstrated traces over novel automation; OpenAdapt self-heal; honest confidence |
-| Local model tool-calling reliability | grammar-constrained + SAP + retry; the durable queue makes a bad turn a no-op |
-| Solo schedule: a blocked day is a lost day | releases are independently valuable; a slip trims scope at the tail, never the released core |
+| Vision reliability (the frontier ceiling) on a local 7B | supervised tier, labeled; cheapest-rail-first routing; set-of-marks fallback; the gate on everything consequential |
+| Approval UX v2 touches the live chat surface | behavior tests per branch; the plain path stays untouched for non-action turns |
+| The Windows human-testing gap | recorded dependency; release notes honest about machine-verified vs human-verified |
+| Solo schedule | releases independently valuable; scope trims at the tail (the vision showcase, Windows polish), never the shipped core |
 
-## Out of scope for v1
+## Out of scope (unchanged)
 
-The mobile adapter, background / headless autonomous runs, chat-channel control surfaces, and store distribution (macOS Developer ID direct; Windows outside the Store). Windows is in scope for desktop v1 from day 1.
+The mobile adapter (post-v1: Appium/WebdriverIO + DroidRun Portal + GUI-Owl-1.5/Qwen3-VL), background/headless autonomous runs, store distribution.
 
 ## Tracking
 
-- Branch: `feat/computer-use`. Small commits per verified unit, merge not squash. PR evidence rules apply (screenshots per surface; video for the recorder, run-view, and web-task demos).
+- R1 record: `R1_CHECKLIST.md`. R2 gets its own checklist when it starts.
+- Small commits per verified unit, merge not squash. PR evidence rules apply.
 - Checkpoint review against this doc at each release; plan changes are edits here.
