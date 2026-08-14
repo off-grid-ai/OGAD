@@ -76,10 +76,20 @@ so the tier is honestly gated (see the watch-list).
 
 ## E. Safety pass + the release
 
-- [ ] **E1. Injection-resistance review** (screen content is untrusted), kill-switch
-  e2e, per-rail verification depth honored.
-- [ ] **E2. Release**: one versioned dispatch - signed/notarized .dmg + Windows NSIS
-  .exe; release notes honest about the supervised tier and what was human-verified.
+- [x] **E1. Injection-resistance review** (screen content is untrusted) +
+  per-rail prompt guards. `docs/SAFETY_REVIEW.md` records the threat / defense /
+  test per rail; `rail-injection-stance.test.ts` guards the prompt contracts;
+  the structural defenses (driver refuses credential fields, the vision guard's
+  terminal kill switch, re-check-before-dispatch) are tested in
+  browser-driver / vision-guard / vision-agent. **Kill-switch e2e** is blocked on
+  actuation (D2b): nothing actuates until then, so nothing halts - it is part of
+  the real-machine pass, not the headless tour (see the review).
+- [ ] **E2. Release** - BLOCKED on: D2b (vision actuation + entitlements) so the
+  supervised tier is real; D1b (the UI-TARS catalog entry); the real-machine
+  click-through for browser + vision on both platforms (WINDOWS_TEST_PLAN.md);
+  and the Windows signing-cert decision (lead). Then: one versioned dispatch -
+  signed/notarized .dmg + Windows NSIS .exe; release notes honest about the
+  supervised tier and what was human-verified.
 
 ## Watch-list
 
