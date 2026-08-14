@@ -47,6 +47,7 @@ import {
   type ImageGenerationRequestContract
 } from '../../../shared/image-generation-contract'
 import { Button } from '@renderer/components/ui/button'
+import { ActionGateDock } from '@renderer/components/actions/ActionGateDock'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import {
   DropdownMenu,
@@ -4493,6 +4494,8 @@ export function MemoryChat({
                     ))}
                   </div>
                 )}
+                {/* Approval UX v2: pending gate cards + outcomes, in-flow above the composer */}
+                <ActionGateDock />
                 {microphoneDenied && (
                   <div
                     role="alert"
