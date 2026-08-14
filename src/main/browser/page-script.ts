@@ -88,12 +88,13 @@ function accessibleName(el: Element): string {
   }
   const labelled = el.getAttribute('aria-labelledby')
   if (labelled) {
-    const target = el.ownerDocument?.getElementById(labelled)
-    if (target?.textContent?.trim()) {
-      return target.textContent.trim()
+    const target = el.ownerDocument.getElementById(labelled)
+    const targetText = target?.textContent.trim()
+    if (targetText) {
+      return targetText
     }
   }
-  const text = (el.textContent ?? '').trim().replace(/\s+/g, ' ')
+  const text = el.textContent.trim().replace(/\s+/g, ' ')
   if (text) {
     return text.slice(0, 120)
   }
@@ -140,7 +141,7 @@ export function collectInteractiveElements(doc: Document): PageSnapshot {
         tag: el.tagName.toLowerCase(),
         role: el.getAttribute('role') ?? el.tagName.toLowerCase(),
         name: accessibleName(el),
-        value: identity ? '' : (input.value ?? ''),
+        value: identity ? '' : input.value,
         cx: Math.round(rect.left + rect.width / 2),
         cy: Math.round(rect.top + rect.height / 2),
         identity,
@@ -153,10 +154,10 @@ export function collectInteractiveElements(doc: Document): PageSnapshot {
     el.index = i + 1
   })
   return {
-    url: doc.location?.href ?? '',
+    url: doc.location.href,
     title: doc.title,
     elements,
-    text: (doc.body?.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 4000)
+    text: doc.body.textContent.replace(/\s+/g, ' ').trim().slice(0, 4000)
   }
 }
 

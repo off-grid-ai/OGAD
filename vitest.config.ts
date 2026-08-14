@@ -98,6 +98,11 @@ export default defineConfig({
         // injectable modules; covered by use-runtime.integration.dbtest.ts (real DB,
         // helper boundary mocked). Its pure seam (pickByPlatform) IS measured here.
         'src/main/actions/use-runtime.ts',
+        // The browser rail's live host: WebContentsView + CDP debugger + the
+        // local model, over the unit-tested collector/driver/loop/executor.
+        // A real display renders it - the e2e tour and the real-machine pass,
+        // not this in-process runner.
+        'src/main/browser/browser-host.ts',
         // powershell.exe-spawning I/O shell (Windows-only twin of native-helper's
         // spawn side); its parsing is the shared parseHelperResponse, which is
         // covered. Exercised on a real Windows machine per WINDOWS_TEST_PLAN.md.
@@ -239,9 +244,7 @@ export default defineConfig({
         lines: 80,
         // pro/** stays separately regression-guarded (mobile pattern), same uniform floor.
         // Only applied when pro is checked out (see hasPro) so a core-only CI run doesn't error.
-        ...(hasPro
-          ? { 'pro/**': { statements: 80, branches: 80, functions: 80, lines: 80 } }
-          : {})
+        ...(hasPro ? { 'pro/**': { statements: 80, branches: 80, functions: 80, lines: 80 } } : {})
       }
     }
   }

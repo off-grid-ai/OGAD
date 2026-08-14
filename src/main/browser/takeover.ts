@@ -70,3 +70,14 @@ export class TakeoverCoordinator {
     return this.pending.size
   }
 }
+
+let shared: TakeoverCoordinator | null = null
+
+/** The one coordinator the host and the IPC share, so a resume from the pane
+ *  reaches the task that parked. */
+export function getTakeoverCoordinator(): TakeoverCoordinator {
+  if (!shared) {
+    shared = new TakeoverCoordinator()
+  }
+  return shared
+}

@@ -53,7 +53,7 @@ export class BrowserDriver {
       setTimeout(() => {
         off()
         resolve()
-      }, NAVIGATION_TIMEOUT_MS).unref?.()
+      }, NAVIGATION_TIMEOUT_MS).unref()
     })
     const reply = await this.cdp.send<{ errorText?: string }>('Page.navigate', { url })
     if (reply.errorText) {

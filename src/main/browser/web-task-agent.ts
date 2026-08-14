@@ -82,15 +82,16 @@ export const STEP_RESPONSE_FORMAT = {
 /** Fail-closed parse of the model's step. Unknown shapes are null - the loop
  *  notes the waste and moves on; it never guesses an action. */
 export function parseStepDecision(raw: string): StepDecision | null {
-  let value: Record<string, unknown>
+  let parsed: unknown
   try {
-    value = JSON.parse(raw) as Record<string, unknown>
+    parsed = JSON.parse(raw)
   } catch {
     return null
   }
-  if (typeof value !== 'object' || value === null) {
+  if (typeof parsed !== 'object' || parsed === null) {
     return null
   }
+  const value = parsed as Record<string, unknown>
   const str = (key: string): string | undefined =>
     typeof value[key] === 'string' && (value[key] as string).length > 0
       ? (value[key] as string)
@@ -148,9 +149,9 @@ export function buildStepPrompt(goal: string, snapshot: PageSnapshot, history: s
 
 const DEFAULT_MAX_STEPS = 12
 
-/* eslint-disable max-lines-per-function, complexity -- the loop is one state
-   machine on purpose: splitting the per-action arms into callbacks would hide
-   the control flow (park, resume, retry, stop) that the tests pin down. */
+/* eslint-disable complexity -- the loop is one state machine on purpose:
+   splitting the per-action arms into callbacks would hide the control flow
+   (park, resume, retry, stop) that the tests pin down. */
 export async function runWebTask(
   goal: string,
   startUrl: string | undefined,
@@ -243,4 +244,4 @@ export async function runWebTask(
     finalUrl: lastUrl
   }
 }
-/* eslint-enable max-lines-per-function, complexity */
+/* eslint-enable complexity */

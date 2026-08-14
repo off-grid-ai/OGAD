@@ -16,7 +16,8 @@ describe('native tool specs', () => {
       'contacts_search',
       'messages_send',
       'mail_send',
-      'open_url'
+      'open_url',
+      'web_task'
     ])
     expect(findNativeToolSpec('calendar_create_event')?.command).toBe('calendar.createEvent')
     expect(findNativeToolSpec('calendar_list_events')?.command).toBe('calendar.listEvents')

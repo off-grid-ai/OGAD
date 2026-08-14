@@ -58,7 +58,7 @@ export function WatchedBrowserPane(): React.JSX.Element | null {
   }, [])
 
   useEffect(() => {
-    feedRef.current?.scrollTo?.({ top: feedRef.current.scrollHeight })
+    feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight })
   }, [steps])
 
   if (!task) {

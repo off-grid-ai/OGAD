@@ -388,6 +388,8 @@ app.whenReady().then(async () => {
     registerNativeActionTools(registerToolExtension) // the assistant's tools (macOS full set; Windows Outlook subset)
     const { registerActionsIpc } = await import('./actions/actions-ipc')
     registerActionsIpc() // Approval UX v2: inline gate cards + outcome/undo feed
+    const { registerBrowserIpc } = await import('./browser/browser-ipc')
+    registerBrowserIpc() // the browser rail's watched-pane takeover handoff
     setupDesktopBackupIPC()
     // one OpenAI-compatible local gateway (LLM + STT); auto-picks a free port. Async, so handle a
     // rejection on the promise (a try/catch around a fire-and-forget async call can't catch it).

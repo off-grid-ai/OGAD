@@ -12,9 +12,7 @@ import {
   TOOL_ACTION_TYPES
 } from '../nativeActionToolExtension-logic'
 
-function makePort(
-  overrides: Partial<ActionsPort> = {}
-): ActionsPort & { proposed: unknown[] } {
+function makePort(overrides: Partial<ActionsPort> = {}): ActionsPort & { proposed: unknown[] } {
   const proposed: unknown[] = []
   return {
     proposed,
@@ -39,7 +37,7 @@ function makePort(
 const run = vi.fn(async () => ({ ok: true as const, result: { id: 'r1' } }))
 const proposeApproval = vi.fn(() => undefined)
 
-const makeExtension = (actions?: ActionsPort) =>
+const makeExtension = (actions?: ActionsPort): NativeActionToolExtension =>
   new NativeActionToolExtension({ run, proposeApproval, actions })
 
 describe('the tool-to-action-type map', () => {
@@ -48,9 +46,11 @@ describe('the tool-to-action-type map', () => {
       'calendar_create_event',
       'mail_send',
       'messages_send',
-      'reminders_create'
+      'reminders_create',
+      'web_task'
     ])
     expect(actionTypeForTool('reminders_create')).toBe('reminder')
+    expect(actionTypeForTool('web_task')).toBe('web_task')
     expect(actionTypeForTool('calendar_list_events')).toBeUndefined()
   })
 })
@@ -58,7 +58,13 @@ describe('the tool-to-action-type map', () => {
 describe('the spec table', () => {
   it('every spec produces a title, mapped args, and a formatted result', () => {
     const sample = {
-      title: 'x', start: 's', end: 'e', query: 'q', to: 't', text: 'm', url: 'u'
+      title: 'x',
+      start: 's',
+      end: 'e',
+      query: 'q',
+      to: 't',
+      text: 'm',
+      url: 'u'
     }
     for (const spec of NATIVE_TOOL_SPECS) {
       expect(typeof spec.title(sample)).toBe('string')
@@ -149,7 +155,11 @@ describe('the engine path', () => {
     const rejected = makeExtension(
       makePort({
         waitForOutcome: async () =>
-          ({ id: 'act_1', outcome: 'rejected', record: { attemptLog: [] } }) as unknown as TickOutcome
+          ({
+            id: 'act_1',
+            outcome: 'rejected',
+            record: { attemptLog: [] }
+          }) as unknown as TickOutcome
       })
     )
     expect(await rejected.execute('mail_send', { to: 'a@b.c' })).toMatch(/declined/)
@@ -160,7 +170,9 @@ describe('the engine path', () => {
           ({
             id: 'act_1',
             outcome: 'needs_help',
-            record: { attemptLog: [{ rail: 'semantic', at: 1, outcome: 'timeout', detail: 'no answer' }] }
+            record: {
+              attemptLog: [{ rail: 'semantic', at: 1, outcome: 'timeout', detail: 'no answer' }]
+            }
           }) as unknown as TickOutcome
       })
     )
@@ -194,7 +206,9 @@ describe('the engine path', () => {
           }) as unknown as TickOutcome
       })
     )
-    expect(await helpNoDetail.execute('reminders_create', { title: 'x' })).toMatch(/needs their attention/)
+    expect(await helpNoDetail.execute('reminders_create', { title: 'x' })).toMatch(
+      /needs their attention/
+    )
   })
 
   it('a listening pro approval queue keeps the legacy path untouched', async () => {
@@ -219,5 +233,46 @@ describe('the engine path', () => {
     await extension.execute('reminders_create', { title: 'x' })
     expect(legacyPropose).toHaveBeenCalled()
     expect(run).toHaveBeenCalled()
+  })
+
+  it('web_task becomes a browser-rail Action with the goal as its intent', async () => {
+    run.mockClear()
+    const port = makePort()
+    const extension = makeExtension(port)
+    const reply = await extension.execute('web_task', {
+      goal: 'check in for my flight',
+      url: 'https://air.test'
+    })
+    expect(port.proposed[0]).toMatchObject({
+      type: 'web_task',
+      intent: 'check in for my flight',
+      args: { goal: 'check in for my flight', url: 'https://air.test' },
+      risk: 'mutate'
+    })
+    expect(run).not.toHaveBeenCalled()
+    expect(reply).toBe('Done.')
+  })
+
+  it('web_task uses the engine EVEN WHEN a pro queue is listening - no connector runs a web task', async () => {
+    run.mockClear()
+    const legacyPropose = vi.fn(() => true)
+    const port = makePort({ approvalHookActive: () => true })
+    const extension = new NativeActionToolExtension({
+      run,
+      proposeApproval: legacyPropose,
+      actions: port
+    })
+    await extension.execute('web_task', { goal: 'order lunch' })
+    // The engine path was taken; the legacy queue was NOT offered a web task.
+    expect(port.proposed).toHaveLength(1)
+    expect(legacyPropose).not.toHaveBeenCalled()
+  })
+
+  it('web_task refuses cleanly when no engine is wired, rather than falling to a connector', async () => {
+    const legacyPropose = vi.fn(() => true)
+    const extension = new NativeActionToolExtension({ run, proposeApproval: legacyPropose })
+    const reply = await extension.execute('web_task', { goal: 'x' })
+    expect(reply).toMatch(/need the on-device action engine/)
+    expect(legacyPropose).not.toHaveBeenCalled()
   })
 })

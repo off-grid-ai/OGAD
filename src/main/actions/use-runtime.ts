@@ -30,6 +30,8 @@ import { makeReadBackVerifiers } from './verification'
 import { runNativeAction } from './native-helper'
 import { gateHost, onGateParked, whenActionParked } from './gate-host'
 import { createActionWorker, type ActionWorker } from './use-worker'
+import { makeBrowserRailExecutor, registerBrowserRail } from '../browser/browser-rail'
+import { getBrowserRailHost } from '../browser/browser-host'
 
 export interface ActionsRuntime {
   propose(
@@ -95,6 +97,9 @@ export function buildRegistry(run: typeof runNativeAction): HandlerRegistry {
       verification: 'none_fuzzy'
     })
   }
+  // The browser rail: web_task, on every platform (Electron CDP is the same
+  // everywhere). Declared in the browser module so its rail/risk live there.
+  registerBrowserRail(registry)
   return registry
 }
 
@@ -128,6 +133,12 @@ export function getActionsRuntime(): ActionsRuntime {
     }),
     makeSemanticRailExecutor(runNativeAction)
   )
+  // The browser rail's live host (WebContentsView + CDP + model + watched
+  // pane) is created lazily on first web_task so a session that never runs one
+  // pays nothing for it.
+  const browserExecute = makeBrowserRailExecutor({
+    runTask: (goal, url, taskId) => getBrowserRailHost().runTask(goal, url, taskId)
+  })
   const engine = new UseEngine({
     driver: makeUseDriver(getDB()),
     // Read-back verification reads the world back through the platform's own
@@ -136,10 +147,13 @@ export function getActionsRuntime(): ActionsRuntime {
     registry,
     device: {
       async execute(action: ActionRecord, rail: Rail) {
-        if (rail !== 'semantic') {
-          return { ok: false, detail: `the '${rail}' rail is not built yet (R1 ships semantic)` }
+        if (rail === 'semantic') {
+          return semanticExecute(action)
         }
-        return semanticExecute(action)
+        if (rail === 'browser') {
+          return browserExecute(action)
+        }
+        return { ok: false, detail: `the '${rail}' rail is not built yet` }
       }
     },
     gate: gateHost,
@@ -158,7 +172,7 @@ export function getActionsRuntime(): ActionsRuntime {
   // Scheduled actions become due while the app idles; a slow heartbeat
   // re-kicks the drain. unref'd so it never holds the process open.
   const heartbeat = setInterval(() => worker.kick(), 30_000)
-  heartbeat.unref?.()
+  heartbeat.unref()
 
   runtime = {
     async propose(input, meta) {

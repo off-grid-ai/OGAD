@@ -113,6 +113,28 @@ describe('getActionsRuntime', () => {
     expect(outcome).toBeUndefined()
   })
 
+  it('the browser rail is registered: a web_task proposes and routes to browser', async () => {
+    const { getActionsRuntime } = await import('../actions/use-runtime')
+    const { buildRegistry } = await import('../actions/use-runtime')
+    // The runtime's registry knows web_task (registerBrowserRail composed in
+    // buildRegistry), so a proposal is accepted rather than refused as unknown.
+    // Not kicked - the live host needs a display; this asserts registration and
+    // acceptance, the rail-routing is proven in browser-rail.test.ts.
+    const proposed = await getActionsRuntime().propose(
+      {
+        type: 'web_task',
+        intent: 'check in for my flight',
+        args: { goal: 'check in' },
+        risk: 'mutate'
+      },
+      { source: 'chat' }
+    )
+    expect(proposed.accepted).toBe(true)
+    // route() reads only the declared rail, so a stub run suffices here.
+    const stubRun = (async () => ({ ok: true as const, result: {} })) as never
+    expect(buildRegistry(stubRun).route('web_task')).toBe('browser')
+  })
+
   it('approvalHookActive reflects both hook registrations', async () => {
     const { getActionsRuntime } = await import('../actions/use-runtime')
     const runtime = getActionsRuntime()

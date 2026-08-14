@@ -115,8 +115,8 @@ describe('pageScriptSource', () => {
   it('the serialized graph is self-contained and returns the same snapshot as the direct call', () => {
     const doc = page('<button>Continue</button><input type="password" aria-label="pw" />')
     const direct = collectInteractiveElements(doc)
-    // eslint-disable-next-line no-eval -- evaluating our own injection source is the test
-    const injected = JSON.parse(eval(pageScriptSource()) as string)
+    // Run the serialized source exactly as CDP would (indirect eval, page scope).
+    const injected = JSON.parse((0, eval)(pageScriptSource()) as string)
     expect(injected.elements).toEqual(JSON.parse(JSON.stringify(direct.elements)))
   })
 })

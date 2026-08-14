@@ -48,6 +48,7 @@ import {
 } from '../../../shared/image-generation-contract'
 import { Button } from '@renderer/components/ui/button'
 import { ActionGateDock } from '@renderer/components/actions/ActionGateDock'
+import { WatchedBrowserPane } from '@renderer/components/browser/WatchedBrowserPane'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import {
   DropdownMenu,
@@ -4496,6 +4497,8 @@ export function MemoryChat({
                 )}
                 {/* Approval UX v2: pending gate cards + outcomes, in-flow above the composer */}
                 <ActionGateDock />
+                {/* Browser rail: the watched pane slides in while a web task runs */}
+                <WatchedBrowserPane />
                 {microphoneDenied && (
                   <div
                     role="alert"

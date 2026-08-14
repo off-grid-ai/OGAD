@@ -184,6 +184,33 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
     buildArgs: (a) => a,
     title: (a) => `Open ${asString(a.url)}`,
     formatResult: () => 'Opened it.'
+  },
+  {
+    name: 'web_task',
+    description:
+      'Complete a task on a website in a watched browser pane the user can see - checking in for a flight, placing an order, filling a form. Describe the whole goal in one call; the assistant drives the page step by step and hands control back to the user for any sign-in, one-time code, or payment. Never use this for reading a page - only for tasks that click, fill, or submit.',
+    parameters: {
+      type: 'object',
+      properties: {
+        goal: {
+          type: 'string',
+          description:
+            'The task to complete, in one sentence (e.g. "check in for my flight tomorrow")'
+        },
+        url: { type: 'string', description: 'Optional starting URL (https://...)' }
+      },
+      required: ['goal']
+    },
+    // The engine routes this to the browser rail; command is unused on that
+    // path (kept for the shape's sake, never sent to the native helper).
+    command: 'web.task',
+    risk: 'mutate',
+    buildArgs: (a) => ({
+      goal: asString(a.goal),
+      ...(typeof a.url === 'string' ? { url: a.url } : {})
+    }),
+    title: (a) => asString(a.goal, 'Run a web task'),
+    formatResult: (result) => (typeof result === 'string' && result ? result : 'Done.')
   }
 ]
 
@@ -203,15 +230,16 @@ export const TOOL_ACTION_TYPES = {
   calendar_create_event: 'calendar',
   reminders_create: 'reminder',
   messages_send: 'message',
-  mail_send: 'email'
+  mail_send: 'email',
+  web_task: 'web_task'
 } as const
 
 export function actionTypeForTool(
   name: string
 ): (typeof TOOL_ACTION_TYPES)[keyof typeof TOOL_ACTION_TYPES] | undefined {
-  return (TOOL_ACTION_TYPES as Record<string, (typeof TOOL_ACTION_TYPES)[keyof typeof TOOL_ACTION_TYPES]>)[
-    name
-  ]
+  return (
+    TOOL_ACTION_TYPES as Record<string, (typeof TOOL_ACTION_TYPES)[keyof typeof TOOL_ACTION_TYPES]>
+  )[name]
 }
 
 /**
@@ -225,7 +253,9 @@ export const WINDOWS_TOOL_NAMES: ReadonlySet<string> = new Set([
   'calendar_create_event',
   'reminders_create',
   'mail_send',
-  'open_url'
+  'open_url',
+  // The browser rail is cross-platform (Electron CDP is the same everywhere).
+  'web_task'
 ])
 
 export function specsForPlatform(platform: NodeJS.Platform): NativeToolSpec[] {
@@ -242,10 +272,10 @@ export function specsForPlatform(platform: NodeJS.Platform): NativeToolSpec[] {
  *  platform does not expose. */
 export function systemHintForPlatform(platform: NodeJS.Platform): string {
   if (platform === 'darwin') {
-    return "You can act on the user's Mac: manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme (like whatsapp://send) with open_url. Use ISO 8601 for all times. Anything that creates or sends needs the user's approval; tell them it is pending until they approve."
+    return "You can act on the user's Mac: manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme (like whatsapp://send) with open_url. Complete a task on a website - a check-in, an order, a form - with web_task, describing the whole goal in one call; it runs in a watched pane and hands back to the user for any sign-in or payment. Use ISO 8601 for all times. Anything that creates, sends, or runs a web task needs the user's approval; tell them it is pending until they approve."
   }
   if (platform === 'win32') {
-    return "You can act on the user's PC through Outlook: create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Anything that creates or sends needs the user's approval; tell them it is pending until they approve."
+    return "You can act on the user's PC through Outlook: create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url. Complete a task on a website - a check-in, an order, a form - with web_task, describing the whole goal in one call; it runs in a watched pane and hands back to the user for any sign-in or payment. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Anything that creates, sends, or runs a web task needs the user's approval; tell them it is pending until they approve."
   }
   return ''
 }
@@ -255,7 +285,9 @@ export interface NativeToolSchema {
   function: { name: string; description: string; parameters: Record<string, unknown> }
 }
 
-export function buildNativeToolSchemas(specs: NativeToolSpec[] = NATIVE_TOOL_SPECS): NativeToolSchema[] {
+export function buildNativeToolSchemas(
+  specs: NativeToolSpec[] = NATIVE_TOOL_SPECS
+): NativeToolSchema[] {
   return specs.map((s) => ({
     type: 'function',
     function: { name: s.name, description: s.description, parameters: s.parameters }
