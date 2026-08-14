@@ -49,11 +49,30 @@ commit, port before writing, brand copy rules on every UI string.
 
 ## D. The vision rail (~1.5-2 days, supervised tier)
 
-- [ ] **D1. UI-TARS-1.5-7B catalog entry** (GGUF + mmproj, Models screen) + OmniParser
-  v3 set-of-marks fallback.
-- [ ] **D2. The operator spine** (@ui-tars/sdk patterns, nut-tree-fork/robotjs input;
-  CGEvent mac / SendInput win) with the overlay, pause-on-input, kill switch.
-- [ ] **D3. file_share through the engine** (the WhatsApp recipe) behind the gate.
+The whole spine landed, screen-free and tested (parser, guard, loop, engine
+adapter), wired into the engine. What remains is the native actuation dep +
+entitlements + a real-machine pass - a packaging decision, not code. Until it
+lands the rail refuses cleanly and computer_task is NOT offered to the model,
+so the tier is honestly gated (see the watch-list).
+
+- [x] **D1a. The UI-TARS action parser** (ported from @ui-tars/sdk, closed to the
+  shipped verbs; 0-1000 -> pixel denormalization, fail-closed). `computer_task`
+  added to the shared ACTION_TYPES enum.
+- [ ] **D1b. UI-TARS-1.5-7B catalog entry** (GGUF + mmproj, Models screen) + OmniParser
+  v3 set-of-marks fallback. (Shared `@offgrid/models` catalog - the model download
+  surface.)
+- [x] **D2a. The operator spine**: the guard (kill switch terminal + outranks all,
+  pause-on-user-input, step budget), the supervised loop (screenshot -> ground ->
+  actuate, handoff + resume, re-check-before-dispatch), and the engine adapter
+  (computer_task on the vision rail, no-retry). The host shell captures via
+  desktopCapturer, grounds via the vision LLM, Esc kill switch wired.
+- [ ] **D2b. Actuation + entitlements**: the native input addon
+  (@nut-tree-fork/robotjs; CGEvent mac / SendInput win) behind the host's
+  ActuationPort, plus Accessibility + Screen-Recording entitlements and the
+  overlay window. Capability-gated - `visionActuationAvailable()` is false until
+  this lands. Needs a human on a real machine.
+- [ ] **D3. file_share through the engine** (the WhatsApp recipe) behind the gate -
+  lands with D2b + the tool exposure.
 
 ## E. Safety pass + the release
 
@@ -73,3 +92,14 @@ commit, port before writing, brand copy rules on every UI string.
   on the real-Windows pass with the rest of WINDOWS_TEST_PLAN.md.
 - Pro flaky watch: model-transfer-service.test.ts leaks a FileHandle at GC (an
   unhandled-error line in every full run) - stabilize with the other sync flakes.
+  ambient-file-watcher / meeting-persistence flake locally (LLM/timing) but pass
+  in isolation and on CI; retry a blocked coverage push rather than chasing them.
+- Vision rail actuation is capability-gated OFF (D2b): the spine is wired and
+  tested, but the native input addon + Accessibility/Screen-Recording
+  entitlements are unshipped, so computer_task is not offered to the model and
+  the host refuses cleanly. The E2 checkpoint's "supervised vision action from
+  chat" needs D2b first - on both platforms, with a human on a real machine.
+- Shared `@offgrid/use` change (computer_task type) rides shared branch
+  feat/r2-full-rails (mirrors the OGAD branch name so CI's matching-branch
+  checkout finds it) and feat/use-approval-tiers; both need merging to shared
+  main with the OGAD PR.
