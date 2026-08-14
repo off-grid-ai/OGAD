@@ -638,10 +638,13 @@ export function MemoryChat({
   // Surfaced when a recording can't become a message (no audio, empty transcript, or a
   // transcription-engine failure) — never fail silently (the "nothing happened" bug).
   const [transcribeError, setTranscribeError] = useState<string | null>(null)
-  // Tools default ON: acting on this Mac is the assistant's own capability
-  // (approval-gated per action), not an opt-in integration. A user's saved
-  // preference still wins (loaded below).
-  const [toolsOn, setToolsOn] = useState(true)
+  // Tools default OFF for now: defaulting it on routes EVERY turn through the
+  // agentic pipeline (toolChat), silently switching thinking/image/scope
+  // behaviour away from the plain stream - measured as 20 behaviour-test
+  // failures. The product answer is R2's per-turn router (agentic only when
+  // the ask needs a tool); until then discoverability is the composer hint
+  // (R1 checklist 18b). Native actions stay under Tools (category fix).
+  const [toolsOn, setToolsOn] = useState(false)
   const [connectorsOn, setConnectorsOn] = useState(false)
   const [thinkingEnabled, setThinkingEnabled] = useState(false)
   const [voiceMode, setVoiceMode] = useState(false) // voice mode: messages exchanged as voice notes
@@ -4601,6 +4604,7 @@ export function MemoryChat({
                           type="button"
                           variant="outline"
                           size="icon"
+                          aria-label="Composer options"
                           className="size-8 rounded-full"
                         >
                           <Plus className="h-4 w-4" />

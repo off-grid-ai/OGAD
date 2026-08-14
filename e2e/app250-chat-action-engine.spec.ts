@@ -7,7 +7,8 @@
  * llama-server (emits the tool call as text, the way small local models do)
  * and a scripted actions helper (records creates, answers list read-backs).
  *
- * Proves, on a fresh profile with NO toggles touched (Tools defaults on):
+ * Proves, on a fresh profile with Tools enabled through the real composer
+ * menu (default-off until R2's per-turn router; see checklist 18b):
  * chat ask -> tool call -> durable Action -> semantic rail create ->
  * read-back verify -> confirmed in chat. The helper log pins the order:
  * exactly one create, then a list (the read-back actually ran).
@@ -104,6 +105,11 @@ test('a chat ask becomes a created, read-back-verified reminder', async () => {
   if (await captureDismiss.isVisible().catch(() => false)) {
     await captureDismiss.click()
   }
+
+  // Enable Tools the way a user does: the composer's + menu.
+  await page.getByRole('button', { name: 'Composer options' }).click()
+  await page.getByRole('menuitem', { name: /^Tools/ }).click()
+  await page.keyboard.press('Escape')
 
   await composer.fill('remind me to send the deck at 6pm today')
   await composer.press('Enter')
