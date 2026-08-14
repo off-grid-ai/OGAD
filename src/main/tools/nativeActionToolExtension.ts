@@ -21,7 +21,8 @@ import {
   actionTypeForTool,
   buildNativeToolSchemas,
   findNativeToolSpec,
-  NATIVE_TOOL_SPECS,
+  specsForPlatform,
+  systemHintForPlatform,
   type NativeToolSpec
 } from './nativeActionToolExtension-logic'
 
@@ -64,22 +65,25 @@ export class NativeActionToolExtension implements ToolExtension {
    *  available in every agentic turn, not gated behind Connectors. */
   category = 'tool' as const
 
-  constructor(private readonly boundary: NativeActionToolBoundary = productionBoundary) {}
+  constructor(
+    private readonly boundary: NativeActionToolBoundary = productionBoundary,
+    private readonly platform: NodeJS.Platform = process.platform
+  ) {}
 
   schemas(): unknown[] {
-    return buildNativeToolSchemas()
+    return buildNativeToolSchemas(specsForPlatform(this.platform))
   }
 
   canHandle(name: string): boolean {
-    return findNativeToolSpec(name) !== undefined
+    return specsForPlatform(this.platform).some((spec) => spec.name === name)
   }
 
   systemHint(): string {
-    return "You can act on the user's Mac: manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme (like whatsapp://send) with open_url. Use ISO 8601 for all times. Anything that creates or sends needs the user's approval; tell them it is pending until they approve."
+    return systemHintForPlatform(this.platform)
   }
 
   async execute(name: string, args: Record<string, unknown>): Promise<string> {
-    const spec = findNativeToolSpec(name)
+    const spec = this.canHandle(name) ? findNativeToolSpec(name) : undefined
     if (!spec) {
       return `Error: unknown action ${name}`
     }
@@ -164,17 +168,15 @@ export class NativeActionToolExtension implements ToolExtension {
 
 export const nativeActionToolExtension = new NativeActionToolExtension()
 
-/** Register the native-action tools. macOS-only: the helper is an EventKit binary and
- *  simply reports "not available" elsewhere, so gate registration on the platform to
- *  keep the tools out of the grammar budget where they cannot work. */
+/** Register the native-action tools where the platform exposes any: macOS (the
+ *  Swift helper, the full set) and Windows (the Outlook rail's engine-routed
+ *  subset). Elsewhere the spec list is empty, so registration is skipped and
+ *  the tools stay out of the grammar budget where they cannot work. */
 export function registerNativeActionTools(
   register: (ext: ToolExtension) => void,
   platform: NodeJS.Platform = process.platform
 ): void {
-  if (platform !== 'darwin') {
-    return
-  }
-  if (NATIVE_TOOL_SPECS.length === 0) {
+  if (specsForPlatform(platform).length === 0) {
     return
   }
   register(nativeActionToolExtension)

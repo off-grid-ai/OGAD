@@ -134,10 +134,14 @@ describe('registerNativeActionTools', () => {
     expect(registered.map((e) => e.id)).toEqual(['native-actions'])
   })
 
-  it('registers nothing off macOS', () => {
+  it('registers on Windows too (the Outlook subset) and nothing on other platforms', () => {
+    // R2-A1: win32 exposes the engine-routed Outlook set; platforms with an
+    // empty spec list stay unregistered so the grammar budget is untouched.
     const registered: ToolExtension[] = []
     registerNativeActionTools((e) => registered.push(e), 'win32')
-    registerNativeActionTools((e) => registered.push(e), 'linux')
-    expect(registered).toEqual([])
+    expect(registered.map((e) => e.id)).toEqual(['native-actions'])
+    const elsewhere: ToolExtension[] = []
+    registerNativeActionTools((e) => elsewhere.push(e), 'linux')
+    expect(elsewhere).toEqual([])
   })
 })

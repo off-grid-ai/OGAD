@@ -214,13 +214,49 @@ export function actionTypeForTool(
   ]
 }
 
+/**
+ * Which tools each platform exposes to the model. macOS ships the full set
+ * (the Swift helper). Windows ships the engine-routed set the local Outlook
+ * rail supports; reads stay macOS-only until the Outlook read verbs land.
+ * Defined once - the extension, its registration, and the tests all read
+ * this. An unlisted platform exposes nothing.
+ */
+export const WINDOWS_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'calendar_create_event',
+  'reminders_create',
+  'mail_send',
+  'open_url'
+])
+
+export function specsForPlatform(platform: NodeJS.Platform): NativeToolSpec[] {
+  if (platform === 'darwin') {
+    return NATIVE_TOOL_SPECS
+  }
+  if (platform === 'win32') {
+    return NATIVE_TOOL_SPECS.filter((spec) => WINDOWS_TOOL_NAMES.has(spec.name))
+  }
+  return []
+}
+
+/** The model-facing capability hint, per platform - never promise a tool the
+ *  platform does not expose. */
+export function systemHintForPlatform(platform: NodeJS.Platform): string {
+  if (platform === 'darwin') {
+    return "You can act on the user's Mac: manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme (like whatsapp://send) with open_url. Use ISO 8601 for all times. Anything that creates or sends needs the user's approval; tell them it is pending until they approve."
+  }
+  if (platform === 'win32') {
+    return "You can act on the user's PC through Outlook: create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Anything that creates or sends needs the user's approval; tell them it is pending until they approve."
+  }
+  return ''
+}
+
 export interface NativeToolSchema {
   type: 'function'
   function: { name: string; description: string; parameters: Record<string, unknown> }
 }
 
-export function buildNativeToolSchemas(): NativeToolSchema[] {
-  return NATIVE_TOOL_SPECS.map((s) => ({
+export function buildNativeToolSchemas(specs: NativeToolSpec[] = NATIVE_TOOL_SPECS): NativeToolSchema[] {
+  return specs.map((s) => ({
     type: 'function',
     function: { name: s.name, description: s.description, parameters: s.parameters }
   }))
