@@ -22,6 +22,7 @@ import { llm } from '../llm'
 import type { VisionAction, Bounds } from './vision-action'
 import { runVisionTask, type VisionScreen, type VisionTaskResult } from './vision-agent'
 import { VisionGuard } from './vision-guard'
+import { buildVisionPrompt } from './vision-prompt'
 import { getTakeoverCoordinator } from '../browser/takeover'
 
 /** The synthetic-input surface the host needs. Implemented by a native addon
@@ -46,14 +47,6 @@ function loadActuation(): ActuationPort | null {
 export function visionActuationAvailable(): boolean {
   return loadActuation() !== null
 }
-
-const VISION_SYSTEM = [
-  'You are a GUI agent operating the user’s computer to complete a task.',
-  'You see a screenshot each step and reply with ONE action in the UI-TARS action space:',
-  "click(point='<point>x y</point>'), left_double(...), right_single(...), drag(start_box='(x,y)', end_box='(x,y)'),",
-  "type(content='...'), hotkey(key='...'), scroll(point='<point>x y</point>', direction='down'), wait(), finished(content='...'), call_user(content='...').",
-  'Coordinates are 0-1000 normalized. For any sign-in, password, one-time code, or payment, reply call_user - the user acts directly. Never type credentials.'
-].join('\n')
 
 function makeScreen(actuation: ActuationPort): VisionScreen {
   return {
@@ -128,7 +121,7 @@ class VisionHost {
         screen: makeScreen(actuation),
         guard,
         ground: (g, image) =>
-          llm.chat(`${VISION_SYSTEM}\n\nTask: ${g}`, [image], 60_000, 200, {
+          llm.chat(buildVisionPrompt(g), [image], 60_000, 200, {
             disableThinking: true
           }),
         waitForUser: async (why) => {
