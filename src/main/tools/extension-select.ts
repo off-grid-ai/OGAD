@@ -5,12 +5,19 @@
  * user turned Connectors on. An extension that declares no category is
  * treated as a connector - fail closed for anything that might touch an
  * external service.
+ *
+ * Structural on purpose: importing ToolExtension from ../tools would create
+ * the cycle tools -> extension-select -> tools (dependency-cruiser blocks
+ * it). The selector only needs the category field, so it asks for exactly
+ * that and stays generic over the caller's richer type.
  */
-import type { ToolExtension } from '../tools'
+export interface CategorizedExtension {
+  category?: 'tool' | 'connector'
+}
 
-export function selectToolExtensions(
-  extensions: ToolExtension[],
+export function selectToolExtensions<T extends CategorizedExtension>(
+  extensions: T[],
   opts: { connectors: boolean }
-): ToolExtension[] {
+): T[] {
   return extensions.filter((e) => e.category === 'tool' || opts.connectors)
 }
