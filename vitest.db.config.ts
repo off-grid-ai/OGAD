@@ -45,6 +45,11 @@ export default defineConfig({
     // provider v8 to match the default run, so both express coverage against the same source positions.
     coverage: {
       provider: 'v8',
+      // Write the report even when a test fails, so one flaky db journey cannot
+      // suppress the whole report and make the new-code gate read tested files
+      // as 0%. The coverage-only variant (vitest.db.coverage.config.ts) already
+      // drops the tests with OPEN failures; this covers the intermittent ones.
+      reportOnFailure: true,
       all: false,
       include: ['src/**/*.ts', 'pro/**/*.ts'],
       exclude: [

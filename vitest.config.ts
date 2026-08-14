@@ -68,6 +68,15 @@ export default defineConfig({
     projects: createVitestProjects(productTestFiles, commonExcludes),
     coverage: {
       provider: 'v8',
+      // Write the report even when a test FAILS. Without this, one flaky pro
+      // test (the sandbox-only sync/ambient timing flakes) suppresses the whole
+      // coverage report, leaving a stale coverage-final.json on disk - so the
+      // new-code gate then measures thoroughly-tested files as 0% and blocks a
+      // green branch. A failing test's own coverage is unaffected; every OTHER
+      // test's coverage is still collected and written. The failing TEST still
+      // fails the run; this only decouples "a test flaked" from "the coverage
+      // report is missing". Mirrors vitest.db.config.ts.
+      reportOnFailure: true,
       // all:true + an `include` of the LOGIC surface (.ts, both core src AND the pro
       // submodule) => every logic file is in the denominator whether or not a test imports
       // it, so untested modules show as 0% and are VISIBLE (previously all:false hid them -
