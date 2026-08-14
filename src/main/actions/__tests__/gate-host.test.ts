@@ -11,9 +11,11 @@ import { HOOKS, registerHook, unregisterHook } from '../../bootstrap/hookRegistr
 import {
   abandonActionGate,
   gateHost,
+  onGateParked,
   pendingActionGateCount,
   railToKind,
-  resolveActionGate
+  resolveActionGate,
+  whenActionParked
 } from '../gate-host'
 
 const record = (overrides: Partial<ActionRecord> = {}): ActionRecord =>
@@ -39,6 +41,7 @@ afterEach(() => {
   unregisterHook(HOOKS.actionsProposeApproval)
   unregisterHook(HOOKS.legacyMcpProposeApproval)
   abandonActionGate('act_1')
+  abandonActionGate('act_2')
 })
 
 describe('railToKind', () => {
@@ -115,5 +118,51 @@ describe('gateHost', () => {
     expect(legacy).toHaveBeenCalled()
     resolveActionGate('act_1', { kind: 'approve' })
     await parked
+  })
+})
+
+describe('the park signals', () => {
+  it('whenActionParked resolves immediately for an already-parked action', async () => {
+    registerHook(HOOKS.actionsProposeApproval, () => true)
+    const parked = gateHost({ action: record() })
+    await whenActionParked('act_1') // already pending: resolves now
+    resolveActionGate('act_1', { kind: 'approve' })
+    await parked
+  })
+
+  it('whenActionParked resolves when the park happens later', async () => {
+    registerHook(HOOKS.actionsProposeApproval, () => true)
+    const waiting = whenActionParked('act_1')
+    const parked = gateHost({ action: record() })
+    await waiting
+    resolveActionGate('act_1', { kind: 'approve' })
+    await parked
+  })
+
+  it('onGateParked notifies global listeners and unsubscribe stops them', async () => {
+    registerHook(HOOKS.actionsProposeApproval, () => true)
+    let fired = 0
+    const unsubscribe = onGateParked(() => {
+      fired += 1
+    })
+    const first = gateHost({ action: record() })
+    expect(fired).toBe(1)
+    resolveActionGate('act_1', { kind: 'approve' })
+    await first
+
+    unsubscribe()
+    const second = gateHost({ action: record({ id: 'act_2' }) })
+    expect(fired).toBe(1)
+    resolveActionGate('act_2', { kind: 'approve' })
+    await second
+  })
+
+  it('pendingActionGateCount tracks parks and abandonActionGate drops one', () => {
+    registerHook(HOOKS.actionsProposeApproval, () => true)
+    void gateHost({ action: record() })
+    expect(pendingActionGateCount()).toBe(1)
+    expect(abandonActionGate('act_1')).toBe(true)
+    expect(abandonActionGate('act_1')).toBe(false)
+    expect(pendingActionGateCount()).toBe(0)
   })
 })

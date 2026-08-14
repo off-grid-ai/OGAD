@@ -78,6 +78,13 @@ describe('makeReadBackVerifiers', () => {
     })
   })
 
+  it('a calendar event with an unparseable start verifies false without listing', async () => {
+    const run = vi.fn()
+    const verifiers = makeReadBackVerifiers(run)
+    expect(await verifiers.calendar(action('calendar', { title: 'x', start: 'whenever' }))).toBe(false)
+    expect(run).not.toHaveBeenCalled()
+  })
+
   it('a helper failure verifies false, never optimistic', async () => {
     const run = vi.fn(async () => ({ ok: false as const, error: 'Reminders access denied' }))
     const verifiers = makeReadBackVerifiers(run)

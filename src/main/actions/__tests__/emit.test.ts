@@ -38,6 +38,11 @@ describe('extractBalancedObject', () => {
     expect(extractBalancedObject(text)).toBe('{"a": "curly } inside", "b": {"c": 1}}')
   })
 
+  it('handles escaped quotes inside strings', () => {
+    const text = 'prefix {"a": "say \\"hi\\" loudly", "b": 1} suffix'
+    expect(extractBalancedObject(text)).toBe('{"a": "say \\"hi\\" loudly", "b": 1}')
+  })
+
   it('returns undefined when no object closes', () => {
     expect(extractBalancedObject('nothing here')).toBeUndefined()
     expect(extractBalancedObject('{"never": "closes"')).toBeUndefined()

@@ -9,6 +9,18 @@ import path from 'path'
 import { describe, expect, it } from 'vitest'
 import { serializeCommand, helperBinCandidates, parseHelperResponse } from '../native-helper-logic'
 
+describe('parseHelperResponse truncation', () => {
+  it('truncates a long invalid line in the reported error', () => {
+    const long = 'x'.repeat(250)
+    const res = parseHelperResponse(long)
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.error.length).toBeLessThan(260)
+      expect(res.error).toContain('invalid JSON')
+    }
+  })
+})
+
 describe('serializeCommand', () => {
   it('encodes the command and args as a single JSON string', () => {
     expect(serializeCommand({ command: 'calendar.createEvent', args: { title: 'Sync' } })).toBe(

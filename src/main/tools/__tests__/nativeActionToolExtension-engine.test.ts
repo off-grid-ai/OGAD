@@ -6,7 +6,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { TickOutcome } from '@offgrid/use'
 import { NativeActionToolExtension, type ActionsPort } from '../nativeActionToolExtension'
-import { actionTypeForTool, TOOL_ACTION_TYPES } from '../nativeActionToolExtension-logic'
+import {
+  actionTypeForTool,
+  NATIVE_TOOL_SPECS,
+  TOOL_ACTION_TYPES
+} from '../nativeActionToolExtension-logic'
 
 function makePort(
   overrides: Partial<ActionsPort> = {}
@@ -48,6 +52,33 @@ describe('the tool-to-action-type map', () => {
     ])
     expect(actionTypeForTool('reminders_create')).toBe('reminder')
     expect(actionTypeForTool('calendar_list_events')).toBeUndefined()
+  })
+})
+
+describe('the spec table', () => {
+  it('every spec produces a title, mapped args, and a formatted result', () => {
+    const sample = {
+      title: 'x', start: 's', end: 'e', query: 'q', to: 't', text: 'm', url: 'u'
+    }
+    for (const spec of NATIVE_TOOL_SPECS) {
+      expect(typeof spec.title(sample)).toBe('string')
+      expect(spec.title(sample).length).toBeGreaterThan(0)
+      expect(typeof spec.buildArgs(sample)).toBe('object')
+      expect(typeof spec.formatResult({ id: 'r1' })).toBe('string')
+    }
+    // Only the engine-routed (mutating) specs must format an undefined
+    // result - the engine reports outcomes, not helper payloads.
+    for (const name of Object.keys(TOOL_ACTION_TYPES)) {
+      const spec = NATIVE_TOOL_SPECS.find((s) => s.name === name)
+      expect(typeof spec?.formatResult(undefined)).toBe('string')
+    }
+  })
+
+  it('the extension exposes its schemas and system hint', () => {
+    const extension = makeExtension(makePort())
+    expect(extension.schemas()).toHaveLength(NATIVE_TOOL_SPECS.length)
+    expect(extension.systemHint()).toMatch(/act on the user's Mac/)
+    expect(extension.canHandle('reminders_create')).toBe(true)
   })
 })
 
@@ -134,6 +165,36 @@ describe('the engine path', () => {
       })
     )
     expect(await needsHelp.execute('mail_send', { to: 'a@b.c' })).toMatch(/no answer/)
+  })
+
+  it('edited and poisoned outcomes report honestly too', async () => {
+    const edited = makeExtension(
+      makePort({
+        waitForOutcome: async () =>
+          ({ id: 'act_1', outcome: 'edited', record: { attemptLog: [] } }) as unknown as TickOutcome
+      })
+    )
+    expect(await edited.execute('reminders_create', { title: 'x' })).toMatch(/editing/)
+
+    const poisoned = makeExtension(
+      makePort({
+        waitForOutcome: async () =>
+          ({ id: 'act_1', outcome: 'poisoned', error: 'bad body' }) as unknown as TickOutcome
+      })
+    )
+    expect(await poisoned.execute('reminders_create', { title: 'x' })).toMatch(/bad body/)
+
+    const helpNoDetail = makeExtension(
+      makePort({
+        waitForOutcome: async () =>
+          ({
+            id: 'act_1',
+            outcome: 'needs_help',
+            record: { attemptLog: [{ rail: 'semantic', at: 1, outcome: 'error' }] }
+          }) as unknown as TickOutcome
+      })
+    )
+    expect(await helpNoDetail.execute('reminders_create', { title: 'x' })).toMatch(/needs their attention/)
   })
 
   it('a listening pro approval queue keeps the legacy path untouched', async () => {

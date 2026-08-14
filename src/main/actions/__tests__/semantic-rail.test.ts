@@ -32,6 +32,11 @@ describe('mapActionToCommand', () => {
     expect(mapped).toEqual({ ok: true, command: { command, args: { query: 'ali' } } })
   })
 
+  it('refuses a lookup with no kind at all', () => {
+    const mapped = mapActionToCommand(action('lookup', { query: 'x' }))
+    expect(mapped.ok).toBe(false)
+  })
+
   it('refuses a lookup with an unknown kind', () => {
     const mapped = mapActionToCommand(action('lookup', { kind: 'photos' }))
     expect(mapped.ok).toBe(false)

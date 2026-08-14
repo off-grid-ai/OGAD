@@ -31,10 +31,17 @@ import {
   type PendingMembershipRevocation
 } from '@offgrid/sync'
 import { NodeTcpTransport } from '@offgrid/sync/node'
-import { createKnowledgeDocumentSource } from '../pro/main/sync/knowledge-document-transfer'
 import type { KnowledgeDocumentSnapshot } from '../src/main/sync-knowledge-document'
 
 const PRO_PRESENT = fs.existsSync(path.resolve('pro/package.json'))
+// Pro implementation modules load lazily behind PRO_PRESENT: a static import
+// fails spec COLLECTION in a core-only checkout, before the guard can skip.
+const knowledgeDocumentTransfer = PRO_PRESENT
+  ? // eslint-disable-next-line @typescript-eslint/no-require-imports
+    (require('../pro/main/sync/knowledge-document-transfer') as {
+      createKnowledgeDocumentSource: (...args: never[]) => unknown
+    })
+  : null
 const SYNCED_PROJECT_ID = '22222222-2222-4222-8222-222222222222'
 const SYNCED_CONVERSATION_ID = '33333333-3333-4333-8333-333333333333'
 const SYNCED_MESSAGE_ID = '44444444-4444-4444-8444-444444444444'
@@ -586,7 +593,7 @@ test.describe('Devices surface — pro tier', () => {
     }
     await syntheticFiles.sendFile(
       desktop.localDevice.id,
-      createKnowledgeDocumentSource(knowledgeDocument)
+      knowledgeDocumentTransfer!.createKnowledgeDocumentSource(knowledgeDocument as never)
     )
     const knowledgeOp = syntheticLog.record(
       'knowledge_document',
