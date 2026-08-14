@@ -70,6 +70,13 @@ describe('getActionsRuntime', () => {
     const runtime = getActionsRuntime()
     expect(getActionsRuntime()).toBe(runtime)
 
+    // The renderer feed: onOutcome fans out every outcome enriched with
+    // whether the handler can reverse it - a reminder with an effect id can.
+    const fanned: Array<{ id: string; undoable: boolean }> = []
+    const offOutcome = runtime.onOutcome(({ outcome, undoable }) => {
+      fanned.push({ id: outcome.id, undoable })
+    })
+
     const proposed = await runtime.propose(
       {
         type: 'reminder',
@@ -87,6 +94,8 @@ describe('getActionsRuntime', () => {
     const outcome = await runtime.waitForOutcome(proposed.id, 10_000)
     expect(outcome?.outcome).toBe('done')
     expect(landed.map(({ title }) => title)).toEqual(['Send the deck'])
+    expect(fanned).toEqual([{ id: proposed.id, undoable: true }])
+    offOutcome()
 
     // Approval UX v2: the reminder auto-ran (reversible), its effect id is
     // stamped, and undo deletes exactly that item through the capability.

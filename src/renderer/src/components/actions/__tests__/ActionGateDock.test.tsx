@@ -126,4 +126,64 @@ describe('<ActionGateDock/>', () => {
     fireEvent.click(screen.getByLabelText('Dismiss'))
     await waitFor(() => expect(screen.queryByTestId('outcome-row')).toBeNull())
   })
+
+  it('a mutate-risk card wears the amber tone, not the red one', async () => {
+    render(<ActionGateDock />)
+    emitPending({ ...request, risk: 'mutate' })
+    await waitFor(() => screen.getByTestId('gate-card'))
+    expect(screen.getByText('mutate').className).toMatch(/amber/)
+    expect(screen.getByText('mutate').className).not.toMatch(/red/)
+  })
+
+  it('an edited outcome never lands as a row - the re-gated card is its own event', async () => {
+    render(<ActionGateDock />)
+    emitPending(request)
+    await waitFor(() => screen.getByTestId('gate-card'))
+    emitOutcome({ id: 'act_1', outcome: 'edited', record: {} })
+    await waitFor(() => expect(screen.queryByTestId('gate-card')).toBeNull())
+    expect(screen.queryByTestId('outcome-row')).toBeNull()
+  })
+
+  it('a failed undo reports the detail instead of pretending it worked', async () => {
+    undo.mockResolvedValueOnce({ ok: false, detail: 'no reminder with id rt9' } as never)
+    render(<ActionGateDock />)
+    emitOutcome({ id: 'act_5', outcome: 'done', undoable: true, record: { effectId: 'rt9' } })
+    await waitFor(() => screen.getByTestId('outcome-row'))
+    fireEvent.click(screen.getByText('Undo'))
+    await waitFor(() => expect(screen.getByText(/no reminder with id rt9/)).toBeTruthy())
+    expect(screen.queryByText('Undo')).toBeNull()
+  })
+
+  it('a poisoned outcome carries the honest error text', async () => {
+    render(<ActionGateDock />)
+    emitOutcome({ id: 'act_6', outcome: 'poisoned', error: 'helper unavailable', record: {} })
+    await waitFor(() => screen.getByTestId('outcome-row'))
+    expect(screen.getByText(/Failed.*helper unavailable/)).toBeTruthy()
+  })
+
+  it('an outcome for an action never shown as a card still lands, and old rows roll off past three', async () => {
+    render(<ActionGateDock />)
+    for (const id of ['r1', 'r2', 'r3', 'r4']) {
+      emitOutcome({ id, outcome: 'done', undoable: false, record: { intent: id } })
+    }
+    await waitFor(() => expect(screen.getAllByTestId('outcome-row')).toHaveLength(3))
+    expect(screen.queryByText(/r1 -/)).toBeNull()
+  })
+
+  it('unmount unsubscribes from the preload feed', () => {
+    const offPending = vi.fn()
+    const offOutcome = vi.fn()
+    window.api = {
+      actions: {
+        resolveGate,
+        undo,
+        onGatePending: () => offPending,
+        onOutcome: () => offOutcome
+      }
+    } as never
+    const { unmount } = render(<ActionGateDock />)
+    unmount()
+    expect(offPending).toHaveBeenCalled()
+    expect(offOutcome).toHaveBeenCalled()
+  })
 })

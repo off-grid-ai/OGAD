@@ -59,9 +59,16 @@ export default defineConfig({
         // LOADS them through use-runtime's import graph, and with all:false a
         // loaded-but-unmeasured file would still land in this report and halve
         // the merged denominator for code this suite never set out to cover.
+        'src/main/index.ts',
         'src/main/actions/semantic-rail-win.ts',
         'src/main/tools/nativeActionToolExtension.ts',
-        'src/main/tools/nativeActionToolExtension-logic.ts'
+        'src/main/tools/nativeActionToolExtension-logic.ts',
+        // Renderer .tsx is rendered-behavior surface owned by the e2e tour + targeted
+        // render tests, never by unit coverage (see vitest.config.ts) - the same rule
+        // here, or a jsdom journey that merely MOUNTS a component makes this report own
+        // it and the merged number gates a surface this suite never set out to cover.
+        'src/renderer/src/**/*.tsx',
+        'pro/renderer/**/*.tsx'
       ],
       reporter: ['text-summary', 'json-summary', 'json'],
       reportsDirectory: 'coverage-db'
