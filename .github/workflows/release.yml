@@ -239,6 +239,10 @@ jobs:
           # drifted lock stops the release instead of resolving a graph nobody committed.
           npm --prefix ../shared ci
           npm --prefix ../shared/packages/sync run build
+          # @offgrid/use (the durable action engine) is consumed the same way as sync
+          # and needs the same explicit build - file-dep prepare alone does not emit
+          # its dist/ types before the typecheck runs.
+          npm --prefix ../shared/packages/use run build
       - name: Install dependencies
         run: npm ci
       # Stamp the resolved version into package.json so electron-builder picks the
@@ -479,6 +483,10 @@ jobs:
           # drifted lock stops the release instead of resolving a graph nobody committed.
           npm --prefix ../shared ci
           npm --prefix ../shared/packages/sync run build
+          # @offgrid/use (the durable action engine) is consumed the same way as sync
+          # and needs the same explicit build - file-dep prepare alone does not emit
+          # its dist/ types before the typecheck runs.
+          npm --prefix ../shared/packages/use run build
       - name: Install dependencies
         run: npm ci
       - name: Fetch Windows native binaries (llama/whisper/sd/ffmpeg)
