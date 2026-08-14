@@ -94,6 +94,14 @@ export default defineConfig({
         // (rebuilds better-sqlite3 for the node ABI); can't load the native module here.
         'src/main/database.ts',
         'src/main/rag/store.ts',
+        // The actions runtime composition: Electron + app-DB wiring over tested,
+        // injectable modules; covered by use-runtime.integration.dbtest.ts (real DB,
+        // helper boundary mocked). Its pure seam (pickByPlatform) IS measured here.
+        'src/main/actions/use-runtime.ts',
+        // powershell.exe-spawning I/O shell (Windows-only twin of native-helper's
+        // spawn side); its parsing is the shared parseHelperResponse, which is
+        // covered. Exercised on a real Windows machine per WINDOWS_TEST_PLAN.md.
+        'src/main/actions/win-powershell.ts',
         // SQLite settings shell; prompt registry and filling remain measured.
         'src/main/prompt-store.ts',
         // SQLite settings shell; policy is measured in runtime-residency-logic.ts.

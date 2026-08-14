@@ -54,7 +54,14 @@ export default defineConfig({
         '**/__tests__/**',
         '**/*.d.ts',
         '**/dist/**',
-        'packages/**'
+        'packages/**',
+        // Owned by the DEFAULT run's report (unit-tested there): this suite only
+        // LOADS them through use-runtime's import graph, and with all:false a
+        // loaded-but-unmeasured file would still land in this report and halve
+        // the merged denominator for code this suite never set out to cover.
+        'src/main/actions/semantic-rail-win.ts',
+        'src/main/tools/nativeActionToolExtension.ts',
+        'src/main/tools/nativeActionToolExtension-logic.ts'
       ],
       reporter: ['text-summary', 'json-summary', 'json'],
       reportsDirectory: 'coverage-db'

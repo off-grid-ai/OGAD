@@ -8,11 +8,18 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { HOOKS, registerHook, unregisterHook } from '../bootstrap/hookRegistry'
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ogad-use-runtime-'))
-process.env.OFFGRID_USER_DATA = tempDir
+// process.env is shared across files in a worker: set the profile override in
+// beforeAll and RESTORE it in afterAll, or every later dbtest in this worker
+// opens (and fails on) this file's deleted temp profile.
+const originalUserData = process.env.OFFGRID_USER_DATA
+
+beforeAll(() => {
+  process.env.OFFGRID_USER_DATA = tempDir
+})
 
 vi.mock('electron', () => ({
   app: {
@@ -38,6 +45,11 @@ vi.mock('../actions/native-helper', () => ({
 }))
 
 afterAll(() => {
+  if (originalUserData === undefined) {
+    delete process.env.OFFGRID_USER_DATA
+  } else {
+    process.env.OFFGRID_USER_DATA = originalUserData
+  }
   fs.rmSync(tempDir, { recursive: true, force: true })
 })
 
