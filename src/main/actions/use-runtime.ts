@@ -36,6 +36,8 @@ export interface ActionsRuntime {
     input: unknown,
     meta: { source: ActionSource; sourceRef?: string }
   ): Promise<ProposeOutcome>
+  /** Reverse a done action through its handler's undo capability. */
+  undo(record: ActionRecord): Promise<{ ok: boolean; detail?: string }>
   waitForOutcome(actionId: string, timeoutMs: number): Promise<TickOutcome | undefined>
   whenParked(actionId: string): Promise<void>
   kick(): void
@@ -47,6 +49,15 @@ export interface ActionsRuntime {
 export function buildRegistry(run: typeof runNativeAction): HandlerRegistry {
   const registry = new HandlerRegistry()
   const verifiers = makeReadBackVerifiers(run)
+  /** Undo = delete the exact effect the create returned (Approval UX v2):
+   *  the capability that makes these reversible, which is what lets them
+   *  auto-run with a verified confirmation + Undo instead of a pre-gate. */
+  const undoVia =
+    (command: 'calendar.deleteEvent' | 'reminders.delete') =>
+    async (action: ActionRecord): Promise<{ ok: boolean; detail?: string }> => {
+      const res = await run({ command, args: { id: action.effectId } })
+      return res.ok ? { ok: true } : { ok: false, detail: res.error }
+    }
   // Calendar and reminders are observable: read back after create, so a
   // failed write retries once and "done" means the item is really there.
   registry.register({
@@ -54,14 +65,16 @@ export function buildRegistry(run: typeof runNativeAction): HandlerRegistry {
     rail: 'semantic',
     defaultRisk: 'mutate',
     verification: 'read_back',
-    verify: verifiers.calendar
+    verify: verifiers.calendar,
+    undo: undoVia('calendar.deleteEvent')
   })
   registry.register({
     type: 'reminder',
     rail: 'semantic',
     defaultRisk: 'mutate',
     verification: 'read_back',
-    verify: verifiers.reminder
+    verify: verifiers.reminder,
+    undo: undoVia('reminders.delete')
   })
   // Sends have no reliable read-back ("did it send?"), so they are fuzzy
   // and single-attempt behind the gate - a wrong verify can never double-
@@ -156,6 +169,10 @@ export function getActionsRuntime(): ActionsRuntime {
     },
     whenParked: whenActionParked,
     kick: () => worker.kick(),
+    undo: async (record) => {
+      await ready
+      return engine.undo(record)
+    },
     approvalHookActive: () =>
       hasHook(HOOKS.actionsProposeApproval) || hasHook(HOOKS.legacyMcpProposeApproval)
   }

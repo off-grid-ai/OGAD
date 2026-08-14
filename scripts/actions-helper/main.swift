@@ -297,6 +297,35 @@ func openURL(_ args: [String: Any]) -> Never {
     }
 }
 
+// Undo verbs (Approval UX v2): delete by the id the create returned. The
+// engine only calls these for the effect a create just made - undo of the
+// exact thing, never a search-and-guess.
+func deleteReminder(_ args: [String: Any]) -> Never {
+    guard let id = args["id"] as? String, !id.isEmpty else { fail("deleteReminder requires an id") }
+    let store = EKEventStore()
+    let access = requestReminderAccess(store)
+    if !access.granted { fail(access.error ?? "reminders access was not granted") }
+    guard let item = store.calendarItem(withIdentifier: id) as? EKReminder else {
+        fail("no reminder with id \(id)")
+    }
+    do { try store.remove(item, commit: true) } catch {
+        fail("could not delete the reminder: \(error.localizedDescription)")
+    }
+    ok(["deleted": id])
+}
+
+func deleteEvent(_ args: [String: Any]) -> Never {
+    guard let id = args["id"] as? String, !id.isEmpty else { fail("deleteEvent requires an id") }
+    let store = EKEventStore()
+    let access = requestEventAccess(store)
+    if !access.granted { fail(access.error ?? "calendar access was not granted") }
+    guard let event = store.event(withIdentifier: id) else { fail("no event with id \(id)") }
+    do { try store.remove(event, span: .thisEvent, commit: true) } catch {
+        fail("could not delete the event: \(error.localizedDescription)")
+    }
+    ok(["deleted": id])
+}
+
 let arguments = CommandLine.arguments
 guard arguments.count >= 2 else { fail("no command provided") }
 guard let data = arguments[1].data(using: .utf8),
@@ -309,10 +338,14 @@ let commandArgs = (payload["args"] as? [String: Any]) ?? [:]
 switch command {
 case "calendar.createEvent":
     createEvent(commandArgs)
+case "calendar.deleteEvent":
+    deleteEvent(commandArgs)
 case "calendar.listEvents":
     listEvents(commandArgs)
 case "reminders.create":
     createReminder(commandArgs)
+case "reminders.delete":
+    deleteReminder(commandArgs)
 case "reminders.list":
     listReminders(commandArgs)
 case "contacts.search":

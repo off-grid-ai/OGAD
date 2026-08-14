@@ -25,11 +25,12 @@ commit, port before writing, brand copy rules on every UI string.
 
 ## B. Approval UX v2 (~1-1.5 days, core + desktop-pro)
 
-- [ ] **B1. Risk-tiered gating policy**: reversible mutations (reminder, calendar)
+- [x] **B1. Risk-tiered gating policy**: reversible mutations (reminder, calendar)
   auto-run + verified confirmation; sends and irreversible actions keep the gate.
   Policy defined once (engine-side risk + handler declaration), tested per tier.
 - [ ] **B2. Undo affordance** for auto-run reversibles (delete the created item), in
-  chat next to the confirmation.
+  chat next to the confirmation. (Engine half DONE with B1: engine.undo, effectId
+  stamping, delete verbs on both platforms; remaining = the chat chip, lands with B3.)
 - [ ] **B3. Inline approval card in chat**: resolved values + Approve / Edit / Reject
   driven by `resolveActionGate`; the Actions screen stays the unattended queue + audit.
 - [ ] **B4. The pro migration** (desktop-pro): pro's approval queue resolves the engine

@@ -29,16 +29,27 @@ vi.mock('electron', () => ({
   }
 }))
 
-// The OS boundary: reminders land in memory; lists read them back.
-const landed: string[] = []
+// The OS boundary: reminders land in memory; lists read them back; deletes
+// remove by the id the create returned (the undo path).
+const landed: Array<{ id: string; title: string }> = []
+let created = 0
 vi.mock('../actions/native-helper', () => ({
   runNativeAction: vi.fn(async (cmd: { command: string; args: Record<string, unknown> }) => {
     if (cmd.command === 'reminders.create') {
-      landed.push(String(cmd.args.title))
-      return { ok: true, result: { id: 'rt1' } }
+      const item = { id: `rt${++created}`, title: String(cmd.args.title) }
+      landed.push(item)
+      return { ok: true, result: { id: item.id } }
     }
     if (cmd.command === 'reminders.list') {
-      return { ok: true, result: { reminders: landed.map((title) => ({ title })) } }
+      return { ok: true, result: { reminders: landed.map(({ title }) => ({ title })) } }
+    }
+    if (cmd.command === 'reminders.delete') {
+      const index = landed.findIndex((item) => item.id === cmd.args.id)
+      if (index === -1) {
+        return { ok: false, error: `no reminder with id ${String(cmd.args.id)}` }
+      }
+      landed.splice(index, 1)
+      return { ok: true, result: { deleted: cmd.args.id } }
     }
     return { ok: false, error: `unhandled ${cmd.command}` }
   })
@@ -75,7 +86,16 @@ describe('getActionsRuntime', () => {
     runtime.kick()
     const outcome = await runtime.waitForOutcome(proposed.id, 10_000)
     expect(outcome?.outcome).toBe('done')
-    expect(landed).toEqual(['Send the deck'])
+    expect(landed.map(({ title }) => title)).toEqual(['Send the deck'])
+
+    // Approval UX v2: the reminder auto-ran (reversible), its effect id is
+    // stamped, and undo deletes exactly that item through the capability.
+    if (outcome && outcome.outcome === 'done') {
+      expect(outcome.record.effectId).toBe('rt1')
+      const undone = await runtime.undo(outcome.record)
+      expect(undone).toEqual({ ok: true })
+      expect(landed).toEqual([])
+    }
   })
 
   it('waitForOutcome times out to undefined for an unknown action', async () => {

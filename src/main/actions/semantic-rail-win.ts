@@ -168,10 +168,23 @@ export function buildOutlookListScript(
   ].join('\n')
 }
 
+/** Undo by the id the create returned: EntryID -> GetItemFromID -> Delete. */
+export function buildOutlookDeleteScript(id: unknown): string {
+  return [
+    `try {`,
+    `$o = New-Object -ComObject Outlook.Application`,
+    `$item = $o.GetNamespace('MAPI').GetItemFromID(${psQuote(id)})`,
+    `$item.Delete()`,
+    `@{ ok = $true; result = @{ deleted = ${psQuote(id)} } } ${RESULT_TAIL}`,
+    CATCH
+  ].join('\n')
+}
+
 /**
- * The Windows reader behind the mac helper's command names, so
- * makeReadBackVerifiers (and buildRegistry) work unchanged per platform.
- * Reads only; anything else refuses.
+ * The Windows adapter behind the mac helper's command names, so
+ * makeReadBackVerifiers and the undo capabilities (buildRegistry) work
+ * unchanged per platform. Reads and undo deletes only; anything else
+ * refuses.
  */
 export function makeOutlookNativeReader(
   runPs: RunPowerShell
@@ -182,6 +195,9 @@ export function makeOutlookNativeReader(
     }
     if (cmd.command === 'calendar.listEvents') {
       return runPs(buildOutlookListScript('events', cmd.args))
+    }
+    if (cmd.command === 'reminders.delete' || cmd.command === 'calendar.deleteEvent') {
+      return runPs(buildOutlookDeleteScript(cmd.args.id))
     }
     return { ok: false, error: `'${cmd.command}' has no Outlook reader` }
   }

@@ -5,7 +5,7 @@
  * refused before the helper is ever invoked.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { mapActionToCommand, makeSemanticRailExecutor } from '../semantic-rail'
+import { effectIdFrom, mapActionToCommand, makeSemanticRailExecutor } from '../semantic-rail'
 import type { NativeActionCommand } from '../native-helper-logic'
 
 const action = (type: string, args: Record<string, unknown> = {}) =>
@@ -62,8 +62,20 @@ describe('makeSemanticRailExecutor', () => {
     const run = vi.fn(async (_cmd: NativeActionCommand) => ({ ok: true as const, result: null }))
     const execute = makeSemanticRailExecutor(run)
     const result = await execute(record('reminder', { title: 'x' }))
-    expect(result).toEqual({ ok: true })
+    expect(result).toEqual({ ok: true, effectId: undefined })
     expect(run).toHaveBeenCalledWith({ command: 'reminders.create', args: { title: 'x' } })
+  })
+
+  it('surfaces the created id as effectId for undo (Approval UX v2)', async () => {
+    const execute = makeSemanticRailExecutor(async () => ({
+      ok: true as const,
+      result: { id: 'EK-123' }
+    }))
+    const result = await execute(record('reminder', { title: 'x' }))
+    expect(result).toEqual({ ok: true, effectId: 'EK-123' })
+    expect(effectIdFrom({ id: '' })).toBeUndefined()
+    expect(effectIdFrom('nope')).toBeUndefined()
+    expect(effectIdFrom({ reminders: [] })).toBeUndefined()
   })
 
   it('a refused mapping never reaches the helper', async () => {

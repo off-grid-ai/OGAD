@@ -8,6 +8,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ActionRecord } from '@offgrid/use'
 import {
+  buildOutlookDeleteScript,
   buildOutlookListScript,
   buildOutlookScript,
   isOutlookUnavailable,
@@ -289,6 +290,25 @@ describe('Outlook read-back (R2-A3)', () => {
     expect(script).toContain('IncludeRecurrences')
     expect(script).toContain('$items.Restrict($filter)')
     expect(script).toContain('events = @($out)')
+  })
+
+  it('the delete script fetches by EntryID and deletes (undo)', () => {
+    const script = buildOutlookDeleteScript("AAA'BBB")
+    expect(script).toContain("GetItemFromID('AAA''BBB')")
+    expect(script).toContain('$item.Delete()')
+    expect(script).toContain('catch')
+  })
+
+  it('the adapter maps the undo verbs onto the delete script', async () => {
+    const scripts: string[] = []
+    const adapter = makeOutlookNativeReader(async (script) => {
+      scripts.push(script)
+      return { ok: true, result: { deleted: 'id1' } }
+    })
+    await adapter({ command: 'reminders.delete', args: { id: 'id1' } })
+    await adapter({ command: 'calendar.deleteEvent', args: { id: 'id2' } })
+    expect(scripts[0]).toContain("GetItemFromID('id1')")
+    expect(scripts[1]).toContain("GetItemFromID('id2')")
   })
 
   it('the reader maps the mac command names and refuses the rest', async () => {

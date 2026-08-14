@@ -16,6 +16,19 @@ export type RunNativeAction = (cmd: NativeActionCommand) => Promise<NativeAction
 export interface SemanticExecuteResult {
   ok: boolean
   detail?: string
+  /** The created item's id (event/reminder) - what undo acts on. */
+  effectId?: string
+}
+
+/** The helper returns { id } on creates; surface it for undo/audit. */
+export function effectIdFrom(result: unknown): string | undefined {
+  if (typeof result === 'object' && result !== null) {
+    const id = (result as Record<string, unknown>).id
+    if (typeof id === 'string' && id.length > 0) {
+      return id
+    }
+  }
+  return undefined
 }
 
 type MapResult = { ok: true; command: NativeActionCommand } | { ok: false; error: string }
@@ -69,7 +82,7 @@ export function makeSemanticRailExecutor(run: RunNativeAction) {
     try {
       const response = await run(mapped.command)
       if (response.ok) {
-        return { ok: true }
+        return { ok: true, effectId: effectIdFrom(response.result) }
       }
       return { ok: false, detail: response.error }
     } catch (error) {
