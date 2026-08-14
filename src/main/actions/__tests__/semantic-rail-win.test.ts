@@ -239,6 +239,15 @@ describe('makeWinInlineRunner (R2-A2)', () => {
     expect(opened).toEqual(['https://x.test'])
   })
 
+  it('a missing url defaults to the empty string for the opener', async () => {
+    const opened: string[] = []
+    const run = makeWinInlineRunner(async (url) => {
+      opened.push(url)
+    })
+    await run({ command: 'system.openURL', args: {} })
+    expect(opened).toEqual([''])
+  })
+
   it('a failing opener degrades to a reported error', async () => {
     const run = makeWinInlineRunner(async () => {
       throw new Error('no default browser')

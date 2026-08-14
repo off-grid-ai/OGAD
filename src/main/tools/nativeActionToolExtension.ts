@@ -54,12 +54,19 @@ const OUTCOME_WAIT_MS = 30_000
 // The inline (non-engine) runner, picked by platform in exactly one place:
 // mac runs the Swift helper; Windows opens links through the shell and
 // refuses everything else honestly (reads are not exposed there yet).
-const inlineRun =
-  process.platform === 'win32'
-    ? makeWinInlineRunner(async (url) => {
-        await shell.openExternal(url)
-      })
-    : runNativeAction
+// Exported so both arms are testable without faking process.platform.
+export function inlineRunnerForPlatform(
+  platform: NodeJS.Platform
+): (cmd: NativeActionCommand) => Promise<NativeActionResponse> {
+  if (platform === 'win32') {
+    return makeWinInlineRunner(async (url) => {
+      await shell.openExternal(url)
+    })
+  }
+  return runNativeAction
+}
+
+const inlineRun = inlineRunnerForPlatform(process.platform)
 
 const productionBoundary: NativeActionToolBoundary = {
   run: inlineRun,

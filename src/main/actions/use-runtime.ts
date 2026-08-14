@@ -82,6 +82,12 @@ export function buildRegistry(run: typeof runNativeAction): HandlerRegistry {
   return registry
 }
 
+/** The one place a platform picks an implementation - exported so both arms
+ *  are testable without faking process.platform. */
+export function pickByPlatform<T>(platform: NodeJS.Platform, win: T, mac: T): T {
+  return platform === 'win32' ? win : mac
+}
+
 let runtime: ActionsRuntime | null = null
 
 /** Lazy singleton: built on first use so the DB and helper exist by then. */
@@ -92,23 +98,24 @@ export function getActionsRuntime(): ActionsRuntime {
 
   // The platform decides which semantic rail implements the port - the one
   // concrete choice, made once here; nothing above it branches on an OS.
-  const semanticExecute =
-    process.platform === 'win32'
-      ? makeWindowsSemanticRailExecutor({
-          runPs: runPowerShell,
-          openUrl: async (url: string) => {
-            await shell.openExternal(url)
-            return { ok: true as const, result: {} }
-          }
-        })
-      : makeSemanticRailExecutor(runNativeAction)
+  const semanticExecute = pickByPlatform(
+    process.platform,
+    makeWindowsSemanticRailExecutor({
+      runPs: runPowerShell,
+      openUrl: async (url: string) => {
+        await shell.openExternal(url)
+        return { ok: true as const, result: {} }
+      }
+    }),
+    makeSemanticRailExecutor(runNativeAction)
+  )
   const engine = new UseEngine({
     driver: makeUseDriver(getDB()),
     // Read-back verification reads the world back through the platform's own
     // surface: the Swift helper's list verbs on macOS, Outlook COM on
     // Windows - the same command names, so buildRegistry is unchanged.
     registry: buildRegistry(
-      process.platform === 'win32' ? makeOutlookNativeReader(runPowerShell) : runNativeAction
+      pickByPlatform(process.platform, makeOutlookNativeReader(runPowerShell), runNativeAction)
     ),
     device: {
       async execute(action: ActionRecord, rail: Rail) {
