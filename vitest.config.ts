@@ -98,11 +98,12 @@ export default defineConfig({
         // injectable modules; covered by use-runtime.integration.dbtest.ts (real DB,
         // helper boundary mocked). Its pure seam (pickByPlatform) IS measured here.
         'src/main/actions/use-runtime.ts',
-        // The browser rail's live host: WebContentsView + CDP debugger + the
-        // local model, over the unit-tested collector/driver/loop/executor.
-        // A real display renders it - the e2e tour and the real-machine pass,
-        // not this in-process runner.
+        // The rail hosts: the browser's WebContentsView + CDP debugger, and the
+        // vision rail's screen capture + actuation + overlay, over the unit-
+        // tested collector/driver/loop/guard/executor. A real display drives
+        // them - the e2e tour and the real-machine pass, not this runner.
         'src/main/browser/browser-host.ts',
+        'src/main/vision/vision-host.ts',
         // powershell.exe-spawning I/O shell (Windows-only twin of native-helper's
         // spawn side); its parsing is the shared parseHelperResponse, which is
         // covered. Exercised on a real Windows machine per WINDOWS_TEST_PLAN.md.

@@ -132,7 +132,25 @@ describe('getActionsRuntime', () => {
     expect(proposed.accepted).toBe(true)
     // route() reads only the declared rail, so a stub run suffices here.
     const stubRun = (async () => ({ ok: true as const, result: {} })) as never
-    expect(buildRegistry(stubRun).route('web_task')).toBe('browser')
+    const registry = buildRegistry(stubRun)
+    expect(registry.route('web_task')).toBe('browser')
+    // The vision rail is composed too: computer_task routes to vision.
+    expect(registry.route('computer_task')).toBe('vision')
+  })
+
+  it('the vision rail is registered: a computer_task proposes and routes to vision', async () => {
+    const { getActionsRuntime } = await import('../actions/use-runtime')
+    const proposed = await getActionsRuntime().propose(
+      {
+        type: 'computer_task',
+        intent: 'share the deck over WhatsApp',
+        args: { goal: 'share the deck' },
+        risk: 'mutate'
+      },
+      { source: 'chat' }
+    )
+    // Accepted (the type is known) but not kicked - actuation needs a display.
+    expect(proposed.accepted).toBe(true)
   })
 
   it('approvalHookActive reflects both hook registrations', async () => {

@@ -32,6 +32,8 @@ import { gateHost, onGateParked, whenActionParked } from './gate-host'
 import { createActionWorker, type ActionWorker } from './use-worker'
 import { makeBrowserRailExecutor, registerBrowserRail } from '../browser/browser-rail'
 import { getBrowserRailHost } from '../browser/browser-host'
+import { makeVisionRailExecutor, registerVisionRail } from '../vision/vision-rail'
+import { getVisionRailHost } from '../vision/vision-host'
 
 export interface ActionsRuntime {
   propose(
@@ -100,6 +102,10 @@ export function buildRegistry(run: typeof runNativeAction): HandlerRegistry {
   // The browser rail: web_task, on every platform (Electron CDP is the same
   // everywhere). Declared in the browser module so its rail/risk live there.
   registerBrowserRail(registry)
+  // The vision rail: computer_task, the supervised tier. Registered so the
+  // engine routes it; the host refuses cleanly until actuation is available,
+  // and the tool is not offered to the model until then.
+  registerVisionRail(registry)
   return registry
 }
 
@@ -139,6 +145,11 @@ export function getActionsRuntime(): ActionsRuntime {
   const browserExecute = makeBrowserRailExecutor({
     runTask: (goal, url, taskId) => getBrowserRailHost().runTask(goal, url, taskId)
   })
+  // The vision rail's live host (screen capture + actuation + grounding model),
+  // created lazily on first computer_task.
+  const visionExecute = makeVisionRailExecutor({
+    runTask: (goal, taskId) => getVisionRailHost().runTask(goal, taskId)
+  })
   const engine = new UseEngine({
     driver: makeUseDriver(getDB()),
     // Read-back verification reads the world back through the platform's own
@@ -152,6 +163,9 @@ export function getActionsRuntime(): ActionsRuntime {
         }
         if (rail === 'browser') {
           return browserExecute(action)
+        }
+        if (rail === 'vision') {
+          return visionExecute(action)
         }
         return { ok: false, detail: `the '${rail}' rail is not built yet` }
       }
