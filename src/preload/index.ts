@@ -52,6 +52,22 @@ const offGridApi = {
       return unsubscribe('license:changed', sub)
     }
   },
+  // Approval UX v2: the inline gate card + outcome/undo feed (core surface).
+  actions: {
+    resolveGate: (actionId: string, decision: unknown) =>
+      ipcRenderer.invoke('actions:resolve-gate', actionId, decision),
+    undo: (record: unknown) => ipcRenderer.invoke('actions:undo', record),
+    onGatePending: (cb: (request: unknown) => void) => {
+      const sub = (_e: unknown, request: unknown): void => cb(request)
+      ipcRenderer.on('actions:gate-pending', sub)
+      return unsubscribe('actions:gate-pending', sub)
+    },
+    onOutcome: (cb: (outcome: unknown) => void) => {
+      const sub = (_e: unknown, outcome: unknown): void => cb(outcome)
+      ipcRenderer.on('actions:outcome', sub)
+      return unsubscribe('actions:outcome', sub)
+    }
+  },
   // Generic passthrough so pro renderer code can reach pro IPC channels without
   // the core preload bundle enumerating them.
   proInvoke: (channel: string, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args),

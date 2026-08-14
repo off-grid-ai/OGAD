@@ -12,10 +12,13 @@ import {
   abandonActionGate,
   gateHost,
   onGateParked,
+  parseGateDecision,
   pendingActionGateCount,
   railToKind,
+  registerInlineGateSurface,
   resolveActionGate,
-  whenActionParked
+  whenActionParked,
+  type InlineGateRequest
 } from '../gate-host'
 
 const record = (overrides: Partial<ActionRecord> = {}): ActionRecord =>
@@ -164,5 +167,70 @@ describe('the park signals', () => {
     expect(abandonActionGate('act_1')).toBe(true)
     expect(abandonActionGate('act_1')).toBe(false)
     expect(pendingActionGateCount()).toBe(0)
+  })
+})
+
+describe('the inline gate surface (Approval UX v2)', () => {
+  it('with a surface registered, a free-build gate parks and emits the card request', async () => {
+    const requests: InlineGateRequest[] = []
+    const unregister = registerInlineGateSurface((request) => requests.push(request))
+    try {
+      const parked = gateHost({ action: record({ risk: 'irreversible', rail: 'semantic' }) })
+      expect(requests).toHaveLength(1)
+      expect(requests[0]).toMatchObject({
+        actionId: 'act_1',
+        actionType: 'reminder',
+        kind: 'native',
+        risk: 'irreversible',
+        title: 'remind me to send the deck',
+        payloadHash: 'a'.repeat(64)
+      })
+      expect(pendingActionGateCount()).toBe(1)
+      resolveActionGate('act_1', { kind: 'approve' })
+      await expect(parked).resolves.toEqual({ kind: 'approve' })
+    } finally {
+      unregister()
+    }
+  })
+
+  it('unregistering restores the run-now default', async () => {
+    const unregister = registerInlineGateSurface(() => {})
+    unregister()
+    const decision = await gateHost({ action: record() })
+    expect(decision).toEqual({ kind: 'approve' })
+  })
+
+  it('a listening pro queue still wins over the inline surface (until the migration)', async () => {
+    const requests: unknown[] = []
+    const unregister = registerInlineGateSurface((request) => requests.push(request))
+    try {
+      registerHook(HOOKS.actionsProposeApproval, () => true)
+      const parked = gateHost({ action: record() })
+      expect(requests).toHaveLength(0)
+      resolveActionGate('act_1', { kind: 'approve' })
+      await parked
+    } finally {
+      unregister()
+    }
+  })
+})
+
+describe('parseGateDecision', () => {
+  it('accepts the three decision shapes and nothing else', () => {
+    expect(parseGateDecision({ kind: 'approve' })).toEqual({ kind: 'approve' })
+    expect(parseGateDecision({ kind: 'reject', reason: 'no' })).toEqual({
+      kind: 'reject',
+      reason: 'no'
+    })
+    expect(parseGateDecision({ kind: 'reject', reason: 42 })).toEqual({ kind: 'reject' })
+    expect(parseGateDecision({ kind: 'edit', args: { title: 'x' } })).toEqual({
+      kind: 'edit',
+      args: { title: 'x' }
+    })
+    expect(parseGateDecision({ kind: 'edit', args: [] })).toBeNull()
+    expect(parseGateDecision({ kind: 'edit' })).toBeNull()
+    expect(parseGateDecision({ kind: 'sudo' })).toBeNull()
+    expect(parseGateDecision('approve')).toBeNull()
+    expect(parseGateDecision(null)).toBeNull()
   })
 })

@@ -30,12 +30,15 @@ export interface ActionWorker {
   /** The outcome for one action id, or undefined when the wait times out
    *  (parked at the gate, or scheduled for later). */
   waitForOutcome(actionId: string, timeoutMs: number): Promise<TickOutcome | undefined>
+  /** Every outcome, as it lands - the UI's feed. Returns unsubscribe. */
+  onOutcome(listener: (outcome: TickOutcome) => void): () => void
   /** Whether a drain pass is currently running (health surface, tests). */
   draining(): boolean
 }
 
 export function createActionWorker(engine: EngineLike, park: ParkSignal): ActionWorker {
   const waiters = new Map<string, Array<(outcome: TickOutcome) => void>>()
+  const outcomeListeners = new Set<(outcome: TickOutcome) => void>()
   let running = false
 
   const notify = (outcome: TickOutcome) => {
@@ -45,6 +48,9 @@ export function createActionWorker(engine: EngineLike, park: ParkSignal): Action
       for (const resolve of list) {
         resolve(outcome)
       }
+    }
+    for (const listener of outcomeListeners) {
+      listener(outcome)
     }
   }
 
@@ -91,6 +97,10 @@ export function createActionWorker(engine: EngineLike, park: ParkSignal): Action
     },
     draining() {
       return running
+    },
+    onOutcome(listener) {
+      outcomeListeners.add(listener)
+      return () => outcomeListeners.delete(listener)
     },
     waitForOutcome(actionId, timeoutMs) {
       return new Promise((resolve) => {

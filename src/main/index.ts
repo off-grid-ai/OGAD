@@ -385,7 +385,9 @@ app.whenReady().then(async () => {
     setupIPC()
     setupRagIPC()
     setupMcpIpc() // basic MCP connectors (management + chat tool extension)
-    registerNativeActionTools(registerToolExtension) // computer use: semantic rail (macOS-only)
+    registerNativeActionTools(registerToolExtension) // the assistant's tools (macOS full set; Windows Outlook subset)
+    const { registerActionsIpc } = await import('./actions/actions-ipc')
+    registerActionsIpc() // Approval UX v2: inline gate cards + outcome/undo feed
     setupDesktopBackupIPC()
     // one OpenAI-compatible local gateway (LLM + STT); auto-picks a free port. Async, so handle a
     // rejection on the promise (a try/catch around a fire-and-forget async call can't catch it).

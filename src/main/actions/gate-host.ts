@@ -21,6 +21,18 @@
 import type { ActionRecord, GateDecision, Rail } from '@offgrid/use'
 import { proposeActionApproval, type ActionKind } from './approval'
 
+/** What the inline chat card needs to render and resolve one gate. */
+export interface InlineGateRequest {
+  actionId: string
+  actionType: string
+  kind: ActionKind
+  title: string
+  args: Record<string, unknown>
+  risk: string
+  payloadHash: string
+  source: string
+}
+
 /** The engine's rails, translated to the approval UI's executor kinds. */
 export function railToKind(rail: Rail | undefined): ActionKind {
   switch (rail) {
@@ -55,6 +67,45 @@ export function whenActionParked(actionId: string): Promise<void> {
 }
 
 const parkListeners = new Set<() => void>()
+
+/**
+ * The inline gate surface (Approval UX v2): when the app registers an
+ * emitter, gated actions with no pro queue listening PARK and render as a
+ * card in the chat instead of auto-running. Unregistered (tests, headless),
+ * the free-build behaviour stays run-now - the safe, unchanged default.
+ */
+let inlineSurface: ((request: InlineGateRequest) => void) | null = null
+
+export function registerInlineGateSurface(emit: (request: InlineGateRequest) => void): () => void {
+  inlineSurface = emit
+  return () => {
+    if (inlineSurface === emit) {
+      inlineSurface = null
+    }
+  }
+}
+
+/** Fail-closed parse of a renderer-supplied decision - unknown shapes reject. */
+export function parseGateDecision(input: unknown): GateDecision | null {
+  if (typeof input !== 'object' || input === null) {
+    return null
+  }
+  const kind = (input as Record<string, unknown>).kind
+  if (kind === 'approve') {
+    return { kind: 'approve' }
+  }
+  if (kind === 'reject') {
+    const reason = (input as Record<string, unknown>).reason
+    return { kind: 'reject', ...(typeof reason === 'string' ? { reason } : {}) }
+  }
+  if (kind === 'edit') {
+    const args = (input as Record<string, unknown>).args
+    if (typeof args === 'object' && args !== null && !Array.isArray(args)) {
+      return { kind: 'edit', args: args as Record<string, unknown> }
+    }
+  }
+  return null
+}
 
 /** Global "an action just parked at the gate" signal - the worker's cue to
  *  move on to the next due message instead of blocking on a human. */
@@ -118,8 +169,26 @@ export async function gateHost({ action }: { action: ActionRecord }): Promise<Ga
     payloadHash: action.payloadHash
   })
   if (queued !== true) {
-    // Nothing listening (free build), or the handler chose not to queue it:
-    // the unchanged behaviour is to run. The engine still verifies.
+    if (inlineSurface) {
+      // Approval UX v2: park and render the card in the conversation. Park
+      // BEFORE emitting so a same-tick resolve always finds the entry.
+      return new Promise<GateDecision>((resolve) => {
+        pending.set(action.id, resolve)
+        notifyParked(action.id)
+        inlineSurface?.({
+          actionId: action.id,
+          actionType: action.type,
+          kind: railToKind(action.rail),
+          title: action.intent,
+          args: action.args,
+          risk: action.risk,
+          payloadHash: action.payloadHash,
+          source: action.source
+        })
+      })
+    }
+    // Nothing listening and no inline surface (tests, headless): the
+    // unchanged behaviour is to run. The engine still verifies.
     return { kind: 'approve' }
   }
   return new Promise<GateDecision>((resolve) => {

@@ -38,6 +38,9 @@ export interface ActionsRuntime {
   ): Promise<ProposeOutcome>
   /** Reverse a done action through its handler's undo capability. */
   undo(record: ActionRecord): Promise<{ ok: boolean; detail?: string }>
+  /** Every outcome as it lands, with whether it can be undone - the chat
+   *  card and Undo chip feed. Returns unsubscribe. */
+  onOutcome(listener: (event: { outcome: TickOutcome; undoable: boolean }) => void): () => void
   waitForOutcome(actionId: string, timeoutMs: number): Promise<TickOutcome | undefined>
   whenParked(actionId: string): Promise<void>
   kick(): void
@@ -111,6 +114,9 @@ export function getActionsRuntime(): ActionsRuntime {
 
   // The platform decides which semantic rail implements the port - the one
   // concrete choice, made once here; nothing above it branches on an OS.
+  const registry = buildRegistry(
+    pickByPlatform(process.platform, makeOutlookNativeReader(runPowerShell), runNativeAction)
+  )
   const semanticExecute = pickByPlatform(
     process.platform,
     makeWindowsSemanticRailExecutor({
@@ -127,9 +133,7 @@ export function getActionsRuntime(): ActionsRuntime {
     // Read-back verification reads the world back through the platform's own
     // surface: the Swift helper's list verbs on macOS, Outlook COM on
     // Windows - the same command names, so buildRegistry is unchanged.
-    registry: buildRegistry(
-      pickByPlatform(process.platform, makeOutlookNativeReader(runPowerShell), runNativeAction)
-    ),
+    registry,
     device: {
       async execute(action: ActionRecord, rail: Rail) {
         if (rail !== 'semantic') {
@@ -173,6 +177,14 @@ export function getActionsRuntime(): ActionsRuntime {
       await ready
       return engine.undo(record)
     },
+    onOutcome: (listener) =>
+      worker.onOutcome((outcome) => {
+        const undoable =
+          outcome.outcome === 'done' &&
+          !!outcome.record.effectId &&
+          !!registry.get(outcome.record.type)?.undo
+        listener({ outcome, undoable })
+      }),
     approvalHookActive: () =>
       hasHook(HOOKS.actionsProposeApproval) || hasHook(HOOKS.legacyMcpProposeApproval)
   }

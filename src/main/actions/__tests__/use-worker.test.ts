@@ -105,3 +105,22 @@ describe('createActionWorker', () => {
     expect(worker.draining()).toBe(false)
   })
 })
+
+describe('onOutcome (the UI feed)', () => {
+  it('every outcome reaches subscribers, and unsubscribe stops the feed', async () => {
+    const script: Array<TickOutcome | undefined> = [done('a1'), done('a2'), undefined]
+    const engine: EngineLike = { tick: async () => script.shift() }
+    const worker = createActionWorker(engine, makePark().signal)
+    const seen: string[] = []
+    const unsubscribe = worker.onOutcome((outcome) => seen.push(outcome.id))
+    worker.kick()
+    await flush()
+    expect(seen).toEqual(['a1', 'a2'])
+    unsubscribe()
+    const more: Array<TickOutcome | undefined> = [done('a3'), undefined]
+    const worker2 = createActionWorker({ tick: async () => more.shift() }, makePark().signal)
+    worker2.kick()
+    await flush()
+    expect(seen).toEqual(['a1', 'a2'])
+  })
+})
