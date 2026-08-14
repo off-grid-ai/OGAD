@@ -41,10 +41,10 @@ commit, port before writing, brand copy rules on every UI string.
 
 ## C. The browser rail (~1.5-2 days)
 
-- [ ] **C1. CDP snapshot + indexed elements** over `webContents.debugger` (nanobrowser
+- [x] **C1. CDP snapshot + indexed elements** over `webContents.debugger` (nanobrowser
   dom module as start code, browser-use algorithm).
-- [ ] **C2. The watched pane + takeover** (login/identity boundary pauses, user acts).
-- [ ] **C3. web_task through the engine** (act/observe/extract API, Zod-validated),
+- [x] **C2. The watched pane + takeover** (login/identity boundary pauses, user acts).
+- [x] **C3. web_task through the engine** (act/observe/extract API, Zod-validated),
   gated at identity, verified by page-state postconditions.
 
 ## D. The vision rail (~1.5-2 days, supervised tier)
