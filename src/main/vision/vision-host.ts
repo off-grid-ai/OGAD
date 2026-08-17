@@ -2,48 +2,128 @@
  * The vision rail's live host (R2-D) - the Electron shell the pure spine plugs
  * into. It captures the screen (desktopCapturer), grounds each step with the
  * local vision model, runs the guard's kill switch, and actuates through an
- * ActuationPort.
+ * ActuationPort backed by the nut.js native input addon.
  *
- * Actuation is CAPABILITY-GATED. Synthetic mouse/keyboard needs a native addon
- * (@nut-tree-fork / robotjs) plus the Accessibility + Screen-Recording
- * entitlements and a notarization pass - a real packaging decision, not a
- * silent dependency. Until that addon is present, loadActuation() returns null,
- * visionActuationAvailable() is false, and the rail refuses cleanly ("vision
- * actuation is not available in this build") instead of half-working. The
- * computer_task TOOL is not offered to the model until the capability is there,
- * so the supervised tier is shipped labeled or not at all - never broken.
+ * Actuation is CAPABILITY-GATED on the OPTIONAL native addon (@nut-tree-fork/
+ * nut-js). When it is installed, loadActuation() returns a working port; when it
+ * is absent, it returns null and the rail refuses cleanly ("vision actuation is
+ * not available") instead of half-working - so an addon-less build (or a failed
+ * native rebuild) degrades gracefully rather than crashing. On macOS the run
+ * also needs the Accessibility grant; without it we prompt and stop with a clear
+ * message rather than clicking into the void.
  *
- * Native/Electron glue over the tested spine (parser, guard, loop, executor),
- * so it is excluded from in-process coverage - exercised on a real display in
- * the real-machine pass, not here.
+ * Native/Electron glue over the tested spine (parser, guard, loop, executor -
+ * and the pure hotkey map in vision-keys), so it is excluded from in-process
+ * coverage; the actuation itself is exercised on a real machine (a display + the
+ * Accessibility grant), which no headless runner has.
  */
-import { desktopCapturer, globalShortcut, screen } from 'electron'
+import { desktopCapturer, globalShortcut, screen, systemPreferences } from 'electron'
 import { llm } from '../llm'
 import type { VisionAction, Bounds } from './vision-action'
 import { runVisionTask, type VisionScreen, type VisionTaskResult } from './vision-agent'
 import { VisionGuard } from './vision-guard'
 import { buildVisionPrompt } from './vision-prompt'
+import { hotkeyToKeyNames } from './vision-keys'
 import { emitVisionState, emitVisionStep, registerVisionSession } from './vision-controller'
 import { visionModelNotice } from './vision-model-notice'
 import { getTakeoverCoordinator } from '../browser/takeover'
 
-/** The synthetic-input surface the host needs. Implemented by a native addon
- *  when one is installed; null otherwise. */
+/** The synthetic-input surface the host needs. Backed by the native addon when
+ *  installed; null otherwise. Async - the addon's operations are promises. */
 export interface ActuationPort {
-  moveMouse(x: number, y: number): void
-  click(button: 'left' | 'right', double: boolean): void
-  dragTo(x: number, y: number): void
-  typeText(text: string): void
-  tapKeys(keys: string): void
-  scroll(direction: 'up' | 'down' | 'left' | 'right'): void
+  moveMouse(x: number, y: number): Promise<void>
+  click(button: 'left' | 'right', double: boolean): Promise<void>
+  dragTo(x: number, y: number): Promise<void>
+  typeText(text: string): Promise<void>
+  tapKeys(keys: string): Promise<void>
+  scroll(direction: 'up' | 'down' | 'left' | 'right'): Promise<void>
 }
 
-/** Lazy-load the native actuation addon. Returns null when it is not installed
- *  - the honest state today, so callers gate on it. */
+/** The slice of the nut.js API the adapter uses. */
+interface NutApi {
+  mouse: {
+    setPosition(p: unknown): Promise<unknown>
+    leftClick(): Promise<unknown>
+    rightClick(): Promise<unknown>
+    doubleClick(btn: number): Promise<unknown>
+    drag(path: unknown[]): Promise<unknown>
+    scrollUp(n: number): Promise<unknown>
+    scrollDown(n: number): Promise<unknown>
+    scrollLeft(n: number): Promise<unknown>
+    scrollRight(n: number): Promise<unknown>
+  }
+  keyboard: {
+    type(...input: unknown[]): Promise<unknown>
+    pressKey(...keys: number[]): Promise<unknown>
+    releaseKey(...keys: number[]): Promise<unknown>
+  }
+  Point: new (x: number, y: number) => unknown
+  Button: { LEFT: number; RIGHT: number; MIDDLE: number }
+  Key: Record<string, number>
+}
+
+/**
+ * Load the OPTIONAL native input addon and adapt it to ActuationPort. The
+ * require is by a variable name so the bundler/typechecker never hard-binds the
+ * optional module; a missing addon (not installed, or a failed native rebuild)
+ * is caught and returns null, keeping the rail gated instead of crashing.
+ */
 function loadActuation(): ActuationPort | null {
-  // No addon is bundled yet (see the file header). When one is added, wire it
-  // here behind the same interface; nothing above this line changes.
-  return null
+  let nut: NutApi
+  try {
+    // Require by a VARIABLE name so the bundler never statically resolves the
+    // optional module (main is CJS - `require` is available at runtime); a
+    // missing or unbuilt addon throws here and we fall through to null.
+    const load = (m: string): NutApi => (require as NodeRequire)(m) as NutApi
+    nut = load('@nut-tree-fork/nut-js')
+  } catch {
+    return null
+  }
+  const { mouse, keyboard, Point, Button, Key } = nut
+  return {
+    async moveMouse(x, y) {
+      await mouse.setPosition(new Point(x, y))
+    },
+    async click(button, double) {
+      if (double) {
+        await mouse.doubleClick(Button.LEFT)
+        return
+      }
+      await (button === 'right' ? mouse.rightClick() : mouse.leftClick())
+    },
+    async dragTo(x, y) {
+      // The mouse is moved to the start first (dispatch), so a one-point path
+      // drags from there to here.
+      await mouse.drag([new Point(x, y)])
+    },
+    async typeText(text) {
+      await keyboard.type(text)
+    },
+    async tapKeys(keys) {
+      const names = hotkeyToKeyNames(keys)
+      if (!names) {
+        return
+      }
+      const codes = names.map((n) => Key[n]).filter((c) => typeof c === 'number')
+      if (codes.length !== names.length) {
+        return // an unmapped key - refuse the partial combo
+      }
+      await keyboard.pressKey(...codes)
+      await keyboard.releaseKey(...codes)
+    },
+    async scroll(direction) {
+      const steps = 3
+      if (direction === 'up') {
+        await mouse.scrollUp(steps)
+      } else if (direction === 'down') {
+        await mouse.scrollDown(steps)
+      } else if (direction === 'left') {
+        await mouse.scrollLeft(steps)
+      } else {
+        await mouse.scrollRight(steps)
+      }
+    }
+  }
 }
 
 export function visionActuationAvailable(): boolean {
@@ -65,41 +145,59 @@ function makeScreen(actuation: ActuationPort): VisionScreen {
       return { image, bounds: { width, height } as Bounds }
     },
     async actuate(action: VisionAction) {
-      dispatch(actuation, action)
+      await dispatch(actuation, action)
     }
   }
 }
 
-function dispatch(actuation: ActuationPort, action: VisionAction): void {
+async function dispatch(actuation: ActuationPort, action: VisionAction): Promise<void> {
   switch (action.type) {
     case 'click':
-      actuation.moveMouse(action.point.x, action.point.y)
-      actuation.click('left', false)
+      await actuation.moveMouse(action.point.x, action.point.y)
+      await actuation.click('left', false)
       return
     case 'double_click':
-      actuation.moveMouse(action.point.x, action.point.y)
-      actuation.click('left', true)
+      await actuation.moveMouse(action.point.x, action.point.y)
+      await actuation.click('left', true)
       return
     case 'right_click':
-      actuation.moveMouse(action.point.x, action.point.y)
-      actuation.click('right', false)
+      await actuation.moveMouse(action.point.x, action.point.y)
+      await actuation.click('right', false)
       return
     case 'drag':
-      actuation.moveMouse(action.from.x, action.from.y)
-      actuation.dragTo(action.to.x, action.to.y)
+      await actuation.moveMouse(action.from.x, action.from.y)
+      await actuation.dragTo(action.to.x, action.to.y)
       return
     case 'type':
-      actuation.typeText(action.content)
+      await actuation.typeText(action.content)
       return
     case 'hotkey':
-      actuation.tapKeys(action.keys)
+      await actuation.tapKeys(action.keys)
       return
     case 'scroll':
-      actuation.moveMouse(action.point.x, action.point.y)
-      actuation.scroll(action.direction)
+      await actuation.moveMouse(action.point.x, action.point.y)
+      await actuation.scroll(action.direction)
       return
     default:
       return
+  }
+}
+
+/** macOS needs the Accessibility grant to post synthetic input to other apps.
+ *  Returns the honest failure (prompting once) when it is missing. */
+function accessibilityBlock(): VisionTaskResult | null {
+  if (process.platform !== 'darwin') {
+    return null
+  }
+  if (systemPreferences.isTrustedAccessibilityClient(true)) {
+    return null
+  }
+  return {
+    ok: false,
+    summary:
+      'Off Grid needs Accessibility access to control the screen. Grant it in System Settings > Privacy & Security > Accessibility, then run this again.',
+    steps: [],
+    handoffs: 0
   }
 }
 
@@ -113,6 +211,10 @@ class VisionHost {
         steps: [],
         handoffs: 0
       }
+    }
+    const blocked = accessibilityBlock()
+    if (blocked) {
+      return blocked
     }
     const guard = new VisionGuard()
     // The kill switch: Esc halts the run and consumes the keypress. The overlay's

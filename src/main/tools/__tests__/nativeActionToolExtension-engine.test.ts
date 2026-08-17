@@ -47,6 +47,7 @@ describe('the tool-to-action-type map', () => {
   it('covers exactly the mutating tools', () => {
     expect(Object.keys(TOOL_ACTION_TYPES).sort()).toEqual([
       'calendar_create_event',
+      'computer_task',
       'mail_send',
       'messages_send',
       'reminders_create',
@@ -54,6 +55,7 @@ describe('the tool-to-action-type map', () => {
     ])
     expect(actionTypeForTool('reminders_create')).toBe('reminder')
     expect(actionTypeForTool('web_task')).toBe('web_task')
+    expect(actionTypeForTool('computer_task')).toBe('computer_task')
     expect(actionTypeForTool('calendar_list_events')).toBeUndefined()
   })
 })
@@ -279,7 +281,35 @@ describe('the engine path', () => {
       'darwin'
     )
     const reply = await extension.execute('web_task', { goal: 'x' })
-    expect(reply).toMatch(/need the on-device action engine/)
+    expect(reply).toMatch(/on-device action engine/)
+    expect(legacyPropose).not.toHaveBeenCalled()
+  })
+
+  it('computer_task becomes a vision-rail Action with the goal as its intent', async () => {
+    run.mockClear()
+    const port = makePort()
+    const extension = makeExtension(port)
+    const reply = await extension.execute('computer_task', { goal: 'share the deck in WhatsApp' })
+    expect(port.proposed[0]).toMatchObject({
+      type: 'computer_task',
+      intent: 'share the deck in WhatsApp',
+      args: { goal: 'share the deck in WhatsApp' },
+      risk: 'mutate'
+    })
+    expect(run).not.toHaveBeenCalled()
+    expect(reply).toBe('Done.')
+  })
+
+  it('computer_task is engine-only too - never offered to the legacy pro queue', async () => {
+    run.mockClear()
+    const legacyPropose = vi.fn(() => true)
+    const port = makePort({ approvalHookActive: () => true })
+    const extension = new NativeActionToolExtension(
+      { run, proposeApproval: legacyPropose, actions: port },
+      'darwin'
+    )
+    await extension.execute('computer_task', { goal: 'x' })
+    expect(port.proposed).toHaveLength(1)
     expect(legacyPropose).not.toHaveBeenCalled()
   })
 })

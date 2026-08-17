@@ -211,6 +211,27 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
     }),
     title: (a) => asString(a.goal, 'Run a web task'),
     formatResult: (result) => (typeof result === 'string' && result ? result : 'Done.')
+  },
+  {
+    name: 'computer_task',
+    description:
+      "Complete a task by controlling the desktop directly - clicking, typing, and navigating an app's window - for things no other tool can do (a desktop app with no web version, sharing a file through an app UI). The user watches in a supervised overlay and can stop or take over at any time; sign-ins and payments are handed back to them. Prefer web_task for websites and the direct tools (calendar/reminders/mail) whenever they fit - use this only when the task genuinely needs GUI control.",
+    parameters: {
+      type: 'object',
+      properties: {
+        goal: {
+          type: 'string',
+          description: 'The task to complete, in one sentence (e.g. "share the deck in WhatsApp")'
+        }
+      },
+      required: ['goal']
+    },
+    // The engine routes this to the vision rail; command is unused on that path.
+    command: 'computer.task',
+    risk: 'mutate',
+    buildArgs: (a) => ({ goal: asString(a.goal) }),
+    title: (a) => asString(a.goal, 'Run a computer-use task'),
+    formatResult: (result) => (typeof result === 'string' && result ? result : 'Done.')
   }
 ]
 
@@ -231,7 +252,8 @@ export const TOOL_ACTION_TYPES = {
   reminders_create: 'reminder',
   messages_send: 'message',
   mail_send: 'email',
-  web_task: 'web_task'
+  web_task: 'web_task',
+  computer_task: 'computer_task'
 } as const
 
 export function actionTypeForTool(
@@ -254,8 +276,10 @@ export const WINDOWS_TOOL_NAMES: ReadonlySet<string> = new Set([
   'reminders_create',
   'mail_send',
   'open_url',
-  // The browser rail is cross-platform (Electron CDP is the same everywhere).
-  'web_task'
+  // The browser + vision rails are cross-platform (Electron CDP / the nut.js
+  // native addon are the same everywhere).
+  'web_task',
+  'computer_task'
 ])
 
 export function specsForPlatform(platform: NodeJS.Platform): NativeToolSpec[] {
@@ -272,10 +296,10 @@ export function specsForPlatform(platform: NodeJS.Platform): NativeToolSpec[] {
  *  platform does not expose. */
 export function systemHintForPlatform(platform: NodeJS.Platform): string {
   if (platform === 'darwin') {
-    return "You can act on the user's Mac: manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme (like whatsapp://send) with open_url. Complete a task on a website - a check-in, an order, a form - with web_task, describing the whole goal in one call; it runs in a watched pane and hands back to the user for any sign-in or payment. Use ISO 8601 for all times. Anything that creates, sends, or runs a web task needs the user's approval; tell them it is pending until they approve."
+    return "You can act on the user's Mac: manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme (like whatsapp://send) with open_url. Complete a task on a website - a check-in, an order, a form - with web_task, describing the whole goal in one call; it runs in a watched pane and hands back to the user for any sign-in or payment. For a task that needs to control a desktop app directly (no web version), use computer_task - the user watches and can take over. Prefer the direct tools and web_task when they fit. Use ISO 8601 for all times. Anything that creates, sends, or runs a task needs the user's approval; tell them it is pending until they approve."
   }
   if (platform === 'win32') {
-    return "You can act on the user's PC through Outlook: create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url. Complete a task on a website - a check-in, an order, a form - with web_task, describing the whole goal in one call; it runs in a watched pane and hands back to the user for any sign-in or payment. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Anything that creates, sends, or runs a web task needs the user's approval; tell them it is pending until they approve."
+    return "You can act on the user's PC through Outlook: create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url. Complete a task on a website - a check-in, an order, a form - with web_task, describing the whole goal in one call; it runs in a watched pane and hands back to the user for any sign-in or payment. For a task that needs to control a desktop app directly, use computer_task - the user watches and can take over. Prefer the direct tools and web_task when they fit. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Anything that creates, sends, or runs a task needs the user's approval; tell them it is pending until they approve."
   }
   return ''
 }

@@ -106,16 +106,16 @@ export class NativeActionToolExtension implements ToolExtension {
     if (shouldGate(spec.risk)) {
       const actionType = actionTypeForTool(name)
       const actions = this.boundary.actions
-      // web_task is engine-only: no connector runs a web task, so it must not
-      // fall to the legacy queue even when a pro hook is listening (with B4 the
-      // pro queue resolves the engine gate anyway). Other actions keep the
-      // legacy path when a pro queue owns approvals.
-      const engineOnly = actionType === 'web_task'
+      // web_task and computer_task are engine-only: no connector runs them, so
+      // they must not fall to the legacy queue even when a pro hook is listening
+      // (with B4 the pro queue resolves the engine gate anyway). Other actions
+      // keep the legacy path when a pro queue owns approvals.
+      const engineOnly = actionType === 'web_task' || actionType === 'computer_task'
       if (actions && actionType && (engineOnly || !actions.approvalHookActive())) {
         return this.executeViaEngine(actions, actionType, spec, args)
       }
       if (engineOnly) {
-        return 'Error: web tasks need the on-device action engine, which is not available here.'
+        return 'Error: this task needs the on-device action engine, which is not available here.'
       }
       // Legacy path: offer to the approval seam; pro queues and executes.
       const queued = this.boundary.proposeApproval({
