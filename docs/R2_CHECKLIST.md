@@ -58,19 +58,28 @@ so the tier is honestly gated (see the watch-list).
 - [x] **D1a. The UI-TARS action parser** (ported from @ui-tars/sdk, closed to the
   shipped verbs; 0-1000 -> pixel denormalization, fail-closed). `computer_task`
   added to the shared ACTION_TYPES enum.
-- [ ] **D1b. UI-TARS-1.5-7B catalog entry** (GGUF + mmproj, Models screen) + OmniParser
-  v3 set-of-marks fallback. (Shared `@offgrid/models` catalog - the model download
-  surface.)
+- [x] **D1b. UI-TARS-1.5-7B catalog entry** (shared `@offgrid/models`):
+  mradermacher/UI-TARS-1.5-7B-GGUF, Q4_K_M weights (4.68GB) + f16 mmproj
+  (1.35GB), Apache-2.0 base, both URLs HEAD-verified 200. Downloadable from the
+  Models screen; regression test guards both roles + real URLs. (OmniParser v3
+  set-of-marks fallback still open - a second-source-of-marks nicety, not on the
+  critical path.)
 - [x] **D2a. The operator spine**: the guard (kill switch terminal + outranks all,
   pause-on-user-input, step budget), the supervised loop (screenshot -> ground ->
   actuate, handoff + resume, re-check-before-dispatch), and the engine adapter
   (computer_task on the vision rail, no-retry). The host shell captures via
   desktopCapturer, grounds via the vision LLM, Esc kill switch wired.
-- [ ] **D2b. Actuation + entitlements**: the native input addon
-  (@nut-tree-fork/robotjs; CGEvent mac / SendInput win) behind the host's
-  ActuationPort, plus Accessibility + Screen-Recording entitlements and the
-  overlay window. Capability-gated - `visionActuationAvailable()` is false until
-  this lands. Needs a human on a real machine.
+- [x] **D2b-UX. The supervised surface**: the overlay (live step feed, visible
+  Stop + Pause, the takeover promise on-screen) + the controller routing
+  Stop/Pause/Resume to the running task's guard (fail-closed, stale-safe) +
+  step/state broadcasts + the preload vision namespace. Tested; mounted in chat.
+- [ ] **D2b-native. Actuation + the grant**: the native input addon
+  (@nut-tree-fork/nut-js; CGEvent mac / SendInput win) behind the host's
+  ActuationPort, plus the runtime Accessibility grant (Screen-Recording +
+  `disable-library-validation` already covered by the entitlements). Capability-
+  gated - `visionActuationAvailable()` is false until this lands. Cannot be
+  verified in this sandbox (no display, no TCC): needs a human on a real machine.
+  Everything above it (spine + supervised UX) is ready to switch on.
 - [ ] **D3. file_share through the engine** (the WhatsApp recipe) behind the gate -
   lands with D2b + the tool exposure.
 
