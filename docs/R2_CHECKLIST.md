@@ -58,12 +58,18 @@ so the tier is honestly gated (see the watch-list).
 - [x] **D1a. The UI-TARS action parser** (ported from @ui-tars/sdk, closed to the
   shipped verbs; 0-1000 -> pixel denormalization, fail-closed). `computer_task`
   added to the shared ACTION_TYPES enum.
-- [x] **D1b. UI-TARS-1.5-7B catalog entry** (shared `@offgrid/models`):
-  mradermacher/UI-TARS-1.5-7B-GGUF, Q4_K_M weights (4.68GB) + f16 mmproj
-  (1.35GB), Apache-2.0 base, both URLs HEAD-verified 200. Downloadable from the
-  Models screen; regression test guards both roles + real URLs. (OmniParser v3
-  set-of-marks fallback still open - a second-source-of-marks nicety, not on the
-  critical path.)
+- [x] **D1b. UI-TARS-1.5-7B catalog entry** in **OGAD's own `packages/models`**
+  (OGAD ships `file:./packages/models`, NOT the shared copy - the first attempt
+  landed in shared, which OGAD does not consume; corrected). mradermacher/
+  UI-TARS-1.5-7B-GGUF, Q4_K_M weights (4.68GB) + f16 mmproj (1.35GB), Apache-2.0
+  base, both URLs HEAD-verified 200, dist rebuilt. Downloadable from the Models
+  screen; regression test against the real catalog. (OmniParser v3 set-of-marks
+  fallback still open - a second-source-of-marks nicety, not on the critical path.)
+- [x] **D1c. Model-agnostic + a grounder notice** (the maintainer's call): the
+  vision rail runs on any loaded model, but warns (never blocks) when it is not
+  a grounder. `grounder` flag on catalogued models + isGrounderModel() (flag
+  authoritative, name heuristic for a user's own HF pick); the supervisor overlay
+  shows an amber notice ('may click the wrong place') that names the fix.
 - [x] **D2a. The operator spine**: the guard (kill switch terminal + outranks all,
   pause-on-user-input, step budget), the supervised loop (screenshot -> ground ->
   actuate, handoff + resume, re-check-before-dispatch), and the engine adapter
