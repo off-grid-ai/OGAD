@@ -37,7 +37,7 @@ const world = (
   const actuator: ElementActuator = {
     click: async (e) => void acted.push(`click:${e.index}`),
     press: async (e) => void acted.push(`press:${e.index}`),
-    type: async (e, text) => void acted.push(`type:${e.index}:${text}`),
+    type: async (e, text) => void acted.push(`type:${e ? e.index : 'focus'}:${text}`),
     keys: async (combo) => void acted.push(`keys:${combo}`)
   }
   const snapshot: AxSnapshot = { windowTitle: 'App', elements }
@@ -83,6 +83,18 @@ describe('runElementTask', () => {
     const w = world(['{"action":"key","keys":"cmd k"}', '{"action":"done","summary":"ok"}'])
     await runElementTask('t', w.deps)
     expect(w.acted).toEqual(['keys:cmd k'])
+  })
+
+  it('types into the FOCUSED field (no index) and submits with a trailing key', async () => {
+    // Exactly how a general model drives a compose box it cannot pick out of the
+    // list: {"action":"type","text":"hi","keys":"Enter"} - type at focus, send.
+    const w = world([
+      '{"action":"type","text":"hi","keys":"Enter"}',
+      '{"action":"done","summary":"sent"}'
+    ])
+    const result = await runElementTask('send hi to sidd', w.deps)
+    expect(result).toMatchObject({ ok: true, summary: 'sent' })
+    expect(w.acted).toEqual(['type:focus:hi', 'keys:Enter'])
   })
 
   it('re-observes an unparsed reply and a missing element, acting on neither', async () => {
@@ -138,6 +150,27 @@ describe('parseElementStep', () => {
     }
   })
 
+  it('types with an OPTIONAL index and a trailing submit key (how a general model phrases it)', () => {
+    // No index -> type into the focused field; "keys" is a trailing submit.
+    expect(parseElementStep('{"action":"type","text":"hi","keys":"Enter"}')).toEqual({
+      action: 'type',
+      text: 'hi',
+      submitKeys: 'Enter'
+    })
+    // With an index, target that field; no submit key.
+    expect(parseElementStep('{"action":"type","index":4,"text":"hello"}')).toEqual({
+      action: 'type',
+      index: 4,
+      text: 'hello'
+    })
+    // "key" (singular) is accepted for the submit too.
+    expect(parseElementStep('{"action":"type","text":"x","key":"Enter"}')).toEqual({
+      action: 'type',
+      text: 'x',
+      submitKeys: 'Enter'
+    })
+  })
+
   it('tolerates a general chat model wrapping the JSON (fences, reasoning, prose)', () => {
     // A non-grounder often does not emit bare JSON even under a grammar hint -
     // markdown fences, a <think> channel, or a sentence around it. The rail must
@@ -164,6 +197,10 @@ describe('buildElementPrompt', () => {
     )
     expect(prompt).toContain('Task: send hi to sidd')
     expect(prompt).toContain('[1] AXButton')
-    expect(prompt).toMatch(/sign-in.*give_up/)
+    expect(prompt).toMatch(/sign-in.*give_up/i)
+    // The type rule must teach the optional-index + trailing-submit shape a
+    // general model needs, or it re-observes forever (the Slack regression).
+    expect(prompt).toMatch(/omit "index".*focused/i)
+    expect(prompt).toMatch(/"keys":"Enter".*send/i)
   })
 })

@@ -129,7 +129,10 @@ function makeElementActuator(actuation: ActuationPort, guard: VisionGuard): Elem
     },
     async type(el, text) {
       ensureLive()
-      await clickCenter(el)
+      // With a target, focus it first; without one, type into the focused field.
+      if (el) {
+        await clickCenter(el)
+      }
       await actuation.typeText(text)
     },
     async keys(combo) {

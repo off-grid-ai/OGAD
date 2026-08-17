@@ -19,8 +19,10 @@ export interface ElementActuator {
   click(el: AxElement): Promise<void>
   /** AXPress the element (preferred when it exposes a press action). */
   press(el: AxElement): Promise<void>
-  /** Focus the element and type text (replacing any current value). */
-  type(el: AxElement, text: string): Promise<void>
+  /** Type text. With an element, focus it first (click its center); a null
+   *  element types into whatever the app already has focused - which is how a
+   *  general model drives a compose box it cannot pick out of the element list. */
+  type(el: AxElement | null, text: string): Promise<void>
   /** A key or combo to the focused UI: "Enter", "cmd k", "cmd shift g". */
   keys(combo: string): Promise<void>
 }
@@ -43,7 +45,10 @@ export interface ElementTaskResult {
 export type ElementStep =
   | { action: 'click'; index: number }
   | { action: 'press'; index: number }
-  | { action: 'type'; index: number; text: string }
+  // index is OPTIONAL: a general model often cannot pick the compose box out of
+  // the list and types into the focused field. submitKeys carries a trailing
+  // "Enter" so "type hi and send" lands in one step (how the model phrases it).
+  | { action: 'type'; index?: number; text: string; submitKeys?: string }
   | { action: 'key'; keys: string }
   | { action: 'done'; summary: string }
   | { action: 'give_up'; why: string }
@@ -118,8 +123,19 @@ export function parseElementStep(raw: string): ElementStep | null {
     case 'press':
       return idx !== undefined ? { action: 'press', index: idx } : null
     case 'type': {
+      // text is required; index is OPTIONAL (type into the focused field when
+      // omitted). A "keys"/"key" on a type step is a trailing submit ("Enter").
       const text = typeof value.text === 'string' ? value.text : undefined
-      return idx !== undefined && text !== undefined ? { action: 'type', index: idx, text } : null
+      if (text === undefined) {
+        return null
+      }
+      const submitKeys = str('keys') ?? str('key')
+      return {
+        action: 'type',
+        text,
+        ...(idx !== undefined ? { index: idx } : {}),
+        ...(submitKeys ? { submitKeys } : {})
+      }
     }
     case 'key': {
       const keys = str('keys')
@@ -142,12 +158,12 @@ export function buildElementPrompt(goal: string, snapshot: AxSnapshot, history: 
     formatAxElementsForModel(snapshot),
     '',
     history.length ? `Previous steps:\n${history.slice(-6).join('\n')}` : '',
-    'Rules:',
-    '- Refer to elements by their [number]. One action per reply.',
-    '- click / press an element, type into a field, or send a key combo ("Enter", "cmd k").',
-    '- For a sign-in, one-time code, or payment, reply give_up and let the user act.',
-    '- When the task is complete reply {"action":"done","summary":"..."}.',
-    '- If it cannot be done reply {"action":"give_up","why":"..."}.',
+    'Rules - one action per reply, using an element [number]:',
+    '- Click: {"action":"click","index":N} or {"action":"press","index":N}',
+    '- Type: {"action":"type","index":N,"text":"..."} - omit "index" to type into the field that is already focused; add "keys":"Enter" to send.',
+    '- Key: {"action":"key","keys":"Enter"} (or "cmd k").',
+    '- Sign-in, one-time code, or payment: {"action":"give_up","why":"..."} and let the user act.',
+    '- Task complete: {"action":"done","summary":"..."}. Cannot be done: {"action":"give_up","why":"..."}.',
     'Reply with ONLY the JSON for your next action.'
   ]
     .filter(Boolean)
@@ -190,14 +206,33 @@ export async function runElementTask(
       note(`key ${decision.keys}`)
       continue
     }
+    if (decision.action === 'type') {
+      // index is optional: focus the named field if given, else type into the
+      // field the app already has focused (the common case a general model hits).
+      let target: AxElement | null = null
+      if (decision.index !== undefined) {
+        target = snapshot.elements.find((candidate) => candidate.index === decision.index) ?? null
+        if (!target) {
+          note(`no element [${decision.index}] on this screen`)
+          continue
+        }
+      }
+      await actuator.type(target, decision.text)
+      note(
+        target
+          ? `typed into [${target.index}] ${target.name || target.role}`
+          : `typed "${decision.text}" into the focused field`
+      )
+      // A trailing submit key ("Enter") sends the message in the same step.
+      if (decision.submitKeys) {
+        await actuator.keys(decision.submitKeys)
+        note(`key ${decision.submitKeys}`)
+      }
+      continue
+    }
     const el = snapshot.elements.find((candidate) => candidate.index === decision.index)
     if (!el) {
       note(`no element [${decision.index}] on this screen`)
-      continue
-    }
-    if (decision.action === 'type') {
-      await actuator.type(el, decision.text)
-      note(`typed into [${el.index}] ${el.name || el.role}`)
       continue
     }
     // click or press: prefer AXPress when the element exposes it.
