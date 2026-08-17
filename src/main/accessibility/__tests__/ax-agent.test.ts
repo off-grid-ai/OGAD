@@ -119,11 +119,38 @@ describe('runElementTask', () => {
   })
 
   it('stops at the step budget', async () => {
-    const w = world(Array.from({ length: 20 }, () => '{"action":"key","keys":"Tab"}'))
+    // Distinct keys each step so the runaway guard does not fire first.
+    const w = world(Array.from({ length: 20 }, (_, i) => `{"action":"key","keys":"cmd ${i}"}`))
     const result = await runElementTask('t', { ...w.deps, maxSteps: 3 })
     expect(result.ok).toBe(false)
     expect(result.summary).toMatch(/stopped after 3 steps/)
     expect(w.acted).toHaveLength(3)
+  })
+
+  it('halts on a repeated action so a live send never fires twice (runaway guard)', async () => {
+    // The exact failure seen live: the model sent "hi", did not notice, and asked
+    // to send it again. The guard must stop BEFORE the second actuation.
+    const w = world([
+      '{"action":"type","index":2,"text":"hi","keys":"Enter"}',
+      '{"action":"type","index":2,"text":"hi","keys":"Enter"}', // identical -> halt
+      '{"action":"done","summary":"unreachable"}'
+    ])
+    const result = await runElementTask('send hi', w.deps)
+    expect(result.ok).toBe(false)
+    expect(result.summary).toMatch(/repeated the same action/i)
+    // Actuated exactly once - the message was not sent twice.
+    expect(w.acted).toEqual(['type:2:hi', 'keys:Enter'])
+  })
+
+  it('does NOT halt when consecutive actions differ (no false positive)', async () => {
+    const w = world([
+      '{"action":"type","index":2,"text":"hi","keys":"Enter"}',
+      '{"action":"press","index":1}', // different action -> allowed
+      '{"action":"done","summary":"ok"}'
+    ])
+    const result = await runElementTask('t', w.deps)
+    expect(result.ok).toBe(true)
+    expect(w.acted).toEqual(['type:2:hi', 'keys:Enter', 'press:1'])
   })
 })
 

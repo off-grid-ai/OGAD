@@ -177,6 +177,25 @@ export function buildElementPrompt(goal: string, snapshot: AxSnapshot, history: 
 
 const DEFAULT_MAX_STEPS = 14
 
+/** A stable signature of an actuating step, used to detect a runaway loop. Two
+ *  consecutive identical signatures mean the model is repeating itself (it sent
+ *  the message, did not notice, and is sending it again) - the rail halts rather
+ *  than actuate the duplicate. Terminal actions (done/give_up) have none. */
+export function actionSignature(step: ElementStep): string | null {
+  switch (step.action) {
+    case 'click':
+      return `click:${step.index}`
+    case 'press':
+      return `press:${step.index}`
+    case 'type':
+      return `type:${step.index ?? 'focus'}:${step.text}:${step.submitKeys ?? ''}`
+    case 'key':
+      return `key:${step.keys}`
+    default:
+      return null
+  }
+}
+
 /* eslint-disable complexity -- one state machine; per-action helpers would hide
    the observe/act/stop control flow the tests pin down. */
 export async function runElementTask(
@@ -190,6 +209,7 @@ export async function runElementTask(
     steps.push(line)
     onStep?.(line)
   }
+  let lastActionSig: string | null = null
 
   for (let step = 0; step < maxSteps; step += 1) {
     const snapshot = await read()
@@ -206,6 +226,19 @@ export async function runElementTask(
       note(`gave up: ${decision.why}`)
       return { ok: false, summary: decision.why, steps }
     }
+    // Runaway guard: the model just asked to repeat the EXACT action it already
+    // did (e.g. send "hi" again). Stop before actuating the duplicate - a live
+    // action like a message must never fire twice because the model looped.
+    const sig = actionSignature(decision)
+    if (sig !== null && sig === lastActionSig) {
+      note('the model repeated the same action; stopping to avoid a loop')
+      return {
+        ok: false,
+        summary: 'stopped: the model repeated the same action, which usually means it is looping',
+        steps
+      }
+    }
+    lastActionSig = sig
     if (decision.action === 'key') {
       await actuator.keys(decision.keys)
       note(`key ${decision.keys}`)
