@@ -79,15 +79,17 @@ so the tier is honestly gated (see the watch-list).
   Stop + Pause, the takeover promise on-screen) + the controller routing
   Stop/Pause/Resume to the running task's guard (fail-closed, stale-safe) +
   step/state broadcasts + the preload vision namespace. Tested; mounted in chat.
-- [ ] **D2b-native. Actuation + the grant**: the native input addon
-  (@nut-tree-fork/nut-js; CGEvent mac / SendInput win) behind the host's
-  ActuationPort, plus the runtime Accessibility grant (Screen-Recording +
-  `disable-library-validation` already covered by the entitlements). Capability-
-  gated - `visionActuationAvailable()` is false until this lands. Cannot be
-  verified in this sandbox (no display, no TCC): needs a human on a real machine.
-  Everything above it (spine + supervised UX) is ready to switch on.
-- [ ] **D3. file_share through the engine** (the WhatsApp recipe) behind the gate -
-  lands with D2b + the tool exposure.
+- [x] **D2b-native. Actuation wired**: the ActuationPort is backed by
+  @nut-tree-fork/nut-js (optionalDependency; CGEvent mac / SendInput win),
+  dynamic-required so an absent/unbuilt addon degrades to a clean refusal. The
+  macOS Accessibility grant is checked at run start (prompts once, stops with a
+  clear message if missing). `computer_task` exposed as an engine-only tool. The
+  pure hotkey map (vision-keys) is tested; the actuation ITSELF still needs a
+  real machine to VERIFY (a display + the Accessibility grant) - the code is on
+  the branch for local testing, not proven headlessly.
+- [ ] **D3. file_share recipe** (the WhatsApp share-a-file flow) as a labeled
+  showcase - a nicety on top of the general computer_task, once the rail is
+  verified on a real machine.
 
 ## E. Safety pass + the release
 
