@@ -51,14 +51,31 @@ function makeScreen(actuation: ActuationPort): VisionScreen {
       const point = screen.getCursorScreenPoint()
       const display = screen.getDisplayNearestPoint(point)
       const { width, height } = display.size
-      const sources = await desktopCapturer.getSources({
-        types: ['screen'],
-        thumbnailSize: { width, height }
-      })
-      const source = sources[0]
-      if (source) {
-        fs.writeFileSync(CAPTURE_FILE, source.thumbnail.toPNG())
+      // desktopCapturer can hand back an EMPTY thumbnail when the system is busy
+      // (e.g. right after a multi-GB model swap) - which becomes a 0-byte PNG and
+      // then a llama-server "400 Failed to load image". Retry, prefer the source
+      // for the cursor's display, and validate the buffer before writing.
+      let png: Buffer | null = null
+      for (let attempt = 0; attempt < 4 && (png === null || png.length === 0); attempt += 1) {
+        const sources = await desktopCapturer.getSources({
+          types: ['screen'],
+          thumbnailSize: { width, height }
+        })
+        const source =
+          sources.find((s) => String(s.display_id) === String(display.id)) ?? sources[0]
+        if (source && !source.thumbnail.isEmpty()) {
+          png = source.thumbnail.toPNG()
+        }
+        if (png === null || png.length === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 250))
+        }
       }
+      if (png === null || png.length === 0) {
+        throw new Error(
+          'screen capture returned an empty image - check Screen Recording permission for Off Grid'
+        )
+      }
+      fs.writeFileSync(CAPTURE_FILE, png)
       // Return the file path - the grounder reads it from disk.
       return { image: CAPTURE_FILE, bounds: { width, height } as Bounds }
     },

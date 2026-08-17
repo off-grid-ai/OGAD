@@ -9,8 +9,46 @@ import {
   MODE_PRESETS,
   samplingPayload,
   launchArgsChanged,
+  buildLaunchArgs,
+  type LaunchArgsInput,
   type LaunchState
 } from '../settings-math'
+
+const baseArgs = (over: Partial<LaunchArgsInput> = {}): LaunchArgsInput => ({
+  modelPath: '/m/model.gguf',
+  mmProjPath: '',
+  port: 8439,
+  effectiveCtxSize: 16384,
+  gpuLayers: 99,
+  flashAttn: false,
+  kvCacheType: 'f16',
+  threads: undefined,
+  batchSize: undefined,
+  ...over
+})
+
+describe('buildLaunchArgs image-min-tokens', () => {
+  it('adds --image-min-tokens only with a projector AND a set floor (grounder)', () => {
+    const args = buildLaunchArgs(
+      baseArgs({ mmProjPath: '/m/UI-TARS.mmproj.gguf', imageMinTokens: 1024 })
+    )
+    const i = args.indexOf('--image-min-tokens')
+    expect(i).toBeGreaterThan(-1)
+    expect(args[i + 1]).toBe('1024')
+    expect(args).toContain('--mmproj')
+  })
+
+  it('omits --image-min-tokens for a text-only model even if a floor is passed', () => {
+    // No projector -> the flag would be meaningless.
+    const args = buildLaunchArgs(baseArgs({ mmProjPath: '', imageMinTokens: 1024 }))
+    expect(args).not.toContain('--image-min-tokens')
+  })
+
+  it('omits --image-min-tokens for a general vision model (no floor set)', () => {
+    const args = buildLaunchArgs(baseArgs({ mmProjPath: '/m/gemma.mmproj.gguf' }))
+    expect(args).not.toContain('--image-min-tokens')
+  })
+})
 
 describe('MODE_PRESETS', () => {
   it('conservative quantizes the KV cache (q8_0) with flash-attn and a modest ctx', () => {
