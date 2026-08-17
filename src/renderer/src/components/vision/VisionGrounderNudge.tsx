@@ -21,12 +21,20 @@ export function VisionGrounderNudge(): React.JSX.Element | null {
   const [notice, setNotice] = useState<string | null>(null)
 
   useEffect(() => {
-    const off = window.api.vision?.onTaskState((event) => {
-      const state = event as TaskState
-      // A run with a notice raises it; a run without one clears a stale nudge.
-      setNotice(state.notice ?? null)
+    // Queue time: the chat tool warns the moment a computer_task is queued on a
+    // non-grounder, before the user approves.
+    const offNotice = window.api.vision?.onNotice((event) => {
+      setNotice((event as { notice?: string }).notice ?? null)
     })
-    return () => off?.()
+    // Run time: a run raises its notice; a grounder run (no notice) clears a
+    // stale nudge.
+    const offState = window.api.vision?.onTaskState((event) => {
+      setNotice((event as TaskState).notice ?? null)
+    })
+    return () => {
+      offNotice?.()
+      offState?.()
+    }
   }, [])
 
   if (!notice) {

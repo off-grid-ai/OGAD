@@ -300,6 +300,22 @@ describe('the engine path', () => {
     expect(reply).toBe('Done.')
   })
 
+  it('queuing a computer_task announces the grounder nudge - but a web_task or a semantic tool does not', async () => {
+    const announceComputerTask = vi.fn()
+    const port = makePort()
+    const extension = new NativeActionToolExtension(
+      { run, proposeApproval, announceComputerTask, actions: port },
+      'darwin'
+    )
+    await extension.execute('computer_task', { goal: 'share the deck' })
+    expect(announceComputerTask).toHaveBeenCalledTimes(1)
+
+    announceComputerTask.mockClear()
+    await extension.execute('web_task', { goal: 'check in' })
+    await extension.execute('reminders_create', { title: 'x' })
+    expect(announceComputerTask).not.toHaveBeenCalled()
+  })
+
   it('computer_task is engine-only too - never offered to the legacy pro queue', async () => {
     run.mockClear()
     const legacyPropose = vi.fn(() => true)

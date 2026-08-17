@@ -101,6 +101,11 @@ const offGridApi = {
       const sub = (_e: unknown, state: unknown): void => cb(state)
       ipcRenderer.on('vision:task-state', sub)
       return unsubscribe('vision:task-state', sub)
+    },
+    onNotice: (cb: (notice: unknown) => void) => {
+      const sub = (_e: unknown, notice: unknown): void => cb(notice)
+      ipcRenderer.on('vision:notice', sub)
+      return unsubscribe('vision:notice', sub)
     }
   },
   // Generic passthrough so pro renderer code can reach pro IPC channels without

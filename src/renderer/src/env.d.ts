@@ -137,6 +137,7 @@ interface RendererAPIOverrides {
     control: (command: 'stop' | 'pause' | 'resume') => Promise<boolean>
     onStep: (cb: (step: unknown) => void) => () => void
     onTaskState: (cb: (state: unknown) => void) => () => void
+    onNotice: (cb: (notice: unknown) => void) => () => void
   }
   proInvoke?: (channel: string, ...args: unknown[]) => Promise<unknown>
   proOn?: (channel: string, cb: (...a: unknown[]) => void) => () => void

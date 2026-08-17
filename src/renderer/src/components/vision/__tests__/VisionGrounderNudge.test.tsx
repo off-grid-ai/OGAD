@@ -11,6 +11,7 @@ import { VisionGrounderNudge } from '../VisionGrounderNudge'
 
 type Listener = (payload: unknown) => void
 let emitState: Listener
+let emitNotice: Listener
 
 beforeEach(() => {
   window.api = {
@@ -19,6 +20,10 @@ beforeEach(() => {
       onStep: () => () => {},
       onTaskState: (cb: Listener) => {
         emitState = cb
+        return () => {}
+      },
+      onNotice: (cb: Listener) => {
+        emitNotice = cb
         return () => {}
       }
     }
@@ -33,17 +38,26 @@ describe('<VisionGrounderNudge/>', () => {
     expect(container.firstChild).toBeNull()
   })
 
-  it('shows the notice (in the shared nudge look) when the model is not a grounder', async () => {
+  it('shows the notice at QUEUE time (onNotice), before any run', async () => {
     render(<VisionGrounderNudge />)
-    emitState({
-      taskId: 'v1',
-      goal: 'x',
-      status: 'running',
+    emitNotice({
       notice:
         'The current model is not a grounding model, so computer use may click the wrong place.'
     })
     await waitFor(() => screen.getByRole('status'))
     expect(screen.getByText(/may click the wrong place/)).toBeTruthy()
+  })
+
+  it('also shows a run-time notice via task-state (in the shared nudge look)', async () => {
+    render(<VisionGrounderNudge />)
+    emitState({
+      taskId: 'v1',
+      goal: 'x',
+      status: 'running',
+      notice: 'not a grounder - load UI-TARS'
+    })
+    await waitFor(() => screen.getByRole('status'))
+    expect(screen.getByText(/load UI-TARS/)).toBeTruthy()
   })
 
   it('is dismissable', async () => {

@@ -16,6 +16,9 @@ import type { ToolExtension } from '../tools'
 import type { ProposeOutcome, TickOutcome } from '@offgrid/use'
 import { proposeActionApproval, shouldGate, type ActionApprovalRequest } from '../actions/approval'
 import { getActionsRuntime } from '../actions/use-runtime'
+import { llm } from '../llm'
+import { visionModelNotice } from '../vision/vision-model-notice'
+import { emitVisionNotice } from '../vision/vision-controller'
 import { makeWinInlineRunner } from '../actions/semantic-rail-win'
 import { runNativeAction } from '../actions/native-helper'
 import type { NativeActionCommand, NativeActionResponse } from '../actions/native-helper-logic'
@@ -42,6 +45,10 @@ export interface NativeActionToolBoundary {
   run: (cmd: NativeActionCommand) => Promise<NativeActionResponse>
   proposeApproval: (request: ActionApprovalRequest) => boolean | undefined
   actions?: ActionsPort
+  /** Called when a computer_task is queued: warns the chat, at queue time, if
+   *  the loaded model is not a grounder. Injected so the broadcast is faked in
+   *  tests. */
+  announceComputerTask?: () => void
 }
 
 /** How long the tool waits for a free-build action to finish before calling
@@ -72,6 +79,12 @@ const productionBoundary: NativeActionToolBoundary = {
     // The import is static (the main bundle is one CJS chunk); the runtime
     // itself builds lazily on first access, once the DB exists.
     return getActionsRuntime()
+  },
+  announceComputerTask: () => {
+    const notice = visionModelNotice(llm.activeModelInfo())
+    if (notice) {
+      emitVisionNotice(notice)
+    }
   }
 }
 
@@ -160,6 +173,11 @@ export class NativeActionToolExtension implements ToolExtension {
     }
     if (proposed.deduped) {
       return `That exact action is already queued — not queuing a duplicate. Tell the user it is already in flight.`
+    }
+    // A computer_task is now queued: warn the chat at queue time if the loaded
+    // model can't ground (the nudge appears whether or not the user approves).
+    if (actionType === 'computer_task') {
+      this.boundary.announceComputerTask?.()
     }
     actions.kick()
     const raced = await Promise.race([

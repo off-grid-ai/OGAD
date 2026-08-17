@@ -36,6 +36,13 @@ export function emitVisionStep(taskId: string, note: string): void {
   broadcast('vision:step', { taskId, note })
 }
 
+/** Warn the chat, at QUEUE time, that a computer-use task was queued on a
+ *  non-grounder - so the user sees it before approving, not only once the rail
+ *  runs. The chat's grounder nudge subscribes to this. */
+export function emitVisionNotice(notice: string): void {
+  broadcast('vision:notice', { notice })
+}
+
 /** Push the task lifecycle state to the overlay. `notice` warns (never blocks)
  *  when the loaded model is not a grounder - the rail stays model-agnostic. */
 export function emitVisionState(state: {
