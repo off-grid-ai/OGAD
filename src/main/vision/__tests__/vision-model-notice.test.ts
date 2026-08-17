@@ -5,7 +5,7 @@
  * still names the fix (load a grounder) - it warns, never blocks.
  */
 import { describe, expect, it } from 'vitest'
-import { visionModelNotice } from '../vision-model-notice'
+import { visionModelNotice, grounderNudgeForQueuedTask } from '../vision-model-notice'
 
 describe('visionModelNotice', () => {
   it('says nothing when a grounder is loaded', () => {
@@ -39,5 +39,27 @@ describe('visionModelNotice', () => {
     ]) {
       expect(visionModelNotice(model)).toMatch(/Models screen/)
     }
+  })
+})
+
+describe('grounderNudgeForQueuedTask', () => {
+  const general = { id: 'unsloth/Qwen3-VL-8B-Instruct-GGUF', vision: true }
+
+  it('says NOTHING when the accessibility rail will drive the task - no grounder needed', () => {
+    // The headline case: a general model driving an AX-rich app (Slack). Nudging
+    // for a grounder here would contradict the feature.
+    expect(grounderNudgeForQueuedTask(general, true)).toBeNull()
+    expect(grounderNudgeForQueuedTask(null, true)).toBeNull()
+  })
+
+  it('warns when the task will fall to vision on a non-grounder', () => {
+    const notice = grounderNudgeForQueuedTask(general, false)
+    expect(notice).toMatch(/not a grounding model/i)
+  })
+
+  it('says nothing when a grounder is loaded, even falling to vision', () => {
+    expect(
+      grounderNudgeForQueuedTask({ id: 'mradermacher/UI-TARS-1.5-7B-GGUF', vision: true }, false)
+    ).toBeNull()
   })
 })

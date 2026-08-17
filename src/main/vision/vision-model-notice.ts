@@ -31,3 +31,23 @@ export function visionModelNotice(model: ActiveModel | null): string | null {
   }
   return null
 }
+
+/**
+ * The grounder nudge to show for a QUEUED computer_task, given the model and
+ * whether the accessibility rail can drive this task. AX-first tiering means a
+ * task an AX-rich app can drive needs NO grounder - so we must NOT nudge for one
+ * there, or we would contradict the feature on exactly the case it is built for.
+ * The warning is only honest when the task will actually fall to the vision rail.
+ *
+ * Pure: the host passes the model + the AX-viability it already computed; this
+ * returns the notice string or null.
+ */
+export function grounderNudgeForQueuedTask(
+  model: ActiveModel | null,
+  axRailWillDrive: boolean
+): string | null {
+  if (axRailWillDrive) {
+    return null
+  }
+  return visionModelNotice(model)
+}

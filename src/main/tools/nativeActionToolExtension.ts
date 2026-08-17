@@ -17,8 +17,10 @@ import type { ProposeOutcome, TickOutcome } from '@offgrid/use'
 import { proposeActionApproval, shouldGate, type ActionApprovalRequest } from '../actions/approval'
 import { getActionsRuntime } from '../actions/use-runtime'
 import { llm } from '../llm'
-import { visionModelNotice } from '../vision/vision-model-notice'
+import { grounderNudgeForQueuedTask } from '../vision/vision-model-notice'
 import { emitVisionNotice } from '../vision/vision-controller'
+import { getAxRailHost } from '../accessibility/ax-host'
+import { axRailViable } from '../accessibility/ax-router'
 import { makeWinInlineRunner } from '../actions/semantic-rail-win'
 import { runNativeAction } from '../actions/native-helper'
 import type { NativeActionCommand, NativeActionResponse } from '../actions/native-helper-logic'
@@ -46,9 +48,11 @@ export interface NativeActionToolBoundary {
   proposeApproval: (request: ActionApprovalRequest) => boolean | undefined
   actions?: ActionsPort
   /** Called when a computer_task is queued: warns the chat, at queue time, if
-   *  the loaded model is not a grounder. Injected so the broadcast is faked in
+   *  the loaded model is not a grounder AND the task will fall to the vision
+   *  rail (an AX-drivable app needs no grounder). Takes the goal so it can check
+   *  AX viability for the target app. Injected so the broadcast is faked in
    *  tests. */
-  announceComputerTask?: () => void
+  announceComputerTask?: (goal: string) => void
 }
 
 /** How long the tool waits for a free-build action to finish before calling
@@ -80,11 +84,22 @@ const productionBoundary: NativeActionToolBoundary = {
     // itself builds lazily on first access, once the DB exists.
     return getActionsRuntime()
   },
-  announceComputerTask: () => {
-    const notice = visionModelNotice(llm.activeModelInfo())
-    if (notice) {
-      emitVisionNotice(notice)
-    }
+  announceComputerTask: (goal: string) => {
+    const model = llm.activeModelInfo()
+    // AX-first: if the accessibility rail can drive the target app, the task
+    // needs no grounder - so resolve AX viability first, THEN decide the nudge.
+    // Fire-and-forget so queuing is never blocked; any AX error nudges as before
+    // (assume vision will run).
+    void getAxRailHost()
+      .routingSnapshot(goal)
+      .then((routing) => routing !== null && axRailViable(routing.snapshot))
+      .catch(() => false)
+      .then((axWillDrive) => {
+        const notice = grounderNudgeForQueuedTask(model, axWillDrive)
+        if (notice) {
+          emitVisionNotice(notice)
+        }
+      })
   }
 }
 
@@ -174,10 +189,13 @@ export class NativeActionToolExtension implements ToolExtension {
     if (proposed.deduped) {
       return `That exact action is already queued — not queuing a duplicate. Tell the user it is already in flight.`
     }
-    // A computer_task is now queued: warn the chat at queue time if the loaded
-    // model can't ground (the nudge appears whether or not the user approves).
+    // A computer_task is now queued: warn the chat at queue time only if the
+    // loaded model can't ground AND the task will fall to vision (an AX-drivable
+    // app needs no grounder). Pass the goal so AX viability can be checked.
     if (actionType === 'computer_task') {
-      this.boundary.announceComputerTask?.()
+      const goal = typeof args.goal === 'string' && args.goal.trim() ? args.goal : spec.title(args)
+      console.log(`[computer-task] queued (awaiting approval) goal="${goal}"`)
+      this.boundary.announceComputerTask?.(goal)
     }
     actions.kick()
     const raced = await Promise.race([

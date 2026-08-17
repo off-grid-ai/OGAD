@@ -309,6 +309,8 @@ describe('the engine path', () => {
     )
     await extension.execute('computer_task', { goal: 'share the deck' })
     expect(announceComputerTask).toHaveBeenCalledTimes(1)
+    // The goal is passed so the boundary can check AX viability for the target app.
+    expect(announceComputerTask).toHaveBeenCalledWith('share the deck')
 
     announceComputerTask.mockClear()
     await extension.execute('web_task', { goal: 'check in' })
