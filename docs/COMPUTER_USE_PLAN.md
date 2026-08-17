@@ -30,6 +30,7 @@ Companion to `COMPUTER_USE.md` (the product model), `ASSISTANT_ARCHITECTURE.md` 
 | **R2. Full rails in chat, both platforms + Approval UX v2** | Windows chat exposure; the browser rail (watched web tasks, takeover at login); the vision rail (supervised GUI actions, UI-TARS-1.5-7B); the approval experience rebuilt (inline in chat, outcome feedback, risk-tiered auto-run); the safety pass. ~5-6 working days. | **next** |
 | **R3. Notices you** (was R2) | Reasoning + resolve + gate: commitment/gap detection over Replay, memory-resolved slots with confidence, the proactive Day surface. Cross-platform (memory + LLM). Pro-side code lands in desktop-pro (access in place). ~3 days. | after R2 |
 | **R4. Routines** (was R3) | Record-by-showing + self-healing, per-step-verified replay (OpenAdapt design). macOS-first; the Windows UIA adapter as the fast-follow (napi-rs over the `uiautomation` crate + SendInput, Terminator head-start). ~2-3 days + fast-follow. | after R3 |
+| **R5. Model-agnostic computer use** (the tiered rail) | Demote the vision grounder to a last-resort fallback so computer use runs on the user's NORMAL chat model for the common case. **Tier 1: the accessibility driving rail** - extend the shipped macOS AX helper to emit structured interactive elements; the model picks by label; act via AXPress/click. Any chat model, no grounder, covers most native + Electron apps. **Tier 2: set-of-marks** - a small OmniParser-class detector numbers elements on dead-AX apps for a general vision model. Router prefers AX -> set-of-marks -> vision. Tier 3 (the R2 UI-TARS grounder) stays as the on-demand fallback, deferred here. | **building (pulled forward, before R3/R4)** |
 
 The split: `shared` holds the durable cross-platform brain (`@offgrid/use`, reused by mobile later); this repo holds the rails, surfaces, and product integration; pro business logic lands in `desktop-pro`.
 
@@ -85,6 +86,18 @@ Scope unchanged: commitment and gap detection over the Replay observation + enti
 ## R4 - routines (was R3, ~2-3 days + the Windows fast-follow)
 
 Record-by-showing + faithful replay per the OpenAdapt design (compiled-step schema, resolution ladder, postconditions, repair-as-diff); Playwright codegen for the browser lane; memory-resolved variable slots; the plain-language review UI. macOS AX-as-eyes with actuation capped at press/set-value; the Windows UIA adapter (reader + SendInput) as the fast-follow. Checkpoint: record a routine once; it replays per-step-verified with a slot resolved from memory at run time.
+
+## R5 - model-agnostic computer use (the tiered rail, pulled forward)
+
+The R2 vision rail grounds every click through a specialized 7B model (UI-TARS): RAM-heavy, model-specific, and - as the field test showed - it makes the grounder the DEFAULT for interactive GUI tasks. R5 inverts that: the user's NORMAL chat model drives the common case, and the grounder is the last resort. This is architecture rule 8 ("cheapest reliable rail first, vision last") finally built for interactive execution, not just intent routing. Agenda: **computer use works on most chat models.** Detail + evidence: `R5_CHECKLIST.md`.
+
+- **Tier 1 - the accessibility driving rail (BUILD FIRST).** The shipped macOS AX helper (`scripts/text-extractor`, Swift - already walks the AX tree and owns the permission plumbing) is extended to emit STRUCTURED interactive elements: role, label, frame (x/y/w/h), actionable (has AXPress), value, enabled - not today's flat text blob. The rail runs the browser-rail loop verbatim over that element list: numbered elements -> the model picks by label (a TEXT task) -> act via AXPress or a click at the element frame. Works with ANY chat model, zero extra model RAM, covers most native + Electron apps. Wired as the `accessibility` rail the router prefers before vision.
+- **Tier 2 - set-of-marks for the dead-AX tail.** Catalyst / WhatsApp-class apps expose no usable AX tree. A small OmniParser-class detector (a YOLO-ish icon detector + a tiny captioner - ONNX-class, not a 7B) finds and numbers the interactive elements on the screenshot; the user's general VISION model picks the number. One small detection-model runtime, not a grounder. Built after tier 1 ships and real coverage shows the tail is worth it.
+- **Tier 3 - the vision grounder (existing R2 rail, DEFERRED in R5).** UI-TARS becomes the last-resort fallback for pixel-precision cases (drag a slider, a canvas) the tiers above cannot reach. Its separate on-demand loader (image-gen eviction pattern) + pluggable grounding-format adapters are a later item - NOT in R5.
+
+**Architecture evolution (note against `ASSISTANT_ARCHITECTURE.md`):** that doc said "accessibility is primarily the eyes, actuation capped." R5 promotes AX to a first-class DRIVING rail (element-picking + AXPress/click at frame), because that is precisely what lets a normal model do computer use. Vision stays genuinely last. The router's cheapest-first order becomes: semantic -> browser -> **accessibility (driving)** -> set-of-marks -> vision.
+
+**R5 checkpoint:** "send a file to a contact in Slack" runs end to end on a general chat model - app nav + a native file dialog + a verified irreversible send - with the vision grounder never loaded.
 
 ## Dependencies
 
