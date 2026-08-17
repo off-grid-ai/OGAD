@@ -77,23 +77,73 @@ func elementLabel(_ el: AXUIElement) -> String {
         ?? ""
 }
 
-func walkElements(_ el: AXUIElement, depth: Int, count: inout Int) {
-    if depth > 45 || count > 400 { return }
+let axDebug = ProcessInfo.processInfo.environment["AX_ELEMENTS_DEBUG"] == "1"
+
+func walkElements(_ el: AXUIElement, depth: Int, out: inout [String]) {
+    if depth > 45 || out.count > 400 { return }
     let role = axStr(el, kAXRoleAttribute as String) ?? ""
+    if axDebug {
+        let label = elementLabel(el)
+        let frame = axFrame(el)
+        FileHandle.standardError.write(
+            "\(String(repeating: "  ", count: min(depth, 20)))[\(depth)] \(role) '\(label.prefix(30))' frame=\(String(describing: frame)) press=\(axHasPress(el))\n".data(using: .utf8)!
+        )
+    }
     if interactiveRoles.contains(role), let (x, y, w, h) = axFrame(el), w > 0, h > 0 {
         let label = elementLabel(el)
         // Never emit a secure field's contents.
         let secure = axStr(el, "AXSubrole") == "AXSecureTextField"
         let value = secure ? "" : (axStr(el, kAXValueAttribute as String) ?? "")
-        count += 1
-        print(
+        out.append(
             "{\"role\":\"\(jsonEscape(role))\",\"label\":\"\(jsonEscape(label))\",\"value\":\"\(jsonEscape(value))\",\"x\":\(x),\"y\":\(y),\"w\":\(w),\"h\":\(h),\"press\":\(axHasPress(el)),\"enabled\":\(axEnabled(el))}"
         )
     }
     var childrenVal: AnyObject?
     AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &childrenVal)
     if let children = childrenVal as? [AXUIElement] {
-        for child in children { walkElements(child, depth: depth + 1, count: &count) }
+        for child in children { walkElements(child, depth: depth + 1, out: &out) }
+    }
+}
+
+/** The app's focused window (preferred) or its first window, re-resolved each
+ *  attempt so the retry loop sees a tree that appeared after the trigger. */
+func resolveWindow(_ appElem: AXUIElement) -> AXUIElement? {
+    var focusedWin: AnyObject?
+    AXUIElementCopyAttributeValue(appElem, kAXFocusedWindowAttribute as CFString, &focusedWin)
+    if let focused = focusedWin, CFGetTypeID(focused) == AXUIElementGetTypeID() {
+        return (focused as! AXUIElement)
+    }
+    var windows: AnyObject?
+    AXUIElementCopyAttributeValue(appElem, kAXWindowsAttribute as CFString, &windows)
+    if let list = windows as? [AXUIElement], let first = list.first { return first }
+    return nil
+}
+
+/** Pick the real app for a name: a foreground (.regular) app, preferring an
+ *  exact localizedName match over a substring, so "Safari" resolves the browser
+ *  and not a background "…Safari Web Content" helper with no window. */
+func resolveApp(_ appName: String) -> NSRunningApplication? {
+    let wanted = appName.lowercased()
+    let regular = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
+    if let exact = regular.first(where: { ($0.localizedName ?? "").lowercased() == wanted }) {
+        return exact
+    }
+    if let sub = regular.first(where: { ($0.localizedName ?? "").lowercased().contains(wanted) }) {
+        return sub
+    }
+    // Last resort: any running app (agents included) whose name matches.
+    return NSWorkspace.shared.runningApplications.first(where: {
+        ($0.localizedName ?? "").lowercased().contains(wanted)
+    })
+}
+
+/** List the foreground (.regular) running apps, one localizedName per line.
+ *  NSWorkspace needs no Screen-Recording / Accessibility grant, so this is a
+ *  reliable candidate list for target resolution (get-windows under-reports
+ *  without Screen Recording). */
+func runAppsList() {
+    for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular {
+        if let name = app.localizedName, !name.isEmpty { print(name) }
     }
 }
 
@@ -103,26 +153,31 @@ func runElementsExtractor(_ appName: String) {
         print("Accessibility permissions not granted")
         exit(1)
     }
-    for app in NSWorkspace.shared.runningApplications {
-        if let name = app.localizedName, name.lowercased().contains(appName.lowercased()) {
-            let appElem = AXUIElementCreateApplication(app.processIdentifier)
-            var focusedWin: AnyObject?
-            AXUIElementCopyAttributeValue(appElem, kAXFocusedWindowAttribute as CFString, &focusedWin)
-            var targetWindow: AXUIElement? = nil
-            if let focused = focusedWin, CFGetTypeID(focused) == AXUIElementGetTypeID() {
-                targetWindow = (focused as! AXUIElement)
-            } else {
-                var windows: AnyObject?
-                AXUIElementCopyAttributeValue(appElem, kAXWindowsAttribute as CFString, &windows)
-                if let list = windows as? [AXUIElement], let first = list.first { targetWindow = first }
-            }
-            if let win = targetWindow {
-                if let title = axStr(win, kAXTitleAttribute as String) { print("[WINDOW_TITLE] \(title)") }
-                var count = 0
-                walkElements(win, depth: 0, count: &count)
-            }
-            return
-        }
+    guard let app = resolveApp(appName) else {
+        print("[WINDOW_TITLE] (app not running)")
+        return
     }
-    print("[WINDOW_TITLE] (app not running)")
+    let appElem = AXUIElementCreateApplication(app.processIdentifier)
+    // Chromium/Electron/WebKit apps (Slack, Code, Chrome, Discord, ...) build NO
+    // web-content accessibility tree until a client asks for it. These "an
+    // assistive client is here" attributes trigger the full tree; without them a
+    // window has a title but zero elements. Harmless on native apps. The tree is
+    // built ASYNChronously, so the first read can be empty - retry until it
+    // populates (or a native window that is simply control-thin gives up).
+    AXUIElementSetAttributeValue(appElem, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+    AXUIElementSetAttributeValue(appElem, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+    var elements: [String] = []
+    var window: AXUIElement? = nil
+    for attempt in 0..<5 {
+        usleep(attempt == 0 ? 250_000 : 350_000)
+        guard let win = resolveWindow(appElem) else { continue }
+        window = win
+        elements = []
+        walkElements(win, depth: 0, out: &elements)
+        if !elements.isEmpty { break }
+    }
+    if let win = window, let title = axStr(win, kAXTitleAttribute as String) {
+        print("[WINDOW_TITLE] \(title)")
+    }
+    for line in elements { print(line) }
 }

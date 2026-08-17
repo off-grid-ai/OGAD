@@ -88,6 +88,11 @@ func runTextExtractor() {
         runElementsExtractor(args[2])
         return
     }
+    // R5 T1d: the foreground running-app list for target resolution.
+    if args.count >= 2 && args[1] == "--apps" {
+        runAppsList()
+        return
+    }
     if args.count < 2 {
         print("Usage: text-extractor <app-name>  |  text-extractor --elements <app-name>")
         exit(1)
