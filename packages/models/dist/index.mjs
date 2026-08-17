@@ -360,6 +360,36 @@ var RAW_CATALOG = [
       }
     ]
   },
+  {
+    // The desktop vision-rail grounder (supervised computer use): reads a
+    // screenshot and points at the control to act on. Qwen2.5-VL base,
+    // Apache-2.0; GGUF + mmproj by mradermacher. ~6GB with the projector.
+    id: "mradermacher/UI-TARS-1.5-7B-GGUF",
+    name: "UI-TARS 1.5 7B",
+    kind: "vision",
+    org: "ByteDance",
+    description: "GUI grounding for supervised computer use \u2014 points at the control to click",
+    params: 7,
+    minRamGb: 10,
+    quant: "Q4_K_M",
+    grounder: true,
+    tags: ["Computer use"],
+    releaseDate: "2025-04-17",
+    files: [
+      {
+        name: "UI-TARS-1.5-7B.Q4_K_M.gguf",
+        url: resolve("mradermacher/UI-TARS-1.5-7B-GGUF", "UI-TARS-1.5-7B.Q4_K_M.gguf"),
+        sizeBytes: 4683073856,
+        role: "primary"
+      },
+      {
+        name: "UI-TARS-1.5-7B.mmproj-f16.gguf",
+        url: resolve("mradermacher/UI-TARS-1.5-7B-GGUF", "UI-TARS-1.5-7B.mmproj-f16.gguf"),
+        sizeBytes: 1354162880,
+        role: "mmproj"
+      }
+    ]
+  },
   // --- image generation — 2026 / fast few-step models only (open weight) ---
   {
     id: "leejet/Z-Image-Turbo-GGUF",
@@ -969,6 +999,14 @@ var CATALOG = RAW_CATALOG.map((e) => ({
 }));
 function modelsByKind(kind) {
   return CATALOG.filter((m) => m.kind === kind);
+}
+var GROUNDER_NAME = /ui[-_ ]?tars|holo(?:1|-|_| )|gui[-_ ]?owl|aguvis|show[-_ ]?ui|cogagent|os[-_ ]?atlas|ferret[-_ ]?ui|seeclick/i;
+function isGrounderModel(idOrName, catalog = CATALOG) {
+  const entry = catalog.find((m) => m.id === idOrName || m.name === idOrName);
+  if (entry) {
+    return entry.grounder === true;
+  }
+  return GROUNDER_NAME.test(idOrName);
 }
 var MODEL_KINDS = ["text", "vision", "image", "voice", "transcription"];
 
@@ -1658,6 +1696,7 @@ export {
   hasActiveFilters,
   hasVisionProjector,
   initialFilterState,
+  isGrounderModel,
   isMMProjFile,
   modelsByKind,
   ollamaProvider,

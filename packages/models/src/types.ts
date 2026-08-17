@@ -42,6 +42,12 @@ export interface ModelEntry {
   /** For image models: which generation modes it supports (txt2img/img2img). */
   imageModes?: ImageGenMode[]
   isNew?: boolean
+  /** A GUI-grounding vision model (UI-TARS, Holo, GUI-Owl): given a screenshot it
+   *  outputs precise click coordinates. Unlike `kind` (derived from files), grounder-
+   *  ness is not a file fact - a grounder and a general VLM both ship an mmproj - so
+   *  it is a model-identity flag. Used to WARN (never block) when the vision rail
+   *  runs on a non-grounder. */
+  grounder?: boolean
   /** Short capability labels shown as chips, e.g. ['Recommended','Fast','Photoreal']. */
   tags?: string[]
   /** Which on-device runtime serves this model. Default 'sd-cli' (stable-diffusion.cpp).

@@ -36,12 +36,14 @@ export function emitVisionStep(taskId: string, note: string): void {
   broadcast('vision:step', { taskId, note })
 }
 
-/** Push the task lifecycle state to the overlay. */
+/** Push the task lifecycle state to the overlay. `notice` warns (never blocks)
+ *  when the loaded model is not a grounder - the rail stays model-agnostic. */
 export function emitVisionState(state: {
   taskId: string
   goal: string
   status: 'running' | 'paused' | 'done' | 'failed'
   summary?: string
+  notice?: string
 }): void {
   broadcast('vision:task-state', state)
 }

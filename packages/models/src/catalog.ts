@@ -363,6 +363,36 @@ const RAW_CATALOG: ModelEntry[] = [
       }
     ]
   },
+  {
+    // The desktop vision-rail grounder (supervised computer use): reads a
+    // screenshot and points at the control to act on. Qwen2.5-VL base,
+    // Apache-2.0; GGUF + mmproj by mradermacher. ~6GB with the projector.
+    id: 'mradermacher/UI-TARS-1.5-7B-GGUF',
+    name: 'UI-TARS 1.5 7B',
+    kind: 'vision',
+    org: 'ByteDance',
+    description: 'GUI grounding for supervised computer use — points at the control to click',
+    params: 7,
+    minRamGb: 10,
+    quant: 'Q4_K_M',
+    grounder: true,
+    tags: ['Computer use'],
+    releaseDate: '2025-04-17',
+    files: [
+      {
+        name: 'UI-TARS-1.5-7B.Q4_K_M.gguf',
+        url: resolve('mradermacher/UI-TARS-1.5-7B-GGUF', 'UI-TARS-1.5-7B.Q4_K_M.gguf'),
+        sizeBytes: 4683073856,
+        role: 'primary'
+      },
+      {
+        name: 'UI-TARS-1.5-7B.mmproj-f16.gguf',
+        url: resolve('mradermacher/UI-TARS-1.5-7B-GGUF', 'UI-TARS-1.5-7B.mmproj-f16.gguf'),
+        sizeBytes: 1354162880,
+        role: 'mmproj'
+      }
+    ]
+  },
   // --- image generation — 2026 / fast few-step models only (open weight) ---
   {
     id: 'leejet/Z-Image-Turbo-GGUF',
@@ -994,6 +1024,24 @@ export const CATALOG: ModelEntry[] = RAW_CATALOG.map((e) => ({
 
 export function modelsByKind(kind: ModelKind): ModelEntry[] {
   return CATALOG.filter((m) => m.kind === kind)
+}
+
+// GUI-grounding model families, for a user's own Hugging Face pick that is not in
+// the catalog. For catalogued models the `grounder` flag is authoritative; this
+// heuristic only decides the unknowns.
+const GROUNDER_NAME =
+  /ui[-_ ]?tars|holo(?:1|-|_| )|gui[-_ ]?owl|aguvis|show[-_ ]?ui|cogagent|os[-_ ]?atlas|ferret[-_ ]?ui|seeclick/i
+
+/** Whether a model grounds GUI clicks (the desktop vision rail's ideal input).
+ *  Catalogued models answer from their `grounder` flag - the single source of
+ *  truth; an off-catalog id/name falls back to the known-family heuristic. Used
+ *  to WARN, never to block: the vision rail stays model-agnostic. */
+export function isGrounderModel(idOrName: string, catalog: ModelEntry[] = CATALOG): boolean {
+  const entry = catalog.find((m) => m.id === idOrName || m.name === idOrName)
+  if (entry) {
+    return entry.grounder === true
+  }
+  return GROUNDER_NAME.test(idOrName)
 }
 
 export const MODEL_KINDS: ModelKind[] = ['text', 'vision', 'image', 'voice', 'transcription']

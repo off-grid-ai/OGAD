@@ -9,7 +9,8 @@ export {
   MODEL_KINDS,
   RECOMMENDATION_TIERS,
   recommendForRam,
-  modelsByKind
+  modelsByKind,
+  isGrounderModel
 } from './catalog'
 export { hasVisionProjector, deriveKind } from './capabilities'
 export { ModelDownloader } from './download'

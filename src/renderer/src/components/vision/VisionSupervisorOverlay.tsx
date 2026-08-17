@@ -20,6 +20,7 @@ interface TaskState {
   goal: string
   status: 'running' | 'paused' | 'done' | 'failed'
   summary?: string
+  notice?: string
 }
 
 const STATUS_TONE: Record<string, string> = {
@@ -88,6 +89,15 @@ export function VisionSupervisorOverlay(): React.JSX.Element | null {
       <div className="border-b border-neutral-800 px-4 py-2 text-xs text-neutral-500">
         Off Grid is acting on your screen. Move the mouse or press Esc to take over at any time.
       </div>
+
+      {task.notice && (
+        <div
+          data-testid="vision-model-notice"
+          className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-500"
+        >
+          {task.notice}
+        </div>
+      )}
 
       <div
         ref={feedRef}

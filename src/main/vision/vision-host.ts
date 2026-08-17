@@ -24,6 +24,7 @@ import { runVisionTask, type VisionScreen, type VisionTaskResult } from './visio
 import { VisionGuard } from './vision-guard'
 import { buildVisionPrompt } from './vision-prompt'
 import { emitVisionState, emitVisionStep, registerVisionSession } from './vision-controller'
+import { visionModelNotice } from './vision-model-notice'
 import { getTakeoverCoordinator } from '../browser/takeover'
 
 /** The synthetic-input surface the host needs. Implemented by a native addon
@@ -119,7 +120,10 @@ class VisionHost {
     globalShortcut.register('Escape', () => guard.halt('stopped with Esc'))
     const releaseSession = registerVisionSession(guard)
     const coordinator = getTakeoverCoordinator()
-    emitVisionState({ taskId, goal, status: 'running' })
+    // Model-agnostic, but honest: warn (do not block) when the loaded model is
+    // not a grounder, so the user sees why a click may miss and what to load.
+    const notice = visionModelNotice(llm.activeModelInfo())
+    emitVisionState({ taskId, goal, status: 'running', ...(notice ? { notice } : {}) })
     try {
       const result = await runVisionTask(goal, {
         screen: makeScreen(actuation),

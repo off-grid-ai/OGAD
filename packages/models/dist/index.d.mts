@@ -1,10 +1,15 @@
-import { M as ModelEntry, a as ModelKind, b as ModelRecommendationTier, c as ModelFile, D as DownloadBridge, d as ModelStore, e as DownloadProgress } from './types-CZMZpuKL.mjs';
-export { f as DownloadStatus, I as ImageGenMode, g as ImageGenProvider, h as ImageGenRequest, i as ImageGenResult, s as supportsMode, v as validateImageGenRequest } from './types-CZMZpuKL.mjs';
+import { M as ModelEntry, a as ModelKind, b as ModelRecommendationTier, c as ModelFile, D as DownloadBridge, d as ModelStore, e as DownloadProgress } from './types-Cp-D96rw.mjs';
+export { f as DownloadStatus, I as ImageGenMode, g as ImageGenProvider, h as ImageGenRequest, i as ImageGenResult, s as supportsMode, v as validateImageGenRequest } from './types-Cp-D96rw.mjs';
 
 declare const RECOMMENDATION_TIERS: ModelRecommendationTier[];
 declare function recommendForRam(ramGb: number): ModelRecommendationTier;
 declare const CATALOG: ModelEntry[];
 declare function modelsByKind(kind: ModelKind): ModelEntry[];
+/** Whether a model grounds GUI clicks (the desktop vision rail's ideal input).
+ *  Catalogued models answer from their `grounder` flag - the single source of
+ *  truth; an off-catalog id/name falls back to the known-family heuristic. Used
+ *  to WARN, never to block: the vision rail stays model-agnostic. */
+declare function isGrounderModel(idOrName: string, catalog?: ModelEntry[]): boolean;
 declare const MODEL_KINDS: ModelKind[];
 
 /** True iff the file set includes a vision projector (mmproj). This is what actually
@@ -306,4 +311,4 @@ declare const LIGHT_MODEL_RAM_CEILING_GB = 16;
  */
 declare function recommendedImageModelId(models: RecommendableModel[], ramGb: number | null | undefined): string | null;
 
-export { CATALOG, CREDIBILITY_LABELS, CREDIBILITY_OPTIONS, type ChatMessage, type ChatOptions, type ChatRole, type Credibility, type CredibilityFilter, DownloadBridge, DownloadProgress, type FetchLike, type FilterState, type FilterableModel, type HFSearchResult, type InferenceProvider, LIGHT_MODEL_RAM_CEILING_GB, MODEL_KINDS, MODEL_TYPE_OPTIONS, ModelDownloader, ModelEntry, ModelFile, type ModelFileVariant, ModelKind, ModelRecommendationTier, ModelStore, type ModelTypeFilter, OFFICIAL_MODEL_AUTHORS, type ProviderModel, ProviderRegistry, QUANTIZATION_INFO, type QuantInfo, RECOMMENDATION_TIERS, type RecommendableModel, type RemoteServerConfig, type RemoteServerKind, SIZE_OPTIONS, SORT_OPTIONS, type SizeFilter, type SortOption, VERIFIED_QUANTIZERS, applyFilters, applySort, bestFitScore, createProvider, deriveKind, determineCredibility, extractQuantization, filterAndSort, formatFileSize, getModelFiles, getModelType, hasActiveFilters, hasVisionProjector, initialFilterState, isMMProjFile, modelsByKind, ollamaProvider, openAICompatibleProvider, parseParamCount, recommendForRam, recommendedImageModelId, resolveHuggingFaceModel, searchHuggingFace };
+export { CATALOG, CREDIBILITY_LABELS, CREDIBILITY_OPTIONS, type ChatMessage, type ChatOptions, type ChatRole, type Credibility, type CredibilityFilter, DownloadBridge, DownloadProgress, type FetchLike, type FilterState, type FilterableModel, type HFSearchResult, type InferenceProvider, LIGHT_MODEL_RAM_CEILING_GB, MODEL_KINDS, MODEL_TYPE_OPTIONS, ModelDownloader, ModelEntry, ModelFile, type ModelFileVariant, ModelKind, ModelRecommendationTier, ModelStore, type ModelTypeFilter, OFFICIAL_MODEL_AUTHORS, type ProviderModel, ProviderRegistry, QUANTIZATION_INFO, type QuantInfo, RECOMMENDATION_TIERS, type RecommendableModel, type RemoteServerConfig, type RemoteServerKind, SIZE_OPTIONS, SORT_OPTIONS, type SizeFilter, type SortOption, VERIFIED_QUANTIZERS, applyFilters, applySort, bestFitScore, createProvider, deriveKind, determineCredibility, extractQuantization, filterAndSort, formatFileSize, getModelFiles, getModelType, hasActiveFilters, hasVisionProjector, initialFilterState, isGrounderModel, isMMProjFile, modelsByKind, ollamaProvider, openAICompatibleProvider, parseParamCount, recommendForRam, recommendedImageModelId, resolveHuggingFaceModel, searchHuggingFace };

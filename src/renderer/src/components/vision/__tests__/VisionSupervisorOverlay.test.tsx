@@ -77,6 +77,28 @@ describe('<VisionSupervisorOverlay/>', () => {
     expect(screen.queryByText('Stop')).toBeNull()
   })
 
+  it('shows the grounder notice when the model is not a grounder, without blocking', async () => {
+    render(<VisionSupervisorOverlay />)
+    emitState({
+      taskId: 'v7',
+      goal: 'share the deck',
+      status: 'running',
+      notice:
+        'The current model is not a grounding model, so computer use may click the wrong place.'
+    })
+    await waitFor(() => screen.getByTestId('vision-model-notice'))
+    expect(screen.getByText(/may click the wrong place/)).toBeTruthy()
+    // The task still runs - the controls are present, nothing is blocked.
+    expect(screen.getByText('Stop')).toBeTruthy()
+  })
+
+  it('shows no notice when the model is a grounder', async () => {
+    render(<VisionSupervisorOverlay />)
+    emitState({ taskId: 'v8', goal: 'x', status: 'running' })
+    await waitFor(() => screen.getByTestId('vision-supervisor-overlay'))
+    expect(screen.queryByTestId('vision-model-notice')).toBeNull()
+  })
+
   it('a new task clears the previous run feed', async () => {
     render(<VisionSupervisorOverlay />)
     emitState({ taskId: 'v5', goal: 'first', status: 'running' })
