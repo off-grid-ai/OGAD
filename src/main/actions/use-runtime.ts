@@ -17,7 +17,8 @@ import {
   type ProposeOutcome,
   type Rail,
   type TickOutcome,
-  type ActionRecord
+  type ActionRecord,
+  type ExecuteResult
 } from '@offgrid/use'
 import { getDB } from '../database'
 import { hasHook, HOOKS } from '../bootstrap/hookRegistry'
@@ -34,8 +35,9 @@ import { makeBrowserRailExecutor, registerBrowserRail } from '../browser/browser
 import { getBrowserRailHost } from '../browser/browser-host'
 import { makeVisionRailExecutor, registerVisionRail } from '../vision/vision-rail'
 import { getVisionRailHost } from '../vision/vision-host'
-import { makeComputerTaskExecutor } from '../accessibility/ax-rail'
+import { makeComputerTaskExecutor, parseForcedRail } from '../accessibility/ax-rail'
 import { getAxRailHost } from '../accessibility/ax-host'
+import { withGrounder } from '../vision/grounder-loader'
 
 export interface ActionsRuntime {
   propose(
@@ -152,14 +154,33 @@ export function getActionsRuntime(): ActionsRuntime {
   const visionExecute = makeVisionRailExecutor({
     runTask: (goal, taskId) => getVisionRailHost().runTask(goal, taskId)
   })
+  // The grounder-vision executor: swap in UI-TARS (evict the chat model), run the
+  // vision rail, restore the chat model - the tier-3 fallback. The swap/run/swap
+  // wall-clock is logged so a computer_task's cost is attributable (the AX-vs-
+  // grounder A/B). OFFGRID_GROUNDER=0 keeps the current model (no swap) for a
+  // grounder-format A/B without paying the reload.
+  const groundedVisionExecute = async (action: ActionRecord): Promise<ExecuteResult> => {
+    if (process.env.OFFGRID_GROUNDER === '0') {
+      return visionExecute(action)
+    }
+    const { result, timing } = await withGrounder(() => visionExecute(action))
+    console.log(
+      `[computer-task] grounder rail: skippedSwap=${timing.skippedSwap} swapInMs=${timing.swapInMs} runMs=${timing.runMs} swapOutMs=${timing.swapOutMs} totalMs=${timing.swapInMs + timing.runMs + timing.swapOutMs}`
+    )
+    return result
+  }
   // computer_task is TIERED: try the accessibility rail first (free, any chat
-  // model, most native apps), and fall through to the vision grounder only when
-  // AX can't see the controls. One decision, made from the routing snapshot.
-  const computerTaskExecute = makeComputerTaskExecutor({
-    routingSnapshot: (goal) => getAxRailHost().routingSnapshot(goal),
-    runAx: (goal, taskId, app, initial) => getAxRailHost().runTask(goal, taskId, app, initial),
-    visionExecute
-  })
+  // model, most native apps), and fall through to the grounder-vision rail only
+  // when AX can't see the controls. OFFGRID_COMPUTER_RAIL=ax|vision forces one
+  // rail for the A/B; unset = the real tiered behaviour.
+  const computerTaskExecute = makeComputerTaskExecutor(
+    {
+      routingSnapshot: (goal) => getAxRailHost().routingSnapshot(goal),
+      runAx: (goal, taskId, app, initial) => getAxRailHost().runTask(goal, taskId, app, initial),
+      visionExecute: groundedVisionExecute
+    },
+    { forcedRail: parseForcedRail(process.env.OFFGRID_COMPUTER_RAIL) }
+  )
   const engine = new UseEngine({
     driver: makeUseDriver(getDB()),
     // Read-back verification reads the world back through the platform's own

@@ -113,6 +113,10 @@ export default defineConfig({
         // them - the e2e tour and the real-machine pass, not this runner.
         'src/main/browser/browser-host.ts',
         'src/main/vision/vision-host.ts',
+        // On-demand grounder swap: reloads llama-server with UI-TARS and back,
+        // needs the multi-GB models on disk. Its decision (isGrounderActive) is
+        // measured; the reload orchestration is exercised by the A/B run.
+        'src/main/vision/grounder-loader.ts',
         // The accessibility rail's live host: get-windows I/O + the Swift helper
         // spawn + synthetic input + the Accessibility grant, over the unit-tested
         // parser/router/loop/target-picker. Driven on a real Mac (the T1f pass).

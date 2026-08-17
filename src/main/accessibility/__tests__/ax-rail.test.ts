@@ -111,4 +111,52 @@ describe('makeComputerTaskExecutor', () => {
 
     expect(routingSnapshot).toHaveBeenCalledWith('open the DM with sidd')
   })
+
+  describe('forced rail (A/B)', () => {
+    it("forcedRail 'vision' skips the AX read entirely and uses the grounder", async () => {
+      const routingSnapshot = vi.fn(async () => ({ app: 'Slack', snapshot: richSnapshot() }))
+      const tiers = makeTiers({ routingSnapshot })
+      const exec = makeComputerTaskExecutor(tiers, { forcedRail: 'vision' })
+
+      const result = await exec(action())
+
+      expect(routingSnapshot).not.toHaveBeenCalled() // no AX read at all
+      expect(tiers.runAx).not.toHaveBeenCalled()
+      expect(tiers.visionExecute).toHaveBeenCalledOnce()
+      expect(result).toEqual({ ok: true, effectId: 'vision' })
+    })
+
+    it("forcedRail 'ax' drives via AX even on a dead-AX window (as long as an app resolved)", async () => {
+      const routing: AxRouting = { app: 'Game', snapshot: deadSnapshot() }
+      const tiers = makeTiers({ routingSnapshot: vi.fn(async () => routing) })
+      const exec = makeComputerTaskExecutor(tiers, { forcedRail: 'ax' })
+
+      const result = await exec(action({ intent: 'play the game' }))
+
+      expect(tiers.runAx).toHaveBeenCalledOnce() // forced past the viability gate
+      expect(tiers.visionExecute).not.toHaveBeenCalled()
+      expect(result).toEqual({ ok: true, effectId: 'act-1' })
+    })
+
+    it("forcedRail 'ax' still falls to vision when NO app resolves (nothing to drive)", async () => {
+      const tiers = makeTiers({ routingSnapshot: vi.fn(async () => null) })
+      const exec = makeComputerTaskExecutor(tiers, { forcedRail: 'ax' })
+
+      await exec(action())
+
+      expect(tiers.runAx).not.toHaveBeenCalled()
+      expect(tiers.visionExecute).toHaveBeenCalledOnce()
+    })
+  })
+})
+
+describe('parseForcedRail', () => {
+  it('accepts ax/vision and defaults everything else to auto', async () => {
+    const { parseForcedRail } = await import('../ax-rail')
+    expect(parseForcedRail('ax')).toBe('ax')
+    expect(parseForcedRail('vision')).toBe('vision')
+    expect(parseForcedRail('auto')).toBe('auto')
+    expect(parseForcedRail(undefined)).toBe('auto')
+    expect(parseForcedRail('nonsense')).toBe('auto')
+  })
 })
