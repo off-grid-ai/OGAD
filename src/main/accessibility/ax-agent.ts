@@ -70,12 +70,36 @@ export const ELEMENT_STEP_FORMAT = {
   }
 } as const
 
+/** Pull the JSON object out of a model reply that may wrap it in a reasoning
+ *  channel or a markdown fence. A grammar-constrained model returns bare JSON,
+ *  but a general chat model (no grounder) often prefixes `<think>…</think>` or
+ *  fences it in ```json - so we drop the reasoning, then take the first `{` to
+ *  the last `}`. Returns null when there is no object at all. */
+function extractJsonObject(raw: string): string | null {
+  let text = raw
+  const thinkClose = text.lastIndexOf('</think>')
+  if (thinkClose !== -1) {
+    text = text.slice(thinkClose + '</think>'.length)
+  }
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start === -1 || end === -1 || end <= start) {
+    return null
+  }
+  return text.slice(start, end + 1)
+}
+
 /** Fail-closed parse: unknown shapes are null; the loop re-observes rather than
- *  acting on a guess. */
+ *  acting on a guess. Tolerant of a reasoning/fence wrapper (see
+ *  extractJsonObject) so a general chat model drives this, not just a grounder. */
 export function parseElementStep(raw: string): ElementStep | null {
+  const json = extractJsonObject(raw)
+  if (json === null) {
+    return null
+  }
   let parsed: unknown
   try {
-    parsed = JSON.parse(raw)
+    parsed = JSON.parse(json)
   } catch {
     return null
   }

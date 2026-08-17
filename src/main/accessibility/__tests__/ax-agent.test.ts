@@ -137,6 +137,22 @@ describe('parseElementStep', () => {
       expect(parseElementStep(junk)).toBeNull()
     }
   })
+
+  it('tolerates a general chat model wrapping the JSON (fences, reasoning, prose)', () => {
+    // A non-grounder often does not emit bare JSON even under a grammar hint -
+    // markdown fences, a <think> channel, or a sentence around it. The rail must
+    // still drive, so the parser extracts the object.
+    expect(parseElementStep('```json\n{"action":"click","index":5}\n```')).toEqual({
+      action: 'click',
+      index: 5
+    })
+    expect(
+      parseElementStep('<think>I should press Search first</think>\n{"action":"press","index":7}')
+    ).toEqual({ action: 'press', index: 7 })
+    expect(
+      parseElementStep('Sure - here is the next step: {"action":"type","index":2,"text":"hi"} done')
+    ).toEqual({ action: 'type', index: 2, text: 'hi' })
+  })
 })
 
 describe('buildElementPrompt', () => {
