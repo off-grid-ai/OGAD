@@ -1,0 +1,192 @@
+/**
+ * The element-picking loop (R5 T1b): snapshot the interactive elements ->
+ * the model picks one by number -> act, until done, given up, or out of steps.
+ * The same shape as the browser rail's web-task loop, but over an element list
+ * instead of a web page - so it drives the accessibility rail AND, later, the
+ * set-of-marks tier (a detected box is just an element with no AX role). One
+ * loop, two surfaces; do not fork a third.
+ *
+ * Every boundary injected - the reader (elements), the model (decide), the
+ * actuator - so the control flow is fully unit-tested without a screen. The
+ * model picks by LABEL (a text task), which is exactly what lets a normal chat
+ * model drive this without a grounder.
+ */
+import type { AxElement, AxSnapshot } from './ax-elements'
+import { formatAxElementsForModel } from './ax-elements'
+
+export interface ElementActuator {
+  /** Click at the element's center. */
+  click(el: AxElement): Promise<void>
+  /** AXPress the element (preferred when it exposes a press action). */
+  press(el: AxElement): Promise<void>
+  /** Focus the element and type text (replacing any current value). */
+  type(el: AxElement, text: string): Promise<void>
+  /** A key or combo to the focused UI: "Enter", "cmd k", "cmd shift g". */
+  keys(combo: string): Promise<void>
+}
+
+export interface ElementTaskDeps {
+  read(): Promise<AxSnapshot>
+  actuator: ElementActuator
+  /** goal + the numbered elements + history in, one step decision out. */
+  decide: (prompt: string) => Promise<string>
+  onStep?: (note: string) => void
+  maxSteps?: number
+}
+
+export interface ElementTaskResult {
+  ok: boolean
+  summary: string
+  steps: string[]
+}
+
+export type ElementStep =
+  | { action: 'click'; index: number }
+  | { action: 'press'; index: number }
+  | { action: 'type'; index: number; text: string }
+  | { action: 'key'; keys: string }
+  | { action: 'done'; summary: string }
+  | { action: 'give_up'; why: string }
+
+/** Grammar the model is constrained to (llama.cpp -> GBNF): always parses or
+ *  the call fails, never free text. */
+export const ELEMENT_STEP_FORMAT = {
+  type: 'json_schema',
+  json_schema: {
+    name: 'element_step',
+    strict: true,
+    schema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['click', 'press', 'type', 'key', 'done', 'give_up'] },
+        index: { type: 'integer' },
+        text: { type: 'string' },
+        keys: { type: 'string' },
+        summary: { type: 'string' },
+        why: { type: 'string' }
+      },
+      required: ['action']
+    }
+  }
+} as const
+
+/** Fail-closed parse: unknown shapes are null; the loop re-observes rather than
+ *  acting on a guess. */
+export function parseElementStep(raw: string): ElementStep | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    return null
+  }
+  const value = parsed as Record<string, unknown>
+  const idx = typeof value.index === 'number' ? value.index : undefined
+  const str = (k: string): string | undefined =>
+    typeof value[k] === 'string' && (value[k] as string).length > 0
+      ? (value[k] as string)
+      : undefined
+  switch (value.action) {
+    case 'click':
+      return idx !== undefined ? { action: 'click', index: idx } : null
+    case 'press':
+      return idx !== undefined ? { action: 'press', index: idx } : null
+    case 'type': {
+      const text = typeof value.text === 'string' ? value.text : undefined
+      return idx !== undefined && text !== undefined ? { action: 'type', index: idx, text } : null
+    }
+    case 'key': {
+      const keys = str('keys')
+      return keys ? { action: 'key', keys } : null
+    }
+    case 'done':
+      return { action: 'done', summary: str('summary') ?? 'done' }
+    case 'give_up':
+      return { action: 'give_up', why: str('why') ?? 'could not finish' }
+    default:
+      return null
+  }
+}
+
+export function buildElementPrompt(goal: string, snapshot: AxSnapshot, history: string[]): string {
+  return [
+    'You are completing a task by operating an app one step at a time.',
+    `Task: ${goal}`,
+    '',
+    formatAxElementsForModel(snapshot),
+    '',
+    history.length ? `Previous steps:\n${history.slice(-6).join('\n')}` : '',
+    'Rules:',
+    '- Refer to elements by their [number]. One action per reply.',
+    '- click / press an element, type into a field, or send a key combo ("Enter", "cmd k").',
+    '- For a sign-in, one-time code, or payment, reply give_up and let the user act.',
+    '- When the task is complete reply {"action":"done","summary":"..."}.',
+    '- If it cannot be done reply {"action":"give_up","why":"..."}.',
+    'Reply with ONLY the JSON for your next action.'
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+const DEFAULT_MAX_STEPS = 14
+
+/* eslint-disable complexity -- one state machine; per-action helpers would hide
+   the observe/act/stop control flow the tests pin down. */
+export async function runElementTask(
+  goal: string,
+  deps: ElementTaskDeps
+): Promise<ElementTaskResult> {
+  const { read, actuator, decide, onStep } = deps
+  const maxSteps = deps.maxSteps ?? DEFAULT_MAX_STEPS
+  const steps: string[] = []
+  const note = (line: string): void => {
+    steps.push(line)
+    onStep?.(line)
+  }
+
+  for (let step = 0; step < maxSteps; step += 1) {
+    const snapshot = await read()
+    const decision = parseElementStep(await decide(buildElementPrompt(goal, snapshot, steps)))
+    if (!decision) {
+      note('model reply did not parse; re-observing')
+      continue
+    }
+    if (decision.action === 'done') {
+      note(`done: ${decision.summary}`)
+      return { ok: true, summary: decision.summary, steps }
+    }
+    if (decision.action === 'give_up') {
+      note(`gave up: ${decision.why}`)
+      return { ok: false, summary: decision.why, steps }
+    }
+    if (decision.action === 'key') {
+      await actuator.keys(decision.keys)
+      note(`key ${decision.keys}`)
+      continue
+    }
+    const el = snapshot.elements.find((candidate) => candidate.index === decision.index)
+    if (!el) {
+      note(`no element [${decision.index}] on this screen`)
+      continue
+    }
+    if (decision.action === 'type') {
+      await actuator.type(el, decision.text)
+      note(`typed into [${el.index}] ${el.name || el.role}`)
+      continue
+    }
+    // click or press: prefer AXPress when the element exposes it.
+    if (decision.action === 'press' || el.actionable) {
+      await actuator.press(el)
+      note(`pressed [${el.index}] ${el.name || el.role}`)
+    } else {
+      await actuator.click(el)
+      note(`clicked [${el.index}] ${el.name || el.role}`)
+    }
+  }
+
+  note('ran out of steps')
+  return { ok: false, summary: `stopped after ${maxSteps} steps without finishing`, steps }
+}
+/* eslint-enable complexity */
