@@ -48,6 +48,12 @@ interface RawElement {
 const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
+/** A real, targetable control is at least this many px on each side. Below it the
+ *  element is a hidden/hover artifact (Slack emits ~one 1px "Reply in thread" pair
+ *  per message) - useless to click and, worse, it floods the list and buries the
+ *  real controls (the composer) past the model's element cap. */
+const MIN_ELEMENT_SIZE = 3
+
 /** Parse the helper output. Element lines are JSON objects; the WINDOW_TITLE
  *  line is the app/window label. Anything else (blank lines, the text-mode
  *  markers) is ignored - the elements mode and the text mode can share a stream. */
@@ -80,6 +86,11 @@ export function parseAxElements(stdout: string): AxSnapshot {
     const y = num(parsed.y)
     const w = num(parsed.w)
     const h = num(parsed.h)
+    // Drop hidden/hover artifacts (1px buttons) - not targetable, and they bury
+    // the real controls past the cap. This is fail-closed toward real controls.
+    if (w < MIN_ELEMENT_SIZE || h < MIN_ELEMENT_SIZE) {
+      continue
+    }
     elements.push({
       index: 0,
       role,
@@ -99,7 +110,7 @@ export function parseAxElements(stdout: string): AxSnapshot {
 
 /** The numbered element list rendered for the model - same shape as the browser
  *  collector's, so the model faces one consistent "pick [n]" surface. */
-export function formatAxElementsForModel(snapshot: AxSnapshot, maxElements = 80): string {
+export function formatAxElementsForModel(snapshot: AxSnapshot, maxElements = 120): string {
   const lines = snapshot.elements.slice(0, maxElements).map((el) => {
     const parts = [`[${el.index}]`, el.role]
     if (el.name) {
