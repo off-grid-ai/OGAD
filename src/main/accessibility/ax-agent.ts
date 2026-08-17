@@ -164,6 +164,8 @@ export function buildElementPrompt(goal: string, snapshot: AxSnapshot, history: 
     '- Key: {"action":"key","keys":"Enter"} (or "cmd k").',
     '- Sign-in, one-time code, or payment: {"action":"give_up","why":"..."} and let the user act.',
     '- Task complete: {"action":"done","summary":"..."}. Cannot be done: {"action":"give_up","why":"..."}.',
+    'Messaging a person: a field named Search / "Channel or user name" / "To" is for NAVIGATION, not the message. First type the PERSON\'S NAME there and press Enter to open their conversation; ONLY THEN type your message (the message box is usually already focused - use type with no index). Never type the message text into a search or recipient field.',
+    'If a step did not change anything (the same field still holds your text), do something different - do not repeat it.',
     'Reply with ONLY the JSON for your next action.'
   ]
     .filter(Boolean)
