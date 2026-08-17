@@ -17,6 +17,9 @@
  * coverage; the actuation itself is exercised on a real machine (a display + the
  * Accessibility grant), which no headless runner has.
  */
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
 import { desktopCapturer, globalShortcut, screen, systemPreferences } from 'electron'
 import { llm } from '../llm'
 import type { VisionAction, Bounds } from './vision-action'
@@ -130,6 +133,12 @@ export function visionActuationAvailable(): boolean {
   return loadActuation() !== null
 }
 
+// The screenshot is written to ONE reused temp file per process; llm.chat reads
+// images off disk (decodeImages -> fs.readFileSync), NOT as base64, so the
+// grounder must be handed a PATH. Captures are sequential (capture -> ground ->
+// actuate), so reusing one path is race-free and keeps the disk clean.
+const CAPTURE_FILE = path.join(os.tmpdir(), 'offgrid-vision-capture.png')
+
 function makeScreen(actuation: ActuationPort): VisionScreen {
   return {
     async capture() {
@@ -141,8 +150,11 @@ function makeScreen(actuation: ActuationPort): VisionScreen {
         thumbnailSize: { width, height }
       })
       const source = sources[0]
-      const image = source ? source.thumbnail.toPNG().toString('base64') : ''
-      return { image, bounds: { width, height } as Bounds }
+      if (source) {
+        fs.writeFileSync(CAPTURE_FILE, source.thumbnail.toPNG())
+      }
+      // Return the file path - the grounder reads it from disk.
+      return { image: CAPTURE_FILE, bounds: { width, height } as Bounds }
     },
     async actuate(action: VisionAction) {
       await dispatch(actuation, action)
