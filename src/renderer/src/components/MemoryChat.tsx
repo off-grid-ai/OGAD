@@ -49,6 +49,7 @@ import {
 import { Button } from '@renderer/components/ui/button'
 import { ActionGateDock } from '@renderer/components/actions/ActionGateDock'
 import { WatchedBrowserPane } from '@renderer/components/browser/WatchedBrowserPane'
+import { VisionSupervisorOverlay } from '@renderer/components/vision/VisionSupervisorOverlay'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import {
   DropdownMenu,
@@ -4499,6 +4500,8 @@ export function MemoryChat({
                 <ActionGateDock />
                 {/* Browser rail: the watched pane slides in while a web task runs */}
                 <WatchedBrowserPane />
+                {/* Vision rail: the supervisor overlay slides in during a computer-use task */}
+                <VisionSupervisorOverlay />
                 {microphoneDenied && (
                   <div
                     role="alert"

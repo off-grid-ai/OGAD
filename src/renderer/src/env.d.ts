@@ -133,6 +133,11 @@ interface RendererAPIOverrides {
     onTakeover: (cb: (request: unknown) => void) => () => void
     onTaskState: (cb: (state: unknown) => void) => () => void
   }
+  vision?: {
+    control: (command: 'stop' | 'pause' | 'resume') => Promise<boolean>
+    onStep: (cb: (step: unknown) => void) => () => void
+    onTaskState: (cb: (state: unknown) => void) => () => void
+  }
   proInvoke?: (channel: string, ...args: unknown[]) => Promise<unknown>
   proOn?: (channel: string, cb: (...a: unknown[]) => void) => () => void
   proOff?: (channel: string) => void

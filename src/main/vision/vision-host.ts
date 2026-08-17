@@ -23,6 +23,7 @@ import type { VisionAction, Bounds } from './vision-action'
 import { runVisionTask, type VisionScreen, type VisionTaskResult } from './vision-agent'
 import { VisionGuard } from './vision-guard'
 import { buildVisionPrompt } from './vision-prompt'
+import { emitVisionState, emitVisionStep, registerVisionSession } from './vision-controller'
 import { getTakeoverCoordinator } from '../browser/takeover'
 
 /** The synthetic-input surface the host needs. Implemented by a native addon
@@ -113,11 +114,14 @@ class VisionHost {
       }
     }
     const guard = new VisionGuard()
-    // The kill switch: Esc halts the run and consumes the keypress.
+    // The kill switch: Esc halts the run and consumes the keypress. The overlay's
+    // Stop routes to the SAME guard via the controller session.
     globalShortcut.register('Escape', () => guard.halt('stopped with Esc'))
+    const releaseSession = registerVisionSession(guard)
     const coordinator = getTakeoverCoordinator()
+    emitVisionState({ taskId, goal, status: 'running' })
     try {
-      return await runVisionTask(goal, {
+      const result = await runVisionTask(goal, {
         screen: makeScreen(actuation),
         guard,
         ground: (g, image) =>
@@ -126,10 +130,19 @@ class VisionHost {
           }),
         waitForUser: async (why) => {
           await coordinator.waitForTakeover(taskId, why)
-        }
+        },
+        onStep: (note) => emitVisionStep(taskId, note)
       })
+      emitVisionState({
+        taskId,
+        goal,
+        status: result.ok ? 'done' : 'failed',
+        summary: result.summary
+      })
+      return result
     } finally {
       globalShortcut.unregister('Escape')
+      releaseSession()
     }
   }
 }

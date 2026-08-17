@@ -88,6 +88,21 @@ const offGridApi = {
       return unsubscribe('browser:task-state', sub)
     }
   },
+  // Vision rail (R2-D): the supervised overlay's Stop/Pause/Resume + its feed.
+  vision: {
+    control: (command: 'stop' | 'pause' | 'resume') =>
+      ipcRenderer.invoke('vision:control', command),
+    onStep: (cb: (step: unknown) => void) => {
+      const sub = (_e: unknown, step: unknown): void => cb(step)
+      ipcRenderer.on('vision:step', sub)
+      return unsubscribe('vision:step', sub)
+    },
+    onTaskState: (cb: (state: unknown) => void) => {
+      const sub = (_e: unknown, state: unknown): void => cb(state)
+      ipcRenderer.on('vision:task-state', sub)
+      return unsubscribe('vision:task-state', sub)
+    }
+  },
   // Generic passthrough so pro renderer code can reach pro IPC channels without
   // the core preload bundle enumerating them.
   proInvoke: (channel: string, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args),

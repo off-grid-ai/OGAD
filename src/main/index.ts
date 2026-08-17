@@ -390,6 +390,8 @@ app.whenReady().then(async () => {
     registerActionsIpc() // Approval UX v2: inline gate cards + outcome/undo feed
     const { registerBrowserIpc } = await import('./browser/browser-ipc')
     registerBrowserIpc() // the browser rail's watched-pane takeover handoff
+    const { registerVisionIpc } = await import('./vision/vision-controller')
+    registerVisionIpc() // the vision rail's supervisor Stop/Pause/Resume
     setupDesktopBackupIPC()
     // one OpenAI-compatible local gateway (LLM + STT); auto-picks a free port. Async, so handle a
     // rejection on the promise (a try/catch around a fire-and-forget async call can't catch it).
