@@ -42,8 +42,15 @@ export function makeComputerTaskExecutor(
   return async (action) => {
     const goal = goalOf(action)
     const routing = await tiers.routingSnapshot(goal)
-    if (routing && axRailViable(routing.snapshot)) {
+    const viable = routing !== null && axRailViable(routing.snapshot)
+    console.log(
+      `[computer-task] goal="${goal}" routing=${
+        routing ? `${routing.app}/${routing.snapshot.elements.length} elements` : 'none'
+      } axViable=${viable}`
+    )
+    if (routing && viable) {
       const result = await tiers.runAx(goal, action.id, routing.app, routing.snapshot)
+      console.log(`[computer-task] AX result ok=${result.ok} summary="${result.summary}"`)
       if (!result.ok) {
         return { ok: false, detail: result.summary }
       }
@@ -51,6 +58,7 @@ export function makeComputerTaskExecutor(
       return { ok: true, effectId: action.id }
     }
     // Dead-AX surface (or no named app): the vision rail sees the whole screen.
+    console.log('[computer-task] falling through to the vision rail')
     return tiers.visionExecute(action)
   }
 }

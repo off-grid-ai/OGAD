@@ -176,11 +176,14 @@ class AxRailHost {
     app: string,
     initial?: AxSnapshot
   ): Promise<ElementTaskResult> {
+    console.log(`[ax-rail] runTask app="${app}" goal="${goal}"`)
     const actuation = loadActuation()
     if (!actuation) {
+      console.log('[ax-rail] BLOCKED: nut.js actuation not available in this build')
       return { ok: false, summary: 'input actuation is not available in this build', steps: [] }
     }
     if (process.platform === 'darwin' && !systemPreferences.isTrustedAccessibilityClient(true)) {
+      console.log('[ax-rail] BLOCKED: Accessibility grant missing for Off Grid')
       return {
         ok: false,
         summary:
@@ -210,12 +213,18 @@ class AxRailHost {
           return (await snapshotApp(app)) ?? { windowTitle: '', elements: [] }
         },
         actuator: makeElementActuator(actuation, guard),
-        decide: (prompt) =>
-          llm.chat(prompt, [], 60_000, 200, {
+        decide: async (prompt) => {
+          const raw = await llm.chat(prompt, [], 60_000, 400, {
             responseFormat: ELEMENT_STEP_FORMAT,
             disableThinking: true
-          }),
-        onStep: (note) => emitVisionStep(taskId, note)
+          })
+          console.log(`[ax-rail] model reply: ${JSON.stringify(raw.slice(0, 400))}`)
+          return raw
+        },
+        onStep: (note) => {
+          console.log(`[ax-rail] step: ${note}`)
+          emitVisionStep(taskId, note)
+        }
       })
       emitVisionState({
         taskId,
