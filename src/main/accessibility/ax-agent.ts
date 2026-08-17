@@ -164,8 +164,11 @@ export function buildElementPrompt(goal: string, snapshot: AxSnapshot, history: 
     '- Key: {"action":"key","keys":"Enter"} (or "cmd k").',
     '- Sign-in, one-time code, or payment: {"action":"give_up","why":"..."} and let the user act.',
     '- Task complete: {"action":"done","summary":"..."}. Cannot be done: {"action":"give_up","why":"..."}.',
-    'Messaging a person: a field named Search / "Channel or user name" / "To" is for NAVIGATION, not the message. First type the PERSON\'S NAME there and press Enter to open their conversation; ONLY THEN type your message (the message box is usually already focused - use type with no index). Never type the message text into a search or recipient field.',
-    'If a step did not change anything (the same field still holds your text), do something different - do not repeat it.',
+    'Messaging a person in a chat app (Slack, etc.), in order:',
+    '  1) Open their conversation with the quick switcher: {"action":"key","keys":"cmd k"}, then type their name, then {"action":"key","keys":"Enter"}. (Typing in the left sidebar "Search"/"Channel or user name" box only FILTERS the list - Enter there does NOT open the chat; you would have to CLICK the matching result.)',
+    '  2) THEN type the message into the box labeled "Message to <name>" (or "Message #<channel>") by ITS [number], and add "keys":"Enter" to send. Do not assume the message box is focused.',
+    'A Search / "Channel or user name" / "To" field is for navigation only - never put the message text there.',
+    'If a step changed nothing (the same field still holds your text), do something different - do not repeat it.',
     'Reply with ONLY the JSON for your next action.'
   ]
     .filter(Boolean)

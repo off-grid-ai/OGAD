@@ -202,5 +202,11 @@ describe('buildElementPrompt', () => {
     // general model needs, or it re-observes forever (the Slack regression).
     expect(prompt).toMatch(/omit "index".*focused/i)
     expect(prompt).toMatch(/"keys":"Enter".*send/i)
+    // Messaging guidance (the Slack live-test fixes): open the DM via the quick
+    // switcher (a sidebar-search Enter only filters), then type into the labeled
+    // composer by number - not by assuming focus.
+    expect(prompt).toMatch(/cmd k/i)
+    expect(prompt).toMatch(/Message to <name>/i)
+    expect(prompt).toMatch(/only FILTERS|does NOT open/i)
   })
 })
