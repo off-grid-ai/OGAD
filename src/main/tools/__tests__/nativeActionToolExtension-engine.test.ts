@@ -300,64 +300,6 @@ describe('the engine path', () => {
     expect(reply).toBe('Done.')
   })
 
-  it('a non-grounder nudge is surfaced IN THE CHAT for computer_task (queued + needs_help)', async () => {
-    const visionNotice = vi.fn(() => 'That model is not a grounding model - load UI-TARS 1.5 7B.')
-    // Queued (parked) path.
-    const parked = new NativeActionToolExtension(
-      {
-        run,
-        proposeApproval,
-        visionNotice,
-        actions: makePort({
-          waitForOutcome: () => new Promise(() => {}),
-          whenParked: async () => {}
-        })
-      },
-      'darwin'
-    )
-    const queuedReply = await parked.execute('computer_task', { goal: 'share the deck' })
-    expect(queuedReply).toMatch(/not a grounding model/)
-    expect(queuedReply).toMatch(/pending approval/)
-
-    // needs_help outcome path also carries the nudge.
-    const ranNeedsHelp = new NativeActionToolExtension(
-      {
-        run,
-        proposeApproval,
-        visionNotice,
-        actions: makePort({
-          waitForOutcome: async () =>
-            ({
-              id: 'act_1',
-              outcome: 'needs_help',
-              record: { attemptLog: [] }
-            }) as unknown as TickOutcome
-        })
-      },
-      'darwin'
-    )
-    expect(await ranNeedsHelp.execute('computer_task', { goal: 'x' })).toMatch(
-      /not a grounding model/
-    )
-  })
-
-  it('no nudge when the model IS a grounder (visionNotice returns null), or for a non-vision tool', async () => {
-    const visionNotice = vi.fn(() => null)
-    const grounderPort = makePort({
-      waitForOutcome: () => new Promise(() => {}),
-      whenParked: async () => {}
-    })
-    const ext = new NativeActionToolExtension(
-      { run, proposeApproval, visionNotice, actions: grounderPort },
-      'darwin'
-    )
-    expect(await ext.execute('computer_task', { goal: 'x' })).not.toMatch(/grounding model/)
-    // A semantic tool never triggers the vision nudge lookup.
-    visionNotice.mockClear()
-    await ext.execute('reminders_create', { title: 'x' })
-    expect(visionNotice).not.toHaveBeenCalled()
-  })
-
   it('computer_task is engine-only too - never offered to the legacy pro queue', async () => {
     run.mockClear()
     const legacyPropose = vi.fn(() => true)

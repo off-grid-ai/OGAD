@@ -50,6 +50,8 @@ import { Button } from '@renderer/components/ui/button'
 import { ActionGateDock } from '@renderer/components/actions/ActionGateDock'
 import { WatchedBrowserPane } from '@renderer/components/browser/WatchedBrowserPane'
 import { VisionSupervisorOverlay } from '@renderer/components/vision/VisionSupervisorOverlay'
+import { VisionGrounderNudge } from '@renderer/components/vision/VisionGrounderNudge'
+import { MessageNudge } from '@renderer/components/ui/MessageNudge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import {
   DropdownMenu,
@@ -3350,14 +3352,10 @@ export function MemoryChat({
                           </ReactMarkdown>
                         )}
                         {message.cutoff ? (
-                          <p
-                            role="status"
-                            className="mt-2 flex items-start gap-1.5 border-t border-amber-500/20 pt-2 text-[11px] text-amber-400"
-                          >
-                            <WarningCircle className="mt-0.5 h-3 w-3 shrink-0" weight="fill" />
+                          <MessageNudge>
                             Response stopped at the configured{' '}
                             {message.cutoff.maxTokens.toLocaleString()}-token limit.
-                          </p>
+                          </MessageNudge>
                         ) : null}
                         {message.imageMemoryRetry ? (
                           <div className="mt-2 flex items-center gap-2 border-t border-border pt-2">
@@ -4502,6 +4500,8 @@ export function MemoryChat({
                 <WatchedBrowserPane />
                 {/* Vision rail: the supervisor overlay slides in during a computer-use task */}
                 <VisionSupervisorOverlay />
+                {/* Vision rail: the grounder nudge, in the chat, when the model can't ground */}
+                <VisionGrounderNudge />
                 {microphoneDenied && (
                   <div
                     role="alert"

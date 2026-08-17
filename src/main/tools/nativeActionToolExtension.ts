@@ -16,8 +16,6 @@ import type { ToolExtension } from '../tools'
 import type { ProposeOutcome, TickOutcome } from '@offgrid/use'
 import { proposeActionApproval, shouldGate, type ActionApprovalRequest } from '../actions/approval'
 import { getActionsRuntime } from '../actions/use-runtime'
-import { llm } from '../llm'
-import { visionModelNotice } from '../vision/vision-model-notice'
 import { makeWinInlineRunner } from '../actions/semantic-rail-win'
 import { runNativeAction } from '../actions/native-helper'
 import type { NativeActionCommand, NativeActionResponse } from '../actions/native-helper-logic'
@@ -44,10 +42,6 @@ export interface NativeActionToolBoundary {
   run: (cmd: NativeActionCommand) => Promise<NativeActionResponse>
   proposeApproval: (request: ActionApprovalRequest) => boolean | undefined
   actions?: ActionsPort
-  /** The grounder nudge for a computer_task: a one-line warning when the loaded
-   *  model is not a grounding model, or null when it is. Surfaced IN THE CHAT so
-   *  the user cannot miss it (the supervisor overlay is easy to look past). */
-  visionNotice?: () => string | null
 }
 
 /** How long the tool waits for a free-build action to finish before calling
@@ -78,8 +72,7 @@ const productionBoundary: NativeActionToolBoundary = {
     // The import is static (the main bundle is one CJS chunk); the runtime
     // itself builds lazily on first access, once the DB exists.
     return getActionsRuntime()
-  },
-  visionNotice: () => visionModelNotice(llm.activeModelInfo())
+  }
 }
 
 export class NativeActionToolExtension implements ToolExtension {
@@ -153,12 +146,6 @@ export class NativeActionToolExtension implements ToolExtension {
     spec: NativeToolSpec,
     args: Record<string, unknown>
   ): Promise<string> {
-    // A computer_task grounds clicks from a screenshot: warn IN THE CHAT (not
-    // just the overlay) when the loaded model is not a grounder, so the user
-    // sees why it may misclick and what to load.
-    const groundNudge = actionType === 'computer_task' ? (this.boundary.visionNotice?.() ?? '') : ''
-    const withNudge = (message: string): string =>
-      groundNudge ? `${groundNudge}\n\n${message}` : message
     const proposed = await actions.propose(
       {
         type: actionType,
@@ -182,9 +169,7 @@ export class NativeActionToolExtension implements ToolExtension {
       actions.whenParked(proposed.id).then(() => ({ kind: 'parked' as const }))
     ])
     if (raced.kind === 'parked' || !raced.outcome) {
-      return withNudge(
-        `Queued for the user's approval — ${spec.title(args)} will run only after they approve it. Do not assume it has happened; tell the user it's pending approval.`
-      )
+      return `Queued for the user's approval — ${spec.title(args)} will run only after they approve it. Do not assume it has happened; tell the user it's pending approval.`
     }
     const outcome = raced.outcome
     switch (outcome.outcome) {
@@ -195,9 +180,7 @@ export class NativeActionToolExtension implements ToolExtension {
       case 'needs_help': {
         const lastAttempt = outcome.record.attemptLog.at(-1)
         const detail = lastAttempt?.detail ? ` (${lastAttempt.detail})` : ''
-        return withNudge(
-          `It ran but could not be confirmed${detail}. Tell the user it needs their attention.`
-        )
+        return `It ran but could not be confirmed${detail}. Tell the user it needs their attention.`
       }
       case 'edited':
         return `The user is editing this action before approving it. Tell them it is pending.`
