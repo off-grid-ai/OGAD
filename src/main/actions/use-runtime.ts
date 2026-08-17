@@ -34,6 +34,8 @@ import { makeBrowserRailExecutor, registerBrowserRail } from '../browser/browser
 import { getBrowserRailHost } from '../browser/browser-host'
 import { makeVisionRailExecutor, registerVisionRail } from '../vision/vision-rail'
 import { getVisionRailHost } from '../vision/vision-host'
+import { makeComputerTaskExecutor } from '../accessibility/ax-rail'
+import { getAxRailHost } from '../accessibility/ax-host'
 
 export interface ActionsRuntime {
   propose(
@@ -150,6 +152,14 @@ export function getActionsRuntime(): ActionsRuntime {
   const visionExecute = makeVisionRailExecutor({
     runTask: (goal, taskId) => getVisionRailHost().runTask(goal, taskId)
   })
+  // computer_task is TIERED: try the accessibility rail first (free, any chat
+  // model, most native apps), and fall through to the vision grounder only when
+  // AX can't see the controls. One decision, made from the routing snapshot.
+  const computerTaskExecute = makeComputerTaskExecutor({
+    routingSnapshot: (goal) => getAxRailHost().routingSnapshot(goal),
+    runAx: (goal, taskId, app, initial) => getAxRailHost().runTask(goal, taskId, app, initial),
+    visionExecute
+  })
   const engine = new UseEngine({
     driver: makeUseDriver(getDB()),
     // Read-back verification reads the world back through the platform's own
@@ -165,7 +175,8 @@ export function getActionsRuntime(): ActionsRuntime {
           return browserExecute(action)
         }
         if (rail === 'vision') {
-          return visionExecute(action)
+          // computer_task: accessibility-first, vision as the fallback tier.
+          return computerTaskExecute(action)
         }
         return { ok: false, detail: `the '${rail}' rail is not built yet` }
       }

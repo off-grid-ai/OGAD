@@ -113,6 +113,14 @@ export default defineConfig({
         // them - the e2e tour and the real-machine pass, not this runner.
         'src/main/browser/browser-host.ts',
         'src/main/vision/vision-host.ts',
+        // The accessibility rail's live host: get-windows I/O + the Swift helper
+        // spawn + synthetic input + the Accessibility grant, over the unit-tested
+        // parser/router/loop/target-picker. Driven on a real Mac (the T1f pass).
+        'src/main/accessibility/ax-host.ts',
+        // The shared synthetic-input adapter: dynamically requires the OPTIONAL
+        // native addon (nut.js) and needs a real display to actuate - the same
+        // class of shell as the rail hosts above.
+        'src/main/input/actuation.ts',
         // powershell.exe-spawning I/O shell (Windows-only twin of native-helper's
         // spawn side); its parsing is the shared parseHelperResponse, which is
         // covered. Exercised on a real Windows machine per WINDOWS_TEST_PLAN.md.
