@@ -26,111 +26,17 @@ import type { VisionAction, Bounds } from './vision-action'
 import { runVisionTask, type VisionScreen, type VisionTaskResult } from './vision-agent'
 import { VisionGuard } from './vision-guard'
 import { buildVisionPrompt } from './vision-prompt'
-import { hotkeyToKeyNames } from './vision-keys'
 import { emitVisionState, emitVisionStep, registerVisionSession } from './vision-controller'
 import { visionModelNotice } from './vision-model-notice'
 import { getTakeoverCoordinator } from '../browser/takeover'
+import { loadActuation, actuationAvailable, type ActuationPort } from '../input/actuation'
 
-/** The synthetic-input surface the host needs. Backed by the native addon when
- *  installed; null otherwise. Async - the addon's operations are promises. */
-export interface ActuationPort {
-  moveMouse(x: number, y: number): Promise<void>
-  click(button: 'left' | 'right', double: boolean): Promise<void>
-  dragTo(x: number, y: number): Promise<void>
-  typeText(text: string): Promise<void>
-  tapKeys(keys: string): Promise<void>
-  scroll(direction: 'up' | 'down' | 'left' | 'right'): Promise<void>
-}
+export type { ActuationPort }
 
-/** The slice of the nut.js API the adapter uses. */
-interface NutApi {
-  mouse: {
-    setPosition(p: unknown): Promise<unknown>
-    leftClick(): Promise<unknown>
-    rightClick(): Promise<unknown>
-    doubleClick(btn: number): Promise<unknown>
-    drag(path: unknown[]): Promise<unknown>
-    scrollUp(n: number): Promise<unknown>
-    scrollDown(n: number): Promise<unknown>
-    scrollLeft(n: number): Promise<unknown>
-    scrollRight(n: number): Promise<unknown>
-  }
-  keyboard: {
-    type(...input: unknown[]): Promise<unknown>
-    pressKey(...keys: number[]): Promise<unknown>
-    releaseKey(...keys: number[]): Promise<unknown>
-  }
-  Point: new (x: number, y: number) => unknown
-  Button: { LEFT: number; RIGHT: number; MIDDLE: number }
-  Key: Record<string, number>
-}
-
-/**
- * Load the OPTIONAL native input addon and adapt it to ActuationPort. The
- * require is by a variable name so the bundler/typechecker never hard-binds the
- * optional module; a missing addon (not installed, or a failed native rebuild)
- * is caught and returns null, keeping the rail gated instead of crashing.
- */
-function loadActuation(): ActuationPort | null {
-  let nut: NutApi
-  try {
-    // Require by a VARIABLE name so the bundler never statically resolves the
-    // optional module (main is CJS - `require` is available at runtime); a
-    // missing or unbuilt addon throws here and we fall through to null.
-    const load = (m: string): NutApi => (require as NodeRequire)(m) as NutApi
-    nut = load('@nut-tree-fork/nut-js')
-  } catch {
-    return null
-  }
-  const { mouse, keyboard, Point, Button, Key } = nut
-  return {
-    async moveMouse(x, y) {
-      await mouse.setPosition(new Point(x, y))
-    },
-    async click(button, double) {
-      if (double) {
-        await mouse.doubleClick(Button.LEFT)
-        return
-      }
-      await (button === 'right' ? mouse.rightClick() : mouse.leftClick())
-    },
-    async dragTo(x, y) {
-      // The mouse is moved to the start first (dispatch), so a one-point path
-      // drags from there to here.
-      await mouse.drag([new Point(x, y)])
-    },
-    async typeText(text) {
-      await keyboard.type(text)
-    },
-    async tapKeys(keys) {
-      const names = hotkeyToKeyNames(keys)
-      if (!names) {
-        return
-      }
-      const codes = names.map((n) => Key[n]).filter((c) => typeof c === 'number')
-      if (codes.length !== names.length) {
-        return // an unmapped key - refuse the partial combo
-      }
-      await keyboard.pressKey(...codes)
-      await keyboard.releaseKey(...codes)
-    },
-    async scroll(direction) {
-      const steps = 3
-      if (direction === 'up') {
-        await mouse.scrollUp(steps)
-      } else if (direction === 'down') {
-        await mouse.scrollDown(steps)
-      } else if (direction === 'left') {
-        await mouse.scrollLeft(steps)
-      } else {
-        await mouse.scrollRight(steps)
-      }
-    }
-  }
-}
-
+/** Back-compat alias: the rail-neutral availability check now lives in the
+ *  shared actuation module (both vision and the accessibility rail use it). */
 export function visionActuationAvailable(): boolean {
-  return loadActuation() !== null
+  return actuationAvailable()
 }
 
 // The screenshot is written to ONE reused temp file per process; llm.chat reads
