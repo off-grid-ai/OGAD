@@ -17,6 +17,9 @@ import { stripTags, htmlToText, decodeDdgHref } from './tools-parsers'
 import { mimeFromExt } from './model-server/data-url'
 import { evaluateArithmetic } from './calculator'
 import { selectToolExtensions } from './tools/extension-select'
+import { planTask } from './tools/planner'
+import { makePlanExecutor } from './tools/plan-executor'
+import { shouldPlan } from './tools/planner-logic'
 
 // Per-tool enable/disable, persisted as a list of disabled tool names.
 function disabledSet(): Set<string> {
@@ -363,7 +366,7 @@ function asToolResult(r: string | ToolResult): ToolResult {
  *  else the matching built-in. Any throw becomes an error-text result (a single
  *  tool failing never aborts the turn). No name-based special-casing — each tool
  *  owns its own text + side channels (sources / imageRequest) via its ToolResult. */
-async function runTool(
+export async function runTool(
   name: string,
   args: Record<string, unknown>,
   ctx: ToolContext,
@@ -433,6 +436,51 @@ export type UnifiedSource = {
  * callbacks (e.g. the pro skills-engine caller) and it just buffers - the final answer is
  * always the return value either way. Returns the final answer + the calls made.
  */
+/** Compose the closing reply after the orchestrator ran a plan: seed the model
+ *  with the plan's tool calls + results and stream one natural summary (the same
+ *  shape as the reactive loop's forced-final-answer). */
+async function composePlanAnswer(
+  sys: string,
+  query: string,
+  history: { role: string; content: string }[],
+  res: { toolCalls: ToolCall[]; stopped?: string },
+  signal: AbortSignal | undefined,
+  onDelta: (text: string, kind: 'content' | 'reasoning') => void
+): Promise<string> {
+  if (signal?.aborted) {
+    return ''
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const messages: any[] = [
+    { role: 'system', content: sys },
+    ...history.slice(-10).map((m) => ({ role: m.role, content: m.content })),
+    { role: 'user', content: query }
+  ]
+  res.toolCalls.forEach((c, i) => {
+    const id = `plan-${String(i)}`
+    messages.push({
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        { id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.args) } }
+      ]
+    })
+    messages.push({ role: 'tool', tool_call_id: id, content: c.result })
+  })
+  if (res.stopped) {
+    messages.push({
+      role: 'user',
+      content: `Note: the task stopped early - ${res.stopped}. Tell the user plainly what happened.`
+    })
+  }
+  const final = await llm.streamChat(messages, onDelta, {
+    temperature: 0.3,
+    thinking: false,
+    signal
+  })
+  return final.content.trim() || res.stopped || 'Done.'
+}
+
 export async function toolChat(
   query: string,
   history: { role: string; content: string }[] = [],
@@ -450,6 +498,8 @@ export async function toolChat(
     onDelta?: (text: string, kind: 'content' | 'reasoning') => void
     onStep?: (call: { name: string; args: Record<string, unknown> }) => void
     onToolResult?: (call: { name: string; result: string }) => void
+    /** The orchestrator's plan for this turn, emitted once before its steps run. */
+    onPlan?: (steps: { tool: string; why: string }[]) => void
   } = {}
 ): Promise<{
   answer: string
@@ -543,6 +593,43 @@ export async function toolChat(
   const sys =
     'You are Off Grid, a private on-device assistant. Use the provided tools when they help answer precisely. Keep answers concise.' +
     (hints.length ? ' ' + hints.join(' ') : '')
+
+  // --- Orchestrator: plan-and-execute for action requests --------------------
+  // Before the reactive loop, run ONE focused planning pass. It routes to the
+  // right tool and fills its args - the judgment a small model fumbles inline
+  // (open_url vs web_task, the missing url, sequencing contacts -> message). An
+  // empty/absent plan (a question, chit-chat, a request no tool fits) falls
+  // straight through to the reactive loop below, so normal chat is untouched.
+  if (shouldPlan(query)) {
+    try {
+      const catalog = tools
+        .map((t) => {
+          const fn = (t as { function?: { name?: unknown; description?: unknown } }).function
+          return { name: String(fn?.name ?? ''), description: String(fn?.description ?? '') }
+        })
+        .filter((c) => c.name.length > 0)
+      const plan = await planTask(query, history, catalog)
+      if (plan.steps.length > 0) {
+        opts.onPlan?.(plan.steps.map((s) => ({ tool: s.tool, why: s.why })))
+        const execute = makePlanExecutor((name, args) =>
+          runTool(
+            name,
+            args,
+            { conversationId: opts.conversationId, projectId: opts.projectId },
+            exts
+          )
+        )
+        const res = await execute(plan, { onStep: opts.onStep, onToolResult: opts.onToolResult })
+        const answer = await composePlanAnswer(sys, query, history, res, opts.signal, onDelta)
+        return { answer, toolCalls: res.toolCalls, unified: res.unified, imageRequest: res.imageRequest }
+      }
+    } catch (e) {
+      console.warn(
+        '[orchestrator] planning failed; falling back to the reactive loop:',
+        (e as Error).message
+      )
+    }
+  }
 
   // Attached images ride on the current user turn so the vision model can read
   // them even in tools/connectors mode (otherwise they were silently dropped).
