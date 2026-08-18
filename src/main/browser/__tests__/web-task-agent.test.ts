@@ -59,8 +59,8 @@ const world = (
       return { ok: true }
     },
     type: async (target, text) => {
-      calls.push(`type:${target.index}:${text}`)
-      if (target.identity) {
+      calls.push(`type:${target?.index ?? 'focused'}:${text}`)
+      if (target?.identity) {
         return { ok: false, reason: 'takeover', detail: 'credential field' }
       }
       return { ok: true }
@@ -208,6 +208,22 @@ describe('parseStepDecision', () => {
     expect(parseStepDecision('{"action":"press_key","key":"Enter"}')).toEqual({
       action: 'press_key',
       key: 'Enter'
+    })
+  })
+
+  it('accepts type with NO index (focused field) and an optional submit key', () => {
+    // The real "did not parse" loop: the model typed into the focused search box
+    // and pressed Enter, which the old parser rejected for lacking an index.
+    expect(parseStepDecision('{"action":"type","text":"family guy","key":"Enter"}')).toEqual({
+      action: 'type',
+      text: 'family guy',
+      key: 'Enter'
+    })
+    // With an index it still targets that element, and drops an invalid key.
+    expect(parseStepDecision('{"action":"type","index":3,"text":"hi","key":"Nope"}')).toEqual({
+      action: 'type',
+      index: 3,
+      text: 'hi'
     })
   })
 

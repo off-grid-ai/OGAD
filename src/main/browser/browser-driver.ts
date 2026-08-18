@@ -102,17 +102,21 @@ export class BrowserDriver {
     return { ok: true }
   }
 
-  /** Click-to-focus, then insert. Identity fields refuse - that is the takeover
-   *  boundary, enforced here so no prompt injection can talk the agent past it. */
-  async type(el: PageElement, text: string): Promise<DriverResult> {
-    if (el.identity) {
+  /** Click-to-focus (when given an element), then insert. A null element types
+   *  into whatever is already focused (a search box the agent just clicked).
+   *  Identity fields refuse - that is the takeover boundary, enforced here so no
+   *  prompt injection can talk the agent past it. */
+  async type(el: PageElement | null, text: string): Promise<DriverResult> {
+    if (el?.identity) {
       return {
         ok: false,
         reason: 'takeover',
         detail: `"${el.name || el.tag}" is a credential field - the user signs in directly in the watched pane`
       }
     }
-    await this.click(el)
+    if (el) {
+      await this.click(el)
+    }
     // Select-all so typing REPLACES a prefilled value instead of appending.
     await this.send('Input.dispatchKeyEvent', {
       type: 'keyDown',
