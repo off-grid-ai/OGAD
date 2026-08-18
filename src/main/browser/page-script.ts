@@ -179,7 +179,7 @@ export function pageScriptSource(): string {
 }
 
 /** The snapshot rendered for the model: numbered elements, then page text. */
-export function formatSnapshotForModel(snapshot: PageSnapshot, maxElements = 80): string {
+export function formatSnapshotForModel(snapshot: PageSnapshot, maxElements = 150): string {
   const lines = snapshot.elements.slice(0, maxElements).map((el) => {
     const parts = [`[${el.index}]`, el.role]
     if (el.name) {

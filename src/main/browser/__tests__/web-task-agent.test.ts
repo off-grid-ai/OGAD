@@ -146,12 +146,42 @@ describe('runWebTask', () => {
   })
 
   it('stops at the step budget instead of looping forever', async () => {
-    const replies = Array.from({ length: 20 }, () => '{"action":"press_key","key":"Tab"}')
+    // Cycle distinct keys so the runaway guard (which halts a REPEATED action)
+    // does not fire before the budget is reached.
+    const keys = ['Tab', 'Escape', 'Enter']
+    const replies = Array.from(
+      { length: 20 },
+      (_, i) => `{"action":"press_key","key":"${keys[i % keys.length]}"}`
+    )
     const w = world(replies)
     const result = await runWebTask('t', undefined, { ...w.deps, maxSteps: 3 })
     expect(result.ok).toBe(false)
     expect(result.summary).toMatch(/stopped after 3 steps/)
     expect(w.calls.filter((c) => c.startsWith('key'))).toHaveLength(3)
+  })
+
+  it('halts a runaway: refuses to repeat the same action', async () => {
+    const w = world([
+      '{"action":"click","index":1}',
+      '{"action":"click","index":1}', // identical -> halt
+      '{"action":"done","summary":"unreachable"}'
+    ])
+    const result = await runWebTask('t', undefined, w.deps)
+    expect(result.ok).toBe(false)
+    expect(result.summary).toMatch(/repeated the same action/i)
+    expect(w.calls.filter((c) => c.startsWith('click'))).toHaveLength(1)
+  })
+
+  it('halts a re-typed search text (the A-B-A-B submit loop)', async () => {
+    const w = world([
+      '{"action":"type","index":2,"text":"Family Guy"}',
+      '{"action":"press_key","key":"Enter"}',
+      '{"action":"type","index":2,"text":"Family Guy"}', // same text again -> halt
+      '{"action":"done","summary":"unreachable"}'
+    ])
+    const result = await runWebTask('t', undefined, w.deps)
+    expect(result.ok).toBe(false)
+    expect(result.summary).toMatch(/re-typed the same text/i)
   })
 
   it('a failed start navigation ends the task immediately', async () => {

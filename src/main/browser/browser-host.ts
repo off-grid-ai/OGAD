@@ -70,6 +70,7 @@ class BrowserHost implements BrowserRailHost {
     const view = this.ensureView()
     const driver = new BrowserDriver(attachCdp(view))
     broadcast('browser:task-state', { taskId, goal, status: 'running' })
+    console.log(`[web-task] runTask goal="${goal}" url="${url ?? ''}"`)
     const coordinator = getTakeoverCoordinator()
 
     const result = await runWebTask(goal, url, {
@@ -83,9 +84,15 @@ class BrowserHost implements BrowserRailHost {
         broadcast('browser:takeover', { taskId, why })
         await coordinator.waitForTakeover(taskId, why)
       },
-      onStep: (note) => broadcast('browser:step', { taskId, note })
+      onStep: (note) => {
+        console.log(`[web-task] step: ${note}`)
+        broadcast('browser:step', { taskId, note })
+      }
     })
 
+    console.log(
+      `[web-task] result ok=${result.ok} steps=${result.steps.length} summary="${result.summary}"`
+    )
     broadcast('browser:task-state', {
       taskId,
       goal,
