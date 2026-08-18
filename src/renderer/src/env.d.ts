@@ -129,6 +129,7 @@ interface RendererAPIOverrides {
   }
   browser?: {
     resolveTakeover: (taskId: string, outcome: 'resumed' | 'cancelled') => Promise<boolean>
+    setRegion: (rect: { x: number; y: number; width: number; height: number } | null) => void
     onStep: (cb: (step: unknown) => void) => () => void
     onTakeover: (cb: (request: unknown) => void) => () => void
     onTaskState: (cb: (state: unknown) => void) => () => void

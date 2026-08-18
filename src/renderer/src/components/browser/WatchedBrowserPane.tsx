@@ -33,6 +33,7 @@ export function WatchedBrowserPane(): React.JSX.Element | null {
   const [steps, setSteps] = useState<string[]>([])
   const [takeover, setTakeover] = useState<TakeoverRequest | null>(null)
   const feedRef = useRef<HTMLDivElement>(null)
+  const regionRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const offState = window.api.browser?.onTaskState((event) => {
@@ -60,6 +61,35 @@ export function WatchedBrowserPane(): React.JSX.Element | null {
   useEffect(() => {
     feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight })
   }, [steps])
+
+  // Report the reserved region to main so the live WebContentsView docks exactly
+  // to it (and hide the view when the pane goes away) - keyed on the task so it
+  // re-measures when the region first appears. The pane is `fixed`, so the rect
+  // only moves on window resize, which the observer + listener catch.
+  useEffect(() => {
+    const el = regionRef.current
+    if (!el) {
+      return
+    }
+    const report = (): void => {
+      const r = el.getBoundingClientRect()
+      window.api.browser?.setRegion?.({
+        x: Math.round(r.left),
+        y: Math.round(r.top),
+        width: Math.round(r.width),
+        height: Math.round(r.height)
+      })
+    }
+    report()
+    const observer = new ResizeObserver(report)
+    observer.observe(el)
+    window.addEventListener('resize', report)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', report)
+      window.api.browser?.setRegion?.(null) // hide the view when the pane unmounts
+    }
+  }, [task?.taskId])
 
   if (!task) {
     return null
@@ -96,6 +126,7 @@ export function WatchedBrowserPane(): React.JSX.Element | null {
 
       {/* The reserved region the main-process WebContentsView is laid over. */}
       <div
+        ref={regionRef}
         data-testid="watched-web-region"
         className="relative min-h-0 flex-1 border-b border-neutral-800 bg-neutral-900"
       >
