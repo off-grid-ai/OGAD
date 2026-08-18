@@ -69,9 +69,27 @@ class BrowserHost implements BrowserRailHost {
     return view
   }
 
+  /** Bring the view's renderer up on the start page NATIVELY before any CDP
+   *  command. A freshly-created WebContentsView has no committed frame, so the
+   *  debugger has no live target and EVERY CDP command (Page.enable,
+   *  Runtime.evaluate) hangs until the 15s guard - that was the "did nothing"
+   *  failure. webContents.loadURL spawns the renderer and lands the page, after
+   *  which CDP has a real target. Raced with a timeout so a slow/aborted load
+   *  still hands control back (a partial load already spawned the renderer). */
+  private async loadNatively(view: WebContentsView, url: string): Promise<void> {
+    const load = view.webContents.loadURL(url).catch(() => {
+      /* aborts / redirects still commit a renderer, which is all CDP needs */
+    })
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, 20_000)
+      timer.unref?.()
+    })
+    await Promise.race([load, timeout]).finally(() => clearTimeout(timer))
+  }
+
   async runTask(goal: string, url: string | undefined, taskId: string): Promise<WebTaskResult> {
     const view = this.ensureView()
-    const driver = new BrowserDriver(attachCdp(view))
     // A web task with no start URL would begin on a blank pane (no page to act
     // on, and snapshotting about:blank can hang) - default to a real search page
     // so the model always has somewhere to start and can navigate from there.
@@ -97,7 +115,15 @@ class BrowserHost implements BrowserRailHost {
     showSupervisorWindow()
 
     try {
-      const result = await runWebTask(goal, start, {
+      // Land the start page natively FIRST so the debugger has a live target,
+      // THEN attach CDP for the snapshot/input the loop drives.
+      await this.loadNatively(view, start)
+      emitVisionStep(taskId, `opened ${start}`)
+      broadcast('browser:step', { taskId, note: `opened ${start}` })
+      const driver = new BrowserDriver(attachCdp(view))
+      // startUrl is '' - the page is already loaded natively, so the loop goes
+      // straight to snapshotting it instead of re-navigating over CDP.
+      const result = await runWebTask(goal, '', {
         driver,
         decide: (prompt) =>
           llm.chat(prompt, [], 60_000, 400, {
