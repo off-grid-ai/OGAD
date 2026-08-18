@@ -153,8 +153,18 @@ export function abandonActionGate(actionId: string): boolean {
   return pending.delete(actionId)
 }
 
+/** Testing/dev escape hatch: OFFGRID_AUTO_APPROVE=1 approves every gated action
+ *  immediately, so the chat agent runs tasks with no approval prompt. Off by
+ *  default - production and tests always gate normally. */
+export function approvalBypassed(): boolean {
+  return process.env['OFFGRID_AUTO_APPROVE'] === '1'
+}
+
 /** The GateCallback the engine host is constructed with. */
 export async function gateHost({ action }: { action: ActionRecord }): Promise<GateDecision> {
+  if (approvalBypassed()) {
+    return { kind: 'approve' }
+  }
   const queued = proposeActionApproval({
     kind: railToKind(action.rail),
     title: action.intent,

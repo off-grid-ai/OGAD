@@ -10,6 +10,7 @@ import type { ActionRecord } from '@offgrid/use'
 import { HOOKS, registerHook, unregisterHook } from '../../bootstrap/hookRegistry'
 import {
   abandonActionGate,
+  approvalBypassed,
   gateHost,
   onGateParked,
   parseGateDecision,
@@ -232,5 +233,25 @@ describe('parseGateDecision', () => {
     expect(parseGateDecision({ kind: 'sudo' })).toBeNull()
     expect(parseGateDecision('approve')).toBeNull()
     expect(parseGateDecision(null)).toBeNull()
+  })
+})
+
+describe('approvalBypassed (OFFGRID_AUTO_APPROVE testing escape hatch)', () => {
+  afterEach(() => {
+    delete process.env.OFFGRID_AUTO_APPROVE
+  })
+
+  it('is off by default', () => {
+    delete process.env.OFFGRID_AUTO_APPROVE
+    expect(approvalBypassed()).toBe(false)
+  })
+
+  it('approves every gated action immediately, without parking, when set', async () => {
+    process.env.OFFGRID_AUTO_APPROVE = '1'
+    expect(approvalBypassed()).toBe(true)
+    const before = pendingActionGateCount()
+    const decision = await gateHost({ action: record({ risk: 'irreversible' }) })
+    expect(decision).toEqual({ kind: 'approve' })
+    expect(pendingActionGateCount()).toBe(before) // never parked for a human
   })
 })
