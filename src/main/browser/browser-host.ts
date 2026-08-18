@@ -73,35 +73,63 @@ class BrowserHost implements BrowserRailHost {
   /** The pane region the renderer last reported. null => hide the view. */
   private region: Rect | null = null
 
-  /** Match the live view to the reserved pane region, or hide it when there is
-   *  none - so the browser docks cleanly inside the pane and never lingers,
-   *  misaligned, over another screen. */
-  private applyRegion(): void {
+  private setViewVisible(visible: boolean): void {
     const view = this.view
     if (!view) {
       return
     }
-    const setVisible = (view as unknown as { setVisible?: (v: boolean) => void }).setVisible
-    if (this.region) {
-      view.setBounds(this.region)
-      if (typeof setVisible === 'function') {
-        setVisible.call(view, true)
-      }
-    } else if (typeof setVisible === 'function') {
-      setVisible.call(view, false)
-    } else {
+    const sv = (view as unknown as { setVisible?: (v: boolean) => void }).setVisible
+    if (typeof sv === 'function') {
+      sv.call(view, visible)
+    } else if (!visible) {
       view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
     }
   }
 
-  /** The renderer reports the pane's on-screen region (or null to hide). */
+  /** A coarse right-half rectangle: the fallback bounds so the browser is ALWAYS
+   *  visible the instant a task runs, even before the pane reports its exact
+   *  region - or if that report never arrives. */
+  private coarseBounds(): Rect {
+    const win = BrowserWindow.getAllWindows()[0]
+    const [width, height] = (win ? win.getContentSize() : [1200, 800]) as [number, number]
+    return {
+      x: Math.round(width * 0.58),
+      y: 56,
+      width: Math.round(width * 0.42),
+      height: Math.max(200, height - 260)
+    }
+  }
+
+  /** Show the live view now, docked to the last-reported region or a coarse
+   *  default - so every task makes the browser appear (including a second task
+   *  after the first hid the view). */
+  private showView(): void {
+    if (!this.view) {
+      return
+    }
+    this.view.setBounds(this.region ?? this.coarseBounds())
+    this.setViewVisible(true)
+  }
+
+  /** The renderer reports the pane's on-screen region so the view docks to it
+   *  exactly; null (the pane unmounted) hides the view so it never lingers,
+   *  misaligned, over another screen. */
   setRegion(rect: Rect | null): void {
     this.region = rect
-    this.applyRegion()
+    if (!this.view) {
+      return
+    }
+    if (rect) {
+      this.view.setBounds(rect)
+      this.setViewVisible(true)
+    } else {
+      this.setViewVisible(false)
+    }
   }
 
   private ensureView(): WebContentsView {
     if (this.view) {
+      this.showView()
       return this.view
     }
     const view = new WebContentsView({
@@ -124,10 +152,10 @@ class BrowserHost implements BrowserRailHost {
     const win = BrowserWindow.getAllWindows()[0]
     win?.contentView.addChildView(view)
     this.view = view
-    // Dock the view to the pane's reserved region (reported by the renderer).
-    // Until it reports one, stay HIDDEN rather than floating at a coarse guess
-    // over the app - that guess was the misaligned overlay.
-    this.applyRegion()
+    // Show it immediately (region if reported, else coarse) so the browser is
+    // never invisible while a task runs; the pane refines / hides it via
+    // setRegion.
+    this.showView()
     return view
   }
 
