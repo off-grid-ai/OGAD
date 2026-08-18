@@ -54,6 +54,7 @@ import { OFF_GRID_MOBILE_URL, openExternal } from './constants/links'
 import { cn } from './lib/utils'
 import { normalizeProNavigationIntent, type ProNavigationIntent } from './lib/pro-navigation'
 import { navigateSearchHit } from './lib/search-navigation'
+import { WatchedBrowserPane } from './components/browser/WatchedBrowserPane'
 import {
   OPEN_MODEL_SETTINGS_PANEL_EVENT,
   type ModelSettingsPanelTab
@@ -859,6 +860,9 @@ function AppContent() {
          real split, not an overlay. 0 when no task is running. */
       style={{ paddingRight: 'var(--browser-pane-width, 0px)' }}
     >
+      {/* The web-task browser split: fixed + viewport-docked, rendered at the
+          root so no transformed chat ancestor becomes its containing block. */}
+      <WatchedBrowserPane />
       <CommandPalette
         onOpenHit={handleOpenHit}
         onSeeAll={openSearch}

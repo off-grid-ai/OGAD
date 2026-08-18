@@ -48,7 +48,6 @@ import {
 } from '../../../shared/image-generation-contract'
 import { Button } from '@renderer/components/ui/button'
 import { ActionGateDock } from '@renderer/components/actions/ActionGateDock'
-import { WatchedBrowserPane } from '@renderer/components/browser/WatchedBrowserPane'
 import { VisionSupervisorOverlay } from '@renderer/components/vision/VisionSupervisorOverlay'
 import { VisionGrounderNudge } from '@renderer/components/vision/VisionGrounderNudge'
 import { MessageNudge } from '@renderer/components/ui/MessageNudge'
@@ -4496,8 +4495,9 @@ export function MemoryChat({
                 )}
                 {/* Approval UX v2: pending gate cards + outcomes, in-flow above the composer */}
                 <ActionGateDock />
-                {/* Browser rail: the watched pane slides in while a web task runs */}
-                <WatchedBrowserPane />
+                {/* Browser rail: the watched pane is rendered at the App root (a
+                    fixed viewport-docked split), not here, so a transformed chat
+                    ancestor doesn't become its containing block. */}
                 {/* Vision rail: the supervisor overlay slides in during a computer-use task */}
                 <VisionSupervisorOverlay />
                 {/* Vision rail: the grounder nudge, in the chat, when the model can't ground */}
