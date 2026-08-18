@@ -42,3 +42,49 @@ export function pickTargetApp(
   }
   return best
 }
+
+/** Browsers the AX rail can drive for a WEB computer_task, most-preferred first.
+ *  Used only as a fallback: an orchestrator "play/watch X" plan opens the user's
+ *  browser with open_url, then runs a computer_task to click the result - but
+ *  that goal ("click the first video") names no app, so pickTargetApp finds
+ *  nothing. This lets it target the browser we just opened. */
+export const BROWSER_APPS = [
+  'Arc',
+  'Google Chrome',
+  'Google Chrome Canary',
+  'Microsoft Edge',
+  'Brave Browser',
+  'Safari',
+  'Firefox',
+  'Opera',
+  'Vivaldi'
+] as const
+
+/** Does the goal describe acting on a web page? Gates the browser fallback so a
+ *  non-web goal ("click send" in a chat app) is never hijacked to a running
+ *  browser - only an explicitly web goal falls back to the browser. */
+export function isWebGoal(goal: string): boolean {
+  return /\b(video|youtube|browser|website|web ?page|the page|the site|a tab|search results?|results page|watch|play\b[^.]*\bon\b)\b/i.test(
+    goal
+  )
+}
+
+/** The app a computer_task should drive: the app the goal NAMES, else - for a
+ *  web goal only - the running browser (the one a preceding open_url opened).
+ *  Preserves the named-app behaviour; adds the browser fallback the orchestrator
+ *  chain needs so the AX rail can click a video in the user's real browser. */
+export function pickWebTarget(
+  goal: string,
+  runningApps: readonly string[],
+  selfName: string
+): string | null {
+  const named = pickTargetApp(goal, runningApps, selfName)
+  if (named) {
+    return named
+  }
+  if (!isWebGoal(goal)) {
+    return null
+  }
+  const running = new Set(runningApps.map((a) => a.trim()))
+  return BROWSER_APPS.find((b) => running.has(b)) ?? null
+}

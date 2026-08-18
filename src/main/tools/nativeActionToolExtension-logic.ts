@@ -219,7 +219,7 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
   {
     name: 'computer_task',
     description:
-      "Complete a task by controlling the desktop directly - clicking, typing, and navigating an app's window - for things no other tool can do (a desktop app with no web version, sharing a file through an app UI). The user watches in a supervised overlay and can stop or take over at any time; sign-ins and payments are handed back to them. Prefer web_task for websites and the direct tools (calendar/reminders/mail) whenever they fit - use this only when the task genuinely needs GUI control.",
+      "Complete a task by controlling the desktop directly - clicking, typing, and navigating an app's window - for things no other tool can do (a desktop app with no web version, sharing a file through an app UI, or clicking a result in the user's OWN browser right after open_url opened it, so a video plays where they normally watch). The user watches in a supervised overlay and can stop or take over at any time; sign-ins and payments are handed back to them. Prefer the direct tools (calendar/reminders/mail) and web_task's in-app browser when they fit; use this when the task needs GUI control of a real app window, including the user's own browser.",
     parameters: {
       type: 'object',
       properties: {

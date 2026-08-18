@@ -24,7 +24,7 @@ import { binRoots, exe } from '../runtime-env'
 import { llm } from '../llm'
 import { loadActuation, type ActuationPort } from '../input/actuation'
 import { parseAxElements, type AxElement, type AxSnapshot } from './ax-elements'
-import { pickTargetApp } from './ax-target'
+import { pickWebTarget } from './ax-target'
 import {
   ELEMENT_STEP_FORMAT,
   runElementTask,
@@ -161,7 +161,10 @@ class AxRailHost {
     if (!helper) {
       return null
     }
-    const app = pickTargetApp(goal, await runningAppNames(helper), SELF_APP_NAME)
+    // Named app first; for a web goal with no named app, the running browser -
+    // so a chained open_url -> computer_task can click a result in the user's
+    // real browser (which the goal doesn't name).
+    const app = pickWebTarget(goal, await runningAppNames(helper), SELF_APP_NAME)
     if (!app) {
       return null
     }
