@@ -52,7 +52,21 @@ class BrowserHost implements BrowserRailHost {
       return this.view
     }
     const view = new WebContentsView({
-      webPreferences: { sandbox: true, contextIsolation: true }
+      webPreferences: {
+        sandbox: true,
+        contextIsolation: true,
+        // Off Grid's OWN persistent browser profile. A `persist:` partition keeps
+        // cookies / logins / history / localStorage on disk, so the user signs
+        // into a site inside this pane ONCE and stays signed in across restarts -
+        // a real baked-in browser, not a throwaway view.
+        partition: 'persist:agent-browser',
+        // The agent drives this view over CDP (Input.dispatchMouseEvent) - events
+        // go straight to the renderer, never the real cursor/keyboard - so the
+        // user keeps using their machine while it works. Chromium would throttle
+        // a backgrounded renderer, so disable it or the browsing crawls whenever
+        // Off Grid isn't the focused window.
+        backgroundThrottling: false
+      }
     })
     const win = BrowserWindow.getAllWindows()[0]
     win?.contentView.addChildView(view)
