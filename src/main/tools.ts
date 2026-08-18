@@ -609,6 +609,9 @@ export async function toolChat(
         })
         .filter((c) => c.name.length > 0)
       const plan = await planTask(query, history, catalog)
+      console.log(
+        `[orchestrator] goal="${query}" plan=[${plan.steps.map((s) => s.tool).join(' -> ') || 'none'}]`
+      )
       if (plan.steps.length > 0) {
         opts.onPlan?.(plan.steps.map((s) => ({ tool: s.tool, why: s.why })))
         const execute = makePlanExecutor((name, args) =>
