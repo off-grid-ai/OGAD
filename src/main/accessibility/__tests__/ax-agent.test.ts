@@ -142,6 +142,23 @@ describe('runElementTask', () => {
     expect(w.acted).toEqual(['type:2:hi', 'keys:Enter'])
   })
 
+  it('halts on a re-typed text even at a different index (the A-B-A-B send loop)', async () => {
+    // The real Slack bug: type link -> Enter -> type link at a NEW index (the
+    // composer renumbers after each send) -> Enter ... The consecutive-signature
+    // guard misses it because the indexes differ; the typed-text set catches it.
+    const w = world([
+      '{"action":"type","index":2,"text":"github.com/x"}',
+      '{"action":"key","keys":"Enter"}',
+      '{"action":"type","index":1,"text":"github.com/x"}', // same text, new index -> halt
+      '{"action":"done","summary":"unreachable"}'
+    ])
+    const result = await runElementTask('send the link', w.deps)
+    expect(result.ok).toBe(false)
+    expect(result.summary).toMatch(/re-typed the same text/i)
+    // The link was typed+sent exactly once; the duplicate never actuated.
+    expect(w.acted).toEqual(['type:2:github.com/x', 'keys:Enter'])
+  })
+
   it('does NOT halt when consecutive actions differ (no false positive)', async () => {
     const w = world([
       '{"action":"type","index":2,"text":"hi","keys":"Enter"}',

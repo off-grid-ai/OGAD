@@ -210,6 +210,12 @@ export async function runElementTask(
     onStep?.(line)
   }
   let lastActionSig: string | null = null
+  // Texts already typed this run. Re-typing the SAME text - even into a
+  // different index - means the model already sent it and is looping; the
+  // signature guard misses this because the composer's index changes after each
+  // send (type[74]->Enter->type[71]->Enter...), an A-B-A-B loop the consecutive
+  // check can't see.
+  const typedTexts = new Set<string>()
 
   for (let step = 0; step < maxSteps; step += 1) {
     const snapshot = await read()
@@ -245,6 +251,22 @@ export async function runElementTask(
       continue
     }
     if (decision.action === 'type') {
+      // A re-type of the same non-empty text is a loop (it already sent it and
+      // did not notice); stop before actuating the duplicate, so a message is
+      // never sent twice.
+      const typed = decision.text.trim()
+      if (typed.length > 0 && typedTexts.has(typed)) {
+        note('already typed this text; stopping to avoid re-sending (likely a loop)')
+        return {
+          ok: false,
+          summary:
+            'stopped: the model re-typed the same text, which usually means it already sent it and is looping',
+          steps
+        }
+      }
+      if (typed.length > 0) {
+        typedTexts.add(typed)
+      }
       // index is optional: focus the named field if given, else type into the
       // field the app already has focused (the common case a general model hits).
       let target: AxElement | null = null
