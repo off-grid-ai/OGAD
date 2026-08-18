@@ -180,6 +180,26 @@ export function parsePlan(raw: string, knownToolNames: readonly string[]): Plan 
   return { steps }
 }
 
+/** Tools whose required `goal` arg IS the task and must never be blank - the
+ *  rail drives that string. */
+const GOAL_TOOLS = new Set(['web_task', 'computer_task'])
+
+/** Deterministic backfill: a `web_task`/`computer_task` step whose `goal` the
+ *  planner left empty gets the user's full request - so the rail always drives
+ *  the real task, never a generic placeholder (the "Run a web task" bug). Keeps
+ *  a goal the planner DID provide (it may have refined it). Pure. */
+export function backfillGoals(plan: Plan, userRequest: string): Plan {
+  return {
+    steps: plan.steps.map((s) => {
+      if (!GOAL_TOOLS.has(s.tool)) {
+        return s
+      }
+      const provided = typeof s.args.goal === 'string' ? s.args.goal.trim() : ''
+      return provided ? s : { ...s, args: { ...s.args, goal: userRequest } }
+    })
+  }
+}
+
 /** Resolve a contact handle from contacts_search's result text (which is a
  *  JSON.stringify of the matches). Prefers the requested field, then phone, then
  *  email; null when nothing usable. Pure so the recipient-binding is tested. */

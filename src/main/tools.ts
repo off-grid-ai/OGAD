@@ -19,7 +19,7 @@ import { evaluateArithmetic } from './calculator'
 import { selectToolExtensions } from './tools/extension-select'
 import { planTask } from './tools/planner'
 import { makePlanExecutor } from './tools/plan-executor'
-import { shouldPlan } from './tools/planner-logic'
+import { shouldPlan, backfillGoals } from './tools/planner-logic'
 
 // Per-tool enable/disable, persisted as a list of disabled tool names.
 function disabledSet(): Set<string> {
@@ -608,7 +608,9 @@ export async function toolChat(
           return { name: String(fn?.name ?? ''), description: String(fn?.description ?? '') }
         })
         .filter((c) => c.name.length > 0)
-      const plan = await planTask(query, history, catalog)
+      // Backfill an empty web_task/computer_task goal with the user's request so
+      // the rail never drives a generic placeholder.
+      const plan = backfillGoals(await planTask(query, history, catalog), query)
       console.log(
         `[orchestrator] goal="${query}" plan=[${plan.steps.map((s) => s.tool).join(' -> ') || 'none'}]`
       )

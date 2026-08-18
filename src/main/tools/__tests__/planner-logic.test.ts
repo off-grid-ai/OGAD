@@ -8,6 +8,7 @@ import {
   shouldPlan,
   buildPlannerPrompt,
   parsePlan,
+  backfillGoals,
   resolveContactHandle,
   type ToolCatalogEntry
 } from '../planner-logic'
@@ -104,5 +105,25 @@ describe('resolveContactHandle', () => {
     expect(resolveContactHandle(JSON.stringify([{ phones: ['+199'] }]), 'phone')).toBe('+199')
     expect(resolveContactHandle(JSON.stringify([{ name: 'x' }]))).toBeNull()
     expect(resolveContactHandle('garbage')).toBeNull()
+  })
+})
+
+describe('backfillGoals', () => {
+  it('fills an empty web_task/computer_task goal with the user request', () => {
+    const plan = { steps: [{ tool: 'web_task', args: { url: 'https://youtube.com' }, why: '', bindings: [] }] }
+    const out = backfillGoals(plan, 'play Family Guy on YouTube')
+    expect(out.steps[0]?.args).toEqual({ url: 'https://youtube.com', goal: 'play Family Guy on YouTube' })
+  })
+
+  it('keeps a goal the planner already provided, and ignores non-goal tools', () => {
+    const plan = {
+      steps: [
+        { tool: 'computer_task', args: { goal: 'open the DM with sidd' }, why: '', bindings: [] },
+        { tool: 'messages_send', args: { text: 'hi' }, why: '', bindings: [] }
+      ]
+    }
+    const out = backfillGoals(plan, 'do the thing')
+    expect(out.steps[0]?.args.goal).toBe('open the DM with sidd')
+    expect(out.steps[1]?.args).toEqual({ text: 'hi' })
   })
 })
