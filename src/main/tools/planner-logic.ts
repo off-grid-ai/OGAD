@@ -203,6 +203,43 @@ export function backfillGoals(plan: Plan, userRequest: string): Plan {
   }
 }
 
+/** Web tools that reach a site in a browser - the wrong rail when the user
+ *  named an app they actually have installed. */
+const WEB_TOOLS = new Set(['web_task', 'open_url'])
+
+/** Rail-per-surface guard: if the request names a RUNNING native app (Slack,
+ *  Spotify, ...), a plan that routed to the WEBSITE (web_task/open_url) is
+ *  redirected to driving the app directly with computer_task. A consecutive run
+ *  of web steps (open_url -> web_task) collapses into ONE computer_task carrying
+ *  the user's full request. Deterministic, so it holds no matter which model
+ *  planned - the fix for "send a file on Slack" opening slack.com in the browser.
+ *  nativeApp null (no running app named) leaves the plan untouched. Pure. */
+export function preferNativeApp(plan: Plan, userRequest: string, nativeApp: string | null): Plan {
+  if (!nativeApp) {
+    return plan
+  }
+  const steps: PlanStep[] = []
+  let lastWasRedirect = false
+  for (const s of plan.steps) {
+    if (!WEB_TOOLS.has(s.tool)) {
+      steps.push(s)
+      lastWasRedirect = false
+      continue
+    }
+    if (lastWasRedirect) {
+      continue // collapse a run of web steps into the single computer_task above
+    }
+    steps.push({
+      tool: 'computer_task',
+      args: { goal: userRequest },
+      why: `${nativeApp} is installed - drive the app directly, not its website`,
+      bindings: []
+    })
+    lastWasRedirect = true
+  }
+  return { steps }
+}
+
 /** Resolve a contact handle from contacts_search's result text (which is a
  *  JSON.stringify of the matches). Prefers the requested field, then phone, then
  *  email; null when nothing usable. Pure so the recipient-binding is tested. */

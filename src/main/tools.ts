@@ -19,7 +19,8 @@ import { evaluateArithmetic } from './calculator'
 import { selectToolExtensions } from './tools/extension-select'
 import { planTask } from './tools/planner'
 import { makePlanExecutor } from './tools/plan-executor'
-import { shouldPlan, backfillGoals } from './tools/planner-logic'
+import { shouldPlan, backfillGoals, preferNativeApp } from './tools/planner-logic'
+import { resolveNativeApp } from './accessibility/ax-host'
 
 // Per-tool enable/disable, persisted as a list of disabled tool names.
 function disabledSet(): Set<string> {
@@ -608,9 +609,15 @@ export async function toolChat(
           return { name: String(fn?.name ?? ''), description: String(fn?.description ?? '') }
         })
         .filter((c) => c.name.length > 0)
-      // Backfill an empty web_task/computer_task goal with the user's request so
-      // the rail never drives a generic placeholder.
-      const plan = backfillGoals(await planTask(query, history, catalog), query)
+      // Backfill an empty web_task/computer_task goal with the user's request,
+      // then apply rail-per-surface: a task naming a RUNNING native app drives
+      // the app (computer_task), not its website (web_task/open_url).
+      const nativeApp = await resolveNativeApp(query)
+      const plan = preferNativeApp(
+        backfillGoals(await planTask(query, history, catalog), query),
+        query,
+        nativeApp
+      )
       console.log(
         `[orchestrator] goal="${query}" plan=[${plan.steps.map((s) => s.tool).join(' -> ') || 'none'}]`
       )

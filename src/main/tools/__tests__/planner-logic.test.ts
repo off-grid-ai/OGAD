@@ -9,6 +9,7 @@ import {
   buildPlannerPrompt,
   parsePlan,
   backfillGoals,
+  preferNativeApp,
   resolveContactHandle,
   type ToolCatalogEntry
 } from '../planner-logic'
@@ -130,5 +131,42 @@ describe('backfillGoals', () => {
     const out = backfillGoals(plan, 'do the thing')
     expect(out.steps[0]?.args.goal).toBe('open the DM with sidd')
     expect(out.steps[1]?.args).toEqual({ text: 'hi' })
+  })
+})
+
+describe('preferNativeApp (rail-per-surface: named running app -> computer_task)', () => {
+  const step = (tool, args = {}) => ({ tool, args, why: '', bindings: [] })
+
+  it('redirects a web_task to computer_task when the request names a running app', () => {
+    const plan = { steps: [step('web_task', { goal: 'send a file', url: 'https://slack.com' })] }
+    const out = preferNativeApp(plan, 'send the file to dishit on slack', 'Slack')
+    expect(out.steps).toEqual([
+      { tool: 'computer_task', args: { goal: 'send the file to dishit on slack' }, why: expect.stringContaining('Slack'), bindings: [] }
+    ])
+  })
+
+  it('collapses an open_url -> web_task run into a single computer_task', () => {
+    const plan = { steps: [step('open_url', { url: 'https://slack.com' }), step('web_task', { goal: 'x' })] }
+    const out = preferNativeApp(plan, 'open slack and send a file', 'Slack')
+    expect(out.steps).toHaveLength(1)
+    expect(out.steps[0]?.tool).toBe('computer_task')
+    expect(out.steps[0]?.args.goal).toBe('open slack and send a file')
+  })
+
+  it('keeps a preceding contacts_search and redirects only the web step', () => {
+    const plan = { steps: [step('contacts_search', { query: 'dishit' }), step('web_task', { goal: 'x' })] }
+    const out = preferNativeApp(plan, 'message dishit on slack', 'Slack')
+    expect(out.steps.map((s) => s.tool)).toEqual(['contacts_search', 'computer_task'])
+  })
+
+  it('leaves the plan untouched when no running app was named (nativeApp null)', () => {
+    // "play family guy on youtube" names no native app - the browser chain stays.
+    const plan = { steps: [step('open_url', { url: 'https://youtube.com/results?search_query=x' }), step('computer_task', { goal: 'click first video' })] }
+    expect(preferNativeApp(plan, 'play family guy on youtube', null)).toEqual(plan)
+  })
+
+  it('leaves an already-native computer_task plan unchanged', () => {
+    const plan = { steps: [step('computer_task', { goal: 'send a file on slack' })] }
+    expect(preferNativeApp(plan, 'send a file on slack', 'Slack')).toEqual(plan)
   })
 })

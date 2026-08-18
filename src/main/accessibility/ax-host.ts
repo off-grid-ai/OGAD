@@ -24,7 +24,7 @@ import { binRoots, exe } from '../runtime-env'
 import { llm } from '../llm'
 import { loadActuation, type ActuationPort } from '../input/actuation'
 import { parseAxElements, type AxElement, type AxSnapshot } from './ax-elements'
-import { pickWebTarget } from './ax-target'
+import { pickWebTarget, pickTargetApp } from './ax-target'
 import {
   ELEMENT_STEP_FORMAT,
   runElementTask,
@@ -72,6 +72,21 @@ async function runningAppNames(helper: string): Promise<string[]> {
   } catch {
     return []
   }
+}
+
+/** The running native app a request targets, or null. Lets the orchestrator
+ *  route "do X in Slack" (Slack running) to the app via computer_task instead of
+ *  a website via web_task - rail-per-surface, independent of the model's guess.
+ *  Only sees RUNNING apps (the helper lists NSWorkspace); [] off macOS. */
+export async function resolveNativeApp(goal: string): Promise<string | null> {
+  if (process.platform !== 'darwin') {
+    return null
+  }
+  const helper = helperPath()
+  if (!helper) {
+    return null
+  }
+  return pickTargetApp(goal, await runningAppNames(helper), SELF_APP_NAME)
 }
 
 /** Bring the target app forward so synthetic clicks land on it. `open -a` needs
