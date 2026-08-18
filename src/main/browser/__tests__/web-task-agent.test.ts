@@ -211,6 +211,18 @@ describe('parseStepDecision', () => {
     })
   })
 
+  it('strips a reasoning <think> block / prose before the JSON (the "did not parse" loop)', () => {
+    // A reasoning model emits its thinking before the JSON - a raw JSON.parse
+    // rejected it and every reply read as "did not parse".
+    expect(
+      parseStepDecision('<think>I should click the search result now.</think>\n{"action":"click","index":7}')
+    ).toEqual({ action: 'click', index: 7 })
+    expect(parseStepDecision('Okay, here is my step: {"action":"press_key","key":"Enter"}')).toEqual({
+      action: 'press_key',
+      key: 'Enter'
+    })
+  })
+
   it('fails closed on junk: bad JSON, unknown actions, missing fields, non-http urls', () => {
     for (const raw of [
       'not json',

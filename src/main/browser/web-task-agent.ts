@@ -16,6 +16,7 @@
 import type { PageElement, PageSnapshot } from './page-script'
 import { formatSnapshotForModel } from './page-script'
 import type { DriverResult } from './browser-driver'
+import { extractJsonObject } from '../json-extract'
 
 export interface AgentDriver {
   snapshot(): Promise<PageSnapshot>
@@ -85,9 +86,15 @@ export const STEP_RESPONSE_FORMAT = {
 /** Fail-closed parse of the model's step. Unknown shapes are null - the loop
  *  notes the waste and moves on; it never guesses an action. */
 export function parseStepDecision(raw: string): StepDecision | null {
+  // Strip any <think> block / prose a reasoning model wraps the JSON in, or a
+  // raw JSON.parse rejects it and the loop reads every reply as "did not parse".
+  const json = extractJsonObject(raw)
+  if (json === null) {
+    return null
+  }
   let parsed: unknown
   try {
-    parsed = JSON.parse(raw)
+    parsed = JSON.parse(json)
   } catch {
     return null
   }

@@ -13,6 +13,7 @@
  */
 import type { AxElement, AxSnapshot } from './ax-elements'
 import { formatAxElementsForModel } from './ax-elements'
+import { extractJsonObject } from '../json-extract'
 
 export interface ElementActuator {
   /** Click at the element's center. */
@@ -75,24 +76,6 @@ export const ELEMENT_STEP_FORMAT = {
   }
 } as const
 
-/** Pull the JSON object out of a model reply that may wrap it in a reasoning
- *  channel or a markdown fence. A grammar-constrained model returns bare JSON,
- *  but a general chat model (no grounder) often prefixes `<think>…</think>` or
- *  fences it in ```json - so we drop the reasoning, then take the first `{` to
- *  the last `}`. Returns null when there is no object at all. */
-function extractJsonObject(raw: string): string | null {
-  let text = raw
-  const thinkClose = text.lastIndexOf('</think>')
-  if (thinkClose !== -1) {
-    text = text.slice(thinkClose + '</think>'.length)
-  }
-  const start = text.indexOf('{')
-  const end = text.lastIndexOf('}')
-  if (start === -1 || end === -1 || end <= start) {
-    return null
-  }
-  return text.slice(start, end + 1)
-}
 
 /** Fail-closed parse: unknown shapes are null; the loop re-observes rather than
  *  acting on a guess. Tolerant of a reasoning/fence wrapper (see
