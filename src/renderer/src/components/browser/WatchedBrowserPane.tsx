@@ -10,6 +10,7 @@
  * renders nothing until a task is running.
  */
 import { useEffect, useRef, useState } from 'react'
+import { X } from '@phosphor-icons/react'
 
 interface StepEvent {
   taskId: string
@@ -34,6 +35,8 @@ export function WatchedBrowserPane(): React.JSX.Element | null {
   const [takeover, setTakeover] = useState<TakeoverRequest | null>(null)
   const feedRef = useRef<HTMLDivElement>(null)
   const regionRef = useRef<HTMLDivElement>(null)
+  // The split's width (px), drag-resizable from its left edge.
+  const [paneWidth, setPaneWidth] = useState(() => Math.round(window.innerWidth * 0.42))
 
   useEffect(() => {
     const offState = window.api.browser?.onTaskState((event) => {
@@ -91,6 +94,21 @@ export function WatchedBrowserPane(): React.JSX.Element | null {
     }
   }, [task?.taskId])
 
+  // Reserve the split's width on the app shell (App root reads this variable as
+  // padding-right) so the content shrinks to the LEFT of the browser - a true
+  // side-by-side split, not an overlay. Cleared when the pane is gone.
+  useEffect(() => {
+    const root = document.documentElement
+    if (task) {
+      root.style.setProperty('--browser-pane-width', `${paneWidth}px`)
+    } else {
+      root.style.removeProperty('--browser-pane-width')
+    }
+    return () => {
+      root.style.removeProperty('--browser-pane-width')
+    }
+  }, [task, paneWidth])
+
   if (!task) {
     return null
   }
@@ -100,6 +118,29 @@ export function WatchedBrowserPane(): React.JSX.Element | null {
       void window.api.browser?.resolveTakeover(takeover.taskId, outcome)
       setTakeover(null)
     }
+  }
+
+  // Drag the left edge to resize the split; width = distance from the right edge,
+  // clamped so both the content and the browser stay usable.
+  const startResize = (e: React.MouseEvent): void => {
+    e.preventDefault()
+    const onMove = (ev: MouseEvent): void => {
+      const w = window.innerWidth - ev.clientX
+      setPaneWidth(Math.max(360, Math.min(window.innerWidth - 280, w)))
+    }
+    const onUp = (): void => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
+  // Close: stop a running task and dismiss the pane, which hides the browser
+  // view (null region) and un-shrinks the content.
+  const close = (): void => {
+    void window.api.vision?.control?.('stop')
+    setTask(null)
   }
 
   const statusTone =
@@ -112,16 +153,33 @@ export function WatchedBrowserPane(): React.JSX.Element | null {
   return (
     <div
       data-testid="watched-browser-pane"
-      className="fixed right-0 top-0 bottom-0 z-50 flex w-[42vw] min-w-[420px] max-w-[90vw] flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl"
+      style={{ width: paneWidth }}
+      className="fixed right-0 top-0 bottom-0 z-50 flex flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl"
     >
+      {/* Drag handle: resize the split from its left edge. */}
+      <div
+        data-testid="watched-resize-handle"
+        onMouseDown={startResize}
+        className="absolute top-0 bottom-0 left-0 z-20 w-1.5 cursor-ew-resize bg-transparent transition-colors hover:bg-green-500/40"
+      />
       <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2.5">
-        <div className="flex items-center gap-2 text-sm text-neutral-200">
+        <div className="flex min-w-0 items-center gap-2 text-sm text-neutral-200">
           <span className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-green-500">
             Web task
           </span>
           <span className="truncate">{task.goal}</span>
         </div>
-        <span className={`text-[11px] uppercase tracking-wide ${statusTone}`}>{task.status}</span>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className={`text-[11px] uppercase tracking-wide ${statusTone}`}>{task.status}</span>
+          <button
+            onClick={close}
+            aria-label="Close browser"
+            data-testid="watched-close"
+            className="rounded p-0.5 text-neutral-500 transition-colors hover:bg-neutral-800 hover:text-neutral-200"
+          >
+            <X size={14} weight="bold" />
+          </button>
+        </div>
       </div>
 
       {/* The reserved region the main-process WebContentsView is laid over. */}

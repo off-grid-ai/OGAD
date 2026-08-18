@@ -101,4 +101,26 @@ describe('<WatchedBrowserPane/>', () => {
     expect(screen.queryByText('step from the first task')).toBeNull()
     expect(screen.queryByText(/sign in/)).toBeNull()
   })
+
+  it('the close button stops the task and dismisses the pane', async () => {
+    const control = vi.fn(async () => true)
+    ;(window.api as unknown as { vision: unknown }).vision = { control }
+    render(<WatchedBrowserPane />)
+    emitState({ taskId: 't7', goal: 'x', status: 'running' })
+    await waitFor(() => screen.getByTestId('watched-browser-pane'))
+    fireEvent.click(screen.getByTestId('watched-close'))
+    expect(control).toHaveBeenCalledWith('stop')
+    await waitFor(() => expect(screen.queryByTestId('watched-browser-pane')).toBeNull())
+  })
+
+  it('the split is resizable by dragging its left edge', async () => {
+    render(<WatchedBrowserPane />)
+    emitState({ taskId: 't8', goal: 'x', status: 'running' })
+    const pane = await waitFor(() => screen.getByTestId('watched-browser-pane'))
+    const before = pane.style.width
+    fireEvent.mouseDown(screen.getByTestId('watched-resize-handle'))
+    fireEvent.mouseMove(window, { clientX: 300 })
+    fireEvent.mouseUp(window)
+    expect(pane.style.width).not.toBe(before) // the drag changed the split width
+  })
 })

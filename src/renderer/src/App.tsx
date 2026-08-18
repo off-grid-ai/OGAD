@@ -852,7 +852,13 @@ function AppContent() {
   }
 
   return (
-    <div className="h-screen w-full overflow-hidden bg-neutral-950 relative">
+    <div
+      className="h-screen w-full overflow-hidden bg-neutral-950 relative"
+      /* The watched browser pane sets --browser-pane-width; reserving it here
+         shrinks the app content to the LEFT so the browser docks beside it as a
+         real split, not an overlay. 0 when no task is running. */
+      style={{ paddingRight: 'var(--browser-pane-width, 0px)' }}
+    >
       <CommandPalette
         onOpenHit={handleOpenHit}
         onSeeAll={openSearch}
