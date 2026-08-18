@@ -16,8 +16,8 @@ import { BrowserDriver, type CdpTransport } from './browser-driver'
 import { runWebTask, STEP_RESPONSE_FORMAT, type WebTaskResult } from './web-task-agent'
 import { getTakeoverCoordinator } from './takeover'
 import { VisionGuard } from '../vision/vision-guard'
-import { emitVisionState, emitVisionStep, registerVisionSession } from '../vision/vision-controller'
-import { showSupervisorWindow, hideSupervisorWindow } from '../vision/supervisor-window'
+import { registerVisionSession } from '../vision/vision-controller'
+import { getMainWindow } from '../main-window'
 import type { BrowserRailHost } from './browser-rail'
 
 function broadcast(channel: string, payload: unknown): void {
@@ -90,7 +90,7 @@ class BrowserHost implements BrowserRailHost {
    *  visible the instant a task runs, even before the pane reports its exact
    *  region - or if that report never arrives. */
   private coarseBounds(): Rect {
-    const win = BrowserWindow.getAllWindows()[0]
+    const win = getMainWindow()
     const [width, height] = (win ? win.getContentSize() : [1200, 800]) as [number, number]
     return {
       x: Math.round(width * 0.58),
@@ -149,7 +149,7 @@ class BrowserHost implements BrowserRailHost {
         backgroundThrottling: false
       }
     })
-    const win = BrowserWindow.getAllWindows()[0]
+    const win = getMainWindow()
     win?.contentView.addChildView(view)
     this.view = view
     // Show it immediately (region if reported, else coarse) so the browser is
@@ -187,28 +187,22 @@ class BrowserHost implements BrowserRailHost {
     console.log(`[web-task] runTask goal="${goal}" url="${start}"`)
     const coordinator = getTakeoverCoordinator()
 
-    // The browser rail reports through the SAME supervisor bridge as the AX /
-    // vision rails, so the one floating panel shows its step feed and its Stop
-    // works no matter which rail is driving (one source of truth for "what is
-    // the computer-use task doing"). `browser:*` stays for the in-app watched
-    // pane + takeover UX; this adds the cross-rail panel.
+    // The browser rail's surface is the in-app watched pane (browser:*), which
+    // shows the live page + step feed inline - so NO floating supervisor window
+    // here (that is for the AX/vision rails, whose driven surface is OUTSIDE the
+    // app). The VisionGuard is still registered so the pane's Stop / close halts
+    // the loop through the vision:control seam.
     const guard = new VisionGuard()
     const releaseSession = registerVisionSession(guard)
-    const setState = (
-      status: 'running' | 'done' | 'failed',
-      summary?: string
-    ): void => {
-      emitVisionState({ taskId, goal, status, summary })
+    const setState = (status: 'running' | 'done' | 'failed', summary?: string): void => {
       broadcast('browser:task-state', { taskId, goal, status, summary })
     }
     setState('running')
-    showSupervisorWindow()
 
     try {
       // Land the start page natively FIRST so the debugger has a live target,
       // THEN attach CDP for the snapshot/input the loop drives.
       await this.loadNatively(view, start)
-      emitVisionStep(taskId, `opened ${start}`)
       broadcast('browser:step', { taskId, note: `opened ${start}` })
       const driver = new BrowserDriver(attachCdp(view))
       // startUrl is '' - the page is already loaded natively, so the loop goes
@@ -226,7 +220,6 @@ class BrowserHost implements BrowserRailHost {
         },
         onStep: (note) => {
           console.log(`[web-task] step: ${note}`)
-          emitVisionStep(taskId, note)
           broadcast('browser:step', { taskId, note })
         },
         shouldStop: () => guard.isHalted
@@ -247,7 +240,6 @@ class BrowserHost implements BrowserRailHost {
       return { ok: false, summary: `browser task error: ${detail}`, steps: [], takeovers: 0, finalUrl: '' }
     } finally {
       releaseSession()
-      hideSupervisorWindow()
     }
   }
 }

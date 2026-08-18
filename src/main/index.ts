@@ -24,6 +24,7 @@ import { registerNativeActionTools } from './tools/nativeActionToolExtension'
 import { setupDesktopBackupIPC } from './backup/ipc'
 import { preloadPath } from './preload-path'
 import { rendererHtmlPath } from './renderer-path'
+import { setMainWindow } from './main-window'
 import { startModelServer, stopModelServer } from './model-server'
 import { startMediaServer, stopMediaServer, mediaUrlFor } from './media-server'
 import { serveCaptureFile } from './ogcapture-serve'
@@ -161,6 +162,10 @@ function createWindow(): void {
       devTools: is.dev // no inspector in the packaged/production build (tamper-proofing)
     }
   })
+
+  // Record THE main window so callers that lay a view over it (the browser
+  // rail) attach to the right window, not a stray overlay from getAllWindows().
+  setMainWindow(mainWindow)
 
   // Maximized before the first paint, not on ready-to-show: the window is still hidden here, so it
   // opens at full size instead of appearing at the constructed size and jumping. It also means anything
