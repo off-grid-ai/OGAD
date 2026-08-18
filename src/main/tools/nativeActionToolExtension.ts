@@ -204,8 +204,13 @@ export class NativeActionToolExtension implements ToolExtension {
         .then((outcome) => ({ kind: 'outcome' as const, outcome })),
       actions.whenParked(proposed.id).then(() => ({ kind: 'parked' as const }))
     ])
-    if (raced.kind === 'parked' || !raced.outcome) {
+    if (raced.kind === 'parked') {
       return `Queued for the user's approval — ${spec.title(args)} will run only after they approve it. Do not assume it has happened; tell the user it's pending approval.`
+    }
+    if (!raced.outcome) {
+      // Approved and still running past the wait window - NOT queued. Say so, or
+      // the model wrongly tells the user to approve something already in flight.
+      return `"${spec.title(args)}" is running now and will finish shortly. It does NOT need approval - do not tell the user to approve it.`
     }
     const outcome = raced.outcome
     switch (outcome.outcome) {

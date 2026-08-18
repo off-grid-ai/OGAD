@@ -155,14 +155,25 @@ export function abandonActionGate(actionId: string): boolean {
 
 /** Testing/dev escape hatch: OFFGRID_AUTO_APPROVE=1 approves every gated action
  *  immediately, so the chat agent runs tasks with no approval prompt. Off by
- *  default - production and tests always gate normally. */
+ *  default - production and tests gate per the rule below. */
 export function approvalBypassed(): boolean {
   return process.env['OFFGRID_AUTO_APPROVE'] === '1'
 }
 
+/** Only COMPUTER-USE tasks ask for approval. The accessibility / vision rails
+ *  drive the real desktop - they take over the user's cursor and keyboard - so
+ *  the user confirms before that happens. Every other action runs IN-APP without
+ *  taking over the machine (the browser rail acts in Off Grid's own page; native
+ *  actions call an API), so it runs without a prompt. */
+export function needsApproval(rail: Rail | undefined): boolean {
+  return rail === 'accessibility' || rail === 'vision'
+}
+
 /** The GateCallback the engine host is constructed with. */
 export async function gateHost({ action }: { action: ActionRecord }): Promise<GateDecision> {
-  if (approvalBypassed()) {
+  // In-app actions run straight through; only computer use is gated. The env
+  // flag bypasses even that, for headless testing.
+  if (approvalBypassed() || !needsApproval(action.rail)) {
     return { kind: 'approve' }
   }
   const queued = proposeActionApproval({

@@ -12,6 +12,7 @@ import {
   abandonActionGate,
   approvalBypassed,
   gateHost,
+  needsApproval,
   onGateParked,
   parseGateDecision,
   pendingActionGateCount,
@@ -31,7 +32,9 @@ const record = (overrides: Partial<ActionRecord> = {}): ActionRecord =>
     id: 'act_1',
     source: 'chat',
     payloadHash: 'a'.repeat(64),
-    rail: 'semantic',
+    // Default to a COMPUTER-USE rail: only those gate now, so the parking tests
+    // need one. Non-computer-use rails (browser/semantic) auto-approve.
+    rail: 'accessibility',
     idempotencyKey: 'k',
     attempts: 0,
     attemptLog: [],
@@ -89,9 +92,9 @@ describe('gateHost', () => {
       request = req
       return true
     })
-    const parked = gateHost({ action: record({ rail: 'browser', risk: 'irreversible' }) })
+    const parked = gateHost({ action: record({ rail: 'vision', risk: 'irreversible' }) })
     expect(request).toMatchObject({
-      kind: 'browser',
+      kind: 'computer',
       risk: 'irreversible',
       actionId: 'act_1',
       actionType: 'reminder',
@@ -176,12 +179,12 @@ describe('the inline gate surface (Approval UX v2)', () => {
     const requests: InlineGateRequest[] = []
     const unregister = registerInlineGateSurface((request) => requests.push(request))
     try {
-      const parked = gateHost({ action: record({ risk: 'irreversible', rail: 'semantic' }) })
+      const parked = gateHost({ action: record({ risk: 'irreversible', rail: 'accessibility' }) })
       expect(requests).toHaveLength(1)
       expect(requests[0]).toMatchObject({
         actionId: 'act_1',
         actionType: 'reminder',
-        kind: 'native',
+        kind: 'computer',
         risk: 'irreversible',
         title: 'remind me to send the deck',
         payloadHash: 'a'.repeat(64)
@@ -233,6 +236,26 @@ describe('parseGateDecision', () => {
     expect(parseGateDecision({ kind: 'sudo' })).toBeNull()
     expect(parseGateDecision('approve')).toBeNull()
     expect(parseGateDecision(null)).toBeNull()
+  })
+})
+
+describe('needsApproval (only computer use is gated)', () => {
+  it('gates the computer-use rails, runs in-app actions straight through', () => {
+    expect(needsApproval('accessibility')).toBe(true)
+    expect(needsApproval('vision')).toBe(true)
+    expect(needsApproval('browser')).toBe(false) // web_task runs in-app
+    expect(needsApproval('semantic')).toBe(false) // native actions
+    expect(needsApproval(undefined)).toBe(false)
+  })
+
+  it('gateHost auto-approves a browser (web_task) action even with a surface listening', async () => {
+    const dispose = registerInlineGateSurface(() => {
+      throw new Error('a web_task must NOT park for approval')
+    })
+    const decision = await gateHost({ action: record({ rail: 'browser' }) })
+    expect(decision).toEqual({ kind: 'approve' })
+    expect(pendingActionGateCount()).toBe(0)
+    dispose()
   })
 })
 

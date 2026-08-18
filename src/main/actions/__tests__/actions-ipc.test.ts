@@ -51,7 +51,8 @@ const record = (): ActionRecord => {
     id: 'act_ipc',
     source: 'chat',
     payloadHash: computePayloadHash({ ...payload, triggerAt: undefined }),
-    rail: 'semantic',
+    // Only computer-use gates now, so this parked-gate test uses that rail.
+    rail: 'accessibility',
     idempotencyKey: 'k',
     attempts: 0,
     attemptLog: [],
