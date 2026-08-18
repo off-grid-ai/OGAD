@@ -252,5 +252,9 @@ describe('buildElementPrompt', () => {
     expect(prompt).toMatch(/cmd k/i)
     expect(prompt).toMatch(/Message to <name>/i)
     expect(prompt).toMatch(/only FILTERS|does NOT open/i)
+    // Completion coaching: stop the instant the goal is achieved (a playing
+    // video is done) - the over-acting seen when it clicked past a playing video.
+    expect(prompt).toMatch(/STOP as soon as the goal is achieved/i)
+    expect(prompt).toMatch(/already playing is done/i)
   })
 })

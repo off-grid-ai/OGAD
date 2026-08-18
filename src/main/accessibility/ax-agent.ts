@@ -164,6 +164,7 @@ export function buildElementPrompt(goal: string, snapshot: AxSnapshot, history: 
     '- Key: {"action":"key","keys":"Enter"} (or "cmd k").',
     '- Sign-in, one-time code, or payment: {"action":"give_up","why":"..."} and let the user act.',
     '- Task complete: {"action":"done","summary":"..."}. Cannot be done: {"action":"give_up","why":"..."}.',
+    '- STOP as soon as the goal is achieved: the instant the target is open or PLAYING, the message is sent, or the file is attached, reply {"action":"done"}. Do NOT keep clicking once the visible end-state is reached - a video that is already playing is done, not a cue to click more.',
     'Messaging a person in a chat app (Slack, etc.), in order:',
     '  1) Open their conversation with the quick switcher: {"action":"key","keys":"cmd k"}, then type their name, then {"action":"key","keys":"Enter"}. (Typing in the left sidebar "Search"/"Channel or user name" box only FILTERS the list - Enter there does NOT open the chat; you would have to CLICK the matching result.)',
     '  2) THEN type the message into the box labeled "Message to <name>" (or "Message #<channel>") by ITS [number], and add "keys":"Enter" to send. Do not assume the message box is focused.',
