@@ -171,7 +171,7 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
   {
     name: 'open_url',
     description:
-      "Open a URL or app link on the user's Mac - a web page, a mailto: draft, or an app scheme like whatsapp://send. Opens only; it does not submit or send anything.",
+      "Open a URL or app link on the user's Mac - a web page, a mailto: draft, or an app scheme like whatsapp://send. Opens ONLY - it does not interact: no searching, clicking, playing, logging in, or submitting. If the goal needs anything DONE on the page (search and click a result, play or watch a video, log in, place an order), use web_task instead, not open_url.",
     parameters: {
       type: 'object',
       properties: {
@@ -188,7 +188,7 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
   {
     name: 'web_task',
     description:
-      'Complete a task on a website in a watched browser pane the user can see - checking in for a flight, placing an order, filling a form. Describe the whole goal in one call; the assistant drives the page step by step and hands control back to the user for any sign-in, one-time code, or payment. Never use this for reading a page - only for tasks that click, fill, or submit.',
+      'Complete a task ON a website in a watched browser pane - searching a site and opening a result, playing or watching a video (YouTube, etc.), checking in for a flight, placing an order, filling a form. Use this whenever the goal needs to click, type, or navigate on a page, not merely open it - "play X on YouTube" or "search Y and open the first result" is web_task, not open_url. Describe the whole goal in one call; the assistant drives the page step by step and hands control back to the user for any sign-in, one-time code, or payment.',
     parameters: {
       type: 'object',
       properties: {
@@ -296,10 +296,10 @@ export function specsForPlatform(platform: NodeJS.Platform): NativeToolSpec[] {
  *  platform does not expose. */
 export function systemHintForPlatform(platform: NodeJS.Platform): string {
   if (platform === 'darwin') {
-    return "You can act on the user's Mac: manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme (like whatsapp://send) with open_url. Complete a task on a website - a check-in, an order, a form - with web_task, describing the whole goal in one call; it runs in a watched pane and hands back to the user for any sign-in or payment. For a task that needs to control a desktop app directly (no web version), use computer_task - the user watches and can take over. Prefer the direct tools and web_task when they fit. Use ISO 8601 for all times. Anything that creates, sends, or runs a task needs the user's approval; tell them it is pending until they approve."
+    return "You can act on the user's Mac: manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme (like whatsapp://send) with open_url - it ONLY opens a page, no interaction. To actually DO something on a website - play a video, search and click a result, check in, order, fill a form - use web_task (NOT open_url), describing the whole goal in one call; it runs in a watched pane and hands back to the user for any sign-in or payment. For a task that needs to control a desktop app directly (no web version), use computer_task - the user watches and can take over. Prefer the direct tools and web_task when they fit. Use ISO 8601 for all times. Anything that creates, sends, or runs a task needs the user's approval; tell them it is pending until they approve."
   }
   if (platform === 'win32') {
-    return "You can act on the user's PC through Outlook: create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url. Complete a task on a website - a check-in, an order, a form - with web_task, describing the whole goal in one call; it runs in a watched pane and hands back to the user for any sign-in or payment. For a task that needs to control a desktop app directly, use computer_task - the user watches and can take over. Prefer the direct tools and web_task when they fit. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Anything that creates, sends, or runs a task needs the user's approval; tell them it is pending until they approve."
+    return "You can act on the user's PC through Outlook: create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url - it ONLY opens a page, no interaction. To DO something on a website - play a video, search and click a result, check in, order, fill a form - use web_task (NOT open_url), describing the whole goal in one call; it runs in a watched pane and hands back to the user for any sign-in or payment. For a task that needs to control a desktop app directly, use computer_task - the user watches and can take over. Prefer the direct tools and web_task when they fit. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Anything that creates, sends, or runs a task needs the user's approval; tell them it is pending until they approve."
   }
   return ''
 }

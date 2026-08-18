@@ -7,6 +7,18 @@ import {
 import { shouldGate } from '../../actions/approval'
 
 describe('native tool specs', () => {
+  it('routes interactive web goals to web_task, not open_url (the "play on YouTube" fix)', () => {
+    // open_url must disclaim interaction and point at web_task; web_task must
+    // name the interactive cases (play a video / search-and-click) so the model
+    // stops treating "play X on YouTube" as a plain open.
+    const openUrl = findNativeToolSpec('open_url')?.description ?? ''
+    const webTask = findNativeToolSpec('web_task')?.description ?? ''
+    expect(openUrl).toMatch(/does not interact|Opens ONLY/i)
+    expect(openUrl).toMatch(/web_task/)
+    expect(webTask).toMatch(/play or watch a video|YouTube/i)
+    expect(webTask).toMatch(/not open_url/i)
+  })
+
   it('exposes calendar and reminder tools with matching helper commands', () => {
     expect(NATIVE_TOOL_SPECS.map((s) => s.name)).toEqual([
       'calendar_create_event',
