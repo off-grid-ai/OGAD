@@ -7,20 +7,17 @@ import {
 import { shouldGate } from '../../actions/approval'
 
 describe('native tool specs', () => {
-  it('routes watch/open intents to open_url (real browser) and operate intents to web_task (in-app)', () => {
-    // The hybrid taxonomy: "open/play/watch X" ends up in the user's OWN
-    // browser via open_url (deep-linked to a search URL for a site search);
-    // web_task is only for OPERATING a page (log in / fill / order) in the
-    // controlled in-app browser. open_url must own play/watch and show the
-    // deep-link; web_task must disclaim simple open/watch and point back.
+  it('routes every website task (incl play/watch) to web_task in the built-in browser; open_url only opens', () => {
+    // Post-pivot: browser tasks run INSIDE Off Grid's built-in browser via
+    // web_task (play/watch included). open_url only opens a link and must point
+    // at web_task; web_task must own play/watch and name the built-in browser.
     const openUrl = findNativeToolSpec('open_url')?.description ?? ''
     const webTask = findNativeToolSpec('web_task')?.description ?? ''
-    expect(openUrl).toMatch(/own browser/i)
-    expect(openUrl).toMatch(/play|watch/i)
-    expect(openUrl).toMatch(/results\?search_query/)
-    expect(webTask).toMatch(/operate/i)
-    expect(webTask).toMatch(/open or watch/i)
-    expect(webTask).toMatch(/open_url/)
+    expect(openUrl).toMatch(/only opens/i)
+    expect(openUrl).toMatch(/web_task/)
+    expect(webTask).toMatch(/play or watch a video|YouTube/i)
+    expect(webTask).toMatch(/built-in browser/i)
+    expect(webTask).toMatch(/not open_url/i)
   })
 
   it('exposes calendar and reminder tools with matching helper commands', () => {

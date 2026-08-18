@@ -46,12 +46,11 @@ describe('buildPlannerPrompt', () => {
     const p = buildPlannerPrompt('play X on YouTube', [], catalog)
     expect(p).toContain('- web_task:')
     expect(p).toContain('play X on YouTube')
-    // The hybrid routing rule: watch/open -> open_url (real browser, deep-linked
-    // to a search results URL) then computer_task to click the result;
-    // operate-the-page -> web_task (in-app).
-    expect(p).toMatch(/END-STATE/i)
-    expect(p).toMatch(/results\?search_query/)
-    expect(p).toMatch(/computer_task/) // the 2-step play/watch chain clicks the result
+    // Post-pivot rule: any website task (incl play/watch) -> web_task, which runs
+    // in Off Grid's built-in browser; open_url only opens a link.
+    expect(p).toMatch(/is web_task/i)
+    expect(p).toMatch(/built-in browser/i)
+    expect(p).toMatch(/NOT open_url/i)
     expect(p).toMatch(/Fill EVERY required argument/i)
     expect(p).toMatch(/\{"steps":\[\]\}/) // the conversational escape hatch
   })
