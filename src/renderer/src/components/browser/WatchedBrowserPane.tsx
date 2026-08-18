@@ -156,12 +156,15 @@ export function WatchedBrowserPane(): React.JSX.Element | null {
       style={{ width: paneWidth }}
       className="fixed right-0 top-0 bottom-0 z-50 flex flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl"
     >
-      {/* Drag handle: resize the split from its left edge. */}
+      {/* Drag handle: resize the split from its left edge, with a small centered
+          notch so it reads as draggable. */}
       <div
         data-testid="watched-resize-handle"
         onMouseDown={startResize}
-        className="absolute top-0 bottom-0 left-0 z-20 w-1.5 cursor-ew-resize bg-transparent transition-colors hover:bg-green-500/40"
-      />
+        className="group absolute top-0 bottom-0 left-0 z-20 flex w-2 cursor-ew-resize items-center justify-center bg-transparent transition-colors hover:bg-green-500/20"
+      >
+        <div className="h-8 w-1 rounded-full bg-neutral-600 transition-colors group-hover:bg-green-500" />
+      </div>
       <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-2 text-sm text-neutral-200">
           <span className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-green-500">
