@@ -113,6 +113,8 @@ export default defineConfig({
         // them - the e2e tour and the real-machine pass, not this runner.
         'src/main/browser/browser-host.ts',
         'src/main/vision/vision-host.ts',
+        // The floating supervisor NSPanel: BrowserWindow glue over the tested feed.
+        'src/main/vision/supervisor-window.ts',
         // On-demand grounder swap: reloads llama-server with UI-TARS and back,
         // needs the multi-GB models on disk. Its decision (isGrounderActive) is
         // measured; the reload orchestration is exercised by the A/B run.

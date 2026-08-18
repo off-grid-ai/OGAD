@@ -27,6 +27,7 @@ import { runVisionTask, type VisionScreen, type VisionTaskResult } from './visio
 import { VisionGuard } from './vision-guard'
 import { buildVisionPrompt } from './vision-prompt'
 import { emitVisionState, emitVisionStep, registerVisionSession } from './vision-controller'
+import { showSupervisorWindow, hideSupervisorWindow } from './supervisor-window'
 import { visionModelNotice } from './vision-model-notice'
 import { getTakeoverCoordinator } from '../browser/takeover'
 import { loadActuation, actuationAvailable, type ActuationPort } from '../input/actuation'
@@ -161,6 +162,7 @@ class VisionHost {
     // not a grounder, so the user sees why a click may miss and what to load.
     const notice = visionModelNotice(llm.activeModelInfo())
     emitVisionState({ taskId, goal, status: 'running', ...(notice ? { notice } : {}) })
+    showSupervisorWindow()
     try {
       const result = await runVisionTask(goal, {
         screen: makeScreen(actuation),
@@ -184,6 +186,7 @@ class VisionHost {
     } finally {
       globalShortcut.unregister('Escape')
       releaseSession()
+      hideSupervisorWindow()
     }
   }
 }

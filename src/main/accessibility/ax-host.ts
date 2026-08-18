@@ -33,6 +33,7 @@ import {
 } from './ax-agent'
 import { VisionGuard } from '../vision/vision-guard'
 import { emitVisionState, emitVisionStep, registerVisionSession } from '../vision/vision-controller'
+import { showSupervisorWindow, hideSupervisorWindow } from '../vision/supervisor-window'
 
 const execFileAsync = promisify(execFile)
 
@@ -203,6 +204,9 @@ class AxRailHost {
     // The AX rail is model-agnostic and needs no grounder, so there is no
     // grounder notice here (unlike the vision rail).
     emitVisionState({ taskId, goal, status: 'running' })
+    // Float the supervisor window over the app we are about to drive, so the
+    // user sees the step feed even though the driven app takes the foreground.
+    showSupervisorWindow()
     let usedInitial = false
     try {
       const result = await runElementTask(goal, {
@@ -248,6 +252,7 @@ class AxRailHost {
     } finally {
       globalShortcut.unregister('Escape')
       releaseSession()
+      hideSupervisorWindow()
     }
   }
 }
