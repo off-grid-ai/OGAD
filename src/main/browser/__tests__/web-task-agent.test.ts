@@ -235,3 +235,28 @@ describe('the prompt (injection-stance regression guard)', () => {
     expect(prompt).toContain('clicked [1] el1')
   })
 })
+
+describe('shouldStop (overlay Stop / Esc halts the loop between actions)', () => {
+  it('stops before the first navigate and never touches the page or the model', async () => {
+    const w = world(['{"action":"click","index":1}'])
+    const result = await runWebTask('check in', 'https://air.test', {
+      ...w.deps,
+      shouldStop: () => true
+    })
+    expect(result.ok).toBe(false)
+    expect(result.summary).toBe('stopped')
+    expect(w.calls).toEqual([]) // no navigate, no snapshot - halted before acting
+  })
+
+  it('stops at the top of the loop after navigating, before the first step', async () => {
+    const w = world(['{"action":"click","index":1}'])
+    let checks = 0
+    // Pass the pre-navigate check, halt at the first loop iteration.
+    const result = await runWebTask('check in', 'https://air.test', {
+      ...w.deps,
+      shouldStop: () => checks++ > 0
+    })
+    expect(result.summary).toBe('stopped')
+    expect(w.calls).toEqual(['navigate:https://air.test']) // navigated, then halted before snapshot
+  })
+})

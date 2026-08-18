@@ -15,6 +15,9 @@ import { llm } from '../llm'
 import { BrowserDriver, type CdpTransport } from './browser-driver'
 import { runWebTask, STEP_RESPONSE_FORMAT, type WebTaskResult } from './web-task-agent'
 import { getTakeoverCoordinator } from './takeover'
+import { VisionGuard } from '../vision/vision-guard'
+import { emitVisionState, emitVisionStep, registerVisionSession } from '../vision/vision-controller'
+import { showSupervisorWindow, hideSupervisorWindow } from '../vision/supervisor-window'
 import type { BrowserRailHost } from './browser-rail'
 
 function broadcast(channel: string, payload: unknown): void {
@@ -69,13 +72,29 @@ class BrowserHost implements BrowserRailHost {
   async runTask(goal: string, url: string | undefined, taskId: string): Promise<WebTaskResult> {
     const view = this.ensureView()
     const driver = new BrowserDriver(attachCdp(view))
-    broadcast('browser:task-state', { taskId, goal, status: 'running' })
     // A web task with no start URL would begin on a blank pane (no page to act
     // on, and snapshotting about:blank can hang) - default to a real search page
     // so the model always has somewhere to start and can navigate from there.
     const start = url ?? 'https://www.google.com'
     console.log(`[web-task] runTask goal="${goal}" url="${start}"`)
     const coordinator = getTakeoverCoordinator()
+
+    // The browser rail reports through the SAME supervisor bridge as the AX /
+    // vision rails, so the one floating panel shows its step feed and its Stop
+    // works no matter which rail is driving (one source of truth for "what is
+    // the computer-use task doing"). `browser:*` stays for the in-app watched
+    // pane + takeover UX; this adds the cross-rail panel.
+    const guard = new VisionGuard()
+    const releaseSession = registerVisionSession(guard)
+    const setState = (
+      status: 'running' | 'done' | 'failed',
+      summary?: string
+    ): void => {
+      emitVisionState({ taskId, goal, status, summary })
+      broadcast('browser:task-state', { taskId, goal, status, summary })
+    }
+    setState('running')
+    showSupervisorWindow()
 
     try {
       const result = await runWebTask(goal, start, {
@@ -91,19 +110,16 @@ class BrowserHost implements BrowserRailHost {
         },
         onStep: (note) => {
           console.log(`[web-task] step: ${note}`)
+          emitVisionStep(taskId, note)
           broadcast('browser:step', { taskId, note })
-        }
+        },
+        shouldStop: () => guard.isHalted
       })
 
       console.log(
         `[web-task] result ok=${result.ok} steps=${result.steps.length} summary="${result.summary}"`
       )
-      broadcast('browser:task-state', {
-        taskId,
-        goal,
-        status: result.ok ? 'done' : 'failed',
-        summary: result.summary
-      })
+      setState(result.ok ? 'done' : 'failed', result.summary)
       return result
     } catch (error) {
       // A throw in setup/snapshot/CDP was silently disappearing (no step, no
@@ -111,13 +127,11 @@ class BrowserHost implements BrowserRailHost {
       // proper failed result so the engine sees an outcome, not an exception.
       const detail = error instanceof Error ? error.message : String(error)
       console.log(`[web-task] ERROR: ${detail}`)
-      broadcast('browser:task-state', {
-        taskId,
-        goal,
-        status: 'failed',
-        summary: `browser task error: ${detail}`
-      })
+      setState('failed', `browser task error: ${detail}`)
       return { ok: false, summary: `browser task error: ${detail}`, steps: [], takeovers: 0, finalUrl: '' }
+    } finally {
+      releaseSession()
+      hideSupervisorWindow()
     }
   }
 }

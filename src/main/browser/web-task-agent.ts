@@ -33,6 +33,9 @@ export interface WebTaskDeps {
   waitForTakeover: (why: string) => Promise<void>
   /** Step-by-step narration for the watched surface. */
   onStep?: (note: string) => void
+  /** Checked before each step (and before the first navigate) so the overlay's
+   *  Stop / Esc halts the loop between actions, like the AX rail's guard. */
+  shouldStop?: () => boolean
   maxSteps?: number
 }
 
@@ -177,7 +180,11 @@ export async function runWebTask(
   startUrl: string | undefined,
   deps: WebTaskDeps
 ): Promise<WebTaskResult> {
-  const { driver, decide, waitForTakeover, onStep } = deps
+  const { driver, decide, waitForTakeover, onStep, shouldStop } = deps
+  const stopped = (): WebTaskResult => {
+    note('stopped')
+    return { ok: false, summary: 'stopped', steps, takeovers, finalUrl: lastUrl }
+  }
   const maxSteps = deps.maxSteps ?? DEFAULT_MAX_STEPS
   const steps: string[] = []
   let takeovers = 0
@@ -198,6 +205,9 @@ export async function runWebTask(
     note('resumed by the user')
   }
 
+  if (shouldStop?.()) {
+    return stopped()
+  }
   if (startUrl) {
     const nav = await driver.navigate(startUrl)
     note(nav.ok ? `opened ${startUrl}` : `could not open ${startUrl}: ${nav.detail}`)
@@ -207,6 +217,9 @@ export async function runWebTask(
   }
 
   for (let step = 0; step < maxSteps; step += 1) {
+    if (shouldStop?.()) {
+      return stopped()
+    }
     const snapshot = await driver.snapshot()
     lastUrl = snapshot.url
     const decision = parseStepDecision(await decide(buildStepPrompt(goal, snapshot, steps)))
