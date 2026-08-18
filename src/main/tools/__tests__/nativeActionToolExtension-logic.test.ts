@@ -7,16 +7,20 @@ import {
 import { shouldGate } from '../../actions/approval'
 
 describe('native tool specs', () => {
-  it('routes interactive web goals to web_task, not open_url (the "play on YouTube" fix)', () => {
-    // open_url must disclaim interaction and point at web_task; web_task must
-    // name the interactive cases (play a video / search-and-click) so the model
-    // stops treating "play X on YouTube" as a plain open.
+  it('routes watch/open intents to open_url (real browser) and operate intents to web_task (in-app)', () => {
+    // The hybrid taxonomy: "open/play/watch X" ends up in the user's OWN
+    // browser via open_url (deep-linked to a search URL for a site search);
+    // web_task is only for OPERATING a page (log in / fill / order) in the
+    // controlled in-app browser. open_url must own play/watch and show the
+    // deep-link; web_task must disclaim simple open/watch and point back.
     const openUrl = findNativeToolSpec('open_url')?.description ?? ''
     const webTask = findNativeToolSpec('web_task')?.description ?? ''
-    expect(openUrl).toMatch(/does not interact|Opens ONLY/i)
-    expect(openUrl).toMatch(/web_task/)
-    expect(webTask).toMatch(/play or watch a video|YouTube/i)
-    expect(webTask).toMatch(/not open_url/i)
+    expect(openUrl).toMatch(/own browser/i)
+    expect(openUrl).toMatch(/play|watch/i)
+    expect(openUrl).toMatch(/results\?search_query/)
+    expect(webTask).toMatch(/operate/i)
+    expect(webTask).toMatch(/open or watch/i)
+    expect(webTask).toMatch(/open_url/)
   })
 
   it('exposes calendar and reminder tools with matching helper commands', () => {

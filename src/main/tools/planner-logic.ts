@@ -119,7 +119,7 @@ export function buildPlannerPrompt(
     `User request: ${goal}`,
     '',
     'Rules:',
-    '- Choose the correct tool by its description. open_url only OPENS a page; if the request needs anything DONE on a page (play a video, search and click, log in, order), use web_task, not open_url.',
+    "- Route a web request by its desired END-STATE. If the user just wants to land on or watch a page in their own browser (open / go to / play / watch X), use open_url - and for a site search like 'play X on YouTube', set url to the results page, e.g. https://www.youtube.com/results?search_query=X. If a task must be DONE on the page (log in, fill a form, check in, place an order, download, extract), use web_task, which operates a controlled in-app browser.",
     '- Fill EVERY required argument. For web_task always set the "url" to the site (e.g. https://youtube.com). Do not leave a required arg blank.',
     '- If a step needs a value produced by an earlier step (e.g. a phone number from contacts_search to message someone), add a binding: {"arg":"to","fromStep":0,"field":"phone"} and leave that arg out of args.',
     '- Keep the plan MINIMAL - one step when one tool does it; do not add steps that are not needed.',

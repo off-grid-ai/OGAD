@@ -45,7 +45,10 @@ describe('buildPlannerPrompt', () => {
     const p = buildPlannerPrompt('play X on YouTube', [], catalog)
     expect(p).toContain('- web_task:')
     expect(p).toContain('play X on YouTube')
-    expect(p).toMatch(/open_url only OPENS/i)
+    // The hybrid routing rule: watch/open -> open_url (real browser, deep-linked
+    // to a search results URL); operate-the-page -> web_task (in-app).
+    expect(p).toMatch(/END-STATE/i)
+    expect(p).toMatch(/results\?search_query/)
     expect(p).toMatch(/Fill EVERY required argument/i)
     expect(p).toMatch(/\{"steps":\[\]\}/) // the conversational escape hatch
   })
