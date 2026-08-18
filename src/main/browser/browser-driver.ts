@@ -22,13 +22,39 @@ export type DriverResult =
   | { ok: false; reason: 'takeover' | 'error'; detail: string }
 
 const NAVIGATION_TIMEOUT_MS = 20_000
+/** A single CDP command should return in well under a second on a live page.
+ *  When the WebContents/network service is wedged (e.g. after a "Network
+ *  service crashed" event), `debugger.sendCommand` can hang FOREVER with no
+ *  rejection - which froze the whole web task at setup with no step, no result,
+ *  no error. Bound every command so a wedged transport fails fast and visibly
+ *  instead of hanging. */
+const CDP_COMMAND_TIMEOUT_MS = 15_000
 
 export class BrowserDriver {
-  constructor(private readonly cdp: CdpTransport) {}
+  constructor(
+    private readonly cdp: CdpTransport,
+    private readonly commandTimeoutMs = CDP_COMMAND_TIMEOUT_MS
+  ) {}
+
+  /** The ONE choke point every CDP command goes through: race the transport
+   *  send against a timeout so no single command can hang the rail. */
+  private send<T>(method: string, params?: Record<string, unknown>): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`CDP ${method} timed out after ${this.commandTimeoutMs}ms`)),
+        this.commandTimeoutMs
+      )
+      timer.unref?.()
+    })
+    return Promise.race([this.cdp.send<T>(method, params), timeout]).finally(() =>
+      clearTimeout(timer)
+    )
+  }
 
   /** The indexed elements + text the agent reasons over, straight from the page. */
   async snapshot(): Promise<PageSnapshot> {
-    const reply = await this.cdp.send<{ result?: { value?: string } }>('Runtime.evaluate', {
+    const reply = await this.send<{ result?: { value?: string } }>('Runtime.evaluate', {
       expression: pageScriptSource(),
       returnByValue: true
     })
@@ -42,7 +68,7 @@ export class BrowserDriver {
   /** Navigates and resolves on the load event (or the timeout - slow pages
    *  still get a snapshot of whatever rendered). */
   async navigate(url: string): Promise<DriverResult> {
-    await this.cdp.send('Page.enable')
+    await this.send('Page.enable')
     const loaded = new Promise<void>((resolve) => {
       const off = this.cdp.on((method) => {
         if (method === 'Page.loadEventFired') {
@@ -55,7 +81,7 @@ export class BrowserDriver {
         resolve()
       }, NAVIGATION_TIMEOUT_MS).unref()
     })
-    const reply = await this.cdp.send<{ errorText?: string }>('Page.navigate', { url })
+    const reply = await this.send<{ errorText?: string }>('Page.navigate', { url })
     if (reply.errorText) {
       return { ok: false, reason: 'error', detail: reply.errorText }
     }
@@ -65,7 +91,7 @@ export class BrowserDriver {
 
   async click(el: PageElement): Promise<DriverResult> {
     for (const type of ['mousePressed', 'mouseReleased'] as const) {
-      await this.cdp.send('Input.dispatchMouseEvent', {
+      await this.send('Input.dispatchMouseEvent', {
         type,
         x: el.cx,
         y: el.cy,
@@ -88,14 +114,14 @@ export class BrowserDriver {
     }
     await this.click(el)
     // Select-all so typing REPLACES a prefilled value instead of appending.
-    await this.cdp.send('Input.dispatchKeyEvent', {
+    await this.send('Input.dispatchKeyEvent', {
       type: 'keyDown',
       key: 'a',
       code: 'KeyA',
       commands: ['selectAll']
     })
-    await this.cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA' })
-    await this.cdp.send('Input.insertText', { text })
+    await this.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA' })
+    await this.send('Input.insertText', { text })
     return { ok: true }
   }
 
@@ -111,7 +137,7 @@ export class BrowserDriver {
       return { ok: false, reason: 'error', detail: `unsupported key "${key}"` }
     }
     for (const type of ['rawKeyDown', 'keyUp'] as const) {
-      await this.cdp.send('Input.dispatchKeyEvent', {
+      await this.send('Input.dispatchKeyEvent', {
         type,
         key,
         code: spec.code,

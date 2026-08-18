@@ -148,3 +148,22 @@ describe('pressKey', () => {
     expect(t.sent).toEqual([])
   })
 })
+
+describe('CDP command timeout (a wedged transport must not hang the rail)', () => {
+  // A transport whose send never resolves - what a crashed network service /
+  // wedged WebContents does to debugger.sendCommand.
+  const deadTransport: CdpTransport = {
+    send: <T>() => new Promise<T>(() => {}),
+    on: () => () => {}
+  }
+
+  it('rejects snapshot after the command timeout instead of hanging forever', async () => {
+    const driver = new BrowserDriver(deadTransport, 20)
+    await expect(driver.snapshot()).rejects.toThrow(/Runtime\.evaluate timed out/)
+  })
+
+  it('rejects navigate after the command timeout instead of hanging forever', async () => {
+    const driver = new BrowserDriver(deadTransport, 20)
+    await expect(driver.navigate('https://x.test')).rejects.toThrow(/Page\.enable timed out/)
+  })
+})
