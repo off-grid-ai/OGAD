@@ -70,36 +70,55 @@ class BrowserHost implements BrowserRailHost {
     const view = this.ensureView()
     const driver = new BrowserDriver(attachCdp(view))
     broadcast('browser:task-state', { taskId, goal, status: 'running' })
-    console.log(`[web-task] runTask goal="${goal}" url="${url ?? ''}"`)
+    // A web task with no start URL would begin on a blank pane (no page to act
+    // on, and snapshotting about:blank can hang) - default to a real search page
+    // so the model always has somewhere to start and can navigate from there.
+    const start = url ?? 'https://www.google.com'
+    console.log(`[web-task] runTask goal="${goal}" url="${start}"`)
     const coordinator = getTakeoverCoordinator()
 
-    const result = await runWebTask(goal, url, {
-      driver,
-      decide: (prompt) =>
-        llm.chat(prompt, [], 60_000, 400, {
-          disableThinking: true,
-          responseFormat: STEP_RESPONSE_FORMAT
-        }),
-      waitForTakeover: async (why) => {
-        broadcast('browser:takeover', { taskId, why })
-        await coordinator.waitForTakeover(taskId, why)
-      },
-      onStep: (note) => {
-        console.log(`[web-task] step: ${note}`)
-        broadcast('browser:step', { taskId, note })
-      }
-    })
+    try {
+      const result = await runWebTask(goal, start, {
+        driver,
+        decide: (prompt) =>
+          llm.chat(prompt, [], 60_000, 400, {
+            disableThinking: true,
+            responseFormat: STEP_RESPONSE_FORMAT
+          }),
+        waitForTakeover: async (why) => {
+          broadcast('browser:takeover', { taskId, why })
+          await coordinator.waitForTakeover(taskId, why)
+        },
+        onStep: (note) => {
+          console.log(`[web-task] step: ${note}`)
+          broadcast('browser:step', { taskId, note })
+        }
+      })
 
-    console.log(
-      `[web-task] result ok=${result.ok} steps=${result.steps.length} summary="${result.summary}"`
-    )
-    broadcast('browser:task-state', {
-      taskId,
-      goal,
-      status: result.ok ? 'done' : 'failed',
-      summary: result.summary
-    })
-    return result
+      console.log(
+        `[web-task] result ok=${result.ok} steps=${result.steps.length} summary="${result.summary}"`
+      )
+      broadcast('browser:task-state', {
+        taskId,
+        goal,
+        status: result.ok ? 'done' : 'failed',
+        summary: result.summary
+      })
+      return result
+    } catch (error) {
+      // A throw in setup/snapshot/CDP was silently disappearing (no step, no
+      // result line) and read as a mystery failure. Surface it and return a
+      // proper failed result so the engine sees an outcome, not an exception.
+      const detail = error instanceof Error ? error.message : String(error)
+      console.log(`[web-task] ERROR: ${detail}`)
+      broadcast('browser:task-state', {
+        taskId,
+        goal,
+        status: 'failed',
+        summary: `browser task error: ${detail}`
+      })
+      return { ok: false, summary: `browser task error: ${detail}`, steps: [], takeovers: 0, finalUrl: '' }
+    }
   }
 }
 

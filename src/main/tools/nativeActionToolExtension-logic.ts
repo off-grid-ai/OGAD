@@ -197,7 +197,11 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
           description:
             'The task to complete, in one sentence (e.g. "check in for my flight tomorrow")'
         },
-        url: { type: 'string', description: 'Optional starting URL (https://...)' }
+        url: {
+          type: 'string',
+          description:
+            'The site URL to start on (https://...), e.g. https://youtube.com. Always provide the site the task acts on.'
+        }
       },
       required: ['goal']
     },
