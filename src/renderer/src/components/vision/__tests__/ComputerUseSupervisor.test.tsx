@@ -14,12 +14,15 @@ type Listener = (payload: unknown) => void
 let emitState: Listener
 let emitStep: Listener
 const control = vi.fn(async () => true)
+let getCurrent = vi.fn(async () => ({ state: null as unknown, steps: [] as string[] }))
 
 beforeEach(() => {
   control.mockClear()
+  getCurrent = vi.fn(async () => ({ state: null as unknown, steps: [] as string[] }))
   window.api = {
     vision: {
       control,
+      getCurrent,
       onTaskState: (cb: Listener) => {
         emitState = cb
         return () => {}
@@ -58,6 +61,18 @@ describe('<ComputerUseSupervisor/>', () => {
     await waitFor(() => screen.getByText('Stop'))
     fireEvent.click(screen.getByText('Stop'))
     expect(control).toHaveBeenCalledWith('stop')
+  })
+
+  it('seeds from getCurrent when it mounts mid-task (catches missed steps)', async () => {
+    // The window opened after the rail already ran a few steps; the buffered
+    // history must appear, not just live events from here on.
+    getCurrent.mockResolvedValue({
+      state: { taskId: 'v9', goal: 'play Drake on Spotify', status: 'running' },
+      steps: ['key cmd k', 'typed "Drake" into [3]']
+    })
+    render(<ComputerUseSupervisor />)
+    await waitFor(() => expect(screen.getByText('play Drake on Spotify')).toBeTruthy())
+    expect(screen.getByText('typed "Drake" into [3]')).toBeTruthy()
   })
 
   it('shows the final summary and no controls when the task ends', async () => {

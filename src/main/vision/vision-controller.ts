@@ -20,6 +20,21 @@ function broadcast(channel: string, payload: unknown): void {
 
 let activeGuard: VisionGuard | null = null
 
+interface TaskState {
+  taskId: string
+  goal: string
+  status: 'running' | 'paused' | 'done' | 'failed'
+  summary?: string
+  notice?: string
+}
+
+// The current run's state + step history, buffered so a supervisor surface that
+// opens AFTER the task started (the floating window is created at task start but
+// its renderer subscribes a beat later) can fetch what it missed on mount and
+// then follow live - broadcasts are fire-and-forget and are otherwise lost.
+let currentState: TaskState | null = null
+let currentSteps: string[] = []
+
 /** The host calls this at task start with the task's guard, and calls the
  *  returned disposer at task end so a stale Stop cannot reach the next task. */
 export function registerVisionSession(guard: VisionGuard): () => void {
@@ -31,8 +46,9 @@ export function registerVisionSession(guard: VisionGuard): () => void {
   }
 }
 
-/** Push a step-feed line to the overlay. */
+/** Push a step-feed line to the overlay (and buffer it for a late subscriber). */
 export function emitVisionStep(taskId: string, note: string): void {
+  currentSteps.push(note)
   broadcast('vision:step', { taskId, note })
 }
 
@@ -45,13 +61,13 @@ export function emitVisionNotice(notice: string): void {
 
 /** Push the task lifecycle state to the overlay. `notice` warns (never blocks)
  *  when the loaded model is not a grounder - the rail stays model-agnostic. */
-export function emitVisionState(state: {
-  taskId: string
-  goal: string
-  status: 'running' | 'paused' | 'done' | 'failed'
-  summary?: string
-  notice?: string
-}): void {
+export function emitVisionState(state: TaskState): void {
+  // A NEW task starting clears the step buffer; a status change on the same task
+  // keeps the history so a window opening at the end still sees every step.
+  if (currentState?.taskId !== state.taskId) {
+    currentSteps = []
+  }
+  currentState = state
   broadcast('vision:task-state', state)
 }
 
@@ -61,6 +77,9 @@ export function parseVisionCommand(input: unknown): 'stop' | 'pause' | 'resume' 
 }
 
 export function registerVisionIpc(): void {
+  // A supervisor surface fetches the current run's state + steps on mount, so it
+  // catches up on anything broadcast before its renderer was listening.
+  ipcMain.handle('vision:current', () => ({ state: currentState, steps: currentSteps }))
   ipcMain.handle('vision:control', (_e, command: unknown) => {
     const parsed = parseVisionCommand(command)
     if (!parsed || !activeGuard) {

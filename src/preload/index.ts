@@ -92,6 +92,8 @@ const offGridApi = {
   vision: {
     control: (command: 'stop' | 'pause' | 'resume') =>
       ipcRenderer.invoke('vision:control', command),
+    // The current run's state + step history, for a surface that mounts mid-task.
+    getCurrent: () => ipcRenderer.invoke('vision:current'),
     onStep: (cb: (step: unknown) => void) => {
       const sub = (_e: unknown, step: unknown): void => cb(step)
       ipcRenderer.on('vision:step', sub)

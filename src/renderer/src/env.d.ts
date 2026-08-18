@@ -135,6 +135,7 @@ interface RendererAPIOverrides {
   }
   vision?: {
     control: (command: 'stop' | 'pause' | 'resume') => Promise<boolean>
+    getCurrent: () => Promise<{ state: unknown; steps: string[] } | null>
     onStep: (cb: (step: unknown) => void) => () => void
     onTaskState: (cb: (state: unknown) => void) => () => void
     onNotice: (cb: (notice: unknown) => void) => () => void

@@ -41,6 +41,9 @@ export function ComputerUseSupervisor(): React.JSX.Element {
   const feedRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    let mounted = true
+    // Subscribe FIRST (synchronously) so no live event is missed, then fetch the
+    // history the window opened too late to hear (the buffered current run).
     const offState = window.api.vision?.onTaskState((event) => {
       const state = event as TaskState
       setTask((current) => {
@@ -55,7 +58,17 @@ export function ComputerUseSupervisor(): React.JSX.Element {
       setSteps((current) => [...current, (event as StepEvent).note])
       setSinceStep(0)
     })
+    void window.api.vision?.getCurrent?.().then((cur) => {
+      if (!mounted || !cur?.state) {
+        return
+      }
+      setTask((t) => t ?? (cur.state as TaskState))
+      // Use the buffer only if it's at least as complete as what live gave us,
+      // so a step that raced in during the fetch is not clobbered.
+      setSteps((s) => (cur.steps && cur.steps.length >= s.length ? cur.steps : s))
+    })
     return () => {
+      mounted = false
       offState?.()
       offStep?.()
     }
