@@ -169,6 +169,10 @@ export function buildElementPrompt(goal: string, snapshot: AxSnapshot, history: 
     '  1) Open their conversation with the quick switcher: {"action":"key","keys":"cmd k"}, then type their name, then {"action":"key","keys":"Enter"}. (Typing in the left sidebar "Search"/"Channel or user name" box only FILTERS the list - Enter there does NOT open the chat; you would have to CLICK the matching result.)',
     '  2) THEN type the message into the box labeled "Message to <name>" (or "Message #<channel>") by ITS [number], and add "keys":"Enter" to send. Do not assume the message box is focused.',
     'A Search / "Channel or user name" / "To" field is for navigation only - never put the message text there.',
+    'Attaching or uploading a file, AFTER an Attach/Upload opens the system file dialog (the dialog runs in its own window - drive it with keys, not the app search box):',
+    '  1) Open "Go to Folder": {"action":"key","keys":"cmd shift g"}.',
+    '  2) Type the FULL path and go: {"action":"type","text":"~/Documents/<file>","keys":"Enter"} - this navigates to the folder AND selects that exact file. Build the path from the task (the Documents folder is ~/Documents).',
+    '  3) Confirm: {"action":"key","keys":"Enter"} (or click "Open"). NEVER click "Open"/"search" before a file is selected - with nothing selected it does nothing and you will loop.',
     'If a step changed nothing (the same field still holds your text), do something different - do not repeat it.',
     'Reply with ONLY the JSON for your next action.'
   ]

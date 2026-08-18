@@ -256,5 +256,10 @@ describe('buildElementPrompt', () => {
     // video is done) - the over-acting seen when it clicked past a playing video.
     expect(prompt).toMatch(/STOP as soon as the goal is achieved/i)
     expect(prompt).toMatch(/already playing is done/i)
+    // File-picker coaching: the native dialog is a separate window - drive it
+    // with Go-to-Folder + full path, and never click Open with nothing selected
+    // (the Slack file-attach loop on "Open"/"search").
+    expect(prompt).toMatch(/cmd shift g/i)
+    expect(prompt).toMatch(/never click "open".*before a file is selected/i)
   })
 })
