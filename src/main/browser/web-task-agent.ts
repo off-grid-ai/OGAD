@@ -264,17 +264,13 @@ export async function runWebTask(
       await takeover(decision.why)
       continue
     }
-    // Runaway guard: refuse an immediate repeat of the same actuating step.
+    // Repeat of the last action: SKIP re-firing it (so a live action never fires
+    // twice) but keep going - a repeat should not kill the task; the step budget
+    // still bounds a genuinely stuck run.
     const sig = webActionSignature(decision)
     if (sig !== null && sig === lastActionSig) {
-      note('repeated the same action; stopping to avoid a loop')
-      return {
-        ok: false,
-        summary: 'stopped: the model repeated the same action, which usually means it is looping',
-        steps,
-        takeovers,
-        finalUrl: lastUrl
-      }
+      note('skipped a repeated action; moving on')
+      continue
     }
     lastActionSig = sig
     if (decision.action === 'navigate') {
@@ -307,17 +303,12 @@ export async function runWebTask(
       note(`no element [${decision.index}] on this page`)
       continue
     }
-    // A re-type of the same non-empty text is a loop (it already submitted it).
+    // Already submitted this text: SKIP re-typing it (so a search/message is not
+    // re-submitted) but keep going instead of killing the task.
     const typedText = decision.text.trim()
     if (typedText.length > 0 && typedTexts.has(typedText)) {
-      note('already typed this text; stopping to avoid re-submitting (likely a loop)')
-      return {
-        ok: false,
-        summary: 'stopped: the model re-typed the same text, which usually means it is looping',
-        steps,
-        takeovers,
-        finalUrl: lastUrl
-      }
+      note('already typed this text; not submitting it again')
+      continue
     }
     if (typedText.length > 0) {
       typedTexts.add(typedText)

@@ -127,36 +127,37 @@ describe('runElementTask', () => {
     expect(w.acted).toHaveLength(3)
   })
 
-  it('halts on a repeated action so a live send never fires twice (runaway guard)', async () => {
-    // The exact failure seen live: the model sent "hi", did not notice, and asked
-    // to send it again. The guard must stop BEFORE the second actuation.
+  it('skips a repeated action so a live send never fires twice, but does NOT kill the task', async () => {
+    // The model sent "hi", did not notice, and asked to send it again. The
+    // duplicate is skipped (never actuated twice) but the task keeps going.
     const w = world([
       '{"action":"type","index":2,"text":"hi","keys":"Enter"}',
-      '{"action":"type","index":2,"text":"hi","keys":"Enter"}', // identical -> halt
-      '{"action":"done","summary":"unreachable"}'
+      '{"action":"type","index":2,"text":"hi","keys":"Enter"}', // identical -> skipped, not re-fired
+      '{"action":"done","summary":"sent"}'
     ])
     const result = await runElementTask('send hi', w.deps)
-    expect(result.ok).toBe(false)
-    expect(result.summary).toMatch(/repeated the same action/i)
+    expect(result.ok).toBe(true) // the repeat did NOT kill the task
+    expect(result.summary).toBe('sent')
     // Actuated exactly once - the message was not sent twice.
     expect(w.acted).toEqual(['type:2:hi', 'keys:Enter'])
+    expect(result.steps.join('\n')).toMatch(/skipped a repeated action/i)
   })
 
-  it('halts on a re-typed text even at a different index (the A-B-A-B send loop)', async () => {
-    // The real Slack bug: type link -> Enter -> type link at a NEW index (the
-    // composer renumbers after each send) -> Enter ... The consecutive-signature
-    // guard misses it because the indexes differ; the typed-text set catches it.
+  it('skips a re-typed text even at a different index (no double-send) but keeps going', async () => {
+    // The Slack A-B-A-B loop: type link -> Enter -> type the SAME link at a new
+    // index (the composer renumbers). The re-type is skipped, not re-sent, and
+    // the task continues instead of dying.
     const w = world([
       '{"action":"type","index":2,"text":"github.com/x"}',
       '{"action":"key","keys":"Enter"}',
-      '{"action":"type","index":1,"text":"github.com/x"}', // same text, new index -> halt
-      '{"action":"done","summary":"unreachable"}'
+      '{"action":"type","index":1,"text":"github.com/x"}', // same text, new index -> skipped
+      '{"action":"done","summary":"sent"}'
     ])
     const result = await runElementTask('send the link', w.deps)
-    expect(result.ok).toBe(false)
-    expect(result.summary).toMatch(/re-typed the same text/i)
+    expect(result.ok).toBe(true)
     // The link was typed+sent exactly once; the duplicate never actuated.
     expect(w.acted).toEqual(['type:2:github.com/x', 'keys:Enter'])
+    expect(result.steps.join('\n')).toMatch(/not sending it again/i)
   })
 
   it('does NOT halt when consecutive actions differ (no false positive)', async () => {

@@ -160,28 +160,27 @@ describe('runWebTask', () => {
     expect(w.calls.filter((c) => c.startsWith('key'))).toHaveLength(3)
   })
 
-  it('halts a runaway: refuses to repeat the same action', async () => {
+  it('skips a repeated action (fires once) instead of killing the task', async () => {
     const w = world([
       '{"action":"click","index":1}',
-      '{"action":"click","index":1}', // identical -> halt
-      '{"action":"done","summary":"unreachable"}'
+      '{"action":"click","index":1}', // identical -> skipped, not re-fired
+      '{"action":"done","summary":"done"}'
     ])
     const result = await runWebTask('t', undefined, w.deps)
-    expect(result.ok).toBe(false)
-    expect(result.summary).toMatch(/repeated the same action/i)
-    expect(w.calls.filter((c) => c.startsWith('click'))).toHaveLength(1)
+    expect(result.ok).toBe(true) // the repeat did NOT kill the task
+    expect(w.calls.filter((c) => c.startsWith('click'))).toHaveLength(1) // clicked once
   })
 
-  it('halts a re-typed search text (the A-B-A-B submit loop)', async () => {
+  it('skips a re-typed search text (no re-submit) but keeps going', async () => {
     const w = world([
       '{"action":"type","index":2,"text":"Family Guy"}',
       '{"action":"press_key","key":"Enter"}',
-      '{"action":"type","index":2,"text":"Family Guy"}', // same text again -> halt
-      '{"action":"done","summary":"unreachable"}'
+      '{"action":"type","index":2,"text":"Family Guy"}', // same text again -> skipped
+      '{"action":"done","summary":"done"}'
     ])
     const result = await runWebTask('t', undefined, w.deps)
-    expect(result.ok).toBe(false)
-    expect(result.summary).toMatch(/re-typed the same text/i)
+    expect(result.ok).toBe(true)
+    expect(w.calls.filter((c) => c.startsWith('type'))).toHaveLength(1) // typed once
   })
 
   it('a failed start navigation ends the task immediately', async () => {

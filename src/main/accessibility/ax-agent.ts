@@ -225,12 +225,11 @@ export async function runElementTask(
     // action like a message must never fire twice because the model looped.
     const sig = actionSignature(decision)
     if (sig !== null && sig === lastActionSig) {
-      note('the model repeated the same action; stopping to avoid a loop')
-      return {
-        ok: false,
-        summary: 'stopped: the model repeated the same action, which usually means it is looping',
-        steps
-      }
+      // Repeat of the last action: SKIP re-firing it (so a live action never
+      // fires twice) but keep going - a repeat should not kill the task; the
+      // step budget still bounds a genuinely stuck run.
+      note('skipped a repeated action; moving on')
+      continue
     }
     lastActionSig = sig
     if (decision.action === 'key') {
@@ -244,13 +243,10 @@ export async function runElementTask(
       // never sent twice.
       const typed = decision.text.trim()
       if (typed.length > 0 && typedTexts.has(typed)) {
-        note('already typed this text; stopping to avoid re-sending (likely a loop)')
-        return {
-          ok: false,
-          summary:
-            'stopped: the model re-typed the same text, which usually means it already sent it and is looping',
-          steps
-        }
+        // Already sent this text: SKIP re-typing it (so a message is never sent
+        // twice) but keep going instead of killing the task.
+        note('already typed this text; not sending it again')
+        continue
       }
       if (typed.length > 0) {
         typedTexts.add(typed)
