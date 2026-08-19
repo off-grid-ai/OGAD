@@ -24,6 +24,7 @@ import { parseDataUrl } from './mcp-parse-data-url'
 import { runTool, getToolExtensions } from './tools'
 import { NATIVE_TOOL_SPECS } from './tools/nativeActionToolExtension-logic'
 import { jsonSchemaToZodShape } from './mcp-tool-schema'
+import { isActionAuthorized } from './mcp-auth'
 
 // Write a data URL / http(s) URL / file path / bare path to a temp file and
 // return its path (for tools that take an image or audio input).
@@ -63,8 +64,10 @@ const TEXT = (t: string): { content: { type: 'text'; text: string }[] } => ({
   content: [{ type: 'text', text: t }]
 })
 
-/** Build a fresh MCP server with all on-device tools registered. */
-function buildMcpServer(): McpServer {
+/** Build a fresh MCP server. Model/inference tools are always registered (open);
+ *  the ACTION tools are registered ONLY when the request is authorized with the
+ *  desktop's action token, so an unpaired LAN device can't see or run them. */
+function buildMcpServer(actionsAllowed: boolean): McpServer {
   const server = new McpServer(
     { name: 'Off Grid AI Desktop', version: '1.0.0' },
     {
@@ -238,7 +241,9 @@ function buildMcpServer(): McpServer {
     }
   )
 
-  registerActionTools(server)
+  if (actionsAllowed) {
+    registerActionTools(server)
+  }
   return server
 }
 
@@ -277,7 +282,9 @@ export async function handleMcpRequest(
   res: http.ServerResponse,
   body: unknown
 ): Promise<void> {
-  const server = buildMcpServer()
+  // Action tools are exposed only to a request carrying the desktop's action
+  // token; unauthenticated callers still get the open model tools.
+  const server = buildMcpServer(isActionAuthorized(req))
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined, // stateless
     enableJsonResponse: true
