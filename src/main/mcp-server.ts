@@ -21,6 +21,9 @@ import * as tts from './tts'
 import { embeddings } from './embeddings'
 import { desktopExtraction } from './rag/extractors'
 import { parseDataUrl } from './mcp-parse-data-url'
+import { runTool, getToolExtensions } from './tools'
+import { NATIVE_TOOL_SPECS } from './tools/nativeActionToolExtension-logic'
+import { jsonSchemaToZodShape } from './mcp-tool-schema'
 
 // Write a data URL / http(s) URL / file path / bare path to a temp file and
 // return its path (for tools that take an image or audio input).
@@ -235,7 +238,37 @@ function buildMcpServer(): McpServer {
     }
   )
 
+  registerActionTools(server)
   return server
+}
+
+/** Expose the desktop's ACTION tools (calendar, reminders, contacts, messages,
+ *  mail, open_url, web_task, computer_task) over MCP, so a paired client (the
+ *  mobile app) can LIST them and RUN them ON THIS DESKTOP. Each call goes through
+ *  the same runTool dispatch the local chat uses - so the rails run here and the
+ *  approval gate applies (computer-use asks on this machine; in-app runs
+ *  through). The NATIVE_TOOL_SPECS catalog is the single source of truth for the
+ *  names/descriptions/schemas; nothing is re-declared. */
+function registerActionTools(server: McpServer): void {
+  for (const spec of NATIVE_TOOL_SPECS) {
+    server.registerTool(
+      spec.name,
+      {
+        title: spec.name,
+        description: spec.description,
+        inputSchema: jsonSchemaToZodShape(spec.parameters)
+      },
+      async (args) => {
+        const result = await runTool(
+          spec.name,
+          args as Record<string, unknown>,
+          { conversationId: 'mcp' },
+          getToolExtensions()
+        )
+        return TEXT(result.text)
+      }
+    )
+  }
 }
 
 /** Handle a single MCP HTTP request (stateless). `body` is the parsed JSON for POST. */
