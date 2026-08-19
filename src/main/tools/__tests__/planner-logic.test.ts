@@ -10,6 +10,7 @@ import {
   parsePlan,
   backfillGoals,
   preferNativeApp,
+  namesWebsite,
   resolveContactHandle,
   type ToolCatalogEntry
 } from '../planner-logic'
@@ -167,5 +168,27 @@ describe('preferNativeApp (rail-per-surface: named running app -> computer_task)
   it('leaves an already-native computer_task plan unchanged', () => {
     const plan = { steps: [step('computer_task', { goal: 'send a file on slack' })] }
     expect(preferNativeApp(plan, 'send a file on slack', 'Slack')).toEqual(plan)
+  })
+
+  it('keeps a web_task when the request names a website, even if a word matches a running app', () => {
+    // "play drake music on youtube" - "music" matches the running Music app, but
+    // youtube means the browser, so it must stay a web_task (the false-match bug).
+    const plan = { steps: [step('web_task', { goal: 'play drake music on youtube' })] }
+    expect(preferNativeApp(plan, 'play drake music on youtube', 'Music')).toEqual(plan)
+  })
+})
+
+describe('namesWebsite', () => {
+  it('detects clear website references', () => {
+    expect(namesWebsite('play drake music on youtube')).toBe(true)
+    expect(namesWebsite('go to https://example.com')).toBe(true)
+    expect(namesWebsite('search google for cafes')).toBe(true)
+    expect(namesWebsite('open amazon.com')).toBe(true)
+  })
+
+  it('is false for native-app requests (no app-ambiguous words like music/maps)', () => {
+    expect(namesWebsite('play drake in Music')).toBe(false)
+    expect(namesWebsite('message sidd on slack')).toBe(false)
+    expect(namesWebsite('open Maps and find a cafe')).toBe(false)
   })
 })

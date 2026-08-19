@@ -25,6 +25,7 @@ import { llm } from '../llm'
 import { loadActuation, type ActuationPort } from '../input/actuation'
 import { parseAxElements, type AxElement, type AxSnapshot } from './ax-elements'
 import { pickTargetApp } from './ax-target'
+import { namesWebsite } from '../tools/planner-logic'
 import {
   ELEMENT_STEP_FORMAT,
   runElementTask,
@@ -170,6 +171,11 @@ class AxRailHost {
    *  to score. Null => no named running app => the caller falls to vision. */
   async routingSnapshot(goal: string): Promise<AxRouting | null> {
     if (process.platform !== 'darwin') {
+      return null
+    }
+    // A web goal must never drive a native app (a word like 'music' matching the
+    // Music app is a false target) - the browser rail handles websites.
+    if (namesWebsite(goal)) {
       return null
     }
     const helper = helperPath()

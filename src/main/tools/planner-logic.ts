@@ -184,6 +184,18 @@ export function parsePlan(raw: string, knownToolNames: readonly string[]): Plan 
  *  rail drives that string. */
 const GOAL_TOOLS = new Set(['web_task', 'computer_task'])
 
+/** Unambiguous "this is a WEBSITE" signals. Used so a word in the request that
+ *  happens to match a running app name ('music' -> the Music app) does NOT pull
+ *  a web task onto the native app. Deliberately excludes app-ambiguous words
+ *  (maps, mail, tv, spotify): only clear web markers count. */
+const WEBSITE_HINTS =
+  /(https?:\/\/|www\.|\.(com|org|net|io|co)\b|\byoutube\b|\byoutu\.be\b|\bgoogle\b|\bgmail\b|\bin the browser\b|\bon the web\b|\bwebsite\b|\bonline\b)/i
+
+/** Does the request clearly name a website (a URL, youtube, google, ...)? */
+export function namesWebsite(text: string): boolean {
+  return WEBSITE_HINTS.test(text)
+}
+
 /** Deterministic backfill: a `web_task`/`computer_task` step whose `goal` the
  *  planner left empty gets the user's full request - so the rail always drives
  *  the real task, never a generic placeholder (the "Run a web task" bug). Keeps
@@ -212,7 +224,10 @@ const WEB_TOOLS = new Set(['web_task', 'open_url'])
  *  planned - the fix for "send a file on Slack" opening slack.com in the browser.
  *  nativeApp null (no running app named) leaves the plan untouched. Pure. */
 export function preferNativeApp(plan: Plan, userRequest: string, nativeApp: string | null): Plan {
-  if (!nativeApp) {
+  // A request that clearly names a WEBSITE stays a web_task even if a word in it
+  // matches a running app ('play drake music on youtube' - 'music' matches the
+  // Music app, but 'youtube' means the browser).
+  if (!nativeApp || namesWebsite(userRequest)) {
     return plan
   }
   const steps: PlanStep[] = []
