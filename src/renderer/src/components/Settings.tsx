@@ -9,7 +9,6 @@ import { PRO_SETTINGS_SLOTS } from './pro/proSettingsCatalog'
 // Shared card chrome, in its own light module so the pro package can reuse it without
 // importing this whole god-file (which pulls SetupPanel/etc. + their window.api types).
 import { SettingsCard, ProPlaceholder, SettingsCardsGroup } from './SettingsCard'
-import { PairDevicePanel } from './PairDevicePanel'
 import { KeyboardShortcuts } from './KeyboardShortcuts'
 import { currentPlatform } from '@renderer/lib/device'
 import { proComingSoonHere } from './pro/proCatalog'
@@ -181,14 +180,6 @@ export function Settings({
                 </div>
               )}
               <ProcessingControls />
-            </SettingsCard>
-
-            <SettingsCard
-              title="Pair a device"
-              summary="Run this Mac's tools from Off Grid on your phone - scan a code to connect."
-              delay={0.15}
-            >
-              <PairDevicePanel />
             </SettingsCard>
 
             {/* Remaining Pro Settings sections (You / What Off Grid has learned /

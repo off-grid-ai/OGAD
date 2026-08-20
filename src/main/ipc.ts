@@ -1663,36 +1663,6 @@ export function setupIPC() {
     import('./setup').then((m) => m.estimateModelFit(modelId))
   )
 
-  // Pairing info for the "Pair a device" panel: what a phone needs to run this
-  // machine's MCP action tools, as both a scannable QR string and the raw url +
-  // token to show/copy. The token is the desktop's own secret shown on its own
-  // screen; nothing leaves the device here.
-  ipcMain.handle('pairing:info', async () => {
-    const os = await import('os')
-    const { getActionToken } = await import('./mcp-auth')
-    const { getGatewayPort } = await import('./model-server')
-    const { lanAddresses } = await import('./lan-address')
-    const { buildPairingPayload, encodePairingPayload } = await import('./pairing-payload')
-    const lanIps = lanAddresses()
-    const port = getGatewayPort()
-    const token = getActionToken()
-    const deviceName = os.hostname().replace(/\.local$/i, '')
-    const payload = buildPairingPayload({
-      lanIp: lanIps[0] ?? '127.0.0.1',
-      port,
-      token,
-      name: deviceName
-    })
-    return {
-      mcpUrl: payload.url,
-      token,
-      deviceName,
-      lanIps,
-      port,
-      qr: encodePairingPayload(payload)
-    }
-  })
-
   // Open an https link in the user's default browser (e.g. a model's HF page).
   ipcMain.handle('app:open-external', async (_e, url: string) => {
     if (!/^https:\/\//.test(url)) return { success: false }
