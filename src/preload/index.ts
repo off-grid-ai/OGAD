@@ -114,6 +114,18 @@ const offGridApi = {
       return unsubscribe('vision:notice', sub)
     }
   },
+  // "Pair a device": what a phone needs to run this machine's MCP action tools,
+  // as a QR string + the raw url/token to show.
+  pairing: {
+    info: (): Promise<{
+      mcpUrl: string
+      token: string
+      deviceName: string
+      lanIps: string[]
+      port: number
+      qr: string
+    }> => ipcRenderer.invoke('pairing:info')
+  },
   // Generic passthrough so pro renderer code can reach pro IPC channels without
   // the core preload bundle enumerating them.
   proInvoke: (channel: string, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args),

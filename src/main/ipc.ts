@@ -90,11 +90,7 @@ async function regenerateMasterMemory(): Promise<string | null> {
 // arrive (inline chain-of-thought); otherwise fall back to a single blocking call.
 // Active streaming turns, keyed by streamId, so a renderer 'rag:cancel' can abort
 // an in-flight generation and keep whatever was produced so far.
-import {
-  bindChatStream,
-  endChatStream,
-  noteChatStreamDelta
-} from './chat-stream-state'
+import { bindChatStream, endChatStream, noteChatStreamDelta } from './chat-stream-state'
 
 const streamControllers = new Map<string, AbortController>()
 
@@ -427,7 +423,6 @@ async function extractEntitiesForSession(sessionId: string): Promise<void> {
         console.error('[IPC] Failed to update entity summary:', e)
       }
     }
-
   } catch (e) {
     console.error('[IPC] Entity extraction failed:', e)
   }
@@ -1383,7 +1378,6 @@ export function setupIPC() {
           console.error(`[IPC] Failed to reprocess session ${session.id}:`, e)
         }
       }
-
     } else {
       // Additive reprocess: keep existing data, just re-run entity extraction on top
       console.log(
@@ -1668,6 +1662,36 @@ export function setupIPC() {
   ipcMain.handle('system:estimate-fit', (_e, modelId: string) =>
     import('./setup').then((m) => m.estimateModelFit(modelId))
   )
+
+  // Pairing info for the "Pair a device" panel: what a phone needs to run this
+  // machine's MCP action tools, as both a scannable QR string and the raw url +
+  // token to show/copy. The token is the desktop's own secret shown on its own
+  // screen; nothing leaves the device here.
+  ipcMain.handle('pairing:info', async () => {
+    const os = await import('os')
+    const { getActionToken } = await import('./mcp-auth')
+    const { getGatewayPort } = await import('./model-server')
+    const { lanAddresses } = await import('./lan-address')
+    const { buildPairingPayload, encodePairingPayload } = await import('./pairing-payload')
+    const lanIps = lanAddresses()
+    const port = getGatewayPort()
+    const token = getActionToken()
+    const deviceName = os.hostname().replace(/\.local$/i, '')
+    const payload = buildPairingPayload({
+      lanIp: lanIps[0] ?? '127.0.0.1',
+      port,
+      token,
+      name: deviceName
+    })
+    return {
+      mcpUrl: payload.url,
+      token,
+      deviceName,
+      lanIps,
+      port,
+      qr: encodePairingPayload(payload)
+    }
+  })
 
   // Open an https link in the user's default browser (e.g. a model's HF page).
   ipcMain.handle('app:open-external', async (_e, url: string) => {
