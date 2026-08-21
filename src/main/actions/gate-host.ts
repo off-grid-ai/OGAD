@@ -73,15 +73,31 @@ const parkListeners = new Set<() => void>()
  * emitter, gated actions with no pro queue listening PARK and render as a
  * card in the chat instead of auto-running. Unregistered (tests, headless),
  * the free-build behaviour stays run-now - the safe, unchanged default.
+ *
+ * Multiple subscribers, not one: the same parked gate fans out to every
+ * surface that wants it - the desktop chat card (actions-ipc broadcasts to
+ * renderer windows) AND pro's mesh forwarder (sends it to paired phones so the
+ * approval can be given from a phone's chat). Each resolves the ONE engine gate
+ * via resolveActionGate; the first verdict wins, the rest are no-ops.
  */
-let inlineSurface: ((request: InlineGateRequest) => void) | null = null
+const inlineSurfaces = new Set<(request: InlineGateRequest) => void>()
 
 export function registerInlineGateSurface(emit: (request: InlineGateRequest) => void): () => void {
-  inlineSurface = emit
+  inlineSurfaces.add(emit)
   return () => {
-    if (inlineSurface === emit) {
-      inlineSurface = null
-    }
+    inlineSurfaces.delete(emit)
+  }
+}
+
+/** Is any inline surface listening? Drives the park-vs-run-now decision. */
+function hasInlineSurface(): boolean {
+  return inlineSurfaces.size > 0
+}
+
+/** Fan a parked gate out to every registered inline surface. */
+function emitInline(request: InlineGateRequest): void {
+  for (const emit of inlineSurfaces) {
+    emit(request)
   }
 }
 
@@ -226,11 +242,11 @@ export async function gateHost({ action }: { action: ActionRecord }): Promise<Ga
   // settles on the outcome broadcast. This is the "migration" the surface was built
   // for - a chat-initiated computer-use task is approvable right where it was asked.
   // Park BEFORE emitting so a same-tick resolve always finds the pending entry.
-  if (queued === true || inlineSurface) {
+  if (queued === true || hasInlineSurface()) {
     return new Promise<GateDecision>((resolve) => {
       pending.set(action.id, resolve)
       notifyParked(action.id)
-      inlineSurface?.({
+      emitInline({
         actionId: action.id,
         actionType: action.type,
         kind: railToKind(action.rail),

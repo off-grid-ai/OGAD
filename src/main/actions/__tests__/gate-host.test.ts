@@ -206,6 +206,42 @@ describe('the inline gate surface (Approval UX v2)', () => {
     expect(decision).toEqual({ kind: 'approve' })
   })
 
+  it('fans one parked gate out to EVERY registered surface (chat card + mesh forwarder)', async () => {
+    // Two surfaces stand in for the desktop chat card and pro's phone-mesh forwarder.
+    const card: string[] = []
+    const mesh: string[] = []
+    const offCard = registerInlineGateSurface((r) => card.push(r.actionId))
+    const offMesh = registerInlineGateSurface((r) => mesh.push(r.actionId))
+    try {
+      const parked = gateHost({ action: record() })
+      expect(card).toEqual(['act_1'])
+      expect(mesh).toEqual(['act_1'])
+      // A single resolve (from whichever surface) settles the one gate.
+      expect(resolveActionGate('act_1', { kind: 'approve' })).toBe(true)
+      await expect(parked).resolves.toEqual({ kind: 'approve' })
+    } finally {
+      offCard()
+      offMesh()
+    }
+  })
+
+  it('stops delivering to a surface once it unregisters, keeps delivering to the rest', async () => {
+    const card: string[] = []
+    const mesh: string[] = []
+    const offCard = registerInlineGateSurface((r) => card.push(r.actionId))
+    const offMesh = registerInlineGateSurface((r) => mesh.push(r.actionId))
+    offMesh() // the phone forwarder goes away
+    try {
+      const parked = gateHost({ action: record() })
+      expect(card).toEqual(['act_1'])
+      expect(mesh).toEqual([]) // no longer receives
+      resolveActionGate('act_1', { kind: 'approve' })
+      await parked
+    } finally {
+      offCard()
+    }
+  })
+
   it('surfaces a queued gate in BOTH the pro queue and the inline card - one gate, two views', async () => {
     const requests: InlineGateRequest[] = []
     const unregister = registerInlineGateSurface((request) => requests.push(request))
