@@ -189,31 +189,31 @@ export async function gateHost({ action }: { action: ActionRecord }): Promise<Ga
     actionType: action.type,
     payloadHash: action.payloadHash
   })
-  if (queued !== true) {
-    if (inlineSurface) {
-      // Approval UX v2: park and render the card in the conversation. Park
-      // BEFORE emitting so a same-tick resolve always finds the entry.
-      return new Promise<GateDecision>((resolve) => {
-        pending.set(action.id, resolve)
-        notifyParked(action.id)
-        inlineSurface?.({
-          actionId: action.id,
-          actionType: action.type,
-          kind: railToKind(action.rail),
-          title: action.intent,
-          args: action.args,
-          risk: action.risk,
-          payloadHash: action.payloadHash,
-          source: action.source
-        })
+  // Park (and render the inline chat card) whenever a human is needed - which is
+  // either when the pro queue accepted the gate (queued === true) OR when nobody
+  // queued but an inline surface is registered. The pro-queue notification and the
+  // in-chat card are two VIEWS of the ONE engine gate: whichever the user acts on
+  // calls resolveActionGate for the same actionId (idempotent), and the other view
+  // settles on the outcome broadcast. This is the "migration" the surface was built
+  // for - a chat-initiated computer-use task is approvable right where it was asked.
+  // Park BEFORE emitting so a same-tick resolve always finds the pending entry.
+  if (queued === true || inlineSurface) {
+    return new Promise<GateDecision>((resolve) => {
+      pending.set(action.id, resolve)
+      notifyParked(action.id)
+      inlineSurface?.({
+        actionId: action.id,
+        actionType: action.type,
+        kind: railToKind(action.rail),
+        title: action.intent,
+        args: action.args,
+        risk: action.risk,
+        payloadHash: action.payloadHash,
+        source: action.source
       })
-    }
-    // Nothing listening and no inline surface (tests, headless): the
-    // unchanged behaviour is to run. The engine still verifies.
-    return { kind: 'approve' }
+    })
   }
-  return new Promise<GateDecision>((resolve) => {
-    pending.set(action.id, resolve)
-    notifyParked(action.id)
-  })
+  // Nothing queued and no inline surface (tests, headless): the unchanged
+  // behaviour is to run. The engine still verifies.
+  return { kind: 'approve' }
 }

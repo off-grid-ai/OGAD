@@ -204,15 +204,22 @@ describe('the inline gate surface (Approval UX v2)', () => {
     expect(decision).toEqual({ kind: 'approve' })
   })
 
-  it('a listening pro queue still wins over the inline surface (until the migration)', async () => {
-    const requests: unknown[] = []
+  it('surfaces a queued gate in BOTH the pro queue and the inline card - one gate, two views', async () => {
+    const requests: InlineGateRequest[] = []
     const unregister = registerInlineGateSurface((request) => requests.push(request))
     try {
-      registerHook(HOOKS.actionsProposeApproval, () => true)
+      const proSaw = vi.fn(() => true)
+      registerHook(HOOKS.actionsProposeApproval, proSaw)
       const parked = gateHost({ action: record() })
-      expect(requests).toHaveLength(0)
-      resolveActionGate('act_1', { kind: 'approve' })
-      await parked
+      // The pro queue was offered the gate AND the in-chat card was emitted for it.
+      expect(proSaw).toHaveBeenCalledTimes(1)
+      expect(requests).toHaveLength(1)
+      expect(requests[0]).toMatchObject({ actionId: 'act_1', kind: 'computer' })
+      expect(pendingActionGateCount()).toBe(1)
+      // Resolving once (from EITHER surface) resolves the single engine gate.
+      expect(resolveActionGate('act_1', { kind: 'approve' })).toBe(true)
+      await expect(parked).resolves.toEqual({ kind: 'approve' })
+      expect(pendingActionGateCount()).toBe(0)
     } finally {
       unregister()
     }
