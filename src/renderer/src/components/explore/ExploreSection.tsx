@@ -44,7 +44,7 @@ export function ExploreSection({
   return (
     <div className={`font-mono ${className}`}>
       <div className="mb-4">
-        <h2 className="text-sm font-semibold text-white">Explore what Off Grid can do</h2>
+        <h2 className="text-sm font-semibold text-white">Explore what Off Grid AI can do</h2>
         <p className="mt-0.5 text-xs text-neutral-500">
           Pick one - it starts a chat and asks you the rest. Everything runs on your Mac.
         </p>
