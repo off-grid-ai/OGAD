@@ -54,7 +54,7 @@ import { getPrompt, getPromptTemplate, resetPrompt } from './prompt-store'
 import { setupTtsIpc } from './tts-ipc'
 import {
   safeParseJson,
-  tokenizeQuery,
+  ftsMatchExpression,
   clipText,
   isGenerativeRequest,
   isTrivialMessage,
@@ -770,8 +770,10 @@ export function setupIPC() {
       if (streamId)
         event.sender.send('rag:stream', { streamId, type: 'step', step: { kind: 'searching' } })
       const db = getDB()
-      const tokens = tokenizeQuery(query)
-      const ftsQuery = tokens.length > 0 ? tokens.join(' OR ') : query
+      // Quote each token as an FTS5 phrase (via the shared safe builder) so a hyphenated word like
+      // "best-reviewed" can't reach MATCH as invalid syntax and throw "no such column: reviewed",
+      // which failed the whole retrieval. Preserves the any-term (OR) recall the retrieval expects.
+      const ftsQuery = ftsMatchExpression(query)
 
       let memories: any[] = []
       try {
