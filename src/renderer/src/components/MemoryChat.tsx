@@ -23,6 +23,8 @@ import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import { getSlot, SLOTS } from '@/bootstrap/slotRegistry'
 import { ArtifactCanvas, parseArtifact, type Artifact } from './ArtifactCanvas'
+import { ExploreSection } from './explore/ExploreSection'
+import { REQUEST_FORM_URL } from './explore/presetCatalog'
 import { VoiceBubble, stopAllVoicePlayback } from './VoiceBubble'
 import { SkillsPanel } from './SkillsPanel'
 import { ModelPicker } from './ModelPicker'
@@ -2946,6 +2948,15 @@ export function MemoryChat({
                         ? 'Ask across your memories, chats, and entities from every source.'
                         : 'Ask anything, generate images, or build — all on-device.'}
                 </p>
+                {mode !== 'image' ? (
+                  <ExploreSection
+                    onRun={(preset) => {
+                      void sendMessage(preset.prompt)
+                    }}
+                    requestUrl={REQUEST_FORM_URL}
+                    className="mt-6 w-full text-left"
+                  />
+                ) : null}
                 {mode === 'image' ? (
                   <div className="mt-4 w-full">
                     <div className="mb-2 flex items-center justify-between">

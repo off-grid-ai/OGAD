@@ -155,3 +155,9 @@ export const ALL_PRESETS: readonly DemoPreset[] = PRESET_SECTIONS.flatMap(
 export const HEADLINE_PRESETS: readonly DemoPreset[] = ALL_PRESETS.filter(
   (preset) => preset.readiness === 'robust'
 )
+
+/**
+ * Where "Request a capability" points. Set this to the Google Form once it exists; until
+ * then it stays undefined and the surface simply hides the link (no broken link ships).
+ */
+export const REQUEST_FORM_URL: string | undefined = undefined
