@@ -11,12 +11,14 @@ import { HOOKS, registerHook, unregisterHook } from '../../bootstrap/hookRegistr
 import {
   abandonActionGate,
   approvalBypassed,
+  computerApprovalMode,
   gateHost,
   needsApproval,
   onGateParked,
   parseGateDecision,
   pendingActionGateCount,
   railToKind,
+  registerApprovalModeProvider,
   registerInlineGateSurface,
   resolveActionGate,
   whenActionParked,
@@ -263,6 +265,54 @@ describe('needsApproval (only computer use is gated)', () => {
     expect(decision).toEqual({ kind: 'approve' })
     expect(pendingActionGateCount()).toBe(0)
     dispose()
+  })
+})
+
+describe('computerApprovalMode (the Sync-sharing auto/ask setting)', () => {
+  afterEach(() => {
+    // Ensure no provider leaks into other tests (default must be 'ask').
+    registerApprovalModeProvider(() => 'ask')()
+  })
+
+  it('defaults to ask when no provider is registered (free build / tests)', () => {
+    expect(computerApprovalMode()).toBe('ask')
+  })
+
+  it('reads the registered provider, and unregister restores the ask default', () => {
+    let mode: 'auto' | 'ask' = 'auto'
+    const unregister = registerApprovalModeProvider(() => mode)
+    expect(computerApprovalMode()).toBe('auto')
+    mode = 'ask'
+    expect(computerApprovalMode()).toBe('ask')
+    unregister()
+    expect(computerApprovalMode()).toBe('ask')
+  })
+
+  it('mode "auto" approves a computer-use gate without parking, even with a pro queue listening', async () => {
+    const proSaw = vi.fn(() => true)
+    registerHook(HOOKS.actionsProposeApproval, proSaw)
+    const unregister = registerApprovalModeProvider(() => 'auto')
+    try {
+      const decision = await gateHost({ action: record({ rail: 'vision' }) })
+      expect(decision).toEqual({ kind: 'approve' })
+      expect(pendingActionGateCount()).toBe(0) // never parked
+      expect(proSaw).not.toHaveBeenCalled() // auto short-circuits before the queue
+    } finally {
+      unregister()
+    }
+  })
+
+  it('mode "ask" parks the gate for approval (the default path)', async () => {
+    registerHook(HOOKS.actionsProposeApproval, () => true)
+    const unregister = registerApprovalModeProvider(() => 'ask')
+    try {
+      const parked = gateHost({ action: record() })
+      expect(pendingActionGateCount()).toBe(1)
+      resolveActionGate('act_1', { kind: 'approve' })
+      await expect(parked).resolves.toEqual({ kind: 'approve' })
+    } finally {
+      unregister()
+    }
   })
 })
 

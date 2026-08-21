@@ -160,6 +160,29 @@ export function approvalBypassed(): boolean {
   return process.env['OFFGRID_AUTO_APPROVE'] === '1'
 }
 
+/** How computer-use approvals are handled, chosen by the user in Sync sharing:
+ *  'ask' (the default) parks every task for approval; 'auto' runs it with no
+ *  prompt. Distinct from approvalBypassed (a headless-test env flag) - this is a
+ *  real, persisted user setting. Pro owns the setting + its toggle and registers
+ *  a provider; with none registered (free build, tests) the safe default is ask. */
+export type ComputerApprovalMode = 'auto' | 'ask'
+let approvalModeProvider: (() => ComputerApprovalMode) | null = null
+
+export function registerApprovalModeProvider(
+  provider: () => ComputerApprovalMode
+): () => void {
+  approvalModeProvider = provider
+  return () => {
+    if (approvalModeProvider === provider) {
+      approvalModeProvider = null
+    }
+  }
+}
+
+export function computerApprovalMode(): ComputerApprovalMode {
+  return approvalModeProvider?.() ?? 'ask'
+}
+
 /** Only COMPUTER-USE tasks ask for approval. The accessibility / vision rails
  *  drive the real desktop - they take over the user's cursor and keyboard - so
  *  the user confirms before that happens. Every other action runs IN-APP without
@@ -174,6 +197,12 @@ export async function gateHost({ action }: { action: ActionRecord }): Promise<Ga
   // In-app actions run straight through; only computer use is gated. The env
   // flag bypasses even that, for headless testing.
   if (approvalBypassed() || !needsApproval(action.rail)) {
+    return { kind: 'approve' }
+  }
+  // The user's Sync-sharing policy: "Auto-approve" runs computer-use tasks with no
+  // prompt (they still journal, and the outcome shows in chat); "Ask every time"
+  // (the default) falls through to park for approval below.
+  if (computerApprovalMode() === 'auto') {
     return { kind: 'approve' }
   }
   const queued = proposeActionApproval({
