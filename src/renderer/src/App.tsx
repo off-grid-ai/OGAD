@@ -4,6 +4,8 @@ import { CommandPalette } from './components/CommandPalette'
 import logo from './assets/logo.png'
 import { useMeetingRecorder } from './useMeetingRecorder'
 import { MemoryChat } from './components/MemoryChat'
+import { ExploreScreen } from './components/explore/ExploreScreen'
+import type { DemoPreset } from './components/explore/presetCatalog'
 import { Settings } from './components/Settings'
 import { SettingsPanel } from './components/SettingsPanel'
 import { ModelsScreen } from './components/ModelsScreen'
@@ -35,6 +37,7 @@ import { NavThemeToggle } from './components/ThemeToggle'
 import { motion, AnimatePresence } from 'motion/react'
 import {
   IconMessageCircle,
+  IconCompass,
   IconSettings,
   IconDownload,
   IconFolders,
@@ -74,6 +77,7 @@ import {
 
 type ViewMode =
   | 'dashboard'
+  | 'explore'
   | 'day'
   | 'replay'
   | 'reflect'
@@ -311,6 +315,7 @@ function AppContent() {
     conversationId?: string
     projectId?: string
     openGallery?: boolean
+    seedPrompt?: string
   } | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const rec = useMeetingRecorder()
@@ -344,6 +349,7 @@ function AppContent() {
     const path = window.location.pathname
     const viewMap: Record<string, ViewMode> = {
       '/': 'day',
+      '/explore': 'explore',
       '/day': 'day',
       '/replay': 'replay',
       '/reflect': 'reflect',
@@ -420,6 +426,7 @@ function AppContent() {
   // Update browser URL when view mode changes
   useEffect(() => {
     const urlMap: Record<ViewMode, string> = {
+      explore: '/explore',
       day: '/day',
       replay: '/replay',
       reflect: '/reflect',
@@ -707,6 +714,14 @@ function AppContent() {
     []
   )
 
+  // Run an Explore preset: open a fresh chat seeded with the preset's prompt, which auto-sends so
+  // the agent takes over and asks its own follow-ups. Same handoff whether the tap came from the
+  // Explore screen or the chat empty state.
+  const handleRunPreset = useCallback((preset: DemoPreset) => {
+    setChatTarget({ seedPrompt: preset.prompt })
+    setViewMode('memory-chat')
+  }, [])
+
   // Global keyboard shortcuts for back/forward navigation (Cmd+[ and Cmd+])
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -748,6 +763,11 @@ function AppContent() {
   }
   // Icons take no color — the nav button drives it (emerald when active).
   const mainNav: { label: string; icon: React.ReactNode; view: ViewMode; locked?: boolean }[] = [
+    {
+      label: 'Explore',
+      icon: <IconCompass className="h-5 w-5 shrink-0" />,
+      view: 'explore' as ViewMode
+    },
     proItem('search'),
     proItem('day'),
     proItem('replay'),
@@ -1100,7 +1120,9 @@ function AppContent() {
                   transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
                   className="p-6 h-full overflow-y-auto"
                 >
-                  {viewMode === 'memory-chat' ? (
+                  {viewMode === 'explore' ? (
+                    <ExploreScreen onRunPreset={handleRunPreset} />
+                  ) : viewMode === 'memory-chat' ? (
                     <MemoryChat
                       onNavigateToMemory={handleSelectMemory}
                       onNavigateToChat={handleSelectChat}

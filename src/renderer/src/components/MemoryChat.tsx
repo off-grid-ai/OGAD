@@ -268,7 +268,13 @@ interface MemoryChatProps {
   /** Open the Replay screen seeked to a capture's moment (epoch ms). */
   onSeekReplay?: (ts: number) => void
   /** Open a specific conversation, or start a new one scoped to a project. */
-  openTarget?: { conversationId?: string; projectId?: string; openGallery?: boolean } | null
+  openTarget?: {
+    conversationId?: string
+    projectId?: string
+    openGallery?: boolean
+    /** Start a fresh chat and auto-send this prompt (an Explore preset handed off from a landing surface). */
+    seedPrompt?: string
+  } | null
   onTargetConsumed?: () => void
 }
 
@@ -515,6 +521,9 @@ export function MemoryChat({
     []
   )
   const [input, setInput] = useState('')
+  // A preset prompt handed in via openTarget.seedPrompt, held until sendMessage exists in scope
+  // and the fresh-chat state has settled, then auto-sent by the effect below sendMessage.
+  const [pendingSeed, setPendingSeed] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<Attachment[]>([])
   // Whether the active chat model can read images. Gate image attachment on this and
   // re-check periodically (the user can switch models from the Models screen).
@@ -1311,6 +1320,13 @@ export function MemoryChat({
           setActiveConversationId(null)
           setConvMessages(null, [])
           setActiveProjectId(openTarget.projectId)
+        } else if (openTarget.seedPrompt) {
+          // Open a fresh chat, then let the effect below sendMessage fire the preset once the
+          // reset state has settled - so the prompt lands in the new empty conversation.
+          setActiveConversationId(null)
+          setConvMessages(null, [])
+          setActiveProjectId(null)
+          setPendingSeed(openTarget.seedPrompt)
         }
         if (openTarget.openGallery) setShowGallery(true)
         await loadConversations()
@@ -1974,6 +1990,17 @@ export function MemoryChat({
       if (activeStreamId) streamConvRef.current.delete(activeStreamId)
     }
   }
+
+  // Fire a preset handed in via openTarget.seedPrompt. Runs after sendMessage is defined and
+  // after the fresh-chat reset from the openTarget effect has settled, so the prompt lands in
+  // the new empty conversation rather than whatever was open before.
+  useEffect(() => {
+    if (!pendingSeed) return
+    const prompt = pendingSeed
+    setPendingSeed(null)
+    void sendMessage(prompt)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSeed])
 
   // Pull the next queued message for THIS conversation (sent while it was generating)
   // and send it — bound to its own conversation, never the active tab.
