@@ -83,9 +83,9 @@ export const PRESET_SECTIONS: readonly PresetSection[] = [
     presets: [
       {
         id: 'play-music',
-        title: 'Play something and set the volume',
-        prompt: 'Play something upbeat and set the volume to about 30%.',
-        blurb: 'Opens Music and adjusts the volume - a clean, common desktop action.',
+        title: 'Play music on Spotify',
+        prompt: 'Play some jazz on Spotify.',
+        blurb: 'Drives the Spotify app to start playing - a real native action you approve first.',
         readiness: 'robust'
       },
       {
