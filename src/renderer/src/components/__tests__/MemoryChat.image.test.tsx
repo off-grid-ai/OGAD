@@ -87,6 +87,8 @@ type TestConversation = {
   created_at: string
   updated_at: string
   message_count: number
+  last_role?: string | null
+  last_content?: string | null
 }
 
 type Deferred<T> = {
@@ -564,6 +566,30 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     expect(toggle.closest('header')?.firstElementChild).toBe(toggle)
     expect(historyPanel?.querySelector('[aria-label="Collapse conversation list"]')).toBeNull()
     expect(screen.queryByTitle('Show conversations')).toBeNull()
+  })
+
+  it('shows a clean enhanced-prompt preview without model protocol in the conversation list', async () => {
+    installApi({
+      active: FULL,
+      models: [FULL],
+      conversations: [
+        {
+          id: 'enhanced-prompt-chat',
+          title: 'Draw a dog',
+          project_id: null,
+          created_at: '2026-08-21T08:00:00.000Z',
+          updated_at: '2026-08-21T08:00:00.000Z',
+          message_count: 2,
+          last_role: 'assistant',
+          last_content:
+            '<think>__LABEL:Enhanced prompt__\nA sleek black dog in soft morning light.</think>'
+        }
+      ]
+    })
+    renderChat()
+
+    expect(await screen.findByText('A sleek black dog in soft morning light.')).toBeTruthy()
+    expect(screen.queryByText(/<think>|__LABEL:/)).toBeNull()
   })
 
   it('carries the USER-typed steps (10), not the model default (28), and the picked model', async () => {
