@@ -51,7 +51,6 @@ import {
 import { Button } from '@renderer/components/ui/button'
 import { ActionGateDock } from '@renderer/components/actions/ActionGateDock'
 import { VisionSupervisorOverlay } from '@renderer/components/vision/VisionSupervisorOverlay'
-import { VisionGrounderNudge } from '@renderer/components/vision/VisionGrounderNudge'
 import { MessageNudge } from '@renderer/components/ui/MessageNudge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import {
@@ -4538,8 +4537,6 @@ export function MemoryChat({
                     ancestor doesn't become its containing block. */}
                 {/* Vision rail: the supervisor overlay slides in during a computer-use task */}
                 <VisionSupervisorOverlay />
-                {/* Vision rail: the grounder nudge, in the chat, when the model can't ground */}
-                <VisionGrounderNudge />
                 {microphoneDenied && (
                   <div
                     role="alert"
