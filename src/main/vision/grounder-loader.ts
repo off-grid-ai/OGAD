@@ -18,10 +18,18 @@
 import { llm } from '../llm'
 import { getActiveModel, setActiveModel } from '../models-manager'
 import { isGrounderActive } from './vision-model-notice'
+import { installedDownloadedIds } from '../downloaded-models'
+import { resolveGrounderPlan } from './grounder-plan'
 
 /** The grounder we swap in. Catalogued (grounder: true); its weights + mmproj
  *  must be downloaded (they are, for the A/B). */
 export const GROUNDER_MODEL_ID = 'mradermacher/UI-TARS-1.5-7B-GGUF'
+
+/** True when the dedicated grounder's files are actually on disk - the app's own
+ *  installed-model check (the same list the Models screen shows as installed). */
+function grounderInstalled(): boolean {
+  return installedDownloadedIds(llm.getModelsDir()).includes(GROUNDER_MODEL_ID)
+}
 
 export interface GrounderTiming {
   /** True when a grounder was already loaded, so no swap was paid. */
@@ -53,10 +61,17 @@ export async function withGrounder<T>(
   now: () => number = Date.now
 ): Promise<{ result: T; timing: GrounderTiming }> {
   const alreadyGrounder = isGrounderActive(llm.activeModelInfo())
+  const plan = resolveGrounderPlan(alreadyGrounder, grounderInstalled())
+  if (plan === 'fallback-active-model') {
+    console.warn(
+      `[grounder] ${GROUNDER_MODEL_ID} is not downloaded - running computer use on the active model; grounding may be less accurate. Download the grounder for precise clicks.`
+    )
+  }
+  const willSwap = plan === 'swap-in-grounder'
   const previousId = getActiveModel()
 
   let swapInMs = 0
-  if (!alreadyGrounder) {
+  if (willSwap) {
     const t0 = now()
     await loadModel(GROUNDER_MODEL_ID)
     swapInMs = now() - t0
@@ -70,13 +85,13 @@ export async function withGrounder<T>(
     runMs = now() - startRun
     return {
       result,
-      timing: { skippedSwap: alreadyGrounder, swapInMs, runMs, swapOutMs }
+      timing: { skippedSwap: !willSwap, swapInMs, runMs, swapOutMs }
     }
   } finally {
     if (runMs === 0) {
       runMs = now() - startRun // task threw - still attribute the run time
     }
-    if (!alreadyGrounder && previousId) {
+    if (willSwap && previousId) {
       const t2 = now()
       await loadModel(previousId)
       swapOutMs = now() - t2
