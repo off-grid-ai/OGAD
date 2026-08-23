@@ -3,8 +3,9 @@ import { generatedImageMetadataJson } from '@offgrid/sync'
 import type { ChatHome } from '@offgrid/sync'
 import {
   type ImageGenerationJobContract,
-  type ImageGenerationProgressContract,
-  type ImageGenerationRequestContract
+  type ImageGenerationPipelineUpdateContract,
+  type ImageGenerationRequestContract,
+  type ImageGenerationResultContract
 } from '../../shared/image-generation-contract'
 import {
   cancelImageGen,
@@ -18,6 +19,8 @@ import { noteGeneratedImageMessage, shareGeneratedImage } from './generated-imag
 
 export type ImageGenerationJobRequest = ImageGenerationRequestContract & {
   conversationId?: string
+  /** The durable assistant message this image will hang under. */
+  messageId?: string
   projectId?: string | null
 }
 
@@ -25,12 +28,12 @@ type JobListener = (snapshot: ImageGenerationJobContract) => void
 type ConversationListener = (conversationId: string) => void
 
 /** A finished image, and the name it answers to on every device. */
-export type ImageGenerationResult = ImageGenOutput & { syncId: string }
+export type ImageGenerationResult = ImageGenerationResultContract
 
 export interface ImageGenerationRuntime {
   generate(
     request: ImageGenerationJobRequest,
-    onProgress: (progress: ImageGenerationProgressContract) => void
+    onUpdate: (update: ImageGenerationPipelineUpdateContract) => void
   ): Promise<ImageGenOutput>
   cancel(): boolean
   /** The scope, not the whole request: the sidecar owns these facts and nothing else here. */
@@ -44,7 +47,7 @@ export interface ImageGenerationRuntime {
 }
 
 const nativeImageGenerationRuntime: ImageGenerationRuntime = {
-  generate: (request, onProgress) => generateImage(request, onProgress),
+  generate: (request, onUpdate) => generateImage(request, onUpdate),
   cancel: () => cancelImageGen(),
   saveScope: (path, facts) => saveGeneratedImageScope(path, facts),
   share: (path) => shareGeneratedImage(path),
@@ -57,6 +60,8 @@ const idleSnapshot = (): ImageGenerationJobContract => ({
   phase: 'idle',
   conversationId: null,
   projectId: null,
+  stage: null,
+  enhancedPrompt: '',
   progress: null,
   outputPath: null,
   error: null,
@@ -89,10 +94,15 @@ export class ImageGenerationJobService {
     return () => this.conversationListeners.delete(listener)
   }
 
-  async start(request: ImageGenerationJobRequest): Promise<ImageGenerationResult> {
+  /** Reject before a caller reserves related state for a job this service cannot accept. */
+  assertCanStart(): void {
     if (this.active) {
       throw new Error('An image is already generating - please wait for it to finish.')
     }
+  }
+
+  async start(request: ImageGenerationJobRequest): Promise<ImageGenerationResult> {
+    this.assertCanStart()
     this.active = true
     const id = randomUUID()
     this.snapshot = {
@@ -100,6 +110,8 @@ export class ImageGenerationJobService {
       phase: 'running',
       conversationId: request.conversationId ?? null,
       projectId: request.projectId ?? null,
+      stage: 'enhancing',
+      enhancedPrompt: '',
       progress: null,
       outputPath: null,
       error: null,
@@ -117,9 +129,7 @@ export class ImageGenerationJobService {
     )
 
     try {
-      const result = await this.runtime.generate(request, (progress) =>
-        this.updateProgress(id, progress)
-      )
+      const result = await this.runtime.generate(request, (update) => this.update(id, update))
       // Always, not only inside a chat. The syncId is what this image is called on the mesh, so an
       // image made from the tool loop or the gateway needs one exactly as much as one made in a
       // conversation; without it the gallery and the file record name the same picture differently.
@@ -134,6 +144,7 @@ export class ImageGenerationJobService {
             syncId: id,
             ...(keptSource ? { initImage: keptSource } : {}),
             ...(request.conversationId ? { conversationId: request.conversationId } : {}),
+            ...(request.messageId ? { messageId: request.messageId } : {}),
             projectId: request.projectId ?? null,
             createdAt: new Date(this.snapshot.startedAt ?? Date.now()).toISOString(),
             ...(request.width ? { width: request.width } : {}),
@@ -142,7 +153,7 @@ export class ImageGenerationJobService {
             // phone reads `modelId`, so every image made here arrived with its model reading
             // "synced" and its steps reading 0.
             metadataJson: generatedImageMetadataJson({
-              prompt: request.prompt,
+              prompt: result.prompt,
               ...(request.negativePrompt === undefined
                 ? {}
                 : { negativePrompt: request.negativePrompt }),
@@ -164,7 +175,8 @@ export class ImageGenerationJobService {
       this.snapshot = {
         ...this.snapshot,
         phase: 'succeeded',
-        outputPath: result.path ?? null,
+        stage: null,
+        outputPath: result.path,
         progress: null,
         finishedAt: Date.now()
       }
@@ -181,6 +193,7 @@ export class ImageGenerationJobService {
       this.snapshot = {
         ...this.snapshot,
         phase: cancelled ? 'cancelled' : 'failed',
+        stage: null,
         error: message,
         progress: null,
         finishedAt: Date.now()
@@ -202,6 +215,7 @@ export class ImageGenerationJobService {
     this.snapshot = {
       ...this.snapshot,
       phase: 'cancelled',
+      stage: null,
       progress: null,
       finishedAt: Date.now()
     }
@@ -213,9 +227,9 @@ export class ImageGenerationJobService {
    * Called only after the renderer has persisted the generated assistant message.
    * A remounted Chat observes this and refreshes the conversation from SQLite.
    *
-   * This is also the first moment the message EXISTS, so it is the only moment the image can be told
-   * which message it hangs under. The picture is offered again with that link, which is what lets a
-   * phone move it out of the gallery and under the message instead of drawing a hole.
+   * The image was already offered with the stable message id reserved at the start of the turn.
+   * `noteMessage` confirms the final persisted association. The generated-image owner treats this as
+   * an idempotent acknowledgement, so it does not publish or transfer the same image a second time.
    */
   acknowledgeConversation(conversationId: string, messageId?: string): boolean {
     if (
@@ -243,9 +257,14 @@ export class ImageGenerationJobService {
     return true
   }
 
-  private updateProgress(id: string, progress: ImageGenerationProgressContract): void {
+  private update(id: string, update: ImageGenerationPipelineUpdateContract): void {
     if (this.snapshot.id !== id || this.snapshot.phase !== 'running') return
-    this.snapshot = { ...this.snapshot, progress: { ...progress } }
+    this.snapshot = {
+      ...this.snapshot,
+      stage: update.stage,
+      ...(update.enhancedPrompt === undefined ? {} : { enhancedPrompt: update.enhancedPrompt }),
+      progress: update.progress === undefined ? this.snapshot.progress : update.progress
+    }
     this.publish()
   }
 

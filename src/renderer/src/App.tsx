@@ -159,6 +159,22 @@ function ReprocessingBanner() {
   )
 }
 
+// One rule for the look of EVERY sidebar row - nav items, the model-status row, the mobile-app
+// link. The Tailwind palette is remapped onto the theme-aware --og-* tokens in assets/main.css,
+// so these classes already flip with data-theme and no `dark:` variant belongs here: `dark:` is
+// Tailwind's own prefers-color-scheme media query, a SECOND source of truth for the theme that
+// disagrees with data-theme whenever the app theme and the OS theme differ.
+// The tell that made this visible: neutral-900 is a SURFACE token here (#f5f5f5 in light), not a
+// text token, so `hover:text-neutral-900` painted the label near-white on a near-white row.
+const navRowClass = (expanded: boolean, active = false): string =>
+  cn(
+    'group/nav relative flex items-center gap-3 rounded-lg py-2 text-sm transition-colors',
+    expanded ? 'px-3' : 'justify-center px-0',
+    active
+      ? 'bg-green-500/10 text-emerald-400'
+      : 'text-neutral-400 hover:bg-neutral-500/10 hover:text-white'
+  )
+
 // Model-server health dot for the sidebar. Uses the SAME live probe as the System
 // Health panel (system:health → real /health check), not llm.isReady() (an internal
 // flag that lags). Green = running, amber = starting, red = stopped (e.g. a SIGKILL
@@ -220,13 +236,11 @@ function ModelStatusDot({
     : `${text} - expand for details`
   return (
     <button
+      type="button"
       onClick={onClick}
       title={label}
       aria-label={label}
-      className={cn(
-        'flex items-center gap-3 rounded-lg py-2 text-sm text-neutral-500 transition-colors hover:bg-neutral-500/10 hover:text-neutral-300',
-        open ? 'px-3' : 'justify-center px-0'
-      )}
+      className={navRowClass(open)}
     >
       <IconActivityHeartbeat className={cn('h-5 w-5 shrink-0', color)} />
       {open && <span className="flex-1 text-left text-xs">{text}</span>}
@@ -841,13 +855,7 @@ function AppContent() {
         key={item.view}
         onClick={() => goToView(item.view)}
         title={!sidebarOpen ? item.label : undefined}
-        className={cn(
-          'group/nav relative flex items-center gap-3 rounded-lg py-2 text-sm transition-colors',
-          sidebarOpen ? 'px-3' : 'justify-center px-0',
-          active
-            ? 'bg-green-500/10 text-green-600 dark:text-emerald-400'
-            : 'text-neutral-500 hover:bg-neutral-500/10 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white'
-        )}
+        className={navRowClass(sidebarOpen, active)}
       >
         {active && (
           <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-green-500" />
@@ -1042,7 +1050,9 @@ function AppContent() {
             </div>
 
             {/* Pinned bottom */}
-            <div className="flex flex-col gap-1 border-t border-neutral-200 pt-2 dark:border-neutral-800">
+            {/* neutral-800 is the surface token, theme-aware on its own - neutral-200 is the TEXT
+                token, which drew a hard black rule here in light mode. See navRowClass. */}
+            <div className="flex flex-col gap-1 border-t border-neutral-800 pt-2">
               <ModelStatusDot
                 open={sidebarOpen}
                 onClick={() => {
@@ -1062,11 +1072,7 @@ function AppContent() {
               <button
                 onClick={() => openExternal(OFF_GRID_MOBILE_URL)}
                 title={!sidebarOpen ? 'Get the mobile app' : undefined}
-                className={cn(
-                  'group/nav relative flex items-center gap-3 rounded-lg py-2 text-sm transition-colors',
-                  sidebarOpen ? 'px-3' : 'justify-center px-0',
-                  'text-neutral-500 hover:bg-neutral-500/10 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white'
-                )}
+                className={navRowClass(sidebarOpen)}
               >
                 <IconDeviceMobile className="h-5 w-5 shrink-0" />
                 {sidebarOpen && <span className="flex-1 text-left whitespace-pre">Mobile app</span>}

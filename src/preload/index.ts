@@ -2,11 +2,15 @@ import { contextBridge, ipcRenderer } from 'electron'
 import {
   CACHE_CLEANUP_CHANNEL,
   type ArtifactKindContract,
+  type ActiveChatStreamContract,
   type CacheCleanupResultContract,
   type RagChatResultContract,
   type SystemHealthContract
 } from '../shared/ipc-contracts'
-import type { ImageGenerationRequestContract } from '../shared/image-generation-contract'
+import type {
+  ImageGenerationRequestContract,
+  ImageGenerationResultContract
+} from '../shared/image-generation-contract'
 import {
   BACKUP_EXPORT_ALL_CHANNEL,
   BACKUP_IMPORT_CHANNEL,
@@ -180,7 +184,7 @@ const offGridApi = {
   onRagStream: (
     callback: (data: {
       streamId: string
-      type: 'content' | 'reasoning' | 'step' | 'tool_result'
+      type: 'content' | 'reasoning' | 'step' | 'tool_result' | 'done'
       text?: string
       step?: unknown
       call?: { name: string; result: string }
@@ -190,7 +194,7 @@ const offGridApi = {
       _: unknown,
       data: {
         streamId: string
-        type: 'content' | 'reasoning' | 'step' | 'tool_result'
+        type: 'content' | 'reasoning' | 'step' | 'tool_result' | 'done'
         text?: string
         step?: unknown
         call?: { name: string; result: string }
@@ -199,6 +203,8 @@ const offGridApi = {
     ipcRenderer.on('rag:stream', sub)
     return unsubscribe('rag:stream', sub)
   },
+  getActiveRagStreams: () =>
+    ipcRenderer.invoke('rag:active-streams') as Promise<ActiveChatStreamContract[]>,
   // Stop an in-flight streaming turn; the partial answer is kept.
   cancelRag: (streamId: string) => ipcRenderer.send('rag:cancel', streamId),
 
@@ -583,8 +589,6 @@ const offGridApi = {
   listGeneratedImages: (scope?: { conversationId?: string; projectId?: string | null }) =>
     ipcRenderer.invoke('imagegen:list', scope),
   styleThumbs: () => ipcRenderer.invoke('imagegen:style-thumbs'),
-  makeStyleThumb: (key: string, prompt: string) =>
-    ipcRenderer.invoke('imagegen:make-style-thumb', key, prompt),
   listLoras: () => ipcRenderer.invoke('imagegen:list-loras'),
   revealLoras: () => ipcRenderer.invoke('imagegen:reveal-loras'),
   downloadLora: (url: string, filename: string) =>
@@ -597,28 +601,6 @@ const offGridApi = {
   deleteGeneratedImage: (p: string) => ipcRenderer.invoke('imagegen:delete', p),
   exportGeneratedImage: (srcPath: string, suggestedName?: string) =>
     ipcRenderer.invoke('imagegen:export', srcPath, suggestedName),
-  onImageGenProgress: (
-    cb: (p: {
-      step: number
-      total: number
-      secPerStep: number
-      preview?: string
-      phase?: 'sampling' | 'decoding'
-    }) => void
-  ) => {
-    const sub = (
-      _event: unknown,
-      p: {
-        step: number
-        total: number
-        secPerStep: number
-        preview?: string
-        phase?: 'sampling' | 'decoding'
-      }
-    ): void => cb(p)
-    ipcRenderer.on('imagegen:progress', sub)
-    return unsubscribe('imagegen:progress', sub)
-  },
   onImageGenJobState: (
     cb: (state: import('../shared/image-generation-contract').ImageGenerationJobContract) => void
   ) => {
@@ -645,7 +627,7 @@ const offGridApi = {
       conversationId?: string
       projectId?: string | null
     }
-  ) => ipcRenderer.invoke('imagegen:generate', params),
+  ) => ipcRenderer.invoke('imagegen:generate', params) as Promise<ImageGenerationResultContract>,
 
   // --- Projects + RAG (knowledge bases) + project chat ---
   listProjects: () => ipcRenderer.invoke('projects:list'),

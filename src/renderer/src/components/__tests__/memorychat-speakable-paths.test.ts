@@ -1,30 +1,41 @@
-/**
- * Guard: EVERY message -> speech / transcript path goes through one helper
- * (messageToSpeakable -> shared toSpeakableText), so no path can leak raw markdown to
- * the TTS engine or the on-screen transcript. Regression: voice-mode VoiceBubble spoke
- * and displayed literal asterisks because only the Speak button was cleaned.
- * MemoryChat.tsx is coverage-excluded, so guard the contract by reading the source (§D).
- */
-import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'fs'
-import { join } from 'path'
+// @vitest-environment jsdom
 
-const src = readFileSync(join(__dirname, '../MemoryChat.tsx'), 'utf8')
+import { cleanup, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ChatBoundary, installBoundary, renderChat } from './harness/chat-boundary'
 
-describe('MemoryChat — one speakable derivation for all TTS/transcript paths', () => {
-  it('defines messageToSpeakable on top of the shared toSpeakableText', () => {
-    expect(src).toMatch(/function messageToSpeakable/)
-    expect(src).toMatch(/messageToSpeakable[\s\S]{0,240}toSpeakableText\(/)
+describe('<MemoryChat/> speakable message integration', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
+    globalThis.requestAnimationFrame = (callback: FrameRequestCallback): number => {
+      callback(0)
+      return 1
+    }
   })
 
-  it('the Speak button synthesizes messageToSpeakable(...), not raw text', () => {
-    expect(src).toMatch(/window\.api\.speak\(messageToSpeakable\(/)
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
   })
 
-  it('voice-mode transcripts use messageToSpeakable(...), never raw message.content', () => {
-    expect(src).toMatch(/const transcript = messageToSpeakable\(/)
-    expect(src).toMatch(/transcript=\{messageToSpeakable\(message\.content\)\}/)
-    // No VoiceBubble may be handed the raw, un-stripped message content.
-    expect(src).not.toMatch(/transcript=\{message\.content\}/)
+  it('shows and synthesizes a clean voice transcript instead of raw Markdown', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-b']![0]!.content =
+      '**Release ready.**\n\n[private-source]: https://secret.invalid/token'
+    boundary.api.getSettings.mockResolvedValue({ composerVoiceMode: true })
+    installBoundary(boundary)
+    const user = userEvent.setup()
+
+    renderChat({ conversationId: 'conversation-b' })
+
+    await user.click(await screen.findByRole('button', { name: 'Show transcript' }))
+    expect(screen.getByText('Release ready.')).toBeTruthy()
+    expect(screen.queryByText(/\*\*|private-source|secret\.invalid/)).toBeNull()
+
+    await user.click(screen.getByTitle('Play'))
+    await waitFor(() => expect(boundary.speechTurns).toHaveLength(1))
+    expect(boundary.api.speak).toHaveBeenCalledWith('Release ready.')
   })
 })

@@ -7,8 +7,10 @@ import type { RagChatResultContract } from '../../../../../shared/ipc-contracts'
 
 export type StreamEvent = {
   streamId: string
-  type: 'content' | 'reasoning' | 'step'
+  type: 'content' | 'reasoning' | 'step' | 'tool_result'
   text?: string
+  step?: unknown
+  call?: { name: string; result: string }
 }
 type ThinkSplitter = { push: (text: string) => void; answer: () => string }
 export type ThinkSplitterFactory = (
@@ -17,7 +19,7 @@ export type ThinkSplitterFactory = (
 type RagResult = RagChatResultContract
 type StoredMessage = {
   id: number
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
   context?: unknown
   created_at?: string
@@ -226,6 +228,20 @@ export class ChatBoundary {
   emitReasoning(callIndex: number, text: string): void {
     const call = this.calls[callIndex]!
     this.streamCallback?.({ streamId: call.streamId, type: 'reasoning', text })
+  }
+
+  emitToolStep(callIndex: number, name: string): void {
+    const call = this.calls[callIndex]!
+    this.streamCallback?.({
+      streamId: call.streamId,
+      type: 'step',
+      step: { kind: 'running_tool', name }
+    })
+  }
+
+  emitToolResult(callIndex: number, name: string, result: string): void {
+    const call = this.calls[callIndex]!
+    this.streamCallback?.({ streamId: call.streamId, type: 'tool_result', call: { name, result } })
   }
 
   emitRaw(callIndex: number, text: string): void {

@@ -6,7 +6,7 @@
  * Chromium's media boundary. All Off Grid code between those boundaries stays production.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Blob as NodeBlob } from 'node:buffer'
 import fs from 'node:fs'
@@ -374,9 +374,10 @@ describe('assistant reply speech integration (#105)', () => {
     expect(database.getRagMessages(conversationId)).toHaveLength(2)
 
     await user.click(screen.getByTitle('Voice mode on — speak and listen in voice notes'))
+    await waitFor(() => expect(database.getSetting('composerVoiceMode', true)).toBe(false))
     const composer = await screen.findByPlaceholderText(/^ask /i)
-    await user.type(composer, 'Typed chat remains usable after voice recovery')
-    expect((composer as HTMLTextAreaElement).value).toBe(
+    fireEvent.change(composer, { target: { value: 'Typed chat remains usable after voice recovery' } })
+    expect((screen.getByPlaceholderText(/^ask /i) as HTMLTextAreaElement).value).toBe(
       'Typed chat remains usable after voice recovery'
     )
   }, 20_000)

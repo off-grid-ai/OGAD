@@ -17,12 +17,36 @@ export interface ImageGenerationRequestContract {
   allowUnsafeMemoryOverride?: boolean
 }
 
+/** The canonical image result returned after optional local prompt enhancement. */
+export interface ImageGenerationOutputContract {
+  dataUrl: string
+  path: string
+  seed: number
+  model: string
+  /** The exact prompt sent to the image runtime. */
+  prompt: string
+}
+
+/** IPC adds the stable mesh identity owned by the main-process job service. */
+export interface ImageGenerationResultContract extends ImageGenerationOutputContract {
+  syncId: string
+}
+
 export interface ImageGenerationProgressContract {
   step: number
   total: number
   secPerStep: number
   preview?: string
   phase?: 'sampling' | 'decoding'
+}
+
+export type ImageGenerationJobStage = 'enhancing' | 'preparing' | 'generating' | 'decoding'
+
+/** One update shape for every operation in the image pipeline. */
+export interface ImageGenerationPipelineUpdateContract {
+  stage: ImageGenerationJobStage
+  enhancedPrompt?: string
+  progress?: ImageGenerationProgressContract | null
 }
 
 export type ImageGenerationJobPhase = 'idle' | 'running' | 'succeeded' | 'failed' | 'cancelled'
@@ -34,6 +58,8 @@ export interface ImageGenerationJobContract {
   phase: ImageGenerationJobPhase
   conversationId: string | null
   projectId: string | null
+  stage: ImageGenerationJobStage | null
+  enhancedPrompt: string
   progress: ImageGenerationProgressContract | null
   outputPath: string | null
   error: string | null

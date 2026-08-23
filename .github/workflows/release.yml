@@ -125,7 +125,7 @@ jobs:
       - name: Build llama-server (pinned deployment target)
         run: |
           command -v cmake >/dev/null || brew install cmake
-          MACOS_DEPLOYMENT_TARGET=13.0 LLAMA_REF=b9838 bash scripts/build-llama.sh
+          MACOS_DEPLOYMENT_TARGET=13.0 bash scripts/build-llama.sh
           otool -l resources/bin/llama/llama-server | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print "[ci] bundled engine minos="$2; exit}'
       # Rebuild the one-shot Whisper CLI instead of trusting the committed LFS
       # payload. The production script disables OpenMP/BLAS auto-discovery and
@@ -200,7 +200,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-      # `@offgrid/sync` is a file: dependency on the shared monorepo, so it must sit BESIDE this
+      # Shared packages are file: dependencies on the shared monorepo, so it must sit BESIDE this
       # checkout before `npm ci` runs - an install cannot resolve a path that does not exist, and the
       # typecheck inside `npm run build` then fails on every import of it. `ci.yml` has done this since
       # the sync work landed; this workflow did not, which is why no release has built since 2026-07-30.
@@ -229,7 +229,7 @@ jobs:
       - name: Put shared beside this checkout
         run: |
           if [ ! -d _shared ]; then
-            echo "::error::off-grid-ai/shared was not checked out - @offgrid/sync cannot resolve. Check CI_CROSS_REPO_TOKEN."
+            echo "::error::off-grid-ai/shared was not checked out - shared packages cannot resolve. Check CI_CROSS_REPO_TOKEN."
             exit 1
           fi
           rm -rf ../shared
@@ -243,6 +243,7 @@ jobs:
           # and needs the same explicit build - file-dep prepare alone does not emit
           # its dist/ types before the typecheck runs.
           npm --prefix ../shared/packages/use run build
+          npm --prefix ../shared/packages/models run build
       - name: Install dependencies
         run: npm ci
       # Stamp the resolved version into package.json so electron-builder picks the
@@ -441,7 +442,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      # `@offgrid/sync` is a file: dependency on the shared monorepo, so it must sit BESIDE this
+      # Shared packages are file: dependencies on the shared monorepo, so it must sit BESIDE this
       # checkout before `npm ci` runs - an install cannot resolve a path that does not exist, and the
       # typecheck inside `npm run build` then fails on every import of it. `ci.yml` has done this since
       # the sync work landed; this workflow did not, which is why no release has built since 2026-07-30.
@@ -473,7 +474,7 @@ jobs:
         shell: bash
         run: |
           if [ ! -d _shared ]; then
-            echo "::error::off-grid-ai/shared was not checked out - @offgrid/sync cannot resolve. Check CI_CROSS_REPO_TOKEN."
+            echo "::error::off-grid-ai/shared was not checked out - shared packages cannot resolve. Check CI_CROSS_REPO_TOKEN."
             exit 1
           fi
           rm -rf ../shared
@@ -487,6 +488,7 @@ jobs:
           # and needs the same explicit build - file-dep prepare alone does not emit
           # its dist/ types before the typecheck runs.
           npm --prefix ../shared/packages/use run build
+          npm --prefix ../shared/packages/models run build
       - name: Install dependencies
         run: npm ci
       - name: Fetch Windows native binaries (llama/whisper/sd/ffmpeg)

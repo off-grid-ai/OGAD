@@ -104,8 +104,8 @@ describe('downloadedForCatalog', () => {
         org: 'Hugging Face',
         tags: ['Downloaded'],
         files: [
-          { name: 'hf.gguf', url: '' },
-          { name: 'hf-mmproj.gguf', url: '' }
+          { name: 'hf.gguf', url: '', role: 'primary' },
+          { name: 'hf-mmproj.gguf', url: '', role: 'mmproj' }
         ]
       }
     ])
@@ -152,6 +152,18 @@ describe('mergeCatalog — order + all three sources', () => {
     })
     expect(out).toEqual([])
   })
+  it('projects one installed row when an exact variant represents a catalog family', () => {
+    const variant = { ...dl, id: 'model-package-v1:exact', familyId: catEntry.id }
+    const out = mergeCatalog({
+      locals: [],
+      downloaded: [variant],
+      installedDownloadedIds: [variant.id],
+      catalog: [catEntry],
+      present: presentAll
+    })
+    expect(out.map((model) => model.id)).toEqual([variant.id])
+    expect(out[0]!.files.find((file) => file.role === 'mmproj')?.name).toBe('hf-mmproj.gguf')
+  })
 })
 
 describe('catalogEntryInstalled', () => {
@@ -192,6 +204,19 @@ describe('installedIds — order + per-source predicate', () => {
       mfluxCached: () => false
     })
     expect(out).toEqual(['cat/text'])
+  })
+  it('does not list the catalog alias beside an installed exact family variant', () => {
+    const variant = { ...dl, id: 'model-package-v1:exact', familyId: catEntry.id }
+    expect(
+      installedIds({
+        locals: [],
+        installedDownloadedIds: [variant.id],
+        downloaded: [variant],
+        catalog: [catEntry],
+        present: presentAll,
+        mfluxCached: () => false
+      })
+    ).toEqual([variant.id])
   })
   it('includes an mflux id only when cached', () => {
     const both = installedIds({

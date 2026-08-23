@@ -152,11 +152,13 @@ The `pro/` directory is a **git submodule** pointing at the private `desktop-pro
 
 Design to abstractions, not concrete types. When implementations are interchangeable (model backends, TTS/STT engines, image/diffusion runtimes, connectors), the rest of the app depends on one service/interface — never branch on a concrete type in UI/stores (`if (engine === 'kokoro')`, `instanceof X`). Push the decision behind the abstraction; adding an implementation should need zero changes to callers. Normalize capability gaps inside the service, not the UI.
 
-**Before every code edit, stop and ask three questions — out loud, in the response:**
+**Before every code edit, stop and ask these five questions — out loud, in the response:**
 
-1. **Is there enough here to abstract?** Two or more concrete cases handled by the same caller (text vs vision vs image models, Slack vs Mail surfaces, kokoro vs piper TTS) means there's a seam. One case, used once, is not — don't abstract speculatively (YAGNI).
-2. **Can we apply SOLID here?** Mainly: does one thing own one responsibility (SRP), and do callers depend on an interface rather than the concretes (DSP)? A `kind === 'x'` / `instanceof` / per-type `switch` in a caller — _especially in the renderer_ — is the tell that the decision belongs behind a service.
-3. **Are we actually using it?** A mapping or rule must be defined ONCE and reused. If the same kind→modality map, the same routing `if`, or the same capability check appears in two layers (e.g. main process AND renderer), that's duplication, not abstraction — collapse it to a single source of truth and have both sides call it.
+1. **SSOT — who owns this fact?** Name the one authoritative owner for the state, rule, identity, or mapping being changed. Look for any second layer answering the same question; two authorities are a bug even when they currently agree.
+2. **Abstraction / YAGNI — is there enough here to abstract?** Two or more concrete cases handled by the same caller (text vs vision vs image models, Slack vs Mail surfaces, kokoro vs piper TTS) means there's a seam. One case, used once, is not — don't abstract speculatively.
+3. **SRP — does each owner have one reason to change?** Keep policy, orchestration, persistence, transport, and presentation in their owning layers. Do not make a writer schedule work, a renderer derive business truth, or an adapter own product policy.
+4. **SOLID — do callers depend on the seam?** Apply dependency inversion and substitutability: callers depend on an interface, implementations remain interchangeable, interfaces stay focused, and adding an implementation extends the system without type switches in callers. A `kind === 'x'` / `instanceof` / per-type `switch` — _especially in the renderer_ — means the decision belongs behind the abstraction.
+5. **DRY — is the knowledge defined once and reused?** A mapping, ordering, capability rule, or routing decision must have one definition. If the same knowledge appears in two layers, collapse it to the SSOT and make both consumers call it; do not keep copies aligned by convention.
 
 If the answer to 1 is "no", say so and write the simple version. If "yes", build the seam before piling on the second concrete branch — retrofitting after drift is the expensive path.
 

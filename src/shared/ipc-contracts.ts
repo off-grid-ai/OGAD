@@ -49,6 +49,27 @@ export interface RagChatResultContract {
   cutoff?: ResponseCutoffContract
 }
 
+/** One reply still owned by the main process, used to reattach chat UI after navigation. */
+export interface ActiveChatStreamContract {
+  streamId: string
+  conversationId: string
+  messageId?: string
+  content: string
+  reasoning: string
+  phase:
+    | 'waiting'
+    | 'thinking'
+    | 'answering'
+    | 'loading_model'
+    | 'loading_image_model'
+    | 'generating_image'
+  tools?: Array<{
+    name: string
+    status: 'running' | 'completed'
+    result?: string
+  }>
+}
+
 export interface PermissionStatusContract {
   accessibility: boolean
   screenRecording: boolean

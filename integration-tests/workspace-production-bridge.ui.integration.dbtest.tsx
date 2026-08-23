@@ -10,7 +10,7 @@ import path from 'node:path'
 // The DB Vitest config uses the classic JSX transform, which reads this binding at runtime.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import React from 'react'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -211,7 +211,7 @@ describe('production workspace bridge', () => {
     renderChat()
 
     const composer = await screen.findByPlaceholderText(/^ask /i)
-    await user.type(composer, 'Prove the complete local chat path')
+    fireEvent.change(composer, { target: { value: 'Prove the complete local chat path' } })
     await user.click(screen.getByRole('button', { name: /^send$/i }))
 
     expect(await inTranscript('The production bridge persisted this answer.')).toBeTruthy()

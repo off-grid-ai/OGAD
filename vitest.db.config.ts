@@ -77,11 +77,14 @@ export default defineConfig({
         // report owns each file: the unit report owns these.
         'src/main/browser/**',
         'src/main/vision/**',
-        // Renderer .tsx is rendered-behavior surface owned by the e2e tour + targeted
-        // render tests, never by unit coverage (see vitest.config.ts) - the same rule
-        // here, or a jsdom journey that merely MOUNTS a component makes this report own
-        // it and the merged number gates a surface this suite never set out to cover.
+        // Renderer surface (.ts + .tsx) is rendered-behaviour owned by the e2e tour +
+        // targeted render tests, never by this Node SQLite journey. V8 reports transitive
+        // imports even when they do not match `include`, so exclude the whole renderer +
+        // pro renderer surface explicitly - a jsdom journey that merely MOUNTS a component
+        // would otherwise make this report own it and gate a surface it never set out to cover.
+        'src/renderer/src/**/*.ts',
         'src/renderer/src/**/*.tsx',
+        'pro/renderer/**/*.ts',
         'pro/renderer/**/*.tsx'
       ],
       reporter: ['text-summary', 'json-summary', 'json'],

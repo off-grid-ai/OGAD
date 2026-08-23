@@ -1256,11 +1256,19 @@ export function addRagMessage(
   conversationId: string,
   role: 'user' | 'assistant',
   content: string,
-  context?: unknown
+  context?: unknown,
+  /**
+   * The identity this message ALREADY has, when something named it before it was stored.
+   *
+   * A streamed reply is named at its first token, so the frames a paired device renders live carry
+   * the same id as the record that follows. Minting a fresh one here instead is what left the peer
+   * unable to match the two, so it drew the answer twice until its preview timed out.
+   */
+  knownUuid?: string
 ): AddedRagMessage {
   const db = getDB()
   const contextJson = context ? JSON.stringify(context) : null
-  const uuid = crypto.randomUUID()
+  const uuid = knownUuid ?? crypto.randomUUID()
 
   // uuid is the cross-device identity for sync (the autoincrement id is device-local).
   const info = db

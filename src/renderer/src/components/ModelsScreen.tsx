@@ -221,12 +221,32 @@ function withoutProgressEntry(
   return next
 }
 
-/** Megabytes at human scale. "6296.4 MB" is a number you have to convert before it means anything;
- *  "6.3 GB" is the number on the card above it. */
+/**
+ * A byte count at human scale, in decimal GB - the ONE size rule on this screen.
+ *
+ * It was two. The card's meta line divided bytes by 1e9 and the progress line divided megabytes by
+ * 1024, so the same file was printed twice on one card in two different units under one label:
+ * "25.4GB" above "23.7 GB". Decimal is the correct half - sizeBytes comes from Hugging Face, and
+ * that is the number the publisher quotes - so the progress line was the one that lied.
+ *
+ * Below a gigabyte, MB reads better than "0.4 GB".
+ */
+function formatSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return ''
+  return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`
+}
+
+/**
+ * The progress feed counts in MEBIbytes (1024 * 1024), which is why dividing it by 1024 produced
+ * 23.7 for the same 25.4 GB file the meta line described. Convert to bytes on the way in, then the
+ * one rule above decides how it reads.
+ */
+const BYTES_PER_MIB = 1024 * 1024
+
 function formatTransferred(megabytes: string): string {
-  const mb = Number(megabytes)
-  if (!Number.isFinite(mb)) return `${megabytes} MB`
-  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`
+  const mib = Number(megabytes)
+  if (!Number.isFinite(mib)) return `${megabytes} MB`
+  return formatSize(mib * BYTES_PER_MIB)
 }
 
 /** What part of the model is moving right now, as a quiet tail on the progress line. Empty for the
@@ -382,6 +402,10 @@ export function ModelsScreen(): React.JSX.Element {
           }
         })
         if (d.status === 'completed') {
+          api.getModelCatalog?.().then((c: { kinds: string[]; models: ModelEntry[] }) => {
+            setKinds(c.kinds)
+            setModels(c.models)
+          })
           api.getInstalledModels?.().then(setInstalled)
           refreshVision()
           // Adding a projector for the active model turns its vision on in MAIN
@@ -563,7 +587,7 @@ export function ModelsScreen(): React.JSX.Element {
     const vs = visionSt[m.id]
     const projectorMissing = isInstalled && !!vs?.supportsVision && !vs.projectorInstalled
     const bytes = totalBytes(m)
-    const size = bytes > 0 ? `${(bytes / 1e9).toFixed(1)}GB` : null
+    const size = formatSize(bytes) || null
     const meta = [m.org, m.params ? `${m.params}B` : null, size, fmtReleaseDate(m.releaseDate)]
       .filter(Boolean)
       .join(' · ')
@@ -797,7 +821,6 @@ export function ModelsScreen(): React.JSX.Element {
             />
           </div>
         )}
-
       </div>
     )
   }
@@ -1074,7 +1097,7 @@ export function ModelsScreen(): React.JSX.Element {
             ['Source', m.org || (isLocal ? 'Imported' : '—')],
             ['Parameters', m.params ? `${m.params}B` : null],
             ['Quantization', m.quant || null],
-            ['Download', bytes > 0 ? `${(bytes / 1e9).toFixed(1)} GB` : null],
+            ['Download', formatSize(bytes) || null],
             ['Released', fmtReleaseDate(m.releaseDate) || null],
             ['Min RAM', m.minRamGb ? `${m.minRamGb} GB` : null]
           ]

@@ -80,6 +80,11 @@ fi
 set -euo pipefail
 if [ "${'$'}1" = "-l" ]; then
   printf 'Load command 1\n      cmd LC_BUILD_VERSION\n    minos ${minos}\n'
+  # The staged binary carries the @loader_path rpath install_name_tool adds, because the script
+  # GATES on it: without one the dylibs sitting right beside whisper-cli are unreachable to dyld,
+  # which is the "nothing happened" voice-note bug. A fake that never reports a load command the
+  # script checks makes the script fail for a reason the test is not about.
+  printf 'Load command 2\n          cmd LC_RPATH\n      cmdsize 32\n         path @loader_path (offset 12)\n'
   exit 0
 fi
 file="${'$'}2"
@@ -191,13 +196,19 @@ describe('pinned Whisper CLI build and staging', () => {
   it('keeps release and local builds on the same pinned native-engine scripts', () => {
     const release = fs.readFileSync(path.join(REPO_ROOT, '.github/workflows/release.yml'), 'utf8')
     const local = fs.readFileSync(path.join(REPO_ROOT, 'scripts/build-mac-local.sh'), 'utf8')
-    const llamaBuild = 'MACOS_DEPLOYMENT_TARGET=13.0 LLAMA_REF=b9838 bash scripts/build-llama.sh'
+    // No LLAMA_REF here on purpose. The version has one owner - package.json `offgrid.llamaRef` - and a caller that
+    // passes its own would silently build a different engine than the Windows fetch pulls, which is the
+    // drift this test exists to catch.
+    const llamaBuild = 'MACOS_DEPLOYMENT_TARGET=13.0 bash scripts/build-llama.sh'
     const whisperBuild =
       'MACOS_DEPLOYMENT_TARGET=13.0 WHISPER_REF=v1.7.4 bash scripts/build-whisper-cli.sh'
 
     for (const source of [release, local]) {
       expect(source).toContain(llamaBuild)
       expect(source).toContain(whisperBuild)
+    }
+    for (const source of [release, local]) {
+      expect(source).not.toMatch(/LLAMA_REF=/)
     }
     expect(local).toContain('bash scripts/fetch-parakeet.sh')
     expect(local).toContain('node scripts/probe-packaged-helpers.mjs "$app_dir"')

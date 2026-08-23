@@ -14,7 +14,7 @@
 # Most runtimes are resolved DYNAMICALLY from each project's latest GitHub
 # release so the script does not go stale. llama.cpp is the EXCEPTION: it is
 # pinned to the same ref the macOS engine is built from (scripts/build-llama.sh,
-# LLAMA_REF=b9838) so grammar / native tool-call handling is byte-for-byte
+# package.json offgrid.llamaRef) so grammar / native tool-call handling is byte-for-byte
 # identical across platforms. 'latest' floats, and upstream builds have shipped
 # that reject the tool-call GBNF the app generates from MCP tool schemas.
 # Set OFFGRID_GH_TOKEN (or GITHUB_TOKEN) to avoid the unauthenticated API rate
@@ -41,7 +41,7 @@ if ($token) { $ghHeaders['Authorization'] = "Bearer $token" }
 
 # Find the download URL of a release asset whose name matches $pattern. With no
 # $tag it uses the project's LATEST release; with $tag it pins to that exact
-# release (e.g. llama.cpp b9838, to match the macOS source build).
+# release (package.json offgrid.llamaRef, to match the macOS source build).
 function Get-AssetUrl($repo, $pattern, $tag) {
   $uri = if ($tag) { "https://api.github.com/repos/$repo/releases/tags/$tag" }
          else      { "https://api.github.com/repos/$repo/releases/latest" }
@@ -86,7 +86,10 @@ function Copy-Runtime($srcDir, $destName) {
 #   bin/llama-cpu  <- CPU-only build, the app's FALLBACK (llm.ts) for the rare
 #                     box with no Vulkan loader at all, where the Vulkan .exe
 #                     can't even load.
-$LlamaRef = if ($env:LLAMA_REF) { $env:LLAMA_REF } else { 'b9838' }
+# The version has ONE owner: package.json's offgrid.llamaRef, shared with build-llama.sh. Hardcoding it in
+# both is how the macOS build and the Windows binaries drift apart within a single release.
+$PackageJson = Join-Path (Split-Path $PSScriptRoot -Parent) 'package.json'
+$LlamaRef = if ($env:LLAMA_REF) { $env:LLAMA_REF } else { (Get-Content $PackageJson -Raw | ConvertFrom-Json).offgrid.llamaRef }
 Write-Host "== llama.cpp (pinned $LlamaRef): vulkan primary + cpu fallback =="
 try {
   $x = Expand-Asset 'ggml-org/llama.cpp' 'bin-win-vulkan-x64\.zip$' $LlamaRef

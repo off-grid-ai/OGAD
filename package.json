@@ -1,7 +1,10 @@
 {
   "name": "off-grid-ai",
   "productName": "Off Grid AI Desktop",
-  "version": "0.0.42",
+  "version": "0.0.43",
+  "offgrid": {
+    "llamaRef": "b10369"
+  },
   "description": "Off Grid AI — a private, local-first AI that runs open models (text, vision, image, voice) entirely on your device. No cloud, no accounts.",
   "license": "AGPL-3.0-only",
   "main": "./out/main/index.js",
@@ -23,13 +26,13 @@
     "demo": "npm run build && npm run demo:run",
     "demo:run": "mkdir -p \"$PWD/.demo-profile\" && ln -sfn \"$HOME/Library/Application Support/Off Grid AI Desktop/models\" \"$PWD/.demo-profile/models\" && OFFGRID_PRO=1 OFFGRID_SEED=force OFFGRID_SEED_PRO=force OFFGRID_USER_DATA=\"$PWD/.demo-profile\" electron-vite preview",
     "demo:fresh": "rm -rf \"$PWD/.demo-profile\" && npm run demo",
-    "dev": "electron-vite dev",
-    "gateway": "OFFGRID_SERVER_ONLY=1 electron-vite dev",
-    "build": "node scripts/stage-pro-native.mjs && npm run typecheck && electron-vite build",
+    "dev": "node scripts/stage-native.mjs && electron-vite dev",
+    "gateway": "node scripts/stage-native.mjs && OFFGRID_SERVER_ONLY=1 electron-vite dev",
+    "build": "node scripts/stage-native.mjs && npm run typecheck && electron-vite build",
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
-    "build:mac": "electron-vite build && electron-builder --mac",
+    "build:mac": "node scripts/stage-native.mjs && electron-vite build && electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux",
     "test:e2e": "electron-vite build && OFFGRID_E2E_HEADLESS=1 playwright test",
     "test:sync:physical": "node scripts/physical-sync/iosMacKnowledgeSync.mjs",
@@ -42,6 +45,10 @@
     "knip": "knip --no-gitignore",
     "coverage:all": "bash scripts/coverage-all.sh"
   },
+  "//overrides": "ONE sharp for the whole tree. sharp ships libvips as `libvips-42.dll`, and Windows resolves a DLL by NAME across the process: whichever copy loads first wins for every later binding. embeddings.ts loads @xenova/transformers (sharp 0.32 / libvips 8.14.5) at startup, so our own sharp 0.35 (libvips 8.18.3) then asked that older DLL for symbols it does not export and died with ERR_DLOPEN_FAILED. Every file attachment failed on Windows and only there — macOS binds by path, so three copies coexist. Proven by load order: sharp alone loads; @xenova-then-sharp does not. Deduping to one version is the fix, not load-order juggling.",
+  "overrides": {
+    "sharp": "^0.35.2"
+  },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
@@ -51,7 +58,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@offgrid/clipboard": "file:./packages/clipboard",
     "@offgrid/design": "file:./packages/design",
-    "@offgrid/models": "file:./packages/models",
+    "@offgrid/models": "file:../shared/packages/models",
     "@offgrid/rag": "file:./packages/rag",
     "@offgrid/sync": "file:../shared/packages/sync",
     "@offgrid/use": "file:../shared/packages/use",

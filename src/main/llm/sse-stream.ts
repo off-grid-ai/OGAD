@@ -8,6 +8,8 @@
 //      chunks (which may straddle a <think>...</think> tag across chunk boundaries)
 //      and emits {text, kind} events, tracking the reasoning/answer channel.
 
+import { maxPartialTagSuffix, REASONING_DELIMITERS, TOOL_CALL_OPENERS } from '@offgrid/sync'
+
 type DeltaKind = 'content' | 'reasoning'
 
 export interface StreamEvent {
@@ -121,25 +123,28 @@ export function createToolMarkupFilter(emit: (text: string) => void): {
   push: (text: string) => void
   end: () => void
 } {
-  const OPENER = /<\|?tool_call\|?>?|<invoke\b/i
-  const OPENER_PREFIXES = ['<tool_call', '<|tool_call', '<invoke']
+  const suppressOpeners = [...TOOL_CALL_OPENERS, '<|tool_call|>', '<invoke'].map((value) =>
+    value.toLowerCase()
+  )
+  const thinkDelimiter = REASONING_DELIMITERS.find((delimiter) => delimiter.open === '<think>')
+  const dropMarkers = thinkDelimiter
+    ? [thinkDelimiter.open.toLowerCase(), thinkDelimiter.close.toLowerCase()]
+    : ['<think>', '</think>']
+  const partialMarkers = [...suppressOpeners, ...dropMarkers]
   let suppressing = false
   let pending = ''
 
-  // The earliest index of a '<' from which the tail is a PARTIAL prefix of a known
-  // opener (so it might complete into one on the next chunk). -1 when no such tail
-  // exists — i.e. normal content that should stream now, at full granularity.
-  const partialOpenerAt = (s: string): number => {
-    for (let i = 0; i < s.length; i++) {
-      if (s[i] !== '<') {
-        continue
-      }
-      const tail = s.slice(i).toLowerCase()
-      if (OPENER_PREFIXES.some((p) => p.startsWith(tail))) {
-        return i
-      }
+  const earliest = (
+    text: string,
+    tokens: readonly string[]
+  ): { index: number; token: string } | null => {
+    const lower = text.toLowerCase()
+    let found: { index: number; token: string } | null = null
+    for (const token of tokens) {
+      const index = lower.indexOf(token)
+      if (index >= 0 && (!found || index < found.index)) found = { index, token }
     }
-    return -1
+    return found
   }
 
   const push = (text: string): void => {
@@ -147,28 +152,26 @@ export function createToolMarkupFilter(emit: (text: string) => void): {
       return
     }
     pending += text
-    const m = OPENER.exec(pending)
-    if (m) {
-      if (m.index > 0) {
-        emit(pending.slice(0, m.index))
+    while (pending) {
+      const opener = earliest(pending, suppressOpeners)
+      const marker = earliest(pending, dropMarkers)
+      if (opener && (!marker || opener.index <= marker.index)) {
+        if (opener.index > 0) emit(pending.slice(0, opener.index))
+        suppressing = true
+        pending = ''
+        return
       }
-      suppressing = true
-      pending = ''
+      if (marker) {
+        if (marker.index > 0) emit(pending.slice(0, marker.index))
+        pending = pending.slice(marker.index + marker.token.length)
+        continue
+      }
+      // Hold only a tail that can become a shared protocol marker in the next chunk.
+      const holdLength = maxPartialTagSuffix(pending.toLowerCase(), partialMarkers)
+      const emitLength = pending.length - holdLength
+      if (emitLength > 0) emit(pending.slice(0, emitLength))
+      pending = pending.slice(emitLength)
       return
-    }
-    // No full opener. Hold back ONLY a trailing tail that could still become one;
-    // everything before it streams immediately (preserves per-token granularity).
-    const hold = partialOpenerAt(pending)
-    if (hold === -1) {
-      if (pending) {
-        emit(pending)
-      }
-      pending = ''
-    } else {
-      if (hold > 0) {
-        emit(pending.slice(0, hold))
-      }
-      pending = pending.slice(hold)
     }
   }
   const end = (): void => {

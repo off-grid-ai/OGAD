@@ -236,7 +236,12 @@ describe.sequential('release packaging integration', () => {
         'src/renderer/src/bootstrap/loadProFeaturesRenderer.ts',
         'src/renderer/src/components/pro/UpgradeScreen.tsx',
         'pro/main/index.ts',
-        'pro/renderer/index.tsx'
+        // The renderer entry is named by what it DELIVERS, not by the file that forwards it.
+        // `pro/renderer/index.tsx` is nothing but re-exports, so Rollup resolves them straight to
+        // their targets and the shell never appears in a sourcemap - an artifact that carries the
+        // entire pro renderer read as one that carried none of it.
+        'pro/renderer/activate-renderer.ts',
+        'pro/renderer/screens/ClipboardPopup.tsx'
       ])
     )
     expect(pro).toContain('[pro] main activated')

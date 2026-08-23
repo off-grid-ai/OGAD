@@ -258,7 +258,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     expect(r.answer).toBe('Here is your image.')
   })
 
-  it('last generate_image call wins when the model requests more than one', async () => {
+  it('keeps every generate_image request in tool-call order', async () => {
     fake.enqueue(
       {
         toolCalls: [
@@ -269,7 +269,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       { content: 'done' }
     )
     const r = await toolChat('two pictures', [], { imageAvailable: true })
-    expect(r.imageRequest).toEqual({ prompt: 'second' })
+    expect(r.imageRequests).toEqual([{ prompt: 'first' }, { prompt: 'second' }])
   })
 
   it('does not record an imageRequest when the prompt is empty', async () => {

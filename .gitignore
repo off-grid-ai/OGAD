@@ -31,14 +31,17 @@ resources/bin/mflux/
 resources/bin/parakeet/
 # Pro MultipeerConnectivity helper - built from the private Pro repo and staged for packaging.
 resources/bin/proximity-helper
+resources/bin/keychain-bootstrap.node
 # Gateway probe scratch output
 .gateway-probe/
 # TS build cache
 *.tsbuildinfo
 
-# Private pro features — separate repo, added as a git submodule once the remote
-# exists. Ignored for now so the open repo never tracks pro source.
-/pro/
+# Private pro features — a separate repo, tracked as a git submodule now that the remote exists.
+# The submodule records only a URL and a commit, so this open repo still never carries pro source -
+# while pinning exactly which pro revision belongs with this branch. NOT ignored any more: while it
+# was, six licensing tests under pro/ stayed tracked here AND in desktop-pro, so an edit showed up in
+# both repos and the two could diverge with no signal.
 
 # Vendored @offgrid packages ship their built dist
 !packages/*/dist/

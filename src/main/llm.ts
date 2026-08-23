@@ -27,7 +27,9 @@ import {
   buildLaunchArgs,
   type PresetField
 } from './llm/settings-math'
-import { buildMessages, imageMime, thinkingPayload, type DecodedImage } from './llm/chat-payload'
+import { buildMessages, thinkingPayload } from './llm/chat-payload'
+import { readImages } from './llm/read-images'
+import { detectThinkingDialect, type ThinkingDialect } from './llm/thinking-dialect'
 import { isValidGgufFile } from './models/gguf'
 import { isGrounderModel } from '@offgrid/models'
 import { readGgufContextLength } from './models/gguf-metadata'
@@ -375,17 +377,6 @@ export class LLMService {
   /** Read each image off disk and decode to base64 + mime (the one impure step of
    *  payload building). A file that can't be read is logged and skipped so a broken
    *  path never fails the whole request. */
-  private decodeImages(images: string[]): DecodedImage[] {
-    const out: DecodedImage[] = []
-    for (const imgPath of images) {
-      try {
-        out.push({ base64: fs.readFileSync(imgPath).toString('base64'), mime: imageMime(imgPath) })
-      } catch (readErr) {
-        console.error(`[LLMService] Failed to read image ${imgPath}:`, readErr)
-      }
-    }
-    return out
-  }
 
   /** Update inference settings; respawns the server if any launch-time arg changed
    *  (context, KV-cache type, flash-attn, GPU layers, threads, batch). */
@@ -916,6 +907,27 @@ export class LLMService {
   // a 200 server with an empty /v1/models. So we additionally require /v1/models
   // to list a model before declaring ready, and we bail immediately if the server
   // process exits (a model that fails to load takes the process down with it).
+  /** Which thinking controls the LOADED model understands. Resolved once per load from the
+   *  template llama-server publishes at /props; 'enable-thinking' until then, which is the
+   *  behaviour every model got before this was resolved at all. */
+  private thinkingDialect: ThinkingDialect = 'enable-thinking'
+
+  /** Read the loaded model's chat template and remember which thinking dialect it speaks.
+   *  Best-effort: a server that will not answer /props keeps the safe default rather than
+   *  retaining the dialect of the model that was loaded before it. */
+  private async resolveThinkingDialect(): Promise<void> {
+    this.thinkingDialect = 'enable-thinking'
+    try {
+      const res = await fetch(`http://127.0.0.1:${this.port}/props`)
+      if (!res.ok) return
+      const body = (await res.json()) as { chat_template?: string }
+      this.thinkingDialect = detectThinkingDialect(body.chat_template)
+      console.log(`[LLMService] thinking dialect: ${this.thinkingDialect}`)
+    } catch (e) {
+      console.warn('[LLMService] could not read /props for the thinking dialect:', e)
+    }
+  }
+
   private async waitForReady(timeout = 60000): Promise<void> {
     const start = Date.now()
     let healthOk = false
@@ -931,7 +943,10 @@ export class LLMService {
           const res = await fetch(`http://127.0.0.1:${this.port}/v1/models`)
           if (res.ok) {
             const body = await res.json().catch(() => null)
-            if (Array.isArray(body?.data) && body.data.length > 0) return
+            if (Array.isArray(body?.data) && body.data.length > 0) {
+              await this.resolveThinkingDialect()
+              return
+            }
           }
         }
       } catch {
@@ -969,7 +984,7 @@ export class LLMService {
 
       return await this.chatMutex.runExclusive(async () => {
         try {
-          const messages = buildMessages(message, this.decodeImages(images), this.systemPrompt)
+          const messages = buildMessages(message, readImages(images), this.systemPrompt)
           const payload: Record<string, unknown> = {
             messages: messages,
             max_tokens: maxTokensForWire(resolveMaxTokens(maxTokens, this.maxTokens)),
@@ -981,7 +996,9 @@ export class LLMService {
           if (opts.responseFormat) payload.response_format = opts.responseFormat
           // Turn off the model's reasoning channel for fast, direct output (its
           // chain-of-thought otherwise eats the token budget and leaves content empty).
-          if (opts.disableThinking) payload.chat_template_kwargs = { enable_thinking: false }
+          if (opts.disableThinking) {
+            Object.assign(payload, thinkingPayload(false, this.thinkingDialect))
+          }
           const body = JSON.stringify(payload)
 
           console.log(
@@ -1033,7 +1050,7 @@ export class LLMService {
       this.assertImageInputSupported(images)
       await this.ensureReady()
 
-      const messages = buildMessages(message, this.decodeImages(images), this.systemPrompt)
+      const messages = buildMessages(message, readImages(images), this.systemPrompt)
       const resolvedMaxTokens = resolveMaxTokens(maxTokens, this.maxTokens)
       const payload: Record<string, unknown> = {
         messages,
@@ -1044,7 +1061,7 @@ export class LLMService {
         // Thinking control: when on, ask the template to emit reasoning and have
         // llama.cpp split it into reasoning_content (deepseek-style); when off,
         // suppress it so the token budget goes to the answer.
-        ...thinkingPayload(!!opts.thinking)
+        ...thinkingPayload(!!opts.thinking, this.thinkingDialect)
       }
       const body = JSON.stringify(payload)
 
@@ -1088,7 +1105,7 @@ export class LLMService {
         temperature: opts.temperature ?? this.temperature,
         ...this.samplingPayload(),
         stream: true,
-        ...thinkingPayload(!!opts.thinking)
+        ...thinkingPayload(!!opts.thinking, this.thinkingDialect)
       }
       if (opts.tools && opts.tools.length) {
         payload.tools = opts.tools

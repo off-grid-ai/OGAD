@@ -34,6 +34,20 @@ describe('progress reducer', () => {
     expect(state.resolvedSeed).toBe(9) // seed unchanged, no "seed N"
   })
 
+  it('parses the terminal progress-bar form when it matches the requested steps', () => {
+    const { event } = reduceProgress(
+      initialProgressState(-1),
+      '\r[========>             ] 12/42',
+      42
+    )
+    expect(event).toEqual({ step: 12, total: 42, secPerStep: 0, phase: 'sampling' })
+  })
+
+  it('ignores unrelated counters that do not match the requested steps', () => {
+    const { event } = reduceProgress(initialProgressState(-1), 'loading tensors 12/80', 42)
+    expect(event).toBeUndefined()
+  })
+
   it('marks samplingDone once a pass reaches its total, then flips to decoding on a step drop', () => {
     let st = initialProgressState(-1)
     // full sampling pass up to the total

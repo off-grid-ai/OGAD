@@ -7,7 +7,7 @@
  * the stored name survives navigation and is rendered in both sidebar and tab.
  */
 import React from 'react'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import fs from 'fs'
 import os from 'os'
@@ -53,7 +53,10 @@ function renderChat(): void {
 }
 
 async function beginRename(user: ReturnType<typeof userEvent.setup>, title: string): Promise<void> {
-  await user.click(await screen.findByRole('button', { name: `Conversation actions for ${title}` }))
+  fireEvent.pointerDown(
+    await screen.findByRole('button', { name: `Conversation actions for ${title}` }),
+    { button: 0, ctrlKey: false }
+  )
   await user.click(screen.getByRole('menuitem', { name: 'Rename' }))
 }
 

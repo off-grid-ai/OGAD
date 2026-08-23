@@ -59,16 +59,31 @@ describe('mimeForExt — single source of truth for ext -> MIME', () => {
   })
 })
 
-// tools.ts is a coverage-excluded I/O shell (agentic loop). Guard its webp fix by
-// reading the source (§D contract guard): it must route attachments through the
-// shared map, never re-inline the old `endsWith('.png') ? png : jpeg` guess that
-// mislabelled webp. Fails-before (the inline was present) / passes-after.
-describe('tools.ts attachment MIME — no re-inlined png/jpeg guess', () => {
-  const src = readFileSync(join(__dirname, '../tools.ts'), 'utf8')
-  it('imports the shared ext->MIME resolver', () => {
-    expect(src).toContain("import { mimeFromExt } from './model-server/data-url'")
+// tools.ts is a coverage-excluded I/O shell (agentic loop). Guard the webp fix by reading the
+// source (§D contract guard): an attachment's MIME must come from the shared map, never from a
+// re-inlined `endsWith('.png') ? png : jpeg` guess that mislabelled webp.
+//
+// The guard moved with the code. tools.ts no longer resolves MIME at all - reading image bytes is
+// owned by llm/read-images.ts, which BOTH the agentic path and the plain chat path now call, so
+// there is one decoder instead of two that could disagree. So the assertion is now "tools delegates
+// and does not decode", plus "the one decoder uses the shared resolver".
+describe('attachment MIME — one decoder, no re-inlined png/jpeg guess', () => {
+  const toolsSrc = readFileSync(join(__dirname, '../tools.ts'), 'utf8')
+  const readImagesSrc = readFileSync(join(__dirname, '../llm/read-images.ts'), 'utf8')
+
+  it('tools.ts delegates image decoding instead of doing its own', () => {
+    expect(toolsSrc).toContain("import { readImages } from './llm/read-images'")
+    // No second decoder: the inline readFileSync/base64 loop it used to carry is gone.
+    expect(toolsSrc).not.toMatch(/readFileSync\([^)]*\)\.toString\('base64'\)/)
   })
-  it('does not inline the .png-or-jpeg ternary that mislabelled webp', () => {
-    expect(src).not.toMatch(/endsWith\('\.png'\)\s*\?\s*'image\/png'\s*:\s*'image\/jpeg'/)
+
+  it('the one decoder resolves MIME through the shared map', () => {
+    expect(readImagesSrc).toContain('imageMime')
+  })
+
+  it('neither inlines the .png-or-jpeg ternary that mislabelled webp', () => {
+    const ternary = /endsWith\('\.png'\)\s*\?\s*'image\/png'\s*:\s*'image\/jpeg'/
+    expect(toolsSrc).not.toMatch(ternary)
+    expect(readImagesSrc).not.toMatch(ternary)
   })
 })

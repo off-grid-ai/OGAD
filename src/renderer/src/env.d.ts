@@ -202,11 +202,15 @@ interface RendererAPIOverrides {
   onRagStream: (
     callback: (data: {
       streamId: string
-      type: 'content' | 'reasoning' | 'step'
+      type: 'content' | 'reasoning' | 'step' | 'tool_result' | 'done'
       text?: string
       step?: unknown
+      call?: { name: string; result: string }
     }) => void
   ) => () => void
+  getActiveRagStreams?: () => Promise<
+    import('../../shared/ipc-contracts').ActiveChatStreamContract[]
+  >
   cancelRag: (streamId: string) => void
 
   // RAG Conversations

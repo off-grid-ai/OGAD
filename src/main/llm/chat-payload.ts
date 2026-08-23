@@ -8,6 +8,11 @@
 
 import { mimeForExt } from '../mime'
 import { toWellFormedText } from './well-formed-text'
+import {
+  thinkingFragmentFor,
+  type ThinkingDialect,
+  type ThinkingFragment
+} from './thinking-dialect'
 
 export type ContentPart =
   | { type: 'text'; text: string }
@@ -57,17 +62,16 @@ export function buildMessages(
 }
 
 /** The chat_template_kwargs / reasoning_format fragment for the thinking control.
- *  Streaming: thinking on -> ask the template to emit reasoning AND set deepseek
- *  reasoning_format (so llama.cpp splits it into reasoning_content); off -> suppress.
- *  Returns the exact object to spread into the payload. */
-export function thinkingPayload(thinking: boolean): {
-  chat_template_kwargs: { enable_thinking: boolean }
-  reasoning_format?: string
-} {
-  if (thinking) {
-    return { chat_template_kwargs: { enable_thinking: true }, reasoning_format: 'deepseek' }
-  }
-  return { chat_template_kwargs: { enable_thinking: false } }
+ *
+ *  WHICH controls to send depends on the loaded model's template, so the rule lives in
+ *  thinking-dialect.ts and this delegates. The dialect defaults to 'enable-thinking' - the
+ *  long-standing Qwen/Gemma behaviour - so a caller that has not resolved a template behaves
+ *  exactly as before. */
+export function thinkingPayload(
+  thinking: boolean,
+  dialect: ThinkingDialect = 'enable-thinking'
+): ThinkingFragment {
+  return thinkingFragmentFor(dialect, thinking)
 }
 
 /** What a client asked for, or undefined when it said nothing about thinking. */

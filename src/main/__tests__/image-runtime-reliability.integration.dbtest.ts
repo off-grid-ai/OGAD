@@ -11,7 +11,6 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import type { AddressInfo } from 'node:net'
-import { LLAMA_SERVER_PORT } from '../../shared/ports'
 import { createOfflineFetchBoundary, type OfflineFetchBoundary } from './harness/offline-fetch'
 
 const hostFetch = globalThis.fetch.bind(globalThis)
@@ -258,10 +257,11 @@ beforeAll(async () => {
 
 afterAll(async () => {
   const ownedProcessIds = startedProcessIds()
+  const runtimePort = llm.getPort()
   stopModelServer()
   llm.stop()
   await waitFor(
-    async () => (await portIsAvailable(gatewayPort)) && (await portIsAvailable(LLAMA_SERVER_PORT)),
+    async () => (await portIsAvailable(gatewayPort)) && (await portIsAvailable(runtimePort)),
     'owned model ports to be released'
   )
   await waitFor(
@@ -447,7 +447,7 @@ describe('multimodal runtime reliability', () => {
     expect(initialAnswer).toBe('chat recovered')
 
     const startsBefore = lineCount(fixture.llamaLog)
-    const crash = await fetch(`http://127.0.0.1:${String(LLAMA_SERVER_PORT)}/test/crash`, {
+    const crash = await fetch(`http://127.0.0.1:${String(llm.getPort())}/test/crash`, {
       method: 'POST'
     })
     expect(crash.status).toBe(200)

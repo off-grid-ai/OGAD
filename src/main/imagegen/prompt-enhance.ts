@@ -58,7 +58,9 @@ export interface EnhanceDeps {
   enabled: boolean
   /** Run the text model on the instruction prompt. The caller wraps queue + params
    *  + timeout; this module only owns the build → clean → fallback orchestration. */
-  chat: (instruction: string) => Promise<string>
+  chat: (instruction: string, onText: (text: string) => void) => Promise<string>
+  /** Receive the answer text as the model creates it. */
+  onText?: (text: string) => void
 }
 
 /** Gate → build → run → clean → fall back. The orchestration, dependency-injected
@@ -69,7 +71,7 @@ export async function enhancePrompt(userPrompt: string, deps: EnhanceDeps): Prom
     return userPrompt
   }
   try {
-    const raw = await deps.chat(buildEnhancePrompt(userPrompt))
+    const raw = await deps.chat(buildEnhancePrompt(userPrompt), deps.onText ?? (() => undefined))
     return cleanEnhancedPrompt(raw, userPrompt)
   } catch {
     return userPrompt

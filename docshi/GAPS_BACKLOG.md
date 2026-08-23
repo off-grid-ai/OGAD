@@ -7,6 +7,20 @@ how to reproduce, and the fix direction. Close with evidence; never hide.
 
 ## OPEN
 
+### SYN-004 (P1) - Late-pair full graph is not verified between the real Desktop and Mobile apps
+
+**Evidence (2026-08-13):** the production send paths now backfill state records, generated images,
+message attachments, and knowledge documents when a device pairs after the data exists. Shared tests
+prove byte-bounded anti-entropy. Desktop tests use the real service, SQLite, and temporary files.
+Mobile tests use two real sync engines and prove exact file bytes and durable controls. These tests do
+not start both actual apps and verify final receiver materialization and UI in one journey.
+
+**Evidence required to close:** create a project, settings, chat text, enhanced prompt, reasoning,
+completed tool, generated image, attachment, and knowledge document on device A before device B is
+paired. Pair the real apps through the production connect path. Verify every record, relationship,
+and byte on B, restart B, and verify that the same graph returns without duplicate transfers or
+detached files. Run Desktop-to-Mobile and Mobile-to-Desktop on physical macOS, iOS, and Android.
+
 ### DEF-001 (P1) - Replay capture control reports a state that is not factual
 
 **Evidence (2026-08-08):** macOS Settings reported `Screen access: denied` and `Permission
@@ -1181,3 +1195,94 @@ Independently: `0 failed` next to a logged `request.failed` is its own bug - the
 reaching Activity even for the file that DID have a row.
 
 ---
+
+## MTP is a mobile feature, and it should be a `@offgrid/models` one
+
+**Status:** open. Filed 2026-08-12. Deliberately NOT in the current PR - it is a package extraction,
+not a fix, and folding it in would bloat a release branch that is about sync feedback.
+
+**The gap.** MTP support exists on mobile and does not exist on desktop. Both apps consume the same
+model layer, so a capability that lives in one app's screens is a rule with one home and two
+audiences - the shape this repo keeps finding at the root of its bugs.
+
+**Why it is a shared-package problem, not a desktop one.** Copying the mobile implementation across
+would make it a rule with TWO homes, which is worse than having it once. The model layer is the owner:
+whether a model needs MTP, which artefacts it implies, and how a device advertises support are all
+properties of the MODEL, and every surface should be asking `@offgrid/models` rather than each app
+deciding for itself. Desktop then gets it by consuming the package, and so does any future surface.
+
+**Fix shape.**
+
+1. Move the MTP capability rule into `shared/packages/models` - one definition of what MTP is and which
+   models require it, keyed off the catalog entry, with no app-specific branching inside it.
+2. Mobile stops deciding and starts asking. Its current behaviour is the reference for what the rule
+   must produce, so it is the regression check that the extraction changed nothing.
+3. Desktop consumes the same rule. No `if (platform)` in either app: a platform that cannot serve MTP
+   reports that through the same interface, it does not get a special case at the call site.
+
+**Watch for:** the mobile implementation almost certainly carries assumptions that are really about the
+phone runtime rather than about MTP. Those belong on the platform adapter, not in the shared rule - and
+the tell is any code in the extracted package that names a platform.
+
+---
+
+## Every non-image attachment syncs to desktop as "text" and previews blank
+
+**Verdict:** fix-the-guard — the kinds exist, the write path never uses them.
+
+Reproduced on hardware 16 Aug 2026: a message sent from iPhone with three attachments (a camera
+photo, a library screenshot and `mobile.pdf`). On desktop the PDF arrives as a chip reading
+
+```
+mobile.pdf   text
+```
+
+and opening it shows an empty viewer with only Download and Close - nothing renders. Android shows
+the same message correctly, because it has its own renderer.
+
+The attachment type already names the kinds:
+
+```ts
+kind: 'text' | 'pdf' | 'docx' | 'image' | 'audio' | 'video'
+```
+
+but the write path in `src/renderer/src/components/MemoryChat.tsx` (~2940) only ever chooses between
+two of them:
+
+```ts
+if (isImage) { kind: 'image', code: a.path }
+else if (a.text) { kind: 'text', code: a.text }
+```
+
+A PDF has no image path, so it falls through to `text` and renders `a.text` - which for a binary
+document is empty. Hence a labelled-but-blank preview rather than an error.
+
+**This is not PDF-specific.** Any non-image attachment takes the same branch. It was predicted from
+the v0.0.103 diff for VOICE NOTES - "Mac classifies any non-image as kind: 'text', so a .wav arrives
+as a paperclip chip labelled text, and clicking it opens a blank viewer" - and never reproduced until
+now. A PDF and a voice note are the same bug.
+
+**Why it matters:** the attachment did sync. The bytes are there (Download works). What is broken is
+the classification and therefore the rendering, so the user sees a file they cannot open and
+concludes the transfer failed.
+
+**Fix:** classify by MIME/extension into the kinds the union already declares, carry `path` for
+binary kinds rather than `text`, and render a PDF/document viewer for them. `src/main/mime.ts`
+already exists and is the obvious source of truth.
+
+---
+
+## Model transfer can use more of a fast local network
+
+**Status:** open, non-blocking for the current release. Filed 2026-08-21.
+
+The current release removes the JavaScript checksum bottleneck, receives complete authenticated
+frames on iOS, and keeps a bounded encrypted send window full. The real desktop-to-iPhone test then
+reached about 6.5 MB/s on a 5 GHz connection while a second desktop-to-Android transfer used the same
+uplink. The Mac had negotiated a 195 Mb/s Wi-Fi link at -68 dBm, so this test does not establish the
+maximum rate of either device or the new transport.
+
+Follow up with an isolated physical-device benchmark on a strong 5 GHz or 6 GHz link. Measure one
+desktop-to-phone transfer at a time, separate checksum preparation from wire time, and compare both
+directions. Also persist verified file checksums so a repeat send does not hash the same multi-GB
+model again after an app restart. Keep the 4 MiB authenticated frame format and bounded memory.

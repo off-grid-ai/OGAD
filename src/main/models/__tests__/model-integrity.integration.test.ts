@@ -126,6 +126,35 @@ describe('model-manager GGUF integrity', () => {
     })
   })
 
+  it('rejects same-shape Muse bytes when their SHA-256 does not match the shared catalog', async () => {
+    const muse = CATALOG.find((entry) => entry.id === 'unsloth/Muse-Glimmer-30B-GGUF')
+    if (!muse) throw new Error('Shared model catalog must include Muse Glimmer')
+    const wrongBytes = Buffer.concat([Buffer.from('GGUF', 'ascii'), Buffer.alloc(2_000, 17)])
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Promise.resolve(
+          new Response(wrongBytes, {
+            status: 200,
+            headers: { 'content-length': String(wrongBytes.length) }
+          })
+        )
+      )
+    )
+
+    const result = await manager.downloadModel(muse.id)
+
+    expect(result).toEqual({
+      success: false,
+      error: expect.stringMatching(/checksum mismatch/i)
+    })
+    for (const file of muse.files) {
+      expect(fs.existsSync(path.join(dataDir, 'models', file.name))).toBe(false)
+      expect(fs.existsSync(path.join(dataDir, 'models', `${file.name}.part`))).toBe(false)
+    }
+    expect(await manager.listInstalled()).not.toContain(muse.id)
+  })
+
   it('rejects a truncated local GGUF before copying or registration', async () => {
     const source = path.join(dataDir, 'truncated.gguf')
     fs.writeFileSync(source, Buffer.from('GGUF', 'ascii'))

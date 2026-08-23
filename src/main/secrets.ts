@@ -8,6 +8,14 @@ import { safeStorage } from 'electron'
 import { getDB } from './database'
 
 let ready = false
+let unavailableWarningLogged = false
+
+function reportUnavailable(): void {
+  if (unavailableWarningLogged) return
+  unavailableWarningLogged = true
+  console.error('[secrets] OS encryption unavailable - protected secrets cannot be read or written')
+}
+
 function ensure(): void {
   if (ready) return
   getDB().exec(
@@ -32,7 +40,7 @@ export function secretsAvailable(): boolean {
 export function setSecret(key: string, value: string): boolean {
   ensure()
   if (!secretsAvailable()) {
-    console.error('[secrets] OS encryption unavailable — refusing to store plaintext')
+    reportUnavailable()
     return false
   }
   const enc = safeStorage.encryptString(value)
@@ -51,6 +59,10 @@ export function getSecret(key: string): string | null {
     | { blob: Buffer }
     | undefined
   if (!row) return null
+  if (!secretsAvailable()) {
+    reportUnavailable()
+    return null
+  }
   try {
     return safeStorage.decryptString(row.blob)
   } catch (e) {

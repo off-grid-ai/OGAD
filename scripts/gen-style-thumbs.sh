@@ -1,58 +1,80 @@
 #!/usr/bin/env bash
-# One-time batch: generate on-device style-preset thumbnails with SDXL-Lightning.
-# Runs sd-cli once per style (model reloads each time, but no LLM is resident so
-# it's freeze-safe on 16GB). No --vae-tiling (that forced a 69s tiled VAE decode).
-set -u
-ROOT="/Users/user/wednesday/off-grid-ai/desktop"
-MODELS="$HOME/Library/Application Support/Off Grid AI Desktop/models"
-THUMBS="$HOME/Library/Application Support/Off Grid AI Desktop/style-thumbs"
-SD="$ROOT/resources/bin/sd/sd-cli"
-MODEL="$MODELS/sdxl_lightning_4step.q8_0.gguf"
-NEG="lowres, blurry, deformed, watermark, text, low quality"
-mkdir -p "$THUMBS"
+# Generate bundled style previews through the running Off Grid Desktop gateway.
+set -euo pipefail
 
-# Keep the LLM dead so the image model has the RAM to itself.
-pkill -f "sd/sd-server" 2>/dev/null
-pkill -f "llama/llama-server" 2>/dev/null
-sleep 2
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+GATEWAY="${OFFGRID_GATEWAY_URL:-http://127.0.0.1:7878}"
+OUT="${STYLE_THUMB_DIR:-$ROOT/resources/style-thumbs}"
+NEGATIVE="people, person, human, woman, women, girl, girls, man, men, boy, boys, face, portrait, hands, text, letters, logo, watermark, signature, low quality, blurry, distorted, deformed"
 
-# key|prompt  (key matches the renderer's styleKey sanitization)
-# Each style gets a DIFFERENT subject (landscape / animal / object / vehicle /
-# architecture) so the grid showcases the *style*, not a gallery of faces.
+mkdir -p "$OUT"
+curl --fail --silent --max-time 5 "$GATEWAY/health" >/dev/null || {
+  echo "Off Grid Desktop gateway is not available at $GATEWAY." >&2
+  exit 1
+}
+
+# key|seed|prompt. Every scene is people-free by design.
 STYLES=(
-  "Photoreal|a red fox standing in a misty forest, photorealistic, sharp focus, high detail, 50mm photo"
-  "Cinematic|a lone car on a coastal highway at sunset, cinematic film still, dramatic lighting, shallow depth of field, color graded"
-  "Anime|a bustling futuristic city street with cherry blossoms, anime illustration, clean lineart, vibrant colors"
-  "Sketch|an old european cathedral, detailed pencil sketch on paper, monochrome line art"
-  "Watercolor|a serene mountain lake with pine trees, watercolor painting, soft washes, paper texture"
-  "Oil_painting|a still life of fruit and a wine bottle on a table, oil painting, visible brushstrokes, classical, rich color"
-  "Monochrome|a rainy city street with umbrellas, black and white, high contrast, monochrome"
-  "Neon|a rain-soaked alley in a cyberpunk city, neon-lit, glowing lights, night, moody"
-  "3D_render|a cute friendly robot character, 3D render, octane, soft studio lighting, subsurface detail"
-  "Steampunk|a flying steampunk airship above the clouds, brass and gears, victorian, intricate"
-  "Surreal|floating islands with waterfalls in a dreamlike sky, surreal, imaginative composition"
-  "Vintage_film|a vintage convertible car on a desert road, vintage film photograph, faded colors, grain, 1970s"
-  "Minimal|a single sailboat on calm water, minimal flat design, clean, simple shapes, lots of negative space"
-  "Risograph|a bicycle leaning against a wall, risograph print, halftone texture, limited palette"
-  "Fantasy_art|a majestic dragon perched on a mountain peak, epic fantasy concept art, dramatic, highly detailed"
-  "Studio_portrait|a golden retriever dog, studio portrait, soft key light, bokeh background"
+  "Photoreal|4101|A premium editorial product photograph of a precision mechanical wristwatch on dark slate, empty studio, dramatic side light, realistic metal and glass, crisp micro-detail, restrained neutral palette, professional commercial photography"
+  "Cinematic|4102|An empty classic sports car on a rain-dark coastal road at blue hour, cinematic film still, anamorphic light, deep contrast, atmospheric mist, sophisticated color grade, no driver, no people"
+  "Anime|4103|A quiet futuristic botanical research station above the clouds, detailed anime background art, clean linework, luminous color, cinematic composition, no characters, no people"
+  "Sketch|4104|A grand stone museum interior with a sweeping staircase, architectural graphite sketch, precise perspective, fine cross-hatching, archival paper texture, no people"
+  "Watercolor|4105|A serene alpine lake with pine forest and distant snow peaks, refined watercolor painting, translucent washes, elegant pigment blooms, cold-pressed paper, no buildings, no people"
+  "Oil_painting|4106|A museum-quality still life of pears, ceramic vessels, and folded linen on a dark table, classical oil painting, rich glazing, confident brushwork, controlled light, no people"
+  "Monochrome|4107|An empty modern train platform after rain, fine-art black-and-white photography, graphic geometry, luminous reflections, deep tonal range, no people"
+  "Neon|4108|A high-end electric motorcycle parked in an empty rain-soaked city alley at night, cyan and magenta neon reflections, precise industrial design, cinematic atmosphere, no rider, no people"
+  "3D_render|4109|A premium modular desktop speaker on a sculpted pedestal, polished 3D product render, physically based materials, soft studio lighting, subtle shadows, clean art direction, no text, no people"
+  "Steampunk|4110|An intricate brass astronomical observatory above the clouds, gears, copper pipes, glass lenses, Victorian engineering, dramatic warm light, detailed concept art, no people"
+  "Surreal|4111|A monumental marble doorway floating above a silent ocean, impossible reflections, dreamlike scale, refined surrealist composition, soft dawn light, no people"
+  "Vintage_film|4112|An empty mid-century roadside motel and parked convertible at dusk, vintage 1970s film photograph, authentic grain, faded color, understated composition, no people"
+  "Minimal|4113|A single black ceramic vase and one green branch on an off-white surface, premium minimalist editorial composition, soft natural shadow, ample negative space, no text, no people"
+  "Risograph|4114|A geometric arrangement of a bicycle, leaves, and sun shapes, professional risograph poster, limited emerald and coral inks, tactile halftone texture, precise registration, no text, no people"
+  "Fantasy_art|4115|An ancient crystalline fortress on a remote mountain ridge beneath an aurora, epic fantasy environment art, intricate scale, dramatic atmosphere, sophisticated color, no people"
+  "Studio_portrait|4116|A dignified black Labrador sitting against a charcoal studio backdrop, professional animal portrait, soft key light, detailed fur, natural expression, shallow depth of field, no people"
 )
 
-n=0; total=${#STYLES[@]}
-for entry in "${STYLES[@]}"; do
-  n=$((n+1))
-  key="${entry%%|*}"
-  style="${entry#*|}"
-  out="$THUMBS/$key.png"
-  echo "[$n/$total] $key -> $out"
-  DYLD_LIBRARY_PATH="$ROOT/resources/bin/sd" "$SD" \
-    -M img_gen \
-    -m "$MODEL" \
-    -p "$style" \
-    -n "$NEG" \
-    -o "$out" \
-    -W 768 -H 768 --steps 4 --cfg-scale 1.0 --sampling-method euler \
-    --diffusion-fa -t 6 -s 42 > "/tmp/thumb-$key.log" 2>&1
-  if [ -f "$out" ]; then echo "    ok ($(wc -c < "$out") bytes)"; else echo "    FAILED (see /tmp/thumb-$key.log)"; fi
+TOTAL="${#STYLES[@]}"
+INDEX=0
+for ENTRY in "${STYLES[@]}"; do
+  INDEX=$((INDEX + 1))
+  KEY="${ENTRY%%|*}"
+  REST="${ENTRY#*|}"
+  SEED="${REST%%|*}"
+  PROMPT="${REST#*|}"
+  DEST="$OUT/$KEY.png"
+
+  if [[ -f "$DEST" && "${FORCE_STYLE_THUMBS:-0}" != "1" ]]; then
+    echo "[$INDEX/$TOTAL] $KEY already exists."
+    continue
+  fi
+
+  echo "[$INDEX/$TOTAL] Generating $KEY..."
+  PAYLOAD="$(node -e '
+    const [prompt, negative, seed] = process.argv.slice(1)
+    process.stdout.write(JSON.stringify({
+      prompt, negative_prompt: negative, width: 512, height: 512,
+      steps: 10, cfg_scale: 2, seed: Number(seed), response_format: "url"
+    }))
+  ' "$PROMPT" "$NEGATIVE" "$SEED")"
+
+  RESPONSE="$(curl --fail --silent --show-error --max-time 300 \
+    "$GATEWAY/v1/images/generations" -H 'Content-Type: application/json' \
+    --data-binary "$PAYLOAD")"
+  SOURCE="$(node -e '
+    const { fileURLToPath } = require("node:url")
+    let body = ""
+    process.stdin.setEncoding("utf8")
+    process.stdin.on("data", chunk => { body += chunk })
+    process.stdin.on("end", () => {
+      const value = JSON.parse(body).data?.[0]?.url
+      if (typeof value !== "string" || !value.startsWith("file://")) process.exit(1)
+      process.stdout.write(fileURLToPath(value))
+    })
+  ' <<<"$RESPONSE")"
+
+  cp "$SOURCE" "$DEST"
+  rm -f "$SOURCE"
+  echo "[$INDEX/$TOTAL] Saved $DEST"
 done
-echo "=== DONE: $(ls "$THUMBS"/*.png 2>/dev/null | wc -l) thumbnails ==="
+
+echo "Generated $(find "$OUT" -maxdepth 1 -type f -name '*.png' | wc -l | tr -d ' ') style previews."

@@ -21,6 +21,10 @@ export function describeOwnGeneratedImage(
   if (!facts.syncId) return null
   const stat = fs.statSync(imagePath)
   const metadata = readGeneratedImageMetadata(facts.metadataJson)
+  const recordedHome =
+    facts.conversationId && facts.messageId
+      ? { conversationId: facts.conversationId, messageId: facts.messageId }
+      : undefined
   return describeGeneratedImage(
     {
       syncId: facts.syncId,
@@ -32,7 +36,7 @@ export function describeOwnGeneratedImage(
       ...(facts.height === undefined ? {} : { height: facts.height }),
       ...(metadata === undefined ? {} : { metadata })
     },
-    shownIn
+    shownIn ?? recordedHome
   )
 }
 
@@ -89,10 +93,14 @@ export function describeGeneratedImageEnsuringIdentity(
  * picture out of the gallery and under the message.
  */
 export function noteGeneratedImageMessage(link: ChatHome & { imagePath: string }): boolean {
+  const current = readGeneratedImageSidecar(link.imagePath)
+  const alreadyLinked =
+    current.conversationId === link.conversationId && current.messageId === link.messageId
   writeGeneratedImageSidecar(link.imagePath, {
     conversationId: link.conversationId,
     messageId: link.messageId
   })
+  if (alreadyLinked) return true
   return shareGeneratedImage(link.imagePath, {
     conversationId: link.conversationId,
     messageId: link.messageId

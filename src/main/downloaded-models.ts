@@ -2,19 +2,25 @@
 // opposed to catalog entries and locally-imported .gguf files. Without this, a
 // downloaded HF model (e.g. MiniCPM-V) has its files on disk but nothing records
 // it as installed, so it's flagged as "unused" and never offered as a usable
-// option (the bug). We key entries by the HF REPO ID so the rest of the app's
-// `CATALOG.find(id) ?? resolveHuggingFaceModel(id)` lookups re-resolve them for
-// activate/delete with zero extra branching.
+// option (the bug). Direct downloads keep their HF repo id. Device-transferred variants use the
+// shared exact package identity and keep the HF/catalog family id as separate provenance. This lets
+// Q4_0 and Q4_K_M from one repository coexist without either one replacing the other.
 //
 // Pure/IO-only + parameterized by the models dir, so it's testable against a real
 // temp directory with real files (no Electron, no network, no mocks).
 
 import fs from 'fs'
 import path from 'path'
+import { modelPackageIdentity } from '@offgrid/sync'
+import { isProjectorFileName } from './models/catalog-logic'
 
 export interface DownloadedModel {
-  /** The Hugging Face repo id (e.g. "openbmb/MiniCPM-V-2_6-gguf"). */
+  /** Exact installed variant key. Legacy entries use the Hugging Face family id. */
   id: string
+  /** Human/catalog family identity used for display and upstream repair. */
+  familyId?: string
+  /** Deterministic runnable-package identity for device-transferred variants. */
+  packageIdentity?: string
   name: string
   kind: string
   /** On-disk filenames this model comprises (primary + any mmproj/companions). */
@@ -40,6 +46,80 @@ function writeDownloaded(dir: string, list: DownloadedModel[]): void {
   } catch {
     /* best effort */
   }
+}
+
+export interface DownloadedRegistryCatalogEntry {
+  id: string
+  files: Array<{ name: string }>
+}
+
+/**
+ * Migrate the old catalog-family alias used by transferred variants.
+ *
+ * Older receivers stored an alternate quant/projector package under its catalog family id. That
+ * made activation resolve the catalog files and made the UI project both rows. The migration gives
+ * an alternate package its exact shared identity and keeps the family separately. An entry whose
+ * files exactly match the catalog is redundant and is removed from the registry only; model files
+ * are never deleted here.
+ */
+export function reconcileDownloadedModelRegistry(
+  dir: string,
+  catalog: readonly DownloadedRegistryCatalogEntry[]
+): DownloadedModel[] {
+  const current = readDownloaded(dir)
+  let changed = false
+  const migrated: DownloadedModel[] = []
+  for (const model of current) {
+    if (model.familyId || model.packageIdentity) {
+      migrated.push(model)
+      continue
+    }
+    const family = catalog.find((entry) => entry.id === model.id)
+    if (!family) {
+      migrated.push(model)
+      continue
+    }
+    const expected = new Set(family.files.map((file) => file.name))
+    if (expected.size === model.files.length && model.files.every((name) => expected.has(name))) {
+      changed = true
+      continue
+    }
+    const files = model.files.map((name) => {
+      let sizeBytes = 0
+      try {
+        sizeBytes = fs.statSync(path.join(dir, name)).size
+      } catch {
+        /* keep the legacy row until its package is complete */
+      }
+      return {
+        name,
+        sizeBytes,
+        role: isProjectorFileName(name) ? ('projector' as const) : ('primary' as const)
+      }
+    })
+    if (files.some((file) => file.sizeBytes <= 0)) {
+      migrated.push(model)
+      continue
+    }
+    const packageIdentity = modelPackageIdentity({
+      id: model.id,
+      name: model.name,
+      kind: model.kind,
+      source: 'downloaded',
+      files: files as [(typeof files)[number], ...Array<(typeof files)[number]>],
+      engine: model.kind === 'text' || model.kind === 'vision' ? 'llama' : undefined
+    })
+    migrated.push({
+      ...model,
+      id: packageIdentity,
+      familyId: model.id,
+      packageIdentity
+    })
+    changed = true
+  }
+  const unique = [...new Map(migrated.map((model) => [model.id, model])).values()]
+  if (changed || unique.length !== current.length) writeDownloaded(dir, unique)
+  return unique
 }
 
 /** Record a downloaded model (replacing any existing entry with the same id). */

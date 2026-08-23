@@ -28,7 +28,16 @@ const EXT_MIME: Record<string, string> = {
   webp: 'image/webp',
   gif: 'image/gif',
   bmp: 'image/bmp',
-  heic: 'image/heic'
+  heic: 'image/heic',
+  // document — a PDF served as the octet-stream fallback is DOWNLOADED by Chromium rather than
+  // rendered, so an attachment that opened correctly on Android arrived on desktop as a file save
+  // prompt. The kinds here match the ones @offgrid/sync's describeAttachment can name.
+  pdf: 'application/pdf',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  txt: 'text/plain',
+  md: 'text/markdown',
+  csv: 'text/csv'
 }
 
 /**

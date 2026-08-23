@@ -135,7 +135,14 @@ describe('model gateway image generation', () => {
     expect(response.headers.get('content-type')).toContain('application/json')
     expect(response.headers.get('x-request-id')).toBeTruthy()
     expect(body).toMatchObject({
-      data: [{ b64_json: PNG_BASE64, seed: 314, model: MODEL_NAME }],
+      data: [
+        {
+          b64_json: PNG_BASE64,
+          revised_prompt: 'A green cabin under stars',
+          seed: 314,
+          model: MODEL_NAME
+        }
+      ],
       usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
     })
 

@@ -10,6 +10,7 @@ import { LoopbackMediaServer } from '../media-server'
 import { localMediaRoots } from '../media-roots'
 
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-media-server-'))
+const resources = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-media-resources-'))
 const fixtures = {
   image: {
     dir: 'captures',
@@ -27,7 +28,7 @@ const fixtures = {
 } as const
 
 const server = new LoopbackMediaServer({
-  roots: localMediaRoots(profile),
+  roots: localMediaRoots(profile, [resources]),
   port: 0,
   token: 'integration'
 })
@@ -43,11 +44,14 @@ beforeAll(() => {
     fs.mkdirSync(path.join(profile, fixture.dir), { recursive: true })
     fs.writeFileSync(fixturePath(key), fixture.bytes)
   }
+  fs.mkdirSync(path.join(resources, 'style-thumbs'), { recursive: true })
+  fs.writeFileSync(path.join(resources, 'style-thumbs', 'Photoreal.png'), fixtures.image.bytes)
 })
 
 afterAll(async () => {
   await server.close()
   fs.rmSync(profile, { recursive: true, force: true })
+  fs.rmSync(resources, { recursive: true, force: true })
 })
 
 describe('loopback media server integration', () => {
@@ -80,6 +84,16 @@ describe('loopback media server integration', () => {
     expect(response.status).toBe(206)
     expect(response.headers.get('Content-Type')).toBe(fixtures.audio.type)
     expect(Buffer.from(await response.arrayBuffer())).toEqual(fixtures.audio.bytes.subarray(-4))
+  })
+
+  it('serves a bundled style preview through the same admitted media path', async () => {
+    const preview = path.join(resources, 'style-thumbs', 'Photoreal.png')
+    const url = await server.urlFor(preview)
+    const response = await fetch(url!)
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('Content-Type')).toBe('image/png')
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(fixtures.image.bytes)
   })
 
   it('does not issue URLs outside the media roots or for missing files', async () => {

@@ -28,7 +28,7 @@ import {
   MFLUX_MODELS
 } from './mflux'
 import { getActiveModal } from './active-models'
-import { binRoots, dataDir, modelsDir, exe } from './runtime-env'
+import { binRoots, dataDir, modelsDir, resourceDirs, exe } from './runtime-env'
 import { sdServer } from './sd-server'
 import { standardModelDefaults, taesdFilename } from '../shared/image-defaults'
 import { defaultImageModelFilename } from './image-default'
@@ -55,6 +55,8 @@ import {
 import { IMAGE_CANCELLED_MESSAGE, ImageGenerationLifecycle } from './imagegen/generation-lifecycle'
 import {
   imageMemoryGuardErrorMessage,
+  type ImageGenerationPipelineUpdateContract,
+  type ImageGenerationOutputContract,
   type ImageGenerationRequestContract
 } from '../shared/image-generation-contract'
 
@@ -163,33 +165,22 @@ export function deleteGeneratedImage(p: string): boolean {
   }
 }
 
-// --- Style-preset thumbnails (generated on-device, cached; never hotlinked) --
-function styleThumbDir(): string {
-  return path.join(dataDir(), 'style-thumbs')
-}
-
-/** Map of style key -> cached thumbnail path (on-device generated). */
+// --- Style-preset thumbnails (bundled release assets; never hotlinked) --------
+/** Map of style key -> bundled thumbnail path. */
 export function listStyleThumbs(): Record<string, string> {
   const out: Record<string, string> = {}
-  try {
-    for (const f of fs.readdirSync(styleThumbDir())) {
-      const m = f.match(/^(.+)\.png$/i)
-      if (m) out[m[1]!] = path.join(styleThumbDir(), f)
+  for (const resources of resourceDirs()) {
+    const directory = path.join(resources, 'style-thumbs')
+    try {
+      for (const file of fs.readdirSync(directory)) {
+        const match = file.match(/^(.+)\.png$/i)
+        if (match && !out[match[1]!]) out[match[1]!] = path.join(directory, file)
+      }
+    } catch {
+      /* this resource root does not contain style previews */
     }
-  } catch {
-    /* none yet */
   }
   return out
-}
-
-/** Generate one style thumbnail on-device (small/fast) and cache it. */
-export async function generateStyleThumb(key: string, prompt: string): Promise<string> {
-  const out = await generateImage({ prompt, width: 512, height: 512, steps: 6 })
-  const dir = styleThumbDir()
-  fs.mkdirSync(dir, { recursive: true })
-  const dest = path.join(dir, `${key.replace(/[^\w-]+/g, '_')}.png`)
-  fs.copyFileSync(out.path, dest)
-  return dest
 }
 
 // --- LoRA adapters -----------------------------------------------------------
@@ -397,12 +388,10 @@ export function imageGenStatus(): {
 
 export type ImageGenParams = ImageGenerationRequestContract
 
-export interface ImageGenOutput {
-  dataUrl: string
-  path: string
-  seed: number
-  model: string
-}
+export type ImageGenOutput = ImageGenerationOutputContract
+
+/** Native runtimes receive the final prompt as input. The wrapper adds it to their output once. */
+type NativeImageGenOutput = Omit<ImageGenOutput, 'prompt'>
 
 export interface ImageGenProgress {
   step: number
@@ -450,10 +439,7 @@ export function saveGeneratedImageScope(imagePath: string, facts: GeneratedImage
  * itself, does not list an input as though the user had generated it. Returns the copy's path, or null
  * when the source cannot be read - a generation is not worth failing over its provenance.
  */
-export function preserveGeneratedImageSource(
-  syncId: string,
-  sourcePath: string
-): string | null {
+export function preserveGeneratedImageSource(syncId: string, sourcePath: string): string | null {
   try {
     const directory = path.join(dataDir(), 'generated-images', 'sources')
     fs.mkdirSync(directory, { recursive: true })
@@ -528,30 +514,60 @@ export function cancelImageGen(): boolean {
  */
 export async function generateImage(
   params: ImageGenParams,
-  onProgress?: (p: ImageGenProgress & { preview?: string }) => void
+  onUpdate?: (update: ImageGenerationPipelineUpdateContract) => void
 ): Promise<ImageGenOutput> {
   // Prompt enhancement runs FIRST, while the chat model is still resident — the
   // image job below evicts the LLM, so the text pass must precede it. Gated by a
   // setting; failure/timeout silently keeps the original prompt.
-  const enhanced = await maybeEnhancePrompt(params.prompt)
+  const enhanced = await maybeEnhancePrompt(params.prompt, onUpdate)
   const effective = enhanced === params.prompt ? params : { ...params, prompt: enhanced }
+  onUpdate?.({ stage: 'preparing', enhancedPrompt: enhanced })
+  const progressObserver = onUpdate
+    ? (progress: ImageGenProgress & { preview?: string }) =>
+        onUpdate({
+          stage: progress.phase === 'decoding' ? 'decoding' : 'generating',
+          progress
+        })
+    : undefined
   // The queue evicts 'llm' before this runs AND re-warms it (mode-aware) when the
   // job finishes — so the image path no longer touches llm.pause/resume itself.
-  return modalityQueue.run(IMAGE_JOB, () => runImageGen(effective, onProgress))
+  const output = await modalityQueue.run(IMAGE_JOB, () => runImageGen(effective, progressObserver))
+  return { ...output, prompt: effective.prompt }
 }
 
 /** Expand the user's prompt into a richer generation prompt via the local text
  *  model, when `enhanceImagePrompts` is on. Runs through the queue as a foreground
  *  text job (tier 2, evicts a resident image server) so it's serialized with chat.
  *  Any failure returns the original prompt unchanged — enhancement is best-effort. */
-async function maybeEnhancePrompt(prompt: string): Promise<string> {
+async function maybeEnhancePrompt(
+  prompt: string,
+  onUpdate?: (update: ImageGenerationPipelineUpdateContract) => void
+): Promise<string> {
+  const enabled = getSetting('enhanceImagePrompts', true)
+  if (enabled) onUpdate?.({ stage: 'enhancing', enhancedPrompt: '' })
+  let streamed = ''
   return enhancePrompt(prompt, {
-    enabled: getSetting('enhanceImagePrompts', true),
+    enabled,
+    onText: (text) => {
+      streamed += text
+      onUpdate?.({ stage: 'enhancing', enhancedPrompt: streamed })
+    },
     // Foreground text job (tier 2, evicts a resident image server), serialized with
     // chat. Runs while the chat model is still resident — the image job evicts it after.
-    chat: (instruction) =>
+    chat: (instruction, onText) =>
       modalityQueue.run(CHAT_JOB, () =>
-        llm.chat(instruction, [], 60_000, 200, { temperature: 0.7, disableThinking: true })
+        llm
+          .chatStream(
+            instruction,
+            [],
+            (text, kind) => {
+              if (kind === 'content') onText(text)
+            },
+            { temperature: 0.7, thinking: false },
+            200,
+            60_000
+          )
+          .then((result) => result.content)
       )
   })
 }
@@ -559,7 +575,7 @@ async function maybeEnhancePrompt(prompt: string): Promise<string> {
 async function runImageGen(
   params: ImageGenParams,
   onProgress?: (p: ImageGenProgress & { preview?: string }) => void
-): Promise<ImageGenOutput> {
+): Promise<NativeImageGenOutput> {
   if (generationLifecycle.isRunning()) {
     throw new Error('An image is already generating — please wait for it to finish.')
   }
@@ -720,6 +736,7 @@ async function runImageGen(
   const residentImage = getResidencyMode('image') === 'resident'
   const eligibleForServer =
     residentImage &&
+    !onProgress &&
     !coreml &&
     !isZImage &&
     !loras.length &&
@@ -737,20 +754,17 @@ async function runImageGen(
         taesdPath: taesd ?? undefined
       })
       generationLifecycle.throwIfCancelled()
-      const { png, seed: usedSeed } = await sdServer.generate(
-        {
-          prompt: params.prompt,
-          negativePrompt: params.negativePrompt?.trim() || DEFAULT_NEGATIVE,
-          width: params.width ?? defaultSize,
-          height: params.height ?? defaultSize,
-          steps: params.steps ?? defaultSteps,
-          cfgScale: params.cfgScale ?? defaultCfg,
-          sampleMethod: sampler,
-          scheduler,
-          seed
-        },
-        (p) => onProgress?.({ step: p.step, total: p.total, secPerStep: 0 })
-      )
+      const { png, seed: usedSeed } = await sdServer.generate({
+        prompt: params.prompt,
+        negativePrompt: params.negativePrompt?.trim() || DEFAULT_NEGATIVE,
+        width: params.width ?? defaultSize,
+        height: params.height ?? defaultSize,
+        steps: params.steps ?? defaultSteps,
+        cfgScale: params.cfgScale ?? defaultCfg,
+        sampleMethod: sampler,
+        scheduler,
+        seed
+      })
       await fs.promises.writeFile(outPath, png)
       return {
         dataUrl: `data:image/png;base64,${png.toString('base64')}`,
@@ -914,10 +928,14 @@ async function runImageGen(
       // Pure progress reducer owns the seed parse + the denoise->decode phase
       // transition; the shell only handles the preview PNG read + the callback.
       let progress = initialProgressState(seed)
+      let progressBuffer = ''
       const capture = (d: Buffer): void => {
         const s = d.toString()
         log += s
-        const { state, event } = reduceProgress(progress, s)
+        // Terminal progress lines can arrive across multiple data chunks. Keep a
+        // short rolling buffer so "12/" and "42" still become step 12 of 42.
+        progressBuffer = `${progressBuffer}${s}`.slice(-2048)
+        const { state, event } = reduceProgress(progress, progressBuffer, params.steps)
         progress = state
         if (onProgress && event) {
           let preview: string | undefined

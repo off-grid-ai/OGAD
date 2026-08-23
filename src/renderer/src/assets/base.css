@@ -70,3 +70,10 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* Button collapse/expand eases into place. Direct pointer resizing must track the pointer exactly. */
+[data-panel-group]:has([data-resize-handle-state='drag'])
+  [data-panel-id='conversation-history'],
+[data-panel-group]:has([data-resize-handle-state='drag']) [data-panel-id='chat'] {
+  transition-duration: 0ms;
+}

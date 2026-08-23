@@ -8,9 +8,12 @@ import path from 'path'
 import os from 'os'
 import fs from 'fs'
 import { app } from 'electron'
-import sharp from 'sharp'
 import { desktopExtraction as ex } from './rag/extractors'
 import { IMAGE_EXT, AUDIO_EXT, VIDEO_EXT, sanitizeUploadName } from './files-classify'
+// sharp is NOT imported here. It is a native module, and a top-level import let a
+// module that only validates images refuse every attachment of every type when it
+// could not load — which is exactly what happened on Windows. See files-image-probe.
+import { verifyImageDecodable } from './files-image-probe'
 
 export interface ProcessedFile {
   name: string
@@ -33,9 +36,11 @@ export async function processUpload(
       // the upload owner before persisting or marking the attachment ready, so a
       // damaged image produces a specific recoverable error in the composer instead
       // of reaching the vision runtime as engine garbage.
-      try {
-        await sharp(tmp, { failOn: 'error' }).metadata()
-      } catch {
+      //
+      // Only a READ verdict refuses the file. If the validator itself is unavailable
+      // the upload proceeds unchecked: a native module that will not load is our
+      // fault, not a statement about the user's photo.
+      if ((await verifyImageDecodable(tmp)) === 'undecodable') {
         throw new Error('Unsupported or damaged image data.')
       }
       // Persist the image so the chat can pass the ACTUAL image to the multimodal

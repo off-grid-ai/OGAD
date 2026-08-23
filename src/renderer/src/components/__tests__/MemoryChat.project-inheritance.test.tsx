@@ -10,7 +10,7 @@
 // ragChat uses that same project id for document retrieval. The SQLite round-trip
 // behind createRagConversation is covered by database-integration.dbtest.ts.
 
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryChat } from '../MemoryChat'
@@ -96,7 +96,7 @@ describe('<MemoryChat/> - new chat inherits its project (#54)', () => {
     expect(await screen.findByText(project.name)).toBeTruthy()
 
     const textarea = screen.getByPlaceholderText(/ask about .*launch plan/i)
-    await user.type(textarea, 'What is the launch date?')
+    fireEvent.change(textarea, { target: { value: 'What is the launch date?' } })
     await user.click(screen.getByRole('button', { name: /^send$/i }))
 
     await waitFor(() => expect(createRagConversation).toHaveBeenCalledTimes(1))
@@ -137,7 +137,7 @@ describe('<MemoryChat/> - new chat inherits its project (#54)', () => {
 
     expect(await screen.findByText(project.name)).toBeTruthy()
     const textarea = screen.getByPlaceholderText(/ask about .*launch plan/i)
-    await user.type(textarea, 'What changed?')
+    fireEvent.change(textarea, { target: { value: 'What changed?' } })
     await user.click(screen.getByRole('button', { name: /^send$/i }))
 
     await waitFor(() => expect(ragChat).toHaveBeenCalledTimes(1))

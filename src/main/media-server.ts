@@ -21,6 +21,7 @@ import { MEDIA_PORT } from '../shared/ports'
 import { pickFreePort } from './free-port'
 import { mimeForExt } from './mime'
 import { localMediaRoots } from './media-roots'
+import { resourceDirs } from './runtime-env'
 
 // Fixed loopback port so the renderer CSP (media-src) can allowlist it. Bound to
 // 127.0.0.1 only — not reachable off-device. Canonical value in shared/ports.
@@ -197,7 +198,7 @@ function serveFile(req: http.IncomingMessage, res: http.ServerResponse, filePath
 /** Start the loopback media server (idempotent). Call after app is ready. */
 export function startMediaServer(): void {
   productionServer ??= new LoopbackMediaServer({
-    roots: localMediaRoots(app.getPath('userData')),
+    roots: localMediaRoots(app.getPath('userData'), resourceDirs()),
     port: MEDIA_PORT
   })
   void productionServer.start().catch((error) => console.error('[media-server]', error))

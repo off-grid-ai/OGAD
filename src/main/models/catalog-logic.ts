@@ -43,6 +43,7 @@ export interface LocalModelLike {
 }
 export interface DownloadedModelLike {
   id: string
+  familyId?: string
   name: string
   kind: string
   files: string[]
@@ -52,6 +53,9 @@ export interface DownloadedModelLike {
 export type SizeOf = (name: string) => number
 /** True when a filename exists on disk with size > 0. */
 export type FilePresent = (name: string) => boolean
+
+export const isProjectorFileName = (name: string): boolean =>
+  /(?:^|[-_.])(mmproj|projector)(?:[-_.]|$)/i.test(name)
 
 /** A catalog-shaped view of an imported local model whose primary file is present
  *  (size > 0). Tagged "Imported" and surfaced at the top of the catalog. */
@@ -73,9 +77,9 @@ export function localsForCatalog(locals: LocalModelLike[], present: FilePresent)
  *  `installedIds` is the set of downloaded ids whose every file is present. */
 export function downloadedForCatalog(
   downloaded: DownloadedModelLike[],
-  installedIds: Iterable<string>
+  installedDownloadIds: Iterable<string>
 ): CatalogEntry[] {
-  const installed = new Set(installedIds)
+  const installed = new Set(installedDownloadIds)
   return downloaded
     .filter((m) => installed.has(m.id))
     .map((m) => ({
@@ -84,7 +88,11 @@ export function downloadedForCatalog(
       kind: m.kind,
       org: 'Hugging Face',
       tags: ['Downloaded'],
-      files: m.files.map((name) => ({ name, url: '' }))
+      files: m.files.map((name) => ({
+        name,
+        url: '',
+        role: isProjectorFileName(name) ? 'mmproj' : 'primary'
+      }))
     }))
 }
 
@@ -97,10 +105,17 @@ export function mergeCatalog(opts: {
   catalog: CatalogEntry[]
   present: FilePresent
 }): CatalogEntry[] {
+  const installed = new Set(opts.installedDownloadedIds)
+  const representedFamilies = new Set(
+    opts.downloaded
+      .filter((model) => installed.has(model.id))
+      .map((model) => model.familyId)
+      .filter((id): id is string => Boolean(id))
+  )
   return [
     ...localsForCatalog(opts.locals, opts.present),
     ...downloadedForCatalog(opts.downloaded, opts.installedDownloadedIds),
-    ...opts.catalog
+    ...opts.catalog.filter((entry) => !representedFamilies.has(entry.id))
   ]
 }
 
@@ -120,15 +135,25 @@ export function catalogEntryInstalled(
 export function installedIds(opts: {
   locals: LocalModelLike[]
   installedDownloadedIds: Iterable<string>
+  downloaded?: DownloadedModelLike[]
   catalog: CatalogEntry[]
   present: FilePresent
   mfluxCached: (id: string) => boolean
 }): string[] {
+  const downloadedIds = [...opts.installedDownloadedIds]
+  const installed = new Set(downloadedIds)
+  const representedFamilies = new Set(
+    (opts.downloaded ?? [])
+      .filter((model) => installed.has(model.id))
+      .map((model) => model.familyId)
+      .filter((id): id is string => Boolean(id))
+  )
   const catalog = opts.catalog
+    .filter((model) => !representedFamilies.has(model.id))
     .filter((m) => catalogEntryInstalled(m, opts.present, opts.mfluxCached))
     .map((m) => m.id)
   const locals = opts.locals.filter((lm) => opts.present(lm.primary)).map((lm) => lm.id)
-  return [...locals, ...opts.installedDownloadedIds, ...catalog]
+  return [...locals, ...downloadedIds, ...catalog]
 }
 
 /** The primary filename for a catalog entry: the file tagged role 'primary', else
@@ -217,7 +242,7 @@ export function buildDiskEntry(opts: {
   const dl = opts.downloaded.find((m) => m.id === id)
   if (dl && !opts.isCatalogId(id)) {
     const bytes = dl.files.reduce((s, n) => s + sizeOf(n), 0)
-    const primary = dl.files[0]
+    const primary = dl.files.find((name) => !isProjectorFileName(name)) ?? dl.files[0]
     return {
       id,
       name: dl.name,

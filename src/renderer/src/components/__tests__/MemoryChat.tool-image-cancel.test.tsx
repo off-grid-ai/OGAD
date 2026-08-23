@@ -13,7 +13,7 @@
 // content, the same way the reasoning-persistence test asserts the persisted blob.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render, screen, waitFor, cleanup } from '@testing-library/react'
+import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryChat } from '../MemoryChat'
 import { TooltipProvider } from '../ui/tooltip'
@@ -74,7 +74,7 @@ describe('<MemoryChat/> — tool-image cancel keeps the text answer (D12)', () =
     )
 
     const textarea = await screen.findByPlaceholderText(/ask anything/i, {}, { timeout: 3000 })
-    await user.type(textarea, 'summarize my week')
+    fireEvent.change(textarea, { target: { value: 'summarize my week' } })
     await user.click(screen.getByRole('button', { name: /^send$/i }))
 
     // Terminal artifact: the assistant answer was PERSISTED (survives a reload),

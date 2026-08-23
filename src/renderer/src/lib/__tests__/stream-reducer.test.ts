@@ -22,17 +22,40 @@ describe('applyStreamEvent', () => {
     m = applyStreamEvent(m, { type: 'tool_result', call: { name: 'web_search', result: 'r1' } })
     m = applyStreamEvent(m, { type: 'tool_result', call: { name: 'read_url', result: 'r2' } })
     expect(m.toolCalls).toEqual([
-      { name: 'web_search', result: 'r1' },
-      { name: 'read_url', result: 'r2' }
+      { name: 'web_search', result: 'r1', status: 'completed' },
+      { name: 'read_url', result: 'r2', status: 'completed' }
     ])
   })
 
-  it('sets the live activity on a step event without touching tool calls', () => {
+  it('shows a running tool row on the first step event', () => {
     const r = applyStreamEvent<StreamedMessage>(
       { toolCalls: [{ name: 'web_search', result: 'r1' }] },
       { type: 'step', step: { kind: 'running_tool', name: 'read_url' } }
     )
     expect(r.activity).toEqual({ kind: 'running_tool', name: 'read_url' })
-    expect(r.toolCalls).toEqual([{ name: 'web_search', result: 'r1' }]) // unchanged
+    expect(r.toolCalls).toEqual([
+      { name: 'web_search', result: 'r1', status: 'completed' },
+      { name: 'read_url', result: '', status: 'running' }
+    ])
+  })
+
+  it('completes the running tool row instead of adding a duplicate', () => {
+    const running = applyStreamEvent<StreamedMessage>(
+      { toolCalls: [] },
+      { type: 'step', step: { kind: 'running_tool', name: 'generate_image' } }
+    )
+    const completed = applyStreamEvent(running, {
+      type: 'tool_result',
+      call: { name: 'generate_image', result: 'Image generation started' }
+    })
+
+    expect(completed.toolCalls).toEqual([
+      {
+        name: 'generate_image',
+        result: 'Image generation started',
+        status: 'completed'
+      }
+    ])
+    expect(completed.activity).toBeUndefined()
   })
 })

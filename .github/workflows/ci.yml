@@ -64,10 +64,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24' # node:sqlite (used by integration tests) is available unflagged
-      # @offgrid/sync is a file: dependency on the SIBLING shared monorepo ("file:../shared/packages/sync").
-      # It arrived with the sync work and CI never provisioned it, so every job that installs would fail on the
-      # same missing module. actions/checkout refuses a path outside the workspace, so it lands inside and is
-      # moved up one level - exactly where the file: specifier points.
+      # Shared packages are file: dependencies on the SIBLING shared monorepo. CI must provision it before
+      # installing Desktop. actions/checkout refuses a path outside the workspace, so it lands inside and is
+      # moved up one level - exactly where the file: specifiers point.
       #
       # Matching branch first, main as the fallback, the same shape as the pro checkout above: a PR that changes
       # the app and the shared package together must be tested against the package it expects.
@@ -93,7 +92,7 @@ jobs:
       - name: Put shared beside this checkout
         run: |
           if [ ! -d _shared ]; then
-            echo "::error::off-grid-ai/shared was not checked out - @offgrid/sync cannot resolve. Check CI_CROSS_REPO_TOKEN."
+            echo "::error::off-grid-ai/shared was not checked out - shared packages cannot resolve. Check CI_CROSS_REPO_TOKEN."
             exit 1
           fi
           rm -rf ../shared
@@ -107,6 +106,7 @@ jobs:
           # later gates run against dependencies nobody committed. A drifted lock should stop the build.
           npm --prefix ../shared ci
           npm --prefix ../shared/packages/sync run build
+          npm --prefix ../shared/packages/models run build
       - run: npm ci
       # Hard gates: types + the full test suite.
       - name: Typecheck (core)

@@ -21,7 +21,8 @@ import {
   findDownloaded,
   installedDownloadedIds,
   downloadedProtectedNames,
-  readDownloaded
+  reconcileDownloadedModelRegistry,
+  type DownloadedModel
 } from './downloaded-models'
 import {
   mergeCatalog,
@@ -35,10 +36,12 @@ import {
   isChatLoadable,
   visionStatus,
   projectorToHeal,
+  isProjectorFileName,
   type CatalogEntry,
   type VisionStatus
 } from './models/catalog-logic'
 import { writeDiagnosticLog } from './diagnostics-log'
+import { modelPackageIdentity, type TransferredModelManifest } from '@offgrid/sync'
 
 export interface DownloadProgress {
   modelId: string
@@ -74,6 +77,22 @@ function fileSizeOf(dir: string, name: string): number {
   }
 }
 
+function downloadedPrimary(model: DownloadedModel): string | undefined {
+  return model.files.find((name) => !isProjectorFileName(name)) ?? model.files[0]
+}
+
+function downloadedProjector(model: DownloadedModel): string | undefined {
+  return model.files.find(isProjectorFileName)
+}
+
+/** Exact id first; a unique family match keeps a stale pre-migration selection working. */
+function downloadedVariant(models: DownloadedModel[], id: string): DownloadedModel | undefined {
+  const exact = models.find((model) => model.id === id)
+  if (exact) return exact
+  const family = models.filter((model) => model.familyId === id)
+  return family.length === 1 ? family[0] : undefined
+}
+
 export async function getCatalog(): Promise<{ kinds: readonly string[]; models: unknown[] }> {
   const { CATALOG, MODEL_KINDS } = await import('@offgrid/models')
   const dir = llm.getModelsDir()
@@ -82,9 +101,10 @@ export async function getCatalog(): Promise<{ kinds: readonly string[]; models: 
   // catalog) in that exact order - decision in catalog-logic, filesystem probe
   // injected as a closure so it stays pure.
   const present = (name: string): boolean => fileSizeOf(dir, name) > 0
+  const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG as unknown as CatalogEntry[])
   const models = mergeCatalog({
     locals: getLocalModels(),
-    downloaded: readDownloaded(dir),
+    downloaded,
     installedDownloadedIds: installedDownloadedIds(dir),
     catalog: CATALOG as unknown as CatalogEntry[],
     present
@@ -101,9 +121,10 @@ export async function getVisionStatuses(): Promise<Record<string, VisionStatus>>
   const { CATALOG } = await import('@offgrid/models')
   const dir = llm.getModelsDir()
   const present = (name: string): boolean => fileSizeOf(dir, name) > 0
+  const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG as unknown as CatalogEntry[])
   const merged = mergeCatalog({
     locals: getLocalModels(),
-    downloaded: readDownloaded(dir),
+    downloaded,
     installedDownloadedIds: installedDownloadedIds(dir),
     catalog: CATALOG as unknown as CatalogEntry[],
     present
@@ -123,9 +144,11 @@ export async function listInstalled(): Promise<string[]> {
   const { CATALOG } = await import('@offgrid/models')
   const { isMfluxModelCached } = await import('./mflux')
   const dir = llm.getModelsDir()
+  const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG as unknown as CatalogEntry[])
   return installedIds({
     locals: getLocalModels(),
     installedDownloadedIds: installedDownloadedIds(dir),
+    downloaded,
     catalog: CATALOG as unknown as CatalogEntry[],
     present: (name) => fileSizeOf(dir, name) > 0,
     mfluxCached: (id) => isMfluxModelCached(id)
@@ -255,6 +278,7 @@ export async function downloadModel(
       }
 
       let activePartPath: string | null = null
+      let activePartRecoverable = true
       try {
         // Decide the JOB before reporting on it. A model is several files, and percent used to be
         // per-file: a two-file download ran 0→100 for the weights and then 0→100 again for the
@@ -283,6 +307,7 @@ export async function downloadModel(
           const dest = path.join(dir, file.name)
           const partPath = `${dest}.part`
           activePartPath = partPath
+          activePartRecoverable = true
           // Resume from a partial .part if one exists (e.g. download interrupted by a
           // quit/crash) via an HTTP Range request, so we don't re-fetch GBs.
           let resumeFrom = 0
@@ -331,7 +356,10 @@ export async function downloadModel(
           // Verify the file is complete + valid BEFORE promoting it — never mark a
           // truncated/corrupt download installed (it loads as a blank "Chat model Down").
           const integrityErr = downloadIntegrityError(file.name, written, total, partPath)
-          if (integrityErr) throw new Error(integrityErr)
+          if (integrityErr) {
+            activePartRecoverable = false
+            throw new Error(integrityErr)
+          }
           // Content check: when the file carries an expected SHA-256 (e.g. HF's lfs
           // oid), verify the bytes match — catches silent corruption the byte-count +
           // magic check can't. Skipped when no hash is known.
@@ -340,7 +368,10 @@ export async function downloadModel(
             partPath,
             (file as { sha256?: string }).sha256
           )
-          if (checksumErr) throw new Error(checksumErr)
+          if (checksumErr) {
+            activePartRecoverable = false
+            throw new Error(checksumErr)
+          }
           fs.renameSync(partPath, dest)
           activePartPath = null
           jobDoneBytes += written // this file's real bytes now count toward the job, not a new 0%
@@ -368,10 +399,10 @@ export async function downloadModel(
         send({ percent: 100, status: 'completed' })
         return { success: true }
       } catch (err) {
-        // A capacity failure cannot resume until space is reclaimed, and retaining the
-        // bytes makes the full-volume condition worse. Other failures keep their
-        // partial file so retry can resume instead of downloading it again.
-        if (activePartPath && isStorageCapacityError(err)) {
+        // A capacity failure cannot resume until space is reclaimed. A file that failed byte or
+        // checksum validation must restart because the stored prefix is not trustworthy. Only a
+        // transport interruption keeps its partial file for a Range retry.
+        if (activePartPath && (!activePartRecoverable || isStorageCapacityError(err))) {
           try {
             fs.rmSync(activePartPath, { force: true })
           } catch {
@@ -397,10 +428,91 @@ export async function downloadModel(
   )
 }
 
+interface DeleteModelResult {
+  success: boolean
+  error?: string
+  freedFiles?: number
+}
+
+interface TransferredDeletionContext {
+  dir: string
+  requestedId: string
+  target: DownloadedModel
+  downloaded: DownloadedModel[]
+  catalog: CatalogEntry[]
+}
+
+function retainedTransferredFileNames(context: TransferredDeletionContext): Set<string> {
+  const { target, downloaded, catalog, dir } = context
+  const retained = new Set<string>()
+  catalog.forEach((model) => model.files.forEach((file) => retained.add(file.name)))
+  getLocalModels(dir).forEach((model) => {
+    retained.add(model.primary)
+    if (model.mmproj) retained.add(model.mmproj)
+  })
+  downloaded
+    .filter((model) => model.id !== target.id)
+    .forEach((model) => model.files.forEach((name) => retained.add(name)))
+  return retained
+}
+
+function clearTransferredModelSelections(target: DownloadedModel, requestedId: string): void {
+  const activeId = getActiveModel()
+  if (activeId === target.id || activeId === requestedId) {
+    try {
+      fs.rmSync(activeModelFile(), { force: true })
+    } catch {
+      /* already clear */
+    }
+    llm.reloadModel()
+  }
+  const primary = downloadedPrimary(target)
+  const modals = getAllActiveModals()
+  ;(Object.keys(modals) as Modality[]).forEach((kind) => {
+    if (
+      modalSelectionMatches(modals[kind], target.id, primary) ||
+      modalSelectionMatches(modals[kind], requestedId, primary)
+    ) {
+      setModal(kind, null)
+    }
+  })
+}
+
+function deleteTransferredModel(context: TransferredDeletionContext): DeleteModelResult {
+  const { dir, requestedId, target } = context
+  // A projector can be shared by two installed quants. Delete only files that no other installed
+  // model owns, then remove this exact package from the registry projection.
+  const retainedNames = retainedTransferredFileNames(context)
+  let freedFiles = 0
+  for (const name of target.files) {
+    if (!retainedNames.has(name)) {
+      try {
+        const filePath = path.join(dir, name)
+        if (fs.existsSync(filePath)) {
+          fs.rmSync(filePath, { force: true })
+          freedFiles++
+        }
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : `could not delete ${name}`,
+          freedFiles
+        }
+      }
+    }
+    try {
+      fs.rmSync(path.join(dir, `${name}.part`), { force: true })
+    } catch {
+      /* the installed package remains authoritative */
+    }
+  }
+  removeDownloaded(dir, target.id)
+  clearTransferredModelSelections(target, requestedId)
+  return { success: true, freedFiles }
+}
+
 /** Delete a model's files from disk. Clears it as active if it was selected. */
-export async function deleteModel(
-  modelId: string
-): Promise<{ success: boolean; error?: string; freedFiles?: number }> {
+export async function deleteModel(modelId: string): Promise<DeleteModelResult> {
   const dir = llm.getModelsDir()
   // Imported local model: remove its files + registry entry, clear if active.
   if (modelId.startsWith('local:')) {
@@ -428,6 +540,19 @@ export async function deleteModel(
     return { success: true, freedFiles: freedLocal }
   }
   const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models')
+  const catalog = CATALOG as unknown as CatalogEntry[]
+  const downloaded = reconcileDownloadedModelRegistry(dir, catalog)
+  const transferred = downloadedVariant(downloaded, modelId)
+  if (transferred) {
+    return deleteTransferredModel({
+      dir,
+      requestedId: modelId,
+      target: transferred,
+      downloaded,
+      catalog
+    })
+  }
+
   const entry = CATALOG.find((m) => m.id === modelId) ?? (await resolveHuggingFaceModel(modelId))
   if (!entry) return { success: false, error: 'unknown model' }
   let freed = 0
@@ -495,6 +620,26 @@ export async function setActiveModel(
     return { success: true }
   }
   const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models')
+  const dir = llm.getModelsDir()
+  const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG as unknown as CatalogEntry[])
+  const transferred = downloadedVariant(downloaded, modelId)
+  if (transferred) {
+    if (!isChatLoadable(transferred.kind)) {
+      return {
+        success: false,
+        error: `${transferred.kind} models are not loadable as the chat LLM`
+      }
+    }
+    const primary = downloadedPrimary(transferred)
+    if (!primary) return { success: false, error: 'transferred model has no primary file' }
+    const mmproj = downloadedProjector(transferred) ?? null
+    fs.writeFileSync(
+      activeModelFile(),
+      JSON.stringify({ id: transferred.id, primary, mmproj }, null, 2)
+    )
+    llm.reloadModel()
+    return { success: true }
+  }
   const entry = CATALOG.find((m) => m.id === modelId) ?? (await resolveHuggingFaceModel(modelId))
   if (!entry) return { success: false, error: 'unknown model' }
   if (!isChatLoadable(entry.kind)) {
@@ -532,8 +677,29 @@ export async function reconcileActiveModelProjector(): Promise<boolean> {
   }
   const { CATALOG } = await import('@offgrid/models')
   const dir = llm.getModelsDir()
-  const entry = (CATALOG as unknown as CatalogEntry[]).find((m) => m.id === cfg!.id)
-  const projector = projectorToHeal(cfg, entry, (name) => fileSizeOf(dir, name) > 0)
+  const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG as unknown as CatalogEntry[])
+  const active = cfg!
+  const transferred = active.id ? downloadedVariant(downloaded, active.id) : undefined
+  if (transferred) {
+    const primary = downloadedPrimary(transferred)
+    const mmproj = downloadedProjector(transferred)
+    if (
+      primary &&
+      mmproj &&
+      fileSizeOf(dir, primary) > 0 &&
+      fileSizeOf(dir, mmproj) > 0 &&
+      (active.id !== transferred.id || active.primary !== primary || active.mmproj !== mmproj)
+    ) {
+      fs.writeFileSync(
+        activeModelFile(),
+        JSON.stringify({ id: transferred.id, primary, mmproj }, null, 2)
+      )
+      llm.reloadModel()
+      return true
+    }
+  }
+  const entry = (CATALOG as unknown as CatalogEntry[]).find((m) => m.id === active.id)
+  const projector = projectorToHeal(active, entry, (name) => fileSizeOf(dir, name) > 0)
   if (!projector) {
     return false // already has one / no projector / not downloaded yet — leave as is
   }
@@ -632,18 +798,12 @@ export interface TransferableModelFile {
 
 export interface TransferableModel {
   id: string
+  familyId: string
+  packageIdentity?: string
   name: string
   kind: string
   source: TransferableModelSource
   files: TransferableModelFile[]
-}
-
-export interface TransferredModelManifest {
-  id: string
-  name: string
-  kind: string
-  source: TransferableModelSource
-  files: Array<{ name: string; sizeBytes: number }>
 }
 
 function localRegistryFile(dir = llm.getModelsDir()): string {
@@ -724,9 +884,12 @@ export async function getTransferableModel(
   dir = llm.getModelsDir()
 ): Promise<TransferableModel | null> {
   const local = getLocalModels(dir).find((model) => model.id === modelId)
-  const downloaded = findDownloaded(dir, modelId)
   const { CATALOG } = await import('@offgrid/models')
   const catalog = CATALOG.find((model) => model.id === modelId)
+  const downloaded = downloadedVariant(
+    reconcileDownloadedModelRegistry(dir, CATALOG as unknown as CatalogEntry[]),
+    modelId
+  )
 
   const source: TransferableModelSource | null = local
     ? 'local'
@@ -749,7 +912,9 @@ export async function getTransferableModel(
   if (!files) return null
 
   return {
-    id: modelId,
+    id: downloaded?.id ?? modelId,
+    familyId: downloaded?.familyId ?? catalog?.id ?? local?.id ?? modelId,
+    packageIdentity: downloaded?.packageIdentity,
     name: local?.name ?? downloaded?.name ?? catalog?.name ?? modelId,
     kind: local?.kind ?? downloaded?.kind ?? catalog?.kind ?? 'text',
     source,
@@ -780,31 +945,41 @@ export async function registerTransferredModel(
   const resolved = transferredFilesOnDisk(dir, manifest.files)
   if (!resolved.files) return { success: false, error: resolved.error }
 
+  // Projector presence is the package capability SSOT. A caller can still label an older catalog
+  // entry as text, but the installed package and its deterministic identity must be vision.
+  const normalizedManifest: TransferredModelManifest = manifest.files.some(
+    (file) => file.role === 'projector' || isProjectorFileName(file.name)
+  )
+    ? { ...manifest, kind: 'vision' }
+    : manifest
+
   const { CATALOG } = await import('@offgrid/models')
-  const catalog = CATALOG.find((model) => model.id === manifest.id)
+  const catalog = CATALOG.find((model) => model.id === normalizedManifest.id)
   if (catalog) {
     const expected = new Set(catalog.files.map((file) => file.name))
-    const received = new Set(manifest.files.map((file) => file.name))
-    if (expected.size !== received.size || [...expected].some((name) => !received.has(name))) {
-      return { success: false, error: 'transferred catalog model files do not match the catalog' }
+    const received = new Set(normalizedManifest.files.map((file) => file.name))
+    if (expected.size === received.size && [...expected].every((name) => received.has(name))) {
+      return { success: true, id: normalizedManifest.id }
     }
-    return { success: true, id: manifest.id }
+    // A catalog id can have several valid quantizations and projector variants. The sender's
+    // manifest owns the exact installed files; the catalog owns only its download variant.
+    // Register a verified alternate variant below so it remains installed and transferable.
   }
 
-  if (manifest.source === 'local') {
+  if (normalizedManifest.source === 'local') {
     const primary =
-      manifest.files.find(
+      normalizedManifest.files.find(
         (file) => /\.gguf$/i.test(file.name) && !/mmproj|projector/i.test(file.name)
-      ) ?? manifest.files.find((file) => /\.gguf$/i.test(file.name))
+      ) ?? normalizedManifest.files.find((file) => /\.gguf$/i.test(file.name))
     if (!primary) return { success: false, error: 'local model transfer requires a GGUF file' }
-    const mmproj = manifest.files.find(
+    const mmproj = normalizedManifest.files.find(
       (file) => file.name !== primary.name && /\.gguf$/i.test(file.name)
     )
     const id = `local:${primary.name}`
     const list = getLocalModels(dir).filter((model) => model.id !== id)
     list.push({
       id,
-      name: manifest.name,
+      name: normalizedManifest.name,
       primary: primary.name,
       mmproj: mmproj?.name,
       kind: mmproj ? 'vision' : 'text',
@@ -817,19 +992,23 @@ export async function registerTransferredModel(
     return { success: true, id }
   }
 
+  const exactPackageId =
+    normalizedManifest.packageIdentity ?? modelPackageIdentity(normalizedManifest)
   recordDownloaded(dir, {
-    id: manifest.id,
-    name: manifest.name,
-    kind: manifest.kind,
-    files: manifest.files.map((file) => file.name)
+    id: exactPackageId,
+    familyId: normalizedManifest.id,
+    packageIdentity: exactPackageId,
+    name: normalizedManifest.name,
+    kind: normalizedManifest.kind,
+    files: normalizedManifest.files.map((file) => file.name)
   })
-  if (!findDownloaded(dir, manifest.id)) {
+  if (!findDownloaded(dir, exactPackageId)) {
     return { success: false, error: 'could not register the transferred model' }
   }
   if (dir === llm.getModelsDir()) {
     await reconcileActiveModelProjector().catch(() => false)
   }
-  return { success: true, id: manifest.id }
+  return { success: true, id: exactPackageId }
 }
 
 /** Set of every filename referenced by the local registry (primary + mmproj), so
@@ -931,6 +1110,7 @@ export async function getStorageInfo(): Promise<StorageInfo> {
   const dir = llm.getModelsDir()
   const { CATALOG } = await import('@offgrid/models')
   const catalog = CATALOG as unknown as CatalogEntry[]
+  const reconciledDownloaded = reconcileDownloadedModelRegistry(dir, catalog)
   // Protect catalog + imported-local + free-form-download files, plus the active
   // chat selection's files, from being flagged/deleted as orphans.
   let activePrimary: string | null = null
@@ -959,7 +1139,7 @@ export async function getStorageInfo(): Promise<StorageInfo> {
   const locals = getLocalModels()
   const installed = await listInstalled()
   const sizeOf = (name: string): number => fileSizeOf(dir, name)
-  const downloaded = readDownloaded(dir)
+  const downloaded = reconciledDownloaded
   const catalogIds = new Set(catalog.map((m) => m.id))
   const catalogById = (id: string): CatalogEntry | undefined => catalog.find((m) => m.id === id)
   const models: ModelDiskEntry[] = installed.map((id) =>

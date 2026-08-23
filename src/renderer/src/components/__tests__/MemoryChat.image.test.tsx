@@ -25,6 +25,8 @@ import { render, screen, waitFor, cleanup, fireEvent, act } from '@testing-libra
 import userEvent from '@testing-library/user-event'
 import { MemoryChat } from '../MemoryChat'
 import { TooltipProvider } from '../ui/tooltip'
+import { registerHook } from '../../bootstrap/hookRegistry'
+import { SYNC_SUBSCRIBE_INCOMING_FILES_HOOK, type IncomingSharedFile } from '../../lib/sync-hooks'
 import {
   imageMemoryGuardErrorMessage,
   type ImageGenerationJobContract
@@ -62,14 +64,22 @@ type GenPayload = {
   conversationId?: string
 }
 
-type ImageResult = { dataUrl: string; path: string; seed?: number; model?: string }
+type ImageResult = {
+  dataUrl: string
+  path: string
+  syncId?: string
+  seed?: number
+  model?: string
+  prompt?: string
+}
 type ImageProgress = {
-  phase: string
+  phase: 'sampling' | 'decoding'
   step: number
   total: number
   secPerStep: number
   preview?: string
 }
+type GalleryImage = { path: string; name: string; mtime: number }
 type TestConversation = {
   id: string
   title: string
@@ -94,6 +104,7 @@ type InstallApiOptions = {
   active: string
   models: string[]
   settings?: Record<string, unknown>
+  styleThumbs?: Record<string, string>
   conversations?: TestConversation[]
   generate?: (payload: GenPayload) => Promise<ImageResult>
   chatVision?: boolean
@@ -103,6 +114,12 @@ type InstallApiOptions = {
   jobStatus?: ImageGenerationJobContract
   /** Seed per-conversation persisted messages (getRagMessages), keyed by conversation id. */
   messages?: Record<string, unknown[]>
+  toolResult?: {
+    answer: string
+    toolCalls: { name: string; result: string }[]
+    unified: never[]
+    imageRequests?: { prompt: string }[]
+  }
 }
 
 type InstalledApi = {
@@ -111,14 +128,24 @@ type InstalledApi = {
   emitJobState: (job: ImageGenerationJobContract) => void
   setActiveModalModel: Mock<(kind: string, model: string) => Promise<void>>
   toolChat: Mock<
-    (...args: unknown[]) => Promise<{ answer: string; toolCalls: never[]; unified: never[] }>
+    (...args: unknown[]) => Promise<{
+      answer: string
+      toolCalls: { name: string; result: string }[]
+      unified: never[]
+      imageRequests?: { prompt: string }[]
+    }>
   >
   exportGeneratedImage: Mock<(...args: unknown[]) => Promise<void>>
+  addRagMessage: Mock<(...args: unknown[]) => Promise<{ id: number; uuid: string }>>
+  imageGenConversationPersisted: Mock<(...args: unknown[]) => Promise<void>>
   getRagMessages: Mock<(id: string) => Promise<unknown[]>>
   cancelImageGen: Mock<() => void>
   chatVisionAvailable: Mock<() => Promise<boolean>>
   processFile: Mock<ProcessImage>
   ragChat: Mock<(...args: unknown[]) => Promise<{ answer: string; context: { unified: never[] } }>>
+  listGeneratedImages: Mock<() => Promise<GalleryImage[]>>
+  replaceGeneratedGallery: (images: GalleryImage[]) => void
+  emitIncomingFiles: (files: IncomingSharedFile[]) => void
   emitProgress: (value: ImageProgress) => void
 }
 
@@ -140,27 +167,53 @@ function installApi(opts: InstallApiOptions): InstalledApi {
   const settings: Record<string, unknown> = { ...(opts.settings ?? {}) }
   const conversations = [...(opts.conversations ?? [])]
   const messages = new Map<string, unknown[]>(Object.entries(opts.messages ?? {}))
-  let progress: ((value: ImageProgress) => void) | null = null
+  const generatedGallery: GalleryImage[] = []
+  let activeImageConversation: string | null = null
   let jobStateCb: ((job: ImageGenerationJobContract) => void) | null = null
   let convUpdatedCb: ((conversationId: string) => void) | null = null
-  const generateImage = vi.fn<(payload: GenPayload) => Promise<ImageResult>>(
+  let incomingFilesCb: ((files: IncomingSharedFile[]) => void) | null = null
+  registerHook(SYNC_SUBSCRIBE_INCOMING_FILES_HOOK, (cb: typeof incomingFilesCb) => {
+    incomingFilesCb = cb
+    return () => {
+      incomingFilesCb = null
+    }
+  })
+  const generate =
     opts.generate ??
-      (async (payload: GenPayload) => ({
-        dataUrl: 'data:image/png;base64,AAAA',
-        path: '/tmp/out.png',
-        seed: payload.seed,
-        model: payload.model
-      }))
-  )
+    (async (payload: GenPayload) => ({
+      dataUrl: 'data:image/png;base64,AAAA',
+      path: '/tmp/out.png',
+      seed: payload.seed,
+      model: payload.model,
+      prompt: payload.prompt
+    }))
+  const generateImage = vi.fn<(payload: GenPayload) => Promise<ImageResult>>(async (payload) => {
+    activeImageConversation = payload.conversationId ?? null
+    const result = await generate(payload)
+    generatedGallery.unshift({
+      path: result.path,
+      name: result.path.split('/').pop() ?? 'generated.png',
+      mtime: Date.now()
+    })
+    return result
+  })
   const setActiveModalModel = vi.fn<(kind: string, model: string) => Promise<void>>(async () => {})
   // The agentic path's single entry point. Returns a benign text answer with no
   // imageRequest, so if the turn reaches the agent no generateImage call follows —
   // making "generateImage was/ wasn't called" an unambiguous terminal artifact.
-  const toolChat = vi.fn<
-    (...args: unknown[]) => Promise<{ answer: string; toolCalls: never[]; unified: never[] }>
-  >(async () => ({ answer: 'done', toolCalls: [], unified: [] }))
+  const toolChat = vi.fn(async () =>
+    opts.toolResult
+      ? structuredClone(opts.toolResult)
+      : { answer: 'done', toolCalls: [], unified: [] }
+  )
   const cancelImageGen = vi.fn<() => void>()
   const exportGeneratedImage = vi.fn<(...args: unknown[]) => Promise<void>>(async () => {})
+  let nextStoredMessageId = 1
+  const addRagMessage = vi.fn(async () => {
+    const id = nextStoredMessageId++
+    return { id, uuid: `stored-message-${id}` }
+  })
+  const imageGenConversationPersisted = vi.fn(async () => {})
   // Timestamps are filled in where a seed omitted one. The renderer projects each row through
   // projectSyncedMessageTurn, which returns null for a message it cannot order, so an untimestamped
   // row is silently dropped and the conversation renders empty. The table this stands for always has
@@ -184,6 +237,7 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     answer: opts.ragAnswer ?? 'A red fox is standing in snow.',
     context: { unified: [] as never[] }
   }))
+  const listGeneratedImages = vi.fn(async () => generatedGallery.map((image) => ({ ...image })))
   const api = {
     isPro: false,
     // --- assertion subjects ---
@@ -196,12 +250,6 @@ function installApi(opts: InstallApiOptions): InstalledApi {
       active: opts.active
     })),
     cancelImageGen,
-    onImageGenProgress: vi.fn((callback: (value: ImageProgress) => void) => {
-      progress = callback
-      return () => {
-        progress = null
-      }
-    }),
     // --- main-owned image job (the reattach-on-remount path) ---
     imageGenJobStatus: vi.fn(
       async (): Promise<ImageGenerationJobContract> =>
@@ -210,6 +258,8 @@ function installApi(opts: InstallApiOptions): InstalledApi {
           phase: 'idle',
           conversationId: null,
           projectId: null,
+          stage: null,
+          enhancedPrompt: '',
           progress: null,
           outputPath: null,
           error: null,
@@ -244,7 +294,8 @@ function installApi(opts: InstallApiOptions): InstalledApi {
       })
       messages.set(id, [])
     }),
-    addRagMessage: vi.fn(async () => {}),
+    addRagMessage,
+    imageGenConversationPersisted,
     saveArtifact: vi.fn(async () => {}),
     exportGeneratedImage,
     // --- settings round-trip (per-model override persistence) ---
@@ -255,7 +306,8 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     // --- misc mount-time calls (inert) ---
     listProjects: vi.fn(async () => []),
     listArtifacts: vi.fn(async () => []),
-    styleThumbs: vi.fn(async () => ({})),
+    listGeneratedImages,
+    styleThumbs: vi.fn(async () => ({ ...(opts.styleThumbs ?? {}) })),
     listSkills: vi.fn(async () => []),
     onRagStream: vi.fn(() => () => {}),
     chatVisionAvailable,
@@ -270,12 +322,34 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     toolChat,
     exportGeneratedImage,
     getRagMessages,
+    addRagMessage,
+    imageGenConversationPersisted,
     cancelImageGen,
     chatVisionAvailable,
     processFile,
     ragChat,
+    listGeneratedImages,
+    replaceGeneratedGallery(images: GalleryImage[]): void {
+      generatedGallery.splice(0, generatedGallery.length, ...images)
+    },
+    emitIncomingFiles(files: IncomingSharedFile[]): void {
+      incomingFilesCb?.(files)
+    },
     emitProgress(value: ImageProgress): void {
-      progress?.(value)
+      if (!activeImageConversation) return
+      jobStateCb?.({
+        id: 'live-image-job',
+        phase: 'running',
+        conversationId: activeImageConversation,
+        projectId: null,
+        stage: value.phase === 'decoding' ? 'decoding' : 'generating',
+        enhancedPrompt: '',
+        progress: value,
+        outputPath: null,
+        error: null,
+        startedAt: 1,
+        finishedAt: null
+      })
     },
     emitConversationUpdated(conversationId: string): void {
       convUpdatedCb?.(conversationId)
@@ -313,7 +387,8 @@ function typeSteps(value: number): void {
 
 async function sendPrompt(user: ReturnType<typeof userEvent.setup>, prompt: string): Promise<void> {
   const textarea = screen.getByPlaceholderText(/describe an image to generate/i)
-  await user.type(textarea, prompt)
+  ;(textarea as HTMLTextAreaElement).focus()
+  await user.type(textarea, prompt, { skipClick: true })
   await user.click(screen.getByRole('button', { name: /^send$/i }))
 }
 
@@ -342,8 +417,153 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
   it('opens the real Gallery when a synced generated-file destination targets it', async () => {
     installApi({ active: FULL, models: [FULL] })
     renderChat({ openGallery: true })
-    expect(await screen.findByText('Gallery')).toBeTruthy()
+    expect(await screen.findByRole('dialog', { name: 'Gallery' })).toBeTruthy()
     expect(screen.getByRole('button', { name: /^images/i })).toBeTruthy()
+  })
+
+  it('shows bundled style previews without a runtime generation control', async () => {
+    const user = userEvent.setup()
+    installApi({
+      active: FULL,
+      models: [FULL],
+      styleThumbs: {
+        Photoreal: '/app/resources/style-thumbs/Photoreal.png',
+        Cinematic: '/app/resources/style-thumbs/Cinematic.png'
+      }
+    })
+    renderChat()
+
+    await openImageComposer(user)
+
+    expect((await screen.findByAltText('Photoreal')).getAttribute('src')).toBe(
+      'ogcapture:///app/resources/style-thumbs/Photoreal.png'
+    )
+    expect(screen.getByAltText('Photoreal').closest('button')?.className).toContain('aspect-[16/9]')
+    expect((await screen.findByAltText('Cinematic')).getAttribute('src')).toBe(
+      'ogcapture:///app/resources/style-thumbs/Cinematic.png'
+    )
+    expect(screen.queryByRole('button', { name: /generate previews/i })).toBeNull()
+  })
+
+  it('shows the same style previews inline when Image is opened in an existing chat', async () => {
+    const user = userEvent.setup()
+    const conv: TestConversation = {
+      id: 'existing-image-chat',
+      title: 'Existing image chat',
+      project_id: null,
+      created_at: '2026-07-17T00:00:00.000Z',
+      updated_at: '2026-07-17T00:00:00.000Z',
+      message_count: 1
+    }
+    installApi({
+      active: FULL,
+      models: [FULL],
+      conversations: [conv],
+      messages: {
+        [conv.id]: [{ id: 1, role: 'user', content: 'Draw a dog' }]
+      },
+      styleThumbs: {
+        Photoreal: '/app/resources/style-thumbs/Photoreal.png',
+        Cinematic: '/app/resources/style-thumbs/Cinematic.png'
+      }
+    })
+    renderChat({ conversationId: conv.id })
+
+    expect(await screen.findByText('Draw a dog')).toBeTruthy()
+    await openImageComposer(user)
+
+    expect((await screen.findByAltText('Photoreal')).getAttribute('src')).toBe(
+      'ogcapture:///app/resources/style-thumbs/Photoreal.png'
+    )
+    expect(screen.getByRole('region', { name: 'Image style presets' })).toBeTruthy()
+    expect(screen.getByAltText('Photoreal').closest('button')?.className).toContain('h-48')
+    expect((await screen.findByAltText('Cinematic')).getAttribute('src')).toBe(
+      'ogcapture:///app/resources/style-thumbs/Cinematic.png'
+    )
+  })
+
+  it('reloads a received image while Gallery is open, then Escape restores trigger focus', async () => {
+    const user = userEvent.setup()
+    const api = installApi({ active: FULL, models: [FULL] })
+    renderChat()
+
+    const trigger = await screen.findByTitle('Generated images')
+    act(() => {
+      api.emitIncomingFiles([
+        {
+          syncId: 'sync-image',
+          name: 'synced-image.png',
+          fileSize: 10,
+          mimeType: 'image/png',
+          kind: 'generated-image'
+        }
+      ])
+    })
+    await user.click(trigger)
+    expect(await screen.findByRole('dialog', { name: 'Gallery' })).toBeTruthy()
+    await waitFor(() => expect(api.listGeneratedImages).toHaveBeenCalledTimes(1))
+
+    api.replaceGeneratedGallery([
+      { path: '/received/synced-image.png', name: 'synced-image.png', mtime: 1 }
+    ])
+    act(() => api.emitIncomingFiles([]))
+
+    expect(await screen.findByAltText('synced-image.png')).toBeTruthy()
+    expect(api.listGeneratedImages).toHaveBeenCalledTimes(2)
+
+    await user.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Gallery' })).toBeNull()
+    })
+    expect(document.activeElement).toBe(trigger)
+  })
+
+  it('closes Gallery when the user clicks its scrim', async () => {
+    const user = userEvent.setup()
+    installApi({ active: FULL, models: [FULL] })
+    renderChat()
+
+    const trigger = await screen.findByTitle('Generated images')
+    await user.click(trigger)
+    expect(await screen.findByRole('dialog', { name: 'Gallery' })).toBeTruthy()
+
+    const scrim = document.querySelector<HTMLElement>('[data-slot="dialog-overlay"]')
+    expect(scrim).not.toBeNull()
+    // Radix defers its outside-pointer listener by one task so the opening click cannot close it.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await user.click(scrim!)
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Gallery' })).toBeNull()
+    })
+    expect(document.activeElement).toBe(trigger)
+  })
+
+  it('renders the conversation list as an accessible resizable panel without a fixed inner width', async () => {
+    installApi({ active: FULL, models: [FULL] })
+    renderChat()
+
+    const resizeHandle = await screen.findByRole('separator', {
+      name: 'Resize conversation list'
+    })
+    expect(resizeHandle.className).toContain('cursor-col-resize')
+    const historyPanel = document.querySelector<HTMLElement>(
+      '[data-panel-id="conversation-history"]'
+    )
+    expect(historyPanel).not.toBeNull()
+    expect(historyPanel?.dataset.panelSize).toBe('20.0')
+    expect(historyPanel?.querySelector('.w-64')).toBeNull()
+    expect(historyPanel?.className).toContain('transition-[flex-grow]')
+    const newChat = screen.getByRole('button', { name: 'New chat' })
+    expect(newChat.parentElement?.className).toContain('px-2')
+    expect(newChat.parentElement?.className).not.toContain('p-3')
+    expect(document.querySelector('[data-panel-id="chat"]')?.className).toContain(
+      'transition-[flex-grow]'
+    )
+    const toggle = screen.getByRole('button', { name: 'Collapse conversation list' })
+    expect(toggle.closest('header')?.firstElementChild).toBe(toggle)
+    expect(historyPanel?.querySelector('[aria-label="Collapse conversation list"]')).toBeNull()
+    expect(screen.queryByTitle('Show conversations')).toBeNull()
   })
 
   it('carries the USER-typed steps (10), not the model default (28), and the picked model', async () => {
@@ -407,6 +627,8 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
         phase: 'running',
         conversationId: 'c-img',
         projectId: null,
+        stage: 'generating',
+        enhancedPrompt: 'a glass observatory under an aurora',
         progress: { step: 3, total: 20, secPerStep: 1 },
         outputPath: null,
         error: null,
@@ -420,7 +642,7 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     // proving the remount re-derived the whole in-flight UI from main, not a blank screen.
     // Delete the markGenerating(...) call in the reattach observe() → generatingConvs stays empty
     // → this panel never renders → the test goes red (the "generated but UI didn't show it" bug).
-    expect(await screen.findByText('Step 3/20')).toBeTruthy()
+    expect(await screen.findByText('Generating image · Step 3 of 20')).toBeTruthy()
   })
 
   it('picking a different model in the dropdown routes through setActiveModalModel and reaches the payload', async () => {
@@ -471,8 +693,11 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     typeSteps(17)
     fireEvent.change(screen.getByLabelText('Guidance'), { target: { value: '5.5' } })
     const seedInput = screen.getByLabelText('Seed') as HTMLInputElement
-    await firstUser.type(seedInput, '4242')
-    await firstUser.type(screen.getByPlaceholderText('Negative prompt'), 'blurry, watermark')
+    seedInput.focus()
+    await firstUser.type(seedInput, '4242', { skipClick: true })
+    const negativePrompt = screen.getByPlaceholderText('Negative prompt') as HTMLInputElement
+    negativePrompt.focus()
+    await firstUser.type(negativePrompt, 'blurry, watermark', { skipClick: true })
     await sendPrompt(firstUser, 'a glass observatory under an aurora')
 
     await waitFor(() => expect(boundary.generateImage).toHaveBeenCalledTimes(1))
@@ -526,7 +751,8 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
 // Send a message in the DEFAULT chat composer (not image mode).
 async function sendChat(user: ReturnType<typeof userEvent.setup>, text: string): Promise<void> {
   const textarea = await screen.findByPlaceholderText(/ask anything/i, {}, { timeout: 3000 })
-  await user.type(textarea, text)
+  ;(textarea as HTMLTextAreaElement).focus()
+  await user.type(textarea, text, { skipClick: true })
   await user.click(screen.getByRole('button', { name: /^send$/i }))
 }
 
@@ -578,6 +804,71 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     const payload = generateImage.mock.calls[0]![0] as GenPayload
     expect(payload.prompt).toBe('a dog') // cleanImagePrompt stripped the verb
   })
+
+  it('generates, associates, and renders one distinct image for every completed image tool call', async () => {
+    const outputs = [
+      {
+        dataUrl: 'data:image/png;base64,FIRST',
+        path: '/generated/first.png',
+        syncId: 'image-sync-first'
+      },
+      {
+        dataUrl: 'data:image/png;base64,SECOND',
+        path: '/generated/second.png',
+        syncId: 'image-sync-second'
+      }
+    ]
+    const boundary = installApi({
+      active: FULL,
+      models: [FULL],
+      settings: { composerToolsOn: true },
+      toolResult: {
+        answer: 'I made both images.',
+        toolCalls: [
+          { name: 'generate_image', result: 'Image generation started' },
+          { name: 'generate_image', result: 'Image generation started' }
+        ],
+        unified: [],
+        imageRequests: [{ prompt: 'first scene' }, { prompt: 'second scene' }]
+      },
+      generate: async () => outputs.shift()!
+    })
+    const user = userEvent.setup()
+    renderChat()
+
+    await sendChat(user, 'make two different scenes')
+
+    await waitFor(() => expect(boundary.generateImage).toHaveBeenCalledTimes(2))
+    expect(boundary.generateImage.mock.calls.map(([payload]) => payload.prompt)).toEqual([
+      'first scene',
+      'second scene'
+    ])
+    const generated = await screen.findAllByAltText('Generated')
+    expect(generated.map((image) => image.getAttribute('src'))).toEqual([
+      'data:image/png;base64,FIRST',
+      'data:image/png;base64,SECOND'
+    ])
+
+    const persistedImages = boundary.addRagMessage.mock.calls.filter(
+      ([, role, , context]) =>
+        role === 'assistant' && !!(context as { imageRef?: unknown })?.imageRef
+    )
+    expect(persistedImages).toHaveLength(2)
+    expect(
+      persistedImages.map(([, , , context]) => (context as { imageRef: unknown }).imageRef)
+    ).toEqual([
+      { id: 'image-sync-first', path: '/generated/first.png' },
+      { id: 'image-sync-second', path: '/generated/second.png' }
+    ])
+    expect(
+      boundary.imageGenConversationPersisted.mock.calls.map(([, messageId]) => messageId)
+    ).toEqual(['stored-message-3', 'stored-message-4'])
+
+    await user.click(screen.getByTitle('Generated images'))
+    expect(await screen.findByRole('button', { name: /images \(2\)/i })).toBeTruthy()
+    expect(screen.getByAltText('first.png')).toBeTruthy()
+    expect(screen.getByAltText('second.png')).toBeTruthy()
+  })
 })
 
 function conversation(id: string, title: string): TestConversation {
@@ -612,6 +903,46 @@ describe('<MemoryChat/> image and vision release journeys', () => {
     })
   })
 
+  it('renders a synced image attachment inline and opens the existing lightbox', async () => {
+    const conv = conversation('c-synced-image', 'Synced image')
+    installApi({
+      active: FULL,
+      models: [FULL],
+      conversations: [conv],
+      messages: {
+        [conv.id]: [
+          {
+            uuid: 'message-image-1',
+            role: 'assistant',
+            content: 'Generated image for: "Draw a dog"',
+            context: JSON.stringify({
+              attachments: [
+                {
+                  id: 'image-1',
+                  name: 'dog.png',
+                  kind: 'image',
+                  path: '/received/dog.png'
+                }
+              ]
+            })
+          }
+        ]
+      }
+    })
+    const user = userEvent.setup()
+    renderChat({ conversationId: conv.id })
+
+    const image = await screen.findByAltText('dog.png')
+    expect(image.getAttribute('src')).toBe('ogcapture:///received/dog.png')
+    expect(screen.queryByText('image')).toBeNull()
+
+    await user.click(image)
+    expect(screen.getByRole('dialog', { name: 'Generated image preview' })).toBeTruthy()
+    expect(screen.getByAltText('Generated preview').getAttribute('src')).toBe(
+      'ogcapture:///received/dog.png'
+    )
+  })
+
   it('shows live progress, renders one generated image, and opens and saves it (#61, #67)', async () => {
     const turn = deferred<ImageResult>()
     const boundary = installApi({
@@ -626,14 +957,53 @@ describe('<MemoryChat/> image and vision release journeys', () => {
     await sendPrompt(user, 'a lighthouse during a winter storm')
     await waitFor(() => expect(boundary.generateImage).toHaveBeenCalledTimes(1))
 
+    const conversationId = boundary.generateImage.mock.calls[0]![0].conversationId!
     act(() => {
-      boundary.emitProgress({ phase: 'diffusion', step: 4, total: 10, secPerStep: 0.5 })
+      boundary.emitJobState({
+        id: 'live-image-job',
+        phase: 'running',
+        conversationId,
+        projectId: null,
+        stage: 'enhancing',
+        enhancedPrompt: 'A cinematic lighthouse in a fierce',
+        progress: null,
+        outputPath: null,
+        error: null,
+        startedAt: 1,
+        finishedAt: null
+      })
     })
-    expect(await screen.findByText('Step 4/10')).toBeTruthy()
+    expect(await screen.findByText('A cinematic lighthouse in a fierce')).toBeTruthy()
+    expect(screen.getByText('Enhancing prompt…')).toBeTruthy()
 
-    turn.resolve({ dataUrl: 'data:image/png;base64,AAAA', path: '/generated/lighthouse.png' })
+    act(() => {
+      boundary.emitProgress({ phase: 'sampling', step: 4, total: 10, secPerStep: 0.5 })
+    })
+    expect(await screen.findByText('Generating image · Step 4 of 10')).toBeTruthy()
+
+    const enhancedPrompt =
+      'A cinematic lighthouse in a fierce winter storm, dramatic waves, cold blue light'
+    turn.resolve({
+      dataUrl: 'data:image/png;base64,AAAA',
+      path: '/generated/lighthouse.png',
+      prompt: enhancedPrompt
+    })
     const generated = await screen.findByAltText('Generated')
+    const caption = await screen.findByText('Generated for: a lighthouse during a winter storm')
+    const disclosure = await screen.findByRole('button', { name: /enhanced prompt/i })
     expect(screen.getAllByAltText('Generated')).toHaveLength(1)
+    expect(generated.className).toContain('w-full')
+    expect(generated.compareDocumentPosition(caption) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(
+      0
+    )
+    await user.click(disclosure)
+    expect(screen.getByText(enhancedPrompt)).toBeTruthy()
+    expect(boundary.addRagMessage).toHaveBeenCalledWith(
+      expect.any(String),
+      'assistant',
+      expect.stringContaining(`__LABEL:Enhanced prompt__\n${enhancedPrompt}`),
+      expect.any(Object)
+    )
 
     await user.click(generated)
     expect(screen.getByRole('dialog', { name: 'Generated image preview' })).toBeTruthy()
@@ -712,12 +1082,12 @@ describe('<MemoryChat/> image and vision release journeys', () => {
     await waitFor(() => expect(boundary.generateImage).toHaveBeenCalledTimes(1))
     expect(boundary.generateImage.mock.calls[0]![0].conversationId).toBe('conversation-a')
     act(() => {
-      boundary.emitProgress({ phase: 'diffusion', step: 2, total: 8, secPerStep: 1 })
+      boundary.emitProgress({ phase: 'sampling', step: 2, total: 8, secPerStep: 1 })
     })
-    expect(await screen.findByText('Step 2/8')).toBeTruthy()
+    expect(await screen.findByText('Generating image · Step 2 of 8')).toBeTruthy()
 
     await user.click(screen.getByText('Conversation B'))
-    await waitFor(() => expect(screen.queryByText('Step 2/8')).toBeNull())
+    await waitFor(() => expect(screen.queryByText('Generating image · Step 2 of 8')).toBeNull())
     expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
     expect(boundary.cancelImageGen).not.toHaveBeenCalled()
 

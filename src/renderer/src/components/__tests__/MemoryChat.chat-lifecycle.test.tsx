@@ -56,9 +56,46 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
 
     boundary.resolve(0, 'Choose plan B because it is reversible.')
 
-    expect(await screen.findByRole('button', { name: /thought process/i })).toBeTruthy()
+    const thoughtProcess = await screen.findByRole('button', { name: /thought process/i })
+    const thoughtProcessLabel = screen.getByText('Thought process')
+    expect(thoughtProcessLabel.classList.contains('whitespace-nowrap')).toBe(true)
+    await user.click(thoughtProcess)
+    expect(await screen.findByText('First compare risk, then reversibility.')).toBeTruthy()
     expect(screen.getByText('Choose plan B because it is reversible.')).toBeTruthy()
     expect(screen.queryByText(/<\/?think>/i)).toBeNull()
+  })
+
+  it('keeps actions off supporting context and below the real assistant reply', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-a'] = [
+      {
+        id: 1,
+        role: 'assistant',
+        content:
+          '<think>__LABEL:Enhanced prompt__\nA cinematic lighthouse in a winter storm.</think>'
+      },
+      {
+        id: 2,
+        role: 'assistant',
+        content: 'Generated image for: a lighthouse in a winter storm'
+      }
+    ]
+    installBoundary(boundary)
+
+    renderChat({ conversationId: 'conversation-a' })
+
+    const disclosure = await screen.findByRole('button', { name: /enhanced prompt/i })
+    const answer = screen.getByText('Generated image for: a lighthouse in a winter storm')
+    const speak = screen.getByRole('button', { name: 'Speak' })
+    expect(screen.getByTestId('supporting-context-bubble')).toBeTruthy()
+    expect(screen.getByTestId('chat-message-1').className).toContain('mb-2')
+    expect(screen.getByTestId('chat-message-2').className).toContain('mb-5')
+    expect(disclosure.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(
+      0
+    )
+    expect(answer.compareDocumentPosition(speak) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+    expect(screen.getAllByTitle('Copy')).toHaveLength(1)
+    expect(screen.getAllByTitle('Regenerate')).toHaveLength(1)
   })
 
   it('strips inline think markers from a plain reply through the real stream parser (#37)', async () => {
@@ -363,7 +400,10 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     // selector (targeted by its title so it is not confused with the header's "In Project…"
     // link, which shares the project name). The header then reflects the new active project;
     // the already-sent turn must stay attributed to alpha (asserted below).
-    await user.click(screen.getByTitle(/choose what this chat can draw on/i))
+    const scopeButton = screen.getByTitle(/choose what this chat can draw on/i)
+    scopeButton.focus()
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(scopeButton.getAttribute('data-state')).toBe('open'))
     await user.click(await screen.findByRole('menuitem', { name: /project beta/i }))
     expect(await screen.findByRole('button', { name: /in project beta/i })).toBeTruthy()
 

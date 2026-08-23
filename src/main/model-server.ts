@@ -747,8 +747,13 @@ async function executeImage(
     const b64 = out.dataUrl.slice(out.dataUrl.indexOf(',') + 1)
     const datum =
       responseFormat === 'url'
-        ? { url: `file://${out.path}`, seed: out.seed, model: out.model }
-        : { b64_json: b64, seed: out.seed, model: out.model }
+        ? {
+            url: `file://${out.path}`,
+            revised_prompt: out.prompt,
+            seed: out.seed,
+            model: out.model
+          }
+        : { b64_json: b64, revised_prompt: out.prompt, seed: out.seed, model: out.model }
     return {
       created: Math.floor(Date.now() / 1000),
       data: [datum],

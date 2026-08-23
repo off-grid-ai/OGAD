@@ -122,3 +122,10 @@ export async function serveCaptureFile(
     return new Response(null, { status: 404 })
   }
 }
+
+/**
+ * The reader half of the scheme now lives beside its writer in `shared/ogcapture-url`, because the
+ * renderer builds these URLs and the main process resolves them: written apart, they drifted, and the
+ * drift was invisible on macOS. Re-exported here so existing callers and their tests keep their import.
+ */
+export { capturePathFromUrl } from '../shared/ogcapture-url'

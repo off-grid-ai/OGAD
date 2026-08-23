@@ -268,4 +268,12 @@ describe('createToolMarkupFilter - hide tool-call markup from the visible stream
     f.end()
     expect(f.out()).toBe('answer ')
   })
+
+  it('removes a stray closing think tag before a text-form tool call', () => {
+    const f = collect()
+    f.push('I will search for that.</thi')
+    f.push('nk>\n<tool_call><function=web_search>raw protocol')
+    f.end()
+    expect(f.out()).toBe('I will search for that.\n')
+  })
 })

@@ -15,7 +15,7 @@
 // reload uses to restore the block), not an intermediate field.
 
 import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest'
-import { render, screen, waitFor, cleanup } from '@testing-library/react'
+import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryChat } from '../MemoryChat'
 import { TooltipProvider } from '../ui/tooltip'
@@ -80,7 +80,7 @@ describe('<MemoryChat/> — streamed reasoning is persisted (survives reload)', 
     )
 
     const textarea = await screen.findByPlaceholderText(/ask anything/i, {}, { timeout: 3000 })
-    await user.type(textarea, 'what did I work on')
+    fireEvent.change(textarea, { target: { value: 'what did I work on' } })
     await user.click(screen.getByRole('button', { name: /^send$/i }))
 
     // Terminal artifact: the assistant turn persisted via addRagMessage carries the

@@ -28,6 +28,58 @@ afterAll(() => {
 })
 
 describe('device-transferred model registration', () => {
+  it('registers a valid vision variant whose files differ from the download catalog', async () => {
+    const primary = 'Qwen3.5-0.8B-Q4_0.gguf'
+    const projector = 'qwen3.5-0.8b-mmproj-F16.gguf'
+    const primaryBytes = validGguf(3)
+    const projectorBytes = validGguf(4)
+    fs.writeFileSync(path.join(dataDir, 'models', primary), primaryBytes)
+    fs.writeFileSync(path.join(dataDir, 'models', projector), projectorBytes)
+
+    const result = await manager.registerTransferredModel({
+      id: 'unsloth/Qwen3.5-0.8B-GGUF',
+      name: 'Qwen3.5 0.8B',
+      kind: 'vision',
+      source: 'downloaded',
+      files: [
+        { name: primary, sizeBytes: primaryBytes.length },
+        { name: projector, sizeBytes: projectorBytes.length }
+      ]
+    })
+
+    expect(result.success).toBe(true)
+    expect(result.id).toMatch(/^model-package-v1:[0-9a-f]{64}$/)
+    expect(await manager.listInstalled()).toContain(result.id)
+    expect(await manager.getTransferableModel(result.id!)).toMatchObject({
+      id: result.id,
+      familyId: 'unsloth/Qwen3.5-0.8B-GGUF',
+      packageIdentity: result.id,
+      kind: 'vision',
+      source: 'downloaded',
+      files: [
+        { name: primary, sizeBytes: primaryBytes.length },
+        { name: projector, sizeBytes: projectorBytes.length }
+      ]
+    })
+
+    const otherPrimary = 'Qwen3.5-0.8B-Q5_K_M.gguf'
+    const otherBytes = validGguf(5)
+    fs.writeFileSync(path.join(dataDir, 'models', otherPrimary), otherBytes)
+    const other = await manager.registerTransferredModel({
+      id: 'unsloth/Qwen3.5-0.8B-GGUF',
+      name: 'Qwen3.5 0.8B',
+      kind: 'vision',
+      source: 'downloaded',
+      files: [
+        { name: otherPrimary, sizeBytes: otherBytes.length },
+        { name: projector, sizeBytes: projectorBytes.length }
+      ]
+    })
+    expect(other.success).toBe(true)
+    expect(other.id).not.toBe(result.id)
+    expect(await manager.listInstalled()).toEqual(expect.arrayContaining([result.id, other.id]))
+  })
+
   it('registers a verified multi-file model through the production catalog owner', async () => {
     const primary = 'shared-model-q4.gguf'
     const projector = 'mmproj-shared-model-f16.gguf'
@@ -47,11 +99,13 @@ describe('device-transferred model registration', () => {
       ]
     })
 
-    expect(result).toEqual({ success: true, id: 'off-grid/test-shared-model' })
-    expect(await manager.listInstalled()).toContain('off-grid/test-shared-model')
+    expect(result.success).toBe(true)
+    expect(result.id).toMatch(/^model-package-v1:[0-9a-f]{64}$/)
+    expect(await manager.listInstalled()).toContain(result.id)
     expect((await manager.getStorageInfo()).orphans).toEqual([])
-    expect(await manager.getTransferableModel('off-grid/test-shared-model')).toMatchObject({
-      id: 'off-grid/test-shared-model',
+    expect(await manager.getTransferableModel(result.id!)).toMatchObject({
+      id: result.id,
+      familyId: 'off-grid/test-shared-model',
       name: 'Test shared model',
       kind: 'vision',
       source: 'downloaded',
@@ -60,6 +114,48 @@ describe('device-transferred model registration', () => {
         { name: projector, sizeBytes: projectorBytes.length }
       ]
     })
+  })
+
+  it('deletes the selected transferred variant and keeps files owned by a sibling variant', async () => {
+    const sharedProjector = 'mmproj-delete-family-f16.gguf'
+    const firstPrimary = 'delete-family-q4_0.gguf'
+    const secondPrimary = 'delete-family-q5_k_m.gguf'
+    const projectorBytes = validGguf(6)
+    const firstBytes = validGguf(7)
+    const secondBytes = validGguf(8)
+    fs.writeFileSync(path.join(dataDir, 'models', sharedProjector), projectorBytes)
+    fs.writeFileSync(path.join(dataDir, 'models', firstPrimary), firstBytes)
+    fs.writeFileSync(path.join(dataDir, 'models', secondPrimary), secondBytes)
+
+    const register = (
+      primary: string,
+      bytes: Buffer
+    ): ReturnType<typeof manager.registerTransferredModel> =>
+      manager.registerTransferredModel({
+        id: 'off-grid/delete-family',
+        name: 'Delete family',
+        kind: 'vision',
+        source: 'downloaded',
+        files: [
+          { name: primary, sizeBytes: bytes.length },
+          { name: sharedProjector, sizeBytes: projectorBytes.length }
+        ]
+      })
+    const first = await register(firstPrimary, firstBytes)
+    const second = await register(secondPrimary, secondBytes)
+    expect(first.success).toBe(true)
+    expect(second.success).toBe(true)
+
+    expect(await manager.deleteModel(first.id!)).toEqual({ success: true, freedFiles: 1 })
+    expect(fs.existsSync(path.join(dataDir, 'models', firstPrimary))).toBe(false)
+    expect(fs.existsSync(path.join(dataDir, 'models', sharedProjector))).toBe(true)
+    expect(await manager.listInstalled()).not.toContain(first.id)
+    expect(await manager.listInstalled()).toContain(second.id)
+
+    expect(await manager.deleteModel(second.id!)).toEqual({ success: true, freedFiles: 2 })
+    expect(fs.existsSync(path.join(dataDir, 'models', secondPrimary))).toBe(false)
+    expect(fs.existsSync(path.join(dataDir, 'models', sharedProjector))).toBe(false)
+    expect(await manager.listInstalled()).not.toContain(second.id)
   })
 
   it('rejects traversal and corrupt GGUF manifests without registering them', async () => {

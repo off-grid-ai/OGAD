@@ -17,6 +17,9 @@ const LOCAL_MEDIA_DIRS = [
   'style-thumbs'
 ] as const
 
-export function localMediaRoots(userData: string): string[] {
-  return LOCAL_MEDIA_DIRS.map((directory) => path.join(userData, directory))
+export function localMediaRoots(userData: string, resourceRoots: readonly string[] = []): string[] {
+  return [
+    ...LOCAL_MEDIA_DIRS.map((directory) => path.join(userData, directory)),
+    ...resourceRoots.map((directory) => path.join(directory, 'style-thumbs'))
+  ]
 }

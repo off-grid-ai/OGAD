@@ -11,9 +11,13 @@ set -euo pipefail
 # official llama.cpp release binaries are now minos 26. The only reliable fix is
 # to build it ourselves with the target pinned. Run in CI before packaging.
 #
-#   LLAMA_REF=b9838 MACOS_DEPLOYMENT_TARGET=13.0 scripts/build-llama.sh
+#   LLAMA_REF=b10369 MACOS_DEPLOYMENT_TARGET=13.0 scripts/build-llama.sh   (override; default is package.json offgrid.llamaRef)
 
-LLAMA_REF="${LLAMA_REF:-b9838}"                       # gemma4/qwen35-capable build
+# ONE owner for the version: package.json, where every other version in this repo already lives. It was
+# hardcoded here AND in fetch-win-binaries.ps1 AND passed again by two callers - one fact with four homes.
+# The macOS source build and the Windows binary fetch must be the same llama.cpp, or grammar and native
+# tool-call handling differ between the platforms of a single release.
+LLAMA_REF="${LLAMA_REF:-$(node -p "require('$(cd "$(dirname "$0")/.." && pwd)/package.json').offgrid.llamaRef")}"
 TARGET="${MACOS_DEPLOYMENT_TARGET:-13.0}"             # runs on macOS 13+
 ROOT="${OFFGRID_BUILD_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 DEST="$ROOT/resources/bin/llama"

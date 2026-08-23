@@ -37,7 +37,8 @@ const SEED_RE = /seed\s+(-?\d+)/i
  *  several per chunk; only the newest matters for a monotonic UI). */
 export function reduceProgress(
   prev: ProgressState,
-  chunk: string
+  chunk: string,
+  expectedTotal?: number
 ): { state: ProgressState; event?: ProgressEvent } {
   let resolvedSeed = prev.resolvedSeed
   const sm = chunk.match(SEED_RE)
@@ -48,13 +49,23 @@ export function reduceProgress(
   let last: RegExpExecArray | null = null
   for (let mm = re.exec(chunk); mm; mm = re.exec(chunk)) last = mm
 
+  // Newer sd.cpp builds render a terminal progress bar without the old
+  // "- Xs/it" suffix. Match that form only when its total is the requested
+  // sampling-step count, so model-loading counters cannot become image progress.
+  if (!last && expectedTotal && !/(?:MB|MiB)\/s/i.test(chunk)) {
+    const ratioRe = /(\d+)\/(\d+)/g
+    for (let mm = ratioRe.exec(chunk); mm; mm = ratioRe.exec(chunk)) {
+      if (Number(mm[2]) === expectedTotal) last = mm
+    }
+  }
+
   if (!last) {
     return { state: { ...prev, resolvedSeed } }
   }
 
   const step = parseInt(last[1]!, 10)
   const total = parseInt(last[2]!, 10)
-  const secPerStep = parseFloat(last[3]!)
+  const secPerStep = last[3] ? parseFloat(last[3]) : 0
   let samplingDone = prev.samplingDone
   let phase = prev.phase
   if (!samplingDone) {
@@ -63,5 +74,6 @@ export function reduceProgress(
     phase = 'decoding'
   }
   const state: ProgressState = { resolvedSeed, samplingDone, prevStep: step, phase }
+  if (step === prev.prevStep && phase === prev.phase) return { state }
   return { state, event: { step, total, secPerStep, phase } }
 }

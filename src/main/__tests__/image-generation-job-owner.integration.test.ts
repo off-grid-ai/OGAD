@@ -12,7 +12,10 @@ import {
   type ImageGenerationJobRequest,
   type ImageGenerationRuntime
 } from '../imagegen/job-service'
-import type { ImageGenerationProgressContract } from '../../shared/image-generation-contract'
+import type {
+  ImageGenerationPipelineUpdateContract,
+  ImageGenerationProgressContract
+} from '../../shared/image-generation-contract'
 import type { ImageGenOutput } from '../imagegen'
 import type { GeneratedImageSidecar } from '../imagegen/gallery-sidecar'
 import { generatedImageMetadataJson, type ChatHome } from '@offgrid/sync'
@@ -36,12 +39,16 @@ const generatedFile = (name: string): string => {
 afterAll(() => fs.rmSync(workspace, { recursive: true, force: true }))
 
 interface ControlledGeneration {
+  update(update: ImageGenerationPipelineUpdateContract): void
   progress(progress: ImageGenerationProgressContract): void
   succeed(output: ImageGenOutput): void
   fail(error: unknown): void
 }
 
-function controlledRuntime(cancelResult = true, saveScopeError?: Error): {
+function controlledRuntime(
+  cancelResult = true,
+  saveScopeError?: Error
+): {
   runtime: ImageGenerationRuntime
   generation(): ControlledGeneration
   savedScopes: { path: string; scope: GeneratedImageSidecar }[]
@@ -51,7 +58,7 @@ function controlledRuntime(cancelResult = true, saveScopeError?: Error): {
 } {
   let resolveGeneration: ((output: ImageGenOutput) => void) | null = null
   let rejectGeneration: ((error: unknown) => void) | null = null
-  let reportProgress: ((progress: ImageGenerationProgressContract) => void) | null = null
+  let reportUpdate: ((update: ImageGenerationPipelineUpdateContract) => void) | null = null
   const savedScopes: { path: string; scope: GeneratedImageSidecar }[] = []
   const sharedPaths: string[] = []
   const notedMessages: { path: string; shownIn: ChatHome }[] = []
@@ -59,8 +66,8 @@ function controlledRuntime(cancelResult = true, saveScopeError?: Error): {
 
   return {
     runtime: {
-      generate: (_request, onProgress) => {
-        reportProgress = onProgress
+      generate: (_request, onUpdate) => {
+        reportUpdate = onUpdate
         return new Promise<ImageGenOutput>((resolve, reject) => {
           resolveGeneration = resolve
           rejectGeneration = reject
@@ -87,7 +94,12 @@ function controlledRuntime(cancelResult = true, saveScopeError?: Error): {
       }
     },
     generation: () => ({
-      progress: (progress) => reportProgress?.(progress),
+      update: (update) => reportUpdate?.(update),
+      progress: (progress) =>
+        reportUpdate?.({
+          stage: progress.phase === 'decoding' ? 'decoding' : 'generating',
+          progress
+        }),
       succeed: (output) => resolveGeneration?.(output),
       fail: (error) => rejectGeneration?.(error)
     }),
@@ -102,6 +114,7 @@ const request: ImageGenerationJobRequest = {
   prompt: 'A green cabin rendered while navigating',
   model: 'local-image-model',
   conversationId: 'conversation-navigation',
+  messageId: 'message-navigation',
   projectId: 'project-navigation',
   seed: 91,
   width: 512,
@@ -125,7 +138,17 @@ describe('main-owned image generation job journeys', () => {
     })
     await expect(jobs.start(request)).rejects.toThrow('already generating')
 
+    boundary.generation().update({
+      stage: 'enhancing',
+      enhancedPrompt: 'A quiet observatory under'
+    })
+    expect(jobs.status()).toMatchObject({
+      stage: 'enhancing',
+      enhancedPrompt: 'A quiet observatory under'
+    })
+
     boundary.generation().progress({ step: 2, total: 4, secPerStep: 0.5, phase: 'sampling' })
+    expect(jobs.status().stage).toBe('generating')
     const progress = jobs.status().progress
     expect(progress).toEqual({ step: 2, total: 4, secPerStep: 0.5, phase: 'sampling' })
     if (progress) progress.step = 99
@@ -137,7 +160,8 @@ describe('main-owned image generation job journeys', () => {
       dataUrl: 'data:image/png;base64,aW1hZ2U=',
       path: generatedFile('image.png'),
       seed: 91,
-      model: 'Local image model'
+      model: 'Local image model',
+      prompt: 'A detailed emerald cabin beneath a star-filled sky'
     }
     boundary.generation().succeed(output)
     await expect(generation).resolves.toEqual({ ...output, syncId: jobs.status().id })
@@ -158,6 +182,7 @@ describe('main-owned image generation job journeys', () => {
         scope: {
           syncId: jobs.status().id,
           conversationId: request.conversationId,
+          messageId: request.messageId,
           projectId: request.projectId,
           createdAt: expect.any(String),
           width: request.width,
@@ -166,7 +191,7 @@ describe('main-owned image generation job journeys', () => {
           // wire's field names drift on one platform without a single assertion noticing - which is
           // exactly what happened: the Mac wrote `model` and the phone only ever read `modelId`.
           metadataJson: generatedImageMetadataJson({
-            prompt: request.prompt,
+            prompt: output.prompt,
             steps: request.steps,
             seed: output.seed,
             modelId: output.model
@@ -241,7 +266,8 @@ describe('main-owned image generation job journeys', () => {
       dataUrl: 'data:image/png;base64,aW1hZ2U=',
       path: generatedFile('image-without-scope.png'),
       seed: 91,
-      model: 'Local image model'
+      model: 'Local image model',
+      prompt: request.prompt
     }
 
     boundary.generation().succeed(output)
@@ -264,7 +290,8 @@ describe('main-owned image generation job journeys', () => {
       dataUrl: 'data:image/png;base64,aW1hZ2U=',
       path: '',
       seed: -1,
-      model: 'Local image model'
+      model: 'Local image model',
+      prompt: 'An unscoped image'
     }
 
     boundary.generation().succeed(output)
