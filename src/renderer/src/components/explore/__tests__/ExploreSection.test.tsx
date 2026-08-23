@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ExploreSection } from '../ExploreSection'
-import { ALL_PRESETS } from '../presetCatalog'
+import { ALL_PRESETS, PRESET_SECTIONS } from '../presetCatalog'
 
 afterEach(() => cleanup())
 
@@ -38,6 +38,20 @@ describe('<ExploreSection/>', () => {
     render(<ExploreSection onRun={() => {}} />)
     const gated = screen.getByTestId('explore-preset-phone-summarize')
     expect(gated.textContent).toMatch(/paired phone/i)
+  })
+
+  it('renders each card with its own icon plus the run arrow', () => {
+    render(<ExploreSection onRun={() => {}} />)
+    for (const preset of ALL_PRESETS) {
+      const card = screen.getByTestId(`explore-preset-${preset.id}`)
+      // The preset icon and the hover arrow - a card without both lost its visual lead.
+      expect(card.querySelectorAll('svg').length).toBeGreaterThanOrEqual(2)
+    }
+  })
+
+  it('shows a runs count on every capability panel', () => {
+    render(<ExploreSection onRun={() => {}} />)
+    expect(screen.getAllByText(/^\d+ runs?$/)).toHaveLength(PRESET_SECTIONS.length)
   })
 
   it('marks robust ungated presets as ready, and only those', () => {

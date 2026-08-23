@@ -45,6 +45,14 @@ describe('the Explore preset catalog', () => {
     expect(new Set(capabilities)).toEqual(new Set(['browser', 'computer-use', 'memory', 'phone']))
   })
 
+  it('every preset carries its own icon, defined once in the catalog', () => {
+    // The icon is the one presentation field the SSOT holds, so both placements (Explore
+    // screen, chat empty state) show the same mark without a per-surface lookup to drift.
+    for (const preset of ALL_PRESETS) {
+      expect(preset.icon, `preset ${preset.id} has no icon`).toBeTypeOf('object')
+    }
+  })
+
   it('titles are capability labels, never the raw prompt', () => {
     // The surface renders title + blurb only; the prompt stays behind the tap. A title that
     // IS the prompt (or reads first-person like one) would leak it back onto the card.

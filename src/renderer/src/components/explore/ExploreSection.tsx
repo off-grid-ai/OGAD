@@ -70,10 +70,13 @@ export function ExploreSection({
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-neutral-800 bg-neutral-950 text-green-500">
                   <Icon className="h-4 w-4" />
                 </span>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <h3 className="truncate text-[13px] text-white">{section.title}</h3>
                   <p className="truncate text-[11px] text-neutral-500">{section.teaches}</p>
                 </div>
+                <span className="shrink-0 self-start text-[9px] uppercase tracking-wide text-neutral-600">
+                  {section.presets.length} {section.presets.length === 1 ? 'run' : 'runs'}
+                </span>
               </div>
 
               <div className="grid flex-1 grid-cols-1 gap-2 @md:grid-cols-2">
@@ -85,12 +88,13 @@ export function ExploreSection({
                     className="group flex flex-col rounded-md border border-neutral-800 bg-neutral-950 p-3 text-left transition-all duration-150 hover:border-neutral-700 hover:bg-neutral-900/60 active:scale-[0.98]"
                     data-testid={`explore-preset-${preset.id}`}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="text-xs text-neutral-100 transition-colors duration-150 group-hover:text-white">
-                        {preset.title}
-                      </span>
-                      <ArrowRight className="mt-0.5 h-3.5 w-3.5 shrink-0 -translate-x-0.5 text-neutral-700 transition-all duration-150 group-hover:translate-x-0 group-hover:text-green-500" />
+                    <div className="flex items-center justify-between gap-2">
+                      <preset.icon className="h-[18px] w-[18px] shrink-0 text-neutral-400 transition-colors duration-150 group-hover:text-green-500" />
+                      <ArrowRight className="h-3.5 w-3.5 shrink-0 -translate-x-0.5 text-neutral-700 transition-all duration-150 group-hover:translate-x-0 group-hover:text-green-500" />
                     </div>
+                    <span className="mt-2 text-xs text-neutral-100 transition-colors duration-150 group-hover:text-white">
+                      {preset.title}
+                    </span>
                     <span className="mt-1 text-[11px] leading-4 text-neutral-500">
                       {preset.blurb}
                     </span>
