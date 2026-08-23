@@ -20,6 +20,15 @@ on:
         type: string
         required: false
         default: ''
+      shared_ref:
+        # off-grid-ai/shared carries @offgrid/models|sync|use. This core branch depends
+        # on shared feature work that is NOT on shared main, and the auto match below is
+        # by BRANCH NAME - which differs across repos here - so it would fall back to main
+        # and miss effectId/undo/computer_task. Pin it on dispatch (e.g. feat/use-approval-tiers).
+        description: 'off-grid-ai/shared ref for @offgrid/* (empty = match this branch name, else shared main)'
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -87,7 +96,7 @@ jobs:
         with:
           repository: off-grid-ai/shared
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          ref: ${{ github.ref_name }}
+          ref: ${{ inputs.shared_ref || github.ref_name }}
           path: _shared
           persist-credentials: false
       - name: Fall back to shared main
@@ -109,6 +118,7 @@ jobs:
           rm -rf ../shared
           mv _shared ../shared
           npm --prefix ../shared ci
+          npm --prefix ../shared/packages/models run build
           npm --prefix ../shared/packages/sync run build
           npm --prefix ../shared/packages/use run build
 
