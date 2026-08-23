@@ -31,6 +31,7 @@ import { showSupervisorWindow, hideSupervisorWindow } from './supervisor-window'
 import { visionModelNotice } from './vision-model-notice'
 import { getTakeoverCoordinator } from '../browser/takeover'
 import { loadActuation, actuationAvailable, type ActuationPort } from '../input/actuation'
+import { mapActionToScreen, type DisplayGeometry } from '../input/coordinate-mapping'
 
 export type { ActuationPort }
 
@@ -47,11 +48,16 @@ export function visionActuationAvailable(): boolean {
 const CAPTURE_FILE = path.join(os.tmpdir(), 'offgrid-vision-capture.png')
 
 function makeScreen(actuation: ActuationPort): VisionScreen {
+  // The display the last screenshot was taken from. Its scaleFactor + origin move
+  // the grounder's DIP coordinates into the actuation space (physical px on
+  // Windows). capture() always runs before actuate() in the vision loop.
+  let capturedDisplay: DisplayGeometry | null = null
   return {
     async capture() {
       const point = screen.getCursorScreenPoint()
       const display = screen.getDisplayNearestPoint(point)
       const { width, height } = display.size
+      capturedDisplay = { bounds: display.bounds, scaleFactor: display.scaleFactor }
       // desktopCapturer can hand back an EMPTY thumbnail when the system is busy
       // (e.g. right after a multi-GB model swap) - which becomes a 0-byte PNG and
       // then a llama-server "400 Failed to load image". Retry, prefer the source
@@ -81,7 +87,10 @@ function makeScreen(actuation: ActuationPort): VisionScreen {
       return { image: CAPTURE_FILE, bounds: { width, height } as Bounds }
     },
     async actuate(action: VisionAction) {
-      await dispatch(actuation, action)
+      const mapped = capturedDisplay
+        ? mapActionToScreen(action, capturedDisplay, process.platform)
+        : action
+      await dispatch(actuation, mapped)
     }
   }
 }
