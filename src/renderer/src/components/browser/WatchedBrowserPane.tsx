@@ -10,7 +10,7 @@
  * renders nothing until a task is running.
  */
 import { useEffect, useRef, useState } from 'react'
-import { X } from '@phosphor-icons/react'
+import { X, DotsSixVertical } from '@phosphor-icons/react'
 
 interface StepEvent {
   taskId: string
@@ -156,14 +156,19 @@ export function WatchedBrowserPane(): React.JSX.Element | null {
       style={{ width: paneWidth }}
       className="fixed right-0 top-0 bottom-0 z-50 flex flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl"
     >
-      {/* Drag handle: resize the split from its left edge, with a small centered
-          notch so it reads as draggable. */}
+      {/* Drag handle: a full-height grab gutter on the left edge with a centered grip
+          icon so it clearly reads as draggable. The web region below is inset by this
+          width (ml-4) so the native WebContentsView never covers the gutter - otherwise
+          the handle is only grabbable in the thin header strip. */}
       <div
         data-testid="watched-resize-handle"
         onMouseDown={startResize}
-        className="group absolute top-0 bottom-0 left-0 z-20 flex w-2 cursor-ew-resize items-center justify-center bg-transparent transition-colors hover:bg-green-500/20"
+        className="group absolute top-0 bottom-0 left-0 z-20 flex w-4 cursor-ew-resize items-center justify-center bg-neutral-900/60 transition-colors hover:bg-green-500/20"
       >
-        <div className="h-8 w-1 rounded-full bg-neutral-600 transition-colors group-hover:bg-green-500" />
+        <DotsSixVertical
+          weight="bold"
+          className="h-4 w-4 text-neutral-600 transition-colors group-hover:text-green-500"
+        />
       </div>
       <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-2 text-sm text-neutral-200">
@@ -185,11 +190,12 @@ export function WatchedBrowserPane(): React.JSX.Element | null {
         </div>
       </div>
 
-      {/* The reserved region the main-process WebContentsView is laid over. */}
+      {/* The reserved region the main-process WebContentsView is laid over. Inset from
+          the left (ml-4) so the resize handle's gutter stays uncovered and grabbable. */}
       <div
         ref={regionRef}
         data-testid="watched-web-region"
-        className="relative min-h-0 flex-1 border-b border-neutral-800 bg-neutral-900"
+        className="relative ml-4 min-h-0 flex-1 border-b border-neutral-800 bg-neutral-900"
       >
         {takeover && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-neutral-950/95 p-6 text-center">
