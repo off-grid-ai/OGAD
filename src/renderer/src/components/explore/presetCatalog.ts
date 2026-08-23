@@ -24,9 +24,12 @@ export type PresetRequirement = 'pro' | 'phone-paired' | 'capture-history'
 
 export interface DemoPreset {
   id: string
-  /** Card title, e.g. "Find me a flight to book". */
+  /**
+   * Card label, e.g. "Find a flight". A short name for the capability, NEVER the raw
+   * prompt - the surface shows the label + blurb only; the prompt stays behind the tap.
+   */
   title: string
-  /** The starter prompt seeded into the chat. The user never has to write it. */
+  /** The starter prompt seeded into the chat. The user never has to write it - or see it. */
   prompt: string
   /** One line: what this run shows the user. */
   blurb: string
@@ -54,22 +57,24 @@ export const PRESET_SECTIONS: readonly PresetSection[] = [
     presets: [
       {
         id: 'find-flight',
-        title: 'Find me a flight to book',
+        title: 'Find a flight',
         prompt: 'Find me a flight to book and show me the best options.',
         blurb: 'Asks where, when, and your priority - then searches and lists the options.',
         readiness: 'needs-setup'
       },
       {
         id: 'best-nearby',
-        title: 'Find the best-reviewed spots nearby',
-        prompt: 'Find the three best-reviewed places near me for a specific kind of food, open right now.',
+        title: 'Best-reviewed spots nearby',
+        prompt:
+          'Find the three best-reviewed places near me for a specific kind of food, open right now.',
         blurb: 'Reads maps + reviews and comes back with a short, ranked pick.',
         readiness: 'robust'
       },
       {
         id: 'price-compare',
-        title: 'Compare a price across stores',
-        prompt: 'Compare the price of a product I name across a few stores and tell me where it is cheapest.',
+        title: 'Compare prices across stores',
+        prompt:
+          'Compare the price of a product I name across a few stores and tell me where it is cheapest.',
         blurb: 'Checks a few retailers read-only and reports the best price.',
         readiness: 'robust'
       }
@@ -90,7 +95,7 @@ export const PRESET_SECTIONS: readonly PresetSection[] = [
       },
       {
         id: 'crop-screenshot',
-        title: 'Edit my latest screenshot',
+        title: 'Edit a screenshot',
         prompt: 'Open my most recent screenshot and crop it to the top half.',
         blurb: 'Finds the file, opens it, and makes an edit in a bundled app.',
         readiness: 'robust'
@@ -98,7 +103,8 @@ export const PRESET_SECTIONS: readonly PresetSection[] = [
       {
         id: 'draft-reply',
         title: 'Draft an email reply',
-        prompt: 'Draft a reply to the last email from a person I name, saying I will get back to them Monday.',
+        prompt:
+          'Draft a reply to the last email from a person I name, saying I will get back to them Monday.',
         blurb: 'Reads the thread and writes a reply for you to send.',
         readiness: 'needs-setup'
       }
@@ -112,7 +118,7 @@ export const PRESET_SECTIONS: readonly PresetSection[] = [
     presets: [
       {
         id: 'work-today',
-        title: 'What did I work on today?',
+        title: 'Recall your day',
         prompt: 'What did I work on this morning?',
         blurb: 'Recalls your on-device activity into a short summary.',
         readiness: 'needs-data',
@@ -120,7 +126,7 @@ export const PRESET_SECTIONS: readonly PresetSection[] = [
       },
       {
         id: 'that-article',
-        title: 'Find that thing I saw earlier',
+        title: 'Find something you saw',
         prompt: 'What was that article I had open earlier about a topic I name?',
         blurb: 'Searches what it captured on your screen to surface it again.',
         readiness: 'needs-data',
@@ -136,7 +142,7 @@ export const PRESET_SECTIONS: readonly PresetSection[] = [
     presets: [
       {
         id: 'phone-summarize',
-        title: "From your phone, ask your Mac to summarize today",
+        title: "Get today's summary on your phone",
         prompt: 'Summarize what I looked at on my Mac today.',
         blurb: 'The phone hands the task to your Mac and shows the result.',
         readiness: 'needs-setup',

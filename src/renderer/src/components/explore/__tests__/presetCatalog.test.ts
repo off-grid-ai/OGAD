@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  PRESET_SECTIONS,
-  ALL_PRESETS,
-  HEADLINE_PRESETS
-} from '../presetCatalog'
+import { PRESET_SECTIONS, ALL_PRESETS, HEADLINE_PRESETS } from '../presetCatalog'
 
 describe('the Explore preset catalog', () => {
   it('gives every section at least one preset', () => {
@@ -46,9 +42,16 @@ describe('the Explore preset catalog', () => {
 
   it('covers the four capabilities we mean to show off', () => {
     const capabilities = PRESET_SECTIONS.map((section) => section.capability)
-    expect(new Set(capabilities)).toEqual(
-      new Set(['browser', 'computer-use', 'memory', 'phone'])
-    )
+    expect(new Set(capabilities)).toEqual(new Set(['browser', 'computer-use', 'memory', 'phone']))
+  })
+
+  it('titles are capability labels, never the raw prompt', () => {
+    // The surface renders title + blurb only; the prompt stays behind the tap. A title that
+    // IS the prompt (or reads first-person like one) would leak it back onto the card.
+    for (const preset of ALL_PRESETS) {
+      expect(preset.title).not.toBe(preset.prompt)
+      expect(preset.title).not.toMatch(/\b(me|my|I)\b/)
+    }
   })
 
   it('keeps the flight hero present with a non-empty starter prompt', () => {

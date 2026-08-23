@@ -15,6 +15,14 @@ describe('<ExploreSection/>', () => {
     }
   })
 
+  it('never renders the raw prompt on a card - the prompt stays behind the tap', () => {
+    render(<ExploreSection onRun={() => {}} />)
+    for (const preset of ALL_PRESETS) {
+      const card = screen.getByTestId(`explore-preset-${preset.id}`)
+      expect(card.textContent).not.toContain(preset.prompt)
+    }
+  })
+
   it('runs the preset that was clicked, with the full preset', async () => {
     const onRun = vi.fn()
     const user = userEvent.setup()
@@ -30,6 +38,26 @@ describe('<ExploreSection/>', () => {
     render(<ExploreSection onRun={() => {}} />)
     const gated = screen.getByTestId('explore-preset-phone-summarize')
     expect(gated.textContent).toMatch(/paired phone/i)
+  })
+
+  it('marks robust ungated presets as ready, and only those', () => {
+    render(<ExploreSection onRun={() => {}} />)
+    // Robust + ungated -> the ready marker.
+    expect(screen.getByTestId('explore-preset-best-nearby').textContent).toMatch(/ready to run/i)
+    // Gated -> the requirement, never a ready claim.
+    expect(screen.getByTestId('explore-preset-work-today').textContent).not.toMatch(/ready to run/i)
+    // Needs-setup without a gate -> no marker either way.
+    expect(screen.getByTestId('explore-preset-find-flight').textContent).not.toMatch(
+      /ready to run/i
+    )
+  })
+
+  it('shows its compact intro by default and hides it for hosts with their own header', () => {
+    const { rerender } = render(<ExploreSection onRun={() => {}} />)
+    expect(screen.getByText(/explore what off grid ai can do/i)).toBeTruthy()
+
+    rerender(<ExploreSection onRun={() => {}} showIntro={false} />)
+    expect(screen.queryByText(/explore what off grid ai can do/i)).toBeNull()
   })
 
   it('shows the request link only when a url is given, pointing where told', () => {

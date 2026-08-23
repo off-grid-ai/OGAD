@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ExploreScreen } from '../ExploreScreen'
-import { ALL_PRESETS } from '../presetCatalog'
+import { ALL_PRESETS, PRESET_SECTIONS } from '../presetCatalog'
 
 afterEach(() => cleanup())
 
@@ -13,6 +13,17 @@ describe('<ExploreScreen/>', () => {
     for (const preset of ALL_PRESETS) {
       expect(screen.getByTestId(`explore-preset-${preset.id}`)).toBeTruthy()
     }
+  })
+
+  it('renders one page header with a catalog-computed count, not the section intro', () => {
+    render(<ExploreScreen onRunPreset={() => {}} />)
+    expect(screen.getByRole('heading', { level: 1, name: 'Explore' })).toBeTruthy()
+    // The meta count comes from the catalog, never a hardcoded number.
+    expect(
+      screen.getByText(`${ALL_PRESETS.length} runs / ${PRESET_SECTIONS.length} capabilities`)
+    ).toBeTruthy()
+    // The section's compact intro stays hidden here - one header per screen.
+    expect(screen.queryByText(/explore what off grid ai can do/i)).toBeNull()
   })
 
   it('hands the tapped preset back to the host to seed a chat', async () => {
