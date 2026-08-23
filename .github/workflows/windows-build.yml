@@ -115,6 +115,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify the computer-use input addon (nut.js) shipped for Windows
+        shell: pwsh
+        run: |
+          # The vision computer-use rail drives the cursor/keyboard through
+          # @nut-tree-fork/nut-js, whose Windows binding is the prebuilt (N-API)
+          # libnut-win32 addon - an OPTIONAL dependency. If npm skips it or the
+          # prebuild fails to land, the rail loads null and refuses every task
+          # silently. Fail the build loudly instead, the same way
+          # fetch-win-binaries.ps1 fails on a missing llama-server.exe.
+          $addon = "node_modules/@nut-tree-fork/libnut-win32/build/Release/libnut.node"
+          if (-not (Test-Path $addon)) {
+            Write-Error "Missing $addon - the Windows computer-use rail would refuse every task. Confirm @nut-tree-fork/libnut-win32 installed (optional dep)."
+            exit 1
+          }
+          Write-Host "OK: computer-use addon present ($((Get-Item $addon).Length) bytes)"
+
       - name: Fetch Windows native binaries (llama/whisper/sd/ffmpeg)
         shell: pwsh
         env:
