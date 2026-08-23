@@ -32,14 +32,14 @@ export function WatchedBrowserPane(): React.JSX.Element | null {
   const [paneWidth, setPaneWidth] = useState(() => Math.round(window.innerWidth * 0.42))
 
   useEffect(() => {
-    const offState = window.api.browser?.onTaskState((event) => {
+    const offState = window.api.browser?.onTaskState?.((event) => {
       const state = event as TaskState
       setTask(state)
       if (state.status === 'running') {
         setTakeover(null)
       }
     })
-    const offTakeover = window.api.browser?.onTakeover((event) => {
+    const offTakeover = window.api.browser?.onTakeover?.((event) => {
       setTakeover(event as TakeoverRequest)
     })
     return () => {
