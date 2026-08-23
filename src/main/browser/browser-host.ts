@@ -78,11 +78,43 @@ class BrowserHost implements BrowserRailHost {
     if (!view) {
       return
     }
+    // A hidden agent-browser must be SILENT. The WebContentsView keeps running when
+    // it's off-screen (backgroundThrottling is off, so the agent can work while the
+    // user does other things) - which means a playing video would keep its audio
+    // going after the pane closes or the window is hidden. Mute when hidden, unmute
+    // when shown, so closing the browser actually stops the sound.
+    try {
+      view.webContents.setAudioMuted(!visible)
+    } catch {
+      /* view torn down mid-flip - nothing to mute */
+    }
     const sv = (view as unknown as { setVisible?: (v: boolean) => void }).setVisible
     if (typeof sv === 'function') {
       sv.call(view, visible)
     } else if (!visible) {
       view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+    }
+  }
+
+  /** Tear the live view down completely: remove it from the window and close its
+   *  WebContents, which stops any media immediately. Used when the app quits or the
+   *  window closes so a task's browser never lingers (audible) after it's gone. */
+  dispose(): void {
+    const view = this.view
+    if (!view) {
+      return
+    }
+    this.view = null
+    this.region = null
+    try {
+      getMainWindow()?.contentView.removeChildView(view)
+    } catch {
+      /* window already gone */
+    }
+    try {
+      ;(view.webContents as unknown as { close?: () => void }).close?.()
+    } catch {
+      /* already destroyed */
     }
   }
 
@@ -152,6 +184,12 @@ class BrowserHost implements BrowserRailHost {
     const win = getMainWindow()
     win?.contentView.addChildView(view)
     this.view = view
+    // Silence / tear down the browser when the window goes away. setRegion only
+    // fires while the pane is mounted, so a video would keep playing behind a
+    // hidden window (macOS keeps the app alive on window close) unless we react to
+    // the window itself: mute on hide, fully dispose on close.
+    win?.on('hide', () => this.setViewVisible(false))
+    win?.once('close', () => this.dispose())
     // Show it immediately (region if reported, else coarse) so the browser is
     // never invisible while a task runs; the pane refines / hides it via
     // setRegion.
@@ -255,6 +293,13 @@ function browserHost(): BrowserHost {
 
 export function getBrowserRailHost(): BrowserRailHost {
   return browserHost()
+}
+
+/** Stop + drop the agent browser (halts any playing media). Called on app quit so a
+ *  running task's browser never lingers audibly after the app is gone. No-op if the
+ *  view was never created. */
+export function disposeBrowserHost(): void {
+  host?.dispose()
 }
 
 /** Wire the renderer's pane-region reports to the live view so it docks to the

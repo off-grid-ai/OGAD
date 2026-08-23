@@ -482,6 +482,14 @@ app.on('before-quit', (event) => {
   }
   event.preventDefault()
   void (async () => {
+    // Stop the agent browser first so a playing video's audio dies immediately,
+    // not whenever the process finally exits.
+    try {
+      const { disposeBrowserHost } = await import('./browser/browser-host')
+      disposeBrowserHost()
+    } catch {
+      /* best-effort — never block quit */
+    }
     try {
       const { llm } = await import('./llm')
       await llm.unload()
