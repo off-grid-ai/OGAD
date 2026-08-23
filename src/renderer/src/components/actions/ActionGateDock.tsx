@@ -71,6 +71,10 @@ export function ActionGateDock(): React.JSX.Element | null {
   }, [])
 
   const resolve = (actionId: string, decision: unknown): void => {
+    // Drop the card the instant the user decides, so it doesn't sit there while the
+    // action runs and the outcome makes its way back. An edit re-gates and arrives as
+    // its own fresh pending event; approve/reject land as an outcome row.
+    setPending((current) => current.filter((p) => p.actionId !== actionId))
     void window.api.actions?.resolveGate(actionId, decision)
   }
 

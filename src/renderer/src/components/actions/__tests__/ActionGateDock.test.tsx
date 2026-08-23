@@ -68,6 +68,15 @@ describe('<ActionGateDock/>', () => {
     expect(resolveGate).toHaveBeenCalledWith('act_1', { kind: 'approve' })
   })
 
+  it('Approve dismisses the card immediately, without waiting for the outcome', async () => {
+    render(<ActionGateDock />)
+    emitPending(request)
+    await waitFor(() => screen.getByTestId('gate-card'))
+    fireEvent.click(screen.getByText('Approve'))
+    // Gone the instant it's approved - no outcome event has been emitted.
+    expect(screen.queryByTestId('gate-card')).toBeNull()
+  })
+
   it('Reject declines; the card clears when the outcome arrives', async () => {
     render(<ActionGateDock />)
     emitPending(request)
