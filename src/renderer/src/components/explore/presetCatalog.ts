@@ -77,7 +77,8 @@ export const PRESET_SECTIONS: readonly PresetSection[] = [
         id: 'find-flight',
         icon: AirplaneTilt,
         title: 'Find a flight',
-        prompt: 'Find me a flight to book and show me the best options.',
+        prompt:
+          'Go to skyscanner.com and help me find a flight to book. I will give you the route, dates, and budget when you ask.',
         blurb: 'Asks where, when, and your priority - then searches and lists the options.',
         readiness: 'needs-setup'
       },
@@ -86,7 +87,7 @@ export const PRESET_SECTIONS: readonly PresetSection[] = [
         icon: MapPin,
         title: 'Best-reviewed spots nearby',
         prompt:
-          'Find the three best-reviewed places near me for a specific kind of food, open right now.',
+          'Open Google Maps and find the three best-reviewed places near me that are open right now, for a kind of food I will name.',
         blurb: 'Reads maps + reviews and comes back with a short, ranked pick.',
         readiness: 'robust'
       },
@@ -95,7 +96,7 @@ export const PRESET_SECTIONS: readonly PresetSection[] = [
         icon: Tag,
         title: 'Compare prices across stores',
         prompt:
-          'Compare the price of a product I name across a few stores and tell me where it is cheapest.',
+          'On Google Shopping, compare the price of a product I will name across a few stores and tell me where it is cheapest.',
         blurb: 'Checks a few retailers read-only and reports the best price.',
         readiness: 'robust'
       }
@@ -111,7 +112,7 @@ export const PRESET_SECTIONS: readonly PresetSection[] = [
         id: 'play-music',
         icon: SpotifyLogo,
         title: 'Play music on Spotify',
-        prompt: 'Play some jazz on Spotify.',
+        prompt: 'Open the Spotify app and play some jazz.',
         blurb: 'Drives the Spotify app to start playing - a real native action you approve first.',
         readiness: 'robust'
       },
@@ -119,7 +120,7 @@ export const PRESET_SECTIONS: readonly PresetSection[] = [
         id: 'crop-screenshot',
         icon: Crop,
         title: 'Edit a screenshot',
-        prompt: 'Open my most recent screenshot and crop it to the top half.',
+        prompt: 'Open my most recent screenshot in the Preview app and crop it to the top half.',
         blurb: 'Finds the file, opens it, and makes an edit in a bundled app.',
         readiness: 'robust'
       },
@@ -128,7 +129,7 @@ export const PRESET_SECTIONS: readonly PresetSection[] = [
         icon: EnvelopeSimple,
         title: 'Draft an email reply',
         prompt:
-          'Draft a reply to the last email from a person I name, saying I will get back to them Monday.',
+          'Open Mail, find the latest email from a person I will name, and draft a reply saying I will get back to them Monday.',
         blurb: 'Reads the thread and writes a reply for you to send.',
         readiness: 'needs-setup'
       }
@@ -144,7 +145,8 @@ export const PRESET_SECTIONS: readonly PresetSection[] = [
         id: 'work-today',
         icon: ClockCounterClockwise,
         title: 'Recall your day',
-        prompt: 'What did I work on this morning?',
+        prompt:
+          'Look through what you have captured on my Mac and tell me what I worked on this morning.',
         blurb: 'Recalls your on-device activity into a short summary.',
         readiness: 'needs-data',
         requires: 'capture-history'
@@ -153,7 +155,8 @@ export const PRESET_SECTIONS: readonly PresetSection[] = [
         id: 'that-article',
         icon: MagnifyingGlass,
         title: 'Find something you saw',
-        prompt: 'What was that article I had open earlier about a topic I name?',
+        prompt:
+          'Search what you captured on my screen and find that article I had open earlier about a topic I will name.',
         blurb: 'Searches what it captured on your screen to surface it again.',
         readiness: 'needs-data',
         requires: 'capture-history'
@@ -170,7 +173,7 @@ export const PRESET_SECTIONS: readonly PresetSection[] = [
         id: 'phone-summarize',
         icon: PaperPlaneTilt,
         title: "Get today's summary on your phone",
-        prompt: 'Summarize what I looked at on my Mac today.',
+        prompt: 'Summarize what I looked at on my Mac today, using what you have captured.',
         blurb: 'The phone hands the task to your Mac and shows the result.',
         readiness: 'needs-setup',
         requires: 'phone-paired'
