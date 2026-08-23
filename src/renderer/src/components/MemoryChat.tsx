@@ -523,6 +523,26 @@ export function MemoryChat({
   // A preset prompt handed in via openTarget.seedPrompt, held until sendMessage exists in scope
   // and the fresh-chat state has settled, then auto-sent by the effect below sendMessage.
   const [pendingSeed, setPendingSeed] = useState<string | null>(null)
+  // Live web-task step narration, surfaced in the streaming turn (not below the browser).
+  // A new task resets it; the steps only render while the turn is streaming, then fall away.
+  const [webTaskSteps, setWebTaskSteps] = useState<string[]>([])
+  useEffect(() => {
+    const offStep = window.api.browser?.onStep?.((e) => {
+      const note = (e as { note?: string })?.note
+      if (typeof note === 'string') {
+        setWebTaskSteps((prev) => [...prev, note])
+      }
+    })
+    const offState = window.api.browser?.onTaskState?.((e) => {
+      if ((e as { status?: string })?.status === 'running') {
+        setWebTaskSteps([])
+      }
+    })
+    return () => {
+      offStep?.()
+      offState?.()
+    }
+  }, [])
   const [attachments, setAttachments] = useState<Attachment[]>([])
   // Whether the active chat model can read images. Gate image attachment on this and
   // re-check periodically (the user can switch models from the Models screen).
@@ -3213,6 +3233,15 @@ export function MemoryChat({
                             <span className="text-[11px] text-neutral-500">
                               {activityLabel(message.activity)}
                             </span>
+                          ) : null}
+                          {webTaskSteps.length > 0 ? (
+                            <div className="max-w-[85%] space-y-0.5 border-l-2 border-neutral-800 pl-3 text-[11px] leading-4 text-neutral-500">
+                              {webTaskSteps.slice(-6).map((note, i) => (
+                                <div key={`${webTaskSteps.length}-${i}`} className="truncate">
+                                  {note}
+                                </div>
+                              ))}
+                            </div>
                           ) : null}
                         </div>
                       ) : null}

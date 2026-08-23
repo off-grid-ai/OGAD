@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 /**
- * The watched pane: nothing until a task runs, then the live step feed, and at
- * the identity boundary a takeover prompt whose Resume/Cancel resolve through
- * the browser IPC. The preload feed is the only fake; the component is real.
+ * The watched pane: nothing until a task runs, then the live browser + goal, and at
+ * the identity boundary a takeover prompt whose Resume/Cancel resolve through the
+ * browser IPC. Step narration now streams in the chat, not here. The preload feed is
+ * the only fake; the component is real.
  */
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -11,7 +12,6 @@ import { WatchedBrowserPane } from '../WatchedBrowserPane'
 type Listener = (payload: unknown) => void
 
 let emitState: Listener
-let emitStep: Listener
 let emitTakeover: Listener
 const resolveTakeover = vi.fn(async () => true)
 
@@ -24,10 +24,7 @@ beforeEach(() => {
         emitState = cb
         return () => {}
       },
-      onStep: (cb: Listener) => {
-        emitStep = cb
-        return () => {}
-      },
+      onStep: () => () => {},
       onTakeover: (cb: Listener) => {
         emitTakeover = cb
         return () => {}
@@ -44,14 +41,13 @@ describe('<WatchedBrowserPane/>', () => {
     expect(container.firstChild).toBeNull()
   })
 
-  it('shows the goal and the live step feed once a task starts', async () => {
+  it('shows the goal once a task starts (steps stream in the chat, not here)', async () => {
     render(<WatchedBrowserPane />)
     emitState({ taskId: 't1', goal: 'check in for my flight', status: 'running' })
     await waitFor(() => screen.getByTestId('watched-browser-pane'))
     expect(screen.getByText('check in for my flight')).toBeTruthy()
-    emitStep({ taskId: 't1', note: 'opened the airline site' })
-    emitStep({ taskId: 't1', note: 'clicked [3] Check in' })
-    await waitFor(() => expect(screen.getByText('clicked [3] Check in')).toBeTruthy())
+    // No step feed here anymore - the narration goes to the chat turn.
+    expect(screen.queryByTestId('watched-step-feed')).toBeNull()
   })
 
   it('a takeover prompt appears and Resume resolves it through IPC', async () => {
@@ -77,28 +73,21 @@ describe('<WatchedBrowserPane/>', () => {
     expect(resolveTakeover).toHaveBeenCalledWith('t3', 'cancelled')
   })
 
-  it('a finished task shows its status and summary', async () => {
+  it('a finished task shows its status', async () => {
     render(<WatchedBrowserPane />)
-    emitState({
-      taskId: 't4',
-      goal: 'check in',
-      status: 'done',
-      summary: 'checked in, seat 14C'
-    })
-    await waitFor(() => screen.getByText('checked in, seat 14C'))
+    emitState({ taskId: 't4', goal: 'check in', status: 'done', summary: 'checked in, seat 14C' })
+    await waitFor(() => screen.getByTestId('watched-browser-pane'))
     expect(screen.getByText('done')).toBeTruthy()
   })
 
-  it('a new running task clears the previous run feed and any stale takeover', async () => {
+  it('a new running task clears a stale takeover', async () => {
     render(<WatchedBrowserPane />)
     emitState({ taskId: 't5', goal: 'first', status: 'running' })
     await waitFor(() => screen.getByTestId('watched-browser-pane'))
-    emitStep({ taskId: 't5', note: 'step from the first task' })
     emitTakeover({ taskId: 't5', why: 'sign in' })
     await waitFor(() => screen.getByText(/sign in/))
     emitState({ taskId: 't6', goal: 'second', status: 'running' })
     await waitFor(() => screen.getByText('second'))
-    expect(screen.queryByText('step from the first task')).toBeNull()
     expect(screen.queryByText(/sign in/)).toBeNull()
   })
 

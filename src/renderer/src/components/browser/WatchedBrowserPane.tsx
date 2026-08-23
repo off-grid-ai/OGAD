@@ -12,11 +12,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { X, DotsSixVertical } from '@phosphor-icons/react'
 
-interface StepEvent {
-  taskId: string
-  note: string
-}
-
 interface TakeoverRequest {
   taskId: string
   why: string
@@ -31,9 +26,7 @@ interface TaskState {
 
 export function WatchedBrowserPane(): React.JSX.Element | null {
   const [task, setTask] = useState<TaskState | null>(null)
-  const [steps, setSteps] = useState<string[]>([])
   const [takeover, setTakeover] = useState<TakeoverRequest | null>(null)
-  const feedRef = useRef<HTMLDivElement>(null)
   const regionRef = useRef<HTMLDivElement>(null)
   // The split's width (px), drag-resizable from its left edge.
   const [paneWidth, setPaneWidth] = useState(() => Math.round(window.innerWidth * 0.42))
@@ -43,27 +36,17 @@ export function WatchedBrowserPane(): React.JSX.Element | null {
       const state = event as TaskState
       setTask(state)
       if (state.status === 'running') {
-        setSteps([])
         setTakeover(null)
       }
-    })
-    const offStep = window.api.browser?.onStep((event) => {
-      const step = event as StepEvent
-      setSteps((current) => [...current, step.note])
     })
     const offTakeover = window.api.browser?.onTakeover((event) => {
       setTakeover(event as TakeoverRequest)
     })
     return () => {
       offState?.()
-      offStep?.()
       offTakeover?.()
     }
   }, [])
-
-  useEffect(() => {
-    feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight })
-  }, [steps])
 
   // Report the reserved region to main so the live WebContentsView docks exactly
   // to it (and hide the view when the pane goes away) - keyed on the task so it
@@ -222,26 +205,6 @@ export function WatchedBrowserPane(): React.JSX.Element | null {
               </button>
             </div>
           </div>
-        )}
-      </div>
-
-      <div
-        ref={feedRef}
-        data-testid="watched-step-feed"
-        className="max-h-48 shrink-0 overflow-y-auto px-4 py-2 text-xs text-neutral-400"
-      >
-        {steps.length === 0 ? (
-          <span className="text-neutral-600">Starting…</span>
-        ) : (
-          steps.map((note, i) => (
-            <div key={i} className="py-0.5">
-              <span className="mr-2 text-neutral-600">{String(i + 1).padStart(2, '0')}</span>
-              {note}
-            </div>
-          ))
-        )}
-        {task.status !== 'running' && task.summary && (
-          <div className={`mt-1 py-0.5 ${statusTone}`}>{task.summary}</div>
         )}
       </div>
     </div>
