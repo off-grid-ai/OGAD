@@ -13,7 +13,7 @@ import { parakeetTranscription as parakeet } from './parakeet-cli'
 import { whisperServerTranscription as whisperResident, whisperServer } from './whisper-server'
 import { getActiveModal } from '../active-models'
 import { modelsByKind } from '@offgrid/models'
-import type { SpeechLanguage } from '@offgrid/speech'
+import { transcriptionLanguages, type SpeechLanguage } from '@offgrid/speech'
 import type { ManagedRuntime } from '../runtime-manager'
 import { getSetting } from '../database'
 // The pure engine classifiers live in a LEAF module (classify.ts) so the CLIs can import
@@ -141,6 +141,25 @@ export function resolveConfiguredTranscriptionLanguage(
   return languages.some((candidate) => candidate.code === configuredLanguage)
     ? configuredLanguage
     : languages[0]?.code ?? 'auto'
+}
+
+export function transcriptionActiveInfo(
+  info: ReturnType<typeof getActiveTranscriptionInfo>,
+  installedIds: readonly string[],
+  configuredLanguage: string
+): ReturnType<typeof getActiveTranscriptionInfo> & {
+  language: string
+  languages: readonly SpeechLanguage[]
+  options: ReturnType<typeof transcriptionModelOptions>
+} {
+  const installed = modelsByKind('transcription').filter((entry) => installedIds.includes(entry.id))
+  const languages = transcriptionLanguages(info.engine, info.modelId)
+  return {
+    ...info,
+    language: resolveConfiguredTranscriptionLanguage(configuredLanguage, languages),
+    languages,
+    options: transcriptionModelOptions(info.modelId, installed)
+  }
 }
 
 /** The engine actually used for a requested one, after the whisper fallback. Single

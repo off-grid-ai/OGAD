@@ -9,6 +9,7 @@ import {
   modelsByEngine,
   transcriptionProvenance,
   transcriptionModelOptions,
+  transcriptionActiveInfo,
   resolveConfiguredTranscriptionLanguage,
   withConfiguredTranscriptionLanguage
 } from '../select'
@@ -117,6 +118,20 @@ describe('resolveConfiguredTranscriptionLanguage', () => {
   it('falls back to the model default after switching to an incompatible model', () => {
     expect(resolveConfiguredTranscriptionLanguage('fr', languages)).toBe('auto')
     expect(resolveConfiguredTranscriptionLanguage('fr', [])).toBe('auto')
+  })
+})
+
+describe('transcriptionActiveInfo', () => {
+  it('returns the selected language and only installed transcription choices', () => {
+    const result = transcriptionActiveInfo(
+      { engine: 'whisper', modelId: 'ggml-base.bin', label: 'Whisper · Base' },
+      ['ggerganov/whisper.cpp-base'],
+      'hi'
+    )
+
+    expect(result.language).toBe('hi')
+    expect(result.languages.some((language) => language.code === 'hi')).toBe(true)
+    expect(result.options).toHaveLength(1)
   })
 })
 
