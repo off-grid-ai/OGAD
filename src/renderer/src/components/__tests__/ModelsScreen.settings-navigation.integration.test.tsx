@@ -147,15 +147,21 @@ describe('<ModelsScreen/> active model settings', () => {
     expect((openSettings.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({ tab: expectedTab })
   })
 
-  it('does not offer model settings for transcription', async () => {
+  it('opens transcription settings for the active transcription model', async () => {
     const user = userEvent.setup()
+    const openSettings = vi.fn()
+    window.addEventListener('og:open-model-settings-panel', openSettings, { once: true })
     render(<ModelsScreen />)
 
     await user.click(await screen.findByRole('button', { name: 'Transcription' }))
-    expect(
-      within(cardFor('Active Transcription Model')).queryByRole('button', {
+    await user.click(
+      within(cardFor('Active Transcription Model')).getByRole('button', {
         name: 'Open model settings'
       })
-    ).toBeNull()
+    )
+
+    expect((openSettings.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({
+      tab: 'transcription'
+    })
   })
 })
