@@ -38,10 +38,22 @@ echo "[pre-push] coverage 1/3 — unit + integration"
 # The app keeps SQLite built for Electron. The fast suite also contains real product
 # integrations that open SQLite under Node, so give them Node's ABI before Vitest starts.
 # The DB journey immediately below restores Electron's ABI in its EXIT trap.
+sqlite_needs_electron_restore=0
+restore_electron_sqlite() {
+  if [ "$sqlite_needs_electron_restore" != "1" ]; then
+    return
+  fi
+  sqlite_needs_electron_restore=0
+  echo "[pre-push] restoring SQLite for Electron"
+  npx electron-rebuild -f -w better-sqlite3-multiple-ciphers >/dev/null 2>&1 || \
+    npx electron-builder install-app-deps >/dev/null 2>&1 || true
+}
+trap restore_electron_sqlite EXIT
 if ! npm rebuild better-sqlite3-multiple-ciphers >/dev/null 2>&1; then
   echo "[pre-push] BLOCKED: could not rebuild SQLite for the Node test runner."
   exit 1
 fi
+sqlite_needs_electron_restore=1
 if ! npm run --silent test:coverage; then
   echo ""
   echo "[pre-push] NOTE: the fast suite reported failures or missed its own thresholds. The aggregate gate"
@@ -53,6 +65,9 @@ echo "[pre-push] coverage 2/3 — DB journeys (real SQLite)"
 if ! OFFGRID_DB_VITEST_CONFIG=vitest.db.coverage.config.ts npm run --silent test:db -- --coverage; then
   echo "[pre-push] NOTE: the DB journeys reported failures; their contribution may be missing below."
 fi
+# test-db.sh restores Electron's ABI in its own EXIT trap. The parent trap above
+# remains the interruption guard for every earlier exit path.
+sqlite_needs_electron_restore=0
 
 # Full Playwright e2e on the built app — the one gate the unit/integration suite can't give:
 # does the built app actually render + drive its surfaces. Specs needing real models/engine binaries
