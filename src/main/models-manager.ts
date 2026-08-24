@@ -733,7 +733,13 @@ export async function activateModel(
     kind = getLocalModels().find((m) => m.id === modelId)?.kind
   } else {
     const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models')
-    kind = (CATALOG.find((m) => m.id === modelId) ?? (await resolveHuggingFaceModel(modelId)))?.kind
+    const downloaded = reconcileDownloadedModelRegistry(
+      llm.getModelsDir(),
+      CATALOG as unknown as CatalogEntry[]
+    )
+    kind =
+      downloadedVariant(downloaded, modelId)?.kind ??
+      (CATALOG.find((m) => m.id === modelId) ?? (await resolveHuggingFaceModel(modelId)))?.kind
   }
   const modal = modalityForModel(kind)
   return modal ? setActiveModalChoice(modal, modelId) : setActiveModel(modelId)

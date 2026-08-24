@@ -7,13 +7,14 @@
 //                          interim, so ticks don't reload the model each call.
 // Everything that turns audio into text depends on this seam, never on a concrete
 // engine module: adding an engine is a new entry here + a new TranscriptionService.
-import type { TranscriptionService } from './types'
+import type { TranscriptionService, TranscribeOptions } from './types'
 import { transcriptionService as whisper } from './whisper-cli'
 import { parakeetTranscription as parakeet } from './parakeet-cli'
 import { whisperServerTranscription as whisperResident, whisperServer } from './whisper-server'
 import { getActiveModal } from '../active-models'
 import { modelsByKind } from '@offgrid/models'
 import type { ManagedRuntime } from '../runtime-manager'
+import { getSetting } from '../database'
 // The pure engine classifiers live in a LEAF module (classify.ts) so the CLIs can import
 // them without forming a load-time cycle back through select (which reads the CLI
 // singletons at module scope). Re-exported here so existing importers/tests keep working.
@@ -112,7 +113,23 @@ export function getActiveTranscription(): TranscriptionService {
     getActiveModal('transcription'),
     modelsByKind('transcription')
   )
-  return getTranscription(engine)
+  return withConfiguredTranscriptionLanguage(
+    getTranscription(engine),
+    getSetting('sttLanguage', 'auto')
+  )
+}
+
+/** Apply the user's language hint at the shared transcription seam. An explicit
+ *  call-site hint still wins, so specialized import flows can override it. */
+export function withConfiguredTranscriptionLanguage(
+  service: TranscriptionService,
+  language: string
+): TranscriptionService {
+  return {
+    isAvailable: () => service.isAvailable(),
+    transcribe: (input: { path: string }, opts?: TranscribeOptions) =>
+      service.transcribe(input, { language, ...opts })
+  }
 }
 
 /** The engine actually used for a requested one, after the whisper fallback. Single

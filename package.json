@@ -59,6 +59,7 @@
     "@offgrid/clipboard": "file:./packages/clipboard",
     "@offgrid/design": "file:./packages/design",
     "@offgrid/models": "file:../shared/packages/models",
+    "@offgrid/speech": "file:../shared/packages/speech",
     "@offgrid/rag": "file:./packages/rag",
     "@offgrid/sync": "file:../shared/packages/sync",
     "@phosphor-icons/react": "^2.1.10",

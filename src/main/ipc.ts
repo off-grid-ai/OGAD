@@ -2052,6 +2052,8 @@ export function setupIPC() {
       await import('./transcription/select')
     const { listInstalled } = await import('./models-manager')
     const { modelsByKind } = await import('@offgrid/models')
+    const { transcriptionLanguages } = await import('@offgrid/speech')
+    const { getSetting } = await import('./database')
     const info = getActiveTranscriptionInfo()
     const installedIds = new Set(await listInstalled())
     const installed = (
@@ -2061,7 +2063,17 @@ export function setupIPC() {
         files: Array<{ name: string }>
       }>
     ).filter((entry) => installedIds.has(entry.id))
-    return { ...info, options: transcriptionModelOptions(info.modelId, installed) }
+    const languages = transcriptionLanguages(info.engine, info.modelId)
+    const configuredLanguage = getSetting('sttLanguage', 'auto')
+    const language = languages.some((candidate) => candidate.code === configuredLanguage)
+      ? configuredLanguage
+      : languages[0]?.code ?? 'auto'
+    return {
+      ...info,
+      language,
+      languages,
+      options: transcriptionModelOptions(info.modelId, installed)
+    }
   })
 
   // --- Voice input (STT via the active engine: whisper default / Parakeet opt-in) ---

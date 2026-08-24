@@ -28,6 +28,25 @@ afterAll(() => {
 })
 
 describe('device-transferred model registration', () => {
+  it('activates a transferred Whisper package as transcription, not as the chat LLM', async () => {
+    const primary = 'ggml-small.en.gguf'
+    const primaryBytes = validGguf(10)
+    fs.writeFileSync(path.join(dataDir, 'models', primary), primaryBytes)
+
+    const registered = await manager.registerTransferredModel({
+      id: 'ggerganov/whisper.cpp/small.en',
+      name: 'Whisper Small English',
+      kind: 'transcription',
+      source: 'downloaded',
+      files: [{ name: primary, sizeBytes: primaryBytes.length }]
+    })
+
+    expect(registered.success).toBe(true)
+    await expect(manager.activateModel(registered.id!)).resolves.toEqual({ success: true })
+    expect(manager.getActiveModalities()).toMatchObject({ transcription: registered.id })
+    expect(manager.getActiveModel()).not.toBe(registered.id)
+  })
+
   it('registers a valid vision variant whose files differ from the download catalog', async () => {
     const primary = 'Qwen3.5-0.8B-Q4_0.gguf'
     const projector = 'qwen3.5-0.8b-mmproj-F16.gguf'

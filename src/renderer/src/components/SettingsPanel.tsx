@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { persistToggle } from '@renderer/lib/persist-toggle'
-import { useEscapeToClose } from '@renderer/lib/use-escape-to-close'
 import {
   DEFAULT_CTX_SIZE,
   MAX_TOKENS_AUTO,
@@ -15,6 +14,14 @@ import {
 import { formatContextWindow, resolveModelName } from '@renderer/lib/model-summary'
 import type { ModelSettingsPanelTab as Tab } from '@renderer/lib/model-settings-panel'
 import { ImageSettingsTab } from './ImageSettingsTab'
+import { SidePanel } from './SidePanel'
+import {
+  availableKokoroLanguages,
+  kokoroVoiceLabel,
+  kokoroVoiceLanguage,
+  standardKokoroVoices,
+  type SpeechLanguage
+} from '@offgrid/speech'
 
 const MAX_OUTPUT_AUTO = MAX_TOKENS_AUTO
 const MAX_OUTPUT_OPTIONS = [2048, 4096, 8192, 16384, 32768]
@@ -49,6 +56,15 @@ type Connector = {
   enabled?: number | boolean
 }
 
+type TranscriptionInfo = {
+  engine: 'whisper' | 'parakeet' | 'whisper-resident'
+  modelId: string | null
+  label: string
+  language: string
+  languages: SpeechLanguage[]
+  options: { id: string | null; name: string; active: boolean }[]
+}
+
 const CTX_OPTIONS = [4096, 8192, 16384, 32768, 65536, 131072]
 // Defaults mirror the backend's LLMService field defaults (for "Reset to defaults").
 const DEFAULTS: LlmSettings = {
@@ -71,17 +87,24 @@ function Row({
   label,
   hint,
   value,
+  controlId,
   children
 }: {
   label: string
   hint?: string
   value?: string
+  controlId?: string
   children: React.ReactNode
 }) {
   return (
     <div className="mb-4">
       <div className="mb-1 flex items-center justify-between">
-        <label className="text-[11px] uppercase tracking-wide text-neutral-400">{label}</label>
+        <label
+          htmlFor={controlId}
+          className="text-[11px] uppercase tracking-wide text-neutral-400"
+        >
+          {label}
+        </label>
         {value !== undefined ? <span className="text-xs text-green-500">{value}</span> : null}
       </div>
       {children}
@@ -99,11 +122,12 @@ export function SettingsPanel({
   embedded?: boolean
   initialTab?: Tab
 }) {
-  useEscapeToClose(onClose)
   const [tab, setTab] = useState<Tab>(initialTab)
   const [s, setS] = useState<LlmSettings>({})
   const [voices, setVoices] = useState<string[]>([])
   const [voice, setVoice] = useState<string>('af_heart')
+  const [voiceLanguage, setVoiceLanguage] = useState<string>('en-US')
+  const [transcriptionInfo, setTranscriptionInfo] = useState<TranscriptionInfo | null>(null)
   const [tools, setTools] = useState<{ name: string; description: string; enabled?: boolean }[]>([])
   const [connectors, setConnectors] = useState<Connector[]>([])
   const [newConn, setNewConn] = useState({ name: '', url: '' })
@@ -127,8 +151,12 @@ export function SettingsPanel({
     }
     window.api
       .ttsVoices?.()
-      .then((v: string[]) => setVoices(v))
+      .then((v: string[]) => setVoices(standardKokoroVoices(v).map((entry) => entry.id)))
       .catch(() => {})
+    window.api
+      .getTranscriptionInfo?.()
+      .then((info: TranscriptionInfo) => setTranscriptionInfo(info))
+      .catch(() => setTranscriptionInfo(null))
     window.api
       .listTools?.()
       .then((t: { name: string; description: string }[]) => setTools(t))
@@ -136,7 +164,11 @@ export function SettingsPanel({
     window.api
       .getSettings()
       .then((all: Record<string, unknown>) => {
-        if (all.ttsVoice) setVoice(String(all.ttsVoice))
+        if (all.ttsVoice) {
+          const savedVoice = String(all.ttsVoice)
+          setVoice(savedVoice)
+          setVoiceLanguage(kokoroVoiceLanguage(savedVoice)?.code ?? 'en-US')
+        }
       })
       .catch(() => {})
     refreshConnectors()
@@ -171,7 +203,23 @@ export function SettingsPanel({
   }
 
   const pickVoice = (v: string): void => {
+    setVoiceLanguage(kokoroVoiceLanguage(v)?.code ?? voiceLanguage)
     void persistToggle(v, voice, setVoice, (val) => window.api.saveSetting('ttsVoice', val))
+  }
+
+  const pickVoiceLanguage = (language: string): void => {
+    const matchingVoice = voices.find(
+      (candidate) => kokoroVoiceLanguage(candidate)?.code === language
+    )
+    if (!matchingVoice) return
+    setVoiceLanguage(language)
+    pickVoice(matchingVoice)
+  }
+
+  const pickTranscriptionLanguage = (language: string): void => {
+    if (!transcriptionInfo) return
+    setTranscriptionInfo({ ...transcriptionInfo, language })
+    void window.api.saveSetting('sttLanguage', language)
   }
 
   const testVoice = async (): Promise<void> => {
@@ -210,26 +258,8 @@ export function SettingsPanel({
     refreshConnectors()
   }
 
-  return (
+  const content = (
     <>
-      {/* Click-outside scrim: any click off the panel closes it (paired with Escape). */}
-      {!embedded ? (
-        <div
-          className="fixed inset-0 z-40 bg-black/30 transition-opacity duration-150"
-          onClick={onClose}
-          aria-hidden="true"
-        />
-      ) : null}
-      <div
-        role={embedded ? undefined : 'dialog'}
-        aria-modal={embedded ? undefined : true}
-        aria-label={embedded ? undefined : 'Model settings'}
-        className={
-          embedded
-            ? 'flex min-h-0 flex-col bg-neutral-950/20 font-mono'
-            : 'fixed bottom-0 right-0 top-0 z-50 flex w-[30vw] min-w-[420px] flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl'
-        }
-      >
         {!embedded ? (
           <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2.5">
             <div className="flex items-center gap-2 text-sm text-neutral-200">
@@ -247,7 +277,8 @@ export function SettingsPanel({
         ) : null}
 
         <div className="flex items-center gap-1 border-b border-neutral-800 px-3 py-2">
-          {(['model', 'image', 'voice', 'tools', 'connectors'] as const).map((t) => (
+          {(['model', 'image', 'voice', 'transcription', 'tools', 'connectors'] as const).map(
+            (t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -255,7 +286,8 @@ export function SettingsPanel({
             >
               {t}
             </button>
-          ))}
+            )
+          )}
         </div>
 
         <div
@@ -520,19 +552,43 @@ export function SettingsPanel({
           {tab === 'voice' && (
             <>
               <Row
-                label="Voice"
-                hint="Kokoro on-device voices (af_ = US female, am_ = US male, bf_/bm_ = British)."
+                label="Language"
+                controlId="tts-language"
+                hint="Only languages available in the installed on-device voice runtime are shown."
               >
                 <select
+                  id="tts-language"
+                  value={voiceLanguage}
+                  onChange={(e) => pickVoiceLanguage(e.target.value)}
+                  className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
+                >
+                  {availableKokoroLanguages(voices.length ? voices : [voice]).map((language) => (
+                    <option key={language.code} value={language.code}>
+                      {language.label}
+                    </option>
+                  ))}
+                </select>
+              </Row>
+              <Row
+                label="Voice"
+                controlId="tts-voice"
+                hint="Voices available for the selected language."
+              >
+                <select
+                  id="tts-voice"
                   value={voice}
                   onChange={(e) => pickVoice(e.target.value)}
                   className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
                 >
-                  {(voices.length ? voices : [voice]).map((v) => (
+                  {(voices.length ? voices : [voice])
+                    .filter(
+                      (candidate) => kokoroVoiceLanguage(candidate)?.code === voiceLanguage
+                    )
+                    .map((v) => (
                     <option key={v} value={v}>
-                      {v}
+                      {kokoroVoiceLabel(v)}
                     </option>
-                  ))}
+                    ))}
                 </select>
               </Row>
               <button
@@ -551,6 +607,35 @@ export function SettingsPanel({
                   Couldn’t play — check the console.
                 </span>
               ) : null}
+            </>
+          )}
+
+          {tab === 'transcription' && (
+            <>
+              <Row label="Current model" hint="The model used for the next recording.">
+                <div className="rounded-md border border-neutral-800 bg-neutral-900 px-2 py-2 text-neutral-200">
+                  {transcriptionInfo?.label ?? 'Checking installed model…'}
+                </div>
+              </Row>
+              <Row
+                label="Spoken language"
+                controlId="stt-language"
+                hint="Auto-detect is available for multilingual Whisper models. English-only models show English only."
+              >
+                <select
+                  id="stt-language"
+                  value={transcriptionInfo?.language ?? 'auto'}
+                  onChange={(e) => pickTranscriptionLanguage(e.target.value)}
+                  disabled={!transcriptionInfo}
+                  className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500 disabled:opacity-50"
+                >
+                  {(transcriptionInfo?.languages ?? []).map((language) => (
+                    <option key={language.code} value={language.code}>
+                      {language.label}
+                    </option>
+                  ))}
+                </select>
+              </Row>
             </>
           )}
 
@@ -666,7 +751,16 @@ export function SettingsPanel({
             </>
           )}
         </div>
-      </div>
     </>
+  )
+
+  if (embedded) {
+    return <div className="flex min-h-0 flex-col bg-neutral-950/20 font-mono">{content}</div>
+  }
+
+  return (
+    <SidePanel ariaLabel="Model settings" onClose={onClose} className="w-[30vw] min-w-[420px]">
+      {content}
+    </SidePanel>
   )
 }

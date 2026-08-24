@@ -1,14 +1,27 @@
 export const OPEN_MODEL_SETTINGS_PANEL_EVENT = 'og:open-model-settings-panel'
-export type ModelSettingsPanelTab = 'model' | 'image' | 'voice' | 'tools' | 'connectors'
+export type ModelSettingsPanelTab =
+  | 'model'
+  | 'image'
+  | 'voice'
+  | 'transcription'
+  | 'tools'
+  | 'connectors'
 
 export function modelSettingsTabForKind(kind?: string): ModelSettingsPanelTab {
   if (kind === 'image') return 'image'
   if (kind === 'voice') return 'voice'
+  if (kind === 'transcription') return 'transcription'
   return 'model'
 }
 
 export function supportsModelSettings(kind?: string): boolean {
-  return kind === 'text' || kind === 'vision' || kind === 'image' || kind === 'voice'
+  return (
+    kind === 'text' ||
+    kind === 'vision' ||
+    kind === 'image' ||
+    kind === 'voice' ||
+    kind === 'transcription'
+  )
 }
 
 /** Open the one shared model-settings drawer over the current screen. */

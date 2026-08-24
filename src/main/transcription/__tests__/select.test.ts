@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   pickTranscription,
   engineForActiveModel,
@@ -8,7 +8,8 @@ import {
   catalogEngine,
   modelsByEngine,
   transcriptionProvenance,
-  transcriptionModelOptions
+  transcriptionModelOptions,
+  withConfiguredTranscriptionLanguage
 } from '../select'
 import type { TranscriptionService } from '../types'
 
@@ -67,6 +68,38 @@ describe('pickTranscription', () => {
     const r = pickTranscription('whisper', three(false, true, true))
     expect(r.engine).toBe('whisper')
     expect(r.fellBack).toBe(false)
+  })
+})
+
+describe('withConfiguredTranscriptionLanguage', () => {
+  it('applies the selected language to normal transcription', async () => {
+    const transcribe = vi.fn(async () => ({ text: 'bonjour' }))
+    const configured = withConfiguredTranscriptionLanguage(
+      { isAvailable: () => true, transcribe },
+      'fr'
+    )
+
+    await configured.transcribe({ path: '/tmp/voice.wav' })
+
+    expect(transcribe).toHaveBeenCalledWith(
+      { path: '/tmp/voice.wav' },
+      expect.objectContaining({ language: 'fr' })
+    )
+  })
+
+  it('allows a specialized caller to override the selected language', async () => {
+    const transcribe = vi.fn(async () => ({ text: 'hello' }))
+    const configured = withConfiguredTranscriptionLanguage(
+      { isAvailable: () => true, transcribe },
+      'fr'
+    )
+
+    await configured.transcribe({ path: '/tmp/voice.wav' }, { language: 'en' })
+
+    expect(transcribe).toHaveBeenCalledWith(
+      { path: '/tmp/voice.wav' },
+      expect.objectContaining({ language: 'en' })
+    )
   })
 })
 

@@ -511,6 +511,8 @@ const offGridApi = {
     engine: 'whisper' | 'parakeet' | 'whisper-resident'
     modelId: string | null
     label: string
+    language: string
+    languages: { code: string; label: string }[]
     options: { id: string | null; name: string; active: boolean }[]
   }> => ipcRenderer.invoke('transcription:active-info'),
 
