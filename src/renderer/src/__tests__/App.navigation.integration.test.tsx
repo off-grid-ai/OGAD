@@ -40,6 +40,7 @@ describe('<App/> desktop navigation integration', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    Element.prototype.scrollIntoView = (): void => {}
     rendererActivation.load.mockResolvedValue(undefined)
     installAppStorage().setItem('onboarding_completed', 'true')
     window.history.replaceState(null, '', '/projects')
@@ -177,6 +178,34 @@ describe('<App/> desktop navigation integration', () => {
     })
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Model settings' })).toBeNull())
     expect(window.location.pathname).toBe('/models')
+  })
+
+  it('keeps a Devices subroute only while Devices remains the active screen', async () => {
+    const user = userEvent.setup()
+    installAppBoundary({ universalSearch: async () => [] })
+    render(<App />)
+
+    expect(
+      await screen.findByRole('heading', { name: 'Projects' }, { timeout: 5_000 })
+    ).toBeTruthy()
+
+    await user.keyboard('{Meta>}k{/Meta}')
+    const search = await screen.findByPlaceholderText(/jump to a screen/i)
+    await user.type(search, 'Activity')
+    await user.click(await screen.findByTestId('palette-screen-devices-activity'))
+    await waitFor(() => expect(window.location.pathname).toBe('/devices/activity'))
+
+    await user.keyboard('{Meta>}k{/Meta}')
+    const nextSearch = await screen.findByPlaceholderText(/jump to a screen/i)
+    await user.type(nextSearch, 'Models')
+    await user.click(await screen.findByTestId('palette-screen-models-root'))
+    await waitFor(() => expect(window.location.pathname).toBe('/models'))
+
+    await user.keyboard('{Meta>}k{/Meta}')
+    const finalSearch = await screen.findByPlaceholderText(/jump to a screen/i)
+    await user.type(finalSearch, 'Devices')
+    await user.click(await screen.findByTestId('palette-screen-devices-root'))
+    await waitFor(() => expect(window.location.pathname).toBe('/devices'))
   })
 
   it('routes permission recovery into the existing Setup & health detail', async () => {

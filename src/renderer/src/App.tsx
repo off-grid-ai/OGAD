@@ -381,6 +381,10 @@ function AppContent() {
       setSettingsSection(decodeURIComponent(path.slice('/settings/'.length)) || null)
       setNavigationSubroute(null)
       setViewMode('settings')
+    } else if (path.startsWith('/devices/')) {
+      setNavigationSubroute(decodeURIComponent(path.slice('/devices/'.length)) || null)
+      setSettingsSection(null)
+      setViewMode('devices')
     } else if (viewMap[path]) {
       setNavigationSubroute(null)
       setSettingsSection(null)
@@ -459,6 +463,8 @@ function AppContent() {
     const newPath =
       viewMode === 'settings' && settingsSection
         ? `/settings/${encodeURIComponent(settingsSection)}`
+        : viewMode === 'devices' && navigationSubroute
+          ? `/devices/${encodeURIComponent(navigationSubroute)}`
         : urlMap[viewMode]
     if (window.location.pathname !== newPath) {
       window.history.replaceState(null, '', newPath)
@@ -811,8 +817,8 @@ function AppContent() {
   ]
   // One way in to a screen, used by the sidebar and by the command palette: switching screens also
   // drops whatever row was selected in the old one, so a stale detail pane never rides along.
-  const goToView = (view: ViewMode, subroute?: string | null): void => {
-    setNavigationSubroute(view === 'devices' ? (subroute ?? null) : null)
+  const goToView = (view: ViewMode, subroute: string | null = null): void => {
+    setNavigationSubroute(view === 'devices' ? subroute : null)
     setSettingsSection(null)
     setViewMode(view)
     setSelectedSessionId(null)

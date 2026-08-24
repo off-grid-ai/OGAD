@@ -74,8 +74,9 @@ export function CommandPalette({
     }
     const id = ++seq.current
     const t = setTimeout(async () => {
-      const r = (await api.universalSearch(query, { limit: 8, semantic: false })) as SearchHit[]
-      if (id === seq.current) setHits(r)
+      const result = await api.universalSearch(query, { limit: 8, semantic: false })
+      const nextHits = Array.isArray(result) ? (result as SearchHit[]) : []
+      if (id === seq.current) setHits(nextHits)
     }, 140)
     return () => clearTimeout(t)
   }, [query])

@@ -11,8 +11,17 @@ afterEach(() => {
 
 function renderPicker(onClose = vi.fn()) {
   ;(window as unknown as { api: Record<string, unknown> }).api = {
-    getModelCatalog: vi.fn().mockResolvedValue({ models: [] }),
-    getInstalledModels: vi.fn().mockResolvedValue([]),
+    getModelCatalog: vi.fn().mockResolvedValue({
+      models: [
+        {
+          id: 'local/qwen',
+          name: 'Qwen 3.5 2B',
+          kind: 'text',
+          files: [{ name: 'qwen.gguf', role: 'primary' }]
+        }
+      ]
+    }),
+    getInstalledModels: vi.fn().mockResolvedValue(['local/qwen']),
     getActiveModel: vi.fn().mockResolvedValue(null),
     getActiveModalities: vi.fn().mockResolvedValue({})
   }
@@ -47,11 +56,13 @@ describe('<ModelPicker/> dismissal', () => {
     const panel = screen.getByRole('dialog', { name: 'Active models' })
 
     await waitFor(() => expect(document.activeElement).toBe(panel))
+    await screen.findByRole('button', { name: /Qwen 3\.5 2B/ })
     const buttons = Array.from(panel.querySelectorAll<HTMLButtonElement>('button:not([disabled])'))
     const first = buttons[0]
     const last = buttons[buttons.length - 1]
     expect(first).toBeTruthy()
     expect(last).toBeTruthy()
+    expect(first).not.toBe(last)
 
     last?.focus()
     fireEvent.keyDown(last as HTMLElement, { key: 'Tab' })

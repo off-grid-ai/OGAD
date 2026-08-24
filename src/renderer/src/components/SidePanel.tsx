@@ -34,9 +34,17 @@ export function SidePanel({
       if (event.key !== 'Tab' || !panel) return
       const focusable = Array.from(
         panel.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+          'button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
         )
-      ).filter((element) => !element.hasAttribute('hidden'))
+      ).filter((element) => {
+        const style = window.getComputedStyle(element)
+        return (
+          !element.hasAttribute('hidden') &&
+          element.getAttribute('aria-hidden') !== 'true' &&
+          style.display !== 'none' &&
+          style.visibility !== 'hidden'
+        )
+      })
       if (focusable.length === 0) {
         event.preventDefault()
         panel.focus()
