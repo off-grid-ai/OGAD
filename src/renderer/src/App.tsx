@@ -472,12 +472,12 @@ function AppContent() {
       devices: '/devices'
     }
 
-    const newPath =
-      viewMode === 'settings' && settingsSection
-        ? `/settings/${encodeURIComponent(settingsSection)}`
-        : viewMode === 'devices' && navigationSubroute
-          ? `/devices/${encodeURIComponent(navigationSubroute)}`
-          : urlMap[viewMode]
+    let newPath = urlMap[viewMode]
+    if (viewMode === 'settings' && settingsSection) {
+      newPath = `/settings/${encodeURIComponent(settingsSection)}`
+    } else if (viewMode === 'devices' && navigationSubroute) {
+      newPath = `/devices/${encodeURIComponent(navigationSubroute)}`
+    }
     if (window.location.pathname !== newPath) {
       window.history.replaceState(null, '', newPath)
     }
