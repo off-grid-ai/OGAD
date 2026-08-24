@@ -28,3 +28,18 @@ export function authorizeBearer(headerValue: string | undefined, token: string):
   }
   return timingSafeEqual(provided, expected)
 }
+
+/** True iff `headerValue` is a valid `Bearer` for ANY token in `tokens`. This is how the
+ *  per-device model works: each paired+tools-allowed device has its own token, and a request
+ *  authorizes only if its bearer matches one that is LIVE right now. An empty list (no paired
+ *  device may run tools) never authorizes - fail closed. Checks every token (no early return on
+ *  a match) so the time taken does not reveal which device matched. */
+export function authorizeBearerAny(headerValue: string | undefined, tokens: readonly string[]): boolean {
+  let authorized = false
+  for (const token of tokens) {
+    if (authorizeBearer(headerValue, token)) {
+      authorized = true
+    }
+  }
+  return authorized
+}

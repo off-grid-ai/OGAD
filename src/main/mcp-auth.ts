@@ -9,9 +9,23 @@ import path from 'path'
 import type http from 'http'
 import { randomBytes } from 'crypto'
 import { app } from 'electron'
-import { authorizeBearer } from './mcp-auth-logic'
+import { authorizeBearer, authorizeBearerAny } from './mcp-auth-logic'
 
 let cached: string | null = null
+
+/** Supplies the tokens that authorize action tools RIGHT NOW - one per paired device that may
+ *  run this Mac's tools. Registered by the pro sync layer, which owns the pairing set; core
+ *  stays free of any pairing/device knowledge. Un-pairing a device drops its token from this
+ *  list, so its next call is rejected - that is what makes tool access revoke on un-pair. */
+export type ActiveActionTokens = () => readonly string[]
+
+let activeActionTokens: ActiveActionTokens | null = null
+
+/** Install (or clear, with null) the live per-device token provider. When set, ONLY those
+ *  tokens authorize; the legacy single global token is ignored. */
+export function registerActiveActionTokens(provider: ActiveActionTokens | null): void {
+  activeActionTokens = provider
+}
 
 function tokenPath(): string {
   return path.join(app.getPath('userData'), 'mcp-action-token')
@@ -42,11 +56,20 @@ export function getActionToken(): string {
   return token
 }
 
-/** True when the request carries the valid action-tool token. Unauthenticated
- *  requests still get the open model tools - just not the action tools. */
+/** True when the request carries a valid action-tool token. Unauthenticated
+ *  requests still get the open model tools - just not the action tools.
+ *
+ *  When the pro sync layer has registered a live-token provider, ONLY the tokens
+ *  of currently paired + tools-allowed devices authorize (per-device, revoked on
+ *  un-pair). With no provider (free build / no device sync), it falls back to the
+ *  legacy single global token, which is never distributed in that build anyway. */
 export function isActionAuthorized(req: http.IncomingMessage): boolean {
   const header = req.headers['authorization']
-  return authorizeBearer(Array.isArray(header) ? header[0] : header, getActionToken())
+  const provided = Array.isArray(header) ? header[0] : header
+  if (activeActionTokens) {
+    return authorizeBearerAny(provided, activeActionTokens())
+  }
+  return authorizeBearer(provided, getActionToken())
 }
 
 /** Dev-only: print the action token so a device can be paired for testing. In a
