@@ -1,4 +1,5 @@
-import { preprocessChatMarkdown } from '@offgrid/sync'
+import { preprocessChatMarkdown, safeChatExternalUrl } from '@offgrid/sync'
+import { openExternal } from '../constants/links'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
@@ -58,7 +59,15 @@ export const chatMarkdownComponents: Components = {
   ),
   hr: () => <hr className="my-3 border-neutral-800" />,
   a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noreferrer" className="text-green-500 underline">
+    <a
+      href={safeChatExternalUrl(href) ?? undefined}
+      className="text-green-500 underline"
+      onClick={(event) => {
+        event.preventDefault()
+        const safeUrl = safeChatExternalUrl(href)
+        if (safeUrl) openExternal(safeUrl)
+      }}
+    >
       {children}
     </a>
   ),
