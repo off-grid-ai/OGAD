@@ -18,10 +18,7 @@ restore() {
   # no-op from cache). Verify the app can actually load it; warn loudly if not.
   npx electron-rebuild -f -w better-sqlite3-multiple-ciphers >/dev/null 2>&1 \
     || npx electron-builder install-app-deps >/dev/null 2>&1 || true
-  ELECTRON_RUN_AS_NODE=1 ./node_modules/electron/dist/Electron.app/Contents/MacOS/Electron \
-    -e 'new (require("better-sqlite3-multiple-ciphers"))(":memory:")' >/dev/null 2>&1 \
-    && echo "[test:db] Electron ABI restored (app can load sqlite)." \
-    || echo "[test:db] WARNING: Electron cannot load sqlite - run 'npx electron-rebuild -f -w better-sqlite3-multiple-ciphers' before launching the app."
+  ./scripts/probe-electron-sqlite.sh '[test:db]'
 }
 trap restore EXIT
 
