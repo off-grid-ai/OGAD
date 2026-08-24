@@ -74,6 +74,43 @@ function rms(samples: Float32Array): number {
   return Math.sqrt(sum / samples.length)
 }
 
+function captureIsBlocked(
+  phase: ChatVoicePhase,
+  current: ChatVoiceTurnOptions,
+  userInitiated: boolean
+): boolean {
+  if (phase !== 'idle') return true
+  if (current.isGenerating || current.isPlaybackActive) return true
+  return !current.voiceMode && !userInitiated
+}
+
+function effectiveCaptureMode(current: ChatVoiceTurnOptions): VoiceTurnMode {
+  if (!current.voiceMode) return 'tap'
+  return current.mode
+}
+
+function initialCapturePhase(mode: VoiceTurnMode): ChatVoicePhase {
+  if (mode === 'handsfree') return 'listening'
+  return 'recording'
+}
+
+function microphoneFailure(cause: unknown): { denied: boolean; message: string } {
+  const name =
+    typeof cause === 'object' && cause !== null && 'name' in cause ? String(cause.name) : ''
+  const denied = name === 'NotAllowedError' || name === 'SecurityError'
+  if (denied) {
+    return {
+      denied,
+      message:
+        'Microphone access is off. Allow Off Grid AI Desktop in System Settings, then try again.'
+    }
+  }
+  return {
+    denied,
+    message: 'The microphone could not start. Try again, or switch this voice turn to Manual.'
+  }
+}
+
 /**
  * One owner for a chat voice turn.
  *
@@ -88,9 +125,9 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
     optionsRef.current = options
   }, [options])
 
-  const [phase, setPhaseState] = useState<ChatVoicePhase>('idle')
+  const [phase, setPhase] = useState<ChatVoicePhase>('idle')
   const phaseRef = useRef<ChatVoicePhase>('idle')
-  const [suspended, setSuspendedState] = useState(false)
+  const [suspended, setSuspended] = useState(false)
   const suspendedRef = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const [microphoneDenied, setMicrophoneDenied] = useState(false)
@@ -110,14 +147,14 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
   const previousPlaybackRef = useRef(false)
   const rearmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const setPhase = useCallback((next: ChatVoicePhase): void => {
+  const updatePhase = useCallback((next: ChatVoicePhase): void => {
     phaseRef.current = next
-    setPhaseState(next)
+    setPhase(next)
   }, [])
 
-  const setSuspended = useCallback((next: boolean): void => {
+  const updateSuspended = useCallback((next: boolean): void => {
     suspendedRef.current = next
-    setSuspendedState(next)
+    setSuspended(next)
   }, [])
 
   const clearRearmTimer = useCallback((): void => {
@@ -156,7 +193,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
         stopTracks(resources)
       }
       phaseRef.current = 'idle'
-      if (notify && mountedRef.current) setPhaseState('idle')
+      if (notify && mountedRef.current) setPhase('idle')
     },
     [stopAnalysis, stopTracks]
   )
@@ -167,8 +204,8 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
       if (blob.size === 0) {
         if (sequence === sequenceRef.current) {
           setError("Didn't record any audio. Try again.")
-          setSuspended(optionsRef.current.mode === 'handsfree')
-          setPhase('idle')
+          updateSuspended(optionsRef.current.mode === 'handsfree')
+          updatePhase('idle')
         }
         return
       }
@@ -180,13 +217,13 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
         if (!mountedRef.current || sequence !== sequenceRef.current) return
         if (!text) {
           setError("Didn't catch that. Tap the microphone and try again.")
-          setSuspended(optionsRef.current.mode === 'handsfree')
-          setPhase('idle')
+          updateSuspended(optionsRef.current.mode === 'handsfree')
+          updatePhase('idle')
           return
         }
 
         setError(null)
-        setPhase('idle')
+        updatePhase('idle')
         if (optionsRef.current.voiceMode) {
           sawGenerationRef.current = false
           sawPlaybackRef.current = false
@@ -202,38 +239,37 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
         setError(
           'Transcription failed. Check the speech-to-text model in Settings > Setup & health.'
         )
-        setSuspended(optionsRef.current.mode === 'handsfree')
-        setPhase('idle')
+        updateSuspended(optionsRef.current.mode === 'handsfree')
+        updatePhase('idle')
       }
     },
-    [setPhase, setSuspended]
+    [updatePhase, updateSuspended]
   )
 
   const finishCaptureRef = useRef<(suspendAfter: boolean) => void>(() => {})
 
+  const refreshTranscriptionLabel = useCallback(async (sequence: number): Promise<void> => {
+    try {
+      const info = await optionsRef.current.getTranscriptionLabel?.()
+      if (mountedRef.current && sequence === sequenceRef.current && info?.label) {
+        setTranscriptionLabel(info.label)
+      }
+    } catch {
+      // The label is supplementary. Recording can continue with the generic label.
+    }
+  }, [])
+
   const startCapture = useCallback(
     async (userInitiated: boolean): Promise<void> => {
       const current = optionsRef.current
-      if (
-        phaseRef.current !== 'idle' ||
-        current.isGenerating ||
-        current.isPlaybackActive ||
-        (!current.voiceMode && !userInitiated)
-      )
-        return
+      if (captureIsBlocked(phaseRef.current, current, userInitiated)) return
 
-      if (userInitiated) setSuspended(false)
+      if (userInitiated) updateSuspended(false)
       setError(null)
       setMicrophoneDenied(false)
       const sequence = ++sequenceRef.current
-      setPhase('starting')
-      void Promise.resolve()
-        .then(() => current.getTranscriptionLabel?.())
-        .then((info) => {
-          if (mountedRef.current && sequence === sequenceRef.current && info?.label)
-            setTranscriptionLabel(info.label)
-        })
-        .catch(() => {})
+      updatePhase('starting')
+      void refreshTranscriptionLabel(sequence)
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -285,7 +321,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
           })
         }
 
-        const mode = current.voiceMode ? current.mode : 'tap'
+        const mode = effectiveCaptureMode(current)
         if (mode !== 'tap') {
           const context = new window.AudioContext()
           const source = context.createMediaStreamSource(stream)
@@ -304,12 +340,12 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
             analyser.getFloatTimeDomainData(samples)
             const reading = endpoint.observeLevel(rms(samples))
             if (mode === 'handsfree' && reading.speech && phaseRef.current === 'listening')
-              setPhase('recording')
+              updatePhase('recording')
           }, LEVEL_SAMPLE_MS)
         }
 
         recorder.start(250)
-        setPhase(mode === 'handsfree' ? 'listening' : 'recording')
+        updatePhase(initialCapturePhase(mode))
       } catch (cause) {
         const resources = resourcesRef.current
         resourcesRef.current = null
@@ -318,42 +354,44 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
           stopTracks(resources)
         }
         if (!mountedRef.current || sequence !== sequenceRef.current) return
-        const name =
-          typeof cause === 'object' && cause !== null && 'name' in cause ? String(cause.name) : ''
-        setError(
-          name === 'NotAllowedError' || name === 'SecurityError'
-            ? 'Microphone access is off. Allow Off Grid AI Desktop in System Settings, then try again.'
-            : 'The microphone could not start. Try again, or switch this voice turn to Manual.'
-        )
-        setMicrophoneDenied(name === 'NotAllowedError' || name === 'SecurityError')
-        setSuspended(current.mode === 'handsfree')
-        setPhase('idle')
+        const failure = microphoneFailure(cause)
+        setError(failure.message)
+        setMicrophoneDenied(failure.denied)
+        updateSuspended(current.mode === 'handsfree')
+        updatePhase('idle')
       }
     },
-    [setPhase, setSuspended, stopAnalysis, stopTracks, transcribeRecording]
+    [
+      refreshTranscriptionLabel,
+      stopAnalysis,
+      stopTracks,
+      transcribeRecording,
+      updatePhase,
+      updateSuspended
+    ]
   )
 
   const finishCapture = useCallback(
     (suspendAfter: boolean): void => {
       if (phaseRef.current === 'starting') {
         discardCapture()
-        if (suspendAfter) setSuspended(true)
+        if (suspendAfter) updateSuspended(true)
         return
       }
       if (phaseRef.current === 'transcribing') {
         discardCapture()
-        if (suspendAfter) setSuspended(true)
+        if (suspendAfter) updateSuspended(true)
         return
       }
       const resources = resourcesRef.current
       if (!resources) {
-        setPhase('idle')
-        if (suspendAfter) setSuspended(true)
+        updatePhase('idle')
+        if (suspendAfter) updateSuspended(true)
         return
       }
 
       const heardSpeech = resources.endpoint?.hasHeardSpeech() ?? phaseRef.current === 'recording'
-      if (suspendAfter) setSuspended(true)
+      if (suspendAfter) updateSuspended(true)
       if (!heardSpeech && optionsRef.current.mode === 'handsfree') {
         discardCapture()
         return
@@ -361,7 +399,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
 
       stopAnalysis(resources)
       discardRef.current = false
-      setPhase('transcribing')
+      updatePhase('transcribing')
       try {
         if (resources.recorder.state !== 'inactive') resources.recorder.stop()
       } catch {
@@ -369,7 +407,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
         discardCapture()
       }
     },
-    [discardCapture, setPhase, setSuspended, stopAnalysis]
+    [discardCapture, stopAnalysis, updatePhase, updateSuspended]
   )
 
   useEffect(() => {
@@ -389,8 +427,8 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
     setAwaitingReply(false)
     sawGenerationRef.current = false
     sawPlaybackRef.current = false
-    if (optionsRef.current.mode === 'handsfree') setSuspended(true)
-  }, [discardCapture, setSuspended])
+    if (optionsRef.current.mode === 'handsfree') updateSuspended(true)
+  }, [discardCapture, updateSuspended])
 
   useEffect(() => {
     mountedRef.current = true
@@ -407,17 +445,17 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
     modeRef.current = options.mode
     discardCapture()
     setAwaitingReply(false)
-    setSuspended(false)
+    updateSuspended(false)
     setRearmReady(true)
-  }, [discardCapture, options.mode, setSuspended])
+  }, [discardCapture, options.mode, updateSuspended])
 
   useEffect(() => {
     if (options.voiceMode) return
     discardCapture()
     setAwaitingReply(false)
-    setSuspended(false)
+    updateSuspended(false)
     setRearmReady(true)
-  }, [discardCapture, options.voiceMode, setSuspended])
+  }, [discardCapture, options.voiceMode, updateSuspended])
 
   useEffect(() => {
     if (!options.isGenerating && !options.isPlaybackActive) return

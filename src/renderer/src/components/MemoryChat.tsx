@@ -47,7 +47,7 @@ import { ChatThinkingBlock } from './ChatThinkingBlock'
 import { ChatToolRows } from './ChatToolRows'
 import { ArtifactCanvas, parseArtifact, type Artifact } from './ArtifactCanvas'
 import { VoiceBubble, stopAllVoicePlayback } from './VoiceBubble'
-import { useChatVoiceTurns } from './use-chat-voice-turns'
+import { useChatVoiceTurns, type ChatVoicePhase } from './use-chat-voice-turns'
 import { SkillsPanel } from './SkillsPanel'
 import { ModelPicker } from './ModelPicker'
 import { SettingsPanel } from './SettingsPanel'
@@ -2080,6 +2080,62 @@ function StylePresetPicker({
 const NEW_CHAT = '__new__' // bucket key for a fresh, not-yet-saved conversation
 const EMPTY_MSGS: ChatMessage[] = []
 
+function nextVoicePlaybackOwner(
+  current: string | null,
+  messageId: string,
+  active: boolean
+): string | null {
+  if (active) return messageId
+  return current === messageId ? null : current
+}
+
+function voiceTurnButtonLabel(phase: ChatVoicePhase, suspended: boolean): string {
+  if (phase === 'transcribing') return 'Cancel transcription'
+  if (phase !== 'idle') return 'Stop voice recording'
+  if (suspended) return 'Resume hands-free listening'
+  return 'Start voice recording'
+}
+
+interface VoiceTurnStatusOptions {
+  phase: ChatVoicePhase
+  mode: VoiceTurnMode
+  suspended: boolean
+  transcriptionLabel: string
+}
+
+function voiceTurnStatus({
+  phase,
+  mode,
+  suspended,
+  transcriptionLabel
+}: VoiceTurnStatusOptions): string {
+  if (phase === 'starting') return 'Opening the microphone...'
+  if (phase === 'listening') return 'Waiting for your voice'
+  if (phase === 'transcribing') {
+    return `Transcribing with ${transcriptionLabel} - click to cancel`
+  }
+  if (phase === 'recording') {
+    return mode === 'tap' ? 'Recording - click to send' : 'Recording you now'
+  }
+  if (suspended) return 'Hands-free is paused - click to resume'
+  if (mode === 'handsfree') return 'Hands-free is ready'
+  return 'Click to record a voice note'
+}
+
+function textRecordingButtonLabel(phase: ChatVoicePhase): string {
+  if (phase === 'transcribing') return 'Cancel transcription'
+  if (phase !== 'idle') return 'Stop recording'
+  return 'Record voice'
+}
+
+function textRecordingTooltip(phase: ChatVoicePhase, transcriptionLabel: string): string {
+  if (phase === 'transcribing') {
+    return `Transcribing with ${transcriptionLabel} - click to cancel`
+  }
+  if (phase !== 'idle') return 'Stop recording'
+  return 'Record voice'
+}
+
 export function MemoryChat({
   onNavigateToMemory,
   onNavigateToChat,
@@ -3563,9 +3619,7 @@ export function MemoryChat({
   }
 
   const handleVoicePlaybackChange = useCallback((messageId: string, active: boolean): void => {
-    setVoicePlaybackOwner((current) =>
-      active ? messageId : current === messageId ? null : current
-    )
+    setVoicePlaybackOwner((current) => nextVoicePlaybackOwner(current, messageId, active))
   }, [])
 
   const voiceTurns = useChatVoiceTurns({
@@ -3588,6 +3642,15 @@ export function MemoryChat({
     voiceTurns.phase === 'listening' ||
     voiceTurns.phase === 'recording'
   const transcribing = voiceTurns.phase === 'transcribing'
+  const voiceRecordButtonLabel = voiceTurnButtonLabel(voiceTurns.phase, voiceTurns.suspended)
+  const voiceStatus = voiceTurnStatus({
+    phase: voiceTurns.phase,
+    mode: voiceTurnMode,
+    suspended: voiceTurns.suspended,
+    transcriptionLabel: voiceTurns.transcriptionLabel
+  })
+  const textRecordButtonLabel = textRecordingButtonLabel(voiceTurns.phase)
+  const textRecordTooltip = textRecordingTooltip(voiceTurns.phase, voiceTurns.transcriptionLabel)
   const toggleRecording = transcribing ? voiceTurns.cancel : voiceTurns.toggle
 
   // Stop the in-flight generation for a conversation: abort the model stream (main
@@ -5227,11 +5290,8 @@ export function MemoryChat({
                   )}
                   {voiceMode ? (
                     <div className="flex w-full flex-col items-center gap-3 px-3 py-4">
-                      <div
-                        role="group"
-                        aria-label="Voice turn mode"
-                        className="grid w-full max-w-md grid-cols-3 rounded-md border border-neutral-800 bg-neutral-950 p-1"
-                      >
+                      <fieldset className="grid w-full max-w-md grid-cols-3 rounded-md border border-neutral-800 bg-neutral-950 p-1">
+                        <legend className="sr-only">Voice turn mode</legend>
                         {(Object.keys(VOICE_TURN_LABELS) as VoiceTurnMode[]).map((turnMode) => (
                           <button
                             key={turnMode}
@@ -5248,22 +5308,14 @@ export function MemoryChat({
                             {VOICE_TURN_LABELS[turnMode].label}
                           </button>
                         ))}
-                      </div>
+                      </fieldset>
                       <p className="text-center text-[11px] text-neutral-500">
                         {VOICE_TURN_LABELS[voiceTurnMode].description}
                       </p>
                       <button
                         type="button"
                         onClick={toggleRecording}
-                        aria-label={
-                          transcribing
-                            ? 'Cancel transcription'
-                            : recording
-                              ? 'Stop voice recording'
-                              : voiceTurns.suspended
-                                ? 'Resume hands-free listening'
-                                : 'Start voice recording'
-                        }
+                        aria-label={voiceRecordButtonLabel}
                         className="flex flex-col items-center gap-2"
                       >
                         <span
@@ -5308,23 +5360,7 @@ export function MemoryChat({
                             </svg>
                           )}
                         </span>
-                        <span className="text-xs text-neutral-500">
-                          {voiceTurns.phase === 'starting'
-                            ? 'Opening the microphone...'
-                            : voiceTurns.phase === 'listening'
-                              ? 'Waiting for your voice'
-                              : transcribing
-                                ? `Transcribing with ${voiceTurns.transcriptionLabel} - click to cancel`
-                                : voiceTurns.phase === 'recording'
-                                  ? voiceTurnMode === 'tap'
-                                    ? 'Recording - click to send'
-                                    : 'Recording you now'
-                                  : voiceTurns.suspended
-                                    ? 'Hands-free is paused - click to resume'
-                                    : voiceTurnMode === 'handsfree'
-                                      ? 'Hands-free is ready'
-                                      : 'Click to record a voice note'}
-                        </span>
+                        <span className="text-xs text-neutral-500">{voiceStatus}</span>
                       </button>
                     </div>
                   ) : (
@@ -5644,13 +5680,7 @@ export function MemoryChat({
                               type="button"
                               variant="outline"
                               size="icon"
-                              aria-label={
-                                transcribing
-                                  ? 'Cancel transcription'
-                                  : recording
-                                    ? 'Stop recording'
-                                    : 'Record voice'
-                              }
+                              aria-label={textRecordButtonLabel}
                               onClick={toggleRecording}
                               className={`size-8 ${recording ? 'border-red-500/50 text-red-400' : ''}`}
                             >
@@ -5698,13 +5728,7 @@ export function MemoryChat({
                               )}
                             </Button>
                           </TooltipTrigger>
-                          <TooltipContent>
-                            {transcribing
-                              ? `Transcribing with ${voiceTurns.transcriptionLabel} - click to cancel`
-                              : recording
-                                ? 'Stop recording'
-                                : 'Record voice'}
-                          </TooltipContent>
+                          <TooltipContent>{textRecordTooltip}</TooltipContent>
                         </Tooltip>
                       )}
                       {/* Stop shows for the WHOLE generating window — the pre-stream
