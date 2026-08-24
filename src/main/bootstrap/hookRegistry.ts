@@ -39,6 +39,11 @@ export const HOOKS = {
   chatAugmentContext: 'chat.augmentContext',
   /** () => Promise<SearchSource[]> — extra universal-search sources (pro). */
   searchExtraSources: 'search.extraSources',
+  /**
+   * (connectorId: number, url: string | null) => ConnectorToolSource | undefined - lets Pro
+   * providers verify through their supported protocol and suppress unusable MCP tool discovery.
+   */
+  mcpConnectorToolSource: 'mcp:connectorToolSource',
   /** (mutation: SyncMutation) => void - record a committed core data change in Pro sync. */
   syncRecordLocalMutation: 'sync.recordLocalMutation',
   /**
