@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { ARTIFACT_KIND_LABELS, type ArtifactKind } from '@renderer/lib/artifact-labels'
+import { SidePanel } from './SidePanel'
 
 // Renders a model-generated artifact (HTML / SVG / Mermaid / React) in a SANDBOXED
 // iframe with sandbox="allow-scripts" only and no same-origin access, so generated
@@ -276,8 +277,10 @@ else { __ogShow('No React component found — define a component named App or a 
   }
 
   return (
-    <div
-      className="fixed right-0 top-0 bottom-0 z-50 flex min-w-[360px] max-w-[90vw] flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl"
+    <SidePanel
+      ariaLabel={artifact.title || KIND_LABEL[artifact.kind]}
+      onClose={onClose}
+      className="min-w-[360px] max-w-[90vw]"
       style={{ width: width ? `${width}px` : '30vw' }}
     >
       {/* Resize handle — drag the left edge to slide the canvas wider/narrower. */}
@@ -349,7 +352,7 @@ else { __ogShow('No React component found — define a component named App or a 
           </div>
         )}
       </div>
-    </div>
+    </SidePanel>
   )
 }
 

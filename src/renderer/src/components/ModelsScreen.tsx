@@ -17,6 +17,7 @@ import {
   IconClock
 } from '@tabler/icons-react'
 import { StoragePanel } from './setup/StoragePanel'
+import { SidePanel } from './SidePanel'
 import { deviceNoun } from '@renderer/lib/device'
 import { modelKindLabel } from '@renderer/lib/model-kind-labels'
 import { collectTags, matchesAllTags, toggleTag } from '@renderer/lib/model-tag-filter'
@@ -305,7 +306,6 @@ export function ModelsScreen(): React.JSX.Element {
     setSelectedTags([])
   }, [activeKind])
   const [detail, setDetail] = useState<ModelEntry | null>(null)
-  const [detailVisible, setDetailVisible] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [hfResults, setHfResults] = useState<
@@ -326,22 +326,11 @@ export function ModelsScreen(): React.JSX.Element {
 
   const openDetail = useCallback((m: ModelEntry) => {
     setDetail(m)
-    requestAnimationFrame(() => requestAnimationFrame(() => setDetailVisible(true)))
   }, [])
 
   const closeDetail = useCallback(() => {
-    setDetailVisible(false)
-    setTimeout(() => setDetail(null), 220)
+    setDetail(null)
   }, [])
-
-  useEffect(() => {
-    if (!detail) return undefined
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') closeDetail()
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [closeDetail, detail])
 
   const importModel = async (): Promise<void> => {
     if (importing) return
@@ -1102,14 +1091,11 @@ export function ModelsScreen(): React.JSX.Element {
             ['Min RAM', m.minRamGb ? `${m.minRamGb} GB` : null]
           ]
           return (
-            <div className="fixed inset-0 z-50 flex justify-end">
-              <div
-                onClick={closeDetail}
-                className={`absolute inset-0 bg-black/50 transition-opacity duration-200 ${detailVisible ? 'opacity-100' : 'opacity-0'}`}
-              />
-              <div
-                className={`relative z-10 flex h-full w-[26vw] min-w-[380px] flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl transition-transform duration-200 ease-out ${detailVisible ? 'translate-x-0' : 'translate-x-full'}`}
-              >
+            <SidePanel
+              ariaLabel={`${m.name} details`}
+              onClose={closeDetail}
+              className="w-[26vw] min-w-[380px] font-mono"
+            >
                 <div className="flex items-start justify-between gap-3 border-b border-neutral-800 px-5 py-4">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
@@ -1230,8 +1216,7 @@ export function ModelsScreen(): React.JSX.Element {
                     </button>
                   )}
                 </div>
-              </div>
-            </div>
+            </SidePanel>
           )
         })()}
     </div>

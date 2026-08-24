@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { SidePanel } from './SidePanel'
 
 // Right-side panel to view, create, edit, and delete Skills — reusable
 // instruction packs invoked from chat with /skill-name. Mirrors the ArtifactCanvas
@@ -150,7 +151,7 @@ export function SkillsPanel({
   }
 
   return (
-    <div className="fixed right-0 top-0 bottom-0 z-50 flex w-[30vw] min-w-[420px] flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl">
+    <SidePanel ariaLabel="Skills" onClose={onClose} className="w-[30vw] min-w-[420px]">
       <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2.5">
         <div className="flex items-center gap-2 text-sm text-neutral-200">
           <span className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-green-500">
@@ -341,6 +342,6 @@ export function SkillsPanel({
           </div>
         )}
       </div>
-    </div>
+    </SidePanel>
   )
 }
