@@ -59,7 +59,7 @@ vi.mock('@lancedb/lancedb', () => ({
   })
 }))
 
-import { getDB } from '../database'
+import { getDB, saveSetting } from '../database'
 import { setupIPC } from '../ipc'
 import { llm } from '../llm'
 import { listProjects } from '../rag/store'
@@ -124,6 +124,23 @@ afterAll(async () => {
 })
 
 describe('rag:chat on an empty memory corpus', () => {
+  it('returns the configured transcription language through the registered IPC path', async () => {
+    saveSetting('sttLanguage', 'hi')
+
+    const handler = handlers.get('transcription:active-info')
+    expect(handler).toBeTypeOf('function')
+    const activeInfo = (await handler!({ sender: { send: () => undefined } })) as {
+      engine: string
+      language: string
+      options: Array<{ active: boolean }>
+    }
+    expect(activeInfo).toMatchObject({ engine: 'whisper', language: 'hi' })
+    expect(activeInfo.options.some(({ active }) => active)).toBe(true)
+
+    const { getActiveTranscription } = await import('../transcription/select')
+    expect(getActiveTranscription().isAvailable()).toBeTypeOf('boolean')
+  })
+
   it('answers without context and releases the chat seam for the next turn', async () => {
     const handler = handlers.get('rag:chat')
     expect(handler).toBeTypeOf('function')
