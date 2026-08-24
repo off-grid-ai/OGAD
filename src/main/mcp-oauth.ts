@@ -12,6 +12,7 @@ import { app, shell } from 'electron'
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js'
 import { getSecret, setSecret, deleteSecret } from './secrets'
 import { OAuthLoopbackServer } from './mcp-oauth-loopback'
+import { MCP_OAUTH_REDIRECT_PORT } from '../shared/mcp-oauth-callback'
 
 // The Off Grid brand mark, served by the loopback at /oglogo.png so the consent
 // success page (and its favicon) show the real logo instead of a generic glyph.
@@ -35,10 +36,8 @@ function logoBytes(): Buffer | null {
   return null
 }
 
-const REDIRECT_PORT = 33418
-
 // A pre-registered OAuth client to use INSTEAD of dynamic client registration.
-// Google has no DCR, so we ship a client_id/secret and pin the request to a
+// Google has no DCR, so we use a client_id/secret and pin the request to a
 // least-privilege read scope + offline access (to get a refresh token).
 export interface StaticOAuthClient {
   client_id: string
@@ -168,7 +167,7 @@ const SUCCESS_HTML = (err: string | null): string =>
 // ONE persistent loopback server for the whole app lifetime. The server owns
 // exact state admission, expiry, one-time consumption, and concurrent routing.
 const oauthLoopback = new OAuthLoopbackServer({
-  port: REDIRECT_PORT,
+  port: MCP_OAUTH_REDIRECT_PORT,
   renderCompletionPage: SUCCESS_HTML,
   logoBytes,
   onError: (error) => console.error('[oauth] loopback error', error),
