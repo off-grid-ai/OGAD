@@ -208,6 +208,43 @@ describe('<App/> desktop navigation integration', () => {
     await waitFor(() => expect(window.location.pathname).toBe('/devices'))
   })
 
+  it('opens an initial Devices Activity deep link', async () => {
+    const { registerProView } = await import('../bootstrap/proView')
+    registerProView((view, context) =>
+      view === 'devices' ? <div>Devices view: {context.navigationSubroute}</div> : null
+    )
+    installAppBoundary({ isPro: true })
+    window.history.replaceState(null, '', '/devices/activity')
+
+    render(<App />)
+
+    expect(await screen.findByText('Devices view: activity')).toBeTruthy()
+    expect(window.location.pathname).toBe('/devices/activity')
+  })
+
+  it('falls back to the Devices root for a malformed encoded subroute', async () => {
+    const { registerProView } = await import('../bootstrap/proView')
+    registerProView((view, context) =>
+      view === 'devices' ? <div>Devices root: {context.navigationSubroute ?? 'none'}</div> : null
+    )
+    installAppBoundary({ isPro: true })
+    window.history.replaceState(null, '', '/devices/%E0%A4%A')
+
+    render(<App />)
+
+    expect(await screen.findByText('Devices root: none')).toBeTruthy()
+    await waitFor(() => expect(window.location.pathname).toBe('/devices'))
+  })
+
+  it('falls back to the Settings root for a malformed encoded section', async () => {
+    window.history.replaceState(null, '', '/settings/%E0%A4%A')
+
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Settings' })).toBeTruthy()
+    await waitFor(() => expect(window.location.pathname).toBe('/settings'))
+  })
+
   it('routes permission recovery into the existing Setup & health detail', async () => {
     const user = userEvent.setup()
     installAppBoundary({

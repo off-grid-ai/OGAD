@@ -39,6 +39,7 @@ export function SidePanel({
       ).filter((element) => {
         const style = window.getComputedStyle(element)
         return (
+          !element.matches(':disabled') &&
           !element.hasAttribute('hidden') &&
           element.getAttribute('aria-hidden') !== 'true' &&
           style.display !== 'none' &&

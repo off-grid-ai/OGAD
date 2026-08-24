@@ -55,6 +55,11 @@ describe('<ModelPicker/> dismissal', () => {
     renderPicker()
     const panel = screen.getByRole('dialog', { name: 'Active models' })
 
+    const disabled = document.createElement('button')
+    disabled.disabled = true
+    disabled.tabIndex = 0
+    panel.appendChild(disabled)
+
     await waitFor(() => expect(document.activeElement).toBe(panel))
     await screen.findByRole('button', { name: /Qwen 3\.5 2B/ })
     const buttons = Array.from(panel.querySelectorAll<HTMLButtonElement>('button:not([disabled])'))
@@ -63,6 +68,8 @@ describe('<ModelPicker/> dismissal', () => {
     expect(first).toBeTruthy()
     expect(last).toBeTruthy()
     expect(first).not.toBe(last)
+    expect(first).not.toBe(disabled)
+    expect(last).not.toBe(disabled)
 
     last?.focus()
     fireEvent.keyDown(last as HTMLElement, { key: 'Tab' })

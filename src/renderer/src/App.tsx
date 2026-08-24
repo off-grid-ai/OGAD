@@ -378,11 +378,23 @@ function AppContent() {
     }
 
     if (path.startsWith('/settings/')) {
-      setSettingsSection(decodeURIComponent(path.slice('/settings/'.length)) || null)
+      let section: string | null = null
+      try {
+        section = decodeURIComponent(path.slice('/settings/'.length)) || null
+      } catch {
+        section = null
+      }
+      setSettingsSection(section)
       setNavigationSubroute(null)
       setViewMode('settings')
     } else if (path.startsWith('/devices/')) {
-      setNavigationSubroute(decodeURIComponent(path.slice('/devices/'.length)) || null)
+      let subroute: string | null = null
+      try {
+        subroute = decodeURIComponent(path.slice('/devices/'.length)) || null
+      } catch {
+        subroute = null
+      }
+      setNavigationSubroute(subroute)
       setSettingsSection(null)
       setViewMode('devices')
     } else if (viewMap[path]) {
