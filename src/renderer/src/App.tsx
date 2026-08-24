@@ -811,8 +811,8 @@ function AppContent() {
   ]
   // One way in to a screen, used by the sidebar and by the command palette: switching screens also
   // drops whatever row was selected in the old one, so a stale detail pane never rides along.
-  const goToView = (view: ViewMode): void => {
-    setNavigationSubroute(null)
+  const goToView = (view: ViewMode, subroute: string | null = null): void => {
+    setNavigationSubroute(view === 'devices' ? subroute : null)
     setSettingsSection(null)
     setViewMode(view)
     setSelectedSessionId(null)
@@ -865,12 +865,26 @@ function AppContent() {
         onOpenHit={handleOpenHit}
         onSeeAll={openSearch}
         /* The sidebar IS the list of screens - the palette searches that, never a second copy. */
-        screens={[...mainNav, ...bottomNav].map(({ label, view, locked }) => ({
-          label,
-          view,
-          locked
-        }))}
-        onGoTo={(view) => goToView(view as ViewMode)}
+        screens={[
+          ...[...mainNav, ...bottomNav].map(({ label, view, locked }) => ({
+            label,
+            view,
+            locked
+          })),
+          {
+            label: 'Activity',
+            view: 'devices',
+            subroute: 'activity',
+            locked: !isPro && proActivation !== 'entitlement-bootstrap'
+          },
+          {
+            label: 'Files',
+            view: 'devices',
+            subroute: 'files',
+            locked: !isPro && proActivation !== 'entitlement-bootstrap'
+          }
+        ]}
+        onGoTo={(view, subroute) => goToView(view as ViewMode, subroute ?? null)}
       />
       {/* Recording indicator — auto-records detected meetings; always visible. */}
       {(rec.recording || rec.busy) && (

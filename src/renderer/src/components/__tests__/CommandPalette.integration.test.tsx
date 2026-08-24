@@ -14,6 +14,8 @@ let hits: unknown[] = []
 
 const SCREENS = [
   { label: 'Devices', view: 'devices' },
+  { label: 'Activity', view: 'devices', subroute: 'activity' },
+  { label: 'Files', view: 'devices', subroute: 'files' },
   { label: 'Integrations', view: 'connectors' },
   { label: 'Models', view: 'models' },
   { label: 'Vault', view: 'vault', locked: true },
@@ -90,7 +92,19 @@ describe('command palette', () => {
     await waitFor(() => expect(screen.getByText('Settings')).toBeTruthy())
     await user.click(screen.getByText('Settings'))
 
-    await waitFor(() => expect(goTo).toHaveBeenCalledWith('settings'))
+    await waitFor(() => expect(goTo).toHaveBeenCalledWith('settings', undefined))
     expect(screen.queryByPlaceholderText(/jump to a screen/i)).toBeNull()
+  })
+
+  it.each([
+    ['Activity', 'activity'],
+    ['Files', 'files']
+  ])('opens the Devices %s subroute', async (label, subroute) => {
+    const user = await openPalette()
+    await user.type(screen.getByPlaceholderText(/jump to a screen/i), label)
+    await waitFor(() => expect(screen.getByText(label)).toBeTruthy())
+    await user.click(screen.getByText(label))
+
+    await waitFor(() => expect(goTo).toHaveBeenCalledWith('devices', subroute))
   })
 })

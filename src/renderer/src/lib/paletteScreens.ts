@@ -2,6 +2,7 @@
 export interface PaletteScreen {
   label: string
   view: string
+  subroute?: string
   locked?: boolean
 }
 

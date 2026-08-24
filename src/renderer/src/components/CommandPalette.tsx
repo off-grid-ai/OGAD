@@ -38,7 +38,7 @@ interface CommandPaletteProps {
   onSeeAll: (query: string) => void
   /** Every navigable screen, in sidebar order. */
   screens?: PaletteScreen[]
-  onGoTo?: (view: string) => void
+  onGoTo?: (view: string, subroute?: string) => void
 }
 
 // ⌘K universal search launcher. Fast (keyword-only) results; Enter opens, or jump
@@ -94,10 +94,10 @@ export function CommandPalette({
     }
   }, [query, onSeeAll])
   const goTo = useCallback(
-    (view: string) => {
+    (view: string, subroute?: string) => {
       setOpen(false)
       setQuery('')
-      onGoTo?.(view)
+      onGoTo?.(view, subroute)
     },
     [onGoTo]
   )
@@ -126,11 +126,11 @@ export function CommandPalette({
               <CommandGroup heading={needle ? 'Screens' : 'Go to'}>
                 {screenMatches.map((screen) => (
                   <CommandItem
-                    key={screen.view}
-                    value={`__screen_${screen.view}`}
-                    onSelect={() => goTo(screen.view)}
+                    key={`${screen.view}:${screen.subroute ?? ''}`}
+                    value={`__screen_${screen.view}_${screen.subroute ?? ''}`}
+                    onSelect={() => goTo(screen.view, screen.subroute)}
                     className="gap-3"
-                    data-testid={`palette-screen-${screen.view}`}
+                    data-testid={`palette-screen-${screen.view}-${screen.subroute ?? 'root'}`}
                   >
                     <IconLayoutSidebar className="h-4 w-4 shrink-0 text-neutral-500" aria-hidden />
                     <span className="min-w-0 flex-1 truncate text-sm text-white">
