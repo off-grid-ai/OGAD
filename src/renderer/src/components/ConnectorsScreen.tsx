@@ -164,7 +164,7 @@ function ConnectorConnectControls({
   error,
   onConnect,
   onCancel
-}: ConnectorConnectControlsProps): ReactElement {
+}: Readonly<ConnectorConnectControlsProps>): ReactElement {
   const byoBlocked = entry.oauthClient === 'byo' && !byoReady
   const isAuthorizing = connecting && entry.auth === 'oauth'
   const progressLabel = isAuthorizing ? 'Authorize in browser…' : 'Connecting…'
