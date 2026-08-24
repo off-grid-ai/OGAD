@@ -16,6 +16,7 @@ import path from 'node:path'
 
 const MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX'
 const DEFAULT_VOICE = 'af_heart'
+const PROGRESS_PREFIX = 'OFFGRID_TTS_PROGRESS '
 
 const worker = {
   log(event, fields = {}) {
@@ -24,6 +25,14 @@ const worker = {
       .join(' ')
     process.stderr.write(
       `${new Date().toISOString()} INFO [tts-worker] ${event}${details ? ` ${details}` : ''}\n`
+    )
+  },
+
+  progress(event) {
+    if (event?.status !== 'progress' || !Number.isFinite(event.progress)) return
+    const value = event.progress <= 1 ? event.progress * 100 : event.progress
+    process.stderr.write(
+      `${PROGRESS_PREFIX}${JSON.stringify({ file: event.file, progress: Math.max(0, Math.min(100, value)) })}\n`
     )
   },
 
@@ -142,11 +151,22 @@ const worker = {
     worker.configureWritableCache(transformersEnv)
     const loadStarted = Date.now()
     worker.log('model.loading', { model: MODEL_ID, dtype: 'q8', device: 'cpu' })
-    const tts = await KokoroTTS.from_pretrained(MODEL_ID, { dtype: 'q8', device: 'cpu' })
+    const tts = await KokoroTTS.from_pretrained(MODEL_ID, {
+      dtype: 'q8',
+      device: 'cpu',
+      progress_callback: (event) => worker.progress(event)
+    })
     worker.log('model.ready', { durationMs: Date.now() - loadStarted })
 
     if (mode === 'voices') {
-      const voices = Object.keys(tts.voices || {})
+      const voices = Object.entries(tts.voices || {}).map(([id, metadata]) => ({
+        id,
+        label: metadata.name,
+        language: metadata.language?.replace(
+          /^([a-z]{2})-([a-z]{2})$/i,
+          (_, language, region) => `${language.toLowerCase()}-${region.toUpperCase()}`
+        )
+      }))
       worker.log('voices.completed', { count: voices.length })
       process.stdout.write(JSON.stringify(voices))
       return { persist: false }

@@ -8,8 +8,10 @@ import { SettingsPanel } from '../SettingsPanel'
 
 const saveSetting = vi.fn(async () => undefined)
 const getTranscriptionInfo = vi.fn()
+let emitVoiceProgress: ((data: { progress: number }) => void) | undefined
 
 beforeEach(() => {
+  emitVoiceProgress = undefined
   saveSetting.mockClear()
   getTranscriptionInfo.mockReset()
   getTranscriptionInfo.mockResolvedValue({
@@ -30,7 +32,16 @@ beforeEach(() => {
     getLlmSettings: vi.fn().mockResolvedValue({}),
     getModelCatalog: vi.fn().mockResolvedValue({ models: [] }),
     getActiveModel: vi.fn().mockResolvedValue(null),
-    ttsVoices: vi.fn().mockResolvedValue(['af_heart', 'bf_emma', 'ff_siwis']),
+    ttsVoices: vi.fn().mockResolvedValue([
+      { id: 'af_heart', label: 'Heart', language: 'en-US' },
+      { id: 'af_bella', label: 'Bella', language: 'en-US' },
+      { id: 'bf_emma', label: 'Emma', language: 'en-GB' },
+      { id: 'ff_siwis', label: 'Siwis', language: 'fr' },
+    ]),
+    onTtsVoiceProgress: vi.fn((callback: (data: { progress: number }) => void) => {
+      emitVoiceProgress = callback
+      return vi.fn()
+    }),
     getTranscriptionInfo,
     listTools: vi.fn().mockResolvedValue([]),
     getSettings: vi.fn().mockResolvedValue({ ttsVoice: 'af_heart' }),
@@ -64,6 +75,47 @@ describe('<SettingsPanel/> speech languages', () => {
 
     await waitFor(() => expect(saveSetting).toHaveBeenCalledWith('ttsVoice', 'ff_siwis'))
     expect(screen.getByRole('option', { name: 'Siwis' })).toBeTruthy()
+  })
+
+  it('shows every voice returned by the active runtime', async () => {
+    render(<SettingsPanel onClose={vi.fn()} initialTab="voice" />)
+
+    expect(await screen.findByRole('option', { name: 'Bella' })).toBeTruthy()
+  })
+
+  it('shows voice loading progress and changes to ready only after loading completes', async () => {
+    let finishLoading!: (voices: { id: string; label: string; language: string }[]) => void
+    const boundary = (window as unknown as { api: Record<string, unknown> }).api
+    boundary.ttsVoices = vi.fn(() => new Promise((resolve) => { finishLoading = resolve }))
+
+    render(<SettingsPanel onClose={vi.fn()} initialTab="voice" />)
+
+    expect(await screen.findByText('Loading voices - 0%')).toBeTruthy()
+    emitVoiceProgress?.({ progress: 43 })
+    expect(await screen.findByText('Loading voices - 43%')).toBeTruthy()
+
+    finishLoading([
+      { id: 'af_heart', label: 'Heart', language: 'en-US' },
+      { id: 'af_bella', label: 'Bella', language: 'en-US' },
+    ])
+    expect(await screen.findByText('English (US) voice ready.')).toBeTruthy()
+  })
+
+  it('shows a clear failure and retries voice loading', async () => {
+    const boundary = (window as unknown as { api: Record<string, unknown> }).api
+    const ttsVoices = vi.fn()
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValueOnce([{ id: 'af_heart', label: 'Heart', language: 'en-US' }])
+    boundary.ttsVoices = ttsVoices
+
+    render(<SettingsPanel onClose={vi.fn()} initialTab="voice" />)
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Could not load voices. Check your connection and retry.'
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByText('English (US) voice ready.')).toBeTruthy()
+    expect(ttsVoices).toHaveBeenCalledTimes(2)
   })
 
   it('uses the selected STT language for the next transcription', async () => {

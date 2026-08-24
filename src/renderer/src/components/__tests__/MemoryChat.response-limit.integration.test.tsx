@@ -40,6 +40,7 @@ describe('<MemoryChat/> - response limit through public renderer contracts', () 
       getLlmSettings: async () => ({ maxTokens }),
       setLlmSettings,
       ttsVoices: async () => [],
+      onTtsVoiceProgress: () => () => {},
       listTools: async () => [],
       mcpList: async () => []
     })
@@ -108,6 +109,7 @@ describe('<MemoryChat/> - response limit through public renderer contracts', () 
       getLlmSettings: async () => settings,
       setLlmSettings,
       ttsVoices: async () => [],
+      onTtsVoiceProgress: () => () => {},
       listTools: async () => [],
       mcpList: async () => []
     })

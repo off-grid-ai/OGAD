@@ -11,6 +11,7 @@ beforeEach(() => {
   ;(window as unknown as { api: Record<string, unknown> }).api = {
     getLlmSettings: vi.fn().mockResolvedValue({}),
     ttsVoices: vi.fn().mockResolvedValue([]),
+    onTtsVoiceProgress: vi.fn(() => vi.fn()),
     listTools: vi.fn().mockResolvedValue([]),
     getSettings: vi.fn().mockResolvedValue({}),
     mcpList: vi.fn().mockResolvedValue([]),

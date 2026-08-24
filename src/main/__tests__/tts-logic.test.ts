@@ -4,7 +4,14 @@
  * No child_process/electron — pure import-and-assert.
  */
 import { describe, it, expect } from 'vitest'
-import { chooseVoice, isTeardownNoise, parseServeLine, DEFAULT_VOICE } from '../tts-logic'
+import {
+  chooseVoice,
+  isTeardownNoise,
+  parseRuntimeVoiceCatalog,
+  parseServeLine,
+  parseTtsProgressLine,
+  DEFAULT_VOICE
+} from '../tts-logic'
 
 // Note: markdown -> speakable text moved to the renderer (src/renderer/.../speakable.ts),
 // which parses with the chat UI's real markdown AST. Its tests live beside it. This
@@ -70,5 +77,36 @@ describe('parseServeLine — NDJSON line parse', () => {
   it('malformed JSON yields null (never throws)', () => {
     expect(parseServeLine('not json')).toBeNull()
     expect(parseServeLine('{ broken')).toBeNull()
+  })
+})
+
+describe('parseTtsProgressLine — worker download progress', () => {
+  it('returns bounded percentage progress', () => {
+    expect(parseTtsProgressLine('OFFGRID_TTS_PROGRESS {"progress":42}')).toBe(42)
+    expect(parseTtsProgressLine('OFFGRID_TTS_PROGRESS {"progress":120}')).toBe(100)
+    expect(parseTtsProgressLine('OFFGRID_TTS_PROGRESS {"progress":-5}')).toBe(0)
+  })
+
+  it('ignores unrelated or malformed diagnostics', () => {
+    expect(parseTtsProgressLine('Downloading model')).toBeNull()
+    expect(parseTtsProgressLine('OFFGRID_TTS_PROGRESS broken')).toBeNull()
+    expect(parseTtsProgressLine('OFFGRID_TTS_PROGRESS {"progress":"42"}')).toBeNull()
+  })
+})
+
+describe('parseRuntimeVoiceCatalog — runtime language source', () => {
+  it('keeps valid runtime metadata and drops malformed entries', () => {
+    expect(parseRuntimeVoiceCatalog(JSON.stringify([
+      { id: 'af_heart', label: 'Heart', language: 'en-US' },
+      { id: 'jf_tebukuro', label: 'Tebukuro', language: 'ja' },
+      { label: 'Missing id', language: 'en-US' },
+    ]))).toEqual([
+      { id: 'af_heart', label: 'Heart', language: 'en-US' },
+      { id: 'jf_tebukuro', label: 'Tebukuro', language: 'ja' },
+    ])
+  })
+
+  it('returns an empty catalogue for malformed output', () => {
+    expect(parseRuntimeVoiceCatalog('not json')).toEqual([])
   })
 })

@@ -35,3 +35,37 @@ export function parseServeLine(line: string): ServeMsg | null {
     return null
   }
 }
+
+const TTS_PROGRESS_PREFIX = 'OFFGRID_TTS_PROGRESS '
+
+/** Parse one progress diagnostic from the worker's stderr. Other worker logs
+ * remain ordinary diagnostics and malformed progress lines are ignored. */
+export function parseTtsProgressLine(line: string): number | null {
+  if (!line.startsWith(TTS_PROGRESS_PREFIX)) return null
+  try {
+    const event = JSON.parse(line.slice(TTS_PROGRESS_PREFIX.length)) as { progress?: unknown }
+    if (typeof event.progress !== 'number' || !Number.isFinite(event.progress)) return null
+    return Math.max(0, Math.min(100, event.progress))
+  } catch {
+    return null
+  }
+}
+
+/** Parse and validate the runtime-owned voice catalogue returned by the worker. */
+export function parseRuntimeVoiceCatalog(output: string): RuntimeSpeechVoice[] {
+  try {
+    const parsed = JSON.parse(output) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter(
+      (voice): voice is RuntimeSpeechVoice =>
+        typeof voice === 'object' &&
+        voice !== null &&
+        typeof voice.id === 'string' &&
+        (voice.label === undefined || typeof voice.label === 'string') &&
+        (voice.language === undefined || typeof voice.language === 'string')
+    )
+  } catch {
+    return []
+  }
+}
+import type { RuntimeSpeechVoice } from '@offgrid/speech'

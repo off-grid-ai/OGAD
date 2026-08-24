@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { persistToggle } from '@renderer/lib/persist-toggle'
 import {
   DEFAULT_CTX_SIZE,
@@ -16,10 +16,12 @@ import type { ModelSettingsPanelTab as Tab } from '@renderer/lib/model-settings-
 import { ImageSettingsTab } from './ImageSettingsTab'
 import { SidePanel } from './SidePanel'
 import {
-  availableKokoroLanguages,
+  firstRuntimeVoiceForLanguage,
   kokoroVoiceLabel,
-  kokoroVoiceLanguage,
-  standardKokoroVoices,
+  runtimeSpeechLanguages,
+  runtimeVoiceLanguage,
+  runtimeVoicesForLanguage,
+  type RuntimeSpeechVoice,
   type SpeechLanguage
 } from '@offgrid/speech'
 
@@ -124,15 +126,39 @@ export function SettingsPanel({
 }) {
   const [tab, setTab] = useState<Tab>(initialTab)
   const [s, setS] = useState<LlmSettings>({})
-  const [voices, setVoices] = useState<string[]>([])
+  const [voices, setVoices] = useState<RuntimeSpeechVoice[]>([])
   const [voice, setVoice] = useState<string>('af_heart')
   const [voiceLanguage, setVoiceLanguage] = useState<string>('en-US')
+  const [voiceAssetsState, setVoiceAssetsState] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [voiceAssetsProgress, setVoiceAssetsProgress] = useState(0)
   const [transcriptionInfo, setTranscriptionInfo] = useState<TranscriptionInfo | null>(null)
   const [tools, setTools] = useState<{ name: string; description: string; enabled?: boolean }[]>([])
   const [connectors, setConnectors] = useState<Connector[]>([])
   const [newConn, setNewConn] = useState({ name: '', url: '' })
   const [voiceState, setVoiceState] = useState<'idle' | 'generating' | 'playing' | 'error'>('idle')
   const [activeModelName, setActiveModelName] = useState<string | null>(null)
+
+  const loadVoices = useCallback((): void => {
+    setVoiceAssetsState('loading')
+    setVoiceAssetsProgress(0)
+    void window.api
+      .ttsVoices()
+      .then((runtimeVoices: RuntimeSpeechVoice[]) => {
+        if (!runtimeVoices.length) throw new Error('No voices available')
+        setVoices(runtimeVoices)
+        setVoiceAssetsProgress(100)
+        setVoiceAssetsState('ready')
+      })
+      .catch(() => setVoiceAssetsState('error'))
+  }, [])
+
+  useEffect(() => {
+    const stopVoiceProgress = window.api.onTtsVoiceProgress(({ progress }) => {
+      setVoiceAssetsProgress(Math.round(progress))
+    })
+    loadVoices()
+    return stopVoiceProgress
+  }, [loadVoices])
 
   useEffect(() => {
     window.api
@@ -150,10 +176,6 @@ export function SettingsPanel({
         .catch(() => setActiveModelName(null))
     }
     window.api
-      .ttsVoices?.()
-      .then((v: string[]) => setVoices(standardKokoroVoices(v).map((entry) => entry.id)))
-      .catch(() => {})
-    window.api
       .getTranscriptionInfo?.()
       .then((info: TranscriptionInfo) => setTranscriptionInfo(info))
       .catch(() => setTranscriptionInfo(null))
@@ -167,7 +189,7 @@ export function SettingsPanel({
         const savedVoice = typeof all.ttsVoice === 'string' ? all.ttsVoice : null
         if (savedVoice) {
           setVoice(savedVoice)
-          setVoiceLanguage(kokoroVoiceLanguage(savedVoice)?.code ?? 'en-US')
+          setVoiceLanguage(runtimeVoiceLanguage({ id: savedVoice })?.code ?? 'en-US')
         }
       })
       .catch(() => {})
@@ -203,14 +225,12 @@ export function SettingsPanel({
   }
 
   const pickVoice = (v: string): void => {
-    setVoiceLanguage(kokoroVoiceLanguage(v)?.code ?? voiceLanguage)
+    setVoiceLanguage(runtimeVoiceLanguage({ id: v })?.code ?? voiceLanguage)
     void persistToggle(v, voice, setVoice, (val) => window.api.saveSetting('ttsVoice', val))
   }
 
   const pickVoiceLanguage = (language: string): void => {
-    const matchingVoice = voices.find(
-      (candidate) => kokoroVoiceLanguage(candidate)?.code === language
-    )
+    const matchingVoice = firstRuntimeVoiceForLanguage(voices, language)?.id
     if (!matchingVoice) return
     setVoiceLanguage(language)
     pickVoice(matchingVoice)
@@ -565,15 +585,45 @@ export function SettingsPanel({
                   id="tts-language"
                   value={voiceLanguage}
                   onChange={(e) => pickVoiceLanguage(e.target.value)}
+                  disabled={voiceAssetsState === 'loading'}
                   className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
                 >
-                  {availableKokoroLanguages(voices.length ? voices : [voice]).map((language) => (
+                  {runtimeSpeechLanguages(voices.length ? voices : [{ id: voice }]).map((language) => (
                     <option key={language.code} value={language.code}>
                       {language.label}
                     </option>
                   ))}
                 </select>
               </Row>
+              {voiceAssetsState === 'loading' ? (
+                <div
+                  className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-3.5 py-2.5 text-xs text-neutral-400"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <span className="flex gap-1 px-1" aria-hidden="true">
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-green-500 [animation-delay:0ms]" />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-green-500 [animation-delay:150ms]" />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-green-500 [animation-delay:300ms]" />
+                  </span>
+                  Loading voices - {voiceAssetsProgress}%
+                </div>
+              ) : voiceAssetsState === 'error' ? (
+                <div className="flex items-center justify-between gap-3 text-xs text-red-400" role="alert">
+                  <span>Could not load voices. Check your connection and retry.</span>
+                  <button
+                    type="button"
+                    onClick={loadVoices}
+                    className="rounded-md border border-red-500/50 px-2.5 py-1 text-red-300 hover:border-red-400"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : (
+                <p className="text-xs text-neutral-500" role="status">
+                  {runtimeVoiceLanguage({ id: voice })?.label ?? voiceLanguage} voice ready.
+                </p>
+              )}
               <Row
                 label="Voice"
                 controlId="tts-voice"
@@ -583,17 +633,17 @@ export function SettingsPanel({
                   id="tts-voice"
                   value={voice}
                   onChange={(e) => pickVoice(e.target.value)}
+                  disabled={voiceAssetsState === 'loading'}
                   className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
                 >
-                  {(voices.length ? voices : [voice])
-                    .filter(
-                      (candidate) => kokoroVoiceLanguage(candidate)?.code === voiceLanguage
-                    )
-                    .map((v) => (
-                    <option key={v} value={v}>
-                      {kokoroVoiceLabel(v)}
+                  {runtimeVoicesForLanguage(
+                    voices.length ? voices : [{ id: voice }],
+                    voiceLanguage
+                  ).map(({ id, label }) => (
+                    <option key={id} value={id}>
+                      {label ?? kokoroVoiceLabel(id)}
                     </option>
-                    ))}
+                  ))}
                 </select>
               </Row>
               <button

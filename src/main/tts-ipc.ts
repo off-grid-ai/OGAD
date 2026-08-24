@@ -6,10 +6,12 @@ import { getSetting } from './database'
  * TTS service. Keeping that composition out of the general IPC registry makes it independently
  * testable without duplicating voice-selection rules in a caller. */
 export function setupTtsIpc(): void {
-  ipcMain.handle('tts:voices', async () => {
-    const { listVoices } = await import('./tts')
+  ipcMain.handle('tts:voices', async (event) => {
+    const { listVoiceCatalog } = await import('./tts')
     try {
-      return await listVoices()
+      return await listVoiceCatalog((progress) => {
+        if (!event.sender.isDestroyed()) event.sender.send('tts:voice-progress', { progress })
+      })
     } catch (error) {
       console.error('[tts] voices failed', error)
       return []

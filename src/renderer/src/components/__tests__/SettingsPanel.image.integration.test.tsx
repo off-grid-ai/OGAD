@@ -33,6 +33,7 @@ describe('<SettingsPanel/> image settings', () => {
       saveSetting,
       setActiveModalModel,
       ttsVoices: async () => [],
+      onTtsVoiceProgress: () => () => {},
       listTools: async () => [],
       mcpList: async () => []
     }

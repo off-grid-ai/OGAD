@@ -16,7 +16,15 @@ import { getActiveModal } from './active-models'
 import { applicationCodeFile, modelsDir } from './runtime-env'
 import { getResidencyMode } from './runtime-residency'
 import type { ManagedRuntime } from './runtime-manager'
-import { DEFAULT_VOICE, chooseVoice, isTeardownNoise, parseServeLine } from './tts-logic'
+import type { RuntimeSpeechVoice } from '@offgrid/speech'
+import {
+  DEFAULT_VOICE,
+  chooseVoice,
+  isTeardownNoise,
+  parseRuntimeVoiceCatalog,
+  parseServeLine,
+  parseTtsProgressLine
+} from './tts-logic'
 import { writeDiagnosticLog } from './diagnostics-log'
 
 function messageOf(error: unknown): string {
@@ -47,7 +55,8 @@ function workerEnvironment(): NodeJS.ProcessEnv {
 // exit code here; callers validate the actual output and ignore the teardown noise.
 function runWorker(
   args: string[],
-  stdin?: string
+  stdin?: string,
+  onProgress?: (progress: number) => void
 ): Promise<{ out: string; err: string; code: number }> {
   return new Promise((resolve, reject) => {
     // No `cwd`: the worker gets an ABSOLUTE script path and Node resolves its deps
@@ -62,8 +71,20 @@ function runWorker(
     })
     let out = ''
     let err = ''
+    let progressBuffer = ''
     child.stdout.on('data', (d: Buffer) => (out += d.toString()))
-    child.stderr.on('data', (d: Buffer) => (err += d.toString()))
+    child.stderr.on('data', (d: Buffer) => {
+      const text = d.toString()
+      err += text
+      progressBuffer += text
+      let newline: number
+      while ((newline = progressBuffer.indexOf('\n')) >= 0) {
+        const line = progressBuffer.slice(0, newline)
+        progressBuffer = progressBuffer.slice(newline + 1)
+        const progress = parseTtsProgressLine(line)
+        if (progress !== null) onProgress?.(progress)
+      }
+    })
     child.on('error', (error) => {
       writeDiagnosticLog('tts', 'worker.spawn_failed', { mode, error: error.message }, 'error')
       reject(error)
@@ -322,26 +343,28 @@ export async function synthesize(text: string, voice?: string): Promise<{ dataUr
   }
 }
 
-let voicesCache: string[] | null = null
+let voiceCatalogCache: RuntimeSpeechVoice[] | null = null
 
-/** Available voice ids (e.g. af_heart, af_bella, am_michael, …). */
-export async function listVoices(): Promise<string[]> {
-  if (voicesCache) {
-    writeDiagnosticLog('tts', 'voices.cache_hit', { count: voicesCache.length })
-    return voicesCache
+/** Runtime voice metadata for selectors. The worker is the source of truth. */
+export async function listVoiceCatalog(
+  onProgress?: (progress: number) => void
+): Promise<RuntimeSpeechVoice[]> {
+  if (voiceCatalogCache) {
+    writeDiagnosticLog('tts', 'voices.cache_hit', { count: voiceCatalogCache.length })
+    onProgress?.(100)
+    return voiceCatalogCache
   }
   writeDiagnosticLog('tts', 'voices.requested')
-  const { out, err } = await runWorker(['voices'])
-  let voices: string[] = []
-  try {
-    const parsed = JSON.parse(out.trim())
-    if (Array.isArray(parsed)) voices = parsed
-  } catch {
-    /* fall through */
-  }
+  const { out, err } = await runWorker(['voices'], undefined, onProgress)
+  const voices = parseRuntimeVoiceCatalog(out.trim())
   if (!voices.length && !isTeardownNoise(err))
     throw new Error(err.trim() || 'failed to list voices')
-  voicesCache = voices
+  voiceCatalogCache = voices
   writeDiagnosticLog('tts', 'voices.completed', { count: voices.length })
   return voices
+}
+
+/** Available voice ids for the OpenAI-compatible model endpoint. */
+export async function listVoices(onProgress?: (progress: number) => void): Promise<string[]> {
+  return (await listVoiceCatalog(onProgress)).map(({ id }) => id)
 }

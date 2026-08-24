@@ -298,7 +298,7 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
         {/* Waveform (click to seek) */}
         <div className="flex h-10 flex-1 items-center gap-[1.5px] overflow-hidden">
           {isLoading && !isUser ? (
-            <span className="flex items-center gap-1.5 pl-1">
+            <span className="flex items-center gap-1.5 px-2">
               <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-green-500 [animation-delay:-0.3s]" />
               <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-green-500 [animation-delay:-0.15s]" />
               <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-green-500" />
