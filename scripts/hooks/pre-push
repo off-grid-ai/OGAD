@@ -35,6 +35,13 @@ fi
 # So: run each suite, keep its report, gate once on the union. The floors are a RATCHET recording what this
 # branch achieves. Raise them as coverage rises; do not lower them to pass.
 echo "[pre-push] coverage 1/3 — unit + integration"
+# The app keeps SQLite built for Electron. The fast suite also contains real product
+# integrations that open SQLite under Node, so give them Node's ABI before Vitest starts.
+# The DB journey immediately below restores Electron's ABI in its EXIT trap.
+if ! npm rebuild better-sqlite3-multiple-ciphers >/dev/null 2>&1; then
+  echo "[pre-push] BLOCKED: could not rebuild SQLite for the Node test runner."
+  exit 1
+fi
 if ! npm run --silent test:coverage; then
   echo ""
   echo "[pre-push] NOTE: the fast suite reported failures or missed its own thresholds. The aggregate gate"
