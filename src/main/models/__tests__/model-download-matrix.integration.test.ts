@@ -222,7 +222,7 @@ describe('model download release matrix', () => {
     expect(dictation.isAvailable()).toBe(true)
     await expect(
       dictation.transcribe({ path: path.join(testRoot, 'synthetic.wav') }, { alreadyWav16k: true })
-    ).resolves.toEqual({ text: 'downloaded model dictation works', language: undefined })
+    ).resolves.toEqual({ text: 'downloaded model dictation works', language: 'en' })
   })
 
   it('keeps a multi-file image model unavailable until the whole runtime stack lands (#21)', async () => {

@@ -251,8 +251,9 @@ export function transcriptionModelOptions(
   active: string | null,
   installed: readonly InstalledTranscriptionEntry[]
 ): TranscriptionModelOption[] {
+  const hasInstalledActive = installed.some((entry) => transcriptionEntryMatches(entry, active))
   return [
-    { id: null, name: 'Whisper (built-in)', active: active == null },
+    { id: null, name: 'Whisper (built-in)', active: active == null || !hasInstalledActive },
     ...installed.map((e) => ({
       id: e.id,
       name: e.name ?? e.id,

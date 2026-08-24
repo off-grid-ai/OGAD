@@ -176,6 +176,12 @@ describe('transcriptionActiveInfo', () => {
       { id: null, name: 'Whisper (built-in)', active: true }
     ])
   })
+
+  it('marks built-in Whisper active when the saved model is no longer installed', () => {
+    expect(transcriptionModelOptions('removed-whisper-model', [])).toEqual([
+      { id: null, name: 'Whisper (built-in)', active: true }
+    ])
+  })
 })
 
 describe('engineForActiveModel', () => {
