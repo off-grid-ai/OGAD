@@ -45,6 +45,17 @@ afterEach(() => {
 })
 
 describe('<SettingsPanel/> speech languages', () => {
+  it('ignores a malformed saved voice instead of showing an object as a voice name', async () => {
+    const boundary = (window as unknown as { api: Record<string, unknown> }).api
+    boundary.getSettings = vi.fn().mockResolvedValue({ ttsVoice: { id: 'af_heart' } })
+
+    render(<SettingsPanel onClose={vi.fn()} initialTab="voice" />)
+
+    const voice = (await screen.findByRole('combobox', { name: 'Voice' })) as HTMLSelectElement
+    expect(voice.value).toBe('af_heart')
+    expect(screen.queryByRole('option', { name: '[object Object]' })).toBeNull()
+  })
+
   it('lets the user choose a TTS language and selects a live voice for it', async () => {
     render(<SettingsPanel onClose={vi.fn()} initialTab="voice" />)
 

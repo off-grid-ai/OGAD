@@ -164,8 +164,8 @@ export function SettingsPanel({
     window.api
       .getSettings()
       .then((all: Record<string, unknown>) => {
-        if (all.ttsVoice) {
-          const savedVoice = String(all.ttsVoice)
+        const savedVoice = typeof all.ttsVoice === 'string' ? all.ttsVoice : null
+        if (savedVoice) {
           setVoice(savedVoice)
           setVoiceLanguage(kokoroVoiceLanguage(savedVoice)?.code ?? 'en-US')
         }
