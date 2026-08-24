@@ -11,7 +11,7 @@ device pass.
 
 For a shareable execution sheet, import
 [`RELEASE_READINESS_CHECKLIST_0.0.40.csv`](RELEASE_READINESS_CHECKLIST_0.0.40.csv) into Google
-Sheets. It contains 210 Core and Pro journeys: the canonical 155 product journeys plus 55
+Sheets. It contains 214 Core and Pro journeys: the canonical 155 product journeys plus 59
 manually-audited native, security, release, and omitted-surface cases. Every row includes exact
 steps and expected results, strict automation status and evidence, remaining manual boundaries,
 calibrated regression confidence, and blank tester/result/evidence/defect columns for the release

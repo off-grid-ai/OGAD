@@ -30,7 +30,7 @@ node scripts/generate-release-readiness-checklist.mjs
 npx vitest run src/main/__tests__/p0-p2-coverage-ledger.test.ts
 ```
 
-The generator must produce 210 unique rows with one header row and 28 columns. The validation test
+The generator must produce 214 unique rows with one header row and 28 columns. The validation test
 prevents canonical journey/status drift, duplicate IDs, invalid tiers/confidence, empty evidence
 explanations, and non-pending manual results in a newly generated sheet.
 
@@ -40,12 +40,12 @@ as a new sheet. Do not enable automatic conversion of IDs such as `NR-01`, `PR-0
 
 ## Status snapshot after the current integration hardening pass
 
-- Total: 210 journeys - 21 `COMPLETE`, 179 `PARTIAL`, 10 `OPEN`.
-- P0: 93 journeys - 59.7% automation coverage, 41.8% initial readiness before manual results.
+- Total: 214 journeys - 21 `COMPLETE`, 183 `PARTIAL`, 10 `OPEN`.
+- P0: 97 journeys - 60.2% automation coverage, 42.1% initial readiness before manual results.
 - P1: 93 journeys - 63.7% automation coverage, 44.6% initial readiness before manual results.
 - P2: 21 journeys - 71.2% automation coverage, 49.8% initial readiness before manual results.
 - P3: 3 journeys - 45.0% automation coverage, 31.5% initial readiness before manual results.
-- Overall: 62.4% automation coverage, 43.7% initial readiness before manual results.
+- Overall: 62.6% automation coverage, 43.8% initial readiness before manual results.
 - This pass closed the gateway and OAuth P0 automation gaps, added production composition coverage
   for TCC revocation and shutdown, replaced clipboard and chat tours with real persistence/runtime
   integrations, and added guarded entity graph, contextual Jot, and complete rendered action-state

@@ -1312,3 +1312,28 @@ The remaining boundary is the installed macOS app with real hardware and models.
 
 Close this gap only with the exact packaged build, an audible reply, the real macOS microphone
 indicator, and a saved diagnostic excerpt that identifies the active speech-to-text model.
+
+---
+
+## Personal Mesh visibility and Google OAuth need installed passes
+
+**Status:** automation-backed; manual macOS and provider verification is open. Filed 2026-08-24.
+
+The release tests prove the Personal Mesh lifecycle through the Shared contract, the Electron bridge,
+and the macOS helper. They also prove that a failed advertising stop keeps the last true state and
+that a later stop can retry. Complete rows PR-14 through PR-16 in
+`docs/RELEASE_READINESS_CHECKLIST_0.0.40.csv` on the exact
+release Mac with a second physical device. Confirm Hidden at cold launch, separate Discoverable and
+Find nearby controls, an active encrypted session during visibility changes, a private IP or machine
+name endpoint, one custom Sync port on every device, and failed-stop recovery through a diagnostic
+helper.
+
+The Google connector UI and credential paths have automated coverage, but the real provider boundary
+still needs one installed pass. Complete row PR-13 with a real test account and a Web application OAuth
+client. Confirm both APIs are enabled, the account has consent or test-user approval, the exact local
+callback completes, Gmail and Google Calendar connect, and both connection tests succeed. Relaunch,
+reconnect, and confirm that the protected credentials still work.
+
+Close this gap only with the device names, OS versions, exact build commits, Google project test
+status, redacted provider evidence, and completed checklist rows. Do not put client secrets, tokens,
+mail, calendar records, or other private data in release evidence.
