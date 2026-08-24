@@ -13,6 +13,8 @@ import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.
 import { getSecret, setSecret, deleteSecret } from './secrets'
 import { OAuthLoopbackServer } from './mcp-oauth-loopback'
 import { MCP_OAUTH_REDIRECT_PORT } from '../shared/mcp-oauth-callback'
+import { beginOAuthAuthorization } from './mcp-oauth-cancellation'
+import { OAuthPkceVerifier, type OAuthCredentialScope } from './mcp-oauth-pkce'
 
 // The Off Grid brand mark, served by the loopback at /oglogo.png so the consent
 // success page (and its favicon) show the real logo instead of a generic glyph.
@@ -47,7 +49,7 @@ export interface StaticOAuthClient {
 
 export interface OffGridOAuthClientProvider extends OAuthClientProvider {
   getCodePromise(): Promise<string>
-  invalidateCredentials(scope: 'all' | 'client' | 'tokens' | 'verifier' | 'discovery'): void
+  invalidateCredentials(scope: OAuthCredentialScope): void
 }
 
 export function makeOAuthProvider(
@@ -63,7 +65,9 @@ export function makeOAuthProvider(
   // Set when redirectToAuthorization runs (during connect, before it throws), so
   // the caller can await the code routed back to us by `state`.
   let pendingCode: Promise<string> | null = null
-  let pendingState: string | null = null
+  const pkce = new OAuthPkceVerifier()
+
+  const clearLegacyVerifier = (): void => deleteSecret(skey('verifier'))
 
   return {
     getCodePromise(): Promise<string> {
@@ -101,14 +105,18 @@ export function makeOAuthProvider(
     },
     saveTokens(t: unknown): void {
       setSecret(skey('tokens'), JSON.stringify(t))
+      pendingCode = null
+      pkce.complete()
+      clearLegacyVerifier()
     },
     saveCodeVerifier(v: string): void {
-      setSecret(skey('verifier'), v)
+      // The verifier belongs to this one browser attempt. Keeping it in the provider instance
+      // prevents a cancelled or superseded attempt from deleting another attempt's verifier.
+      pkce.save(v)
+      clearLegacyVerifier()
     },
     codeVerifier(): string {
-      const v = getSecret(skey('verifier'))
-      if (!v) throw new Error('missing PKCE code verifier')
-      return v
+      return pkce.read()
     },
     async redirectToAuthorization(url: URL): Promise<void> {
       // Background (non-interactive) connects must NEVER pop a login — if the
@@ -128,19 +136,14 @@ export function makeOAuthProvider(
       const state = url.searchParams.get('state')
       if (!state) throw new Error('OAuth authorization URL is missing state')
       await oauthLoopback.start()
-      if (pendingState) {
-        oauthLoopback.cancel(pendingState, new Error('Authorization superseded by a newer request'))
-      }
       pendingCode = oauthLoopback.awaitCode(state)
-      pendingState = state
-      void pendingCode.then(
-        () => {
-          if (pendingState === state) pendingState = null
-        },
-        () => {
-          if (pendingState === state) pendingState = null
-        }
+      const finishAuthorization = beginOAuthAuthorization(connectorId, (error) =>
+        oauthLoopback.cancel(state, error)
       )
+      void pendingCode.then(finishAuthorization, () => {
+        pkce.cancel()
+        finishAuthorization()
+      })
       try {
         await shell.openExternal(url.toString())
       } catch (error) {
@@ -148,10 +151,14 @@ export function makeOAuthProvider(
         throw error
       }
     },
-    invalidateCredentials(scope: 'all' | 'client' | 'tokens' | 'verifier' | 'discovery'): void {
+    invalidateCredentials(scope: OAuthCredentialScope): void {
       if (scope === 'all' || scope === 'tokens') deleteSecret(skey('tokens'))
       if (scope === 'all' || scope === 'client') deleteSecret(skey('client'))
-      if (scope === 'all' || scope === 'verifier') deleteSecret(skey('verifier'))
+      // The SDK retries invalid_client and unauthorized_client with the same authorization code.
+      // Preserve the active in-memory verifier for that retry so the real provider error remains
+      // visible. Explicit verifier invalidation and inactive cleanup still remove it.
+      pkce.invalidate(scope)
+      if (scope === 'all' || scope === 'verifier') clearLegacyVerifier()
     }
   }
 }

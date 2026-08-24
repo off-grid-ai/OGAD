@@ -41,7 +41,7 @@ export const HOOKS = {
   searchExtraSources: 'search.extraSources',
   /**
    * (connectorId: number, url: string | null) => ConnectorToolSource | undefined - lets Pro
-   * providers verify through their supported protocol and suppress unusable MCP tool discovery.
+   * providers own verification, read-tool discovery, and execution through their supported protocol.
    */
   mcpConnectorToolSource: 'mcp:connectorToolSource',
   /** (mutation: SyncMutation) => void - record a committed core data change in Pro sync. */

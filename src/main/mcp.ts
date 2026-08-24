@@ -8,6 +8,7 @@
 import { getDB } from './database'
 import { deleteSecretsByPrefix, getSecret } from './secrets'
 import { makeOAuthProvider, ensureLoopback, hasOAuthTokens } from './mcp-oauth'
+import { cancelOAuthAuthorization } from './mcp-oauth-cancellation'
 import { callHook, HOOKS } from './bootstrap/hookRegistry'
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import type { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
@@ -28,14 +29,21 @@ export interface ConnectorToolDefinition {
   inputSchema?: unknown
 }
 
+export interface ConnectorToolCallResult {
+  ok: boolean
+  result?: unknown
+  error?: string
+}
+
 /**
  * A provider-owned connector can verify through its supported protocol while keeping generic MCP
- * discovery disabled. An empty tools list is meaningful: the provider is healthy, but its preview
- * MCP tools are not safe to publish to chat.
+ * discovery disabled. The provider owns execution too, so a published REST-backed tool never falls
+ * through to an unavailable preview MCP endpoint.
  */
 export interface ConnectorToolSource {
   tools: ConnectorToolDefinition[]
   verify: () => Promise<void>
+  callTool: (tool: string, args: unknown) => Promise<ConnectorToolCallResult>
 }
 
 let ready = false
@@ -132,6 +140,7 @@ export function setConnectorStatus(
 
 export function removeConnector(id: number): void {
   ensure()
+  cancelOAuthAuthorization(id)
   const database = getDB()
   database.transaction(() => {
     deleteSecretsByPrefix(`connector:${id}:`)
@@ -424,12 +433,14 @@ export async function callConnectorTool(
   id: number,
   tool: string,
   args: unknown
-): Promise<{ ok: boolean; result?: unknown; error?: string }> {
+): Promise<ConnectorToolCallResult> {
   ensure()
   const c = getConnector(id)
   if (!c) return { ok: false, error: 'connector not found' }
   if (!c.enabled) return { ok: false, error: 'connector disabled' }
   try {
+    const source = connectorToolSource(c)
+    if (source) return await source.callTool(tool, args)
     const { client, close } = await connect(c, false) // background → saved tokens only
     const result = await client.callTool({
       name: tool,
