@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   IconPhoto,
   IconUser,
@@ -80,27 +80,21 @@ export function CommandPalette({
     return () => clearTimeout(t)
   }, [query])
 
-  const open_ = useCallback(
-    (h: SearchHit) => {
-      setOpen(false)
-      onOpenHit(h)
-    },
-    [onOpenHit]
-  )
-  const seeAll = useCallback(() => {
+  const open_ = (hit: SearchHit): void => {
+    setOpen(false)
+    onOpenHit(hit)
+  }
+  const seeAll = (): void => {
     if (query.trim()) {
       setOpen(false)
       onSeeAll(query)
     }
-  }, [query, onSeeAll])
-  const goTo = useCallback(
-    (view: string, subroute?: string) => {
-      setOpen(false)
-      setQuery('')
-      onGoTo?.(view, subroute)
-    },
-    [onGoTo]
-  )
+  }
+  const goTo = (view: string, subroute?: string): void => {
+    setOpen(false)
+    setQuery('')
+    onGoTo?.(view, subroute)
+  }
 
   // Screens are known locally, so they resolve as you type rather than waiting on a search round
   // trip. With nothing typed the palette is a jump list: ⌘K then a screen name, never a hunt.

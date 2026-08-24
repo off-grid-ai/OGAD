@@ -811,8 +811,8 @@ function AppContent() {
   ]
   // One way in to a screen, used by the sidebar and by the command palette: switching screens also
   // drops whatever row was selected in the old one, so a stale detail pane never rides along.
-  const goToView = (view: ViewMode, subroute: string | null = null): void => {
-    setNavigationSubroute(view === 'devices' ? subroute : null)
+  const goToView = (view: ViewMode, subroute?: string | null): void => {
+    setNavigationSubroute(view === 'devices' ? (subroute ?? null) : null)
     setSettingsSection(null)
     setViewMode(view)
     setSelectedSessionId(null)
@@ -884,7 +884,7 @@ function AppContent() {
             locked: !isPro && proActivation !== 'entitlement-bootstrap'
           }
         ]}
-        onGoTo={(view, subroute) => goToView(view as ViewMode, subroute ?? null)}
+        onGoTo={(view, subroute) => goToView(view as ViewMode, subroute)}
       />
       {/* Recording indicator — auto-records detected meetings; always visible. */}
       {(rec.recording || rec.busy) && (

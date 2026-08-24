@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from 'react'
+import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
 import { useEscapeToClose } from '@renderer/lib/use-escape-to-close'
 
 type SidePanelProps = {
@@ -23,6 +23,42 @@ export function SidePanel({
   style
 }: SidePanelProps): React.JSX.Element {
   useEscapeToClose(onClose)
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const panel = panelRef.current
+    panel?.focus()
+
+    const trapFocus = (event: KeyboardEvent): void => {
+      if (event.key !== 'Tab' || !panel) return
+      const focusable = Array.from(
+        panel.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((element) => !element.hasAttribute('hidden'))
+      if (focusable.length === 0) {
+        event.preventDefault()
+        panel.focus()
+        return
+      }
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last?.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first?.focus()
+      }
+    }
+
+    panel?.addEventListener('keydown', trapFocus)
+    return () => {
+      panel?.removeEventListener('keydown', trapFocus)
+      previousFocus?.focus()
+    }
+  }, [])
 
   return (
     <>
@@ -33,6 +69,8 @@ export function SidePanel({
         data-testid="side-panel-backdrop"
       />
       <div
+        ref={panelRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={ariaLabel}

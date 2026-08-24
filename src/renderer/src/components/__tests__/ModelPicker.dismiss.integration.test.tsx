@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ModelPicker } from '../ModelPicker'
 
 afterEach(() => {
@@ -37,5 +37,31 @@ describe('<ModelPicker/> dismissal', () => {
     const onClose = renderPicker()
     fireEvent.click(screen.getByRole('dialog', { name: 'Active models' }))
     expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('moves focus into the panel, traps it, and restores the opener', async () => {
+    const opener = document.createElement('button')
+    document.body.appendChild(opener)
+    opener.focus()
+    renderPicker()
+    const panel = screen.getByRole('dialog', { name: 'Active models' })
+
+    await waitFor(() => expect(document.activeElement).toBe(panel))
+    const buttons = Array.from(panel.querySelectorAll<HTMLButtonElement>('button:not([disabled])'))
+    const first = buttons[0]
+    const last = buttons[buttons.length - 1]
+    expect(first).toBeTruthy()
+    expect(last).toBeTruthy()
+
+    last?.focus()
+    fireEvent.keyDown(last as HTMLElement, { key: 'Tab' })
+    expect(document.activeElement).toBe(first)
+    first?.focus()
+    fireEvent.keyDown(first as HTMLElement, { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(last)
+
+    cleanup()
+    expect(document.activeElement).toBe(opener)
+    opener.remove()
   })
 })
