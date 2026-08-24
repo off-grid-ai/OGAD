@@ -125,7 +125,13 @@ describe('transcriptionActiveInfo', () => {
   it('returns the selected language and only installed transcription choices', () => {
     const result = transcriptionActiveInfo(
       { engine: 'whisper', modelId: 'ggml-base.bin', label: 'Whisper · Base' },
-      ['ggerganov/whisper.cpp/base'],
+      [
+        {
+          id: 'ggerganov/whisper.cpp/base',
+          name: 'Whisper Base',
+          files: [{ name: 'ggml-base.bin' }]
+        }
+      ],
       'hi'
     )
 
@@ -135,6 +141,27 @@ describe('transcriptionActiveInfo', () => {
       { id: null, name: 'Whisper (built-in)', active: false },
       { id: 'ggerganov/whisper.cpp/base', name: 'Whisper Base', active: true }
     ])
+  })
+
+  it('lists a transferred package by its exact id and matches its active family', () => {
+    const result = transcriptionActiveInfo(
+      { engine: 'whisper', modelId: 'whisper-large-v3', label: 'Whisper · Large' },
+      [
+        {
+          id: 'transferred:whisper-large-v3:q5',
+          familyId: 'whisper-large-v3',
+          name: 'Whisper Large v3 (transferred)',
+          files: [{ name: 'ggml-large-v3-q5.bin' }]
+        }
+      ],
+      'hi'
+    )
+
+    expect(result.options[1]).toEqual({
+      id: 'transferred:whisper-large-v3:q5',
+      name: 'Whisper Large v3 (transferred)',
+      active: true
+    })
   })
 
   it('falls back to auto-detect and excludes models that are not installed', () => {

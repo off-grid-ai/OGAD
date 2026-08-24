@@ -110,13 +110,18 @@ export function engineForActiveModel(
  * actually used instead of always running whisper.
  */
 export function getActiveTranscription(): TranscriptionService {
+  const active = getActiveModal('transcription')
   const engine = engineForActiveModel(
-    getActiveModal('transcription'),
+    active,
     modelsByKind('transcription')
+  )
+  const language = resolveConfiguredTranscriptionLanguage(
+    getSetting('sttLanguage', 'auto'),
+    transcriptionLanguages(engine, active)
   )
   return withConfiguredTranscriptionLanguage(
     getTranscription(engine),
-    getSetting('sttLanguage', 'auto')
+    language
   )
 }
 
@@ -145,15 +150,18 @@ export function resolveConfiguredTranscriptionLanguage(
 
 export function transcriptionActiveInfo(
   info: ReturnType<typeof getActiveTranscriptionInfo>,
-  installedIds: readonly string[],
+  installed: readonly InstalledTranscriptionEntry[],
   configuredLanguage: string
 ): ReturnType<typeof getActiveTranscriptionInfo> & {
   language: string
   languages: readonly SpeechLanguage[]
   options: ReturnType<typeof transcriptionModelOptions>
 } {
-  const installed = modelsByKind('transcription').filter((entry) => installedIds.includes(entry.id))
-  const languages = transcriptionLanguages(info.engine, info.modelId)
+  const activeEntry = installed.find((entry) => transcriptionEntryMatches(entry, info.modelId))
+  const languages = transcriptionLanguages(
+    info.engine,
+    activeEntry?.familyId ?? info.modelId
+  )
   return {
     ...info,
     language: resolveConfiguredTranscriptionLanguage(configuredLanguage, languages),
@@ -216,20 +224,39 @@ export interface TranscriptionModelOption {
   active: boolean
 }
 
+export interface InstalledTranscriptionEntry {
+  id: string
+  familyId?: string
+  name?: string
+  files: Array<{ name: string }>
+}
+
+function transcriptionEntryMatches(
+  entry: InstalledTranscriptionEntry,
+  active: string | null
+): boolean {
+  return (
+    active != null &&
+    (entry.id === active ||
+      entry.familyId === active ||
+      entry.files.some((file) => file.name === active))
+  )
+}
+
 /** Pure: the switchable transcription models for a picker — the built-in whisper default plus
  *  every INSTALLED transcription catalog model — with the active one flagged. Matches the active
  *  value by catalog id OR primary filename (active-models stores either). Selecting an option
  *  goes through the existing setActiveModalModel('transcription', id) — this only lists. */
 export function transcriptionModelOptions(
   active: string | null,
-  installed: Array<{ id: string; name?: string; files: Array<{ name: string }> }>
+  installed: readonly InstalledTranscriptionEntry[]
 ): TranscriptionModelOption[] {
   return [
     { id: null, name: 'Whisper (built-in)', active: active == null },
     ...installed.map((e) => ({
       id: e.id,
       name: e.name ?? e.id,
-      active: e.id === active || e.files.some((f) => f.name === active)
+      active: transcriptionEntryMatches(e, active)
     }))
   ]
 }

@@ -219,7 +219,12 @@ export function SettingsPanel({
   const pickTranscriptionLanguage = (language: string): void => {
     if (!transcriptionInfo) return
     setTranscriptionInfo({ ...transcriptionInfo, language })
-    void window.api.saveSetting('sttLanguage', language)
+    void Promise.resolve(window.api.saveSetting('sttLanguage', language)).catch(() => {
+      void window.api
+        .getTranscriptionInfo()
+        .then((persisted) => setTranscriptionInfo(persisted))
+        .catch(() => {})
+    })
   }
 
   const testVoice = async (): Promise<void> => {

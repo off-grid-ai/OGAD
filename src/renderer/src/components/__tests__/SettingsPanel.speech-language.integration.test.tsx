@@ -7,28 +7,31 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { SettingsPanel } from '../SettingsPanel'
 
 const saveSetting = vi.fn(async () => undefined)
+const getTranscriptionInfo = vi.fn()
 
 beforeEach(() => {
   saveSetting.mockClear()
+  getTranscriptionInfo.mockReset()
+  getTranscriptionInfo.mockResolvedValue({
+    engine: 'whisper',
+    modelId: 'whisper-large-v3',
+    label: 'Whisper · Whisper Large v3',
+    language: 'auto',
+    languages: [
+      { code: 'auto', label: 'Auto-detect' },
+      { code: 'en', label: 'English' },
+      { code: 'fr', label: 'French' },
+      { code: 'de', label: 'German' },
+      { code: 'ko', label: 'Korean' }
+    ],
+    options: []
+  })
   ;(window as unknown as { api: Record<string, unknown> }).api = {
     getLlmSettings: vi.fn().mockResolvedValue({}),
     getModelCatalog: vi.fn().mockResolvedValue({ models: [] }),
     getActiveModel: vi.fn().mockResolvedValue(null),
     ttsVoices: vi.fn().mockResolvedValue(['af_heart', 'bf_emma', 'ff_siwis']),
-    getTranscriptionInfo: vi.fn().mockResolvedValue({
-      engine: 'whisper',
-      modelId: 'whisper-large-v3',
-      label: 'Whisper · Whisper Large v3',
-      language: 'auto',
-      languages: [
-        { code: 'auto', label: 'Auto-detect' },
-        { code: 'en', label: 'English' },
-        { code: 'fr', label: 'French' },
-        { code: 'de', label: 'German' },
-        { code: 'ko', label: 'Korean' }
-      ],
-      options: []
-    }),
+    getTranscriptionInfo,
     listTools: vi.fn().mockResolvedValue([]),
     getSettings: vi.fn().mockResolvedValue({ ttsVoice: 'af_heart' }),
     mcpList: vi.fn().mockResolvedValue([]),
@@ -61,5 +64,16 @@ describe('<SettingsPanel/> speech languages', () => {
     })
 
     await waitFor(() => expect(saveSetting).toHaveBeenCalledWith('sttLanguage', 'ko'))
+  })
+
+  it('restores the persisted STT language when saving fails', async () => {
+    saveSetting.mockRejectedValueOnce(new Error('disk full'))
+    render(<SettingsPanel onClose={vi.fn()} initialTab="transcription" />)
+
+    const language = await screen.findByRole('combobox', { name: /spoken language/i })
+    fireEvent.change(language, { target: { value: 'ko' } })
+
+    await waitFor(() => expect(getTranscriptionInfo).toHaveBeenCalledTimes(2))
+    expect((language as HTMLSelectElement).value).toBe('auto')
   })
 })
