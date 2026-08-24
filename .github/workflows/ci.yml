@@ -117,6 +117,12 @@ jobs:
         if: ${{ hashFiles('pro/tsconfig.json') != '' }}
         timeout-minutes: 6
         run: cd pro && npx tsc --noEmit -p tsconfig.json
+      # npm's Electron install hooks leave sqlite compiled for Electron's ABI. The
+      # Vitest process is plain Node, and some default integration tests open the
+      # real database, so put the native module on Node's ABI before that gate.
+      # The later DB journey script restores the Electron ABI in its EXIT trap.
+      - name: Rebuild SQLite for the Node test runner
+        run: npm rebuild better-sqlite3-multiple-ciphers
       # Runs the full vitest suite AND enforces the coverage ratchet floor
       # (vitest.config.ts `thresholds`) — the same gate as the pre-push hook, so a
       # coverage regression fails CI, not just local pushes. The pro/** threshold
