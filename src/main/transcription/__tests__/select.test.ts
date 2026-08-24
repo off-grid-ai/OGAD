@@ -125,13 +125,29 @@ describe('transcriptionActiveInfo', () => {
   it('returns the selected language and only installed transcription choices', () => {
     const result = transcriptionActiveInfo(
       { engine: 'whisper', modelId: 'ggml-base.bin', label: 'Whisper · Base' },
-      ['ggerganov/whisper.cpp-base'],
+      ['ggerganov/whisper.cpp/base'],
       'hi'
     )
 
     expect(result.language).toBe('hi')
     expect(result.languages.some((language) => language.code === 'hi')).toBe(true)
-    expect(result.options).toHaveLength(1)
+    expect(result.options).toEqual([
+      { id: null, name: 'Whisper (built-in)', active: false },
+      { id: 'ggerganov/whisper.cpp/base', name: 'Whisper Base', active: true }
+    ])
+  })
+
+  it('falls back to auto-detect and excludes models that are not installed', () => {
+    const result = transcriptionActiveInfo(
+      { engine: 'whisper', modelId: null, label: 'Whisper · built-in' },
+      [],
+      'unsupported'
+    )
+
+    expect(result.language).toBe('auto')
+    expect(result.options).toEqual([
+      { id: null, name: 'Whisper (built-in)', active: true }
+    ])
   })
 })
 
