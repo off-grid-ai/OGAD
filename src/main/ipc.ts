@@ -2048,7 +2048,11 @@ export function setupIPC() {
   // Which STT engine + model would run right now (provenance) + the installed transcription
   // models a picker can switch to (via the existing models:set-active-modal — this only lists).
   ipcMain.handle('transcription:active-info', async () => {
-    const { getActiveTranscriptionInfo, transcriptionModelOptions } =
+    const {
+      getActiveTranscriptionInfo,
+      resolveConfiguredTranscriptionLanguage,
+      transcriptionModelOptions
+    } =
       await import('./transcription/select')
     const { listInstalled } = await import('./models-manager')
     const { modelsByKind } = await import('@offgrid/models')
@@ -2065,9 +2069,7 @@ export function setupIPC() {
     ).filter((entry) => installedIds.has(entry.id))
     const languages = transcriptionLanguages(info.engine, info.modelId)
     const configuredLanguage = getSetting('sttLanguage', 'auto')
-    const language = languages.some((candidate) => candidate.code === configuredLanguage)
-      ? configuredLanguage
-      : languages[0]?.code ?? 'auto'
+    const language = resolveConfiguredTranscriptionLanguage(configuredLanguage, languages)
     return {
       ...info,
       language,

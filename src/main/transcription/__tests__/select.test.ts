@@ -9,6 +9,7 @@ import {
   modelsByEngine,
   transcriptionProvenance,
   transcriptionModelOptions,
+  resolveConfiguredTranscriptionLanguage,
   withConfiguredTranscriptionLanguage
 } from '../select'
 import type { TranscriptionService } from '../types'
@@ -100,6 +101,22 @@ describe('withConfiguredTranscriptionLanguage', () => {
       { path: '/tmp/voice.wav' },
       expect.objectContaining({ language: 'en' })
     )
+  })
+})
+
+describe('resolveConfiguredTranscriptionLanguage', () => {
+  const languages = [
+    { code: 'auto', label: 'Auto-detect' },
+    { code: 'hi', label: 'Hindi' }
+  ]
+
+  it('keeps a language supported by the selected transcription model', () => {
+    expect(resolveConfiguredTranscriptionLanguage('hi', languages)).toBe('hi')
+  })
+
+  it('falls back to the model default after switching to an incompatible model', () => {
+    expect(resolveConfiguredTranscriptionLanguage('fr', languages)).toBe('auto')
+    expect(resolveConfiguredTranscriptionLanguage('fr', [])).toBe('auto')
   })
 })
 
