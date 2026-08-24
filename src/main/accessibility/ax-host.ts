@@ -24,6 +24,7 @@ import { binRoots, exe } from '../runtime-env'
 import { llm } from '../llm'
 import { loadActuation, type ActuationPort } from '../input/actuation'
 import { parseAxElements, type AxElement, type AxSnapshot } from './ax-elements'
+import { windowsAxBackend, type AxBackend } from './ax-win'
 import { pickTargetApp } from './ax-target'
 import { namesWebsite } from '../tools/planner-logic'
 import {
@@ -75,19 +76,37 @@ async function runningAppNames(helper: string): Promise<string[]> {
   }
 }
 
+/** The macOS backend: the Swift `text-extractor` helper (NSWorkspace apps +
+ *  AX element tree) and `open -a` to foreground. Available only when the helper
+ *  is present on macOS. */
+const macAxBackend: AxBackend = {
+  available: () => process.platform === 'darwin' && helperPath() !== null,
+  async listApps() {
+    const helper = helperPath()
+    return helper ? runningAppNames(helper) : []
+  },
+  activate: activateApp,
+  snapshot: snapshotApp
+}
+
+/** The accessibility backend for this platform - the ONE place the OS is chosen.
+ *  macOS uses the Swift AX helper; Windows uses PowerShell + UI Automation; any
+ *  other platform gets the mac backend, whose available() is false, so the rail
+ *  stays off and the caller falls to vision. */
+function axBackend(): AxBackend {
+  return process.platform === 'win32' ? windowsAxBackend : macAxBackend
+}
+
 /** The running native app a request targets, or null. Lets the orchestrator
  *  route "do X in Slack" (Slack running) to the app via computer_task instead of
  *  a website via web_task - rail-per-surface, independent of the model's guess.
- *  Only sees RUNNING apps (the helper lists NSWorkspace); [] off macOS. */
+ *  Only sees RUNNING apps; [] when no accessibility backend is available. */
 export async function resolveNativeApp(goal: string): Promise<string | null> {
-  if (process.platform !== 'darwin') {
+  const backend = axBackend()
+  if (!backend.available()) {
     return null
   }
-  const helper = helperPath()
-  if (!helper) {
-    return null
-  }
-  return pickTargetApp(goal, await runningAppNames(helper), SELF_APP_NAME)
+  return pickTargetApp(goal, await backend.listApps(), SELF_APP_NAME)
 }
 
 /** Bring the target app forward so synthetic clicks land on it. `open -a` needs
@@ -170,7 +189,8 @@ class AxRailHost {
   /** Resolve the target app from the goal and read its elements, for the router
    *  to score. Null => no named running app => the caller falls to vision. */
   async routingSnapshot(goal: string): Promise<AxRouting | null> {
-    if (process.platform !== 'darwin') {
+    const backend = axBackend()
+    if (!backend.available()) {
       return null
     }
     // A web goal must never drive a native app (a word like 'music' matching the
@@ -178,15 +198,11 @@ class AxRailHost {
     if (namesWebsite(goal)) {
       return null
     }
-    const helper = helperPath()
-    if (!helper) {
-      return null
-    }
-    const app = pickTargetApp(goal, await runningAppNames(helper), SELF_APP_NAME)
+    const app = pickTargetApp(goal, await backend.listApps(), SELF_APP_NAME)
     if (!app) {
       return null
     }
-    const snapshot = await snapshotApp(app)
+    const snapshot = await backend.snapshot(app)
     if (!snapshot) {
       return null
     }
@@ -216,7 +232,7 @@ class AxRailHost {
         steps: []
       }
     }
-    await activateApp(app)
+    await axBackend().activate(app)
     const guard = new VisionGuard()
     // The kill switch: Esc halts for good. The overlay's Stop routes to the SAME
     // guard through the controller session, so both paths end one run.
@@ -238,7 +254,7 @@ class AxRailHost {
           }
           // Read the target app BY NAME each step - stable even though Off Grid
           // (or the overlay) may hold system focus.
-          return (await snapshotApp(app)) ?? { windowTitle: '', elements: [] }
+          return (await axBackend().snapshot(app)) ?? { windowTitle: '', elements: [] }
         },
         actuator: makeElementActuator(actuation, guard),
         decide: async (prompt) => {
