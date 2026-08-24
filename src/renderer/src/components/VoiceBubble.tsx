@@ -104,6 +104,8 @@ interface VoiceBubbleProps {
   synthesize: (text: string) => Promise<{ dataUrl: string }>
   /** Play once automatically when ready (a just-finished assistant reply). */
   autoPlay?: boolean
+  /** Reports audio preparation and playback so hands-free input cannot record the reply. */
+  onPlaybackStateChange?: (active: boolean) => void
   onCopy?: (text: string) => void
   onRetry?: () => void
 }
@@ -117,6 +119,7 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
   isLoading = false,
   synthesize,
   autoPlay = false,
+  onPlaybackStateChange,
   onCopy,
   onRetry
 }) => {
@@ -128,6 +131,14 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
   const [speed, setSpeed] = useState(1.0)
   const [showTranscript, setShowTranscript] = useState(false)
   const [playbackError, setPlaybackError] = useState<string | null>(null)
+  const playbackActive = status === 'loading' || status === 'playing'
+
+  useEffect(() => {
+    onPlaybackStateChange?.(playbackActive)
+    return () => {
+      if (playbackActive) onPlaybackStateChange?.(false)
+    }
+  }, [onPlaybackStateChange, playbackActive])
 
   // Stable waveform: real decoded envelope for a recording, else transcript-derived.
   const [fileWave, setFileWave] = useState<number[]>([])

@@ -31,6 +31,7 @@ import {
   type SyncedMessageRole,
   type SyncedTurnStatus
 } from '@offgrid/sync'
+import { VOICE_TURN_LABELS, type VoiceTurnMode } from '@offgrid/speech'
 import ReactMarkdown, { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -46,9 +47,11 @@ import { ChatThinkingBlock } from './ChatThinkingBlock'
 import { ChatToolRows } from './ChatToolRows'
 import { ArtifactCanvas, parseArtifact, type Artifact } from './ArtifactCanvas'
 import { VoiceBubble, stopAllVoicePlayback } from './VoiceBubble'
+import { useChatVoiceTurns } from './use-chat-voice-turns'
 import { SkillsPanel } from './SkillsPanel'
 import { ModelPicker } from './ModelPicker'
 import { SettingsPanel } from './SettingsPanel'
+import { SidePanel } from './SidePanel'
 import { ConversationTitleActions } from './ConversationTitleActions'
 import { resolveImageParams, setOverride, type ImageParamStore } from '@renderer/lib/image-params'
 import { IMAGE_SETTINGS_CHANGED_EVENT } from '@renderer/lib/image-settings-events'
@@ -69,13 +72,6 @@ import {
   type ImageGenerationRequestContract
 } from '../../../shared/image-generation-contract'
 import { Button } from '@renderer/components/ui/button'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle
-} from '@renderer/components/ui/dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import {
   DropdownMenu,
@@ -684,17 +680,23 @@ function ToolMessageRow({
 function VoiceMessageRow({
   message,
   autoPlay,
+  onPlaybackStateChange,
   onCopy,
   onOpenImage,
   onRegenerate
 }: Readonly<{
   message: ChatMessage
   autoPlay: boolean
+  onPlaybackStateChange: (messageId: string, active: boolean) => void
   onCopy: (text: string, key?: string) => void
   onOpenImage: (image: OpenImage) => void
   onRegenerate: (messageId: string) => void
 }>): React.JSX.Element {
   const alignment = message.role === 'user' ? 'items-end' : 'items-start'
+  const reportPlayback = useCallback(
+    (active: boolean) => onPlaybackStateChange(message.id, active),
+    [message.id, onPlaybackStateChange]
+  )
   let body: React.JSX.Element
   if (message.role === 'user') {
     body = (
@@ -705,6 +707,7 @@ function VoiceMessageRow({
         audioUrl={recordedClipUrl(message)}
         durationSeconds={message.audioDuration}
         synthesize={(text) => window.api.speak(text)}
+        onPlaybackStateChange={reportPlayback}
         onCopy={onCopy}
       />
     )
@@ -728,6 +731,7 @@ function VoiceMessageRow({
         isLoading={Boolean(message.streaming)}
         autoPlay={autoPlay}
         synthesize={(text) => window.api.speak(text)}
+        onPlaybackStateChange={reportPlayback}
         onCopy={onCopy}
         onRetry={() => onRegenerate(message.id)}
       />
@@ -1677,6 +1681,7 @@ type MessageRowActions = Readonly<{
   selectAskOption: (selection: AskOptionSelection) => void
   submitAsk: (selected: readonly string[]) => void
   speak: (messageId: string, content: string) => void
+  voicePlaybackChange: (messageId: string, active: boolean) => void
   selectVariant: (messageId: string, direction: -1 | 1) => void
 }>
 
@@ -1893,6 +1898,7 @@ function MessageRow({
       <VoiceMessageRow
         message={message}
         autoPlay={state.autoPlayId === message.id}
+        onPlaybackStateChange={actions.voicePlaybackChange}
         onCopy={actions.copy}
         onOpenImage={actions.openImage}
         onRegenerate={actions.regenerate}
@@ -2275,18 +2281,17 @@ export function MemoryChat({
     const t = setTimeout(() => projInputRef.current?.focus(), 80)
     return () => clearTimeout(t)
   }, [projCreating])
-  const [recording, setRecording] = useState(false)
-  const [transcribing, setTranscribing] = useState(false)
-  const [microphoneDenied, setMicrophoneDenied] = useState(false)
-  // Surfaced when a recording can't become a message (no audio, empty transcript, or a
-  // transcription-engine failure) — never fail silently (the "nothing happened" bug).
-  const [transcribeError, setTranscribeError] = useState<string | null>(null)
   const [toolsOn, setToolsOn] = useState(false)
   const [connectorsOn, setConnectorsOn] = useState(false)
   const [thinkingEnabled, setThinkingEnabled] = useState(false)
   const [voiceMode, setVoiceMode] = useState(false) // voice mode: messages exchanged as voice notes
+  const [voiceTurnMode, setVoiceTurnMode] = useState<VoiceTurnMode>('tap')
+  const [voicePlaybackOwner, setVoicePlaybackOwner] = useState<string | null>(null)
   useEffect(() => {
-    if (!voiceMode) stopAllVoicePlayback()
+    if (!voiceMode) {
+      stopAllVoicePlayback()
+      setVoicePlaybackOwner(null)
+    }
   }, [voiceMode])
 
   // Composer preferences persist across sessions (memory scope, thinking, tools,
@@ -2302,6 +2307,12 @@ export function MemoryChat({
         if (typeof s.composerConnectorsOn === 'boolean') setConnectorsOn(s.composerConnectorsOn)
         if (typeof s.composerThinking === 'boolean') setThinkingEnabled(s.composerThinking)
         if (typeof s.composerVoiceMode === 'boolean') setVoiceMode(s.composerVoiceMode)
+        if (
+          s.composerVoiceTurnMode === 'tap' ||
+          s.composerVoiceTurnMode === 'silence' ||
+          s.composerVoiceTurnMode === 'handsfree'
+        )
+          setVoiceTurnMode(s.composerVoiceTurnMode)
         // Image-composer params: per-model steps/size overrides + the global
         // seed/negative/strength/style. These are persisted so they survive a
         // remount (they used to reset every mount).
@@ -2335,6 +2346,9 @@ export function MemoryChat({
   useEffect(() => {
     if (prefsLoaded.current) void window.api.saveSetting('composerVoiceMode', voiceMode)
   }, [voiceMode])
+  useEffect(() => {
+    if (prefsLoaded.current) void window.api.saveSetting('composerVoiceTurnMode', voiceTurnMode)
+  }, [voiceTurnMode])
   // Persist the global image-composer params (per-model steps/size live in the
   // store, saved on change). Guarded by prefsLoaded so the initial load doesn't
   // echo back an empty default.
@@ -2427,13 +2441,10 @@ export function MemoryChat({
   const [artifacts, setArtifacts] = useState<
     (Artifact & { id: string; title: string; created: number })[]
   >([])
-  const recorderRef = useRef<MediaRecorder | null>(null)
-  const chunksRef = useRef<Blob[]>([])
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
-  const micStreamRef = useRef<MediaStream | null>(null)
   const voiceMountedRef = useRef(true)
   const speechRequestRef = useRef(0)
   const pendingVariantsRef = useRef<string[] | null>(null) // prior answers to keep when regenerating
@@ -2485,19 +2496,6 @@ export function MemoryChat({
       speechRequestRef.current++
       audioRef.current?.pause()
       audioRef.current = null
-      const recorder = recorderRef.current
-      recorderRef.current = null
-      if (recorder && recorder.state !== 'inactive') {
-        recorder.onstop = null
-        try {
-          recorder.stop()
-        } catch {
-          /* already stopped */
-        }
-      }
-      micStreamRef.current?.getTracks().forEach((track) => track.stop())
-      micStreamRef.current = null
-      chunksRef.current = []
     }
   }, [])
 
@@ -3564,6 +3562,34 @@ export function MemoryChat({
     }, 30)
   }
 
+  const handleVoicePlaybackChange = useCallback((messageId: string, active: boolean): void => {
+    setVoicePlaybackOwner((current) =>
+      active ? messageId : current === messageId ? null : current
+    )
+  }, [])
+
+  const voiceTurns = useChatVoiceTurns({
+    voiceMode,
+    mode: voiceMode ? voiceTurnMode : 'tap',
+    isGenerating: Boolean(activeConversationId && generatingConvs.has(activeConversationId)),
+    isPlaybackActive: voicePlaybackOwner !== null,
+    transcribeAudio: (audio, extension) => window.api.transcribeAudio(audio, extension),
+    getTranscriptionLabel: () => window.api.getTranscriptionInfo(),
+    onTranscript: (text, clip) => {
+      if (voiceMode && clip) {
+        void sendMessage(text, { voiceClip: clip })
+        return
+      }
+      setInput((previous) => `${previous}${previous ? ' ' : ''}${text}`)
+    }
+  })
+  const recording =
+    voiceTurns.phase === 'starting' ||
+    voiceTurns.phase === 'listening' ||
+    voiceTurns.phase === 'recording'
+  const transcribing = voiceTurns.phase === 'transcribing'
+  const toggleRecording = transcribing ? voiceTurns.cancel : voiceTurns.toggle
+
   // Stop the in-flight generation for a conversation: abort the model stream (main
   // keeps whatever streamed so far) or the image job, drop any queued follow-ups, and
   // return the UI to idle now. The in-flight sendMessage sees cancelledRef and bails at
@@ -3692,84 +3718,6 @@ export function MemoryChat({
       if (attachments.some((a) => a.status === 'loading')) return
       sendMessage()
     }
-  }
-
-  // Voice input: record from the mic, transcribe on-device with whisper, then
-  // drop the text into the input for review (not auto-sent).
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      setMicrophoneDenied(false)
-      setTranscribeError(null)
-      if (!voiceMountedRef.current) {
-        stream.getTracks().forEach((track) => track.stop())
-        return
-      }
-      micStreamRef.current = stream
-      const recorder = new MediaRecorder(stream)
-      chunksRef.current = []
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data)
-      }
-      const startedAt = Date.now()
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop())
-        if (micStreamRef.current === stream) micStreamRef.current = null
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
-        if (blob.size === 0) {
-          setTranscribeError("Didn't record any audio — try again.")
-          return
-        }
-        setTranscribing(true)
-        try {
-          const bytes = new Uint8Array(await blob.arrayBuffer())
-          const text = await window.api.transcribeAudio(bytes, 'webm')
-          const clean = (text || '').trim()
-          if (!clean) {
-            // Empty transcript: surface it instead of dropping the recording silently
-            // (the old code returned here with no feedback — the "nothing happened" bug).
-            setTranscribeError("Didn't catch that — try recording again.")
-            return
-          }
-          if (voiceMode) {
-            // Voice mode: send the spoken note straight away, keeping the recording
-            // so the user's bubble plays back their own audio.
-            const url = URL.createObjectURL(blob)
-            void sendMessage(clean, {
-              voiceClip: { url, duration: (Date.now() - startedAt) / 1000 }
-            })
-          } else {
-            setInput((prev) => (prev ? prev + ' ' : '') + clean)
-          }
-        } catch (err) {
-          console.error('Transcription failed', err)
-          setTranscribeError(
-            'Transcription failed. Check the voice model in Settings > Setup & health.'
-          )
-        } finally {
-          setTranscribing(false)
-        }
-      }
-      recorder.start()
-      recorderRef.current = recorder
-      setRecording(true)
-    } catch (err) {
-      console.error('Mic access failed', err)
-      const name =
-        typeof err === 'object' && err !== null && 'name' in err ? String(err.name) : undefined
-      setMicrophoneDenied(name === 'NotAllowedError' || name === 'SecurityError')
-      setRecording(false)
-    }
-  }
-
-  const stopRecording = () => {
-    recorderRef.current?.stop()
-    recorderRef.current = null
-    setRecording(false)
-  }
-
-  const toggleRecording = () => {
-    recording ? stopRecording() : startRecording()
   }
 
   // Voice output: synthesize a message on-device (Kokoro) and play it. Toggling
@@ -4295,6 +4243,7 @@ export function MemoryChat({
     },
     submitAsk: (selected) => void sendMessage(selected.join(', ')),
     speak: speakMessage,
+    voicePlaybackChange: handleVoicePlaybackChange,
     selectVariant: (messageId, direction) => {
       setMessages((previous) =>
         previous.map((message) => {
@@ -5250,7 +5199,7 @@ export function MemoryChat({
                       ))}
                     </div>
                   )}
-                  {microphoneDenied && (
+                  {voiceTurns.microphoneDenied && (
                     <div
                       role="alert"
                       className="mx-2 mb-2 flex items-center justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100"
@@ -5268,70 +5217,116 @@ export function MemoryChat({
                       </button>
                     </div>
                   )}
-                  {transcribeError && (
+                  {voiceTurns.error && !voiceTurns.microphoneDenied && (
                     <div
                       role="alert"
                       className="mx-2 mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100"
                     >
-                      {transcribeError}
+                      {voiceTurns.error}
                     </div>
                   )}
                   {voiceMode ? (
-                    // Voice mode: the input surface is a single mic — record a note,
-                    // it transcribes and sends. The toolbar below stays identical.
-                    <button
-                      type="button"
-                      onClick={toggleRecording}
-                      disabled={transcribing}
-                      className={`flex w-full flex-col items-center gap-2 py-5 ${transcribing ? 'cursor-default' : 'cursor-pointer'}`}
-                    >
-                      <span
-                        className={`flex h-14 w-14 items-center justify-center rounded-full border-2 transition-colors ${recording ? 'border-red-500 bg-red-500/15 text-red-400' : 'border-green-500 bg-green-500/10 text-green-500 hover:bg-green-500/20'} ${transcribing ? 'opacity-50' : ''}`}
+                    <div className="flex w-full flex-col items-center gap-3 px-3 py-4">
+                      <div
+                        role="group"
+                        aria-label="Voice turn mode"
+                        className="grid w-full max-w-md grid-cols-3 rounded-md border border-neutral-800 bg-neutral-950 p-1"
                       >
-                        {transcribing ? (
-                          <svg className="h-6 w-6 animate-spin" fill="none" viewBox="0 0 24 24">
-                            <circle
-                              className="opacity-25"
-                              cx="12"
-                              cy="12"
-                              r="10"
-                              stroke="currentColor"
-                              strokeWidth="4"
-                            />
-                            <path
-                              className="opacity-75"
-                              fill="currentColor"
-                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                            />
-                          </svg>
-                        ) : recording ? (
-                          <svg className="h-6 w-6" fill="currentColor" viewBox="0 0 24 24">
-                            <rect x="6" y="6" width="12" height="12" rx="2" />
-                          </svg>
-                        ) : (
-                          <svg
-                            className="h-6 w-6"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
+                        {(Object.keys(VOICE_TURN_LABELS) as VoiceTurnMode[]).map((turnMode) => (
+                          <button
+                            key={turnMode}
+                            type="button"
+                            aria-pressed={voiceTurnMode === turnMode}
+                            title={VOICE_TURN_LABELS[turnMode].description}
+                            onClick={() => setVoiceTurnMode(turnMode)}
+                            className={`rounded px-2 py-1.5 text-[11px] transition-colors ${
+                              voiceTurnMode === turnMode
+                                ? 'bg-green-500/15 text-green-400'
+                                : 'text-neutral-500 hover:bg-neutral-900 hover:text-neutral-300'
+                            }`}
                           >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M19 11a7 7 0 01-14 0m7 7v3m0-3a4 4 0 01-4-4V5a4 4 0 018 0v6a4 4 0 01-4 4z"
-                            />
-                          </svg>
-                        )}
-                      </span>
-                      <span className="text-xs text-neutral-500">
-                        {transcribing
-                          ? 'Transcribing…'
-                          : recording
-                            ? 'Recording — tap to send'
-                            : 'Tap to record a voice note'}
-                      </span>
-                    </button>
+                            {VOICE_TURN_LABELS[turnMode].label}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-center text-[11px] text-neutral-500">
+                        {VOICE_TURN_LABELS[voiceTurnMode].description}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={toggleRecording}
+                        aria-label={
+                          transcribing
+                            ? 'Cancel transcription'
+                            : recording
+                              ? 'Stop voice recording'
+                              : voiceTurns.suspended
+                                ? 'Resume hands-free listening'
+                                : 'Start voice recording'
+                        }
+                        className="flex flex-col items-center gap-2"
+                      >
+                        <span
+                          className={`flex h-14 w-14 items-center justify-center rounded-full border-2 transition-colors ${recording ? 'border-red-500 bg-red-500/15 text-red-400' : 'border-green-500 bg-green-500/10 text-green-500 hover:bg-green-500/20'}`}
+                        >
+                          {transcribing ? (
+                            <span className="relative flex items-center justify-center">
+                              <svg className="h-6 w-6 animate-spin" fill="none" viewBox="0 0 24 24">
+                                <circle
+                                  className="opacity-25"
+                                  cx="12"
+                                  cy="12"
+                                  r="10"
+                                  stroke="currentColor"
+                                  strokeWidth="4"
+                                />
+                                <path
+                                  className="opacity-75"
+                                  fill="currentColor"
+                                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                                />
+                              </svg>
+                              <X className="absolute h-3 w-3" weight="bold" />
+                            </span>
+                          ) : recording ? (
+                            <svg className="h-6 w-6" fill="currentColor" viewBox="0 0 24 24">
+                              <rect x="6" y="6" width="12" height="12" rx="2" />
+                            </svg>
+                          ) : (
+                            <svg
+                              className="h-6 w-6"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M19 11a7 7 0 01-14 0m7 7v3m0-3a4 4 0 01-4-4V5a4 4 0 018 0v6a4 4 0 01-4 4z"
+                              />
+                            </svg>
+                          )}
+                        </span>
+                        <span className="text-xs text-neutral-500">
+                          {voiceTurns.phase === 'starting'
+                            ? 'Opening the microphone...'
+                            : voiceTurns.phase === 'listening'
+                              ? 'Waiting for your voice'
+                              : transcribing
+                                ? `Transcribing with ${voiceTurns.transcriptionLabel} - click to cancel`
+                                : voiceTurns.phase === 'recording'
+                                  ? voiceTurnMode === 'tap'
+                                    ? 'Recording - click to send'
+                                    : 'Recording you now'
+                                  : voiceTurns.suspended
+                                    ? 'Hands-free is paused - click to resume'
+                                    : voiceTurnMode === 'handsfree'
+                                      ? 'Hands-free is ready'
+                                      : 'Click to record a voice note'}
+                        </span>
+                      </button>
+                    </div>
                   ) : (
                     <textarea
                       ref={inputRef}
@@ -5649,31 +5644,39 @@ export function MemoryChat({
                               type="button"
                               variant="outline"
                               size="icon"
-                              aria-label={recording ? 'Stop recording' : 'Record voice'}
+                              aria-label={
+                                transcribing
+                                  ? 'Cancel transcription'
+                                  : recording
+                                    ? 'Stop recording'
+                                    : 'Record voice'
+                              }
                               onClick={toggleRecording}
-                              disabled={transcribing}
                               className={`size-8 ${recording ? 'border-red-500/50 text-red-400' : ''}`}
                             >
                               {transcribing ? (
-                                <svg
-                                  className="h-4 w-4 animate-spin"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                >
-                                  <circle
-                                    className="opacity-25"
-                                    cx="12"
-                                    cy="12"
-                                    r="10"
-                                    stroke="currentColor"
-                                    strokeWidth="4"
-                                  />
-                                  <path
-                                    className="opacity-75"
-                                    fill="currentColor"
-                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                                  />
-                                </svg>
+                                <span className="relative flex items-center justify-center">
+                                  <svg
+                                    className="h-4 w-4 animate-spin"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <circle
+                                      className="opacity-25"
+                                      cx="12"
+                                      cy="12"
+                                      r="10"
+                                      stroke="currentColor"
+                                      strokeWidth="4"
+                                    />
+                                    <path
+                                      className="opacity-75"
+                                      fill="currentColor"
+                                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                                    />
+                                  </svg>
+                                  <X className="absolute h-2.5 w-2.5" weight="bold" />
+                                </span>
                               ) : recording ? (
                                 <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
                                   <rect x="6" y="6" width="12" height="12" rx="2" />
@@ -5696,7 +5699,11 @@ export function MemoryChat({
                             </Button>
                           </TooltipTrigger>
                           <TooltipContent>
-                            {recording ? 'Stop recording' : 'Record voice'}
+                            {transcribing
+                              ? `Transcribing with ${voiceTurns.transcriptionLabel} - click to cancel`
+                              : recording
+                                ? 'Stop recording'
+                                : 'Record voice'}
                           </TooltipContent>
                         </Tooltip>
                       )}
@@ -5789,32 +5796,40 @@ export function MemoryChat({
         </Panel>
       </PanelGroup>
 
-      {/* Canvas — sandboxed render of a model-generated artifact */}
-      {canvasArtifact && (
-        <ArtifactCanvas
-          artifact={canvasArtifact}
-          onClose={() => setCanvasArtifact(null)}
-          width={canvasWidth}
-          onResize={setCanvasWidth}
-        />
-      )}
+      <AnimatePresence>
+        {/* Canvas — sandboxed render of a model-generated artifact */}
+        {canvasArtifact && (
+          <ArtifactCanvas
+            key="artifact-canvas"
+            artifact={canvasArtifact}
+            onClose={() => setCanvasArtifact(null)}
+            width={canvasWidth}
+            onResize={setCanvasWidth}
+          />
+        )}
 
-      {/* Skills — view / create / edit reusable instruction packs */}
-      {skillsOpen && (
-        <SkillsPanel
-          onClose={() => setSkillsOpen(false)}
-          onChanged={() =>
-            window.api
-              .listSkills()
-              .then((s) => setSkills(s))
-              .catch(() => {})
-          }
-        />
-      )}
+        {/* Skills — view / create / edit reusable instruction packs */}
+        {skillsOpen && (
+          <SkillsPanel
+            key="skills"
+            onClose={() => setSkillsOpen(false)}
+            onChanged={() =>
+              window.api
+                .listSkills()
+                .then((s) => setSkills(s))
+                .catch(() => {})
+            }
+          />
+        )}
 
-      {modelPickerOpen && <ModelPicker onClose={() => setModelPickerOpen(false)} />}
+        {modelPickerOpen && (
+          <ModelPicker key="model-picker" onClose={() => setModelPickerOpen(false)} />
+        )}
 
-      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+        {settingsOpen && (
+          <SettingsPanel key="model-settings" onClose={() => setSettingsOpen(false)} />
+        )}
+      </AnimatePresence>
 
       {/* Attachment viewer — same full-screen overlay layout as the image lightbox
           (floating Download/Close top-right, content centered), for text/PDF/docs.
@@ -5940,119 +5955,128 @@ export function MemoryChat({
       </AnimatePresence>
 
       {/* Gallery — everything generated on-device: images + artifacts */}
-      <Dialog open={showGallery} onOpenChange={setShowGallery}>
-        <DialogContent
-          onCloseAutoFocus={(event) => {
-            event.preventDefault()
-            galleryTriggerRef.current?.focus()
-          }}
-          className="top-0 right-0 bottom-0 left-auto flex h-dvh w-[min(720px,92vw)] max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-y-0 border-r-0 border-l border-neutral-800 bg-neutral-950 p-0 font-mono text-white shadow-none sm:max-w-none"
-        >
-          <DialogHeader className="space-y-0 border-b border-neutral-900 px-4 py-3 pr-12 text-left">
-            <DialogTitle className="text-sm font-normal text-neutral-200">Gallery</DialogTitle>
-            <DialogDescription className="sr-only">
-              Browse generated images and artifacts.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex items-center gap-1 border-b border-neutral-900 px-3 py-2">
-            {(['images', 'artifacts'] as const).map((tab) => (
+      <AnimatePresence>
+        {showGallery && (
+          <SidePanel
+            key="gallery"
+            ariaLabel="Gallery"
+            onClose={() => setShowGallery(false)}
+            className="w-[min(720px,92vw)] overflow-hidden text-white"
+            restoreFocusRef={galleryTriggerRef}
+          >
+            <header className="flex items-center justify-between border-b border-neutral-900 px-4 py-3 text-left">
+              <h2 className="text-sm font-normal text-neutral-200">Gallery</h2>
               <button
-                key={tab}
-                onClick={() => setGalleryTab(tab)}
-                className={`rounded px-3 py-1 text-xs capitalize transition-colors ${galleryTab === tab ? 'bg-neutral-800 text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
+                type="button"
+                onClick={() => setShowGallery(false)}
+                aria-label="Close gallery"
+                className="rounded p-1 text-neutral-500 transition-colors hover:bg-neutral-900 hover:text-white"
               >
-                {tab} {tab === 'images' ? `(${gallery.length})` : `(${artifacts.length})`}
+                <X className="h-4 w-4" />
               </button>
-            ))}
-          </div>
-          <div className="flex items-center gap-1 border-b border-neutral-900 px-3 py-1.5">
-            {(['chat', 'project', 'all'] as const).map((sc) => (
-              <button
-                key={sc}
-                onClick={() => setGalleryScope(sc)}
-                disabled={sc === 'project' && !activeProjectId}
-                className={`rounded px-2 py-0.5 text-[10px] capitalize transition-colors disabled:opacity-30 ${galleryScope === sc ? 'bg-neutral-800 text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
-              >
-                {sc === 'chat' ? 'This chat' : sc}
-              </button>
-            ))}
-          </div>
-          <div className="flex-1 overflow-y-auto p-3">
-            {galleryTab === 'images' ? (
-              gallery.length === 0 ? (
-                <p className="py-10 text-center text-xs text-neutral-600">
-                  No images generated yet.
-                </p>
-              ) : (
-                <div className="grid grid-cols-2 gap-2">
-                  {gallery.map((g) => (
-                    <button
-                      key={g.path}
-                      onClick={() => setLightbox({ url: captureUrlForPath(g.path), path: g.path })}
-                      className="overflow-hidden rounded-md border border-neutral-800 transition-colors hover:border-green-500"
-                    >
-                      <img
-                        src={captureUrlForPath(g.path)}
-                        alt={g.name}
-                        className="aspect-square w-full object-cover"
-                      />
-                    </button>
-                  ))}
-                </div>
-              )
-            ) : (
-              <>
-                {artifacts.length === 0 ? (
+            </header>
+            <div className="flex items-center gap-1 border-b border-neutral-900 px-3 py-2">
+              {(['images', 'artifacts'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setGalleryTab(tab)}
+                  className={`rounded px-3 py-1 text-xs capitalize transition-colors ${galleryTab === tab ? 'bg-neutral-800 text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
+                >
+                  {tab} {tab === 'images' ? `(${gallery.length})` : `(${artifacts.length})`}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1 border-b border-neutral-900 px-3 py-1.5">
+              {(['chat', 'project', 'all'] as const).map((sc) => (
+                <button
+                  key={sc}
+                  onClick={() => setGalleryScope(sc)}
+                  disabled={sc === 'project' && !activeProjectId}
+                  className={`rounded px-2 py-0.5 text-[10px] capitalize transition-colors disabled:opacity-30 ${galleryScope === sc ? 'bg-neutral-800 text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
+                >
+                  {sc === 'chat' ? 'This chat' : sc}
+                </button>
+              ))}
+            </div>
+            <div className="flex-1 overflow-y-auto p-3">
+              {galleryTab === 'images' ? (
+                gallery.length === 0 ? (
                   <p className="py-10 text-center text-xs text-neutral-600">
-                    No artifacts in this {galleryScope === 'all' ? 'app' : galleryScope}.
+                    No images generated yet.
                   </p>
                 ) : (
-                  <div className="flex flex-col gap-2">
-                    {artifacts.map((a) => (
-                      <div
-                        key={a.id}
-                        className="group flex items-center gap-2 rounded-md border border-neutral-800 p-2 transition-colors hover:border-green-500"
+                  <div className="grid grid-cols-2 gap-2">
+                    {gallery.map((g) => (
+                      <button
+                        key={g.path}
+                        onClick={() =>
+                          setLightbox({ url: captureUrlForPath(g.path), path: g.path })
+                        }
+                        className="overflow-hidden rounded-md border border-neutral-800 transition-colors hover:border-green-500"
                       >
-                        <button
-                          onClick={() =>
-                            a.kind === 'image'
-                              ? (closePanels(),
-                                setLightbox({ url: captureUrlForPath(a.code), path: a.code }))
-                              : a.kind === 'text'
-                                ? (closePanels(), setViewer({ title: a.title, text: a.code }))
-                                : openCanvas({ kind: a.kind, code: a.code, title: a.title })
-                          }
-                          className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                        >
-                          {a.kind === 'image' ? (
-                            <img
-                              src={captureUrlForPath(a.code)}
-                              alt=""
-                              className="h-8 w-8 shrink-0 rounded-sm border border-neutral-800 object-cover"
-                            />
-                          ) : (
-                            <span className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-green-500">
-                              {a.kind === 'text' ? 'input' : a.kind}
-                            </span>
-                          )}
-                          <span className="truncate text-xs text-neutral-200">{a.title}</span>
-                        </button>
-                        <button
-                          onClick={() => deleteArtifact(a.id)}
-                          className="text-neutral-600 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
-                          title="Delete"
-                        >
-                          ✕
-                        </button>
-                      </div>
+                        <img
+                          src={captureUrlForPath(g.path)}
+                          alt={g.name}
+                          className="aspect-square w-full object-cover"
+                        />
+                      </button>
                     ))}
                   </div>
-                )}
-              </>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+                )
+              ) : (
+                <>
+                  {artifacts.length === 0 ? (
+                    <p className="py-10 text-center text-xs text-neutral-600">
+                      No artifacts in this {galleryScope === 'all' ? 'app' : galleryScope}.
+                    </p>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {artifacts.map((a) => (
+                        <div
+                          key={a.id}
+                          className="group flex items-center gap-2 rounded-md border border-neutral-800 p-2 transition-colors hover:border-green-500"
+                        >
+                          <button
+                            onClick={() =>
+                              a.kind === 'image'
+                                ? (closePanels(),
+                                  setLightbox({ url: captureUrlForPath(a.code), path: a.code }))
+                                : a.kind === 'text'
+                                  ? (closePanels(), setViewer({ title: a.title, text: a.code }))
+                                  : openCanvas({ kind: a.kind, code: a.code, title: a.title })
+                            }
+                            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                          >
+                            {a.kind === 'image' ? (
+                              <img
+                                src={captureUrlForPath(a.code)}
+                                alt=""
+                                className="h-8 w-8 shrink-0 rounded-sm border border-neutral-800 object-cover"
+                              />
+                            ) : (
+                              <span className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-green-500">
+                                {a.kind === 'text' ? 'input' : a.kind}
+                              </span>
+                            )}
+                            <span className="truncate text-xs text-neutral-200">{a.title}</span>
+                          </button>
+                          <button
+                            onClick={() => deleteArtifact(a.id)}
+                            className="text-neutral-600 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
+                            title="Delete"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </SidePanel>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

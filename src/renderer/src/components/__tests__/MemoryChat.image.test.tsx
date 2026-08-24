@@ -529,10 +529,8 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     await user.click(trigger)
     expect(await screen.findByRole('dialog', { name: 'Gallery' })).toBeTruthy()
 
-    const scrim = document.querySelector<HTMLElement>('[data-slot="dialog-overlay"]')
+    const scrim = document.querySelector<HTMLElement>('[data-testid="side-panel-backdrop"]')
     expect(scrim).not.toBeNull()
-    // Radix defers its outside-pointer listener by one task so the opening click cannot close it.
-    await new Promise((resolve) => setTimeout(resolve, 0))
     await user.click(scrim!)
 
     await waitFor(() => {

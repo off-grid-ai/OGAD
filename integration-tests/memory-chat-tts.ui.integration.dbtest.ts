@@ -329,10 +329,10 @@ describe('assistant reply speech integration (#105)', () => {
     await user.click(await screen.findByTitle('Voice mode off'))
     await waitFor(() => expect(database.getSetting('composerVoiceMode', false)).toBe(true))
 
-    await user.click(screen.getByText('Tap to record a voice note'))
+    await user.click(screen.getByText('Click to record a voice note'))
     expect(RecorderBoundary.instances).toHaveLength(1)
     expect(RecorderBoundary.instances[0]!.state).toBe('recording')
-    await user.click(screen.getByText('Recording — tap to send'))
+    await user.click(screen.getByText('Recording - click to send'))
 
     await waitFor(() => expect(screen.getAllByText('Show transcript')).toHaveLength(2), {
       timeout: 10_000

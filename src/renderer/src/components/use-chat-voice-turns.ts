@@ -1,0 +1,496 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  DEFAULT_SILENCE_AFTER_SPEECH_MS,
+  DEFAULT_SPEAKER_DRAIN_MS,
+  SpeechEndpointTimer,
+  audioFilename,
+  chooseRecorderMime,
+  type VoiceTurnMode
+} from '@offgrid/speech'
+
+/*
+ * These effects are transition inputs to one voice state machine: mode, generation, playback, and
+ * unmount must synchronously stop native microphone resources and move the visible phase. The
+ * generic rule treats that intentional reducer-style transition as an effect cascade.
+ */
+/* eslint-disable react-hooks/set-state-in-effect */
+
+export type ChatVoicePhase = 'idle' | 'starting' | 'listening' | 'recording' | 'transcribing'
+
+export interface ChatVoiceClip {
+  url: string
+  duration: number
+}
+
+interface ChatVoiceTurnOptions {
+  voiceMode: boolean
+  mode: VoiceTurnMode
+  isGenerating: boolean
+  isPlaybackActive: boolean
+  transcribeAudio: (audio: Uint8Array, extension: string) => Promise<string>
+  getTranscriptionLabel?: () => Promise<{ label: string }>
+  onTranscript: (text: string, clip: ChatVoiceClip | null) => void
+}
+
+interface CaptureResources {
+  stream: MediaStream
+  recorder: MediaRecorder
+  context: AudioContext | null
+  meter: ReturnType<typeof setInterval> | null
+  endpoint: SpeechEndpointTimer | null
+}
+
+interface CompletedCapture {
+  sequence: number
+  chunks: Blob[]
+  mime: string
+  duration: number
+}
+
+interface ChatVoiceTurns {
+  phase: ChatVoicePhase
+  suspended: boolean
+  microphoneDenied: boolean
+  error: string | null
+  transcriptionLabel: string
+  toggle: () => void
+  cancel: () => void
+}
+
+const LEVEL_SAMPLE_MS = 50
+
+function recorderMime(): string {
+  const supports =
+    typeof MediaRecorder.isTypeSupported === 'function'
+      ? (mime: string) => MediaRecorder.isTypeSupported(mime)
+      : () => false
+  return chooseRecorderMime(supports)
+}
+
+function rms(samples: Float32Array): number {
+  if (samples.length === 0) return 0
+  let sum = 0
+  for (const sample of samples) sum += sample * sample
+  return Math.sqrt(sum / samples.length)
+}
+
+/**
+ * One owner for a chat voice turn.
+ *
+ * The hook owns the browser microphone, recorder, loudness meter, silence endpoint,
+ * transcription request, and every teardown path. MemoryChat only sends user intent and receives a
+ * completed transcript. Manual, Auto, and Hands-free therefore cannot drift into separate recorder
+ * implementations.
+ */
+export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns {
+  const optionsRef = useRef(options)
+  useEffect(() => {
+    optionsRef.current = options
+  }, [options])
+
+  const [phase, setPhaseState] = useState<ChatVoicePhase>('idle')
+  const phaseRef = useRef<ChatVoicePhase>('idle')
+  const [suspended, setSuspendedState] = useState(false)
+  const suspendedRef = useRef(false)
+  const [error, setError] = useState<string | null>(null)
+  const [microphoneDenied, setMicrophoneDenied] = useState(false)
+  const [transcriptionLabel, setTranscriptionLabel] = useState('Speech-to-text')
+  const [awaitingReply, setAwaitingReply] = useState(false)
+  const [rearmReady, setRearmReady] = useState(true)
+
+  const mountedRef = useRef(true)
+  const sequenceRef = useRef(0)
+  const resourcesRef = useRef<CaptureResources | null>(null)
+  const chunksRef = useRef<Blob[]>([])
+  const mimeRef = useRef('audio/webm')
+  const startedAtRef = useRef(0)
+  const discardRef = useRef(false)
+  const sawGenerationRef = useRef(false)
+  const sawPlaybackRef = useRef(false)
+  const previousPlaybackRef = useRef(false)
+  const rearmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const setPhase = useCallback((next: ChatVoicePhase): void => {
+    phaseRef.current = next
+    setPhaseState(next)
+  }, [])
+
+  const setSuspended = useCallback((next: boolean): void => {
+    suspendedRef.current = next
+    setSuspendedState(next)
+  }, [])
+
+  const clearRearmTimer = useCallback((): void => {
+    if (rearmTimerRef.current) clearTimeout(rearmTimerRef.current)
+    rearmTimerRef.current = null
+  }, [])
+
+  const stopAnalysis = useCallback((resources: CaptureResources): void => {
+    resources.endpoint?.cancel()
+    if (resources.meter) clearInterval(resources.meter)
+    if (resources.context) void resources.context.close().catch(() => {})
+    resources.endpoint = null
+    resources.meter = null
+    resources.context = null
+  }, [])
+
+  const stopTracks = useCallback((resources: CaptureResources): void => {
+    resources.stream.getTracks().forEach((track) => track.stop())
+  }, [])
+
+  const discardCapture = useCallback(
+    (notify = true): void => {
+      sequenceRef.current += 1
+      const resources = resourcesRef.current
+      resourcesRef.current = null
+      chunksRef.current = []
+      discardRef.current = true
+      if (resources) {
+        stopAnalysis(resources)
+        resources.recorder.onstop = null
+        try {
+          if (resources.recorder.state !== 'inactive') resources.recorder.stop()
+        } catch {
+          /* The recorder already stopped. */
+        }
+        stopTracks(resources)
+      }
+      phaseRef.current = 'idle'
+      if (notify && mountedRef.current) setPhaseState('idle')
+    },
+    [stopAnalysis, stopTracks]
+  )
+
+  const transcribeRecording = useCallback(
+    async ({ sequence, chunks, mime, duration }: CompletedCapture): Promise<void> => {
+      const blob = new Blob(chunks, { type: mime })
+      if (blob.size === 0) {
+        if (sequence === sequenceRef.current) {
+          setError("Didn't record any audio. Try again.")
+          setSuspended(optionsRef.current.mode === 'handsfree')
+          setPhase('idle')
+        }
+        return
+      }
+
+      try {
+        const extension = audioFilename(mime).split('.').pop() ?? 'webm'
+        const bytes = new Uint8Array(await blob.arrayBuffer())
+        const text = (await optionsRef.current.transcribeAudio(bytes, extension)).trim()
+        if (!mountedRef.current || sequence !== sequenceRef.current) return
+        if (!text) {
+          setError("Didn't catch that. Tap the microphone and try again.")
+          setSuspended(optionsRef.current.mode === 'handsfree')
+          setPhase('idle')
+          return
+        }
+
+        setError(null)
+        setPhase('idle')
+        if (optionsRef.current.voiceMode) {
+          sawGenerationRef.current = false
+          sawPlaybackRef.current = false
+          setAwaitingReply(true)
+        }
+        optionsRef.current.onTranscript(
+          text,
+          optionsRef.current.voiceMode ? { url: URL.createObjectURL(blob), duration } : null
+        )
+      } catch (cause) {
+        console.error('Transcription failed', cause)
+        if (!mountedRef.current || sequence !== sequenceRef.current) return
+        setError(
+          'Transcription failed. Check the speech-to-text model in Settings > Setup & health.'
+        )
+        setSuspended(optionsRef.current.mode === 'handsfree')
+        setPhase('idle')
+      }
+    },
+    [setPhase, setSuspended]
+  )
+
+  const finishCaptureRef = useRef<(suspendAfter: boolean) => void>(() => {})
+
+  const startCapture = useCallback(
+    async (userInitiated: boolean): Promise<void> => {
+      const current = optionsRef.current
+      if (
+        phaseRef.current !== 'idle' ||
+        current.isGenerating ||
+        current.isPlaybackActive ||
+        (!current.voiceMode && !userInitiated)
+      )
+        return
+
+      if (userInitiated) setSuspended(false)
+      setError(null)
+      setMicrophoneDenied(false)
+      const sequence = ++sequenceRef.current
+      setPhase('starting')
+      void Promise.resolve()
+        .then(() => current.getTranscriptionLabel?.())
+        .then((info) => {
+          if (mountedRef.current && sequence === sequenceRef.current && info?.label)
+            setTranscriptionLabel(info.label)
+        })
+        .catch(() => {})
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        })
+        if (!mountedRef.current || sequence !== sequenceRef.current) {
+          stream.getTracks().forEach((track) => track.stop())
+          return
+        }
+
+        const selectedMime = recorderMime()
+        const recorder = selectedMime
+          ? new MediaRecorder(stream, { mimeType: selectedMime })
+          : new MediaRecorder(stream)
+        const actualMime = recorder.mimeType || selectedMime || 'audio/webm'
+        const resources: CaptureResources = {
+          stream,
+          recorder,
+          context: null,
+          meter: null,
+          endpoint: null
+        }
+        resourcesRef.current = resources
+        chunksRef.current = []
+        mimeRef.current = actualMime
+        startedAtRef.current = Date.now()
+        discardRef.current = false
+
+        recorder.ondataavailable = (event) => {
+          if (event.data.size > 0) chunksRef.current.push(event.data)
+        }
+        recorder.onstop = () => {
+          stopAnalysis(resources)
+          stopTracks(resources)
+          if (resourcesRef.current === resources) resourcesRef.current = null
+          if (discardRef.current || sequence !== sequenceRef.current) return
+          const chunks = chunksRef.current
+          chunksRef.current = []
+          void transcribeRecording({
+            sequence,
+            chunks,
+            mime: mimeRef.current,
+            duration: Math.max(0, (Date.now() - startedAtRef.current) / 1000)
+          })
+        }
+
+        const mode = current.voiceMode ? current.mode : 'tap'
+        if (mode !== 'tap') {
+          const context = new window.AudioContext()
+          const source = context.createMediaStreamSource(stream)
+          const analyser = context.createAnalyser()
+          analyser.fftSize = 2048
+          source.connect(analyser)
+          const samples = new Float32Array(analyser.fftSize)
+          const endpoint = new SpeechEndpointTimer(() => finishCaptureRef.current(false))
+          endpoint.begin(Date.now(), {
+            handsFree: mode === 'handsfree',
+            silenceAfterSpeechMs: DEFAULT_SILENCE_AFTER_SPEECH_MS
+          })
+          resources.context = context
+          resources.endpoint = endpoint
+          resources.meter = setInterval(() => {
+            analyser.getFloatTimeDomainData(samples)
+            const reading = endpoint.observeLevel(rms(samples))
+            if (mode === 'handsfree' && reading.speech && phaseRef.current === 'listening')
+              setPhase('recording')
+          }, LEVEL_SAMPLE_MS)
+        }
+
+        recorder.start(250)
+        setPhase(mode === 'handsfree' ? 'listening' : 'recording')
+      } catch (cause) {
+        const resources = resourcesRef.current
+        resourcesRef.current = null
+        if (resources) {
+          stopAnalysis(resources)
+          stopTracks(resources)
+        }
+        if (!mountedRef.current || sequence !== sequenceRef.current) return
+        const name =
+          typeof cause === 'object' && cause !== null && 'name' in cause ? String(cause.name) : ''
+        setError(
+          name === 'NotAllowedError' || name === 'SecurityError'
+            ? 'Microphone access is off. Allow Off Grid AI Desktop in System Settings, then try again.'
+            : 'The microphone could not start. Try again, or switch this voice turn to Manual.'
+        )
+        setMicrophoneDenied(name === 'NotAllowedError' || name === 'SecurityError')
+        setSuspended(current.mode === 'handsfree')
+        setPhase('idle')
+      }
+    },
+    [setPhase, setSuspended, stopAnalysis, stopTracks, transcribeRecording]
+  )
+
+  const finishCapture = useCallback(
+    (suspendAfter: boolean): void => {
+      if (phaseRef.current === 'starting') {
+        discardCapture()
+        if (suspendAfter) setSuspended(true)
+        return
+      }
+      if (phaseRef.current === 'transcribing') {
+        discardCapture()
+        if (suspendAfter) setSuspended(true)
+        return
+      }
+      const resources = resourcesRef.current
+      if (!resources) {
+        setPhase('idle')
+        if (suspendAfter) setSuspended(true)
+        return
+      }
+
+      const heardSpeech = resources.endpoint?.hasHeardSpeech() ?? phaseRef.current === 'recording'
+      if (suspendAfter) setSuspended(true)
+      if (!heardSpeech && optionsRef.current.mode === 'handsfree') {
+        discardCapture()
+        return
+      }
+
+      stopAnalysis(resources)
+      discardRef.current = false
+      setPhase('transcribing')
+      try {
+        if (resources.recorder.state !== 'inactive') resources.recorder.stop()
+      } catch {
+        setError('The recording could not be finalized. Tap the microphone and try again.')
+        discardCapture()
+      }
+    },
+    [discardCapture, setPhase, setSuspended, stopAnalysis]
+  )
+
+  useEffect(() => {
+    finishCaptureRef.current = finishCapture
+  }, [finishCapture])
+
+  const toggle = useCallback((): void => {
+    if (phaseRef.current === 'idle') {
+      void startCapture(true)
+      return
+    }
+    finishCapture(optionsRef.current.mode === 'handsfree')
+  }, [finishCapture, startCapture])
+
+  const cancel = useCallback((): void => {
+    discardCapture()
+    setAwaitingReply(false)
+    sawGenerationRef.current = false
+    sawPlaybackRef.current = false
+    if (optionsRef.current.mode === 'handsfree') setSuspended(true)
+  }, [discardCapture, setSuspended])
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      clearRearmTimer()
+      discardCapture(false)
+    }
+  }, [clearRearmTimer, discardCapture])
+
+  const modeRef = useRef(options.mode)
+  useEffect(() => {
+    if (modeRef.current === options.mode) return
+    modeRef.current = options.mode
+    discardCapture()
+    setAwaitingReply(false)
+    setSuspended(false)
+    setRearmReady(true)
+  }, [discardCapture, options.mode, setSuspended])
+
+  useEffect(() => {
+    if (options.voiceMode) return
+    discardCapture()
+    setAwaitingReply(false)
+    setSuspended(false)
+    setRearmReady(true)
+  }, [discardCapture, options.voiceMode, setSuspended])
+
+  useEffect(() => {
+    if (!options.isGenerating && !options.isPlaybackActive) return
+    if (
+      phaseRef.current === 'starting' ||
+      phaseRef.current === 'listening' ||
+      phaseRef.current === 'recording'
+    )
+      discardCapture()
+  }, [discardCapture, options.isGenerating, options.isPlaybackActive])
+
+  useEffect(() => {
+    if (options.isGenerating) sawGenerationRef.current = true
+    if (options.isPlaybackActive) sawPlaybackRef.current = true
+    if (
+      awaitingReply &&
+      !options.isGenerating &&
+      !options.isPlaybackActive &&
+      (sawGenerationRef.current || sawPlaybackRef.current)
+    ) {
+      setAwaitingReply(false)
+      sawGenerationRef.current = false
+      sawPlaybackRef.current = false
+      setRearmReady(false)
+      clearRearmTimer()
+      rearmTimerRef.current = setTimeout(() => setRearmReady(true), DEFAULT_SPEAKER_DRAIN_MS)
+    }
+  }, [awaitingReply, clearRearmTimer, options.isGenerating, options.isPlaybackActive])
+
+  useEffect(() => {
+    const wasActive = previousPlaybackRef.current
+    previousPlaybackRef.current = options.isPlaybackActive
+    if (options.isPlaybackActive) {
+      clearRearmTimer()
+      setRearmReady(false)
+    } else if (wasActive && !awaitingReply) {
+      clearRearmTimer()
+      rearmTimerRef.current = setTimeout(() => setRearmReady(true), DEFAULT_SPEAKER_DRAIN_MS)
+    }
+  }, [awaitingReply, clearRearmTimer, options.isPlaybackActive])
+
+  useEffect(() => {
+    if (
+      !options.voiceMode ||
+      options.mode !== 'handsfree' ||
+      options.isGenerating ||
+      options.isPlaybackActive ||
+      awaitingReply ||
+      suspended ||
+      !rearmReady ||
+      phase !== 'idle'
+    )
+      return
+    void startCapture(false)
+  }, [
+    awaitingReply,
+    options.isGenerating,
+    options.isPlaybackActive,
+    options.mode,
+    options.voiceMode,
+    phase,
+    rearmReady,
+    startCapture,
+    suspended
+  ])
+
+  return {
+    phase,
+    suspended,
+    microphoneDenied,
+    error,
+    transcriptionLabel,
+    toggle,
+    cancel
+  }
+}

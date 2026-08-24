@@ -1286,3 +1286,29 @@ Follow up with an isolated physical-device benchmark on a strong 5 GHz or 6 GHz 
 desktop-to-phone transfer at a time, separate checksum preparation from wire time, and compare both
 directions. Also persist verified file checksums so a repeat send does not hash the same multi-GB
 model again after an app restart. Keep the 4 MiB authenticated frame format and bounded memory.
+
+---
+
+## Desktop voice modes need the final physical audio pass
+
+**Status:** automation-backed; manual device verification is open. Filed 2026-08-24.
+
+The rendered Chat journey now proves Manual start/stop and cancellation, Auto end-on-silence,
+Hands-free speech detection, the generation and playback lock, the two-second speaker-drain wait,
+automatic rearming, pause, and the transition back to text mode. The global dictation reducer also
+proves Hold, Toggle, and Both, including auto-repeat protection. The focused suites pass 41 tests.
+
+The remaining boundary is the installed macOS app with real hardware and models. On the release Mac:
+
+1. Select a Whisper model and a Parakeet model in turn. Confirm Chat reports and uses the selected
+   transcription model without changing the chat model.
+2. Speak one turn in Manual, Auto, and Hands-free. Confirm Auto does not cut off a normal pause and
+   Hands-free does not record its own Kokoro reply.
+3. Interrupt and pause Hands-free, switch to text during an active recording, deny and restore
+   microphone permission, and cancel during transcription. Confirm the mic indicator and audio output
+   stop and no discarded transcript appears.
+4. In TextEdit and one other app, verify the Pro Voice Hold, Toggle, and Both gestures and confirm one
+   transcript is pasted for each completed turn.
+
+Close this gap only with the exact packaged build, an audible reply, the real macOS microphone
+indicator, and a saved diagnostic excerpt that identifies the active speech-to-text model.
