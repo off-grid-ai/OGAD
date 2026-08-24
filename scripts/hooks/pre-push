@@ -47,6 +47,10 @@ restore_electron_sqlite() {
   echo "[pre-push] restoring SQLite for Electron"
   npx electron-rebuild -f -w better-sqlite3-multiple-ciphers >/dev/null 2>&1 || \
     npx electron-builder install-app-deps >/dev/null 2>&1 || true
+  ELECTRON_RUN_AS_NODE=1 ./node_modules/electron/dist/Electron.app/Contents/MacOS/Electron \
+    -e 'new (require("better-sqlite3-multiple-ciphers"))(":memory:")' >/dev/null 2>&1 \
+    && echo "[pre-push] Electron ABI restored (app can load sqlite)." \
+    || echo "[pre-push] WARNING: Electron cannot load sqlite - run 'npx electron-rebuild -f -w better-sqlite3-multiple-ciphers' before launching the app."
 }
 trap restore_electron_sqlite EXIT
 if ! npm rebuild better-sqlite3-multiple-ciphers >/dev/null 2>&1; then
