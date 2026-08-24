@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, type ReactNode } from 'react'
+import { AnimatePresence } from 'motion/react'
 import {
   IconPlus,
   IconFolder,
@@ -69,7 +70,9 @@ function ProjectArtifacts({ projectId }: { projectId: string }): React.ReactElem
           ))}
         </div>
       )}
-      {open && <ArtifactCanvas artifact={open} onClose={() => setOpen(null)} />}
+      <AnimatePresence>
+        {open && <ArtifactCanvas artifact={open} onClose={() => setOpen(null)} />}
+      </AnimatePresence>
     </div>
   )
 }

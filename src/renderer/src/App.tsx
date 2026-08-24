@@ -477,7 +477,7 @@ function AppContent() {
         ? `/settings/${encodeURIComponent(settingsSection)}`
         : viewMode === 'devices' && navigationSubroute
           ? `/devices/${encodeURIComponent(navigationSubroute)}`
-        : urlMap[viewMode]
+          : urlMap[viewMode]
     if (window.location.pathname !== newPath) {
       window.history.replaceState(null, '', newPath)
     }
@@ -1206,13 +1206,15 @@ function AppContent() {
           </div>
         </div>
       </div>
-      {modelSettingsOpen && (
-        <SettingsPanel
-          key={modelSettingsTab}
-          initialTab={modelSettingsTab}
-          onClose={() => setModelSettingsOpen(false)}
-        />
-      )}
+      <AnimatePresence>
+        {modelSettingsOpen && (
+          <SettingsPanel
+            key={modelSettingsTab}
+            initialTab={modelSettingsTab}
+            onClose={() => setModelSettingsOpen(false)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { AnimatePresence } from 'motion/react'
 import {
   IconDownload,
   IconCircleCheck,
@@ -1072,30 +1073,31 @@ export function ModelsScreen(): React.JSX.Element {
       )}
 
       {/* Detail slide-over */}
-      {detail &&
-        (() => {
-          const m = detail
-          const isLocal = m.id.startsWith('local:')
-          const hfUrl = !isLocal && m.id.includes('/') ? `https://huggingface.co/${m.id}` : null
-          const bytes = totalBytes(m)
-          const isInstalled = installed.includes(m.id)
-          const active = isActive(m.id)
-          const prog = progress[m.id]
-          const downloading = prog && prog.status !== 'completed' && prog.status !== 'failed'
-          const rows: [string, string | null][] = [
-            ['Source', m.org || (isLocal ? 'Imported' : '—')],
-            ['Parameters', m.params ? `${m.params}B` : null],
-            ['Quantization', m.quant || null],
-            ['Download', formatSize(bytes) || null],
-            ['Released', fmtReleaseDate(m.releaseDate) || null],
-            ['Min RAM', m.minRamGb ? `${m.minRamGb} GB` : null]
-          ]
-          return (
-            <SidePanel
-              ariaLabel={`${m.name} details`}
-              onClose={closeDetail}
-              className="w-[26vw] min-w-[380px] font-mono"
-            >
+      <AnimatePresence>
+        {detail &&
+          (() => {
+            const m = detail
+            const isLocal = m.id.startsWith('local:')
+            const hfUrl = !isLocal && m.id.includes('/') ? `https://huggingface.co/${m.id}` : null
+            const bytes = totalBytes(m)
+            const isInstalled = installed.includes(m.id)
+            const active = isActive(m.id)
+            const prog = progress[m.id]
+            const downloading = prog && prog.status !== 'completed' && prog.status !== 'failed'
+            const rows: [string, string | null][] = [
+              ['Source', m.org || (isLocal ? 'Imported' : '—')],
+              ['Parameters', m.params ? `${m.params}B` : null],
+              ['Quantization', m.quant || null],
+              ['Download', formatSize(bytes) || null],
+              ['Released', fmtReleaseDate(m.releaseDate) || null],
+              ['Min RAM', m.minRamGb ? `${m.minRamGb} GB` : null]
+            ]
+            return (
+              <SidePanel
+                ariaLabel={`${m.name} details`}
+                onClose={closeDetail}
+                className="w-[26vw] min-w-[380px] font-mono"
+              >
                 <div className="flex items-start justify-between gap-3 border-b border-neutral-800 px-5 py-4">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
@@ -1216,9 +1218,10 @@ export function ModelsScreen(): React.JSX.Element {
                     </button>
                   )}
                 </div>
-            </SidePanel>
-          )
-        })()}
+              </SidePanel>
+            )
+          })()}
+      </AnimatePresence>
     </div>
   )
 }

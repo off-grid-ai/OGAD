@@ -25,10 +25,9 @@ afterEach(() => {
 describe('<SettingsPanel/> dismissal', () => {
   it('closes when the click-outside scrim is clicked', () => {
     const onClose = vi.fn()
-    const { container } = render(<SettingsPanel onClose={onClose} />)
-    const scrim = container.querySelector('[aria-hidden="true"]')
-    expect(scrim, 'the click-outside scrim should render').toBeTruthy()
-    fireEvent.click(scrim!)
+    render(<SettingsPanel onClose={onClose} />)
+    const scrim = screen.getByTestId('side-panel-backdrop')
+    fireEvent.click(scrim)
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 

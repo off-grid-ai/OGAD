@@ -1,4 +1,6 @@
-import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, type CSSProperties, type ReactNode, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
+import { motion, useReducedMotion } from 'motion/react'
 import { useEscapeToClose } from '@renderer/lib/use-escape-to-close'
 
 type SidePanelProps = {
@@ -7,6 +9,7 @@ type SidePanelProps = {
   onClose: () => void
   className?: string
   style?: CSSProperties
+  restoreFocusRef?: RefObject<HTMLElement | null>
 }
 
 /**
@@ -20,13 +23,17 @@ export function SidePanel({
   children,
   onClose,
   className = '',
-  style
+  style,
+  restoreFocusRef
 }: SidePanelProps): React.JSX.Element {
   useEscapeToClose(onClose)
+  const reduceMotion = useReducedMotion()
   const panelRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  useLayoutEffect(() => {
+    const previousFocus =
+      restoreFocusRef?.current ??
+      (document.activeElement instanceof HTMLElement ? document.activeElement : null)
     const panel = panelRef.current
     panel?.focus()
 
@@ -37,13 +44,13 @@ export function SidePanel({
           'button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
         )
       ).filter((element) => {
-        const style = window.getComputedStyle(element)
+        const computedStyle = window.getComputedStyle(element)
         return (
           !element.matches(':disabled') &&
           !element.hasAttribute('hidden') &&
           element.getAttribute('aria-hidden') !== 'true' &&
-          style.display !== 'none' &&
-          style.visibility !== 'hidden'
+          computedStyle.display !== 'none' &&
+          computedStyle.visibility !== 'hidden'
         )
       })
       if (focusable.length === 0) {
@@ -67,27 +74,36 @@ export function SidePanel({
       panel?.removeEventListener('keydown', trapFocus)
       previousFocus?.focus()
     }
-  }, [])
+  }, [restoreFocusRef])
 
-  return (
-    <>
-      <div
-        className="fixed inset-0 z-40 bg-black/30 transition-opacity duration-150"
+  return createPortal(
+    <div className="pointer-events-none fixed inset-0 z-40 overflow-hidden" data-testid="side-panel-layer">
+      <motion.div
+        className="pointer-events-auto absolute inset-0 bg-black/30"
         onClick={onClose}
         aria-hidden="true"
         data-testid="side-panel-backdrop"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: reduceMotion ? 0 : 0.16, ease: [0.4, 0, 0.2, 1] }}
       />
-      <div
+      <motion.div
         ref={panelRef}
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={ariaLabel}
-        className={`fixed bottom-0 right-0 top-0 z-50 flex flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl ${className}`}
+        className={`pointer-events-auto absolute bottom-0 right-0 top-0 flex h-dvh max-w-full flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl ${className}`}
         style={style}
+        initial={reduceMotion ? false : { x: '100%' }}
+        animate={{ x: '0%' }}
+        exit={reduceMotion ? { opacity: 0 } : { x: '100%' }}
+        transition={{ duration: reduceMotion ? 0 : 0.2, ease: [0.4, 0, 0.2, 1] }}
       >
         {children}
-      </div>
-    </>
+      </motion.div>
+    </div>,
+    document.body
   )
 }
