@@ -1706,6 +1706,13 @@ export function setupIPC() {
     )
   )
   ipcMain.handle('data:delete-all', () => import('./data-privacy').then((m) => m.deleteAllData()))
+  // Archive-before-delete: ZIP what the delete would remove to a user-picked
+  // destination, then clear - fail closed (see backup/retention-archive.ts).
+  ipcMain.handle('data:archive-clear', (_e, id: string, olderThanDays?: number) =>
+    import('./backup/retention-archive-ipc').then((m) =>
+      m.archiveThenClearCategory(id, olderThanDays)
+    )
+  )
 
   // --- Image generation (stable-diffusion.cpp) ----------------------------
   ipcMain.handle('imagegen:status', async () => {

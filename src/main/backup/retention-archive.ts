@@ -11,6 +11,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import JSZip from 'jszip'
+import type { RetentionArchiveClearContract } from '../../shared/backup-contracts'
 import { CATEGORY_DIRS, type DataCategoryId } from '../data-categories'
 
 export interface DoomedFile {
@@ -159,10 +160,8 @@ export interface ArchiveClearDeps {
   clear: () => Promise<{ success: boolean }>
 }
 
-export type ArchiveClearResult =
-  | { status: 'cleared'; archivedFiles: number; archivePath?: string }
-  | { status: 'canceled' }
-  | { status: 'failed'; error: string }
+// The renderer-facing shape is the shared contract - one definition, both sides.
+export type ArchiveClearResult = RetentionArchiveClearContract
 
 /**
  * The ordering contract: delete runs ONLY after the archive is confirmed delivered.
