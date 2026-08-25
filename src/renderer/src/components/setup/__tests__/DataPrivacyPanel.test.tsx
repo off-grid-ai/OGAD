@@ -25,7 +25,14 @@ const api = {
   getDataSummary: vi.fn(async () => SUMMARY),
   clearDataCategory: vi.fn(async () => ({ success: true })),
   archiveDataCategory: vi.fn(async () => ({ status: 'cleared', archivedFiles: 10 })),
-  deleteAllData: vi.fn(async () => ({ success: true }))
+  deleteAllData: vi.fn(async () => ({ success: true })),
+  getAutoCleanupStatus: vi.fn(async () => ({
+    config: { retentionDays: 0, archiveDir: null },
+    lastRun: null
+  })),
+  saveSetting: vi.fn(async () => true),
+  runAutoCleanupNow: vi.fn(async () => ({ status: 'cleared', ranAt: 1, archivedFiles: 4 })),
+  pickArchiveDir: vi.fn(async () => '/Volumes/SSD/Archive')
 }
 
 beforeEach(() => {
@@ -38,6 +45,9 @@ afterEach(() => {
   vi.restoreAllMocks()
   api.clearDataCategory.mockClear()
   api.archiveDataCategory.mockClear()
+  api.saveSetting.mockClear()
+  api.runAutoCleanupNow.mockClear()
+  api.getAutoCleanupStatus.mockClear()
 })
 
 const backupToggle = (label: string): HTMLElement =>
@@ -104,5 +114,63 @@ describe('<DataPrivacyPanel/> archive-before-delete', () => {
 
     expect(api.archiveDataCategory).not.toHaveBeenCalled()
     expect(api.clearDataCategory).not.toHaveBeenCalled()
+  })
+})
+
+describe('<DataPrivacyPanel/> automatic cleanup', () => {
+  it('defaults to Off, hiding the folder/run controls', async () => {
+    render(<DataPrivacyPanel />)
+    await waitFor(() => expect(screen.getByText('Automatic cleanup')).toBeTruthy())
+    expect(screen.getByRole('button', { name: 'Off' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.queryByRole('button', { name: /run now/i })).toBeNull()
+  })
+
+  it('choosing a window saves the config and re-reads main-sanitized status', async () => {
+    const user = userEvent.setup()
+    render(<DataPrivacyPanel />)
+    await waitFor(() => expect(screen.getByText('Automatic cleanup')).toBeTruthy())
+
+    await user.click(screen.getByRole('button', { name: '30 days' }))
+
+    expect(api.saveSetting).toHaveBeenCalledWith('autoCleanup', {
+      retentionDays: 30,
+      archiveDir: null
+    })
+    // Saved, then re-fetched - main's sanitized copy is the source of truth.
+    await waitFor(() => expect(api.getAutoCleanupStatus.mock.calls.length).toBeGreaterThan(1))
+  })
+
+  it('with retention on, offers the folder picker and Run now, and reports the last run', async () => {
+    api.getAutoCleanupStatus.mockResolvedValue({
+      config: { retentionDays: 30, archiveDir: null },
+      lastRun: { status: 'cleared', ranAt: 1756100000000, archivedFiles: 12 }
+    } as never)
+    const user = userEvent.setup()
+    render(<DataPrivacyPanel />)
+    await waitFor(() => expect(screen.getByText(/no backup - choose a folder/i)).toBeTruthy())
+    expect(screen.getByText(/12 files archived/i)).toBeTruthy()
+
+    await user.click(screen.getByText(/no backup - choose a folder/i))
+    expect(api.pickArchiveDir).toHaveBeenCalled()
+    await waitFor(() =>
+      expect(api.saveSetting).toHaveBeenCalledWith('autoCleanup', {
+        retentionDays: 30,
+        archiveDir: '/Volumes/SSD/Archive'
+      })
+    )
+
+    await user.click(screen.getByRole('button', { name: /run now/i }))
+    expect(api.runAutoCleanupNow).toHaveBeenCalledTimes(1)
+  })
+
+  it('a failed last run says nothing was deleted', async () => {
+    api.getAutoCleanupStatus.mockResolvedValue({
+      config: { retentionDays: 30, archiveDir: '/gone' },
+      lastRun: { status: 'failed', ranAt: 1756100000000, error: 'drive unplugged' }
+    } as never)
+    render(<DataPrivacyPanel />)
+    await waitFor(() =>
+      expect(screen.getByText(/last run failed - nothing was deleted/i)).toBeTruthy()
+    )
   })
 })
