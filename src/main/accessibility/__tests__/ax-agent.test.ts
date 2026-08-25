@@ -10,6 +10,7 @@ import {
   parseElementStep,
   runElementTask,
   type ElementActuator,
+  type ElementStepObservation,
   type ElementTaskDeps
 } from '../ax-agent'
 import type { AxElement, AxSnapshot } from '../ax-elements'
@@ -181,6 +182,76 @@ describe('runElementTask', () => {
       onCheckpoint: (step) => checkpoints.push(step)
     })
     expect(checkpoints).toEqual([8])
+  })
+
+  it('observes the exact prompt, raw reply, parsed action, result, and timing for each plan', async () => {
+    const prompts: string[] = []
+    const w = world([
+      'not json',
+      '{"action":"key","keys":"Enter"}',
+      '{"action":"done","summary":"open"}'
+    ])
+    const observations: ElementStepObservation[] = []
+    let clock = 100
+    await runElementTask('open the item', {
+      ...w.deps,
+      retrievedFacts: ['Earlier task opened the list'],
+      decide: async (prompt) => {
+        prompts.push(prompt)
+        return (
+          ['not json', '{"action":"key","keys":"Enter"}', '{"action":"done","summary":"open"}'][
+            prompts.length - 1
+          ] ?? '{"action":"give_up","why":"script exhausted"}'
+        )
+      },
+      now: () => (clock += 5),
+      onObservation: (observation) => observations.push(observation)
+    })
+
+    expect(observations).toHaveLength(3)
+    expect(observations.map((entry) => entry.result)).toEqual([
+      'parse_failed',
+      'actuated',
+      'terminal'
+    ])
+    expect(observations[0]).toMatchObject({
+      step: 1,
+      prompt: prompts[0],
+      rawResponse: 'not json',
+      parsedAction: null,
+      retrievedFacts: ['Earlier task opened the list'],
+      durationMs: 5
+    })
+    expect(observations[1]).toMatchObject({
+      prompt: prompts[1],
+      rawResponse: '{"action":"key","keys":"Enter"}',
+      parsedAction: { action: 'key', keys: 'Enter' },
+      durationMs: 5
+    })
+    expect(observations[2]?.prompt).toContain('Previous steps:')
+    expect(observations[2]?.prompt).toContain('key Enter')
+  })
+
+  it('observes an actuator failure once with its model evidence', async () => {
+    const w = world(['{"action":"key","keys":"Enter"}'])
+    const observations: ElementStepObservation[] = []
+    w.deps.actuator.keys = async () => {
+      throw new Error('input driver stopped')
+    }
+
+    await expect(
+      runElementTask('submit', {
+        ...w.deps,
+        onObservation: (observation) => observations.push(observation)
+      })
+    ).rejects.toThrow('input driver stopped')
+    expect(observations).toHaveLength(1)
+    expect(observations[0]).toMatchObject({
+      result: 'error',
+      rawResponse: '{"action":"key","keys":"Enter"}',
+      parsedAction: { action: 'key', keys: 'Enter' },
+      error: 'input driver stopped'
+    })
   })
 })
 

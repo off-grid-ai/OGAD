@@ -40,6 +40,7 @@ import { getComputerUseSettings } from '../computer-use-settings'
 import { resolveComputerUseContextTokens } from '../../shared/computer-use-settings'
 import { recentVisualFacts } from '../vision/visual-context'
 import { recordTaskRun } from '../tasks/task-history'
+import { persistAxObservation } from './ax-observation'
 
 const execFileAsync = promisify(execFile)
 
@@ -284,6 +285,9 @@ class AxRailHost {
         retrievedFacts,
         onCheckpoint: (_step, steps) => {
           recordTaskRun({ taskId, kind: 'computer_use', title: goal, steps: [...steps] })
+        },
+        onObservation: (observation) => {
+          persistAxObservation(taskId, goal, observation)
         }
       })
       emitVisionState({

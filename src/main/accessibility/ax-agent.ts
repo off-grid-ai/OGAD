@@ -38,11 +38,13 @@ export interface ElementTaskDeps {
   /** goal + the numbered elements + history in, one step decision out. */
   decide: (prompt: string) => Promise<string>
   onStep?: (note: string) => void
+  onObservation?: (observation: ElementStepObservation) => void
   onCheckpoint?: (step: number, steps: readonly string[]) => void
   maxSteps?: number
   contextTokens?: number
   checkpointInterval?: number
   retrievedFacts?: string[]
+  now?: () => number
 }
 
 export interface ElementTaskResult {
@@ -61,6 +63,17 @@ export type ElementStep =
   | { action: 'key'; keys: string }
   | { action: 'done'; summary: string }
   | { action: 'give_up'; why: string }
+
+export interface ElementStepObservation {
+  step: number
+  prompt: string
+  retrievedFacts: string[]
+  rawResponse?: string
+  parsedAction?: ElementStep | null
+  durationMs: number
+  result: 'parse_failed' | 'actuated' | 'terminal' | 'skipped' | 'invalid_target' | 'error'
+  error?: string
+}
 
 /** Grammar the model is constrained to (llama.cpp -> GBNF): always parses or
  *  the call fails, never free text. */
@@ -216,6 +229,8 @@ export async function runElementTask(
   const { read, actuator, decide, onStep } = deps
   const maxSteps = deps.maxSteps ?? DEFAULT_MAX_STEPS
   const checkpointInterval = Math.max(1, Math.floor(deps.checkpointInterval ?? 9))
+  const retrievedFacts = deps.retrievedFacts ?? []
+  const now = deps.now ?? Date.now
   const steps: string[] = []
   const note = (line: string): void => {
     steps.push(line)
@@ -231,112 +246,150 @@ export async function runElementTask(
 
   for (let step = 0; step < maxSteps; step += 1) {
     const planningStep = step + 1
+    const startedAt = now()
+    let prompt = ''
+    let rawResponse: string | undefined
+    let decision: ElementStep | null | undefined
+    let observed = false
+    const observe = (result: ElementStepObservation['result'], error?: string): void => {
+      if (observed) return
+      observed = true
+      deps.onObservation?.({
+        step: planningStep,
+        prompt,
+        retrievedFacts,
+        rawResponse,
+        parsedAction: decision,
+        durationMs: now() - startedAt,
+        result,
+        error
+      })
+    }
     const checkpoint = (): void => {
       if (planningStep % checkpointInterval === 0) {
         deps.onCheckpoint?.(planningStep, steps)
       }
     }
-    const snapshot = await read()
-    const decision = parseElementStep(
-      await decide(
-        buildElementPrompt({
-          goal,
-          snapshot,
-          history: steps,
-          retrievedFacts: deps.retrievedFacts,
-          contextTokens: deps.contextTokens
-        })
-      )
-    )
-    if (!decision) {
-      note('model reply did not parse; re-observing')
-      checkpoint()
-      continue
-    }
-    if (decision.action === 'done') {
-      note(`done: ${decision.summary}`)
-      checkpoint()
-      return { ok: true, summary: decision.summary, steps }
-    }
-    if (decision.action === 'give_up') {
-      note(`gave up: ${decision.why}`)
-      checkpoint()
-      return { ok: false, summary: decision.why, steps }
-    }
-    // Runaway guard: the model just asked to repeat the EXACT action it already
-    // did (e.g. send "hi" again). Stop before actuating the duplicate - a live
-    // action like a message must never fire twice because the model looped.
-    const sig = actionSignature(decision)
-    if (sig !== null && sig === lastActionSig) {
-      // Repeat of the last action: SKIP re-firing it (so a live action never
-      // fires twice) but keep going - a repeat should not kill the task; the
-      // step budget still bounds a genuinely stuck run.
-      note('skipped a repeated action; moving on')
-      checkpoint()
-      continue
-    }
-    lastActionSig = sig
-    if (decision.action === 'key') {
-      await actuator.keys(decision.keys)
-      note(`key ${decision.keys}`)
-      checkpoint()
-      continue
-    }
-    if (decision.action === 'type') {
-      // A re-type of the same non-empty text is a loop (it already sent it and
-      // did not notice); stop before actuating the duplicate, so a message is
-      // never sent twice.
-      const typed = decision.text.trim()
-      if (typed.length > 0 && typedTexts.has(typed)) {
-        // Already sent this text: SKIP re-typing it (so a message is never sent
-        // twice) but keep going instead of killing the task.
-        note('already typed this text; not sending it again')
+    try {
+      const snapshot = await read()
+      prompt = buildElementPrompt({
+        goal,
+        snapshot,
+        history: steps,
+        retrievedFacts,
+        contextTokens: deps.contextTokens
+      })
+      rawResponse = await decide(prompt)
+      const parsedDecision = parseElementStep(rawResponse)
+      decision = parsedDecision
+      if (!parsedDecision) {
+        observe('parse_failed')
+        note('model reply did not parse; re-observing')
         checkpoint()
         continue
       }
-      if (typed.length > 0) {
-        typedTexts.add(typed)
+      const action = parsedDecision
+      if (action.action === 'done') {
+        observe('terminal')
+        note(`done: ${action.summary}`)
+        checkpoint()
+        return { ok: true, summary: action.summary, steps }
       }
-      // index is optional: focus the named field if given, else type into the
-      // field the app already has focused (the common case a general model hits).
-      let target: AxElement | null = null
-      if (decision.index !== undefined) {
-        target = snapshot.elements.find((candidate) => candidate.index === decision.index) ?? null
-        if (!target) {
-          note(`no element [${decision.index}] on this screen`)
+      if (action.action === 'give_up') {
+        observe('terminal')
+        note(`gave up: ${action.why}`)
+        checkpoint()
+        return { ok: false, summary: action.why, steps }
+      }
+      // Runaway guard: the model just asked to repeat the EXACT action it already
+      // did (e.g. send "hi" again). Stop before actuating the duplicate - a live
+      // action like a message must never fire twice because the model looped.
+      const sig = actionSignature(action)
+      if (sig !== null && sig === lastActionSig) {
+        // Repeat of the last action: SKIP re-firing it (so a live action never
+        // fires twice) but keep going - a repeat should not kill the task; the
+        // step budget still bounds a genuinely stuck run.
+        observe('skipped')
+        note('skipped a repeated action; moving on')
+        checkpoint()
+        continue
+      }
+      lastActionSig = sig
+      if (action.action === 'key') {
+        await actuator.keys(action.keys)
+        observe('actuated')
+        note(`key ${action.keys}`)
+        checkpoint()
+        continue
+      }
+      if (action.action === 'type') {
+        // A re-type of the same non-empty text is a loop (it already sent it and
+        // did not notice); stop before actuating the duplicate, so a message is
+        // never sent twice.
+        const typed = action.text.trim()
+        if (typed.length > 0 && typedTexts.has(typed)) {
+          // Already sent this text: SKIP re-typing it (so a message is never sent
+          // twice) but keep going instead of killing the task.
+          observe('skipped')
+          note('already typed this text; not sending it again')
           checkpoint()
           continue
         }
+        if (typed.length > 0) {
+          typedTexts.add(typed)
+        }
+        // index is optional: focus the named field if given, else type into the
+        // field the app already has focused (the common case a general model hits).
+        let target: AxElement | null = null
+        if (action.index !== undefined) {
+          const targetIndex = action.index
+          target = snapshot.elements.find((candidate) => candidate.index === targetIndex) ?? null
+          if (!target) {
+            observe('invalid_target')
+            note(`no element [${targetIndex}] on this screen`)
+            checkpoint()
+            continue
+          }
+        }
+        await actuator.type(target, action.text)
+        note(
+          target
+            ? `typed into [${target.index}] ${target.name || target.role}`
+            : `typed "${action.text}" into the focused field`
+        )
+        // A trailing submit key ("Enter") sends the message in the same step.
+        if (action.submitKeys) {
+          await actuator.keys(action.submitKeys)
+          note(`key ${action.submitKeys}`)
+        }
+        observe('actuated')
+        checkpoint()
+        continue
       }
-      await actuator.type(target, decision.text)
-      note(
-        target
-          ? `typed into [${target.index}] ${target.name || target.role}`
-          : `typed "${decision.text}" into the focused field`
-      )
-      // A trailing submit key ("Enter") sends the message in the same step.
-      if (decision.submitKeys) {
-        await actuator.keys(decision.submitKeys)
-        note(`key ${decision.submitKeys}`)
+      const targetIndex = action.index
+      const el = snapshot.elements.find((candidate) => candidate.index === targetIndex)
+      if (!el) {
+        observe('invalid_target')
+        note(`no element [${targetIndex}] on this screen`)
+        checkpoint()
+        continue
       }
+      // click or press: prefer AXPress when the element exposes it.
+      if (action.action === 'press' || el.actionable) {
+        await actuator.press(el)
+        note(`pressed [${el.index}] ${el.name || el.role}`)
+      } else {
+        await actuator.click(el)
+        note(`clicked [${el.index}] ${el.name || el.role}`)
+      }
+      observe('actuated')
       checkpoint()
-      continue
-    }
-    const el = snapshot.elements.find((candidate) => candidate.index === decision.index)
-    if (!el) {
-      note(`no element [${decision.index}] on this screen`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'accessibility step failed'
+      observe('error', message)
       checkpoint()
-      continue
+      throw error
     }
-    // click or press: prefer AXPress when the element exposes it.
-    if (decision.action === 'press' || el.actionable) {
-      await actuator.press(el)
-      note(`pressed [${el.index}] ${el.name || el.role}`)
-    } else {
-      await actuator.click(el)
-      note(`clicked [${el.index}] ${el.name || el.role}`)
-    }
-    checkpoint()
   }
 
   note('ran out of steps')
