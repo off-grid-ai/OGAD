@@ -44,7 +44,8 @@ beforeEach(() => {
       { id: 'af_heart', label: 'Heart', language: 'en-US' },
       { id: 'af_bella', label: 'Bella', language: 'en-US' },
       { id: 'bf_emma', label: 'Emma', language: 'en-GB' },
-      { id: 'ff_siwis', label: 'Siwis', language: 'fr' }
+      { id: 'ff_siwis', label: 'Siwis', language: 'fr' },
+      { id: 'future_voice', label: 'Nora', language: 'ga', languageLabel: 'Irish' }
     ]),
     prepareTtsVoice: vi.fn().mockResolvedValue({ ready: true }),
     onTtsVoiceProgress: vi.fn((callback: (data: { progress: number }) => void) => {
@@ -148,13 +149,18 @@ describe('<SettingsPanel/> speech languages', () => {
     )
   })
 
-  it('shows the shared cross-device voices and hides runtime-only voices', async () => {
+  it('shows every voice and language exposed by the active runtime', async () => {
     render(<SettingsPanel onClose={vi.fn()} initialTab="voice" />)
 
     const user = userEvent.setup()
     await user.click(await screen.findByRole('button', { name: 'Voice selection' }))
     expect(screen.getByRole('menuitemradio', { name: 'Heart' })).toBeTruthy()
-    expect(screen.queryByRole('menuitemradio', { name: 'Bella' })).toBeNull()
+    expect(screen.getByRole('menuitemradio', { name: 'Bella' })).toBeTruthy()
+    await user.keyboard('{Escape}')
+    await user.click(screen.getByRole('button', { name: 'Language selection' }))
+    await user.click(screen.getByRole('menuitemradio', { name: 'Irish' }))
+    await waitFor(() => expect(saveSetting).toHaveBeenCalledWith('ttsVoice', 'future_voice'))
+    expect(screen.getByRole('button', { name: 'Language selection' }).textContent).toContain('Irish')
   })
 
   it('shows voice loading progress and changes to ready only after loading completes', async () => {

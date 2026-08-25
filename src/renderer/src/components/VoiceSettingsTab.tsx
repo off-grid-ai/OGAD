@@ -10,7 +10,6 @@ import {
   runtimeVoiceLanguage,
   runtimeVoicesForLanguage,
   secondsLabel,
-  standardKokoroVoices,
   type RuntimeSpeechVoice,
   type VoiceTurnMode
 } from '@offgrid/speech'
@@ -79,10 +78,9 @@ export function VoiceSettingsTab(): React.JSX.Element {
     setProgress(0)
     void window.api
       .ttsVoices()
-      .then((runtimeVoices: Array<{ id: string }>) => {
-        const sharedVoices = standardKokoroVoices(runtimeVoices.map(({ id }) => id))
-        if (!sharedVoices.length) throw new Error('No voices available')
-        setVoices(sharedVoices)
+      .then((runtimeVoices: RuntimeSpeechVoice[]) => {
+        if (!runtimeVoices.length) throw new Error('No voices available')
+        setVoices(runtimeVoices)
       })
       .catch(() => setAssetsState('error'))
   }, [])
@@ -164,10 +162,17 @@ export function VoiceSettingsTab(): React.JSX.Element {
     [language, voice, voices]
   )
 
+  useEffect(() => {
+    const selected = voices.find(({ id }) => id === voice)
+    const selectedLanguage = selected ? runtimeVoiceLanguage(selected)?.code : undefined
+    if (selectedLanguage && selectedLanguage !== language) setLanguage(selectedLanguage)
+  }, [language, voice, voices])
+
   const pickVoice = (nextVoice: string): void => {
     const previous = { voice, language }
+    const runtimeVoice = voices.find(({ id }) => id === nextVoice) ?? { id: nextVoice }
     setVoice(nextVoice)
-    setLanguage(runtimeVoiceLanguage({ id: nextVoice })?.code ?? language)
+    setLanguage(runtimeVoiceLanguage(runtimeVoice)?.code ?? language)
     void Promise.resolve(window.api.saveSetting('ttsVoice', nextVoice)).catch(() => {
       setVoice(previous.voice)
       setLanguage(previous.language)

@@ -8,7 +8,7 @@ import {
   speechCapabilities,
   type DownloadProgress
 } from '@offgrid/executorch-speech'
-import type { RuntimeSpeechVoice } from '@offgrid/speech'
+import { kokoroVoiceLabel, speechLanguageLabel, type RuntimeSpeechVoice } from '@offgrid/speech'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -72,7 +72,9 @@ export async function listVoiceCatalog(
 ): Promise<RuntimeSpeechVoice[]> {
   const voices = speechCapabilities.voices.map(({ id, language }) => ({
     id,
-    language: LANGUAGE_TAGS[language] ?? language
+    label: kokoroVoiceLabel(id),
+    language: LANGUAGE_TAGS[language] ?? language,
+    languageLabel: speechLanguageLabel(LANGUAGE_TAGS[language] ?? language)
   }))
   onProgress?.(100)
   return voices
