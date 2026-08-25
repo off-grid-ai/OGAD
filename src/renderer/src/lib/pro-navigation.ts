@@ -11,6 +11,7 @@ export type ProNavigationIntent =
   | { view: 'day'; calendarEventId?: number }
   | { view: 'replay'; seekMs?: number }
   | { view: 'meetings'; meetingId?: number }
+  | { view: 'chat'; approvalId: number }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
@@ -46,6 +47,11 @@ export function normalizeProNavigationIntent(value: unknown): ProNavigationInten
     return calendarEventId === null
       ? null
       : { view: 'day', ...(calendarEventId ? { calendarEventId } : {}) }
+  }
+
+  if (value.view === 'chat') {
+    const approvalId = optionalPositiveInteger(value, 'approvalId')
+    return approvalId ? { view: 'chat', approvalId } : null
   }
 
   return value.view === 'actions' ? normalizeActionsIntent(value) : null

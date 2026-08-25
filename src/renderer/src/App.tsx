@@ -685,6 +685,14 @@ function AppContent() {
     const intent = normalizeProNavigationIntent(rawIntent)
     if (!intent) return
 
+    if (intent.view === 'chat') {
+      void window.api.approvalsExecutionChat(intent.approvalId).then((conversationId) => {
+        if (!conversationId) return
+        setChatTarget({ conversationId })
+        setViewMode('memory-chat')
+      })
+      return
+    }
     if (intent.view === 'actions') {
       setActionTarget(intent.actionId ?? null)
       setApprovalTarget(intent.approvalId ?? null)

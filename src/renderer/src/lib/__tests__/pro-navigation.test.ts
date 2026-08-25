@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { normalizeProNavigationIntent } from '../pro-navigation'
 
 describe('normalizeProNavigationIntent', () => {
-  it('preserves exact action, approval, calendar, entity, meeting, and replay targets', () => {
+  it('preserves exact action, approval chat, calendar, entity, meeting, and replay targets', () => {
     expect(
       normalizeProNavigationIntent({
         view: 'actions',
@@ -23,6 +23,10 @@ describe('normalizeProNavigationIntent', () => {
     expect(
       normalizeProNavigationIntent({ view: 'actions', approvalId: 43, mode: 'approvals' })
     ).toEqual({ view: 'actions', approvalId: 43, mode: 'approvals' })
+    expect(normalizeProNavigationIntent({ view: 'chat', approvalId: 43 })).toEqual({
+      view: 'chat',
+      approvalId: 43
+    })
     expect(normalizeProNavigationIntent({ view: 'day', calendarEventId: 44 })).toEqual({
       view: 'day',
       calendarEventId: 44
@@ -51,6 +55,8 @@ describe('normalizeProNavigationIntent', () => {
     { view: 'actions', actionId: 1, approvalId: 2 },
     { view: 'actions', actionId: 1, mode: 'approvals' },
     { view: 'actions', approvalId: 2, mode: 'todo' },
+    { view: 'chat' },
+    { view: 'chat', approvalId: 0 },
     { view: 'actions', mode: 'history' },
     { view: 'actions', entity: { id: -1, name: 'Maya' } },
     { view: 'actions', entity: { id: 7, name: ' ' } },

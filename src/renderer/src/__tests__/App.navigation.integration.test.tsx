@@ -11,6 +11,13 @@
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { registerHook } from '../bootstrap/hookRegistry'
+import { NOTIFICATION_RESOLVE_TARGET_HOOK } from '../lib/notification-hooks'
+import {
+  createProNotificationTarget,
+  resolveProNotificationTarget
+} from '../../../../pro/shared/notification-target'
+import { TooltipProvider } from '../components/ui/tooltip'
 import {
   APP_PROJECTS,
   installAppBoundary,
@@ -130,6 +137,38 @@ describe('<App/> desktop navigation integration', () => {
     // subscription would quietly restore the double-notification that commit set out to remove.
     expect(onNewAction).not.toHaveBeenCalled()
     expect(proOn).toHaveBeenCalledWith('notification:open-target', expect.any(Function))
+  })
+
+  it('opens the exact Action execution chat from its notification', async () => {
+    const listeners = new Map<string, (payload: unknown) => void>()
+    const executionChat = vi.fn(async (approvalId: number) => {
+      expect(approvalId).toBe(17)
+      return 'execution-chat-17'
+    })
+    installAppBoundary({
+      isPro: true,
+      approvalsExecutionChat: executionChat,
+      actions: { onGatePending: () => () => {}, onOutcome: () => () => {} },
+      vision: { onTaskState: () => () => {}, onStep: () => () => {} },
+      proOn: (channel: string, listener: (payload: unknown) => void) => {
+        listeners.set(channel, listener)
+        return () => listeners.delete(channel)
+      }
+    })
+    registerHook(NOTIFICATION_RESOLVE_TARGET_HOOK, resolveProNotificationTarget)
+    render(
+      <TooltipProvider>
+        <App />
+      </TooltipProvider>
+    )
+    await waitFor(() => expect(listeners.has('notification:open-target')).toBe(true))
+
+    act(() => {
+      listeners.get('notification:open-target')?.(createProNotificationTarget('approval', 17))
+    })
+
+    await waitFor(() => expect(executionChat).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(window.location.pathname).toBe('/chat'))
   })
 
   it('opens active-model settings over the originating screen and closes it with Cmd+[', async () => {

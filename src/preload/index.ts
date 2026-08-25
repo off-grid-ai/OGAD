@@ -773,6 +773,7 @@ const offGridApi = {
   // Approvals (the act-pillar spine)
   approvalsList: (status?: string) => ipcRenderer.invoke('approvals:list', status),
   approvalsProvenance: (id: number) => ipcRenderer.invoke('approvals:provenance', id),
+  approvalsExecutionChat: (id: number) => ipcRenderer.invoke('approvals:execution-chat', id),
   approvalsApprove: (id: number) => ipcRenderer.invoke('approvals:approve', id),
   approvalsReject: (id: number, reason?: string) =>
     ipcRenderer.invoke('approvals:reject', id, reason),

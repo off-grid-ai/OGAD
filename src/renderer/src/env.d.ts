@@ -337,6 +337,7 @@ interface RendererAPIOverrides {
       title: string
       detail: string
       entityName: string | null
+      executionChatId: string
     }) => void
   ) => () => void
   onNewAction: (
