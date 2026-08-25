@@ -46,13 +46,15 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
     const user = userEvent.setup()
     renderChat({ conversationId: 'conversation-b' })
 
-    const chip = await screen.findByRole('button', { name: /web_search/ })
-    const markdownTool = await screen.findByRole('button', { name: /read_url/ })
+    const work = await screen.findByRole('button', { name: /Work done/ })
     const answer = await screen.findByText('Here is what I found.')
-    expect(answer.compareDocumentPosition(chip) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+    expect(answer.compareDocumentPosition(work) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
     expect(screen.queryByText(LONG_RESULT)).toBeNull()
 
-    // The full result expands under the tool row. No modal or side viewer takes over the chat.
+    // One timeline explains the turn. Each full result stays behind its own disclosure.
+    await user.click(work)
+    const chip = await screen.findByRole('button', { name: 'Searched the web, complete' })
+    const markdownTool = await screen.findByRole('button', { name: 'Read web page, complete' })
     await user.click(chip)
     expect(await screen.findByText(LONG_RESULT)).toBeTruthy()
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -89,17 +91,71 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
     const user = userEvent.setup()
     renderChat({ conversationId: 'conversation-b' })
 
-    const tool = await screen.findByRole('button', { name: /web_search/ })
-    expect(tool.textContent).toContain('Completed in 1031 ms')
+    const work = await screen.findByRole('button', { name: /Work done/ })
+    expect(work.textContent).toContain('2 steps · complete')
     expect(screen.queryByText(LONG_RESULT)).toBeNull()
-    // A call followed by another call is one step of a turn; the last one closes the run. The gap
-    // still says which is which - it is just no longer the between-MESSAGES gap, which spaced a
-    // single turn's steps as far apart as separate conversations.
-    expect(screen.getByTestId('chat-tool-message-1').className).toContain('mb-1')
-    expect(screen.getByTestId('chat-tool-message-2').className).toContain('mb-2')
+    // Adjacent persisted tool messages are one assistant-turn timeline.
+    expect(screen.getByTestId('chat-tool-timeline-1')).toBeTruthy()
+    expect(screen.queryByTestId('chat-tool-timeline-2')).toBeNull()
 
+    await user.click(work)
+    const tool = await screen.findByRole('button', { name: 'Searched the web, complete' })
+    expect(tool.textContent).toContain('1031 ms · complete')
     await user.click(tool)
     expect(await screen.findByText(LONG_RESULT)).toBeTruthy()
+  })
+
+  it('explains a persisted proposal run as one ordered customer timeline', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-b'] = [
+      {
+        id: 1,
+        role: 'assistant',
+        content: 'Your proposal is ready for review.',
+        context: {
+          unified: [],
+          toolCalls: [
+            { name: 'list_folder', result: 'notes.md', status: 'completed' },
+            { name: 'read_file', result: 'Private source material', status: 'completed' },
+            {
+              name: 'proposal_deck',
+              arguments: '{"action":"save_skeleton"}',
+              result: 'Slide plan saved.',
+              status: 'completed'
+            },
+            { name: 'web_use', result: 'Research saved.', status: 'completed' },
+            { name: 'generate_image', result: 'Image created.', status: 'completed' },
+            { name: 'request_approval', result: '', status: 'cancelled' },
+            { name: 'computer_use', result: 'Slides created.', status: 'completed' },
+            { name: 'write_file', result: 'Deck saved.', status: 'completed' }
+          ]
+        }
+      }
+    ]
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-b' })
+
+    const work = await screen.findByRole('button', { name: /Work done/ })
+    expect(work.textContent).toContain('8 steps · needs attention')
+    if (work.getAttribute('aria-expanded') !== 'true') await user.click(work)
+    const labels = [
+      'Listed folder',
+      'Read file',
+      'Built slide plan',
+      'Web Use',
+      'Generated image',
+      'Requested approval',
+      'Computer Use',
+      'Created output'
+    ].map((label) => screen.getByText(label))
+    for (let index = 1; index < labels.length; index += 1) {
+      expect(
+        labels[index - 1]!.compareDocumentPosition(labels[index]!) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).not.toBe(0)
+    }
+    expect(screen.getByText('Waiting for your attention.')).toBeTruthy()
   })
 
   it('renders assistant Markdown with visible document structure', async () => {
@@ -130,7 +186,7 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
     expect(quote?.className).toContain('border-l-2')
   })
 
-  it('does not render chips for citation search tools (shown as source cards instead)', async () => {
+  it('includes citation searches in the same work timeline', async () => {
     const boundary = new ChatBoundary()
     boundary.messages['conversation-b'] = [
       {
@@ -147,11 +203,14 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
       }
     ]
     installBoundary(boundary)
+    const user = userEvent.setup()
     renderChat({ conversationId: 'conversation-b' })
 
     await screen.findByText('Answer.')
-    expect(screen.queryByRole('button', { name: 'search_memory' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'search_replay' })).toBeNull()
+    const work = await screen.findByRole('button', { name: /Work done/ })
+    await user.click(work)
+    expect(screen.getByRole('button', { name: 'Searched memory, complete' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Searched activity, complete' })).toBeTruthy()
   })
 
   it('keeps one live inline tool row and clears the old running label when it completes', async () => {
@@ -164,13 +223,13 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
     await waitFor(() => expect(boundary.calls).toHaveLength(1))
 
     boundary.emitToolStep(0, 'web_search')
-    expect(await screen.findByRole('button', { name: 'Using web_search...' })).toBeTruthy()
+    expect(await screen.findByRole('button', { name: 'Searched the web, running' })).toBeTruthy()
     expect(screen.getByText('Running web_search…')).toBeTruthy()
 
     boundary.emitToolResult(0, 'web_search', LONG_RESULT)
-    const completed = await screen.findByRole('button', { name: /web_search/ })
+    const completed = await screen.findByRole('button', { name: 'Searched the web, complete' })
     await waitFor(() => expect(screen.queryByText('Running web_search…')).toBeNull())
-    expect(screen.getAllByRole('button', { name: /web_search/ })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Searched the web, complete' })).toHaveLength(1)
 
     await user.click(completed)
     expect(await screen.findByText(LONG_RESULT)).toBeTruthy()

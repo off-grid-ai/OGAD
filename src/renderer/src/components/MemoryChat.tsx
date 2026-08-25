@@ -663,33 +663,23 @@ function PromptEnhancementMessageRow({
   )
 }
 
-function ToolMessageRow({
-  message,
-  nextMessageRole
-}: Readonly<{
-  message: ChatMessage
-  nextMessageRole?: SyncedMessageRole
-}>): React.JSX.Element {
-  // A tool row is one step of a turn, not a message between people. `mb-5` is the gap BETWEEN
-  // messages, and applying it after every call that is followed by a reasoning pill spaced a single
-  // turn's steps as far apart as separate conversations.
-  const margin = nextMessageRole === 'tool' ? 'mb-1' : 'mb-2'
+function ToolMessageTimelineRow({
+  messages
+}: Readonly<{ messages: ChatMessage[] }>): React.JSX.Element {
   return (
     <div
-      className={`${margin} flex flex-col items-start`}
-      data-testid={`chat-tool-message-${message.id}`}
+      className="mb-2 flex flex-col items-start"
+      data-testid={`chat-tool-timeline-${messages[0]?.id ?? 'unknown'}`}
     >
       <ChatToolRows
-        tools={[
-          {
-            name: message.toolName || 'Tool result',
-            result: message.content,
-            status: message.turnStatus === 'failed' ? 'failed' : 'completed',
-            ...(message.generationTimeMs === undefined
-              ? {}
-              : { durationMs: message.generationTimeMs })
-          }
-        ]}
+        tools={messages.map((message) => ({
+          name: message.toolName || 'Tool result',
+          result: message.content,
+          status: message.turnStatus === 'failed' ? 'failed' : 'completed',
+          ...(message.generationTimeMs === undefined
+            ? {}
+            : { durationMs: message.generationTimeMs })
+        }))}
       />
     </div>
   )
@@ -1978,7 +1968,6 @@ function AudioPane({ path, title }: { path: string; title: string }): React.JSX.
 
 function MessageRow({
   message,
-  nextMessageRole,
   voiceMode,
   state,
   actions,
@@ -1990,7 +1979,7 @@ function MessageRow({
   } else if (isPromptEnhancementMessage(message)) {
     body = <PromptEnhancementMessageRow message={message} />
   } else if (message.role === 'tool') {
-    body = <ToolMessageRow message={message} nextMessageRole={nextMessageRole} />
+    body = <ToolMessageTimelineRow messages={[message]} />
   } else if (voiceMode) {
     body = (
       <VoiceMessageRow
@@ -4887,31 +4876,41 @@ export function MemoryChat({
                 </div>
               ) : (
                 <div className="w-full px-6 py-5">
-                  {messages.map((message, messageIndex) => (
-                    <MessageRow
-                      key={message.id}
-                      message={message}
-                      nextMessageRole={messages[messageIndex + 1]?.role}
-                      voiceMode={voiceMode}
-                      state={{
-                        autoPlayId,
-                        copiedKey,
-                        editingId,
-                        editText,
-                        loading,
-                        speakingId,
-                        speakLoadingId,
-                        speakError,
-                        ttsEnabled,
-                        ttsSpeed,
-                        latestVoiceAssistantId,
-                        askSelections: askSel,
-                        incomingFiles: incomingFilesFor(message.id)
-                      }}
-                      actions={messageActions}
-                      navigation={messageNavigation}
-                    />
-                  ))}
+                  {messages.map((message, messageIndex) => {
+                    if (message.role === 'tool') {
+                      if (messages[messageIndex - 1]?.role === 'tool') return null
+                      const run: ChatMessage[] = []
+                      for (let index = messageIndex; messages[index]?.role === 'tool'; index += 1) {
+                        run.push(messages[index]!)
+                      }
+                      return <ToolMessageTimelineRow key={message.id} messages={run} />
+                    }
+                    return (
+                      <MessageRow
+                        key={message.id}
+                        message={message}
+                        nextMessageRole={messages[messageIndex + 1]?.role}
+                        voiceMode={voiceMode}
+                        state={{
+                          autoPlayId,
+                          copiedKey,
+                          editingId,
+                          editText,
+                          loading,
+                          speakingId,
+                          speakLoadingId,
+                          speakError,
+                          ttsEnabled,
+                          ttsSpeed,
+                          latestVoiceAssistantId,
+                          askSelections: askSel,
+                          incomingFiles: incomingFilesFor(message.id)
+                        }}
+                        actions={messageActions}
+                        navigation={messageNavigation}
+                      />
+                    )
+                  })}
                   {/* A reply generating on another one of your devices, streaming here live. Pro
                     registers the renderer; the free build has no slot and this is nothing. */}
                   {ChatMessagesFooter && activeConversationId ? (
