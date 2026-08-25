@@ -54,6 +54,7 @@ test('the Explore screen renders capability panels with labels, never the prompt
   for (const panel of [
     'Browse the web for you',
     'Drive your Mac',
+    'Build client-ready work',
     "Remembers what you've seen",
     "Your Mac's tools, from your phone"
   ]) {
@@ -68,6 +69,19 @@ test('the Explore screen renders capability panels with labels, never the prompt
   await expect(page.getByTestId('explore-preset-phone-summarize')).toContainText(/paired phone/i)
 
   await page.screenshot({ path: 'e2e/screenshots/explore-screen.png' })
+})
+
+test('proposal setup scopes the content, style, and output folders before chat', async () => {
+  await page.getByTestId('explore-preset-proposal-deck').click()
+  const setup = page.getByTestId('proposal-deck-setup')
+  await expect(setup).toBeVisible()
+  await expect(setup.getByRole('textbox', { name: 'Content folder' })).toHaveValue('')
+  await expect(setup.getByRole('textbox', { name: 'Save under' })).toHaveValue(
+    '/Users/user/wednesday/cro/proposals'
+  )
+  await setup.getByRole('textbox', { name: 'Content folder' }).fill('/tmp/client-material')
+  await expect(setup.getByRole('button', { name: 'Start in chat' })).toBeEnabled()
+  await page.screenshot({ path: 'e2e/screenshots/explore-proposal-setup.png' })
 })
 
 test('the chat empty state reuses the same catalog with its compact intro', async () => {

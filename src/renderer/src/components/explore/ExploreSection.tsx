@@ -1,10 +1,19 @@
-import { Globe, Desktop, Brain, DeviceMobile, ArrowRight } from '@phosphor-icons/react'
+import {
+  Globe,
+  Desktop,
+  Brain,
+  DeviceMobile,
+  ArrowRight,
+  Presentation
+} from '@phosphor-icons/react'
 import {
   PRESET_SECTIONS,
   type DemoPreset,
   type PresetCapability,
   type PresetRequirement
 } from './presetCatalog'
+import { useState } from 'react'
+import { ProposalDeckSetup } from './ProposalDeckSetup'
 
 /**
  * The Explore surface: the demo-preset catalog rendered as capability panels, each holding a
@@ -20,6 +29,7 @@ import {
 const CAPABILITY_ICON: Record<PresetCapability, typeof Globe> = {
   browser: Globe,
   'computer-use': Desktop,
+  creation: Presentation,
   memory: Brain,
   phone: DeviceMobile
 }
@@ -47,6 +57,7 @@ export function ExploreSection({
   showIntro = true,
   className = ''
 }: ExploreSectionProps): React.ReactElement {
+  const [setupPreset, setSetupPreset] = useState<DemoPreset | null>(null)
   return (
     <div className={`@container font-mono ${className}`}>
       {showIntro ? (
@@ -84,7 +95,9 @@ export function ExploreSection({
                   <button
                     key={preset.id}
                     type="button"
-                    onClick={() => onRun(preset)}
+                    onClick={() =>
+                      preset.setup === 'proposal-deck' ? setSetupPreset(preset) : onRun(preset)
+                    }
                     className="group flex flex-col rounded-md border border-neutral-800 bg-neutral-950 p-3 text-left transition-all duration-150 hover:border-neutral-700 hover:bg-neutral-900/60 active:scale-[0.98]"
                     data-testid={`explore-preset-${preset.id}`}
                   >
@@ -112,6 +125,13 @@ export function ExploreSection({
                     </div>
                   </button>
                 ))}
+                {setupPreset && section.id === 'creation' ? (
+                  <ProposalDeckSetup
+                    preset={setupPreset}
+                    onRun={onRun}
+                    onCancel={() => setSetupPreset(null)}
+                  />
+                ) : null}
               </div>
             </section>
           )

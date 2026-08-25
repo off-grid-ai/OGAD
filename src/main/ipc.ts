@@ -2046,6 +2046,29 @@ export function setupIPC() {
     const { skillsDir } = await import('./skills')
     return skillsDir()
   })
+  ipcMain.handle(
+    'proposal-deck:store-illustration',
+    async (_event, conversationId: string, slide: number, generatedImagePath: string) => {
+      const { proposalDeckService } = await import('./proposal-deck/service')
+      return proposalDeckService().saveIllustration(
+        conversationId,
+        Number(slide),
+        generatedImagePath
+      )
+    }
+  )
+  ipcMain.handle(
+    'filesystem:pick-folder',
+    async (_event, input?: { title?: string; defaultPath?: string }) => {
+      const { dialog } = await import('electron')
+      const result = await dialog.showOpenDialog({
+        title: input?.title ?? 'Choose a folder',
+        ...(input?.defaultPath ? { defaultPath: input.defaultPath } : {}),
+        properties: ['openDirectory', 'createDirectory']
+      })
+      return result.canceled ? null : (result.filePaths[0] ?? null)
+    }
+  )
 
   // Which STT engine + model would run right now (provenance) + the installed transcription
   // models a picker can switch to (via the existing models:set-active-modal — this only lists).

@@ -3478,6 +3478,13 @@ export function MemoryChat({
                   conversationId: convId,
                   projectId: projectId
                 })
+                if (imageRequest.proposal) {
+                  await window.api.storeProposalIllustration(
+                    imageRequest.proposal.conversationId,
+                    imageRequest.proposal.slide,
+                    img.path
+                  )
+                }
                 const imageContent = `Generated for: ${imageRequest.prompt}`
                 const completedImage = completedImageMessage(
                   imageContent,

@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { ExploreSection } from '../ExploreSection'
 import { ALL_PRESETS, PRESET_SECTIONS } from '../presetCatalog'
 
@@ -25,13 +24,27 @@ describe('<ExploreSection/>', () => {
 
   it('runs the preset that was clicked, with the full preset', async () => {
     const onRun = vi.fn()
-    const user = userEvent.setup()
     render(<ExploreSection onRun={onRun} />)
 
-    await user.click(screen.getByTestId('explore-preset-find-flight'))
+    fireEvent.click(screen.getByTestId('explore-preset-find-flight'))
 
     expect(onRun).toHaveBeenCalledTimes(1)
     expect(onRun.mock.calls[0]?.[0]).toMatchObject({ id: 'find-flight' })
+  })
+
+  it('collects user-approved proposal folders before starting chat', async () => {
+    const onRun = vi.fn()
+    render(<ExploreSection onRun={onRun} />)
+
+    fireEvent.click(screen.getByTestId('explore-preset-proposal-deck'))
+    expect(screen.getByTestId('proposal-deck-setup')).toBeTruthy()
+    const source = screen.getByLabelText('Content folder')
+    fireEvent.change(source, { target: { value: '/tmp/client-material' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Start in chat' }))
+
+    expect(onRun).toHaveBeenCalledTimes(1)
+    expect(onRun.mock.calls[0]?.[0].prompt).toContain('/tmp/client-material')
+    expect(onRun.mock.calls[0]?.[0].prompt).toContain('only local folders I authorize')
   })
 
   it('annotates a gated preset so it never dead-ends silently', () => {

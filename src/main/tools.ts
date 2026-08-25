@@ -21,6 +21,13 @@ import { planTask } from './tools/planner'
 import { makePlanExecutor } from './tools/plan-executor'
 import { shouldPlan, backfillGoals, preferNativeApp } from './tools/planner-logic'
 import { resolveNativeApp } from './accessibility/ax-host'
+import {
+  PROPOSAL_DECK_TOOL,
+  PROPOSAL_DECK_TOOL_NAME,
+  runProposalDeckTool,
+  type ProposalDeferredImageRequest
+} from './proposal-deck/tool'
+import { proposalDeckSystemHint, proposalDeckService } from './proposal-deck/service'
 
 // Per-tool enable/disable, persisted as a list of disabled tool names.
 function disabledSet(): Set<string> {
@@ -42,6 +49,8 @@ export function setToolEnabled(name: string, enabled: boolean): void {
 // excludes the current conversation so it can't cite itself).
 interface ToolContext {
   conversationId?: string
+  /** The exact user message. Approval-gated tools use this instead of trusting model-made args. */
+  userQuery?: string
   /** The active project (if the chat is in one), so search_knowledge_base can query
    *  that project's uploaded docs + captured memory. */
   projectId?: string
@@ -56,6 +65,7 @@ export interface ToolResult {
   text: string
   sources?: UnifiedSource[]
   imageRequest?: { prompt: string }
+  imageRequests?: ProposalDeferredImageRequest[]
 }
 
 type ToolDef = {
@@ -350,6 +360,16 @@ const TOOLS: ToolDef[] = [
           }
         : { text: 'Error: no image prompt provided.' }
     }
+  },
+  {
+    name: PROPOSAL_DECK_TOOL.name,
+    description: PROPOSAL_DECK_TOOL.description,
+    parameters: PROPOSAL_DECK_TOOL.parameters,
+    run: (args, context) =>
+      runProposalDeckTool(args, {
+        conversationId: context.conversationId,
+        userMessage: context.userQuery
+      })
   }
 ]
 
@@ -357,12 +377,13 @@ const TOOLS: ToolDef[] = [
 // otherwise; every other built-in obeys only the disabled-set.
 function schemas(
   imageAvailable: boolean,
-  scope: { projectActive: boolean; allMemory: boolean }
+  scope: { projectActive: boolean; allMemory: boolean; proposalDeck: boolean }
 ): unknown[] {
   const off = disabledSet()
   return (
     TOOLS.filter((t) => !off.has(t.name))
       .filter((t) => t.name !== 'generate_image' || imageAvailable)
+      .filter((t) => t.name !== PROPOSAL_DECK_TOOL_NAME || scope.proposalDeck)
       // Memory tools (search_knowledge_base / search_memory) follow the chat's memory scope.
       .filter((t) => isMemoryToolAllowed(t.name, scope))
       .map((t) => ({
@@ -517,7 +538,7 @@ export async function toolChat(
   answer: string
   toolCalls: ToolCall[]
   unified: UnifiedSource[]
-  imageRequests: { prompt: string }[]
+  imageRequests: (ProposalDeferredImageRequest | { prompt: string })[]
   /** Compatibility alias for older renderer bundles that can generate only one image. */
   imageRequest?: { prompt: string }
 }> {
@@ -560,9 +581,13 @@ export async function toolChat(
       console.error('[tools] extension schemas', e.id, err)
     }
   }
+  const proposalDeckActive =
+    /# Skill:\s*proposal-deck\b|\/proposal-deck\b/i.test(query) ||
+    (!!opts.conversationId && !!proposalDeckService().get(opts.conversationId))
   const builtins = schemas(imageAvailable, {
     projectActive: !!opts.projectId,
-    allMemory: !!opts.allMemory
+    allMemory: !!opts.allMemory,
+    proposalDeck: proposalDeckActive
   })
   const rawTools = extSchemas.length ? [...builtins, ...extSchemas] : builtins
   // Keep the tool payload within the model's context. llama-server inlines every
@@ -611,7 +636,8 @@ export async function toolChat(
   const tools = budgeted.tools
   const sys =
     'You are Off Grid, a private on-device assistant. Use the provided tools when they help answer precisely. Keep answers concise.' +
-    (hints.length ? ' ' + hints.join(' ') : '')
+    (hints.length ? ' ' + hints.join(' ') : '') +
+    (proposalDeckActive ? ` ${proposalDeckSystemHint(opts.conversationId)}` : '')
 
   // --- Orchestrator: plan-and-execute for action requests --------------------
   // Before the reactive loop, run ONE focused planning pass. It routes to the
@@ -619,7 +645,7 @@ export async function toolChat(
   // (open_url vs web_task, the missing url, sequencing contacts -> message). An
   // empty/absent plan (a question, chit-chat, a request no tool fits) falls
   // straight through to the reactive loop below, so normal chat is untouched.
-  if (shouldPlan(query)) {
+  if (shouldPlan(query) && !proposalDeckActive) {
     try {
       const catalog = tools
         .map((t) => {
@@ -645,7 +671,7 @@ export async function toolChat(
           runTool(
             name,
             args,
-            { conversationId: opts.conversationId, projectId: opts.projectId },
+            { conversationId: opts.conversationId, projectId: opts.projectId, userQuery: query },
             exts
           )
         )
@@ -688,7 +714,7 @@ export async function toolChat(
   // Deferred image generation: keep EVERY request in tool-call order. The renderer generates after
   // the turn so we never evict the LLM mid-loop, and one model round that asks for two pictures does
   // not silently replace the first request with the last.
-  const imageRequests: { prompt: string }[] = []
+  const imageRequests: (ProposalDeferredImageRequest | { prompt: string })[] = []
   const resultWithImages = (result: {
     answer: string
     toolCalls: ToolCall[]
@@ -697,7 +723,7 @@ export async function toolChat(
     answer: string
     toolCalls: ToolCall[]
     unified: UnifiedSource[]
-    imageRequests: { prompt: string }[]
+    imageRequests: (ProposalDeferredImageRequest | { prompt: string })[]
     imageRequest?: { prompt: string }
   } => {
     const finalImageRequest = imageRequests.at(-1)
@@ -777,7 +803,7 @@ export async function toolChat(
         const res = await runTool(
           c.name,
           c.args,
-          { conversationId: opts.conversationId, projectId: opts.projectId },
+          { conversationId: opts.conversationId, projectId: opts.projectId, userQuery: query },
           exts
         )
         for (const s of res.sources ?? []) {
@@ -785,7 +811,8 @@ export async function toolChat(
           unifiedKeys.add(s.key)
           unified.push(s)
         }
-        if (res.imageRequest) imageRequests.push(res.imageRequest)
+        if (res.imageRequests?.length) imageRequests.push(...res.imageRequests)
+        else if (res.imageRequest) imageRequests.push(res.imageRequest)
         toolCalls.push({ name: c.name, args: c.args, result: res.text })
         // Surface the COMPLETED call (with its result) live, so the UI can show each
         // tool call + result as it lands, not only in the final batch.

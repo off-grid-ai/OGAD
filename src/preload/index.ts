@@ -563,6 +563,15 @@ const offGridApi = {
   }) => ipcRenderer.invoke('skills:save', input),
   deleteSkill: (name: string) => ipcRenderer.invoke('skills:delete', name),
   skillsDir: () => ipcRenderer.invoke('skills:dir'),
+  storeProposalIllustration: (conversationId: string, slide: number, generatedImagePath: string) =>
+    ipcRenderer.invoke(
+      'proposal-deck:store-illustration',
+      conversationId,
+      slide,
+      generatedImagePath
+    ),
+  pickLocalFolder: (input?: { title?: string; defaultPath?: string }) =>
+    ipcRenderer.invoke('filesystem:pick-folder', input),
 
   // --- Voice input (speech-to-text via whisper) ---
   transcribeAudio: (audio: ArrayBuffer | Uint8Array, ext?: string) =>

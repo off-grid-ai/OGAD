@@ -40,9 +40,11 @@ describe('the Explore preset catalog', () => {
     }
   })
 
-  it('covers the four capabilities we mean to show off', () => {
+  it('covers the five capabilities we mean to show off', () => {
     const capabilities = PRESET_SECTIONS.map((section) => section.capability)
-    expect(new Set(capabilities)).toEqual(new Set(['browser', 'computer-use', 'memory', 'phone']))
+    expect(new Set(capabilities)).toEqual(
+      new Set(['browser', 'computer-use', 'creation', 'memory', 'phone'])
+    )
   })
 
   it('every preset carries its own icon, defined once in the catalog', () => {
@@ -65,5 +67,10 @@ describe('the Explore preset catalog', () => {
   it('keeps the flight hero present with a non-empty starter prompt', () => {
     const flight = ALL_PRESETS.find((preset) => preset.id === 'find-flight')
     expect(flight?.prompt.trim().length).toBeGreaterThan(0)
+  })
+
+  it('starts the proposal workflow through its installed skill', () => {
+    const proposal = ALL_PRESETS.find((preset) => preset.id === 'proposal-deck')
+    expect(proposal?.prompt).toMatch(/^\/proposal-deck\b/)
   })
 })

@@ -19,13 +19,14 @@ import {
   MagnifyingGlass,
   MapPin,
   PaperPlaneTilt,
+  Presentation,
   SpotifyLogo,
   Tag,
   type Icon
 } from '@phosphor-icons/react'
 
 /** The capability a section demonstrates. Drives grouping + the icon/label per section. */
-export type PresetCapability = 'browser' | 'computer-use' | 'memory' | 'phone'
+export type PresetCapability = 'browser' | 'computer-use' | 'creation' | 'memory' | 'phone'
 
 /**
  * How reliable a live run of this preset is, so the surface can lead with the safe ones:
@@ -54,6 +55,7 @@ export interface DemoPreset {
   readiness: DemoReadiness
   /** Absent = available in any build. Present = gate/annotate before offering a live run. */
   requires?: PresetRequirement
+  setup?: 'proposal-deck'
 }
 
 export interface PresetSection {
@@ -132,6 +134,25 @@ export const PRESET_SECTIONS: readonly PresetSection[] = [
           'Open Mail, find the latest email from a person I will name, and draft a reply saying I will get back to them Monday.',
         blurb: 'Reads the thread and writes a reply for you to send.',
         readiness: 'needs-setup'
+      }
+    ]
+  },
+  {
+    id: 'creation',
+    capability: 'creation',
+    title: 'Build client-ready work',
+    teaches: 'Turn your local references into a reviewed deliverable, without sending them away.',
+    presets: [
+      {
+        id: 'proposal-deck',
+        icon: Presentation,
+        title: 'Build a proposal deck',
+        prompt:
+          '/proposal-deck Start a new client proposal. Ask me only for the company, meeting context, sale mode, audience geography, and optional website before you begin.',
+        blurb:
+          'Builds the story, slide plan, proof, copy, and illustrations through approval gates.',
+        readiness: 'needs-setup',
+        setup: 'proposal-deck'
       }
     ]
   },

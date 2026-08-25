@@ -14,6 +14,7 @@ import {
   type Skill,
   type SkillTrigger
 } from './skills-parse'
+import { BUNDLED_SKILLS } from './skills-builtin'
 
 // Re-export the pure types so existing importers of './skills' are unchanged.
 export type { Skill }
@@ -46,6 +47,20 @@ function ensureSkillsDir(): string {
       )
     } catch {
       /* best effort */
+    }
+  }
+  const marker = path.join(dir, '.bundled-skills-v1')
+  if (!fs.existsSync(marker)) {
+    try {
+      for (const skill of BUNDLED_SKILLS) {
+        const folder = path.join(dir, skill.slug)
+        if (fs.existsSync(folder)) continue
+        fs.mkdirSync(folder, { recursive: true })
+        fs.writeFileSync(path.join(folder, 'SKILL.md'), skill.markdown)
+      }
+      fs.writeFileSync(marker, 'Installed bundled skills v1.\n')
+    } catch {
+      /* A read-only profile still keeps manually installed skills available. */
     }
   }
   return dir
