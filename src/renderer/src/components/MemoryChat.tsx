@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { shouldQueue, enqueue, dequeue, queuedCount, clearQueue } from '@renderer/lib/chat-queue'
 import { buildSendHistory } from '@renderer/lib/chat-history'
 import { waitingLabel } from '@renderer/lib/chat-labels'
-import { parseSqliteUtc, timeAgo } from '@renderer/lib/time'
+import { parseSqliteUtc, shiftLocalDay, startOfLocalDay, timeAgo } from '@renderer/lib/time'
 import { writeClipboardWithFallback } from '@renderer/lib/clipboard-write'
 import { motion, AnimatePresence } from 'motion/react'
 import {
@@ -31,7 +31,7 @@ import {
   type SyncedMessageRole,
   type SyncedTurnStatus
 } from '@offgrid/sync'
-import { VOICE_TURN_LABELS, type VoiceTurnMode } from '@offgrid/speech'
+import type { VoiceTurnMode } from '@offgrid/speech'
 import ReactMarkdown, { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -46,15 +46,24 @@ import { chatMarkdownComponents } from './ChatMarkdown'
 import { ChatThinkingBlock } from './ChatThinkingBlock'
 import { ChatToolRows } from './ChatToolRows'
 import { ArtifactCanvas, parseArtifact, type Artifact } from './ArtifactCanvas'
-import { VoiceBubble, stopAllVoicePlayback } from './VoiceBubble'
+import { VoiceBubble } from './VoiceBubble'
+import { stopAllVoicePlayback } from '@renderer/lib/voice-playback-bus'
+import { ChatVoiceComposer, VoiceModeControl } from './ChatVoiceComposer'
 import { useChatVoiceTurns, type ChatVoicePhase } from './use-chat-voice-turns'
 import { SkillsPanel } from './SkillsPanel'
 import { ModelPicker } from './ModelPicker'
 import { SettingsPanel } from './SettingsPanel'
+import { LoadingDots } from './ui/loading-dots'
 import { SidePanel } from './SidePanel'
 import { ConversationTitleActions } from './ConversationTitleActions'
 import { resolveImageParams, setOverride, type ImageParamStore } from '@renderer/lib/image-params'
 import { IMAGE_SETTINGS_CHANGED_EVENT } from '@renderer/lib/image-settings-events'
+import {
+  DEFAULT_VOICE_PREFERENCES,
+  VOICE_PREFERENCES_CHANGED_EVENT,
+  readVoicePreferences,
+  type VoicePreferences
+} from '@renderer/lib/voice-preferences'
 import { shouldAutoRouteImage, cleanImagePrompt } from '@renderer/lib/image-intent'
 import {
   buildAssistantContext,
@@ -66,6 +75,8 @@ import {
   withGeneratedImageReference
 } from '../../../shared/generated-image-reference'
 import type { RagConversationContract, ResponseCutoffContract } from '../../../shared/ipc-contracts'
+import type { SearchHit } from '../types'
+import { navigateSearchHit } from '@renderer/lib/search-navigation'
 import {
   parseImageMemoryGuardError,
   type ImageGenerationJobContract,
@@ -122,15 +133,14 @@ type RagContext = {
   summaries?: RagSummary[]
   entities?: RagEntity[]
   entityFacts?: RagEntityFact[]
-  unified?: {
-    kind: string
-    title: string
-    snippet: string
-    surface: string
-    ts: number
-    refId?: number
-    imagePath?: string | null
-  }[]
+  unified?: Array<
+    Omit<SearchHit, 'key' | 'refId' | 'url' | 'score'> & {
+      key?: string
+      refId?: number
+      url?: string | null
+      score?: number
+    }
+  >
   image?: string
   imageMetadata?: ImageGenerationMetadata
   sources?: { name: string; position: number; score: number }[]
@@ -367,6 +377,7 @@ type ProjectLite = { id: string; name: string }
 interface MemoryChatProps {
   readonly onNavigateToMemory?: (memoryId: number) => void
   readonly onNavigateToChat?: (sessionId: string) => void
+  readonly onNavigateToMeeting?: (meetingId: number) => void
   readonly onNavigateToEntity?: (entityId: number) => void
   /** Open the Projects screen focused on this chat's linked project. */
   readonly onOpenProject?: (projectId: string) => void
@@ -680,6 +691,9 @@ function ToolMessageRow({
 function VoiceMessageRow({
   message,
   autoPlay,
+  copied,
+  showTranscriptInitially,
+  playbackSpeed,
   onPlaybackStateChange,
   onCopy,
   onOpenImage,
@@ -687,6 +701,9 @@ function VoiceMessageRow({
 }: Readonly<{
   message: ChatMessage
   autoPlay: boolean
+  copied: boolean
+  showTranscriptInitially: boolean
+  playbackSpeed: number
   onPlaybackStateChange: (messageId: string, active: boolean) => void
   onCopy: (text: string, key?: string) => void
   onOpenImage: (image: OpenImage) => void
@@ -708,36 +725,59 @@ function VoiceMessageRow({
         durationSeconds={message.audioDuration}
         synthesize={(text) => window.api.speak(text)}
         onPlaybackStateChange={reportPlayback}
-        onCopy={onCopy}
+        copied={copied}
+        onCopy={(text) => onCopy(text, message.id)}
+        defaultSpeed={playbackSpeed}
       />
     )
   } else if (isSupportingMessage(message)) {
     body = <ChatThinkingBlock content={message.reasoning ?? ''} label={message.reasoningLabel} />
   } else if (message.image) {
     body = (
-      <ChatImagePreview
-        src={message.image}
-        path={message.imagePath}
-        metadata={message.imageMetadata}
-        className="max-w-[20rem] cursor-zoom-in rounded-md border border-neutral-800 transition-opacity hover:opacity-90"
-        onOpen={onOpenImage}
-      />
+      <>
+        {message.reasoning?.trim() ? (
+          <ChatThinkingBlock
+            content={message.reasoning}
+            live={Boolean(message.streaming)}
+            label={message.reasoningLabel}
+          />
+        ) : null}
+        <ChatImagePreview
+          src={message.image}
+          path={message.imagePath}
+          metadata={message.imageMetadata}
+          className="max-w-[20rem] cursor-zoom-in rounded-md border border-neutral-800 transition-opacity hover:opacity-90"
+          onOpen={onOpenImage}
+        />
+      </>
     )
   } else {
     body = (
-      <VoiceBubble
-        messageId={message.id}
-        transcript={messageToSpeakable(selectedMessageContent(message))}
-        isLoading={Boolean(message.streaming)}
-        autoPlay={autoPlay}
-        synthesize={(text) => window.api.speak(text)}
-        onPlaybackStateChange={reportPlayback}
-        onCopy={onCopy}
-        onRetry={() => onRegenerate(message.id)}
-      />
+      <>
+        {message.reasoning?.trim() ? (
+          <ChatThinkingBlock
+            content={message.reasoning}
+            live={Boolean(message.streaming)}
+            label={message.reasoningLabel}
+          />
+        ) : null}
+        <VoiceBubble
+          messageId={message.id}
+          transcript={messageToSpeakable(selectedMessageContent(message))}
+          isLoading={Boolean(message.streaming)}
+          autoPlay={autoPlay}
+          showTranscriptInitially={showTranscriptInitially}
+          defaultSpeed={playbackSpeed}
+          synthesize={(text) => window.api.speak(text)}
+          onPlaybackStateChange={reportPlayback}
+          copied={copied}
+          onCopy={(text) => onCopy(text, message.id)}
+          onRetry={() => onRegenerate(message.id)}
+        />
+      </>
     )
   }
-  return <div className={`mb-4 flex flex-col ${alignment}`}>{body}</div>
+  return <div className={`mb-4 flex flex-col gap-1.5 ${alignment}`}>{body}</div>
 }
 
 function MessageThinkingHeader({ message }: Readonly<{ message: ChatMessage }>): React.JSX.Element {
@@ -746,11 +786,7 @@ function MessageThinkingHeader({ message }: Readonly<{ message: ChatMessage }>):
     const activity = activityLabel(message.activity)
     return (
       <div className="mb-1.5 flex flex-col gap-1.5">
-        <span className="inline-flex gap-1 text-green-500">
-          <span className="animate-bounce [animation-delay:-0.3s]">●</span>
-          <span className="animate-bounce [animation-delay:-0.15s]">●</span>
-          <span className="animate-bounce">●</span>
-        </span>
+        <LoadingDots />
         {message.reasoning?.trim() ? <ChatThinkingBlock content={message.reasoning} live /> : null}
         {activity ? <span className="text-[11px] text-neutral-500">{activity}</span> : null}
       </div>
@@ -786,11 +822,7 @@ function IncomingFileRows({
           data-testid="incoming-shared-file"
           className="mb-2 flex w-fit items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-2 py-1"
         >
-          <span className="flex gap-1">
-            <span className="h-1 w-1 animate-bounce rounded-full bg-green-500 [animation-delay:0ms]" />
-            <span className="h-1 w-1 animate-bounce rounded-full bg-green-500 [animation-delay:150ms]" />
-            <span className="h-1 w-1 animate-bounce rounded-full bg-green-500 [animation-delay:300ms]" />
-          </span>
+          <LoadingDots size="small" />
           <span className="max-w-[16rem] truncate text-[10px] text-neutral-400">
             {incoming.name}
           </span>
@@ -1308,6 +1340,7 @@ function AssistantMessageActions({
   copied,
   speechState,
   speechError,
+  speechEnabled,
   onCopy,
   onOpenArtifact,
   onRegenerate,
@@ -1319,6 +1352,7 @@ function AssistantMessageActions({
   copied: boolean
   speechState: SpeechControlState
   speechError?: string
+  speechEnabled: boolean
   onCopy: () => void
   onOpenArtifact: (artifact: Artifact) => void
   onRegenerate: () => void
@@ -1328,7 +1362,7 @@ function AssistantMessageActions({
   if (message.image || isSupportingMessage(message)) return null
   return (
     <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-      <SpeechAction state={speechState} onSpeak={onSpeak} />
+      {speechEnabled ? <SpeechAction state={speechState} onSpeak={onSpeak} /> : null}
       <CopyAction copied={copied} onCopy={onCopy} />
       <RegenerateAction label="Regenerate" title="Regenerate" onRegenerate={onRegenerate} />
       <VariantNavigation message={message} onSelect={onSelectVariant} />
@@ -1361,21 +1395,37 @@ function AssistantMessageActions({
 type ContextNavigation = Readonly<{
   onNavigateToMemory?: (memoryId: number) => void
   onNavigateToChat?: (sessionId: string) => void
+  onNavigateToMeeting?: (meetingId: number) => void
   onNavigateToEntity?: (entityId: number) => void
+  onOpenProject?: (projectId: string) => void
   onSeekReplay?: (timestamp: number) => void
 }>
 
 type UnifiedContextItem = NonNullable<RagContext['unified']>[number]
 
 function openUnifiedContext(item: UnifiedContextItem, navigation: ContextNavigation): void {
-  if (item.kind === 'screen') {
-    navigation.onSeekReplay?.(item.ts)
-    return
-  }
-  if (item.refId == null) return
-  if (item.kind === 'memory') navigation.onNavigateToMemory?.(item.refId)
-  if (item.kind === 'entity') navigation.onNavigateToEntity?.(item.refId)
-  if (item.kind === 'meeting') navigation.onNavigateToChat?.(String(item.refId))
+  navigateSearchHit(
+    {
+      ...item,
+      key: item.key ?? `${item.kind}:${String(item.refId ?? item.ts)}`,
+      refId: item.refId ?? 0,
+      url: item.url ?? null,
+      score: item.score ?? 0,
+      imagePath: item.imagePath ?? null
+    },
+    {
+      selectEntity: (entityId) => navigation.onNavigateToEntity?.(entityId),
+      selectMemory: (memoryId) => navigation.onNavigateToMemory?.(memoryId),
+      openMeeting: (meetingId) => {
+        if (meetingId != null) navigation.onNavigateToMeeting?.(meetingId)
+      },
+      openChat: (target) => {
+        if (target?.conversationId) navigation.onNavigateToChat?.(target.conversationId)
+        if (target?.projectId) navigation.onOpenProject?.(target.projectId)
+      },
+      openReplay: (timestamp) => navigation.onSeekReplay?.(timestamp)
+    }
+  )
 }
 
 function UnifiedContextSection({
@@ -1656,6 +1706,9 @@ type MessageRowState = Readonly<{
   speakingId: string | null
   speakLoadingId: string | null
   speakError: { id: string; message: string } | null
+  ttsEnabled: boolean
+  ttsSpeed: number
+  latestVoiceAssistantId: string | null
   askSelections: Readonly<Record<string, readonly string[]>>
   incomingFiles: readonly IncomingSharedFile[]
 }>
@@ -1787,6 +1840,7 @@ function StandardMessageRow({
           copied={copied}
           speechState={speechState}
           speechError={speechError}
+          speechEnabled={state.ttsEnabled}
           onCopy={() => actions.copy(message.content, message.id)}
           onOpenArtifact={actions.openArtifact}
           onRegenerate={() => actions.regenerate(message.id)}
@@ -1898,6 +1952,9 @@ function MessageRow({
       <VoiceMessageRow
         message={message}
         autoPlay={state.autoPlayId === message.id}
+        copied={state.copiedKey === message.id}
+        showTranscriptInitially={state.latestVoiceAssistantId === message.id}
+        playbackSpeed={state.ttsSpeed}
         onPlaybackStateChange={actions.voicePlaybackChange}
         onCopy={actions.copy}
         onOpenImage={actions.openImage}
@@ -2089,39 +2146,6 @@ function nextVoicePlaybackOwner(
   return current === messageId ? null : current
 }
 
-function voiceTurnButtonLabel(phase: ChatVoicePhase, suspended: boolean): string {
-  if (phase === 'transcribing') return 'Cancel transcription'
-  if (phase !== 'idle') return 'Stop voice recording'
-  if (suspended) return 'Resume hands-free listening'
-  return 'Start voice recording'
-}
-
-interface VoiceTurnStatusOptions {
-  phase: ChatVoicePhase
-  mode: VoiceTurnMode
-  suspended: boolean
-  transcriptionLabel: string
-}
-
-function voiceTurnStatus({
-  phase,
-  mode,
-  suspended,
-  transcriptionLabel
-}: VoiceTurnStatusOptions): string {
-  if (phase === 'starting') return 'Opening the microphone...'
-  if (phase === 'listening') return 'Waiting for your voice'
-  if (phase === 'transcribing') {
-    return `Transcribing with ${transcriptionLabel} - click to cancel`
-  }
-  if (phase === 'recording') {
-    return mode === 'tap' ? 'Recording - click to send' : 'Recording you now'
-  }
-  if (suspended) return 'Hands-free is paused - click to resume'
-  if (mode === 'handsfree') return 'Hands-free is ready'
-  return 'Click to record a voice note'
-}
-
 function textRecordingButtonLabel(phase: ChatVoicePhase): string {
   if (phase === 'transcribing') return 'Cancel transcription'
   if (phase !== 'idle') return 'Stop recording'
@@ -2139,6 +2163,7 @@ function textRecordingTooltip(phase: ChatVoicePhase, transcriptionLabel: string)
 export function MemoryChat({
   onNavigateToMemory,
   onNavigateToChat,
+  onNavigateToMeeting,
   onNavigateToEntity,
   onOpenProject,
   onSeekReplay,
@@ -2340,8 +2365,18 @@ export function MemoryChat({
   const [toolsOn, setToolsOn] = useState(false)
   const [connectorsOn, setConnectorsOn] = useState(false)
   const [thinkingEnabled, setThinkingEnabled] = useState(false)
-  const [voiceMode, setVoiceMode] = useState(false) // voice mode: messages exchanged as voice notes
-  const [voiceTurnMode, setVoiceTurnMode] = useState<VoiceTurnMode>('tap')
+  const [voiceMode, setVoiceMode] = useState(DEFAULT_VOICE_PREFERENCES.voiceMode)
+  const [voiceTurnMode, setVoiceTurnMode] = useState<VoiceTurnMode>(
+    DEFAULT_VOICE_PREFERENCES.turnMode
+  )
+  const [voiceSilenceAfterSpeechMs, setVoiceSilenceAfterSpeechMs] = useState(
+    DEFAULT_VOICE_PREFERENCES.silenceAfterSpeechMs
+  )
+  const [voiceSpeakerDrainMs, setVoiceSpeakerDrainMs] = useState(
+    DEFAULT_VOICE_PREFERENCES.speakerDrainMs
+  )
+  const [ttsEnabled, setTtsEnabled] = useState(DEFAULT_VOICE_PREFERENCES.ttsEnabled)
+  const [ttsSpeed, setTtsSpeed] = useState(DEFAULT_VOICE_PREFERENCES.speed)
   const [voicePlaybackOwner, setVoicePlaybackOwner] = useState<string | null>(null)
   useEffect(() => {
     if (!voiceMode) {
@@ -2362,13 +2397,13 @@ export function MemoryChat({
         if (typeof s.composerToolsOn === 'boolean') setToolsOn(s.composerToolsOn)
         if (typeof s.composerConnectorsOn === 'boolean') setConnectorsOn(s.composerConnectorsOn)
         if (typeof s.composerThinking === 'boolean') setThinkingEnabled(s.composerThinking)
-        if (typeof s.composerVoiceMode === 'boolean') setVoiceMode(s.composerVoiceMode)
-        if (
-          s.composerVoiceTurnMode === 'tap' ||
-          s.composerVoiceTurnMode === 'silence' ||
-          s.composerVoiceTurnMode === 'handsfree'
-        )
-          setVoiceTurnMode(s.composerVoiceTurnMode)
+        const voicePreferences = readVoicePreferences(s)
+        setVoiceMode(voicePreferences.voiceMode)
+        setVoiceTurnMode(voicePreferences.turnMode)
+        setVoiceSilenceAfterSpeechMs(voicePreferences.silenceAfterSpeechMs)
+        setVoiceSpeakerDrainMs(voicePreferences.speakerDrainMs)
+        setTtsEnabled(voicePreferences.ttsEnabled)
+        setTtsSpeed(voicePreferences.speed)
         // Image-composer params: per-model steps/size overrides + the global
         // seed/negative/strength/style. These are persisted so they survive a
         // remount (they used to reset every mount).
@@ -2403,8 +2438,18 @@ export function MemoryChat({
     if (prefsLoaded.current) void window.api.saveSetting('composerVoiceMode', voiceMode)
   }, [voiceMode])
   useEffect(() => {
-    if (prefsLoaded.current) void window.api.saveSetting('composerVoiceTurnMode', voiceTurnMode)
-  }, [voiceTurnMode])
+    const applyPreferences = (event: Event): void => {
+      const next = (event as CustomEvent<VoicePreferences>).detail
+      setVoiceMode(next.voiceMode)
+      setVoiceTurnMode(next.turnMode)
+      setVoiceSilenceAfterSpeechMs(next.silenceAfterSpeechMs)
+      setVoiceSpeakerDrainMs(next.speakerDrainMs)
+      setTtsEnabled(next.ttsEnabled)
+      setTtsSpeed(next.speed)
+    }
+    window.addEventListener(VOICE_PREFERENCES_CHANGED_EVENT, applyPreferences)
+    return () => window.removeEventListener(VOICE_PREFERENCES_CHANGED_EVENT, applyPreferences)
+  }, [])
   // Persist the global image-composer params (per-model steps/size live in the
   // store, saved on change). Guarded by prefsLoaded so the initial load doesn't
   // echo back an empty default.
@@ -2429,6 +2474,7 @@ export function MemoryChat({
   const [speakError, setSpeakError] = useState<{ id: string; message: string } | null>(null)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'model' | 'voice'>('model')
   // Active text model + running context window, shown in the composer. Refreshes when
   // the model picker closes (the selection may have changed).
   const modelSummary = useActiveModelSummary(modelPickerOpen)
@@ -3333,7 +3379,6 @@ export function MemoryChat({
           )
         )
         const toolCtxWithReasoning = buildAssistantContext(toolCtx, { reasoning: toolReasoning })
-        if (voiceMode) setAutoPlayId(toolStreamId)
         // Deferred image generation: the tool loop only RECORDS prompts (it never generates inline,
         // which would evict the LLM). Each completed request gets one generated file and one durable
         // assistant image message. A message context has one imageRef by design; putting two results
@@ -3354,9 +3399,21 @@ export function MemoryChat({
           setImgProgress(null)
           setImageGenConv(convId)
           try {
-            await window.api.addRagMessage(convId, 'assistant', answer, toolCtxWithReasoning)
+            const stored = await window.api.addRagMessage(
+              convId,
+              'assistant',
+              answer,
+              toolCtxWithReasoning
+            )
+            setConvMessages(convId, (previous) =>
+              previous.map((message) =>
+                message.id === toolStreamId ? { ...message, id: stored.uuid } : message
+              )
+            )
+            if (voiceMode) setAutoPlayId(stored.uuid)
           } catch {
             /* The answer remains on screen; image rows can still be persisted independently. */
+            if (voiceMode) setAutoPlayId(toolStreamId)
           }
           try {
             for (const imageRequest of imageRequests) {
@@ -3414,9 +3471,21 @@ export function MemoryChat({
           return
         }
         try {
-          await window.api.addRagMessage(convId, 'assistant', answer, toolCtxWithReasoning)
+          const stored = await window.api.addRagMessage(
+            convId,
+            'assistant',
+            answer,
+            toolCtxWithReasoning
+          )
+          setConvMessages(convId, (previous) =>
+            previous.map((message) =>
+              message.id === toolStreamId ? { ...message, id: stored.uuid } : message
+            )
+          )
+          if (voiceMode) setAutoPlayId(stored.uuid)
         } catch {
           /* ignore */
+          if (voiceMode) setAutoPlayId(toolStreamId)
         }
         return
       }
@@ -3553,9 +3622,8 @@ export function MemoryChat({
               /* ignore */
             })
         }
-        if (voiceMode) setAutoPlayId(streamId)
         try {
-          await window.api.addRagMessage(
+          const stored = await window.api.addRagMessage(
             convId,
             'assistant',
             assistantContent,
@@ -3564,8 +3632,15 @@ export function MemoryChat({
               cutoff: result.cutoff
             })
           )
+          setConvMessages(convId, (previous) =>
+            previous.map((message) =>
+              message.id === streamId ? { ...message, id: stored.uuid } : message
+            )
+          )
+          if (voiceMode) setAutoPlayId(stored.uuid)
         } catch (e) {
           console.error('Failed to persist assistant message:', e)
+          if (voiceMode) setAutoPlayId(streamId)
         }
       }
     } catch (e) {
@@ -3625,6 +3700,8 @@ export function MemoryChat({
   const voiceTurns = useChatVoiceTurns({
     voiceMode,
     mode: voiceMode ? voiceTurnMode : 'tap',
+    silenceAfterSpeechMs: voiceSilenceAfterSpeechMs,
+    speakerDrainMs: voiceSpeakerDrainMs,
     isGenerating: Boolean(activeConversationId && generatingConvs.has(activeConversationId)),
     isPlaybackActive: voicePlaybackOwner !== null,
     transcribeAudio: (audio, extension) => window.api.transcribeAudio(audio, extension),
@@ -3642,13 +3719,6 @@ export function MemoryChat({
     voiceTurns.phase === 'listening' ||
     voiceTurns.phase === 'recording'
   const transcribing = voiceTurns.phase === 'transcribing'
-  const voiceRecordButtonLabel = voiceTurnButtonLabel(voiceTurns.phase, voiceTurns.suspended)
-  const voiceStatus = voiceTurnStatus({
-    phase: voiceTurns.phase,
-    mode: voiceTurnMode,
-    suspended: voiceTurns.suspended,
-    transcriptionLabel: voiceTurns.transcriptionLabel
-  })
   const textRecordButtonLabel = textRecordingButtonLabel(voiceTurns.phase)
   const textRecordTooltip = textRecordingTooltip(voiceTurns.phase, voiceTurns.transcriptionLabel)
   const toggleRecording = transcribing ? voiceTurns.cancel : voiceTurns.toggle
@@ -4246,7 +4316,9 @@ export function MemoryChat({
   const messageNavigation: ContextNavigation = {
     onNavigateToMemory,
     onNavigateToChat,
+    onNavigateToMeeting,
     onNavigateToEntity,
+    onOpenProject,
     onSeekReplay
   }
   const messageActions: MessageRowActions = {
@@ -4318,6 +4390,9 @@ export function MemoryChat({
       )
     }
   }
+  const latestVoiceAssistantId = voiceMode
+    ? ([...messages].reverse().find((message) => message.role === 'assistant')?.id ?? null)
+    : null
 
   return (
     <div
@@ -4407,6 +4482,7 @@ export function MemoryChat({
         <button
           onClick={() => {
             closePanels()
+            setSettingsInitialTab('model')
             setSettingsOpen(true)
           }}
           className={`rounded-md border p-1.5 transition-colors ${settingsOpen ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
@@ -4447,26 +4523,6 @@ export function MemoryChat({
               d="M4 15l4-4 4 4 3-3 5 5"
             />
             <circle cx="9" cy="9" r="1.5" fill="currentColor" />
-          </svg>
-        </button>
-        <button
-          onClick={() => setVoiceMode((v) => !v)}
-          className={`rounded-md border p-1.5 transition-colors ${voiceMode ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
-          title={voiceMode ? 'Voice mode on — speak and listen in voice notes' : 'Voice mode off'}
-        >
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M11 5L6 9H2v6h4l5 4V5z"
-            />
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M15.54 8.46a5 5 0 010 7.07M19.07 4.93a10 10 0 010 14.14"
-            />
           </svg>
         </button>
       </header>
@@ -4560,12 +4616,10 @@ export function MemoryChat({
                     return (
                       <p className="px-2 py-4 text-center text-xs text-neutral-600">No matches</p>
                     )
-                  const now = new Date()
-                  const startToday = new Date(
-                    now.getFullYear(),
-                    now.getMonth(),
-                    now.getDate()
-                  ).getTime()
+                  const today = startOfLocalDay(new Date())
+                  const startToday = today.getTime()
+                  const startYesterday = shiftLocalDay(today, -1).getTime()
+                  const startThisWeek = shiftLocalDay(today, -6).getTime()
                   const groups: { label: string; items: Conversation[] }[] = [
                     { label: 'Today', items: [] },
                     { label: 'Yesterday', items: [] },
@@ -4585,8 +4639,8 @@ export function MemoryChat({
                   for (const c of ordered) {
                     const t = parseSqliteUtc(c.updated_at).getTime()
                     if (t >= startToday) groups[0]!.items.push(c)
-                    else if (t >= startToday - 86400000) groups[1]!.items.push(c)
-                    else if (t >= startToday - 6 * 86400000) groups[2]!.items.push(c)
+                    else if (t >= startYesterday) groups[1]!.items.push(c)
+                    else if (t >= startThisWeek) groups[2]!.items.push(c)
                     else groups[3]!.items.push(c)
                   }
                   return groups
@@ -4766,6 +4820,9 @@ export function MemoryChat({
                         speakingId,
                         speakLoadingId,
                         speakError,
+                        ttsEnabled,
+                        ttsSpeed,
+                        latestVoiceAssistantId,
                         askSelections: askSel,
                         incomingFiles: incomingFilesFor(message.id)
                       }}
@@ -5280,7 +5337,7 @@ export function MemoryChat({
                       </button>
                     </div>
                   )}
-                  {voiceTurns.error && !voiceTurns.microphoneDenied && (
+                  {voiceTurns.error && !voiceTurns.microphoneDenied && !voiceMode && (
                     <div
                       role="alert"
                       className="mx-2 mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100"
@@ -5289,80 +5346,14 @@ export function MemoryChat({
                     </div>
                   )}
                   {voiceMode ? (
-                    <div className="flex w-full flex-col items-center gap-3 px-3 py-4">
-                      <fieldset className="grid w-full max-w-md grid-cols-3 rounded-md border border-neutral-800 bg-neutral-950 p-1">
-                        <legend className="sr-only">Voice turn mode</legend>
-                        {(Object.keys(VOICE_TURN_LABELS) as VoiceTurnMode[]).map((turnMode) => (
-                          <button
-                            key={turnMode}
-                            type="button"
-                            aria-pressed={voiceTurnMode === turnMode}
-                            title={VOICE_TURN_LABELS[turnMode].description}
-                            onClick={() => setVoiceTurnMode(turnMode)}
-                            className={`rounded px-2 py-1.5 text-[11px] transition-colors ${
-                              voiceTurnMode === turnMode
-                                ? 'bg-green-500/15 text-green-400'
-                                : 'text-neutral-500 hover:bg-neutral-900 hover:text-neutral-300'
-                            }`}
-                          >
-                            {VOICE_TURN_LABELS[turnMode].label}
-                          </button>
-                        ))}
-                      </fieldset>
-                      <p className="text-center text-[11px] text-neutral-500">
-                        {VOICE_TURN_LABELS[voiceTurnMode].description}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={toggleRecording}
-                        aria-label={voiceRecordButtonLabel}
-                        className="flex flex-col items-center gap-2"
-                      >
-                        <span
-                          className={`flex h-14 w-14 items-center justify-center rounded-full border-2 transition-colors ${recording ? 'border-red-500 bg-red-500/15 text-red-400' : 'border-green-500 bg-green-500/10 text-green-500 hover:bg-green-500/20'}`}
-                        >
-                          {transcribing ? (
-                            <span className="relative flex items-center justify-center">
-                              <svg className="h-6 w-6 animate-spin" fill="none" viewBox="0 0 24 24">
-                                <circle
-                                  className="opacity-25"
-                                  cx="12"
-                                  cy="12"
-                                  r="10"
-                                  stroke="currentColor"
-                                  strokeWidth="4"
-                                />
-                                <path
-                                  className="opacity-75"
-                                  fill="currentColor"
-                                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                                />
-                              </svg>
-                              <X className="absolute h-3 w-3" weight="bold" />
-                            </span>
-                          ) : recording ? (
-                            <svg className="h-6 w-6" fill="currentColor" viewBox="0 0 24 24">
-                              <rect x="6" y="6" width="12" height="12" rx="2" />
-                            </svg>
-                          ) : (
-                            <svg
-                              className="h-6 w-6"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M19 11a7 7 0 01-14 0m7 7v3m0-3a4 4 0 01-4-4V5a4 4 0 018 0v6a4 4 0 01-4 4z"
-                              />
-                            </svg>
-                          )}
-                        </span>
-                        <span className="text-xs text-neutral-500">{voiceStatus}</span>
-                      </button>
-                    </div>
+                    <ChatVoiceComposer
+                      phase={voiceTurns.phase}
+                      turnMode={voiceTurnMode}
+                      suspended={voiceTurns.suspended}
+                      transcriptionLabel={voiceTurns.transcriptionLabel}
+                      error={voiceTurns.error}
+                      onToggleRecording={toggleRecording}
+                    />
                   ) : (
                     <textarea
                       ref={inputRef}
@@ -5629,6 +5620,15 @@ export function MemoryChat({
                             : 'Reasoning off — direct answers (faster)'}
                         </TooltipContent>
                       </Tooltip>
+                      <VoiceModeControl
+                        active={voiceMode}
+                        onToggle={() => setVoiceMode((current) => !current)}
+                        onOpenSettings={() => {
+                          closePanels()
+                          setSettingsInitialTab('voice')
+                          setSettingsOpen(true)
+                        }}
+                      />
                       {/* Image toggle — always available; turning it on makes the next
                       prompt generate an image instead of a chat reply. */}
                       <Tooltip>
@@ -5851,7 +5851,11 @@ export function MemoryChat({
         )}
 
         {settingsOpen && (
-          <SettingsPanel key="model-settings" onClose={() => setSettingsOpen(false)} />
+          <SettingsPanel
+            key={`model-settings-${settingsInitialTab}`}
+            initialTab={settingsInitialTab}
+            onClose={() => setSettingsOpen(false)}
+          />
         )}
       </AnimatePresence>
 

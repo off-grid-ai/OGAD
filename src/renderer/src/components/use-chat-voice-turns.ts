@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  DEFAULT_SILENCE_AFTER_SPEECH_MS,
-  DEFAULT_SPEAKER_DRAIN_MS,
   SpeechEndpointTimer,
   audioFilename,
   chooseRecorderMime,
@@ -25,6 +23,8 @@ export interface ChatVoiceClip {
 interface ChatVoiceTurnOptions {
   voiceMode: boolean
   mode: VoiceTurnMode
+  silenceAfterSpeechMs: number
+  speakerDrainMs: number
   isGenerating: boolean
   isPlaybackActive: boolean
   transcribeAudio: (audio: Uint8Array, extension: string) => Promise<string>
@@ -332,7 +332,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
           const endpoint = new SpeechEndpointTimer(() => finishCaptureRef.current(false))
           endpoint.begin(Date.now(), {
             handsFree: mode === 'handsfree',
-            silenceAfterSpeechMs: DEFAULT_SILENCE_AFTER_SPEECH_MS
+            silenceAfterSpeechMs: current.silenceAfterSpeechMs
           })
           resources.context = context
           resources.endpoint = endpoint
@@ -474,16 +474,22 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
       awaitingReply &&
       !options.isGenerating &&
       !options.isPlaybackActive &&
-      (sawGenerationRef.current || sawPlaybackRef.current)
+      sawPlaybackRef.current
     ) {
       setAwaitingReply(false)
       sawGenerationRef.current = false
       sawPlaybackRef.current = false
       setRearmReady(false)
       clearRearmTimer()
-      rearmTimerRef.current = setTimeout(() => setRearmReady(true), DEFAULT_SPEAKER_DRAIN_MS)
+      rearmTimerRef.current = setTimeout(() => setRearmReady(true), options.speakerDrainMs)
     }
-  }, [awaitingReply, clearRearmTimer, options.isGenerating, options.isPlaybackActive])
+  }, [
+    awaitingReply,
+    clearRearmTimer,
+    options.isGenerating,
+    options.isPlaybackActive,
+    options.speakerDrainMs
+  ])
 
   useEffect(() => {
     const wasActive = previousPlaybackRef.current
@@ -493,9 +499,9 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
       setRearmReady(false)
     } else if (wasActive && !awaitingReply) {
       clearRearmTimer()
-      rearmTimerRef.current = setTimeout(() => setRearmReady(true), DEFAULT_SPEAKER_DRAIN_MS)
+      rearmTimerRef.current = setTimeout(() => setRearmReady(true), options.speakerDrainMs)
     }
-  }, [awaitingReply, clearRearmTimer, options.isPlaybackActive])
+  }, [awaitingReply, clearRearmTimer, options.isPlaybackActive, options.speakerDrainMs])
 
   useEffect(() => {
     if (

@@ -1132,6 +1132,9 @@ function AppContent() {
                     <MemoryChat
                       onNavigateToMemory={handleSelectMemory}
                       onNavigateToChat={handleSelectChat}
+                      onNavigateToMeeting={(meetingId) =>
+                        handleProNavigate({ view: 'meetings', meetingId })
+                      }
                       onNavigateToEntity={handleSelectEntity}
                       onOpenProject={(id) => {
                         setSelectedProjectId(id)

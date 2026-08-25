@@ -18,7 +18,7 @@ export type ThinkSplitterFactory = (
 ) => ThinkSplitter
 type RagResult = RagChatResultContract
 type StoredMessage = {
-  id: number
+  id: number | string
   role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
   context?: unknown
@@ -118,8 +118,10 @@ export class ChatBoundary {
         await gate.promise
       }
       this.messages[conversationId] ??= []
+      const id = this.nextMessageId++
+      const uuid = `message-${id}`
       this.messages[conversationId]!.push({
-        id: this.nextMessageId++,
+        id: uuid,
         role,
         content,
         context,
@@ -127,7 +129,7 @@ export class ChatBoundary {
       })
       const conversation = this.conversations.find((item) => item.id === conversationId)
       if (conversation) conversation.message_count = this.messages[conversationId]!.length
-      return this.nextMessageId - 1
+      return { id, uuid }
     }
   )
 
@@ -181,6 +183,12 @@ export class ChatBoundary {
       this.speechTurns.push(turn)
       return turn.promise
     }),
+    ttsVoices: vi.fn(async () => [
+      { id: 'af_heart', label: 'Heart', language: 'en-US' },
+      { id: 'bf_emma', label: 'Emma', language: 'en-GB' }
+    ]),
+    prepareTtsVoice: vi.fn(async () => ({ ready: true })),
+    onTtsVoiceProgress: vi.fn(() => () => {}),
     getSettings: vi.fn(async () => ({})),
     saveSetting: vi.fn(async () => {}),
     listProjects: vi.fn(async () => this.projects.map((item) => ({ ...item }))),

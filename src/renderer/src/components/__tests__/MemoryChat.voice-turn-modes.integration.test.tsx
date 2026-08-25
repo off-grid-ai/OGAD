@@ -193,7 +193,7 @@ describe('<MemoryChat/> Desktop voice turn modes', () => {
     expect(transcribeAudio).toHaveBeenCalledTimes(2)
   })
 
-  it('shows all shared modes and Auto sends after speech ends in silence', async () => {
+  it('keeps the voice composer compact and Auto sends after speech ends in silence', async () => {
     const { getUserMedia } = installMicrophone()
     const boundary = new ChatBoundary()
     const transcribeAudio = vi.fn(async () => 'Schedule the planning review')
@@ -205,12 +205,18 @@ describe('<MemoryChat/> Desktop voice turn modes', () => {
     installBoundary(boundary)
     renderChat({ conversationId: 'conversation-a' })
 
-    expect(await screen.findByRole('button', { name: 'Manual' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Auto' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Hands-free' })).toBeTruthy()
+    expect(await screen.findByRole('group', { name: 'Voice mode' })).toBeTruthy()
+    expect(screen.getByText('Manual')).toBeTruthy()
+    expect(screen.getByText('Click the microphone to record')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Voice options' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Manual' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Voice settings' }))
+    expect(await screen.findByRole('button', { name: 'Auto' })).toBeTruthy()
 
     vi.useFakeTimers()
     fireEvent.click(screen.getByRole('button', { name: 'Auto' }))
+    await flush()
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     fireEvent.click(screen.getByRole('button', { name: 'Start voice recording' }))
     await flush()
     expect(getUserMedia).toHaveBeenCalledOnce()
@@ -241,7 +247,7 @@ describe('<MemoryChat/> Desktop voice turn modes', () => {
     renderChat({ conversationId: 'conversation-a' })
 
     await user.click(await screen.findByRole('button', { name: 'Start voice recording' }))
-    await user.click(screen.getByTitle('Voice mode on — speak and listen in voice notes'))
+    await user.click(screen.getByRole('button', { name: 'Voice' }))
 
     await waitFor(() => expect(stopTrack).toHaveBeenCalledOnce())
     expect(screen.getByPlaceholderText(/Ask about/)).toBeTruthy()
@@ -260,9 +266,11 @@ describe('<MemoryChat/> Desktop voice turn modes', () => {
     installBoundary(boundary)
     renderChat({ conversationId: 'conversation-a' })
 
+    fireEvent.click(await screen.findByRole('button', { name: 'Voice settings' }))
     await screen.findByRole('button', { name: 'Hands-free' })
     vi.useFakeTimers()
     fireEvent.click(screen.getByRole('button', { name: 'Hands-free' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     await flush()
     expect(getUserMedia).toHaveBeenCalledOnce()
     expect(screen.getByText('Waiting for your voice')).toBeTruthy()
@@ -295,9 +303,114 @@ describe('<MemoryChat/> Desktop voice turn modes', () => {
     expect(getUserMedia).toHaveBeenCalledTimes(2)
 
     fireEvent.click(screen.getByRole('button', { name: 'Stop voice recording' }))
-    expect(screen.getByText('Hands-free is paused - click to resume')).toBeTruthy()
+    expect(screen.getByText('Paused - click the microphone to resume')).toBeTruthy()
     act(() => vi.advanceTimersByTime(10_000))
     await flush()
     expect(getUserMedia).toHaveBeenCalledTimes(2)
+  })
+
+  it('opens live voice reasoning and restores its collapse control when the reply completes', async () => {
+    installMicrophone()
+    const boundary = new ChatBoundary()
+    Object.assign(boundary.api, {
+      getSettings: vi.fn(async () => ({ composerVoiceMode: true })),
+      transcribeAudio: vi.fn(async () => 'Check my calendar'),
+      getTranscriptionInfo: vi.fn(transcriptionInfo)
+    })
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+
+    await user.click(await screen.findByRole('button', { name: 'Start voice recording' }))
+    await user.click(screen.getByRole('button', { name: 'Stop voice recording' }))
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+
+    boundary.emitReasoning(0, 'Check the calendar before answering.')
+    boundary.emit(0, 'You have a planning review at 10.')
+    expect(await screen.findByText('Check the calendar before answering.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Thinking…/ })).toBeTruthy()
+
+    boundary.resolve(0, 'You have a planning review at 10.')
+    await flush()
+    const completedThought = await screen.findByRole('button', { name: /Thought process/i })
+    expect(screen.queryByText('Check the calendar before answering.')).toBeNull()
+    await user.click(completedThought)
+    expect(await screen.findByText('Check the calendar before answering.')).toBeTruthy()
+    await user.click(completedThought)
+    expect(screen.queryByText('Check the calendar before answering.')).toBeNull()
+  })
+
+  it('keeps historical voice reasoning collapsed until the user opens it', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-a'] = [
+      {
+        id: 1,
+        role: 'assistant',
+        content: '<think>Historical reasoning stays private.</think>The saved answer.'
+      }
+    ]
+    Object.assign(boundary.api, {
+      getSettings: vi.fn(async () => ({ composerVoiceMode: true }))
+    })
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+
+    const thought = await screen.findByRole('button', { name: /Thought process/i })
+    expect(screen.queryByText('Historical reasoning stays private.')).toBeNull()
+    await user.click(thought)
+    expect(await screen.findByText('Historical reasoning stays private.')).toBeTruthy()
+  })
+
+  it('shows Copied on a voice note, then returns to the copy action', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-a'] = [
+      { id: 1, role: 'assistant', content: 'Copy this voice reply.' }
+    ]
+    const writeClipboardText = vi.fn(async () => true)
+    Object.assign(boundary.api, {
+      getSettings: vi.fn(async () => ({ composerVoiceMode: true })),
+      writeClipboardText
+    })
+    installBoundary(boundary)
+    renderChat({ conversationId: 'conversation-a' })
+
+    const copy = await screen.findByRole('button', { name: 'Copy transcript' })
+    vi.useFakeTimers()
+    fireEvent.click(copy)
+    await flush()
+    expect(writeClipboardText).toHaveBeenCalledWith('Copy this voice reply.')
+    expect(screen.getByRole('status').textContent).toBe('Copied')
+
+    act(() => vi.advanceTimersByTime(1_500))
+    expect(screen.getByRole('button', { name: 'Copy transcript' })).toBeTruthy()
+  })
+
+  it('keeps the voice-note copy action available when both clipboard paths fail', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-a'] = [
+      { id: 1, role: 'assistant', content: 'Keep this copy action.' }
+    ]
+    const writeClipboardText = vi.fn(async () => {
+      throw new Error('IPC unavailable')
+    })
+    const browserWrite = vi.fn(async () => {
+      throw new Error('Clipboard unavailable')
+    })
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: browserWrite }
+    })
+    Object.assign(boundary.api, {
+      getSettings: vi.fn(async () => ({ composerVoiceMode: true })),
+      writeClipboardText
+    })
+    installBoundary(boundary)
+    renderChat({ conversationId: 'conversation-a' })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy transcript' }))
+    await waitFor(() => expect(browserWrite).toHaveBeenCalledWith('Keep this copy action.'))
+    expect(screen.getByRole('button', { name: 'Copy transcript' })).toBeTruthy()
+    expect(screen.queryByRole('status')).toBeNull()
   })
 })

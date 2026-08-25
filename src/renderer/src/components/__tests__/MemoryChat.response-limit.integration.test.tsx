@@ -4,7 +4,7 @@
 // public preload/stream contracts; the paired main-process integration test owns settings-file
 // persistence, LLMService, and the native-model socket.
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SettingsPanel } from '../SettingsPanel'
@@ -40,6 +40,7 @@ describe('<MemoryChat/> - response limit through public renderer contracts', () 
       getLlmSettings: async () => ({ maxTokens }),
       setLlmSettings,
       ttsVoices: async () => [],
+      prepareTtsVoice: async () => ({ ready: true }),
       onTtsVoiceProgress: () => () => {},
       listTools: async () => [],
       mcpList: async () => []
@@ -51,17 +52,18 @@ describe('<MemoryChat/> - response limit through public renderer contracts', () 
         <SettingsPanel onClose={() => {}} />
       </TooltipProvider>
     )
-    // Max output is now a select (Auto + hard-cap options), not a range slider.
-    const responseLimit = screen.getByLabelText<HTMLSelectElement>('Max output')
-    await waitFor(() => expect(responseLimit.value).toBe(String(OLD_MAX_TOKENS)))
-    fireEvent.change(responseLimit, { target: { value: String(RAISED_MAX_TOKENS) } })
+    expect(settingsView.container.querySelector('select')).toBeNull()
+    const user = userEvent.setup()
+    const responseLimit = screen.getByRole('button', { name: 'Max output' })
+    await waitFor(() => expect(responseLimit.textContent).toContain('2K tokens'))
+    await user.click(responseLimit)
+    await user.click(screen.getByRole('menuitemradio', { name: '4K tokens' }))
     await waitFor(() =>
       expect(setLlmSettings).toHaveBeenCalledWith({ maxTokens: RAISED_MAX_TOKENS })
     )
     settingsView.unmount()
 
     const longAnswer = `${'x'.repeat(OLD_MAX_TOKENS + 2)} LIMIT-END`
-    const user = userEvent.setup()
     renderChat({ conversationId: 'conversation-b' })
     await send('Write beyond the previous response limit', user)
     await waitFor(() => expect(boundary.calls).toHaveLength(1))
@@ -109,6 +111,7 @@ describe('<MemoryChat/> - response limit through public renderer contracts', () 
       getLlmSettings: async () => settings,
       setLlmSettings,
       ttsVoices: async () => [],
+      prepareTtsVoice: async () => ({ ready: true }),
       onTtsVoiceProgress: () => () => {},
       listTools: async () => [],
       mcpList: async () => []
@@ -127,9 +130,10 @@ describe('<MemoryChat/> - response limit through public renderer contracts', () 
     expect(status.textContent).toContain('Running32K')
     expect(status.textContent).toContain('Recommended16K')
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Context window' }), {
-      target: { value: '16384' }
-    })
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Context window' }))
+    expect(screen.getByRole('menuitemradio', { name: "256K tokens (model's max)" })).toBeTruthy()
+    await user.click(screen.getByRole('menuitemradio', { name: '16K tokens (recommended)' }))
     await waitFor(() => expect(setLlmSettings).toHaveBeenCalledWith({ ctxSize: 16384 }))
     await waitFor(() => expect(status.textContent).toContain('Running16K'))
   })

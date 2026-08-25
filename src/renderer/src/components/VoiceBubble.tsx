@@ -13,19 +13,12 @@
  *    transcript-derived envelope (stable before/during playback).
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Play, Pause, CircleNotch, CaretDown, Copy, ArrowsClockwise } from '@phosphor-icons/react'
+import { Play, Pause, CaretDown, Copy, ArrowsClockwise, Check } from '@phosphor-icons/react'
+import { claimVoicePlayback, onVoicePlaybackClaim } from '@renderer/lib/voice-playback-bus'
+import { LoadingDots } from './ui/loading-dots'
 
 const WAVEFORM_BARS = 48
 const SPEED_STEPS = [0.5, 0.8, 1.0, 1.25, 1.5, 2.0]
-
-// One bubble plays at a time: when any bubble starts, the rest pause.
-const playBus = new EventTarget()
-
-/** Pause every voice bubble — call when leaving a chat so playback never carries
- *  across conversations. A sentinel id matches no bubble, so all of them stop. */
-export function stopAllVoicePlayback(): void {
-  playBus.dispatchEvent(new CustomEvent('play', { detail: '__stop_all__' }))
-}
 
 function formatDuration(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return '0:00'
@@ -104,8 +97,14 @@ interface VoiceBubbleProps {
   synthesize: (text: string) => Promise<{ dataUrl: string }>
   /** Play once automatically when ready (a just-finished assistant reply). */
   autoPlay?: boolean
+  /** The latest assistant voice reply opens its transcript without another click. */
+  showTranscriptInitially?: boolean
+  /** Persisted playback speed from Voice settings. */
+  defaultSpeed?: number
   /** Reports audio preparation and playback so hands-free input cannot record the reply. */
   onPlaybackStateChange?: (active: boolean) => void
+  /** The chat's existing copy-feedback state for this message. */
+  copied?: boolean
   onCopy?: (text: string) => void
   onRetry?: () => void
 }
@@ -119,7 +118,10 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
   isLoading = false,
   synthesize,
   autoPlay = false,
+  showTranscriptInitially = false,
+  defaultSpeed = 1,
   onPlaybackStateChange,
+  copied = false,
   onCopy,
   onRetry
 }) => {
@@ -128,10 +130,19 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
   const [status, setStatus] = useState<'idle' | 'loading' | 'playing' | 'paused'>('idle')
   const [currentTime, setCurrentTime] = useState(0)
   const [loadedDuration, setLoadedDuration] = useState(0)
-  const [speed, setSpeed] = useState(1.0)
-  const [showTranscript, setShowTranscript] = useState(false)
+  const [speed, setSpeed] = useState(defaultSpeed)
+  const [showTranscript, setShowTranscript] = useState(showTranscriptInitially)
   const [playbackError, setPlaybackError] = useState<string | null>(null)
   const playbackActive = status === 'loading' || status === 'playing'
+
+  useEffect(() => {
+    if (showTranscriptInitially && transcript && !isLoading) setShowTranscript(true)
+  }, [isLoading, showTranscriptInitially, transcript])
+
+  useEffect(() => {
+    setSpeed(defaultSpeed)
+    if (audioRef.current) audioRef.current.playbackRate = defaultSpeed
+  }, [defaultSpeed])
 
   useEffect(() => {
     onPlaybackStateChange?.(playbackActive)
@@ -172,15 +183,12 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
 
   // Pause when another bubble takes over playback.
   useEffect(() => {
-    const onOther = (e: Event) => {
-      const id = (e as CustomEvent<string>).detail
+    return onVoicePlaybackClaim((id) => {
       if (id !== messageId && audioRef.current && !audioRef.current.paused) {
         audioRef.current.pause()
         setStatus('paused')
       }
-    }
-    playBus.addEventListener('play', onOther)
-    return () => playBus.removeEventListener('play', onOther)
+    })
   }, [messageId])
 
   useEffect(
@@ -215,7 +223,7 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
       return
     }
     if (status === 'paused' && audio) {
-      playBus.dispatchEvent(new CustomEvent('play', { detail: messageId }))
+      claimVoicePlayback(messageId)
       await audio.play()
       setStatus('playing')
       return
@@ -234,7 +242,7 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
       const audioEl = new Audio(src)
       audioRef.current = audioEl
       wire(audioEl)
-      playBus.dispatchEvent(new CustomEvent('play', { detail: messageId }))
+      claimVoicePlayback(messageId)
       await audioEl.play()
       setStatus('playing')
     } catch (e) {
@@ -287,7 +295,7 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
           title={status === 'playing' ? 'Pause' : 'Play'}
         >
           {status === 'loading' ? (
-            <CircleNotch size={16} weight="bold" className="animate-spin" />
+            <LoadingDots size="small" />
           ) : status === 'playing' ? (
             <Pause size={16} weight="fill" />
           ) : (
@@ -298,11 +306,7 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
         {/* Waveform (click to seek) */}
         <div className="flex h-10 flex-1 items-center gap-[1.5px] overflow-hidden">
           {isLoading && !isUser ? (
-            <span className="flex items-center gap-1.5 px-2">
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-green-500 [animation-delay:-0.3s]" />
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-green-500 [animation-delay:-0.15s]" />
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-green-500" />
-            </span>
+            <LoadingDots className="mx-1" />
           ) : (
             bars.map((shape, i) => {
               const played = progress > 0 && i / bars.length < progress
@@ -364,10 +368,20 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
             <button
               type="button"
               onClick={() => onCopy(transcript)}
-              className="cursor-pointer text-neutral-600 transition-colors hover:text-green-500"
-              title="Copy transcript"
+              className={`flex cursor-pointer items-center gap-1 text-[11px] transition-colors ${copied ? 'text-green-500' : 'text-neutral-600 hover:text-green-500'}`}
+              title={copied ? 'Copied' : 'Copy transcript'}
+              aria-label={copied ? 'Copied' : 'Copy transcript'}
             >
-              <Copy size={13} />
+              {copied ? (
+                <>
+                  <Check size={13} weight="bold" />
+                  <span role="status" aria-live="polite">
+                    Copied
+                  </span>
+                </>
+              ) : (
+                <Copy size={13} />
+              )}
             </button>
           ) : null}
           {!isLoading && onRetry ? (
