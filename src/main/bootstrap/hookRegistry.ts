@@ -79,6 +79,9 @@ export const HOOKS = {
    *  for approval; returns true when queued (caller must not execute). Pro
    *  registers it to route the action through its approval queue + audit log. */
   actionsProposeApproval: 'actions:proposeApproval',
+  /** ({ conversationId, message }) => Promise<{ answer: string } | null> - lets Pro resolve a
+   * confirmation written in an Action's execution chat before the model can infer a new Action. */
+  actionsResolveChatDecision: 'actions:resolveChatDecision',
   /** Legacy MCP-only predecessor of actionsProposeApproval. Kept so a pro build
    *  that has not yet migrated still gates connector writes; remove once
    *  desktop-pro registers actionsProposeApproval. */

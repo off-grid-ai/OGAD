@@ -14,6 +14,7 @@
  */
 import { useEffect, useState } from 'react'
 import { Button } from '@renderer/components/ui/button'
+import { presentActionApproval } from './action-approval-presentation'
 
 interface GateRequest {
   actionId: string
@@ -36,13 +37,6 @@ const OUTCOME_LABEL: Record<string, string> = {
   rejected: 'Declined',
   needs_help: 'Ran but could not be confirmed - needs your attention',
   poisoned: 'Failed'
-}
-
-function riskTone(risk: string): string {
-  if (risk === 'irreversible') {
-    return 'text-red-500 border-red-500/40'
-  }
-  return 'text-amber-500 border-amber-500/40'
 }
 
 export function ActionGateDock(): React.JSX.Element | null {
@@ -86,50 +80,62 @@ export function ActionGateDock(): React.JSX.Element | null {
     }))
   }
 
-  if (pending.length === 0 && outcomes.length === 0) {
+  // Pro owns one durable approval card in the Action's execution chat. Keep this
+  // live dock as the free-build approval surface and as the shared outcome feed,
+  // but never draw a second pending card beside Pro's persistent one.
+  const visiblePending = window.api.isPro ? [] : pending
+  if (visiblePending.length === 0 && outcomes.length === 0) {
     return null
   }
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-2 px-4 pb-2 font-mono">
-      {pending.map((request) => {
+      {visiblePending.map((request) => {
         const editing = edits[request.actionId]
+        const presentation = presentActionApproval(request)
         return (
           <div
             key={request.actionId}
             data-testid="gate-card"
             className="rounded-md border border-border bg-card p-3 text-sm"
           >
-            <div className="flex items-center justify-between gap-2">
-              <span className="font-medium">{request.title}</span>
-              <span
-                className={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${riskTone(request.risk)}`}
-              >
-                {request.risk}
-              </span>
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+              Approval needed
             </div>
-            <div className="mt-2 space-y-1">
-              {Object.entries(request.args).map(([key, value]) => (
-                <div key={key} className="flex items-center gap-2 text-xs">
-                  <span className="w-20 shrink-0 text-muted-foreground">{key}</span>
+            <div className="mt-1 font-medium text-foreground">{presentation.title}</div>
+            <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              {presentation.description}
+            </div>
+            <div className="mt-3 space-y-2">
+              {presentation.details.map((detail) => (
+                <div key={detail.key} className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 text-xs">
+                  <span className="text-muted-foreground">{detail.label}</span>
                   {editing ? (
                     <input
-                      aria-label={`edit ${key}`}
+                      aria-label={`edit ${detail.label.toLowerCase()}`}
                       className="w-full rounded border border-border bg-background px-1.5 py-0.5"
-                      value={editing[key] ?? String(value ?? '')}
+                      value={editing[detail.key] ?? detail.editValue}
                       onChange={(e) =>
                         setEdits((current) => ({
                           ...current,
-                          [request.actionId]: { ...current[request.actionId], [key]: e.target.value }
+                          [request.actionId]: {
+                            ...current[request.actionId],
+                            [detail.key]: e.target.value
+                          }
                         }))
                       }
                     />
                   ) : (
-                    <span className="truncate">{String(value ?? '')}</span>
+                    <span className="break-words text-foreground">{detail.value}</span>
                   )}
                 </div>
               ))}
             </div>
+            {presentation.warning ? (
+              <div className="mt-3 text-xs text-amber-600 dark:text-amber-400">
+                {presentation.warning}
+              </div>
+            ) : null}
             <div className="mt-3 flex items-center gap-2">
               {editing ? (
                 <Button
@@ -147,22 +153,26 @@ export function ActionGateDock(): React.JSX.Element | null {
                 </Button>
               ) : (
                 <>
-                  <Button size="sm" onClick={() => resolve(request.actionId, { kind: 'approve' })}>
+                  <Button
+                    size="sm"
+                    disabled={!presentation.canApprove}
+                    onClick={() => resolve(request.actionId, { kind: 'approve' })}
+                  >
                     Approve
                   </Button>
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() =>
-                      setEdits((current) => ({ ...current, [request.actionId]: {} }))
-                    }
+                    onClick={() => setEdits((current) => ({ ...current, [request.actionId]: {} }))}
                   >
                     Edit
                   </Button>
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => resolve(request.actionId, { kind: 'reject', reason: 'declined in chat' })}
+                    onClick={() =>
+                      resolve(request.actionId, { kind: 'reject', reason: 'declined in chat' })
+                    }
                   >
                     Reject
                   </Button>

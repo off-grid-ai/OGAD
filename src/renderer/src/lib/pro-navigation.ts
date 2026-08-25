@@ -12,6 +12,7 @@ export type ProNavigationIntent =
   | { view: 'replay'; seekMs?: number }
   | { view: 'meetings'; meetingId?: number }
   | { view: 'chat'; approvalId: number }
+  | { view: 'chat'; conversationId: string }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
@@ -51,7 +52,11 @@ export function normalizeProNavigationIntent(value: unknown): ProNavigationInten
 
   if (value.view === 'chat') {
     const approvalId = optionalPositiveInteger(value, 'approvalId')
-    return approvalId ? { view: 'chat', approvalId } : null
+    const conversationId =
+      typeof value.conversationId === 'string' ? value.conversationId.trim() : ''
+    if (approvalId && !conversationId) return { view: 'chat', approvalId }
+    if (conversationId && approvalId === undefined) return { view: 'chat', conversationId }
+    return null
   }
 
   return value.view === 'actions' ? normalizeActionsIntent(value) : null

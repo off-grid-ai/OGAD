@@ -51,13 +51,22 @@ describe('<ActionGateDock/>', () => {
     expect(container.firstChild).toBeNull()
   })
 
-  it('a pending gate renders the card with resolved values and the risk', async () => {
+  it('a pending gate explains the task without exposing internal risk tokens', async () => {
     render(<ActionGateDock />)
     emitPending(request)
     await waitFor(() => expect(screen.getByTestId('gate-card')).toBeTruthy())
+    expect(screen.getByText('Approval needed')).toBeTruthy()
     expect(screen.getByText('Send a message to Ali')).toBeTruthy()
     expect(screen.getByText('ali@x.test')).toBeTruthy()
-    expect(screen.getByText('irreversible')).toBeTruthy()
+    expect(screen.getByText('This action cannot be undone.')).toBeTruthy()
+    expect(screen.queryByText('irreversible')).toBeNull()
+  })
+
+  it('does not duplicate Pro’s persistent execution-chat approval card', async () => {
+    window.api = { ...window.api, isPro: true } as never
+    render(<ActionGateDock />)
+    emitPending(request)
+    await waitFor(() => expect(screen.queryByTestId('gate-card')).toBeNull())
   })
 
   it('Approve resolves the gate with the approve decision', async () => {
@@ -136,12 +145,45 @@ describe('<ActionGateDock/>', () => {
     await waitFor(() => expect(screen.queryByTestId('outcome-row')).toBeNull())
   })
 
-  it('a mutate-risk card wears the amber tone, not the red one', async () => {
+  it('approval chatter cannot become a new executable task', async () => {
     render(<ActionGateDock />)
-    emitPending({ ...request, risk: 'mutate' })
+    emitPending({
+      ...request,
+      actionType: 'computer_task',
+      title: 'approved. please proceed',
+      args: { goal: 'approved. please proceed' },
+      risk: 'mutate'
+    })
     await waitFor(() => screen.getByTestId('gate-card'))
-    expect(screen.getByText('mutate').className).toMatch(/amber/)
-    expect(screen.getByText('mutate').className).not.toMatch(/red/)
+    expect(screen.getByText('Review this action')).toBeTruthy()
+    expect(screen.getByText('Add the task you want Off Grid AI to complete.')).toBeTruthy()
+    expect(screen.getByText('Add the task details before you approve.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Approve' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.queryByText(/approved\. please proceed/i)).toBeNull()
+    expect(screen.queryByText('mutate')).toBeNull()
+  })
+
+  it('shows proposal inputs as a clear task plan', async () => {
+    render(<ActionGateDock />)
+    emitPending({
+      ...request,
+      actionType: 'computer_task',
+      title: 'Generate the proposal deck',
+      args: {
+        sourceFolder: '/Documents/Investor Relations',
+        outputPath: '/Documents/Proposal.pptx',
+        style: 'ABSLI proposal'
+      },
+      risk: 'mutate'
+    })
+    await waitFor(() => screen.getByTestId('gate-card'))
+    expect(screen.getByText('Generate the proposal deck')).toBeTruthy()
+    expect(screen.getByText('Source folder')).toBeTruthy()
+    expect(screen.getByText('/Documents/Investor Relations')).toBeTruthy()
+    expect(screen.getByText('Save to')).toBeTruthy()
+    expect(screen.getByText('/Documents/Proposal.pptx')).toBeTruthy()
+    expect(screen.getByText('Style')).toBeTruthy()
+    expect(screen.getByText('ABSLI proposal')).toBeTruthy()
   })
 
   it('an edited outcome never lands as a row - the re-gated card is its own event', async () => {

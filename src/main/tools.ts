@@ -28,6 +28,7 @@ import {
   type ProposalDeferredImageRequest
 } from './proposal-deck/tool'
 import { proposalDeckSystemHint, proposalDeckService } from './proposal-deck/service'
+import { callHookAsync, HOOKS } from './bootstrap/hookRegistry'
 
 // Per-tool enable/disable, persisted as a list of disabled tool names.
 function disabledSet(): Set<string> {
@@ -542,6 +543,20 @@ export async function toolChat(
   /** Compatibility alias for older renderer bundles that can generate only one image. */
   imageRequest?: { prompt: string }
 }> {
+  if (opts.conversationId) {
+    const decision = await callHookAsync<{ answer: string } | null>(
+      HOOKS.actionsResolveChatDecision,
+      { conversationId: opts.conversationId, message: query }
+    )
+    if (decision) {
+      return {
+        answer: decision.answer,
+        toolCalls: [],
+        unified: [],
+        imageRequests: []
+      }
+    }
+  }
   await llm.init() // respects pause; ensures the server is up
   const onDelta = opts.onDelta ?? ((): void => {})
 

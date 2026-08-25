@@ -27,6 +27,12 @@ describe('normalizeProNavigationIntent', () => {
       view: 'chat',
       approvalId: 43
     })
+    expect(
+      normalizeProNavigationIntent({ view: 'chat', conversationId: ' chat-action-43 ' })
+    ).toEqual({
+      view: 'chat',
+      conversationId: 'chat-action-43'
+    })
     expect(normalizeProNavigationIntent({ view: 'day', calendarEventId: 44 })).toEqual({
       view: 'day',
       calendarEventId: 44
@@ -57,6 +63,8 @@ describe('normalizeProNavigationIntent', () => {
     { view: 'actions', approvalId: 2, mode: 'todo' },
     { view: 'chat' },
     { view: 'chat', approvalId: 0 },
+    { view: 'chat', conversationId: '' },
+    { view: 'chat', approvalId: 1, conversationId: 'chat-action-1' },
     { view: 'actions', mode: 'history' },
     { view: 'actions', entity: { id: -1, name: 'Maya' } },
     { view: 'actions', entity: { id: 7, name: ' ' } },

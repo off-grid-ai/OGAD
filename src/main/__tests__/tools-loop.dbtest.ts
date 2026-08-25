@@ -32,6 +32,7 @@ import {
   readUrlText
 } from '../tools'
 import { llm } from '../llm'
+import { HOOKS, registerHook, unregisterHook } from '../bootstrap/hookRegistry'
 
 let fake: FakeLlamaServer
 
@@ -56,6 +57,25 @@ afterAll(async () => {
 })
 
 describe('agentic tool loop — real toolChat + real LLMService over a fake llama socket', () => {
+  it('resolves a pending Action chat decision before the model can infer another Action', async () => {
+    registerHook(HOOKS.actionsResolveChatDecision, ({ conversationId, message }) => {
+      return conversationId === 'execution-chat-17' && message === 'approved. please proceed'
+        ? { answer: 'Approved. Off Grid AI is running this now.' }
+        : null
+    })
+    try {
+      const result = await toolChat('approved. please proceed', [], {
+        conversationId: 'execution-chat-17'
+      })
+
+      expect(result.answer).toBe('Approved. Off Grid AI is running this now.')
+      expect(result.toolCalls).toEqual([])
+      expect(fake.requests).toEqual([])
+    } finally {
+      unregisterHook(HOOKS.actionsResolveChatDecision)
+    }
+  })
+
   it('streams reasoning + content and returns the answer when no tool is called', async () => {
     fake.enqueue({ reasoning: 'Let me think', content: 'Hi there' })
     const deltas: { text: string; kind: string }[] = []

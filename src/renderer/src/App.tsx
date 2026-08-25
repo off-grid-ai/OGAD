@@ -686,6 +686,11 @@ function AppContent() {
     if (!intent) return
 
     if (intent.view === 'chat') {
+      if ('conversationId' in intent) {
+        setChatTarget({ conversationId: intent.conversationId })
+        setViewMode('memory-chat')
+        return
+      }
       void window.api.approvalsExecutionChat(intent.approvalId).then((conversationId) => {
         if (!conversationId) return
         setChatTarget({ conversationId })
