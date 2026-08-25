@@ -15,6 +15,7 @@ import { buildContentParts } from './llm/chat-payload'
 import { readImages } from './llm/read-images'
 import { stripTags, htmlToText, decodeDdgHref } from './tools-parsers'
 import { evaluateArithmetic } from './calculator'
+import type { SearchKind, SearchResult } from '../shared/search-contract'
 
 // Per-tool enable/disable, persisted as a list of disabled tool names.
 function disabledSet(): Set<string> {
@@ -46,7 +47,7 @@ interface ToolContext {
 // (interactive citations, from search_memory) and `imageRequest` (the deferred
 // image prompt, from generate_image) — so the loop dispatches every tool uniformly
 // and no longer branches on the tool's name.
-interface ToolResult {
+export interface ToolResult {
   text: string
   sources?: UnifiedSource[]
   imageRequest?: { prompt: string }
@@ -60,6 +61,49 @@ type ToolDef = {
     args: Record<string, unknown>,
     ctx: ToolContext
   ) => Promise<string | ToolResult> | string | ToolResult
+}
+
+/** The one retrieval path used by memory and Replay chat tools. A caller may
+ *  narrow the source kind, but search, ranking, thumbnails, and citation shape
+ *  stay owned by universalSearch. */
+export async function searchMemoryToolResult(
+  query: string,
+  options: {
+    limit?: number
+    kinds?: SearchKind[]
+    collapseScreenMoments?: boolean
+    excludeChatId?: string
+    emptyText?: string
+    errorSubject?: string
+  } = {}
+): Promise<ToolResult> {
+  try {
+    const { universalSearch } = await import('./search')
+    const limit = Math.min(20, Math.max(1, Number(options.limit) || 8))
+    const hits = await universalSearch(query, {
+      limit,
+      semantic: true,
+      kinds: options.kinds,
+      collapseScreenMoments: options.collapseScreenMoments,
+      excludeChatId: options.excludeChatId
+    })
+    const sources: UnifiedSource[] = hits.map((hit) => ({ ...hit }))
+    const text = hits.length
+      ? hits
+          .map((hit) => {
+            const when = hit.ts
+              ? ` · ${new Date(hit.ts).toISOString().slice(0, 16).replace('T', ' ')}`
+              : ''
+            return `(${hit.surface || hit.kind}${when}) ${hit.title ? `${hit.title} — ` : ''}${hit.snippet}`
+          })
+          .join('\n')
+      : (options.emptyText ?? 'Nothing found in memory for that.')
+    return { text, sources }
+  } catch (error) {
+    return {
+      text: `Error searching ${options.errorSubject ?? 'memory'}: ${(error as Error).message}`
+    }
+  }
 }
 
 // --- HTML helpers for the web tools live in ./tools-parsers (pure, unit-tested).
@@ -245,40 +289,11 @@ const TOOLS: ToolDef[] = [
     // Owns BOTH the model's text result AND the structured hits surfaced as
     // interactive citations. Excludes the current conversation (ctx) so it can't
     // cite itself. The loop dedups the returned sources across rounds.
-    run: async (a, ctx): Promise<ToolResult> => {
-      try {
-        const { universalSearch } = await import('./search')
-        const n = Math.min(20, Math.max(1, Number(a.limit) || 8))
-        const hits = await universalSearch(String(a.query ?? ''), {
-          limit: n,
-          semantic: true,
-          excludeChatId: ctx.conversationId
-        })
-        const sources: UnifiedSource[] = hits.map((h) => ({
-          key: h.key,
-          kind: h.kind,
-          refId: h.refId,
-          title: h.title,
-          snippet: h.snippet,
-          surface: h.surface,
-          ts: h.ts,
-          imagePath: h.imagePath
-        }))
-        const text = hits.length
-          ? hits
-              .map((h) => {
-                const when = h.ts
-                  ? ' · ' + new Date(h.ts).toISOString().slice(0, 16).replace('T', ' ')
-                  : ''
-                return `(${h.surface || h.kind}${when}) ${h.title ? h.title + ' — ' : ''}${h.snippet}`
-              })
-              .join('\n')
-          : 'Nothing found in memory for that.'
-        return { text, sources }
-      } catch (e) {
-        return { text: 'Error searching memory: ' + (e as Error).message }
-      }
-    }
+    run: (args, context) =>
+      searchMemoryToolResult(String(args.query ?? ''), {
+        limit: Number(args.limit) || 8,
+        excludeChatId: context.conversationId
+      })
   },
   {
     // Only OFFERED in a project chat (gated in schemas() by projectId). Lets the model
@@ -369,7 +384,7 @@ async function runTool(
 ): Promise<ToolResult> {
   try {
     const ext = exts.find((e) => e.canHandle(name))
-    if (ext) return { text: String(await ext.execute(name, args)) }
+    if (ext) return asToolResult(await ext.execute(name, args))
     const tool = TOOLS.find((t) => t.name === name)
     if (!tool) return { text: `Error: unknown tool ${name}` }
     return asToolResult(await tool.run(args, ctx))
@@ -385,13 +400,22 @@ async function runTool(
 // Mirrors mobile/src/services/tools/extensions.ts.
 export interface ToolExtension {
   id: string
+  /** A Pro built-in is available with Tools. Connector extensions remain behind
+   *  the separate Connectors control. */
+  scope?: 'tools' | 'connectors'
+  /** Pro built-ins shown beside core built-ins in Tools settings. Connector
+   *  schemas have their own settings surface and omit this. */
+  settings?: readonly { name: string; description: string }[]
   /** OpenAI tool schemas to add when extensions are enabled. Built once per turn;
    *  the extension may cache any per-turn state it needs for execute(). */
   schemas(): Promise<unknown[]> | unknown[]
   /** Whether this extension owns a given tool name. */
   canHandle(name: string): boolean
-  /** Execute a call this extension owns; returns a string result for the model. */
-  execute(name: string, args: Record<string, unknown>): Promise<string> | string
+  /** Execute a call this extension owns. Structured results can also carry citations. */
+  execute(
+    name: string,
+    args: Record<string, unknown>
+  ): Promise<string | ToolResult> | string | ToolResult
   /** Optional system-prompt addition when this extension contributes tools. */
   systemHint?(): string
 }
@@ -407,16 +431,7 @@ export function getToolExtensions(): ToolExtension[] {
 export type ToolCall = { name: string; args: Record<string, unknown>; result: string }
 // Structured sources surfaced by search_memory so the chat can render them as
 // interactive citation cards (thumbnail + open-in-Replay), same as the RAG path.
-export type UnifiedSource = {
-  key: string
-  kind: string
-  refId: number
-  title: string
-  snippet: string
-  surface: string
-  ts: number
-  imagePath: string | null
-}
+export type UnifiedSource = SearchResult
 
 /**
  * Run a chat turn with tool-calling. STREAMS by default (thinking -> tool-call activity
@@ -471,14 +486,21 @@ export async function toolChat(
   // alongside the built-ins. Schemas are built once per turn; each extension
   // caches whatever per-turn state it needs for execute(). Free build registers
   // no extensions, so this is just the built-ins.
-  const exts = opts.connectors ? getToolExtensions() : []
+  const exts = getToolExtensions().filter(
+    (extension) => extension.scope === 'tools' || opts.connectors === true
+  )
   const extSchemas: unknown[] = []
   const hints: string[] = []
+  const disabled = disabledSet()
   for (const e of exts) {
     try {
       const s = await e.schemas()
-      if (s.length) {
-        extSchemas.push(...s)
+      const enabledSchemas = s.filter((schema) => {
+        const name = (schema as { function?: { name?: unknown } })?.function?.name
+        return typeof name !== 'string' || !disabled.has(name)
+      })
+      if (enabledSchemas.length) {
+        extSchemas.push(...enabledSchemas)
         if (e.systemHint) hints.push(e.systemHint())
       }
     } catch (err) {
@@ -699,5 +721,13 @@ function safeParseArgs(raw: string | undefined): Record<string, unknown> {
 /** Names + descriptions + enabled state of all tools (for the settings UI). */
 export function listTools(): { name: string; description: string; enabled: boolean }[] {
   const off = disabledSet()
-  return TOOLS.map((t) => ({ name: t.name, description: t.description, enabled: !off.has(t.name) }))
+  const builtins = TOOLS.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    enabled: !off.has(tool.name)
+  }))
+  const extensions = toolExtensions.flatMap((extension) =>
+    (extension.settings ?? []).map((tool) => ({ ...tool, enabled: !off.has(tool.name) }))
+  )
+  return [...builtins, ...extensions]
 }

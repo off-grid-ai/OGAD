@@ -332,6 +332,11 @@ describe('rankResults — filter then sort', () => {
     expect(out.map((r) => r.key)).toEqual(['obs:1'])
   })
 
+  it('kind filter gives Replay only captured screen results', () => {
+    const out = rankResults(results(), { query: 'x', kinds: ['screen'] })
+    expect(out.map((r) => r.key)).toEqual(['obs:1'])
+  })
+
   it('excludeChatId drops that exact chat and nothing else', () => {
     const out = rankResults(results(), { query: 'x', excludeChatId: '1' })
     expect(out.map((r) => r.key)).not.toContain('chat:1')

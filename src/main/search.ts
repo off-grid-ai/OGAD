@@ -5,6 +5,7 @@
 // semantic half actually covers your captured life. All local, all offline.
 import { getDB } from './database'
 import { embeddings } from './embeddings'
+import { ensureRagStoreSchema } from './rag/store'
 import { addChunks, searchVectors, vectorCount, type VecChunk } from './vectors'
 import {
   applyBoosts,
@@ -141,6 +142,7 @@ export async function searchStatus(): Promise<{ vectors: number; pending: number
 
 /** Data sources available to filter by (surfaces seen, busiest first, + meetings). */
 export function searchSources(): { source: string; count: number }[] {
+  ensureRagStoreSchema()
   const db = getDB()
   const rows = db
     .prepare(
@@ -162,6 +164,7 @@ export function searchSources(): { source: string; count: number }[] {
  *  the numbers reflect the current search (Chat: 1, Knowledge base: 0, …). Empty
  *  query → total counts (searchSources). Only sources with ≥1 match are returned. */
 export function searchFacets(query: string): { source: string; count: number }[] {
+  ensureRagStoreSchema()
   const q = query.trim()
   if (!q) return searchSources()
   const db = getDB()
@@ -431,10 +434,13 @@ export async function universalSearch(
     limit?: number
     semantic?: boolean
     sources?: string[]
+    kinds?: SearchKind[]
+    collapseScreenMoments?: boolean
     sort?: SearchSort
     excludeChatId?: string
   } = {}
 ): Promise<SearchResult[]> {
+  ensureRagStoreSchema()
   const q = query.trim()
   if (!q) return []
   const limit = opts.limit ?? 30
@@ -462,11 +468,29 @@ export async function universalSearch(
   const ordered = rankResults(Array.from(fused.values()), {
     query: q,
     sources: opts.sources,
+    kinds: opts.kinds,
     excludeChatId: opts.excludeChatId,
     sort: opts.sort
   })
-  const ranked = ordered.slice(0, limit)
-  for (const r of ranked)
+  for (const r of ordered)
     r.imagePath = thumbFor({ key: r.key, kind: r.kind, refId: r.refId } as RawHit)
-  return ranked
+
+  if (!opts.collapseScreenMoments) return ordered.slice(0, limit)
+
+  // One captured moment is indexed twice: its raw OCR frame and its distilled
+  // observation. Replay shows moments, not index records, so collapse both forms
+  // after ranking and thumbnail resolution. General search keeps both records.
+  const seenMoments = new Set<string>()
+  const moments: SearchResult[] = []
+  for (const result of ordered) {
+    const identity =
+      result.kind === 'screen'
+        ? result.imagePath || `${String(result.ts)}:${result.surface}`
+        : result.key
+    if (seenMoments.has(identity)) continue
+    seenMoments.add(identity)
+    moments.push(result)
+    if (moments.length === limit) break
+  }
+  return moments
 }

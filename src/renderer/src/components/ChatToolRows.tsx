@@ -17,7 +17,9 @@ interface ChatToolRowsProps {
 
 /** One tool layout for live previews and durable assistant messages. */
 export function ChatToolRows({ tools }: Readonly<ChatToolRowsProps>): React.JSX.Element | null {
-  const visible = (tools ?? []).filter((tool) => tool.name !== 'search_memory')
+  const visible = (tools ?? []).filter(
+    (tool) => tool.name !== 'search_memory' && tool.name !== 'search_replay'
+  )
   if (visible.length === 0) return null
 
   return (

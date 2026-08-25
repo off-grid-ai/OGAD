@@ -130,14 +130,20 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
     expect(quote?.className).toContain('border-l-2')
   })
 
-  it('does not render a chip for search_memory (shown as source cards instead)', async () => {
+  it('does not render chips for citation search tools (shown as source cards instead)', async () => {
     const boundary = new ChatBoundary()
     boundary.messages['conversation-b'] = [
       {
         id: 1,
         role: 'assistant',
         content: 'Answer.',
-        context: { unified: [], toolCalls: [{ name: 'search_memory', result: 'memory hits' }] }
+        context: {
+          unified: [],
+          toolCalls: [
+            { name: 'search_memory', result: 'memory hits' },
+            { name: 'search_replay', result: 'Replay hits' }
+          ]
+        }
       }
     ]
     installBoundary(boundary)
@@ -145,6 +151,7 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
 
     await screen.findByText('Answer.')
     expect(screen.queryByRole('button', { name: 'search_memory' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'search_replay' })).toBeNull()
   })
 
   it('keeps one live inline tool row and clears the old running label when it completes', async () => {

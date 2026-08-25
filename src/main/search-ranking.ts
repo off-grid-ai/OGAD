@@ -159,11 +159,19 @@ export function applyBoosts(results: Iterable<SearchResult>, now: number): void 
  *  overlap in title/snippet with score as tie-break). */
 export function rankResults(
   results: SearchResult[],
-  opts: { query: string; sources?: string[]; excludeChatId?: string; sort?: SearchSort }
+  opts: {
+    query: string
+    sources?: string[]
+    kinds?: SearchKind[]
+    excludeChatId?: string
+    sort?: SearchSort
+  }
 ): SearchResult[] {
   const sourceSet = opts.sources?.length ? new Set(opts.sources.map((s) => s.toLowerCase())) : null
+  const kindSet = opts.kinds?.length ? new Set(opts.kinds) : null
   let ordered = results
   if (sourceSet) ordered = ordered.filter((r) => sourceSet.has((r.surface || '').toLowerCase()))
+  if (kindSet) ordered = ordered.filter((r) => kindSet.has(r.kind))
   // Don't let an answer cite the very conversation it's being asked in.
   if (opts.excludeChatId) ordered = ordered.filter((r) => r.key !== `chat:${opts.excludeChatId}`)
   const sort = opts.sort ?? 'relevance'
