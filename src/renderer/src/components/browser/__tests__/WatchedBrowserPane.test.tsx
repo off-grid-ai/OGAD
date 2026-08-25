@@ -41,6 +41,8 @@ beforeEach(() => {
   visionControl.mockClear()
   resetTaskSessionStoreForTests()
   window.api = {
+    getSettings: vi.fn(async () => ({})),
+    saveSetting: vi.fn(async () => true),
     tasks: {
       list: vi.fn(async () => []),
       onChanged: (cb: Listener) => {
@@ -241,6 +243,15 @@ describe('<WatchedBrowserPane/> shared task panel', () => {
     openTaskSidePanel()
     await waitFor(() => screen.getByTestId('task-side-panel'))
     expect(screen.getByText('No task history yet')).toBeTruthy()
+  })
+
+  it('opens Computer Use settings inside the same task side panel', async () => {
+    render(<WatchedBrowserPane />)
+    openTaskSidePanel()
+    await waitFor(() => screen.getByTestId('task-side-panel'))
+    fireEvent.click(screen.getByLabelText('Computer Use settings'))
+    expect(await screen.findByLabelText('Computer Use task context')).toBeTruthy()
+    expect(screen.getByTestId('task-side-panel')).toBeTruthy()
   })
 
   it('creates a real manual browser tab from the empty state', async () => {
