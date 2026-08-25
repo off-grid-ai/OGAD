@@ -23,7 +23,11 @@ restore() {
 trap restore EXIT
 
 echo "[test:db] rebuilding better-sqlite3-multiple-ciphers for node $(node -v)..."
-npm rebuild better-sqlite3-multiple-ciphers >/dev/null 2>&1
+# `npm rebuild <package>` also runs this app's root postinstall, which immediately
+# rebuilds native dependencies for Electron and leaves Vitest with the wrong ABI.
+# Run the dependency's build script in its own package so the Node build remains
+# installed until the tests finish. The EXIT trap restores the Electron ABI.
+npm explore better-sqlite3-multiple-ciphers -- npm run build-release >/dev/null 2>&1
 
 echo "[test:db] running DB integration tests..."
 # Native/model/UI DB journeys are intentionally serial. Parallel files compete for
