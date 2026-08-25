@@ -17,6 +17,14 @@ import {
   type BackupDeliveryContract,
   type BackupRestoreSummaryContract
 } from '../shared/backup-contracts'
+import type {
+  BrowserControl,
+  BrowserNavigationState,
+  BrowserPointerEvent,
+  BrowserSessionsSnapshot,
+  BrowserTaskPointer,
+  ManualBrowserHistoryEntry
+} from '../shared/browser-session'
 
 console.log('PRELOAD SCRIPT LOADED')
 
@@ -89,14 +97,35 @@ const offGridApi = {
     // (null hides the view). Fire-and-forget on every mount/resize.
     setRegion: (rect: { x: number; y: number; width: number; height: number } | null) =>
       ipcRenderer.send('browser:set-region', rect),
-    control: (action: 'back' | 'forward' | 'reload' | 'stop') =>
-      ipcRenderer.invoke('browser:control', action),
-    navigate: (address: string) => ipcRenderer.invoke('browser:navigate', address),
+    newTab: (): Promise<{ sessionId: string }> => ipcRenderer.invoke('browser:new-tab'),
+    getSessions: (): Promise<BrowserSessionsSnapshot> => ipcRenderer.invoke('browser:get-sessions'),
+    activateSession: (sessionId: string): Promise<boolean> =>
+      ipcRenderer.invoke('browser:activate-session', sessionId),
+    closeSession: (sessionId: string): Promise<boolean> =>
+      ipcRenderer.invoke('browser:close-session', sessionId),
+    control: (action: BrowserControl, sessionId?: string): Promise<boolean> =>
+      ipcRenderer.invoke('browser:control', action, sessionId),
+    navigate: (address: string, sessionId?: string): Promise<{ ok: boolean; detail?: string }> =>
+      ipcRenderer.invoke('browser:navigate', address, sessionId),
     reopen: (taskId?: string) => ipcRenderer.invoke('browser:reopen', taskId),
-    onNavigationState: (cb: (state: unknown) => void) => {
-      const sub = (_e: unknown, state: unknown): void => cb(state)
+    listManualHistory: (): Promise<ManualBrowserHistoryEntry[]> =>
+      ipcRenderer.invoke('browser:list-manual-history'),
+    reopenManual: (historyId: string): Promise<{ sessionId: string } | null> =>
+      ipcRenderer.invoke('browser:reopen-manual', historyId),
+    onSessionsState: (cb: (state: BrowserSessionsSnapshot) => void) => {
+      const sub = (_e: unknown, state: BrowserSessionsSnapshot): void => cb(state)
+      ipcRenderer.on('browser:sessions-state', sub)
+      return unsubscribe('browser:sessions-state', sub)
+    },
+    onNavigationState: (cb: (state: BrowserNavigationState) => void) => {
+      const sub = (_e: unknown, state: BrowserNavigationState): void => cb(state)
       ipcRenderer.on('browser:navigation-state', sub)
       return unsubscribe('browser:navigation-state', sub)
+    },
+    onPointer: (cb: (event: BrowserPointerEvent) => void) => {
+      const sub = (_e: unknown, event: BrowserPointerEvent): void => cb(event)
+      ipcRenderer.on('browser:pointer', sub)
+      return unsubscribe('browser:pointer', sub)
     },
     onStep: (cb: (step: unknown) => void) => {
       const sub = (_e: unknown, step: unknown): void => cb(step)
@@ -108,8 +137,9 @@ const offGridApi = {
       ipcRenderer.on('browser:takeover', sub)
       return unsubscribe('browser:takeover', sub)
     },
-    onTaskState: (cb: (state: unknown) => void) => {
-      const sub = (_e: unknown, state: unknown): void => cb(state)
+    onTaskState: (cb: (state: BrowserTaskPointer & { sessionId: string }) => void) => {
+      const sub = (_e: unknown, state: BrowserTaskPointer & { sessionId: string }): void =>
+        cb(state)
       ipcRenderer.on('browser:task-state', sub)
       return unsubscribe('browser:task-state', sub)
     }

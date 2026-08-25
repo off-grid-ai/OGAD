@@ -5,12 +5,19 @@
  * step decider, the takeover coordinator, and the step broadcasts to the
  * watched pane.
  *
+ * Session shape follows the Midscene and Stagehand/open-browser-use model: one
+ * context owns independent pages, one page is active, and inactive pages keep
+ * their state for later resume. Off Grid AI-specific code below embeds each
+ * page as an Electron WebContentsView and connects it to task history, IPC,
+ * takeover, and the watched SidePanel.
+ *
  * This is native/Electron glue over tested modules (the collector, the driver,
  * the loop, the coordinator, the executor adapter are each unit-tested), so it
  * is excluded from in-process coverage like the other rail hosts - exercised
  * on a real display in the e2e tour and the real-machine pass, not here.
  */
 import { BrowserWindow, WebContentsView, ipcMain } from 'electron'
+import { randomUUID } from 'node:crypto'
 import { llm } from '../llm'
 import { BrowserDriver, type CdpTransport } from './browser-driver'
 import { runWebTask, STEP_RESPONSE_FORMAT, type WebTaskResult } from './web-task-agent'
@@ -20,6 +27,15 @@ import { registerVisionSession } from '../vision/vision-controller'
 import { getMainWindow } from '../main-window'
 import type { BrowserRailHost } from './browser-rail'
 import { appendTaskStep, getTaskRun, recordTaskRun } from '../tasks/task-history'
+import { getDB } from '../database'
+import { BrowserHistoryStore } from './browser-history-store'
+import { BrowserSessionStore, type BrowserSessionRecord } from './browser-session-store'
+import type {
+  BrowserChromeState,
+  BrowserControl,
+  BrowserNavigationState,
+  BrowserTaskPointer
+} from '../../shared/browser-session'
 
 function broadcast(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -36,23 +52,7 @@ interface Rect {
   height: number
 }
 
-type BrowserControl = 'back' | 'forward' | 'reload' | 'stop'
-
-interface BrowserNavigationState {
-  url: string
-  title: string
-  canGoBack: boolean
-  canGoForward: boolean
-  isLoading: boolean
-}
-
-interface BrowserTaskState {
-  taskId: string
-  goal: string
-  status: 'running' | 'done' | 'failed'
-  summary?: string
-  steps: string[]
-}
+type BrowserTaskState = BrowserTaskPointer & { sessionId: string }
 
 /** Convert what the user enters in the address field to a safe web URL. A host
  *  gets HTTPS; other text becomes a search. The browser rail never accepts
@@ -114,87 +114,78 @@ function attachCdp(view: WebContentsView): CdpTransport {
 }
 
 class BrowserHost implements BrowserRailHost {
-  private view: WebContentsView | null = null
-  /** The pane region the renderer last reported. null => hide the view. */
+  private readonly sessions = new BrowserSessionStore<WebContentsView>()
+  private readonly history = new BrowserHistoryStore(getDB())
   private region: Rect | null = null
-  private currentTask: BrowserTaskState | null = null
-  private navigationState: BrowserNavigationState = {
-    url: '',
-    title: 'New tab',
-    canGoBack: false,
-    canGoForward: false,
-    isLoading: false
+  private windowLifecycleBound = false
+
+  constructor() {
+    this.history.migrate()
   }
 
-  private broadcastNavigationState(): void {
-    broadcast('browser:navigation-state', this.navigationState)
+  private broadcastSessions(): void {
+    broadcast('browser:sessions-state', this.sessions.snapshot())
   }
 
-  private readNavigationState(): BrowserNavigationState {
-    const contents = this.view?.webContents
-    if (!contents || contents.isDestroyed()) {
-      return this.navigationState
-    }
-    const history = contents.navigationHistory
+  private broadcastNavigation(record: BrowserSessionRecord<WebContentsView>): void {
+    broadcast('browser:navigation-state', {
+      sessionId: record.sessionId,
+      ...record.chrome
+    } satisfies BrowserNavigationState)
+  }
+
+  private readChrome(record: BrowserSessionRecord<WebContentsView>): BrowserChromeState {
+    const contents = record.resource.webContents
+    if (contents.isDestroyed()) return record.chrome
+    const navigationHistory = contents.navigationHistory
     return {
       url: contents.getURL(),
       title: contents.getTitle() || 'New tab',
-      canGoBack: history.canGoBack(),
-      canGoForward: history.canGoForward(),
+      canGoBack: navigationHistory.canGoBack(),
+      canGoForward: navigationHistory.canGoForward(),
       isLoading: contents.isLoading()
     }
   }
 
-  private refreshNavigationState(): void {
-    this.navigationState = this.readNavigationState()
-    if (this.currentTask) {
+  private refreshSession(sessionId: string): void {
+    const record = this.sessions.get(sessionId)
+    if (!record) return
+    const chrome = this.readChrome(record)
+    this.sessions.updateChrome(sessionId, chrome)
+    if (record.task) {
       recordTaskRun({
-        taskId: this.currentTask.taskId,
+        taskId: record.task.taskId,
         kind: 'web_use',
-        title: this.currentTask.goal,
-        status: this.currentTask.status,
-        summary: this.currentTask.summary,
-        steps: this.currentTask.steps,
-        lastUrl: this.navigationState.url,
-        lastTitle: this.navigationState.title
+        title: record.task.goal,
+        status: record.task.status,
+        summary: record.task.summary,
+        steps: record.task.steps,
+        lastUrl: chrome.url,
+        lastTitle: chrome.title
+      })
+    } else if (/^https?:\/\//i.test(chrome.url)) {
+      this.history.upsert({
+        historyId: record.historyId ?? record.sessionId,
+        title: chrome.title,
+        url: chrome.url
       })
     }
-    this.broadcastNavigationState()
+    this.broadcastNavigation(record)
+    this.broadcastSessions()
   }
 
-  private setViewVisible(visible: boolean): void {
-    const view = this.view
-    if (!view) {
-      return
-    }
-    // A hidden agent-browser must be SILENT. The WebContentsView keeps running when
-    // it's off-screen (backgroundThrottling is off, so the agent can work while the
-    // user does other things) - which means a playing video would keep its audio
-    // going after the pane closes or the window is hidden. Mute when hidden, unmute
-    // when shown, so closing the browser actually stops the sound.
+  private setViewVisible(view: WebContentsView, visible: boolean): void {
     try {
       view.webContents.setAudioMuted(!visible)
     } catch {
-      /* view torn down mid-flip - nothing to mute */
-    }
-    const sv = (view as unknown as { setVisible?: (v: boolean) => void }).setVisible
-    if (typeof sv === 'function') {
-      sv.call(view, visible)
-    } else if (!visible) {
-      view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
-    }
-  }
-
-  /** Tear the live view down completely: remove it from the window and close its
-   *  WebContents, which stops any media immediately. Used when the app quits or the
-   *  window closes so a task's browser never lingers (audible) after it's gone. */
-  dispose(): void {
-    const view = this.view
-    if (!view) {
       return
     }
-    this.view = null
-    this.region = null
+    const setVisible = (view as unknown as { setVisible?: (value: boolean) => void }).setVisible
+    if (typeof setVisible === 'function') setVisible.call(view, visible)
+    else if (!visible) view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+  }
+
+  private destroyView(view: WebContentsView): void {
     try {
       getMainWindow()?.contentView.removeChildView(view)
     } catch {
@@ -207,9 +198,12 @@ class BrowserHost implements BrowserRailHost {
     }
   }
 
-  /** A coarse right-half rectangle: the fallback bounds so the browser is ALWAYS
-   *  visible the instant a task runs, even before the pane reports its exact
-   *  region - or if that report never arrives. */
+  dispose(): void {
+    this.region = null
+    for (const record of this.sessions.clear()) this.destroyView(record.resource)
+    this.broadcastSessions()
+  }
+
   private coarseBounds(): Rect {
     const win = getMainWindow()
     const [width, height] = (win ? win.getContentSize() : [1200, 800]) as [number, number]
@@ -221,59 +215,40 @@ class BrowserHost implements BrowserRailHost {
     }
   }
 
-  /** Show the live view now, docked to the last-reported region or a coarse
-   *  default - so every task makes the browser appear (including a second task
-   *  after the first hid the view). */
-  private showView(): void {
-    if (!this.view) {
-      return
+  private syncViewVisibility(): void {
+    const active = this.sessions.active
+    for (const record of this.sessions.snapshot().sessions) {
+      const live = this.sessions.get(record.sessionId)
+      if (!live) continue
+      const visible = Boolean(active && active.sessionId === live.sessionId && this.region)
+      if (visible) live.resource.setBounds(this.region ?? this.coarseBounds())
+      this.setViewVisible(live.resource, visible)
     }
-    this.view.setBounds(this.region ?? this.coarseBounds())
-    this.setViewVisible(true)
   }
 
-  /** The renderer reports the pane's on-screen region so the view docks to it
-   *  exactly; null (the pane unmounted) hides the view so it never lingers,
-   *  misaligned, over another screen. */
   setRegion(rect: Rect | null): void {
     this.region = rect
-    if (!this.view) {
-      return
-    }
-    if (rect) {
-      this.view.setBounds(rect)
-      this.setViewVisible(true)
-    } else {
-      this.setViewVisible(false)
-    }
+    this.syncViewVisibility()
   }
 
-  private ensureView(): WebContentsView {
-    if (this.view) {
-      this.showView()
-      return this.view
-    }
+  private createSession(input: {
+    sessionId: string
+    historyId?: string
+    kind: 'manual' | 'task'
+    task?: BrowserTaskPointer
+  }): BrowserSessionRecord<WebContentsView> {
     const view = new WebContentsView({
       webPreferences: {
         sandbox: true,
         contextIsolation: true,
-        // Off Grid's OWN persistent browser profile. A `persist:` partition keeps
-        // cookies / logins / history / localStorage on disk, so the user signs
-        // into a site inside this pane ONCE and stays signed in across restarts -
-        // a real baked-in browser, not a throwaway view.
         partition: 'persist:agent-browser',
-        // The agent drives this view over CDP (Input.dispatchMouseEvent) - events
-        // go straight to the renderer, never the real cursor/keyboard - so the
-        // user keeps using their machine while it works. Chromium would throttle
-        // a backgrounded renderer, so disable it or the browsing crawls whenever
-        // Off Grid isn't the focused window.
         backgroundThrottling: false
       }
     })
     const win = getMainWindow()
     win?.contentView.addChildView(view)
-    this.view = view
-    const refresh = (): void => this.refreshNavigationState()
+    const record = this.sessions.create({ ...input, resource: view })
+    const refresh = (): void => this.refreshSession(record.sessionId)
     view.webContents.on('did-start-loading', refresh)
     view.webContents.on('did-stop-loading', refresh)
     view.webContents.on('did-navigate', refresh)
@@ -281,26 +256,68 @@ class BrowserHost implements BrowserRailHost {
     view.webContents.on('page-title-updated', refresh)
     view.webContents.setWindowOpenHandler(({ url }) => {
       const target = normalizeBrowserAddress(url)
-      if (target) {
-        void view.webContents.loadURL(target)
-      }
+      if (target) void this.navigate(target, record.sessionId)
       return { action: 'deny' }
     })
-    // Silence / tear down the browser when the window goes away. setRegion only
-    // fires while the pane is mounted, so a video would keep playing behind a
-    // hidden window (macOS keeps the app alive on window close) unless we react to
-    // the window itself: mute on hide, fully dispose on close.
-    win?.on('hide', () => this.setViewVisible(false))
-    win?.once('close', () => this.dispose())
-    // Show it immediately (region if reported, else coarse) so the browser is
-    // never invisible while a task runs; the pane refines / hides it via
-    // setRegion.
-    this.showView()
-    return view
+    if (win && !this.windowLifecycleBound) {
+      this.windowLifecycleBound = true
+      win.on('hide', () => {
+        for (const session of this.sessions.snapshot().sessions) {
+          const live = this.sessions.get(session.sessionId)
+          if (live) this.setViewVisible(live.resource, false)
+        }
+      })
+      win.once('close', () => this.dispose())
+    }
+    this.syncViewVisibility()
+    this.broadcastSessions()
+    this.broadcastNavigation(record)
+    return record
   }
 
-  control(action: BrowserControl): boolean {
-    const contents = this.view?.webContents
+  newTab(): { sessionId: string } {
+    const sessionId = randomUUID()
+    const record = this.createSession({ sessionId, historyId: sessionId, kind: 'manual' })
+    return { sessionId: record.sessionId }
+  }
+
+  getSessions(): ReturnType<BrowserSessionStore<WebContentsView>['snapshot']> {
+    return this.sessions.snapshot()
+  }
+
+  activateSession(sessionId: string): boolean {
+    if (!this.sessions.activate(sessionId)) return false
+    this.syncViewVisibility()
+    const record = this.sessions.active
+    if (record) this.broadcastNavigation(record)
+    this.broadcastSessions()
+    return true
+  }
+
+  closeSession(sessionId: string): boolean {
+    const record = this.sessions.get(sessionId)
+    if (!record) return false
+    // A running or completed agent session remains reopenable in memory. Closing
+    // its tab only hides it; the durable task row remains the restart fallback.
+    if (record.kind === 'task') {
+      this.sessions.deactivate(sessionId)
+      this.syncViewVisibility()
+      this.broadcastSessions()
+      return true
+    }
+    const closed = this.sessions.close(sessionId)
+    if (!closed) return false
+    this.destroyView(closed.resource)
+    this.syncViewVisibility()
+    const active = this.sessions.active
+    if (active) this.broadcastNavigation(active)
+    this.broadcastSessions()
+    return true
+  }
+
+  control(action: BrowserControl, sessionId?: string): boolean {
+    const record = sessionId ? this.sessions.get(sessionId) : this.sessions.active
+    const contents = record?.resource.webContents
     if (!contents || contents.isDestroyed()) {
       return false
     }
@@ -316,19 +333,28 @@ class BrowserHost implements BrowserRailHost {
     } else {
       return false
     }
-    this.refreshNavigationState()
+    this.refreshSession(record.sessionId)
     return true
   }
 
-  async navigate(address: string): Promise<{ ok: boolean; detail?: string }> {
+  async navigate(address: string, sessionId?: string): Promise<{ ok: boolean; detail?: string }> {
     const target = normalizeBrowserAddress(address)
     if (!target) {
       return { ok: false, detail: 'Enter a website or search.' }
     }
-    const view = this.ensureView()
+    let record = sessionId ? this.sessions.get(sessionId) : this.sessions.active
+    if (!record) {
+      const newSessionId = randomUUID()
+      record = this.createSession({
+        sessionId: newSessionId,
+        historyId: newSessionId,
+        kind: 'manual'
+      })
+    }
+    this.activateSession(record.sessionId)
     try {
-      await this.loadNatively(view, target)
-      this.refreshNavigationState()
+      await this.loadNatively(record.resource, target)
+      this.refreshSession(record.sessionId)
       return { ok: true }
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
@@ -337,25 +363,40 @@ class BrowserHost implements BrowserRailHost {
   }
 
   reopen(taskId?: string): boolean {
-    if (taskId && this.currentTask?.taskId !== taskId) {
+    let record = taskId ? this.sessions.findTask(taskId) : this.sessions.active
+    if (!record && taskId) {
       const saved = getTaskRun(taskId)
       if (!saved || saved.kind !== 'web_use') return false
-      this.currentTask = {
+      const task: BrowserTaskPointer = {
         taskId: saved.taskId,
         goal: saved.title,
         status: saved.status === 'done' ? 'done' : 'failed',
         summary: saved.summary,
         steps: saved.steps
       }
-      if (saved.lastUrl) void this.navigate(saved.lastUrl)
+      record = this.createSession({ sessionId: `task:${saved.taskId}`, kind: 'task', task })
+      if (saved.lastUrl) void this.navigate(saved.lastUrl, record.sessionId)
     }
-    if (!this.currentTask) {
-      return false
-    }
-    this.showView()
-    broadcast('browser:task-state', this.currentTask)
-    this.broadcastNavigationState()
+    if (!record?.task) return false
+    this.activateSession(record.sessionId)
+    broadcast('browser:task-state', { sessionId: record.sessionId, ...record.task })
     return true
+  }
+
+  reopenManual(historyId: string): { sessionId: string } | null {
+    const saved = this.history.get(historyId)
+    if (!saved) return null
+    const record = this.createSession({
+      sessionId: randomUUID(),
+      historyId: saved.historyId,
+      kind: 'manual'
+    })
+    void this.navigate(saved.url, record.sessionId)
+    return { sessionId: record.sessionId }
+  }
+
+  listManualHistory(): ReturnType<BrowserHistoryStore['list']> {
+    return this.history.list()
   }
 
   /** Bring the view's renderer up on the start page NATIVELY before any CDP
@@ -372,13 +413,22 @@ class BrowserHost implements BrowserRailHost {
     let timer: ReturnType<typeof setTimeout> | undefined
     const timeout = new Promise<void>((resolve) => {
       timer = setTimeout(resolve, 20_000)
-      timer.unref?.()
+      timer.unref()
     })
     await Promise.race([load, timeout]).finally(() => clearTimeout(timer))
   }
 
   async runTask(goal: string, url: string | undefined, taskId: string): Promise<WebTaskResult> {
-    const view = this.ensureView()
+    let record = this.sessions.findTask(taskId)
+    if (!record) {
+      record = this.createSession({
+        sessionId: `task:${taskId}`,
+        kind: 'task',
+        task: { taskId, goal, status: 'running', steps: [] }
+      })
+    }
+    this.activateSession(record.sessionId)
+    const view = record.resource
     // A web task with no start URL would begin on a blank pane (no page to act
     // on, and snapshotting about:blank can hang) - default to a real search page
     // so the model always has somewhere to start and can navigate from there.
@@ -395,7 +445,8 @@ class BrowserHost implements BrowserRailHost {
     const releaseSession = registerVisionSession(guard)
     const steps: string[] = []
     const setState = (status: 'running' | 'done' | 'failed', summary?: string): void => {
-      this.currentTask = { taskId, goal, status, summary, steps: [...steps] }
+      const task = { taskId, goal, status, summary, steps: [...steps] }
+      this.sessions.updateTask(record.sessionId, task)
       recordTaskRun({
         taskId,
         kind: 'web_use',
@@ -403,10 +454,14 @@ class BrowserHost implements BrowserRailHost {
         status,
         summary,
         steps,
-        lastUrl: this.navigationState.url,
-        lastTitle: this.navigationState.title
+        lastUrl: record.chrome.url,
+        lastTitle: record.chrome.title
       })
-      broadcast('browser:task-state', this.currentTask)
+      broadcast('browser:task-state', {
+        sessionId: record.sessionId,
+        ...task
+      } satisfies BrowserTaskState)
+      this.broadcastSessions()
     }
     setState('running')
 
@@ -414,11 +469,14 @@ class BrowserHost implements BrowserRailHost {
       // Land the start page natively FIRST so the debugger has a live target,
       // THEN attach CDP for the snapshot/input the loop drives.
       await this.loadNatively(view, start)
+      this.refreshSession(record.sessionId)
       const opened = `opened ${start}`
       steps.push(opened)
       appendTaskStep(taskId, 'web_use', goal, opened)
-      broadcast('browser:step', { taskId, note: opened })
-      const driver = new BrowserDriver(attachCdp(view))
+      broadcast('browser:step', { sessionId: record.sessionId, taskId, note: opened })
+      const driver = new BrowserDriver(attachCdp(view), undefined, (pointer) => {
+        broadcast('browser:pointer', { sessionId: record.sessionId, ...pointer })
+      })
       // startUrl is '' - the page is already loaded natively, so the loop goes
       // straight to snapshotting it instead of re-navigating over CDP.
       const result = await runWebTask(goal, '', {
@@ -429,14 +487,14 @@ class BrowserHost implements BrowserRailHost {
             responseFormat: STEP_RESPONSE_FORMAT
           }),
         waitForTakeover: async (why) => {
-          broadcast('browser:takeover', { taskId, why })
+          broadcast('browser:takeover', { sessionId: record.sessionId, taskId, why })
           await coordinator.waitForTakeover(taskId, why)
         },
         onStep: (note) => {
           console.log(`[web-task] step: ${note}`)
           steps.push(note)
           appendTaskStep(taskId, 'web_use', goal, note)
-          broadcast('browser:step', { taskId, note })
+          broadcast('browser:step', { sessionId: record.sessionId, taskId, note })
         },
         shouldStop: () => guard.isHalted
       })
@@ -486,6 +544,7 @@ export function getBrowserRailHost(): BrowserRailHost {
  *  view was never created. */
 export function disposeBrowserHost(): void {
   host?.dispose()
+  host = null
 }
 
 /** Wire the renderer's pane-region reports to the live view so it docks to the
@@ -494,19 +553,31 @@ export function registerBrowserViewIpc(): void {
   ipcMain.on('browser:set-region', (_e, raw: unknown) => {
     browserHost().setRegion(parseRect(raw))
   })
-  ipcMain.handle('browser:control', (_e, action: unknown) => {
+  ipcMain.handle('browser:new-tab', () => browserHost().newTab())
+  ipcMain.handle('browser:get-sessions', () => browserHost().getSessions())
+  ipcMain.handle('browser:activate-session', (_event, sessionId: unknown) =>
+    typeof sessionId === 'string' ? browserHost().activateSession(sessionId) : false
+  )
+  ipcMain.handle('browser:close-session', (_event, sessionId: unknown) =>
+    typeof sessionId === 'string' ? browserHost().closeSession(sessionId) : false
+  )
+  ipcMain.handle('browser:control', (_e, action: unknown, sessionId: unknown) => {
     if (action !== 'back' && action !== 'forward' && action !== 'reload' && action !== 'stop') {
       return false
     }
-    return browserHost().control(action)
+    return browserHost().control(action, typeof sessionId === 'string' ? sessionId : undefined)
   })
-  ipcMain.handle('browser:navigate', (_e, address: unknown) => {
+  ipcMain.handle('browser:navigate', (_e, address: unknown, sessionId: unknown) => {
     if (typeof address !== 'string') {
       return { ok: false, detail: 'Enter a website or search.' }
     }
-    return browserHost().navigate(address)
+    return browserHost().navigate(address, typeof sessionId === 'string' ? sessionId : undefined)
   })
   ipcMain.handle('browser:reopen', (_event, taskId: unknown) =>
     browserHost().reopen(typeof taskId === 'string' ? taskId : undefined)
+  )
+  ipcMain.handle('browser:list-manual-history', () => browserHost().listManualHistory())
+  ipcMain.handle('browser:reopen-manual', (_event, historyId: unknown) =>
+    typeof historyId === 'string' ? browserHost().reopenManual(historyId) : null
   )
 }

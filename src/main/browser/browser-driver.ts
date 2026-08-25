@@ -21,6 +21,12 @@ export type DriverResult =
   | { ok: true }
   | { ok: false; reason: 'takeover' | 'error'; detail: string }
 
+export interface BrowserPointerEvent {
+  phase: 'moved' | 'pressed' | 'released'
+  x: number
+  y: number
+}
+
 const NAVIGATION_TIMEOUT_MS = 20_000
 /** A single CDP command should return in well under a second on a live page.
  *  When the WebContents/network service is wedged (e.g. after a "Network
@@ -33,7 +39,8 @@ const CDP_COMMAND_TIMEOUT_MS = 15_000
 export class BrowserDriver {
   constructor(
     private readonly cdp: CdpTransport,
-    private readonly commandTimeoutMs = CDP_COMMAND_TIMEOUT_MS
+    private readonly commandTimeoutMs = CDP_COMMAND_TIMEOUT_MS,
+    private readonly onPointer?: (event: BrowserPointerEvent) => void
   ) {}
 
   /** The ONE choke point every CDP command goes through: race the transport
@@ -45,7 +52,7 @@ export class BrowserDriver {
         () => reject(new Error(`CDP ${method} timed out after ${this.commandTimeoutMs}ms`)),
         this.commandTimeoutMs
       )
-      timer.unref?.()
+      timer.unref()
     })
     return Promise.race([this.cdp.send<T>(method, params), timeout]).finally(() =>
       clearTimeout(timer)
@@ -90,14 +97,19 @@ export class BrowserDriver {
   }
 
   async click(el: PageElement): Promise<DriverResult> {
-    for (const type of ['mousePressed', 'mouseReleased'] as const) {
+    const phases = [
+      { type: 'mouseMoved', phase: 'moved' },
+      { type: 'mousePressed', phase: 'pressed' },
+      { type: 'mouseReleased', phase: 'released' }
+    ] as const
+    for (const { type, phase } of phases) {
       await this.send('Input.dispatchMouseEvent', {
         type,
         x: el.cx,
         y: el.cy,
-        button: 'left',
-        clickCount: 1
+        ...(type === 'mouseMoved' ? {} : { button: 'left', clickCount: 1 })
       })
+      this.onPointer?.({ phase, x: el.cx, y: el.cy })
     }
     return { ok: true }
   }

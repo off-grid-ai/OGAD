@@ -89,12 +89,19 @@ describe('navigate', () => {
 })
 
 describe('click and type', () => {
-  it('clicks at the element center with a press/release pair', async () => {
+  it('moves to the real element center, then emits pressed and released phases', async () => {
     const t = makeTransport()
-    await new BrowserDriver(t.cdp).click(el())
+    const pointer: Array<{ phase: string; x: number; y: number }> = []
+    await new BrowserDriver(t.cdp, undefined, (event) => pointer.push(event)).click(el())
     expect(t.sent.map((s) => [s.method, s.params?.type, s.params?.x])).toEqual([
+      ['Input.dispatchMouseEvent', 'mouseMoved', 200],
       ['Input.dispatchMouseEvent', 'mousePressed', 200],
       ['Input.dispatchMouseEvent', 'mouseReleased', 200]
+    ])
+    expect(pointer).toEqual([
+      { phase: 'moved', x: 200, y: 80 },
+      { phase: 'pressed', x: 200, y: 80 },
+      { phase: 'released', x: 200, y: 80 }
     ])
   })
 
@@ -103,6 +110,7 @@ describe('click and type', () => {
     await new BrowserDriver(t.cdp).type(el(), 'KX93F')
     const methods = t.sent.map((s) => s.method)
     expect(methods).toEqual([
+      'Input.dispatchMouseEvent',
       'Input.dispatchMouseEvent',
       'Input.dispatchMouseEvent',
       'Input.dispatchKeyEvent',
@@ -127,7 +135,7 @@ describe('click and type', () => {
     const t = makeTransport()
     const result = await new BrowserDriver(t.cdp).click(el({ identity: true }))
     expect(result).toEqual({ ok: true })
-    expect(t.sent).toHaveLength(2)
+    expect(t.sent).toHaveLength(3)
   })
 })
 
