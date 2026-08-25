@@ -76,13 +76,6 @@ import {
 import { Button } from '@renderer/components/ui/button'
 import { ActionGateDock } from '@renderer/components/actions/ActionGateDock'
 import { VisionSupervisorOverlay } from '@renderer/components/vision/VisionSupervisorOverlay'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle
-} from '@renderer/components/ui/dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import {
   DropdownMenu,
