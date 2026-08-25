@@ -329,6 +329,22 @@ const offGridApi = {
   queueState: () => ipcRenderer.invoke('queue:state'),
   // and a manual "check for updates" that resolves with a definite status.
   updateGetPrefs: () => ipcRenderer.invoke('update:get-prefs'),
+  updateDownloadProgress: () => ipcRenderer.invoke('update:download-progress'),
+  onUpdateDownloadProgress: (
+    callback: (data: {
+      bytesPerSecond: number
+      percent: number
+      total: number
+      transferred: number
+      status: 'downloading' | 'completed' | 'failed'
+      version: string | null
+      error?: string
+    }) => void
+  ) => {
+    const listener = (_event: unknown, data: Parameters<typeof callback>[0]): void => callback(data)
+    ipcRenderer.on('update:download-progress', listener)
+    return unsubscribe('update:download-progress', listener)
+  },
   updateSetAuto: (on: boolean) => ipcRenderer.invoke('update:set-auto', on),
   updateSetChannel: (channel: 'stable' | 'beta') =>
     ipcRenderer.invoke('update:set-channel', channel),
@@ -408,11 +424,22 @@ const offGridApi = {
       percent: number
       downloadedMB: string
       totalMB: string
+      downloadedBytes?: number
+      totalBytes?: number
+      bytesPerSecond?: number
     }) => void
   ) => {
     const subscription = (
       _event: unknown,
-      data: { modelName: string; percent: number; downloadedMB: string; totalMB: string }
+      data: {
+        modelName: string
+        percent: number
+        downloadedMB: string
+        totalMB: string
+        downloadedBytes?: number
+        totalBytes?: number
+        bytesPerSecond?: number
+      }
     ): void => callback(data)
     ipcRenderer.on('model:download-progress', subscription)
     return unsubscribe('model:download-progress', subscription)
@@ -442,6 +469,9 @@ const offGridApi = {
       currentFile?: string
       downloadedMB?: string
       totalMB?: string
+      downloadedBytes?: number
+      totalBytes?: number
+      bytesPerSecond?: number
       error?: string
     }) => void
   ) => {
@@ -454,6 +484,9 @@ const offGridApi = {
         currentFile?: string
         downloadedMB?: string
         totalMB?: string
+        downloadedBytes?: number
+        totalBytes?: number
+        bytesPerSecond?: number
         error?: string
       }
     ): void => callback(data)
@@ -609,11 +642,25 @@ const offGridApi = {
   ttsVoices: () => ipcRenderer.invoke('tts:voices'),
   prepareTtsVoice: (voice: string) => ipcRenderer.invoke('tts:prepare-voice', voice),
   onTtsVoiceProgress: (
-    callback: (data: { voiceId?: string; progress: number | null; currentAsset?: string }) => void
+    callback: (data: {
+      voiceId?: string
+      progress: number | null
+      downloadedBytes?: number
+      totalBytes?: number | null
+      bytesPerSecond?: number
+      currentAsset?: string
+    }) => void
   ) => {
     const listener = (
       _event: unknown,
-      data: { voiceId?: string; progress: number | null; currentAsset?: string }
+      data: {
+        voiceId?: string
+        progress: number | null
+        downloadedBytes?: number
+        totalBytes?: number | null
+        bytesPerSecond?: number
+        currentAsset?: string
+      }
     ): void => callback(data)
     ipcRenderer.on('tts:voice-progress', listener)
     return unsubscribe('tts:voice-progress', listener)

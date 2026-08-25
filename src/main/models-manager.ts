@@ -42,6 +42,7 @@ import {
 } from './models/catalog-logic'
 import { writeDiagnosticLog } from './diagnostics-log'
 import { modelPackageIdentity, type TransferredModelManifest } from '@offgrid/sync'
+import { sampleProgressRate, type ProgressRateSample } from '@offgrid/ui'
 
 export interface DownloadProgress {
   modelId: string
@@ -54,6 +55,9 @@ export interface DownloadProgress {
   fileCount?: number
   downloadedMB?: string
   totalMB?: string
+  downloadedBytes?: number
+  totalBytes?: number
+  bytesPerSecond?: number
   error?: string
 }
 export type ProgressCb = (p: DownloadProgress) => void
@@ -233,7 +237,7 @@ export async function downloadModel(
   }
   let loggedStatus: DownloadProgress['status'] | undefined
   const send = (data: Partial<DownloadProgress>): void => {
-    const p: DownloadProgress = { modelId, ...data }
+    const p: DownloadProgress = { ...lastProgress.get(modelId), modelId, ...data }
     lastProgress.set(modelId, p)
     onProgress?.(p)
     if (p.status && p.status !== loggedStatus) {
@@ -303,6 +307,7 @@ export async function downloadModel(
         const laterBytes = (index: number): number =>
           plannedBytes.slice(index + 1).reduce((sum, bytes) => sum + bytes, 0)
         let jobDoneBytes = 0
+        let rateSample: ProgressRateSample | undefined
         for (const [fileIndex, file] of pending.entries()) {
           const dest = path.join(dir, file.name)
           const partPath = `${dest}.part`
@@ -340,6 +345,11 @@ export async function downloadModel(
             written += n
             const jobDone = jobDoneBytes + written
             const jobTotal = jobDoneBytes + total + laterBytes(fileIndex)
+            const rate = sampleProgressRate(rateSample, {
+              currentBytes: jobDone,
+              sampledAtMs: Date.now()
+            })
+            rateSample = rate.sample
             send({
               currentFile: file.name,
               fileIndex: fileIndex + 1,
@@ -347,6 +357,9 @@ export async function downloadModel(
               percent: jobTotal ? Math.round((jobDone / jobTotal) * 100) : 0,
               downloadedMB: (jobDone / 1048576).toFixed(1),
               totalMB: jobTotal ? (jobTotal / 1048576).toFixed(1) : '?',
+              downloadedBytes: jobDone,
+              totalBytes: jobTotal || undefined,
+              bytesPerSecond: rate.bytesPerSecond,
               status: 'downloading'
             })
           })

@@ -61,6 +61,7 @@ import {
   appNameLikeClause
 } from './ipc-query-logic'
 import { requestApplicationRelaunch } from './shutdown'
+import { sampleProgressRate, type ProgressRateSample } from '@offgrid/ui'
 // import { llm } from './llm'; // Moved to dynamic import to support ESM
 
 // Incrementally update master memory with a new conversation summary
@@ -1461,6 +1462,7 @@ export function setupIPC() {
     const downloadFile = (url: string, destPath: string, modelName: string): Promise<void> => {
       return new Promise((resolve, reject) => {
         const file = fs.createWriteStream(destPath)
+        let rateSample: ProgressRateSample | undefined
 
         const request = (redirectUrl: string) => {
           https
@@ -1489,12 +1491,20 @@ export function setupIPC() {
               response.on('data', (chunk: Buffer) => {
                 downloaded += chunk.length
                 const percent = totalSize ? Math.round((downloaded / totalSize) * 100) : 0
+                const rate = sampleProgressRate(rateSample, {
+                  currentBytes: downloaded,
+                  sampledAtMs: Date.now()
+                })
+                rateSample = rate.sample
 
                 // Send progress to renderer
                 BrowserWindow.getAllWindows().forEach((win) => {
                   win.webContents.send('model:download-progress', {
                     modelName,
                     percent,
+                    downloadedBytes: downloaded,
+                    totalBytes: totalSize || undefined,
+                    bytesPerSecond: rate.bytesPerSecond,
                     downloadedMB: (downloaded / 1024 / 1024).toFixed(1),
                     totalMB: totalSize ? (totalSize / 1024 / 1024).toFixed(1) : '?'
                   })
@@ -2078,14 +2088,16 @@ export function setupIPC() {
     const { getCatalog } = await import('./models-manager')
     const { getSetting } = await import('./database')
     const catalog = await getCatalog()
-    const installed = (catalog.models as Array<{
-      id: string
-      familyId?: string
-      name?: string
-      kind?: string
-      downloaded?: boolean
-      files?: Array<{ name: string; downloaded?: boolean }>
-    }>).filter(
+    const installed = (
+      catalog.models as Array<{
+        id: string
+        familyId?: string
+        name?: string
+        kind?: string
+        downloaded?: boolean
+        files?: Array<{ name: string; downloaded?: boolean }>
+      }>
+    ).filter(
       (model) =>
         model.kind === 'transcription' &&
         (model.downloaded === true || model.files?.every((file) => file.downloaded === true))

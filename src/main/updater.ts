@@ -8,6 +8,7 @@
 import { autoUpdater } from 'electron-updater'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import type { UpdateInfo } from 'builder-util-runtime'
+import type { ProgressInfo } from 'electron-updater'
 import { valid } from 'semver'
 import { getSetting, saveSetting } from './database'
 import { resolveChannelConfig, type UpdateChannel } from './update-channel'
@@ -27,6 +28,19 @@ const GITHUB_UPDATE_PROVIDER = {
 let stagedVersion: string | null = null
 let availableVersion: string | null = null
 let targetedDownloadVersion: string | null = null
+type UpdateDownloadProgress = ProgressInfo & {
+  status: 'downloading' | 'completed' | 'failed'
+  version: string | null
+  error?: string
+}
+let updateDownloadProgress: UpdateDownloadProgress | null = null
+
+function publishDownloadProgress(progress: UpdateDownloadProgress): void {
+  updateDownloadProgress = progress
+  BrowserWindow.getAllWindows().forEach((window) =>
+    window.webContents.send('update:download-progress', progress)
+  )
+}
 
 const platformSupportsUpdate = autoUpdater.isUpdateSupported
 
@@ -89,6 +103,7 @@ export function registerUpdateIpc(): void {
 
   // Lets a freshly-created window ask whether an update is already staged.
   ipcMain.handle('update:staged-version', () => stagedVersion)
+  ipcMain.handle('update:download-progress', () => updateDownloadProgress)
 
   // Current state for the Settings UI: the running version + auto on/off + channel.
   ipcMain.handle('update:get-prefs', () => ({
@@ -240,7 +255,16 @@ export function startAutoUpdates(): void {
   applyAutoPref()
   applyChannel()
 
-  autoUpdater.on('error', (e) => console.error('[update] error', e))
+  autoUpdater.on('error', (e) => {
+    console.error('[update] error', e)
+    if (updateDownloadProgress?.status === 'downloading') {
+      publishDownloadProgress({
+        ...updateDownloadProgress,
+        status: 'failed',
+        error: e instanceof Error ? e.message : String(e)
+      })
+    }
+  })
   autoUpdater.on('checking-for-update', () => console.log('[update] checking…'))
   autoUpdater.on('update-available', (i) => {
     availableVersion = i.version
@@ -250,9 +274,25 @@ export function startAutoUpdates(): void {
     availableVersion = null
     console.log('[update] up to date')
   })
+  autoUpdater.on('download-progress', (progress) => {
+    publishDownloadProgress({
+      ...progress,
+      status: 'downloading',
+      version: targetedDownloadVersion ?? availableVersion
+    })
+  })
   autoUpdater.on('update-downloaded', (i) => {
     console.log('[update] downloaded', i.version, '— will install on quit')
     stagedVersion = i.version
+    publishDownloadProgress({
+      bytesPerSecond: 0,
+      percent: 100,
+      total: updateDownloadProgress?.total ?? 0,
+      transferred: updateDownloadProgress?.total ?? updateDownloadProgress?.transferred ?? 0,
+      delta: 0,
+      status: 'completed',
+      version: i.version
+    })
     BrowserWindow.getAllWindows().forEach((w) =>
       w.webContents.send('update:downloaded', { version: i.version })
     )

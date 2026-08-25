@@ -63,6 +63,7 @@
     "@offgrid/rag": "file:./packages/rag",
     "@offgrid/speech": "file:../shared/packages/speech",
     "@offgrid/sync": "file:../shared/packages/sync",
+    "@offgrid/ui": "file:../shared/packages/ui",
     "@offgrid/use": "file:../shared/packages/use",
     "@phosphor-icons/react": "^2.1.10",
     "@scure/bip39": "^2.2.0",

@@ -47,9 +47,11 @@ export interface SetupProgress {
   percent?: number
   downloadedMB?: string
   totalMB?: string
+  downloadedBytes?: number
+  totalBytes?: number
+  bytesPerSecond?: number
 }
 export type SetupProgressCb = (p: SetupProgress) => void
-
 
 /** GET a localhost endpoint, parse JSON, with a short timeout. null on any failure. */
 function pingJson(port: number, path = '/health', timeoutMs = 1500): Promise<unknown | null> {
@@ -367,7 +369,10 @@ export async function autoConfigure(
         modelName: model.name,
         percent: p.percent,
         downloadedMB: p.downloadedMB,
-        totalMB: p.totalMB
+        totalMB: p.totalMB,
+        downloadedBytes: p.downloadedBytes,
+        totalBytes: p.totalBytes,
+        bytesPerSecond: p.bytesPerSecond
       })
     )
     if (!res.success) {
@@ -436,7 +441,10 @@ export async function autoConfigure(
             modelName: ex.name,
             percent: p.percent,
             downloadedMB: p.downloadedMB,
-            totalMB: p.totalMB
+            totalMB: p.totalMB,
+            downloadedBytes: p.downloadedBytes,
+            totalBytes: p.totalBytes,
+            bytesPerSecond: p.bytesPerSecond
           })
         )
         if (r.success) await setActiveModalChoice(ex.kind, ex.id)
