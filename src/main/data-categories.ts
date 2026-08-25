@@ -7,7 +7,10 @@
 // this module exists to prevent. Dir names are userData-relative; callers resolve
 // them against app.getPath('userData').
 
-export type DataCategoryId = 'chats' | 'memories' | 'captures' | 'meetings' | 'images'
+import type { DataCategoryId } from '../shared/backup-contracts'
+
+export { ARCHIVABLE_CATEGORIES } from '../shared/backup-contracts'
+export type { DataCategoryId }
 
 export const CATEGORY_DIRS: Record<DataCategoryId, readonly string[]> = {
   chats: ['uploads'],
@@ -16,8 +19,3 @@ export const CATEGORY_DIRS: Record<DataCategoryId, readonly string[]> = {
   meetings: ['meetings'],
   images: ['generated-images', 'artifacts-library', 'style-thumbs']
 }
-
-/** Categories whose deletable payload is files on disk - the ones worth archiving
- *  before a delete. chats/memories are DB-centric and already covered by the full
- *  backup engine (backup/data-port.ts). */
-export const ARCHIVABLE_CATEGORIES: readonly DataCategoryId[] = ['captures', 'meetings', 'images']

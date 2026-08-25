@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Trash, Warning } from '@phosphor-icons/react'
+import { Archive, Trash, Warning } from '@phosphor-icons/react'
+import { ARCHIVABLE_CATEGORIES, type DataCategoryId } from '../../../../shared/backup-contracts'
 
 interface DataCategory {
-  id: 'chats' | 'memories' | 'captures' | 'meetings' | 'images'
+  id: DataCategoryId
   label: string
   detail: string
   count?: number
@@ -22,6 +23,18 @@ export function DataPrivacyPanel(): React.ReactElement {
   const api = window.api
   const [cats, setCats] = useState<DataCategory[]>([])
   const [busy, setBusy] = useState<string | null>(null)
+  // Per-category "Back up first": when on, the delete buttons archive to a
+  // user-picked ZIP before clearing (fail closed - cancel deletes nothing).
+  const [backupFirst, setBackupFirst] = useState<Set<DataCategoryId>>(new Set())
+
+  const toggleBackupFirst = (id: DataCategoryId): void => {
+    setBackupFirst((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   const refresh = useCallback(async () => {
     try {
@@ -54,6 +67,24 @@ export function DataPrivacyPanel(): React.ReactElement {
     const what = olderThanDays
       ? `${c.label.toLowerCase()} older than ${olderThanDays} days`
       : `all ${c.label.toLowerCase()}`
+    if (backupFirst.has(c.id)) {
+      if (
+        !window.confirm(
+          `Back up ${what} to a ZIP, then delete? You'll pick where the backup is saved - canceling that deletes nothing.`
+        )
+      )
+        return
+      setBusy(c.id)
+      try {
+        const result = await api.archiveDataCategory(c.id, olderThanDays)
+        if (result.status === 'failed')
+          window.alert(`Backup failed - nothing was deleted. ${result.error}`)
+        await refresh()
+      } finally {
+        setBusy(null)
+      }
+      return
+    }
     if (
       !window.confirm(
         `Delete ${what}? This permanently removes it from this device and can't be undone.`
@@ -118,6 +149,22 @@ export function DataPrivacyPanel(): React.ReactElement {
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
+                {ARCHIVABLE_CATEGORIES.includes(c.id) ? (
+                  <button
+                    onClick={() => toggleBackupFirst(c.id)}
+                    disabled={busy === c.id}
+                    aria-pressed={backupFirst.has(c.id)}
+                    aria-label={`Back up ${c.label} before deleting`}
+                    title="Save a ZIP backup to a location you pick before anything is deleted"
+                    className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] transition-colors disabled:opacity-30 ${
+                      backupFirst.has(c.id)
+                        ? 'border-green-500/60 text-green-500'
+                        : 'border-neutral-800 text-neutral-500 hover:border-neutral-600 hover:text-neutral-300'
+                    }`}
+                  >
+                    <Archive className="h-3 w-3" /> Back up first
+                  </button>
+                ) : null}
                 {RETENTION[c.id]?.map((r) => (
                   <button
                     key={r.days}
@@ -135,7 +182,13 @@ export function DataPrivacyPanel(): React.ReactElement {
                   className="flex items-center gap-1.5 rounded-md border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-300 transition-colors hover:border-red-500/60 hover:text-red-400 disabled:opacity-30"
                 >
                   <Trash className="h-3 w-3" />{' '}
-                  {busy === c.id ? 'Clearing…' : RETENTION[c.id] ? 'All' : 'Clear'}
+                  {busy === c.id
+                    ? backupFirst.has(c.id)
+                      ? 'Backing up…'
+                      : 'Clearing…'
+                    : RETENTION[c.id]
+                      ? 'All'
+                      : 'Clear'}
                 </button>
               </div>
             </div>
