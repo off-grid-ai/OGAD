@@ -6,6 +6,9 @@ import { SetupPanel } from './setup/SetupPanel'
 import { deviceNoun } from '@renderer/lib/device'
 import { PermissionsPanel } from './PermissionsPanel'
 import { usePermissionController } from './use-permission-controller'
+import { formatTransferSpeed } from '@offgrid/sync'
+import { projectProgress, type ProgressLike } from '@offgrid/ui'
+import { formatStorageBytes } from './setup/storage-format'
 
 interface PermissionGateProps {
   children: React.ReactNode
@@ -25,7 +28,7 @@ export function PermissionGate({ children }: PermissionGateProps) {
   const [showSetup, setShowSetup] = useState(false)
   const [setupDismissed, setSetupDismissed] = useState(false)
   const [visionIssue, setVisionIssue] = useState<VisionIssue | null>(null)
-  const [visionDownloadPercent, setVisionDownloadPercent] = useState<number | null>(null)
+  const [visionDownloadProgress, setVisionDownloadProgress] = useState<ProgressLike | null>(null)
   const permissions = usePermissionController(isPro)
   const permissionStatus = permissions.status
   const isChecking = permissions.checking
@@ -97,12 +100,12 @@ export function PermissionGate({ children }: PermissionGateProps) {
     const offProgress = window.api.onModelProgress?.((progress) => {
       if (progress.modelId !== visionIssue?.modelId) return
       if (progress.status === 'completed') {
-        setVisionDownloadPercent(null)
+        setVisionDownloadProgress(null)
         void checkCaptureVision()
       } else if (progress.status === 'failed' || progress.status === 'cancelled') {
-        setVisionDownloadPercent(null)
-      } else if (progress.percent != null) {
-        setVisionDownloadPercent(progress.percent)
+        setVisionDownloadProgress(null)
+      } else {
+        setVisionDownloadProgress(progress)
       }
     })
     return () => {
@@ -130,12 +133,12 @@ export function PermissionGate({ children }: PermissionGateProps) {
 
   const handleVisionAction = (): void => {
     if (visionIssue?.kind === 'missing-projector') {
-      setVisionDownloadPercent(0)
+      setVisionDownloadProgress({ percent: 0 })
       void window.api
         .downloadModel?.(visionIssue.modelId)
         .catch((error) => console.error('Failed to download capture vision support:', error))
         .finally(() => {
-          setVisionDownloadPercent(null)
+          setVisionDownloadProgress(null)
           void checkCaptureVision()
         })
       return
@@ -186,7 +189,7 @@ export function PermissionGate({ children }: PermissionGateProps) {
           <SetupNudge
             issue={visionIssue.kind}
             modelName={visionIssue.modelName}
-            progress={visionDownloadPercent}
+            progress={visionDownloadProgress}
             onOpen={handleVisionAction}
             onDismiss={() => setSetupDismissed(true)}
           />
@@ -324,7 +327,7 @@ function SetupNudge({
   missingLocalNetwork?: boolean
   issue?: VisionIssue['kind']
   modelName?: string | null
-  progress?: number | null
+  progress?: ProgressLike | null
   onOpen: () => void
   onDismiss: () => void
 }) {
@@ -351,9 +354,12 @@ function SetupNudge({
           : missingLocalNetwork
             ? 'Allow this Mac to find and sync directly with your devices.'
             : 'Grant screen and accessibility access so Off Grid can see and remember.'
+  const presentedProgress = progress ? projectProgress(progress) : null
   const cta =
     progress != null
-      ? `Downloading ${String(progress)}%`
+      ? presentedProgress?.determinate
+        ? `Downloading ${Math.round(presentedProgress.percentage ?? 0)}%`
+        : 'Downloading'
       : issue === 'missing-projector'
         ? 'Download vision support'
         : issue === 'choose-vision-model'
@@ -372,6 +378,16 @@ function SetupNudge({
       <div className="text-xs leading-tight">
         <div className="font-medium text-white">{title}</div>
         <div className="text-neutral-500">{detail}</div>
+        {presentedProgress ? (
+          <div className="mt-1 tabular-nums text-neutral-500">
+            {presentedProgress.totalBytes !== undefined
+              ? `${formatStorageBytes(presentedProgress.currentBytes)} / ${formatStorageBytes(presentedProgress.totalBytes)}`
+              : 'Total size unavailable'}
+            {presentedProgress.bytesPerSecond !== undefined
+              ? ` · ${formatTransferSpeed(presentedProgress.bytesPerSecond)}`
+              : ''}
+          </div>
+        ) : null}
       </div>
       <button
         onClick={onOpen}

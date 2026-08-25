@@ -23,9 +23,18 @@ import {
 import { SettingsRow } from './SettingsRow'
 import { SettingsSelect } from './SettingsSelect'
 import { LoadingDots } from './ui/loading-dots'
+import { formatTransferSpeed } from '@offgrid/sync'
+import { projectProgress } from '@offgrid/ui'
+import { formatStorageBytes } from './setup/storage-format'
 
 type AssetsState = 'loading' | 'checking' | 'downloading' | 'ready' | 'error'
 type TestState = 'idle' | 'generating' | 'playing' | 'error'
+interface VoiceAssetProgress {
+  percentage: number | null
+  downloadedBytes?: number
+  totalBytes?: number | null
+  bytesPerSecond?: number
+}
 
 const TURN_ORDER: VoiceTurnMode[] = ['tap', 'silence', 'handsfree']
 
@@ -66,7 +75,7 @@ export function VoiceSettingsTab(): React.JSX.Element {
   const [voice, setVoice] = useState('af_heart')
   const [language, setLanguage] = useState('en-US')
   const [assetsState, setAssetsState] = useState<AssetsState>('loading')
-  const [progress, setProgress] = useState<number | null>(0)
+  const [progress, setProgress] = useState<VoiceAssetProgress>({ percentage: 0 })
   const [testState, setTestState] = useState<TestState>('idle')
   const [settingsLoaded, setSettingsLoaded] = useState(false)
   const [preferences, setPreferences] = useState(DEFAULT_VOICE_PREFERENCES)
@@ -75,7 +84,7 @@ export function VoiceSettingsTab(): React.JSX.Element {
 
   const loadVoices = useCallback((): void => {
     setAssetsState('loading')
-    setProgress(0)
+    setProgress({ percentage: 0 })
     void window.api
       .ttsVoices()
       .then((runtimeVoices: RuntimeSpeechVoice[]) => {
@@ -86,11 +95,13 @@ export function VoiceSettingsTab(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
-    const stopProgress = window.api.onTtsVoiceProgress(({ voiceId, progress: next }) => {
-      if (voiceId && voiceId !== requestedVoiceRef.current) return
-      setAssetsState('downloading')
-      setProgress(typeof next === 'number' && Number.isFinite(next) ? Math.round(next) : null)
-    })
+    const stopProgress = window.api.onTtsVoiceProgress(
+      ({ voiceId, progress: percentage, ...next }) => {
+        if (voiceId && voiceId !== requestedVoiceRef.current) return
+        setAssetsState('downloading')
+        setProgress({ percentage, ...next })
+      }
+    )
     loadVoices()
     void window.api
       .getSettings()
@@ -114,12 +125,12 @@ export function VoiceSettingsTab(): React.JSX.Element {
     if (!settingsLoaded || !voices.some(({ id }) => id === voice)) return
     requestedVoiceRef.current = voice
     setAssetsState('checking')
-    setProgress(0)
+    setProgress({ percentage: 0 })
     void window.api
       .prepareTtsVoice(voice)
       .then(() => {
         if (requestedVoiceRef.current === voice) {
-          setProgress(100)
+          setProgress({ percentage: 100 })
           setAssetsState('ready')
         }
       })
@@ -204,6 +215,7 @@ export function VoiceSettingsTab(): React.JSX.Element {
   }
 
   const turnDescription = VOICE_TURN_LABELS[preferences.turnMode].description
+  const assetProgress = projectProgress(progress)
   return (
     <>
       <SettingsRow
@@ -315,7 +327,13 @@ export function VoiceSettingsTab(): React.JSX.Element {
         >
           <LoadingDots />
           Downloading {runtimeVoiceLanguage({ id: voice })?.label ?? language} audio
-          {progress === null ? '...' : ` - ${progress}%`}
+          {assetProgress.determinate ? ` - ${Math.round(assetProgress.percentage ?? 0)}%` : '...'}
+          {assetProgress.totalBytes !== undefined
+            ? ` · ${formatStorageBytes(assetProgress.currentBytes)} / ${formatStorageBytes(assetProgress.totalBytes)}`
+            : ''}
+          {assetProgress.bytesPerSecond !== undefined
+            ? ` · ${formatTransferSpeed(assetProgress.bytesPerSecond)}`
+            : ''}
         </div>
       ) : assetsState === 'error' ? (
         <div

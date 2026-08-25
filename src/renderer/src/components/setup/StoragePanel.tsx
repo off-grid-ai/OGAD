@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { HardDrives, Trash, ArrowsClockwise, X, Broom } from '@phosphor-icons/react'
 import { cn } from '@renderer/lib/utils'
 import { modelKindLabel } from '@renderer/lib/model-kind-labels'
@@ -10,6 +10,8 @@ import {
 } from '@renderer/lib/model-settings-panel'
 import { CacheCleanupControl } from './CacheCleanupControl'
 import { formatStorageBytes } from './storage-format'
+import { formatTransferSpeed } from '@offgrid/sync'
+import { projectProgress } from '@offgrid/ui'
 
 interface ModelDiskEntry {
   id: string
@@ -32,6 +34,9 @@ interface DownloadEntry {
   currentFile?: string
   downloadedMB?: string
   totalMB?: string
+  downloadedBytes?: number
+  totalBytes?: number
+  bytesPerSecond?: number
   error?: string
 }
 
@@ -46,12 +51,23 @@ export function StoragePanel(): React.ReactElement {
   const [info, setInfo] = useState<StorageInfo | null>(null)
   const [downloads, setDownloads] = useState<DownloadEntry[]>([])
   const [busy, setBusy] = useState<string | null>(null)
+  const liveProgress = useRef(new Map<string, DownloadEntry>())
 
   const refresh = useCallback(async () => {
     try {
       const [s, d] = await Promise.all([api.getStorageInfo(), api.listDownloads()])
       if (s) setInfo(s as StorageInfo)
-      if (Array.isArray(d)) setDownloads(d as DownloadEntry[])
+      if (Array.isArray(d)) {
+        const registry = (d as DownloadEntry[]).map((entry) => ({
+          ...entry,
+          ...liveProgress.current.get(entry.modelId)
+        }))
+        const known = new Set(registry.map((entry) => entry.modelId))
+        setDownloads([
+          ...registry,
+          ...Array.from(liveProgress.current.values()).filter((entry) => !known.has(entry.modelId))
+        ])
+      }
     } catch {
       /* keep last */
     }
@@ -61,8 +77,28 @@ export function StoragePanel(): React.ReactElement {
     refresh()
     const t = setInterval(refresh, 3000)
     const off = (
-      api as unknown as { onModelProgress?: (cb: () => void) => () => void }
-    ).onModelProgress?.(refresh)
+      api as unknown as {
+        onModelProgress?: (cb: (progress: DownloadEntry) => void) => () => void
+      }
+    ).onModelProgress?.((progress) => {
+      // The live model job is authoritative. Keep its aggregate byte and rate fields instead of
+      // waiting for a reduced or stale registry poll to replace them.
+      if (progress.status === 'downloading' || progress.status === 'queued') {
+        liveProgress.current.set(progress.modelId, {
+          ...liveProgress.current.get(progress.modelId),
+          ...progress
+        })
+      } else {
+        liveProgress.current.delete(progress.modelId)
+      }
+      setDownloads((current) => {
+        const index = current.findIndex((item) => item.modelId === progress.modelId)
+        if (index < 0) return [...current, progress]
+        const next = [...current]
+        next[index] = { ...current[index], ...progress }
+        return next
+      })
+    })
     return () => {
       clearInterval(t)
       off?.()
@@ -203,42 +239,59 @@ export function StoragePanel(): React.ReactElement {
               </button>
             )}
           </div>
-          {active.map((d) => (
-            <div key={d.modelId} className="flex items-center gap-3 py-1.5">
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-mono text-[11px] text-neutral-300">
-                  {d.modelId}
-                  {companionDownloadLabel(d.currentFile) && (
-                    // A companion-only fetch (e.g. adding a vision projector to a model
-                    // already on disk) — say so, or it reads as a full re-download.
-                    <span className="ml-1.5 rounded-sm border border-emerald-300/40 px-1 py-px text-[9px] uppercase tracking-wide text-emerald-300">
-                      {companionDownloadLabel(d.currentFile)} only
-                    </span>
-                  )}
-                </div>
-                {d.status === 'queued' ? (
-                  <div className="mt-0.5 text-[10px] text-neutral-500">Queued</div>
-                ) : (
-                  <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-neutral-800">
-                    <div
-                      className="h-full rounded-full bg-green-500 transition-all"
-                      style={{ width: `${d.percent ?? 0}%` }}
-                    />
+          {active.map((d) => {
+            const progress = projectProgress(d)
+            return (
+              <div key={d.modelId} className="flex items-center gap-3 py-1.5">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-mono text-[11px] text-neutral-300">
+                    {d.modelId}
+                    {companionDownloadLabel(d.currentFile) && (
+                      // A companion-only fetch (e.g. adding a vision projector to a model
+                      // already on disk) — say so, or it reads as a full re-download.
+                      <span className="ml-1.5 rounded-sm border border-emerald-300/40 px-1 py-px text-[9px] uppercase tracking-wide text-emerald-300">
+                        {companionDownloadLabel(d.currentFile)} only
+                      </span>
+                    )}
                   </div>
+                  {d.status === 'queued' ? (
+                    <div className="mt-0.5 text-[10px] text-neutral-500">Queued</div>
+                  ) : (
+                    <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-neutral-800">
+                      <div
+                        className="h-full rounded-full bg-green-500 transition-all"
+                        style={{ width: `${progress.percentage ?? 0}%` }}
+                      />
+                    </div>
+                  )}
+                  {d.status === 'downloading' ? (
+                    <div className="mt-1 text-[10px] tabular-nums text-neutral-500">
+                      {progress.totalBytes !== undefined
+                        ? `${formatStorageBytes(progress.currentBytes)} of ${formatStorageBytes(progress.totalBytes)}`
+                        : 'Total size unavailable'}
+                      {progress.bytesPerSecond !== undefined
+                        ? ` · ${formatTransferSpeed(progress.bytesPerSecond)}`
+                        : ''}
+                    </div>
+                  ) : null}
+                </div>
+                {d.status === 'downloading' && (
+                  <span className="font-mono text-[10px] text-neutral-500">
+                    {progress.determinate
+                      ? `${Math.round(progress.percentage ?? 0)}%`
+                      : 'Downloading'}
+                  </span>
                 )}
+                <button
+                  onClick={() => cancel(d.modelId)}
+                  className="rounded-md p-1 text-neutral-500 hover:text-white"
+                  aria-label={`Cancel ${d.modelId}`}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
               </div>
-              {d.status === 'downloading' && (
-                <span className="font-mono text-[10px] text-neutral-500">{d.percent ?? 0}%</span>
-              )}
-              <button
-                onClick={() => cancel(d.modelId)}
-                className="rounded-md p-1 text-neutral-500 hover:text-white"
-                aria-label={`Cancel ${d.modelId}`}
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ))}
+            )
+          })}
           {incomplete.map((d) => (
             <div key={d.modelId} className="flex items-center gap-3 py-1.5">
               <div className="min-w-0 flex-1">

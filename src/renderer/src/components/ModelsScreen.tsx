@@ -23,6 +23,8 @@ import { deviceNoun } from '@renderer/lib/device'
 import { modelKindLabel } from '@renderer/lib/model-kind-labels'
 import { collectTags, matchesAllTags, toggleTag } from '@renderer/lib/model-tag-filter'
 import { companionDownloadLabel } from '@renderer/lib/download-label'
+import { formatTransferSpeed } from '@offgrid/sync'
+import { projectProgress } from '@offgrid/ui'
 import {
   modelSettingsTabForKind,
   openModelSettingsPanel,
@@ -210,6 +212,9 @@ interface DownloadCardProgress {
   error?: string
   downloadedMB?: string
   totalMB?: string
+  downloadedBytes?: number
+  totalBytes?: number
+  bytesPerSecond?: number
   fileIndex?: number
   fileCount?: number
 }
@@ -571,6 +576,7 @@ export function ModelsScreen(): React.JSX.Element {
     const active = isActive(m.id)
     const prog = progress[m.id]
     const downloading = prog && prog.status !== 'completed' && prog.status !== 'failed'
+    const downloadProgress = prog ? projectProgress(prog) : null
     // Installed, vision-capable, but the projector isn't on disk (e.g. downloaded before
     // the model gained vision) → offer to fetch just the projector. downloadModel skips
     // files already present, so this pulls only the mmproj.
@@ -709,13 +715,27 @@ export function ModelsScreen(): React.JSX.Element {
             <>
               <div className="flex min-w-0 items-baseline gap-1.5 text-[10px] text-neutral-500">
                 <span className="text-neutral-300">
-                  {prog.status === 'queued' ? 'Queued' : `${prog.percent}%`}
+                  {prog.status === 'queued'
+                    ? 'Queued'
+                    : downloadProgress?.determinate
+                      ? `${Math.round(downloadProgress.percentage ?? 0)}%`
+                      : 'Downloading'}
                 </span>
-                {prog.downloadedMB && prog.totalMB && (
+                {downloadProgress && downloadProgress.totalBytes !== undefined ? (
+                  <span className="whitespace-nowrap">
+                    {formatSize(downloadProgress.currentBytes)} of{' '}
+                    {formatSize(downloadProgress.totalBytes)}
+                  </span>
+                ) : prog.downloadedMB && prog.totalMB ? (
                   <span className="whitespace-nowrap">
                     {formatTransferred(prog.downloadedMB)} of {formatTransferred(prog.totalMB)}
                   </span>
-                )}
+                ) : null}
+                {downloadProgress?.bytesPerSecond !== undefined ? (
+                  <span className="whitespace-nowrap">
+                    · {formatTransferSpeed(downloadProgress.bytesPerSecond)}
+                  </span>
+                ) : null}
                 <span className="min-w-0 truncate">{downloadPartLabel(prog)}</span>
               </div>
               <button
@@ -807,7 +827,7 @@ export function ModelsScreen(): React.JSX.Element {
           <div className="h-0.5 w-full overflow-hidden rounded-full bg-neutral-800">
             <div
               className="h-full bg-green-500 transition-all"
-              style={{ width: `${prog.percent}%` }}
+              style={{ width: `${downloadProgress?.percentage ?? 0}%` }}
             />
           </div>
         )}
@@ -1084,6 +1104,7 @@ export function ModelsScreen(): React.JSX.Element {
             const active = isActive(m.id)
             const prog = progress[m.id]
             const downloading = prog && prog.status !== 'completed' && prog.status !== 'failed'
+            const downloadProgress = prog ? projectProgress(prog) : null
             const rows: [string, string | null][] = [
               ['Source', m.org || (isLocal ? 'Imported' : '—')],
               ['Parameters', m.params ? `${m.params}B` : null],
@@ -1203,8 +1224,10 @@ export function ModelsScreen(): React.JSX.Element {
                       {prog.status === 'queued'
                         ? 'Queued'
                         : companionDownloadLabel(prog.currentFile)
-                          ? `Downloading ${prog.percent}% · adding ${companionDownloadLabel(prog.currentFile)}`
-                          : `Downloading ${prog.percent}%…`}
+                          ? `Downloading ${downloadProgress?.determinate ? `${Math.round(downloadProgress.percentage ?? 0)}%` : ''} · adding ${companionDownloadLabel(prog.currentFile)}`
+                          : downloadProgress?.determinate
+                            ? `Downloading ${Math.round(downloadProgress.percentage ?? 0)}%…`
+                            : 'Downloading…'}
                     </span>
                   ) : (
                     <button

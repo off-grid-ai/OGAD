@@ -12,6 +12,9 @@ import {
 import { cn } from '@renderer/lib/utils'
 import { deviceNoun } from '@renderer/lib/device'
 import { HealthPanel } from './HealthPanel'
+import { formatTransferSpeed } from '@offgrid/sync'
+import { projectProgress } from '@offgrid/ui'
+import { formatStorageBytes } from './storage-format'
 
 type Mode = 'conservative' | 'balanced' | 'extreme'
 
@@ -48,6 +51,9 @@ interface SetupProgress {
   percent?: number
   downloadedMB?: string
   totalMB?: string
+  downloadedBytes?: number
+  totalBytes?: number
+  bytesPerSecond?: number
 }
 interface SetupItem {
   kind: ItemKind
@@ -83,6 +89,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
   const [mode, setMode] = useState<Mode>('balanced')
   const [plan, setPlan] = useState<SetupPlan | null>(null)
   const firedConfigured = useRef(false)
+  const downloadProgress = progress?.phase === 'download' ? projectProgress(progress) : null
 
   const loadPlan = useCallback(
     async (m: Mode) => {
@@ -159,7 +166,6 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
 
   const done = progress?.phase === 'done'
   const errored = progress?.phase === 'error'
-  const pct = typeof progress?.percent === 'number' ? progress.percent : null
   let progressTextClass = 'text-neutral-400'
   if (done) progressTextClass = 'text-green-500'
   else if (errored) progressTextClass = 'text-neutral-300'
@@ -290,7 +296,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
                   <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-neutral-800">
                     <div
                       className="h-full rounded-full bg-green-500 transition-all"
-                      style={{ width: `${pct ?? 0}%` }}
+                      style={{ width: `${downloadProgress?.percentage ?? 0}%` }}
                     />
                   </div>
                   <button
@@ -301,9 +307,14 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
                   </button>
                 </div>
                 <div className="mt-1 text-[10px] text-neutral-600">
-                  {pct ?? 0}%
-                  {progress.totalMB
-                    ? ` · ${progress.downloadedMB ?? '0'} / ${progress.totalMB} MB`
+                  {downloadProgress?.determinate
+                    ? `${Math.round(downloadProgress.percentage ?? 0)}%`
+                    : 'Downloading'}
+                  {downloadProgress?.totalBytes !== undefined
+                    ? ` · ${formatStorageBytes(downloadProgress.currentBytes)} / ${formatStorageBytes(downloadProgress.totalBytes)}`
+                    : ''}
+                  {downloadProgress?.bytesPerSecond !== undefined
+                    ? ` · ${formatTransferSpeed(downloadProgress.bytesPerSecond)}`
                     : ''}
                 </div>
               </div>

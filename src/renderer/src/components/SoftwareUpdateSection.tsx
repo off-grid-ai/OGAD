@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { persistToggle } from '@renderer/lib/persist-toggle'
 import { Button } from './ui/button'
+import { formatTransferSpeed } from '@offgrid/sync'
+import { projectProgress } from '@offgrid/ui'
+import { formatStorageBytes } from './setup/storage-format'
 import {
   Dialog,
   DialogClose,
@@ -15,6 +18,16 @@ interface PreviousVersion {
   version: string
   channel: 'stable' | 'nightly'
   publishedAt: string | null
+}
+
+interface UpdateProgress {
+  transferred: number
+  total: number
+  bytesPerSecond: number
+  percent: number
+  status: 'downloading' | 'completed' | 'failed'
+  version: string | null
+  error?: string
 }
 
 function releaseDate(value: string | null): string {
@@ -127,6 +140,7 @@ export function SoftwareUpdateSection(): React.ReactElement {
   const [history, setHistory] = useState<PreviousVersion[]>([])
   const [historyError, setHistoryError] = useState('')
   const [selectedVersion, setSelectedVersion] = useState<PreviousVersion | null>(null)
+  const [downloadProgress, setDownloadProgress] = useState<UpdateProgress | null>(null)
 
   useEffect(() => {
     api
@@ -147,6 +161,18 @@ export function SoftwareUpdateSection(): React.ReactElement {
       .catch(() => {})
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [])
+
+  useEffect(() => {
+    void api.updateDownloadProgress?.().then((progress: UpdateProgress | null) => {
+      if (progress) setDownloadProgress(progress)
+    })
+    const stop = api.onUpdateDownloadProgress?.((progress: UpdateProgress) => {
+      setDownloadProgress(progress)
+    })
+    return () => {
+      if (typeof stop === 'function') stop()
+    }
+  }, [api])
 
   const toggle = (): void => {
     const next = !auto
@@ -259,6 +285,16 @@ export function SoftwareUpdateSection(): React.ReactElement {
     }
   }
 
+  const presentedProgress = downloadProgress
+    ? projectProgress({
+        currentBytes: downloadProgress.transferred,
+        totalBytes: downloadProgress.total,
+        bytesPerSecond: downloadProgress.bytesPerSecond,
+        percent: downloadProgress.percent,
+        status: downloadProgress.status
+      })
+    : null
+
   return (
     <div>
       <div className="flex items-start justify-between gap-4">
@@ -337,6 +373,40 @@ export function SoftwareUpdateSection(): React.ReactElement {
           {status}
         </p>
       )}
+      {downloadProgress && downloadProgress.status !== 'failed' ? (
+        <div className="mt-3 border border-neutral-800 bg-neutral-950/40 px-3 py-2.5">
+          <div className="flex items-center justify-between gap-3 text-xs text-neutral-400">
+            <span>
+              {downloadProgress.status === 'completed'
+                ? `v${downloadProgress.version ?? ''} ready to install`
+                : `Downloading v${downloadProgress.version ?? ''}`}
+            </span>
+            <span className="tabular-nums">
+              {presentedProgress?.determinate
+                ? `${Math.round(presentedProgress.percentage ?? 0)}%`
+                : 'Downloading'}
+            </span>
+          </div>
+          <div className="mt-2 h-1 overflow-hidden bg-neutral-800">
+            <div
+              className="h-full bg-emerald-500 transition-all duration-150"
+              style={{ width: `${presentedProgress?.percentage ?? 0}%` }}
+            />
+          </div>
+          <div className="mt-1.5 text-[11px] tabular-nums text-neutral-600">
+            {presentedProgress?.totalBytes !== undefined
+              ? `${formatStorageBytes(presentedProgress.currentBytes)} / ${formatStorageBytes(presentedProgress.totalBytes)}`
+              : 'Total size unavailable'}
+            {presentedProgress?.bytesPerSecond !== undefined
+              ? ` · ${formatTransferSpeed(presentedProgress.bytesPerSecond)}`
+              : ''}
+          </div>
+        </div>
+      ) : downloadProgress?.status === 'failed' ? (
+        <p className="mt-3 text-xs text-red-400" role="alert">
+          {downloadProgress.error ?? 'The update download failed. Check your connection and retry.'}
+        </p>
+      ) : null}
 
       <RollbackDialog
         currentVersion={version}

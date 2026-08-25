@@ -46,6 +46,9 @@ type ProgressEvent = {
   error?: string
   downloadedMB?: string
   totalMB?: string
+  downloadedBytes?: number
+  totalBytes?: number
+  bytesPerSecond?: number
   fileIndex?: number
   fileCount?: number
 }
@@ -148,6 +151,9 @@ describe('<ModelsScreen/> — what a download looks like', () => {
         currentFile: MODEL.files[0]!.name,
         downloadedMB: '1331.2',
         totalMB: '6296.4',
+        downloadedBytes: 1331.2 * 1024 * 1024,
+        totalBytes: 6296.4 * 1024 * 1024,
+        bytesPerSecond: 2.8 * 1024 * 1024,
         fileIndex: 1,
         fileCount: 2
       })
@@ -167,7 +173,7 @@ describe('<ModelsScreen/> — what a download looks like', () => {
     await user.click(await screen.findByRole('button', { name: /^download$/i }))
 
     // BEFORE: it is genuinely downloading — progress on screen and a Cancel to press.
-    expect(await screen.findByText(/20%/)).toBeTruthy()
+    expect(await screen.findByText(/21%/)).toBeTruthy()
     const cancel = screen.getByRole('button', { name: /cancel/i })
 
     await user.click(cancel)
@@ -176,7 +182,7 @@ describe('<ModelsScreen/> — what a download looks like', () => {
     expect(await screen.findByRole('button', { name: /^download$/i })).toBeTruthy()
     expect(screen.queryByText(/cancelled/i)).toBeNull()
     expect(screen.queryByRole('button', { name: /try again/i })).toBeNull()
-    expect(screen.queryByText(/20%/)).toBeNull()
+    expect(screen.queryByText(/21%/)).toBeNull()
   })
 
   it('an in-flight download reads as one number, in human units, with the part it is fetching', async () => {
@@ -188,6 +194,9 @@ describe('<ModelsScreen/> — what a download looks like', () => {
         currentFile: MODEL.files[0]!.name,
         downloadedMB: '1331.2',
         totalMB: '6296.4',
+        downloadedBytes: 1331.2 * 1024 * 1024,
+        totalBytes: 6296.4 * 1024 * 1024,
+        bytesPerSecond: 2.8 * 1024 * 1024,
         fileIndex: 1,
         fileCount: 2
       })
@@ -198,7 +207,7 @@ describe('<ModelsScreen/> — what a download looks like', () => {
     await user.click(await screen.findByRole('button', { name: /^download$/i }))
 
     // One percent for the whole download.
-    expect(await screen.findByText(/20%/)).toBeTruthy()
+    expect(await screen.findByText(/21%/)).toBeTruthy()
     // Bytes at the scale the card above already uses — 6296.4 MB is a number you have to convert.
     //
     // The feed counts MEBIbytes, so 6296.4 is 6.6 GB, not 6.1. This line used to assert 6.1 because
@@ -206,9 +215,32 @@ describe('<ModelsScreen/> — what a download looks like', () => {
     // label, which is what made a 25.4GB model report "23.7 GB" while downloading. Both now read
     // through formatSize, so this assertion finally matches the intent stated above it.
     expect(screen.getByText(/1\.4 GB of 6\.6 GB/)).toBeTruthy()
+    expect(screen.getByText(/2\.8 MB\/s/)).toBeTruthy()
     // Which part is moving, without giving it a second percent of its own.
     expect(screen.getByText(/file 1 of 2/)).toBeTruthy()
     // The action row holds the action, on the same line as the status.
+    expect(screen.getByRole('button', { name: /cancel/i })).toBeTruthy()
+  })
+
+  it('uses an indeterminate label when byte totals and percentage are invalid', async () => {
+    onDownload = async (id) => {
+      emit({
+        modelId: id,
+        status: 'downloading',
+        percent: Number.NaN,
+        downloadedBytes: Number.NaN,
+        totalBytes: Number.NaN,
+        bytesPerSecond: Number.POSITIVE_INFINITY
+      })
+      return new Promise(() => {})
+    }
+    const user = userEvent.setup()
+    render(<ModelsScreen />)
+    await user.click(await screen.findByRole('button', { name: /^download$/i }))
+
+    expect(await screen.findByText('Downloading')).toBeTruthy()
+    expect(document.body.textContent).not.toContain('NaN')
+    expect(document.body.textContent).not.toContain('Infinity')
     expect(screen.getByRole('button', { name: /cancel/i })).toBeTruthy()
   })
 })

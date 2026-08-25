@@ -12,7 +12,14 @@ const setActiveModalModel = vi.fn<(kind: string, modelId: string | null) => Prom
   async () => undefined
 )
 const getTranscriptionInfo = vi.fn()
-let emitVoiceProgress: ((data: { progress: number }) => void) | undefined
+let emitVoiceProgress:
+  | ((data: {
+      progress: number | null
+      downloadedBytes?: number
+      totalBytes?: number | null
+      bytesPerSecond?: number
+    }) => void)
+  | undefined
 
 beforeEach(() => {
   emitVoiceProgress = undefined
@@ -48,7 +55,7 @@ beforeEach(() => {
       { id: 'future_voice', label: 'Nora', language: 'ga', languageLabel: 'Irish' }
     ]),
     prepareTtsVoice: vi.fn().mockResolvedValue({ ready: true }),
-    onTtsVoiceProgress: vi.fn((callback: (data: { progress: number }) => void) => {
+    onTtsVoiceProgress: vi.fn((callback: typeof emitVoiceProgress) => {
       emitVoiceProgress = callback
       return vi.fn()
     }),
@@ -96,6 +103,7 @@ describe('<SettingsPanel/> speech languages', () => {
 
     const user = userEvent.setup()
     const language = await screen.findByRole('button', { name: 'Language selection' })
+    await waitFor(() => expect((language as HTMLButtonElement).disabled).toBe(false))
     language.focus()
     await user.keyboard('{Enter}{ArrowDown}{ArrowDown}{Enter}')
 
@@ -160,7 +168,9 @@ describe('<SettingsPanel/> speech languages', () => {
     await user.click(screen.getByRole('button', { name: 'Language selection' }))
     await user.click(screen.getByRole('menuitemradio', { name: 'Irish' }))
     await waitFor(() => expect(saveSetting).toHaveBeenCalledWith('ttsVoice', 'future_voice'))
-    expect(screen.getByRole('button', { name: 'Language selection' }).textContent).toContain('Irish')
+    expect(screen.getByRole('button', { name: 'Language selection' }).textContent).toContain(
+      'Irish'
+    )
   })
 
   it('shows voice loading progress and changes to ready only after loading completes', async () => {
@@ -194,8 +204,15 @@ describe('<SettingsPanel/> speech languages', () => {
       { id: 'af_bella', label: 'Bella', language: 'en-US' }
     ])
     expect(await screen.findByText('Checking voice files...')).toBeTruthy()
-    emitVoiceProgress?.({ progress: 43 })
-    expect(await screen.findByText('Downloading English (US) audio - 43%')).toBeTruthy()
+    emitVoiceProgress?.({
+      progress: 43,
+      downloadedBytes: 43 * 1024 * 1024,
+      totalBytes: 100 * 1024 * 1024,
+      bytesPerSecond: 2 * 1024 * 1024
+    })
+    expect(await screen.findByText(/Downloading English \(US\) audio - 43%/)).toBeTruthy()
+    expect(screen.getByText(/45 MB \/ 105 MB/)).toBeTruthy()
+    expect(screen.getByText(/2\.0 MB\/s/)).toBeTruthy()
     finishPreparing()
     expect(await screen.findByText('English (US) voice ready.')).toBeTruthy()
     expect(
@@ -204,6 +221,25 @@ describe('<SettingsPanel/> speech languages', () => {
     expect(
       (screen.getByRole('button', { name: 'Voice selection' }) as HTMLButtonElement).disabled
     ).toBe(false)
+  })
+
+  it('keeps an unknown voice download finite and never renders NaN', async () => {
+    let finishPreparing!: () => void
+    const boundary = (window as unknown as { api: Record<string, unknown> }).api
+    boundary.prepareTtsVoice = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finishPreparing = () => resolve({ ready: true })
+        })
+    )
+
+    render(<SettingsPanel onClose={vi.fn()} initialTab="voice" />)
+    expect(await screen.findByText('Checking voice files...')).toBeTruthy()
+    emitVoiceProgress?.({ progress: null, downloadedBytes: Number.NaN, totalBytes: null })
+
+    expect(await screen.findByText(/Downloading English \(US\) audio\.\.\./)).toBeTruthy()
+    expect(document.body.textContent).not.toContain('NaN')
+    finishPreparing()
   })
 
   it('shows a clear failure and retries voice loading', async () => {
