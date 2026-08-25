@@ -33,6 +33,7 @@ describe('shouldPlan', () => {
   it('skips plain questions / chit-chat', () => {
     expect(shouldPlan('what is the capital of France?')).toBe(false)
     expect(shouldPlan('how does photosynthesis work')).toBe(false)
+    expect(shouldPlan('anything?')).toBe(false)
     expect(shouldPlan('')).toBe(false)
   })
 

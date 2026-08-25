@@ -93,7 +93,7 @@ export function shouldPlan(message: string): boolean {
   const questionOpener = /^(what|why|how|who|when|where|which|is |are |can |could |do |does |did |should |would |will |tell me|explain|summar|define)/
   const actionVerb =
     /\b(open|play|watch|send|message|text|email|mail|call|search|find|book|order|buy|schedule|create|add|remind|set|post|share|check in|log in|sign in|navigate|go to|download|upload)\b/
-  if (questionOpener.test(m) && !actionVerb.test(m)) {
+  if (!actionVerb.test(m) && (questionOpener.test(m) || m.endsWith('?'))) {
     return false
   }
   return true
