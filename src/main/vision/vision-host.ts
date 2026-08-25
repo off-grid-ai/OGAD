@@ -176,8 +176,8 @@ class VisionHost {
       const result = await runVisionTask(goal, {
         screen: makeScreen(actuation),
         guard,
-        ground: (g, image) =>
-          llm.chat(buildVisionPrompt(g), [image], 60_000, 200, {
+        ground: (g, image, history) =>
+          llm.chat(buildVisionPrompt(g, history), [image], 60_000, 200, {
             disableThinking: true
           }),
         waitForUser: async (why) => {

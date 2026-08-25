@@ -27,7 +27,9 @@ export const VISION_SYSTEM_PROMPT = [
   'When the task is complete reply finished(content=...); if it cannot be done reply finished with what stopped you.'
 ].join('\n')
 
-/** The full grounding message for one step: the system contract + the task. */
-export function buildVisionPrompt(goal: string): string {
-  return `${VISION_SYSTEM_PROMPT}\n\nTask: ${goal}`
+/** The full grounding message for one isolated step. The parent loop owns the complete action
+ * ledger; only its bounded summary enters this fresh model call. */
+export function buildVisionPrompt(goal: string, recentSteps: readonly string[] = []): string {
+  const history = recentSteps.length > 0 ? `\n\nPrevious steps:\n${recentSteps.join('\n')}` : ''
+  return `${VISION_SYSTEM_PROMPT}\n\nTask: ${goal}${history}`
 }
