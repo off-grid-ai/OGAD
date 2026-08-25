@@ -6,6 +6,7 @@ import {
   type ImageParamStore
 } from '@renderer/lib/image-params'
 import { announceImageSettingsChanged } from '@renderer/lib/image-settings-events'
+import { SettingsSelect } from './SettingsSelect'
 
 type ImageSettings = {
   imageParams?: ImageParamStore
@@ -72,42 +73,35 @@ export function ImageSettingsTab(): React.JSX.Element {
 
   return (
     <div className="space-y-4">
-      <label className="block">
+      <div>
         <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
           Active image model
         </span>
-        <select
-          aria-label="Active image model"
+        <SettingsSelect
+          id="active-image-model"
+          label="Active image model"
           value={model}
-          onChange={(event) => chooseModel(event.target.value)}
-          className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
-        >
-          {models.map((item) => (
-            <option key={item} value={item}>
-              {modelLabel(item)}
-            </option>
-          ))}
-        </select>
-      </label>
+          onValueChange={chooseModel}
+          options={models.map((item) => ({ value: item, label: modelLabel(item) }))}
+        />
+      </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <label>
+        <div>
           <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
             Size
           </span>
-          <select
-            aria-label="Image size"
-            value={effective.size}
-            onChange={(event) => saveOverride('size', Number(event.target.value))}
-            className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
-          >
-            {[256, 512, 640, 768, 1024].map((size) => (
-              <option key={size} value={size}>
-                {size} × {size}
-              </option>
-            ))}
-          </select>
-        </label>
+          <SettingsSelect
+            id="image-size"
+            label="Image size"
+            value={String(effective.size)}
+            onValueChange={(value) => saveOverride('size', Number(value))}
+            options={[256, 512, 640, 768, 1024].map((size) => ({
+              value: String(size),
+              label: `${size} × ${size}`
+            }))}
+          />
+        </div>
         <label>
           <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
             Steps

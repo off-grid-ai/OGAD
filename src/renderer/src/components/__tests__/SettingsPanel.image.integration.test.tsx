@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SettingsPanel } from '../SettingsPanel'
 
@@ -33,20 +34,32 @@ describe('<SettingsPanel/> image settings', () => {
       saveSetting,
       setActiveModalModel,
       ttsVoices: async () => [],
+      prepareTtsVoice: async () => ({ ready: true }),
       onTtsVoiceProgress: () => () => {},
       listTools: async () => [],
       mcpList: async () => []
     }
 
-    render(<SettingsPanel embedded initialTab="image" onClose={() => {}} />)
+    const view = render(<SettingsPanel embedded initialTab="image" onClose={() => {}} />)
+    expect(view.container.querySelector('select')).toBeNull()
 
-    const model = await screen.findByRole('combobox', { name: 'Active image model' })
-    expect((model as HTMLSelectElement).value).toBe('dreamshaper-xl-v2-turbo.gguf')
+    const user = userEvent.setup()
+    const model = await screen.findByRole('button', { name: 'Active image model' })
+    expect(model.textContent).toContain('dreamshaper-xl-v2-turbo')
     expect(
       (screen.getByRole('spinbutton', { name: 'Image steps' }) as HTMLInputElement).value
     ).toBe('12')
-    expect((screen.getByRole('combobox', { name: 'Image size' }) as HTMLSelectElement).value).toBe(
-      '768'
+    expect(screen.getByRole('button', { name: 'Image size' }).textContent).toContain('768 × 768')
+
+    await user.click(screen.getByRole('button', { name: 'Image size' }))
+    await user.click(screen.getByRole('menuitemradio', { name: '1024 × 1024' }))
+    await waitFor(() =>
+      expect(saveSetting).toHaveBeenCalledWith(
+        'imageParams',
+        expect.objectContaining({
+          'dreamshaper-xl-v2-turbo.gguf': expect.objectContaining({ size: 1024 })
+        })
+      )
     )
 
     fireEvent.change(screen.getByRole('spinbutton', { name: 'Image guidance' }), {
@@ -61,7 +74,8 @@ describe('<SettingsPanel/> image settings', () => {
       )
     )
 
-    fireEvent.change(model, { target: { value: 'juggernaut-xl-v9.gguf' } })
+    await user.click(model)
+    await user.click(screen.getByRole('menuitemradio', { name: 'juggernaut-xl-v9' }))
     expect(setActiveModalModel).toHaveBeenCalledWith('image', 'juggernaut-xl-v9.gguf')
   })
 })

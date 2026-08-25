@@ -15,15 +15,10 @@ import { formatContextWindow, resolveModelName } from '@renderer/lib/model-summa
 import type { ModelSettingsPanelTab as Tab } from '@renderer/lib/model-settings-panel'
 import { ImageSettingsTab } from './ImageSettingsTab'
 import { SidePanel } from './SidePanel'
-import {
-  firstRuntimeVoiceForLanguage,
-  kokoroVoiceLabel,
-  runtimeSpeechLanguages,
-  runtimeVoiceLanguage,
-  runtimeVoicesForLanguage,
-  type RuntimeSpeechVoice,
-  type SpeechLanguage
-} from '@offgrid/speech'
+import { VoiceSettingsTab } from './VoiceSettingsTab'
+import { SettingsRow as Row } from './SettingsRow'
+import { SettingsSelect } from './SettingsSelect'
+import type { SpeechLanguage } from '@offgrid/speech'
 
 const MAX_OUTPUT_AUTO = MAX_TOKENS_AUTO
 const MAX_OUTPUT_OPTIONS = [2048, 4096, 8192, 16384, 32768]
@@ -67,6 +62,8 @@ type TranscriptionInfo = {
   options: { id: string | null; name: string; active: boolean }[]
 }
 
+const DEFAULT_TRANSCRIPTION_MODEL = '__default-transcription-model__'
+
 const CTX_OPTIONS = [4096, 8192, 16384, 32768, 65536, 131072]
 // Defaults mirror the backend's LLMService field defaults (for "Reset to defaults").
 const DEFAULTS: LlmSettings = {
@@ -85,36 +82,6 @@ const DEFAULTS: LlmSettings = {
   batchSize: 512
 }
 
-function Row({
-  label,
-  hint,
-  value,
-  controlId,
-  children
-}: {
-  label: string
-  hint?: string
-  value?: string
-  controlId?: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="mb-4">
-      <div className="mb-1 flex items-center justify-between">
-        <label
-          htmlFor={controlId}
-          className="text-[11px] uppercase tracking-wide text-neutral-400"
-        >
-          {label}
-        </label>
-        {value !== undefined ? <span className="text-xs text-green-500">{value}</span> : null}
-      </div>
-      {children}
-      {hint ? <p className="mt-1 text-[10px] text-neutral-600">{hint}</p> : null}
-    </div>
-  )
-}
-
 export function SettingsPanel({
   onClose,
   embedded = false,
@@ -123,42 +90,21 @@ export function SettingsPanel({
   onClose: () => void
   embedded?: boolean
   initialTab?: Tab
-}) {
+}): React.JSX.Element {
   const [tab, setTab] = useState<Tab>(initialTab)
   const [s, setS] = useState<LlmSettings>({})
-  const [voices, setVoices] = useState<RuntimeSpeechVoice[]>([])
-  const [voice, setVoice] = useState<string>('af_heart')
-  const [voiceLanguage, setVoiceLanguage] = useState<string>('en-US')
-  const [voiceAssetsState, setVoiceAssetsState] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [voiceAssetsProgress, setVoiceAssetsProgress] = useState(0)
   const [transcriptionInfo, setTranscriptionInfo] = useState<TranscriptionInfo | null>(null)
   const [tools, setTools] = useState<{ name: string; description: string; enabled?: boolean }[]>([])
   const [connectors, setConnectors] = useState<Connector[]>([])
   const [newConn, setNewConn] = useState({ name: '', url: '' })
-  const [voiceState, setVoiceState] = useState<'idle' | 'generating' | 'playing' | 'error'>('idle')
   const [activeModelName, setActiveModelName] = useState<string | null>(null)
 
-  const loadVoices = useCallback((): void => {
-    setVoiceAssetsState('loading')
-    setVoiceAssetsProgress(0)
-    void window.api
-      .ttsVoices()
-      .then((runtimeVoices: RuntimeSpeechVoice[]) => {
-        if (!runtimeVoices.length) throw new Error('No voices available')
-        setVoices(runtimeVoices)
-        setVoiceAssetsProgress(100)
-        setVoiceAssetsState('ready')
-      })
-      .catch(() => setVoiceAssetsState('error'))
+  const refreshConnectors = useCallback((): void => {
+    window.api
+      .mcpList?.()
+      .then((c: Connector[]) => setConnectors(c))
+      .catch(() => setConnectors([]))
   }, [])
-
-  useEffect(() => {
-    const stopVoiceProgress = window.api.onTtsVoiceProgress(({ progress }) => {
-      setVoiceAssetsProgress(Math.round(progress))
-    })
-    loadVoices()
-    return stopVoiceProgress
-  }, [loadVoices])
 
   useEffect(() => {
     window.api
@@ -183,25 +129,8 @@ export function SettingsPanel({
       .listTools?.()
       .then((t: { name: string; description: string }[]) => setTools(t))
       .catch(() => {})
-    window.api
-      .getSettings()
-      .then((all: Record<string, unknown>) => {
-        const savedVoice = typeof all.ttsVoice === 'string' ? all.ttsVoice : null
-        if (savedVoice) {
-          setVoice(savedVoice)
-          setVoiceLanguage(runtimeVoiceLanguage({ id: savedVoice })?.code ?? 'en-US')
-        }
-      })
-      .catch(() => {})
     refreshConnectors()
-  }, [])
-
-  const refreshConnectors = (): void => {
-    window.api
-      .mcpList?.()
-      .then((c: Connector[]) => setConnectors(c))
-      .catch(() => setConnectors([]))
-  }
+  }, [refreshConnectors])
 
   // Persist one inference setting (optimistic) — backend applies it per-request.
   const set = (patch: LlmSettings): void => {
@@ -224,18 +153,6 @@ export function SettingsPanel({
     window.api.setLlmSettings?.(DEFAULTS)
   }
 
-  const pickVoice = (v: string): void => {
-    setVoiceLanguage(runtimeVoiceLanguage({ id: v })?.code ?? voiceLanguage)
-    void persistToggle(v, voice, setVoice, (val) => window.api.saveSetting('ttsVoice', val))
-  }
-
-  const pickVoiceLanguage = (language: string): void => {
-    const matchingVoice = firstRuntimeVoiceForLanguage(voices, language)?.id
-    if (!matchingVoice) return
-    setVoiceLanguage(language)
-    pickVoice(matchingVoice)
-  }
-
   const pickTranscriptionLanguage = (language: string): void => {
     if (!transcriptionInfo) return
     setTranscriptionInfo({ ...transcriptionInfo, language })
@@ -247,29 +164,17 @@ export function SettingsPanel({
     })
   }
 
-  const testVoice = async (): Promise<void> => {
-    setVoiceState('generating')
-    try {
-      const res = await window.api.speak('This is the Off Grid voice.', voice)
-      if (!res?.dataUrl) throw new Error('No audio returned')
-      const audio = new Audio(res.dataUrl)
-      audio.onended = () => setVoiceState('idle')
-      audio.onerror = () => {
-        console.error('[voice] playback error', audio.error)
-        setVoiceState('error')
-      }
-      // Safety: never get stuck if onended doesn't fire.
-      audio.onloadedmetadata = () =>
-        setTimeout(
-          () => setVoiceState((s) => (s === 'playing' ? 'idle' : s)),
-          (audio.duration + 1) * 1000
-        )
-      setVoiceState('playing')
-      await audio.play()
-    } catch (e) {
-      console.error('[voice] test failed', e)
-      setVoiceState('error')
-    }
+  const pickTranscriptionModel = (value: string): void => {
+    const modelId = value === DEFAULT_TRANSCRIPTION_MODEL ? null : value
+    void Promise.resolve(window.api.setActiveModalModel('transcription', modelId))
+      .then(() => window.api.getTranscriptionInfo())
+      .then((info) => setTranscriptionInfo(info))
+      .catch(() => {
+        void window.api
+          .getTranscriptionInfo()
+          .then((persisted) => setTranscriptionInfo(persisted))
+          .catch(() => {})
+      })
   }
 
   const addConnector = async (): Promise<void> => {
@@ -285,527 +190,447 @@ export function SettingsPanel({
 
   const content = (
     <>
-        {!embedded ? (
-          <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2.5">
-            <div className="flex items-center gap-2 text-sm text-neutral-200">
-              <span className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-green-500">
-                Settings
-              </span>
-            </div>
-            <button
-              onClick={onClose}
-              className="rounded-md border border-neutral-700 px-3 py-1 text-xs text-neutral-300 transition-colors hover:text-white"
-            >
-              Close
-            </button>
+      {!embedded ? (
+        <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2.5">
+          <div className="flex items-center gap-2 text-sm text-neutral-200">
+            <span className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-green-500">
+              Settings
+            </span>
           </div>
-        ) : null}
-
-        <div className="flex items-center gap-1 border-b border-neutral-800 px-3 py-2">
-          {(['model', 'image', 'voice', 'transcription', 'tools', 'connectors'] as const).map(
-            (t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`rounded-md px-3 py-1 text-xs capitalize transition-colors ${tab === t ? 'bg-neutral-800 text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
-            >
-              {t}
-            </button>
-            )
-          )}
+          <button
+            onClick={onClose}
+            className="rounded-md border border-neutral-700 px-3 py-1 text-xs text-neutral-300 transition-colors hover:text-white"
+          >
+            Close
+          </button>
         </div>
+      ) : null}
 
-        <div
-          className={embedded ? 'p-1 pt-4 text-sm' : 'min-h-0 flex-1 overflow-y-auto p-4 text-sm'}
-        >
-          {tab === 'model' && (
-            <>
-              <div
-                className="mb-5 grid grid-cols-2 gap-px border border-neutral-800 bg-neutral-800 lg:grid-cols-4"
-                role="status"
+      <div className="flex items-center gap-1 border-b border-neutral-800 px-3 py-2">
+        {(['model', 'image', 'voice', 'transcription', 'tools', 'connectors'] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`rounded-md px-3 py-1 text-xs capitalize transition-colors ${tab === t ? 'bg-neutral-800 text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      <div className={embedded ? 'p-1 pt-4 text-sm' : 'min-h-0 flex-1 overflow-y-auto p-4 text-sm'}>
+        {tab === 'model' && (
+          <>
+            <div
+              className="mb-5 grid grid-cols-2 gap-px border border-neutral-800 bg-neutral-800 lg:grid-cols-4"
+              role="status"
+            >
+              {[
+                ['Current model', activeModelName ?? 'No active model'],
+                ['Configured', formatContextWindow(s.ctxSize) ?? 'Checking'],
+                ['Running', formatContextWindow(s.effectiveCtxSize) ?? 'Checking'],
+                [
+                  'Recommended',
+                  formatContextWindow(recommendedContextWindow(s.modelMaxCtx)) ?? 'Not supported'
+                ]
+              ].map(([label, value]) => (
+                <div key={label} className="bg-neutral-950/90 p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-neutral-600">
+                    {label}
+                  </div>
+                  <div className="mt-1 truncate text-xs text-neutral-200" title={value}>
+                    {value}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="mb-5 text-[11px] leading-5 text-neutral-500">
+              16K is recommended for capture and chat. Capture needs at least 8K; smaller windows
+              can save memory but leave captured frames waiting for analysis.
+            </p>
+            <Row
+              label="Temperature"
+              value={(s.temperature ?? 0.7).toFixed(2)}
+              hint="Lower = focused, higher = creative."
+            >
+              <input
+                type="range"
+                min={0}
+                max={1.5}
+                step={0.05}
+                value={s.temperature ?? 0.7}
+                onChange={(e) => set({ temperature: Number(e.target.value) })}
+                className="w-full accent-green-500"
+              />
+            </Row>
+            <Row label="Top-P" value={(s.topP ?? 0.95).toFixed(2)} hint="Nucleus sampling cutoff.">
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={s.topP ?? 0.95}
+                onChange={(e) => set({ topP: Number(e.target.value) })}
+                className="w-full accent-green-500"
+              />
+            </Row>
+            <Row
+              label="Top-K"
+              value={String(s.topK ?? 40)}
+              hint="0 disables. Limits candidate tokens."
+            >
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={s.topK ?? 40}
+                onChange={(e) => set({ topK: Number(e.target.value) })}
+                className="w-full accent-green-500"
+              />
+            </Row>
+            <Row
+              label="Min-P"
+              value={(s.minP ?? 0.05).toFixed(2)}
+              hint="Min probability relative to the top token."
+            >
+              <input
+                type="range"
+                min={0}
+                max={0.5}
+                step={0.01}
+                value={s.minP ?? 0.05}
+                onChange={(e) => set({ minP: Number(e.target.value) })}
+                className="w-full accent-green-500"
+              />
+            </Row>
+            <Row
+              label="Repeat penalty"
+              value={(s.repeatPenalty ?? 1.1).toFixed(2)}
+              hint="Higher discourages repetition."
+            >
+              <input
+                type="range"
+                min={1}
+                max={1.5}
+                step={0.01}
+                value={s.repeatPenalty ?? 1.1}
+                onChange={(e) => set({ repeatPenalty: Number(e.target.value) })}
+                className="w-full accent-green-500"
+              />
+            </Row>
+            <Row
+              label="Max output"
+              controlId="max-output"
+              hint={
+                (s.maxTokens ?? MAX_OUTPUT_AUTO) === MAX_OUTPUT_AUTO
+                  ? 'Auto: the reply runs until the model stops or the context window fills — no fixed cap.'
+                  : 'Hard cap on the response length (must fit within the context window).'
+              }
+            >
+              <SettingsSelect
+                id="max-output"
+                label="Max output"
+                value={String(s.maxTokens ?? MAX_OUTPUT_AUTO)}
+                onValueChange={(value) => set({ maxTokens: Number(value) })}
+                options={[
+                  { value: String(MAX_OUTPUT_AUTO), label: 'Auto (until the model stops)' },
+                  ...MAX_OUTPUT_OPTIONS.map((value) => ({
+                    value: String(value),
+                    label: `${value / 1024}K tokens`
+                  }))
+                ]}
+              />
+            </Row>
+            <Row label="Context window" controlId="context-window" hint={contextWindowHint(s)}>
+              <SettingsSelect
+                id="context-window"
+                label="Context window"
+                value={String(s.ctxSize ?? DEFAULT_CTX_SIZE)}
+                onValueChange={(value) => set({ ctxSize: Number(value) })}
+                options={contextWindowOptions(
+                  CTX_OPTIONS,
+                  s.modelMaxCtx,
+                  s.ctxSize ?? DEFAULT_CTX_SIZE
+                ).map((value) => ({
+                  value: String(value),
+                  label: `${value >= 1024 ? `${value / 1024}K` : value} tokens${
+                    value === s.modelMaxCtx
+                      ? " (model's max)"
+                      : value === DEFAULT_CTX_SIZE
+                        ? ' (recommended)'
+                        : value < MIN_CAPTURE_CTX_SIZE
+                          ? ' (capture unavailable)'
+                          : ''
+                  }`
+                }))}
+              />
+            </Row>
+            <Row
+              label="System prompt"
+              hint="Prepended to every chat as a system message. Leave blank for the default."
+            >
+              <textarea
+                value={s.systemPrompt ?? ''}
+                onChange={(e) => set({ systemPrompt: e.target.value })}
+                rows={5}
+                placeholder="e.g. You are a concise, technical assistant."
+                className="w-full resize-none rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 placeholder-neutral-600 outline-none focus:border-green-500"
+              />
+            </Row>
+
+            {/* Advanced — launch-time params; changing any reloads the model. */}
+            <div className="mb-3 mt-6 border-t border-neutral-800 pt-4 text-[10px] font-medium uppercase tracking-widest text-neutral-600">
+              Advanced (reloads the model)
+            </div>
+            <Row
+              label="KV cache"
+              hint="Quantize the KV cache to cut memory and allow a larger context. q8_0 ≈ half, q4_0 ≈ quarter of f16. Auto-enables FlashAttention."
+            >
+              <div className="flex gap-1.5">
+                {(['f16', 'q8_0', 'q4_0'] as const).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() =>
+                      set({ kvCacheType: t, ...(t !== 'f16' ? { flashAttn: true } : {}) })
+                    }
+                    className={`flex-1 rounded-md border px-2 py-1.5 text-xs transition-colors ${(s.kvCacheType ?? 'f16') === t ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-400 hover:border-neutral-700'}`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </Row>
+            <Row
+              label="FlashAttention"
+              value={(s.flashAttn ?? false) ? 'On' : 'Off'}
+              hint="Faster, lower memory. Required for a quantized KV cache."
+            >
+              <button
+                onClick={() => set({ flashAttn: !(s.flashAttn ?? false) })}
+                disabled={(s.kvCacheType ?? 'f16') !== 'f16'}
+                className={`w-full rounded-md border px-2 py-1.5 text-xs transition-colors disabled:opacity-50 ${s.flashAttn ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-400 hover:border-neutral-700'}`}
               >
-                {[
-                  ['Current model', activeModelName ?? 'No active model'],
-                  ['Configured', formatContextWindow(s.ctxSize) ?? 'Checking'],
-                  ['Running', formatContextWindow(s.effectiveCtxSize) ?? 'Checking'],
-                  [
-                    'Recommended',
-                    formatContextWindow(recommendedContextWindow(s.modelMaxCtx)) ?? 'Not supported'
-                  ]
-                ].map(([label, value]) => (
-                  <div key={label} className="bg-neutral-950/90 p-3">
-                    <div className="text-[10px] uppercase tracking-wide text-neutral-600">
-                      {label}
+                {s.flashAttn ? 'Enabled' : 'Disabled'}
+              </button>
+            </Row>
+            <Row
+              label="GPU layers"
+              value={String(s.gpuLayers ?? 99)}
+              hint={gpuLayersHint(s.gpuAccelerator ?? null)}
+            >
+              <input
+                type="range"
+                min={0}
+                max={99}
+                step={1}
+                value={s.gpuLayers ?? 99}
+                onChange={(e) => set({ gpuLayers: Number(e.target.value) })}
+                className="w-full accent-green-500"
+              />
+            </Row>
+            <Row
+              label="CPU threads"
+              value={(s.threads ?? 0) === 0 ? 'auto' : String(s.threads)}
+              hint="0 = auto (let llama.cpp choose)."
+            >
+              <input
+                type="range"
+                min={0}
+                max={16}
+                step={1}
+                value={s.threads ?? 0}
+                onChange={(e) => set({ threads: Number(e.target.value) })}
+                className="w-full accent-green-500"
+              />
+            </Row>
+            <Row
+              label="Batch size"
+              value={String(s.batchSize ?? 512)}
+              hint="Tokens processed per batch during prompt ingest."
+            >
+              <input
+                type="range"
+                min={64}
+                max={2048}
+                step={64}
+                value={s.batchSize ?? 512}
+                onChange={(e) => set({ batchSize: Number(e.target.value) })}
+                className="w-full accent-green-500"
+              />
+            </Row>
+
+            <button
+              onClick={resetDefaults}
+              className="mt-2 w-full rounded-md border border-neutral-800 px-3 py-2 text-xs text-neutral-400 transition-colors hover:border-neutral-700 hover:text-white"
+            >
+              Reset to defaults
+            </button>
+          </>
+        )}
+
+        {tab === 'image' && <ImageSettingsTab />}
+
+        {tab === 'voice' && <VoiceSettingsTab />}
+
+        {tab === 'transcription' && (
+          <>
+            <Row
+              label="Current model"
+              controlId="transcription-model"
+              hint="The model used for the next recording."
+            >
+              <SettingsSelect
+                id="transcription-model"
+                label="Current transcription model"
+                value={
+                  transcriptionInfo?.options.find((option) => option.active)?.id ??
+                  DEFAULT_TRANSCRIPTION_MODEL
+                }
+                placeholder="Checking installed models..."
+                onValueChange={pickTranscriptionModel}
+                disabled={!transcriptionInfo || transcriptionInfo.options.length === 0}
+                options={(transcriptionInfo?.options ?? []).map((option) => ({
+                  value: option.id ?? DEFAULT_TRANSCRIPTION_MODEL,
+                  label: option.name
+                }))}
+              />
+              {transcriptionInfo ? (
+                <p className="mt-1 text-[10px] text-neutral-600">{transcriptionInfo.label}</p>
+              ) : null}
+            </Row>
+            <Row
+              label="Spoken language"
+              controlId="stt-language"
+              hint="Auto-detect is available for multilingual Whisper models. English-only models show English only."
+            >
+              <SettingsSelect
+                id="stt-language"
+                label="Spoken language"
+                value={transcriptionInfo?.language ?? 'auto'}
+                onValueChange={pickTranscriptionLanguage}
+                disabled={!transcriptionInfo}
+                options={(transcriptionInfo?.languages ?? []).map((language) => ({
+                  value: language.code,
+                  label: language.label
+                }))}
+              />
+            </Row>
+          </>
+        )}
+
+        {tab === 'tools' && (
+          <>
+            <p className="mb-3 text-[11px] text-neutral-500">
+              Built-in tools the model can call when “Tools” is on in the composer.
+            </p>
+            {tools.length === 0 ? (
+              <p className="text-xs text-neutral-600">No tools.</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {tools.map((t) => (
+                  <div
+                    key={t.name}
+                    className="flex items-start justify-between gap-3 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <div
+                        className={`text-sm ${t.enabled === false ? 'text-neutral-500' : 'text-green-500'}`}
+                      >
+                        {t.name}
+                      </div>
+                      <div className="text-[11px] text-neutral-500">{t.description}</div>
                     </div>
-                    <div className="mt-1 truncate text-xs text-neutral-200" title={value}>
-                      {value}
+                    <button
+                      onClick={() => {
+                        const next = t.enabled === false
+                        void persistToggle(
+                          tools.map((x) => (x.name === t.name ? { ...x, enabled: next } : x)),
+                          tools,
+                          setTools,
+                          () => window.api.setToolEnabled?.(t.name, next)
+                        )
+                      }}
+                      className={`shrink-0 rounded px-2 py-1 text-[11px] ${t.enabled === false ? 'text-neutral-500' : 'text-green-500'}`}
+                    >
+                      {t.enabled === false ? 'Off' : 'On'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {tab === 'connectors' && (
+          <>
+            <p className="mb-3 text-[11px] text-neutral-500">
+              Connect MCP servers — your reusable tool library (web search, fetch, etc.). Add an
+              HTTP MCP endpoint:
+            </p>
+            <div className="mb-4 flex flex-col gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 p-3">
+              <input
+                value={newConn.name}
+                onChange={(e) => setNewConn({ ...newConn, name: e.target.value })}
+                placeholder="Name (e.g. Brave Search)"
+                className="rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-200 placeholder-neutral-600 outline-none focus:border-green-500"
+              />
+              <input
+                value={newConn.url}
+                onChange={(e) => setNewConn({ ...newConn, url: e.target.value })}
+                placeholder="https://… (MCP HTTP URL)"
+                className="rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-200 placeholder-neutral-600 outline-none focus:border-green-500"
+              />
+              <button
+                onClick={addConnector}
+                disabled={!newConn.name.trim() || !newConn.url.trim()}
+                className="self-start rounded-md bg-green-600 px-3 py-1.5 text-xs text-white transition-colors hover:bg-green-500 disabled:opacity-40"
+              >
+                Add connector
+              </button>
+            </div>
+            {connectors.length === 0 ? (
+              <p className="text-xs text-neutral-600">No connectors yet.</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {connectors.map((c) => (
+                  <div
+                    key={c.id}
+                    className="flex items-center justify-between rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-sm text-neutral-200">{c.name}</div>
+                      {c.url ? (
+                        <div className="truncate text-[10px] text-neutral-600">{c.url}</div>
+                      ) : null}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={async () => {
+                          await window.api.mcpSetEnabled?.(c.id, !c.enabled)
+                          refreshConnectors()
+                        }}
+                        className={`rounded px-2 py-1 text-[11px] ${c.enabled ? 'text-green-500' : 'text-neutral-500'}`}
+                      >
+                        {c.enabled ? 'On' : 'Off'}
+                      </button>
+                      <button
+                        onClick={async () => {
+                          await window.api.mcpRemove?.(c.id)
+                          refreshConnectors()
+                        }}
+                        className="rounded px-2 py-1 text-[11px] text-red-400 hover:bg-red-500/10"
+                      >
+                        Remove
+                      </button>
                     </div>
                   </div>
                 ))}
               </div>
-              <p className="mb-5 text-[11px] leading-5 text-neutral-500">
-                16K is recommended for capture and chat. Capture needs at least 8K; smaller windows
-                can save memory but leave captured frames waiting for analysis.
-              </p>
-              <Row
-                label="Temperature"
-                value={(s.temperature ?? 0.7).toFixed(2)}
-                hint="Lower = focused, higher = creative."
-              >
-                <input
-                  type="range"
-                  min={0}
-                  max={1.5}
-                  step={0.05}
-                  value={s.temperature ?? 0.7}
-                  onChange={(e) => set({ temperature: Number(e.target.value) })}
-                  className="w-full accent-green-500"
-                />
-              </Row>
-              <Row
-                label="Top-P"
-                value={(s.topP ?? 0.95).toFixed(2)}
-                hint="Nucleus sampling cutoff."
-              >
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={s.topP ?? 0.95}
-                  onChange={(e) => set({ topP: Number(e.target.value) })}
-                  className="w-full accent-green-500"
-                />
-              </Row>
-              <Row
-                label="Top-K"
-                value={String(s.topK ?? 40)}
-                hint="0 disables. Limits candidate tokens."
-              >
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={s.topK ?? 40}
-                  onChange={(e) => set({ topK: Number(e.target.value) })}
-                  className="w-full accent-green-500"
-                />
-              </Row>
-              <Row
-                label="Min-P"
-                value={(s.minP ?? 0.05).toFixed(2)}
-                hint="Min probability relative to the top token."
-              >
-                <input
-                  type="range"
-                  min={0}
-                  max={0.5}
-                  step={0.01}
-                  value={s.minP ?? 0.05}
-                  onChange={(e) => set({ minP: Number(e.target.value) })}
-                  className="w-full accent-green-500"
-                />
-              </Row>
-              <Row
-                label="Repeat penalty"
-                value={(s.repeatPenalty ?? 1.1).toFixed(2)}
-                hint="Higher discourages repetition."
-              >
-                <input
-                  type="range"
-                  min={1}
-                  max={1.5}
-                  step={0.01}
-                  value={s.repeatPenalty ?? 1.1}
-                  onChange={(e) => set({ repeatPenalty: Number(e.target.value) })}
-                  className="w-full accent-green-500"
-                />
-              </Row>
-              <Row
-                label="Max output"
-                hint={
-                  (s.maxTokens ?? MAX_OUTPUT_AUTO) === MAX_OUTPUT_AUTO
-                    ? 'Auto: the reply runs until the model stops or the context window fills — no fixed cap.'
-                    : 'Hard cap on the response length (must fit within the context window).'
-                }
-              >
-                <select
-                  aria-label="Max output"
-                  value={s.maxTokens ?? MAX_OUTPUT_AUTO}
-                  onChange={(e) => set({ maxTokens: Number(e.target.value) })}
-                  className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
-                >
-                  <option value={MAX_OUTPUT_AUTO}>Auto (until the model stops)</option>
-                  {MAX_OUTPUT_OPTIONS.map((n) => (
-                    <option key={n} value={n}>
-                      {n / 1024}K tokens
-                    </option>
-                  ))}
-                </select>
-              </Row>
-              <Row label="Context window" hint={contextWindowHint(s)}>
-                <select
-                  aria-label="Context window"
-                  value={s.ctxSize ?? DEFAULT_CTX_SIZE}
-                  onChange={(e) => set({ ctxSize: Number(e.target.value) })}
-                  className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
-                >
-                  {contextWindowOptions(
-                    CTX_OPTIONS,
-                    s.modelMaxCtx,
-                    s.ctxSize ?? DEFAULT_CTX_SIZE
-                  ).map((c) => (
-                    <option key={c} value={c}>
-                      {c >= 1024 ? `${c / 1024}K` : c} tokens
-                      {c === s.modelMaxCtx
-                        ? " (model's max)"
-                        : c === DEFAULT_CTX_SIZE
-                          ? ' (recommended)'
-                          : c < MIN_CAPTURE_CTX_SIZE
-                            ? ' (capture unavailable)'
-                            : ''}
-                    </option>
-                  ))}
-                </select>
-              </Row>
-              <Row
-                label="System prompt"
-                hint="Prepended to every chat as a system message. Leave blank for the default."
-              >
-                <textarea
-                  value={s.systemPrompt ?? ''}
-                  onChange={(e) => set({ systemPrompt: e.target.value })}
-                  rows={5}
-                  placeholder="e.g. You are a concise, technical assistant."
-                  className="w-full resize-none rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 placeholder-neutral-600 outline-none focus:border-green-500"
-                />
-              </Row>
-
-              {/* Advanced — launch-time params; changing any reloads the model. */}
-              <div className="mb-3 mt-6 border-t border-neutral-800 pt-4 text-[10px] font-medium uppercase tracking-widest text-neutral-600">
-                Advanced (reloads the model)
-              </div>
-              <Row
-                label="KV cache"
-                hint="Quantize the KV cache to cut memory and allow a larger context. q8_0 ≈ half, q4_0 ≈ quarter of f16. Auto-enables FlashAttention."
-              >
-                <div className="flex gap-1.5">
-                  {(['f16', 'q8_0', 'q4_0'] as const).map((t) => (
-                    <button
-                      key={t}
-                      onClick={() =>
-                        set({ kvCacheType: t, ...(t !== 'f16' ? { flashAttn: true } : {}) })
-                      }
-                      className={`flex-1 rounded-md border px-2 py-1.5 text-xs transition-colors ${(s.kvCacheType ?? 'f16') === t ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-400 hover:border-neutral-700'}`}
-                    >
-                      {t}
-                    </button>
-                  ))}
-                </div>
-              </Row>
-              <Row
-                label="FlashAttention"
-                value={(s.flashAttn ?? false) ? 'On' : 'Off'}
-                hint="Faster, lower memory. Required for a quantized KV cache."
-              >
-                <button
-                  onClick={() => set({ flashAttn: !(s.flashAttn ?? false) })}
-                  disabled={(s.kvCacheType ?? 'f16') !== 'f16'}
-                  className={`w-full rounded-md border px-2 py-1.5 text-xs transition-colors disabled:opacity-50 ${s.flashAttn ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-400 hover:border-neutral-700'}`}
-                >
-                  {s.flashAttn ? 'Enabled' : 'Disabled'}
-                </button>
-              </Row>
-              <Row
-                label="GPU layers"
-                value={String(s.gpuLayers ?? 99)}
-                hint={gpuLayersHint(s.gpuAccelerator ?? null)}
-              >
-                <input
-                  type="range"
-                  min={0}
-                  max={99}
-                  step={1}
-                  value={s.gpuLayers ?? 99}
-                  onChange={(e) => set({ gpuLayers: Number(e.target.value) })}
-                  className="w-full accent-green-500"
-                />
-              </Row>
-              <Row
-                label="CPU threads"
-                value={(s.threads ?? 0) === 0 ? 'auto' : String(s.threads)}
-                hint="0 = auto (let llama.cpp choose)."
-              >
-                <input
-                  type="range"
-                  min={0}
-                  max={16}
-                  step={1}
-                  value={s.threads ?? 0}
-                  onChange={(e) => set({ threads: Number(e.target.value) })}
-                  className="w-full accent-green-500"
-                />
-              </Row>
-              <Row
-                label="Batch size"
-                value={String(s.batchSize ?? 512)}
-                hint="Tokens processed per batch during prompt ingest."
-              >
-                <input
-                  type="range"
-                  min={64}
-                  max={2048}
-                  step={64}
-                  value={s.batchSize ?? 512}
-                  onChange={(e) => set({ batchSize: Number(e.target.value) })}
-                  className="w-full accent-green-500"
-                />
-              </Row>
-
-              <button
-                onClick={resetDefaults}
-                className="mt-2 w-full rounded-md border border-neutral-800 px-3 py-2 text-xs text-neutral-400 transition-colors hover:border-neutral-700 hover:text-white"
-              >
-                Reset to defaults
-              </button>
-            </>
-          )}
-
-          {tab === 'image' && <ImageSettingsTab />}
-
-          {tab === 'voice' && (
-            <>
-              <Row
-                label="Language"
-                controlId="tts-language"
-                hint="Only languages available in the installed on-device voice runtime are shown."
-              >
-                <select
-                  id="tts-language"
-                  value={voiceLanguage}
-                  onChange={(e) => pickVoiceLanguage(e.target.value)}
-                  disabled={voiceAssetsState === 'loading'}
-                  className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
-                >
-                  {runtimeSpeechLanguages(voices.length ? voices : [{ id: voice }]).map((language) => (
-                    <option key={language.code} value={language.code}>
-                      {language.label}
-                    </option>
-                  ))}
-                </select>
-              </Row>
-              {voiceAssetsState === 'loading' ? (
-                <div
-                  className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-3.5 py-2.5 text-xs text-neutral-400"
-                  role="status"
-                  aria-live="polite"
-                >
-                  <span className="flex gap-1 px-1" aria-hidden="true">
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-green-500 [animation-delay:0ms]" />
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-green-500 [animation-delay:150ms]" />
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-green-500 [animation-delay:300ms]" />
-                  </span>
-                  Loading voices - {voiceAssetsProgress}%
-                </div>
-              ) : voiceAssetsState === 'error' ? (
-                <div className="flex items-center justify-between gap-3 text-xs text-red-400" role="alert">
-                  <span>Could not load voices. Check your connection and retry.</span>
-                  <button
-                    type="button"
-                    onClick={loadVoices}
-                    className="rounded-md border border-red-500/50 px-2.5 py-1 text-red-300 hover:border-red-400"
-                  >
-                    Retry
-                  </button>
-                </div>
-              ) : (
-                <p className="text-xs text-neutral-500" role="status">
-                  {runtimeVoiceLanguage({ id: voice })?.label ?? voiceLanguage} voice ready.
-                </p>
-              )}
-              <Row
-                label="Voice"
-                controlId="tts-voice"
-                hint="Voices available for the selected language."
-              >
-                <select
-                  id="tts-voice"
-                  value={voice}
-                  onChange={(e) => pickVoice(e.target.value)}
-                  disabled={voiceAssetsState === 'loading'}
-                  className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
-                >
-                  {runtimeVoicesForLanguage(
-                    voices.length ? voices : [{ id: voice }],
-                    voiceLanguage
-                  ).map(({ id, label }) => (
-                    <option key={id} value={id}>
-                      {label ?? kokoroVoiceLabel(id)}
-                    </option>
-                  ))}
-                </select>
-              </Row>
-              <button
-                onClick={testVoice}
-                disabled={voiceState === 'generating' || voiceState === 'playing'}
-                className="rounded-md bg-green-600 px-3 py-1.5 text-xs text-white transition-colors hover:bg-green-500 disabled:opacity-40"
-              >
-                {voiceState === 'generating'
-                  ? 'Generating…'
-                  : voiceState === 'playing'
-                    ? 'Playing…'
-                    : 'Test voice'}
-              </button>
-              {voiceState === 'error' ? (
-                <span className="ml-2 text-[11px] text-red-400">
-                  Couldn’t play — check the console.
-                </span>
-              ) : null}
-            </>
-          )}
-
-          {tab === 'transcription' && (
-            <>
-              <Row label="Current model" hint="The model used for the next recording.">
-                <div className="rounded-md border border-neutral-800 bg-neutral-900 px-2 py-2 text-neutral-200">
-                  {transcriptionInfo?.label ?? 'Checking installed model…'}
-                </div>
-              </Row>
-              <Row
-                label="Spoken language"
-                controlId="stt-language"
-                hint="Auto-detect is available for multilingual Whisper models. English-only models show English only."
-              >
-                <select
-                  id="stt-language"
-                  value={transcriptionInfo?.language ?? 'auto'}
-                  onChange={(e) => pickTranscriptionLanguage(e.target.value)}
-                  disabled={!transcriptionInfo}
-                  className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500 disabled:opacity-50"
-                >
-                  {(transcriptionInfo?.languages ?? []).map((language) => (
-                    <option key={language.code} value={language.code}>
-                      {language.label}
-                    </option>
-                  ))}
-                </select>
-              </Row>
-            </>
-          )}
-
-          {tab === 'tools' && (
-            <>
-              <p className="mb-3 text-[11px] text-neutral-500">
-                Built-in tools the model can call when “Tools” is on in the composer.
-              </p>
-              {tools.length === 0 ? (
-                <p className="text-xs text-neutral-600">No tools.</p>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  {tools.map((t) => (
-                    <div
-                      key={t.name}
-                      className="flex items-start justify-between gap-3 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2"
-                    >
-                      <div className="min-w-0">
-                        <div
-                          className={`text-sm ${t.enabled === false ? 'text-neutral-500' : 'text-green-500'}`}
-                        >
-                          {t.name}
-                        </div>
-                        <div className="text-[11px] text-neutral-500">{t.description}</div>
-                      </div>
-                      <button
-                        onClick={() => {
-                          const next = t.enabled === false
-                          void persistToggle(
-                            tools.map((x) => (x.name === t.name ? { ...x, enabled: next } : x)),
-                            tools,
-                            setTools,
-                            () => window.api.setToolEnabled?.(t.name, next)
-                          )
-                        }}
-                        className={`shrink-0 rounded px-2 py-1 text-[11px] ${t.enabled === false ? 'text-neutral-500' : 'text-green-500'}`}
-                      >
-                        {t.enabled === false ? 'Off' : 'On'}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-
-          {tab === 'connectors' && (
-            <>
-              <p className="mb-3 text-[11px] text-neutral-500">
-                Connect MCP servers — your reusable tool library (web search, fetch, etc.). Add an
-                HTTP MCP endpoint:
-              </p>
-              <div className="mb-4 flex flex-col gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 p-3">
-                <input
-                  value={newConn.name}
-                  onChange={(e) => setNewConn({ ...newConn, name: e.target.value })}
-                  placeholder="Name (e.g. Brave Search)"
-                  className="rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-200 placeholder-neutral-600 outline-none focus:border-green-500"
-                />
-                <input
-                  value={newConn.url}
-                  onChange={(e) => setNewConn({ ...newConn, url: e.target.value })}
-                  placeholder="https://… (MCP HTTP URL)"
-                  className="rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-200 placeholder-neutral-600 outline-none focus:border-green-500"
-                />
-                <button
-                  onClick={addConnector}
-                  disabled={!newConn.name.trim() || !newConn.url.trim()}
-                  className="self-start rounded-md bg-green-600 px-3 py-1.5 text-xs text-white transition-colors hover:bg-green-500 disabled:opacity-40"
-                >
-                  Add connector
-                </button>
-              </div>
-              {connectors.length === 0 ? (
-                <p className="text-xs text-neutral-600">No connectors yet.</p>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  {connectors.map((c) => (
-                    <div
-                      key={c.id}
-                      className="flex items-center justify-between rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2"
-                    >
-                      <div className="min-w-0">
-                        <div className="truncate text-sm text-neutral-200">{c.name}</div>
-                        {c.url ? (
-                          <div className="truncate text-[10px] text-neutral-600">{c.url}</div>
-                        ) : null}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={async () => {
-                            await window.api.mcpSetEnabled?.(c.id, !c.enabled)
-                            refreshConnectors()
-                          }}
-                          className={`rounded px-2 py-1 text-[11px] ${c.enabled ? 'text-green-500' : 'text-neutral-500'}`}
-                        >
-                          {c.enabled ? 'On' : 'Off'}
-                        </button>
-                        <button
-                          onClick={async () => {
-                            await window.api.mcpRemove?.(c.id)
-                            refreshConnectors()
-                          }}
-                          className="rounded px-2 py-1 text-[11px] text-red-400 hover:bg-red-500/10"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-        </div>
+            )}
+          </>
+        )}
+      </div>
     </>
   )
 
