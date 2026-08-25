@@ -29,7 +29,15 @@ export const VISION_SYSTEM_PROMPT = [
 
 /** The full grounding message for one isolated step. The parent loop owns the complete action
  * ledger; only its bounded summary enters this fresh model call. */
-export function buildVisionPrompt(goal: string, recentSteps: readonly string[] = []): string {
+export function buildVisionPrompt(
+  goal: string,
+  recentSteps: readonly string[] = [],
+  olderVisualFacts: readonly string[] = []
+): string {
   const history = recentSteps.length > 0 ? `\n\nPrevious steps:\n${recentSteps.join('\n')}` : ''
-  return `${VISION_SYSTEM_PROMPT}\n\nTask: ${goal}${history}`
+  const older =
+    olderVisualFacts.length > 0
+      ? `\n\nOlder task outcomes (text only; may be stale):\n${olderVisualFacts.join('\n')}`
+      : ''
+  return `${VISION_SYSTEM_PROMPT}\n\nTask: ${goal}${older}${history}`
 }

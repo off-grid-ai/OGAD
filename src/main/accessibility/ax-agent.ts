@@ -14,6 +14,10 @@
 import type { AxElement, AxSnapshot } from './ax-elements'
 import { formatAxElementsForModel } from './ax-elements'
 import { extractJsonObject } from '../json-extract'
+import {
+  computerUseHistoryTokenBudget,
+  tailWithinTokenBudget
+} from '../../shared/computer-use-settings'
 
 export interface ElementActuator {
   /** Click at the element's center. */
@@ -34,7 +38,11 @@ export interface ElementTaskDeps {
   /** goal + the numbered elements + history in, one step decision out. */
   decide: (prompt: string) => Promise<string>
   onStep?: (note: string) => void
+  onCheckpoint?: (step: number, steps: readonly string[]) => void
   maxSteps?: number
+  contextTokens?: number
+  checkpointInterval?: number
+  retrievedFacts?: string[]
 }
 
 export interface ElementTaskResult {
@@ -75,7 +83,6 @@ export const ELEMENT_STEP_FORMAT = {
     }
   }
 } as const
-
 
 /** Fail-closed parse: unknown shapes are null; the loop re-observes rather than
  *  acting on a guess. Tolerant of a reasoning/fence wrapper (see
@@ -133,14 +140,30 @@ export function parseElementStep(raw: string): ElementStep | null {
   }
 }
 
-export function buildElementPrompt(goal: string, snapshot: AxSnapshot, history: string[]): string {
+export function buildElementPrompt(input: {
+  goal: string
+  snapshot: AxSnapshot
+  history: string[]
+  retrievedFacts?: readonly string[]
+  contextTokens?: number
+}): string {
+  const { goal, snapshot, history } = input
+  const retrievedFacts = input.retrievedFacts ?? []
+  const contextTokens = input.contextTokens ?? 2_048
+  const boundedHistory = tailWithinTokenBudget(
+    history,
+    computerUseHistoryTokenBudget(contextTokens)
+  )
   return [
     'You are completing a task by operating an app one step at a time.',
     `Task: ${goal}`,
     '',
     formatAxElementsForModel(snapshot),
     '',
-    history.length ? `Previous steps:\n${history.slice(-6).join('\n')}` : '',
+    retrievedFacts.length
+      ? `Older task outcomes (text only; may be stale):\n${retrievedFacts.join('\n')}`
+      : '',
+    boundedHistory.length ? `Previous steps:\n${boundedHistory.join('\n')}` : '',
     'Rules - one action per reply, using an element [number]:',
     '- Click: {"action":"click","index":N} or {"action":"press","index":N}',
     '- Type: {"action":"type","index":N,"text":"..."} - omit "index" to type into the field that is already focused; add "keys":"Enter" to send.',
@@ -192,6 +215,7 @@ export async function runElementTask(
 ): Promise<ElementTaskResult> {
   const { read, actuator, decide, onStep } = deps
   const maxSteps = deps.maxSteps ?? DEFAULT_MAX_STEPS
+  const checkpointInterval = Math.max(1, Math.floor(deps.checkpointInterval ?? 9))
   const steps: string[] = []
   const note = (line: string): void => {
     steps.push(line)
@@ -206,18 +230,37 @@ export async function runElementTask(
   const typedTexts = new Set<string>()
 
   for (let step = 0; step < maxSteps; step += 1) {
+    const planningStep = step + 1
+    const checkpoint = (): void => {
+      if (planningStep % checkpointInterval === 0) {
+        deps.onCheckpoint?.(planningStep, steps)
+      }
+    }
     const snapshot = await read()
-    const decision = parseElementStep(await decide(buildElementPrompt(goal, snapshot, steps)))
+    const decision = parseElementStep(
+      await decide(
+        buildElementPrompt({
+          goal,
+          snapshot,
+          history: steps,
+          retrievedFacts: deps.retrievedFacts,
+          contextTokens: deps.contextTokens
+        })
+      )
+    )
     if (!decision) {
       note('model reply did not parse; re-observing')
+      checkpoint()
       continue
     }
     if (decision.action === 'done') {
       note(`done: ${decision.summary}`)
+      checkpoint()
       return { ok: true, summary: decision.summary, steps }
     }
     if (decision.action === 'give_up') {
       note(`gave up: ${decision.why}`)
+      checkpoint()
       return { ok: false, summary: decision.why, steps }
     }
     // Runaway guard: the model just asked to repeat the EXACT action it already
@@ -229,12 +272,14 @@ export async function runElementTask(
       // fires twice) but keep going - a repeat should not kill the task; the
       // step budget still bounds a genuinely stuck run.
       note('skipped a repeated action; moving on')
+      checkpoint()
       continue
     }
     lastActionSig = sig
     if (decision.action === 'key') {
       await actuator.keys(decision.keys)
       note(`key ${decision.keys}`)
+      checkpoint()
       continue
     }
     if (decision.action === 'type') {
@@ -246,6 +291,7 @@ export async function runElementTask(
         // Already sent this text: SKIP re-typing it (so a message is never sent
         // twice) but keep going instead of killing the task.
         note('already typed this text; not sending it again')
+        checkpoint()
         continue
       }
       if (typed.length > 0) {
@@ -258,6 +304,7 @@ export async function runElementTask(
         target = snapshot.elements.find((candidate) => candidate.index === decision.index) ?? null
         if (!target) {
           note(`no element [${decision.index}] on this screen`)
+          checkpoint()
           continue
         }
       }
@@ -272,11 +319,13 @@ export async function runElementTask(
         await actuator.keys(decision.submitKeys)
         note(`key ${decision.submitKeys}`)
       }
+      checkpoint()
       continue
     }
     const el = snapshot.elements.find((candidate) => candidate.index === decision.index)
     if (!el) {
       note(`no element [${decision.index}] on this screen`)
+      checkpoint()
       continue
     }
     // click or press: prefer AXPress when the element exposes it.
@@ -287,6 +336,7 @@ export async function runElementTask(
       await actuator.click(el)
       note(`clicked [${el.index}] ${el.name || el.role}`)
     }
+    checkpoint()
   }
 
   note('ran out of steps')

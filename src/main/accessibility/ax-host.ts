@@ -36,6 +36,10 @@ import {
 import { VisionGuard } from '../vision/vision-guard'
 import { emitVisionState, emitVisionStep, registerVisionSession } from '../vision/vision-controller'
 import { showSupervisorWindow, hideSupervisorWindow } from '../vision/supervisor-window'
+import { getComputerUseSettings } from '../computer-use-settings'
+import { resolveComputerUseContextTokens } from '../../shared/computer-use-settings'
+import { recentVisualFacts } from '../vision/visual-context'
+import { recordTaskRun } from '../tasks/task-history'
 
 const execFileAsync = promisify(execFile)
 
@@ -234,6 +238,12 @@ class AxRailHost {
     }
     await axBackend().activate(app)
     const guard = new VisionGuard()
+    const settings = getComputerUseSettings()
+    const contextTokens = resolveComputerUseContextTokens(
+      settings.context,
+      llm.effectiveContextSize()
+    )
+    const retrievedFacts = settings.retrieveOlderVisuals ? recentVisualFacts(taskId) : []
     // The kill switch: Esc halts for good. The overlay's Stop routes to the SAME
     // guard through the controller session, so both paths end one run.
     globalShortcut.register('Escape', () => guard.halt('stopped with Esc'))
@@ -268,6 +278,12 @@ class AxRailHost {
         onStep: (note) => {
           console.log(`[ax-rail] step: ${note}`)
           emitVisionStep(taskId, note)
+        },
+        contextTokens,
+        checkpointInterval: settings.checkpointInterval,
+        retrievedFacts,
+        onCheckpoint: (_step, steps) => {
+          recordTaskRun({ taskId, kind: 'computer_use', title: goal, steps: [...steps] })
         }
       })
       emitVisionState({

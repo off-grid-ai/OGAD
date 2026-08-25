@@ -1,0 +1,119 @@
+export type ComputerUseContext = 'auto' | '16k' | '32k'
+export type ComputerUseScreenshotSize = 'compact' | 'balanced' | 'large'
+export type ComputerUseScreenshotQuality = 'efficient' | 'balanced' | 'detailed'
+export type ComputerUseCheckpointInterval = 8 | 9 | 10
+
+export interface ComputerUseSettings {
+  context: ComputerUseContext
+  screenshotSize: ComputerUseScreenshotSize
+  screenshotQuality: ComputerUseScreenshotQuality
+  checkpointInterval: ComputerUseCheckpointInterval
+  retrieveOlderVisuals: boolean
+}
+
+export const COMPUTER_USE_SETTINGS_KEY = 'computerUseSettings'
+
+export const DEFAULT_COMPUTER_USE_SETTINGS: Readonly<ComputerUseSettings> = {
+  context: 'auto',
+  screenshotSize: 'balanced',
+  screenshotQuality: 'balanced',
+  checkpointInterval: 9,
+  retrieveOlderVisuals: false
+}
+
+const CONTEXT_TOKENS: Record<Exclude<ComputerUseContext, 'auto'>, number> = {
+  '16k': 16_384,
+  '32k': 32_768
+}
+
+export const SCREENSHOT_MAX_EDGE: Record<ComputerUseScreenshotSize, number> = {
+  compact: 1_024,
+  balanced: 1_440,
+  large: 1_920
+}
+
+export const SCREENSHOT_RESIZE_QUALITY: Record<
+  ComputerUseScreenshotQuality,
+  'good' | 'better' | 'best'
+> = {
+  efficient: 'good',
+  balanced: 'better',
+  detailed: 'best'
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+export function normalizeComputerUseSettings(value: unknown): ComputerUseSettings {
+  const input = isRecord(value) ? value : {}
+  const context =
+    input.context === '16k' || input.context === '32k' || input.context === 'auto'
+      ? input.context
+      : DEFAULT_COMPUTER_USE_SETTINGS.context
+  const screenshotSize =
+    input.screenshotSize === 'compact' ||
+    input.screenshotSize === 'balanced' ||
+    input.screenshotSize === 'large'
+      ? input.screenshotSize
+      : DEFAULT_COMPUTER_USE_SETTINGS.screenshotSize
+  const screenshotQuality =
+    input.screenshotQuality === 'efficient' ||
+    input.screenshotQuality === 'balanced' ||
+    input.screenshotQuality === 'detailed'
+      ? input.screenshotQuality
+      : DEFAULT_COMPUTER_USE_SETTINGS.screenshotQuality
+  const checkpoint =
+    typeof input.checkpointInterval === 'number'
+      ? Math.max(8, Math.min(10, Math.round(input.checkpointInterval)))
+      : DEFAULT_COMPUTER_USE_SETTINGS.checkpointInterval
+
+  return {
+    context,
+    screenshotSize,
+    screenshotQuality,
+    checkpointInterval: checkpoint as ComputerUseCheckpointInterval,
+    retrieveOlderVisuals:
+      typeof input.retrieveOlderVisuals === 'boolean'
+        ? input.retrieveOlderVisuals
+        : DEFAULT_COMPUTER_USE_SETTINGS.retrieveOlderVisuals
+  }
+}
+
+/** The model process owns the real context ceiling. Computer Use can ask for less,
+ * never more. Auto uses that current effective ceiling. */
+export function resolveComputerUseContextTokens(
+  context: ComputerUseContext,
+  effectiveContextTokens: number
+): number {
+  const safeEffective =
+    Number.isFinite(effectiveContextTokens) && effectiveContextTokens >= 2_048
+      ? Math.floor(effectiveContextTokens)
+      : 2_048
+  const requested = context === 'auto' ? safeEffective : CONTEXT_TOKENS[context]
+  return Math.min(requested, safeEffective)
+}
+
+/** Keep most of the selected context available for the current screenshot,
+ * instructions, and response. Only the bounded action ledger uses this share. */
+export function computerUseHistoryTokenBudget(contextTokens: number): number {
+  const safe = Number.isFinite(contextTokens) ? Math.max(2_048, Math.floor(contextTokens)) : 2_048
+  return Math.max(512, Math.floor(safe / 4))
+}
+
+/** Approximate prompt-token budget without a tokenizer dependency. Always keep the
+ * newest entries and never split one entry. */
+export function tailWithinTokenBudget(lines: readonly string[], tokenBudget: number): string[] {
+  const charBudget = Math.max(0, Math.floor(tokenBudget)) * 4
+  const kept: string[] = []
+  let used = 0
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index]
+    if (line === undefined) continue
+    const cost = line.length + 1
+    if (used + cost > charBudget) break
+    kept.unshift(line)
+    used += cost
+  }
+  return kept
+}

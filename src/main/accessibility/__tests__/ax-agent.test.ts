@@ -170,6 +170,18 @@ describe('runElementTask', () => {
     expect(result.ok).toBe(true)
     expect(w.acted).toEqual(['type:2:hi', 'keys:Enter', 'press:1'])
   })
+
+  it('checkpoints after the selected number of planning steps', async () => {
+    const w = world(Array.from({ length: 8 }, (_, i) => `{"action":"key","keys":"cmd ${i}"}`))
+    const checkpoints: number[] = []
+    await runElementTask('t', {
+      ...w.deps,
+      maxSteps: 8,
+      checkpointInterval: 8,
+      onCheckpoint: (step) => checkpoints.push(step)
+    })
+    expect(checkpoints).toEqual([8])
+  })
 })
 
 describe('parseElementStep', () => {
@@ -235,11 +247,11 @@ describe('parseElementStep', () => {
 
 describe('buildElementPrompt', () => {
   it('anchors on the task, lists the elements, and routes credentials to give_up', () => {
-    const prompt = buildElementPrompt(
-      'send hi to sidd',
-      { windowTitle: 'Slack', elements: [el(1)] },
-      []
-    )
+    const prompt = buildElementPrompt({
+      goal: 'send hi to sidd',
+      snapshot: { windowTitle: 'Slack', elements: [el(1)] },
+      history: []
+    })
     expect(prompt).toContain('Task: send hi to sidd')
     expect(prompt).toContain('[1] AXButton')
     expect(prompt).toMatch(/sign-in.*give_up/i)
@@ -262,5 +274,18 @@ describe('buildElementPrompt', () => {
     // (the Slack file-attach loop on "Open"/"search").
     expect(prompt).toMatch(/cmd shift g/i)
     expect(prompt).toMatch(/never click "open".*before a file is selected/i)
+  })
+
+  it('includes optional older outcomes as text and keeps bounded recent history', () => {
+    const prompt = buildElementPrompt({
+      goal: 'open settings',
+      snapshot: { windowTitle: 'App', elements: [el(1)] },
+      history: ['old'.repeat(2_000), 'current step'],
+      retrievedFacts: ['Earlier task: opened Settings'],
+      contextTokens: 512
+    })
+    expect(prompt).toContain('Earlier task: opened Settings')
+    expect(prompt).toContain('current step')
+    expect(prompt).not.toContain('oldoldold')
   })
 })

@@ -6,7 +6,12 @@
  * closes the guard - never actuating past it.
  */
 import { describe, expect, it } from 'vitest'
-import { runVisionTask, type VisionScreen, type VisionTaskDeps } from '../vision-agent'
+import {
+  runVisionTask,
+  type VisionScreen,
+  type VisionStepObservation,
+  type VisionTaskDeps
+} from '../vision-agent'
 import { VisionGuard } from '../vision-guard'
 
 const bounds = { width: 1000, height: 1000 }
@@ -121,5 +126,54 @@ describe('runVisionTask', () => {
     const result = await runVisionTask('t', w.deps)
     expect(w.actuated).toEqual([])
     expect(result.summary).toBe('stopped with Esc')
+  })
+
+  it('uses one current screenshot per planning step and passes older outcomes as text', async () => {
+    const w = world(["click(point='<point>1 1</point>')", "finished(content='ok')"])
+    let captures = 0
+    const factsSeen: string[][] = []
+    w.deps.screen.capture = async () => {
+      captures += 1
+      return { image: `current-${captures}.png`, bounds }
+    }
+    w.deps.retrievedFacts = ['Earlier task: opened Settings']
+    w.deps.ground = async ({ image, retrievedFacts: facts }) => {
+      factsSeen.push(facts)
+      expect(image).toBe(`current-${factsSeen.length}.png`)
+      return factsSeen.length === 1 ? "click(point='<point>1 1</point>')" : "finished(content='ok')"
+    }
+
+    await runVisionTask('t', w.deps)
+    expect(captures).toBe(2)
+    expect(factsSeen).toEqual([
+      ['Earlier task: opened Settings'],
+      ['Earlier task: opened Settings']
+    ])
+  })
+
+  it('emits typed step details and checkpoints at the selected interval', async () => {
+    const replies = Array.from({ length: 8 }, (_, index) =>
+      index === 7
+        ? "finished(content='ok')"
+        : `click(point='<point>${index + 1} ${index + 1}</point>')`
+    )
+    const w = world(replies)
+    const observations: VisionStepObservation[] = []
+    const checkpoints: number[] = []
+    w.deps.checkpointInterval = 8
+    w.deps.onObservation = (observation) => observations.push(observation)
+    w.deps.onCheckpoint = (step) => checkpoints.push(step)
+
+    await runVisionTask('t', w.deps)
+
+    expect(checkpoints).toEqual([8])
+    expect(observations).toHaveLength(8)
+    expect(observations[0]).toMatchObject({
+      step: 1,
+      rawResponse: "click(point='<point>1 1</point>')",
+      parsedAction: { type: 'click' },
+      result: 'actuated'
+    })
+    expect(observations[7]).toMatchObject({ step: 8, result: 'terminal' })
   })
 })

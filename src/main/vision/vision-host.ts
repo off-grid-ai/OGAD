@@ -32,7 +32,20 @@ import { visionModelNotice } from './vision-model-notice'
 import { getTakeoverCoordinator } from '../browser/takeover'
 import { loadActuation, actuationAvailable, type ActuationPort } from '../input/actuation'
 import { mapActionToScreen, type DisplayGeometry } from '../input/coordinate-mapping'
-import { recordTaskRun, taskScreenshotPath } from '../tasks/task-history'
+import {
+  appendComputerUseStepDetail,
+  recordTaskRun,
+  taskScreenshotPath
+} from '../tasks/task-history'
+import { getComputerUseSettings } from '../computer-use-settings'
+import {
+  resolveComputerUseContextTokens,
+  SCREENSHOT_MAX_EDGE,
+  SCREENSHOT_RESIZE_QUALITY,
+  type ComputerUseSettings
+} from '../../shared/computer-use-settings'
+import { planAspectPreservingResize, type ScreenshotGeometry } from './screenshot-geometry'
+import { recentVisualFacts } from './visual-context'
 
 export type { ActuationPort }
 
@@ -48,31 +61,64 @@ export function visionActuationAvailable(): boolean {
 // actuate), so reusing one path is race-free and keeps the disk clean.
 const CAPTURE_FILE = path.join(os.tmpdir(), 'offgrid-vision-capture.png')
 
-function makeScreen(actuation: ActuationPort, taskId: string, goal: string): VisionScreen {
+function makeScreen(input: {
+  actuation: ActuationPort
+  taskId: string
+  goal: string
+  settings: ComputerUseSettings
+}): VisionScreen {
+  const { actuation, taskId, goal, settings } = input
   // The display the last screenshot was taken from. Its scaleFactor + origin move
   // the grounder's DIP coordinates into the actuation space (physical px on
   // Windows). capture() always runs before actuate() in the vision loop.
   let capturedDisplay: DisplayGeometry | null = null
+  let capturedGeometry: ScreenshotGeometry | null = null
   return {
     async capture() {
       const point = screen.getCursorScreenPoint()
       const display = screen.getDisplayNearestPoint(point)
       const { width, height } = display.size
-      capturedDisplay = { bounds: display.bounds, scaleFactor: display.scaleFactor }
+      const captureSize = {
+        width: Math.max(1, Math.round(width * display.scaleFactor)),
+        height: Math.max(1, Math.round(height * display.scaleFactor))
+      }
+      capturedDisplay = {
+        bounds: display.bounds,
+        scaleFactor: display.scaleFactor,
+        ...(process.platform === 'win32'
+          ? {
+              physicalOrigin: screen.dipToScreenPoint({ x: display.bounds.x, y: display.bounds.y })
+            }
+          : {})
+      }
       // desktopCapturer can hand back an EMPTY thumbnail when the system is busy
       // (e.g. right after a multi-GB model swap) - which becomes a 0-byte PNG and
       // then a llama-server "400 Failed to load image". Retry, prefer the source
       // for the cursor's display, and validate the buffer before writing.
       let png: Buffer | null = null
+      let encodedSize: { width: number; height: number } | null = null
       for (let attempt = 0; attempt < 4 && (png === null || png.length === 0); attempt += 1) {
         const sources = await desktopCapturer.getSources({
           types: ['screen'],
-          thumbnailSize: { width, height }
+          thumbnailSize: captureSize
         })
         const source =
           sources.find((s) => String(s.display_id) === String(display.id)) ?? sources[0]
         if (source && !source.thumbnail.isEmpty()) {
-          png = source.thumbnail.toPNG()
+          const sourceSize = source.thumbnail.getSize()
+          const target = planAspectPreservingResize(
+            sourceSize,
+            SCREENSHOT_MAX_EDGE[settings.screenshotSize]
+          ).encodedSize
+          const thumbnail =
+            target.width === sourceSize.width && target.height === sourceSize.height
+              ? source.thumbnail
+              : source.thumbnail.resize({
+                  ...target,
+                  quality: SCREENSHOT_RESIZE_QUALITY[settings.screenshotQuality]
+                })
+          encodedSize = thumbnail.getSize()
+          png = thumbnail.toPNG()
         }
         if (png === null || png.length === 0) {
           await new Promise((resolve) => setTimeout(resolve, 250))
@@ -82,6 +128,14 @@ function makeScreen(actuation: ActuationPort, taskId: string, goal: string): Vis
         throw new Error(
           'screen capture returned an empty image - check Screen Recording permission for Off Grid'
         )
+      }
+      if (!encodedSize) {
+        throw new Error('screen capture returned invalid dimensions')
+      }
+      capturedGeometry = {
+        sourceBounds: { x: 0, y: 0, width, height },
+        encodedSize,
+        scale: Math.min(encodedSize.width / width, encodedSize.height / height)
       }
       fs.writeFileSync(CAPTURE_FILE, png)
       const savedScreenshot = taskScreenshotPath(taskId)
@@ -93,13 +147,26 @@ function makeScreen(actuation: ActuationPort, taskId: string, goal: string): Vis
         screenshotPath: savedScreenshot
       })
       // Return the file path - the grounder reads it from disk.
-      return { image: CAPTURE_FILE, bounds: { width, height } as Bounds }
+      return {
+        image: CAPTURE_FILE,
+        bounds: encodedSize as Bounds,
+        metadata: { path: savedScreenshot, geometry: capturedGeometry }
+      }
     },
     async actuate(action: VisionAction) {
-      const mapped = capturedDisplay
-        ? mapActionToScreen(action, capturedDisplay, process.platform)
-        : action
+      const mapped =
+        capturedDisplay && capturedGeometry
+          ? mapActionToScreen(action, {
+              display: capturedDisplay,
+              platform: process.platform,
+              screenshot: capturedGeometry
+            })
+          : action
+      if (!mapped) {
+        throw new Error('model returned a point outside the current screenshot')
+      }
       await dispatch(actuation, mapped)
+      return { mappedAction: mapped }
     }
   }
 }
@@ -171,6 +238,12 @@ class VisionHost {
       return blocked
     }
     const guard = new VisionGuard()
+    const settings = getComputerUseSettings()
+    const contextTokens = resolveComputerUseContextTokens(
+      settings.context,
+      llm.effectiveContextSize()
+    )
+    const retrievedFacts = settings.retrieveOlderVisuals ? recentVisualFacts(taskId) : []
     // The kill switch: Esc halts the run and consumes the keypress. The overlay's
     // Stop routes to the SAME guard via the controller session.
     globalShortcut.register('Escape', () => guard.halt('stopped with Esc'))
@@ -183,16 +256,54 @@ class VisionHost {
     showSupervisorWindow()
     try {
       const result = await runVisionTask(goal, {
-        screen: makeScreen(actuation, taskId, goal),
+        screen: makeScreen({ actuation, taskId, goal, settings }),
         guard,
-        ground: (g, image, history) =>
-          llm.chat(buildVisionPrompt(g, history), [image], 60_000, 200, {
+        ground: ({ goal: currentGoal, image, history, retrievedFacts: facts }) =>
+          llm.chat(buildVisionPrompt(currentGoal, history, facts), [image], 60_000, 200, {
             disableThinking: true
           }),
         waitForUser: async (why) => {
           await coordinator.waitForTakeover(taskId, why)
         },
-        onStep: (note) => emitVisionStep(taskId, note)
+        onStep: (note) => emitVisionStep(taskId, note),
+        contextTokens,
+        checkpointInterval: settings.checkpointInterval,
+        retrievedFacts,
+        onCheckpoint: (_step, steps) => {
+          recordTaskRun({ taskId, kind: 'computer_use', title: goal, steps: [...steps] })
+        },
+        onObservation: (observation) => {
+          const geometry = observation.screenshot.metadata?.geometry
+          appendComputerUseStepDetail(taskId, goal, {
+            stepId: String(observation.step),
+            at: Date.now(),
+            modelInput: observation.promptContext,
+            ...(geometry
+              ? {
+                  screenshot: {
+                    path: observation.screenshot.metadata?.path,
+                    originalWidth: geometry.sourceBounds.width,
+                    originalHeight: geometry.sourceBounds.height,
+                    inferenceWidth: geometry.encodedSize.width,
+                    inferenceHeight: geometry.encodedSize.height
+                  }
+                }
+              : {}),
+            retrievedFacts: observation.retrievedFacts,
+            rawResponse: observation.rawResponse,
+            mappedAction: observation.mappedAction
+              ? JSON.stringify(observation.mappedAction)
+              : observation.parsedAction
+                ? JSON.stringify(observation.parsedAction)
+                : undefined,
+            execution: {
+              status: observation.result === 'error' ? 'failed' : 'complete',
+              durationMs: observation.durationMs,
+              result: observation.result,
+              error: observation.error
+            }
+          })
+        }
       })
       emitVisionState({
         taskId,

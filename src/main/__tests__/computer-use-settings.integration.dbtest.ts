@@ -1,0 +1,77 @@
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+
+const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-computer-use-settings-'))
+
+vi.mock('electron', () => ({
+  app: { getPath: () => TMP_DIR, isPackaged: false, getAppPath: () => process.cwd() },
+  safeStorage: {
+    isEncryptionAvailable: () => false,
+    encryptString: (value: string) => Buffer.from(value),
+    decryptString: (value: Buffer) => value.toString()
+  }
+}))
+
+import { deleteSetting, getDB } from '../database'
+import { getComputerUseSettings, setComputerUseSettings } from '../computer-use-settings'
+import { COMPUTER_USE_SETTINGS_KEY } from '../../shared/computer-use-settings'
+import { TaskHistoryStore } from '../tasks/task-history-store'
+import { recentVisualFacts } from '../vision/visual-context'
+
+beforeEach(() => {
+  deleteSetting(COMPUTER_USE_SETTINGS_KEY)
+  const history = new TaskHistoryStore(getDB())
+  history.migrate()
+  getDB().prepare('DELETE FROM task_run_history').run()
+})
+afterAll(() => fs.rmSync(TMP_DIR, { recursive: true, force: true }))
+
+describe('Computer Use settings persistence', () => {
+  it('persists one normalized object in SQLite', () => {
+    setComputerUseSettings({
+      context: '32k',
+      screenshotSize: 'large',
+      screenshotQuality: 'detailed',
+      checkpointInterval: 8,
+      retrieveOlderVisuals: true
+    })
+
+    expect(getComputerUseSettings()).toEqual({
+      context: '32k',
+      screenshotSize: 'large',
+      screenshotQuality: 'detailed',
+      checkpointInterval: 8,
+      retrieveOlderVisuals: true
+    })
+  })
+
+  it('normalizes invalid persisted input before runtime use', () => {
+    setComputerUseSettings({ checkpointInterval: 2, screenshotSize: 'unknown' })
+    expect(getComputerUseSettings()).toMatchObject({
+      checkpointInterval: 8,
+      screenshotSize: 'balanced'
+    })
+  })
+
+  it('retrieves only bounded text outcomes from older Computer Use runs', () => {
+    const history = new TaskHistoryStore(getDB(), () => 100)
+    history.upsert({
+      taskId: 'older',
+      kind: 'computer_use',
+      title: 'Open Settings',
+      status: 'done',
+      summary: 'Settings opened'
+    })
+    history.upsert({
+      taskId: 'current',
+      kind: 'computer_use',
+      title: 'Current task',
+      status: 'done',
+      summary: 'Must not be returned'
+    })
+
+    expect(recentVisualFacts('current')).toEqual(['Open Settings: Settings opened'])
+  })
+})

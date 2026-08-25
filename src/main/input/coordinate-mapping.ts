@@ -17,19 +17,27 @@
  *    display must be multiplied by that display's scaleFactor. Without it every
  *    click on a scaled Windows display lands short - the core Windows gap.
  *
- * Limitation: on a mixed-DPI multi-monitor Windows setup the physical origin of a
- * secondary display is not simply its DIP origin x scaleFactor, so a click routed
- * to a secondary display with a different scale can be offset. Single-display (any
- * scale) and same-scale multi-monitor are correct; mixed-DPI multi-monitor is a
- * follow-up (needs a physical-bounds source Electron does not expose directly).
+ * On mixed-DPI Windows displays the caller supplies the physical origin resolved
+ * through Electron's dipToScreenPoint seam. This avoids the incorrect shortcut of
+ * multiplying a global DIP origin by one display's scale factor.
  */
 import type { Point, VisionAction } from '../vision/vision-action'
+import { imagePixelToDisplayPoint, type ScreenshotGeometry } from '../vision/screenshot-geometry'
 
 export interface DisplayGeometry {
   /** Display origin + size in DIP - Electron `screen.getDisplayNearestPoint().bounds`. */
   bounds: { x: number; y: number; width: number; height: number }
   /** DIP -> physical ratio for this display (1 on a standard-DPI monitor, 1.5 at 150%). */
   scaleFactor: number
+  /** Optional physical-pixel origin. Supply this for mixed-DPI Windows displays,
+   * where multiplying Electron's global DIP origin is not correct. */
+  physicalOrigin?: Point
+}
+
+export interface CoordinateMappingContext {
+  display: DisplayGeometry
+  platform: NodeJS.Platform
+  screenshot?: ScreenshotGeometry
 }
 
 /** The DIP->actuation scale for a platform: only Windows needs it; macOS uses points. */
@@ -38,15 +46,28 @@ export function actuationScale(platform: NodeJS.Platform, scaleFactor: number): 
 }
 
 /** Map ONE point in the captured image's DIP space to the OS cursor coordinate. */
-export function imagePointToScreen(
-  point: Point,
-  display: DisplayGeometry,
-  platform: NodeJS.Platform
-): Point {
+export function imagePointToScreen(point: Point, context: CoordinateMappingContext): Point | null {
+  const { display, platform, screenshot } = context
+  const local = screenshot ? imagePixelToDisplayPoint(point, screenshot) : point
+  if (
+    !local ||
+    !Number.isFinite(local.x) ||
+    !Number.isFinite(local.y) ||
+    !Number.isFinite(display.bounds.x) ||
+    !Number.isFinite(display.bounds.y) ||
+    !Number.isFinite(display.scaleFactor) ||
+    display.scaleFactor <= 0
+  ) {
+    return null
+  }
   const scale = actuationScale(platform, display.scaleFactor)
+  const origin =
+    platform === 'win32' && display.physicalOrigin
+      ? display.physicalOrigin
+      : { x: display.bounds.x * scale, y: display.bounds.y * scale }
   return {
-    x: Math.round((display.bounds.x + point.x) * scale),
-    y: Math.round((display.bounds.y + point.y) * scale)
+    x: Math.round(origin.x + local.x * scale),
+    y: Math.round(origin.y + local.y * scale)
   }
 }
 
@@ -54,18 +75,22 @@ export function imagePointToScreen(
  *  Verbs without coordinates (type/hotkey/wait/finished/call_user) pass through. */
 export function mapActionToScreen(
   action: VisionAction,
-  display: DisplayGeometry,
-  platform: NodeJS.Platform
-): VisionAction {
-  const map = (p: Point): Point => imagePointToScreen(p, display, platform)
+  context: CoordinateMappingContext
+): VisionAction | null {
+  const map = (point: Point): Point | null => imagePointToScreen(point, context)
   switch (action.type) {
     case 'click':
     case 'double_click':
     case 'right_click':
-    case 'scroll':
-      return { ...action, point: map(action.point) }
-    case 'drag':
-      return { ...action, from: map(action.from), to: map(action.to) }
+    case 'scroll': {
+      const point = map(action.point)
+      return point ? { ...action, point } : null
+    }
+    case 'drag': {
+      const from = map(action.from)
+      const to = map(action.to)
+      return from && to ? { ...action, from, to } : null
+    }
     default:
       return action
   }

@@ -16,12 +16,14 @@ import { SoftwareUpdateSection } from './SoftwareUpdateSection'
 import { ProcessingControls } from './ProcessingControls'
 import { BackupRestoreSection } from './BackupRestoreSection'
 import { SettingsPermissionsPanel } from './PermissionsPanel'
+import { ComputerUseSettingsSection } from './ComputerUseSettingsSection'
 export { ModelPipelineSection } from './ProcessingControls'
 
 const SETTINGS_SECTION_TITLES: Record<string, string> = {
   setup: 'Setup & health',
   permissions: 'Setup & health',
   capture: 'Capture & processing',
+  'computer-use': 'Computer use',
   sync: 'Device sync',
   identity: 'You',
   secretary: 'What Off Grid has learned',
@@ -180,6 +182,14 @@ export function Settings({
                 </div>
               )}
               <ProcessingControls />
+            </SettingsCard>
+
+            <SettingsCard
+              title="Computer use"
+              summary="Control screen detail, task context, and recovery checkpoints."
+              delay={0.15}
+            >
+              <ComputerUseSettingsSection />
             </SettingsCard>
 
             {/* Remaining Pro Settings sections (You / What Off Grid has learned /
