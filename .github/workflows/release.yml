@@ -229,6 +229,22 @@ jobs:
           npm --prefix ../shared ci
           npm --prefix ../shared/packages/sync run build
           npm --prefix ../shared/packages/models run build
+      - name: Check out the private Desktop speech runtime
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: off-grid-ai/executorch-speech
+          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          path: _executorch_speech
+          lfs: true # Mac releases bundle the default English voices for offline first use.
+          persist-credentials: false
+      - name: Put the speech runtime beside this checkout
+        run: |
+          if [ ! -f _executorch_speech/package.json ]; then
+            echo "::error::off-grid-ai/executorch-speech was not checked out. Check CI_CROSS_REPO_TOKEN."
+            exit 1
+          fi
+          rm -rf ../executorch-speech
+          mv _executorch_speech ../executorch-speech
       - name: Install dependencies
         run: npm ci
       # Stamp the resolved version into package.json so electron-builder picks the
@@ -268,6 +284,7 @@ jobs:
           # notarytool needs the API key as a file; write it from the secret.
           printf '%s' "$APPLE_API_KEY_CONTENT" > "$RUNNER_TEMP/AuthKey.p8"
           export APPLE_API_KEY="$RUNNER_TEMP/AuthKey.p8"
+          npm run prepare:speech-defaults
           # Build every artifact with publication disabled. The artifact hook verifies
           # both the updater ZIP and DMG before this command can complete.
           npx electron-builder --mac \
@@ -470,6 +487,23 @@ jobs:
           npm --prefix ../shared ci
           npm --prefix ../shared/packages/sync run build
           npm --prefix ../shared/packages/models run build
+      - name: Check out the private Desktop speech package
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: off-grid-ai/executorch-speech
+          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          path: _executorch_speech
+          lfs: false # The current native speech engine is macOS-only.
+          persist-credentials: false
+      - name: Put the speech package beside this checkout
+        shell: bash
+        run: |
+          if [ ! -f _executorch_speech/package.json ]; then
+            echo "::error::off-grid-ai/executorch-speech was not checked out. Check CI_CROSS_REPO_TOKEN."
+            exit 1
+          fi
+          rm -rf ../executorch-speech
+          mv _executorch_speech ../executorch-speech
       - name: Install dependencies
         run: npm ci
       - name: Fetch Windows native binaries (llama/whisper/sd/ffmpeg)

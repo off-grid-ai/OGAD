@@ -67,6 +67,11 @@ mac:
       - _offgrid-sync._udp
   notarize: true
   icon: resources/icon.png
+  extraResources:
+    - from: ../executorch-speech/native/bin/executorch-speech
+      to: bin/executorch-speech
+    - from: ../executorch-speech/generated/default-assets
+      to: speech-assets
   # NOTE: no afterSign re-sign hook. electron-builder already signs every nested
   # binary (resources/bin/*) with hardenedRuntime + these entitlements and then
   # notarizes + staples. A post-sign re-sign (the old resign.js) re-signed AFTER

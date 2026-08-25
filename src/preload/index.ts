@@ -518,8 +518,14 @@ const offGridApi = {
 
   // --- Voice output (text-to-speech via Kokoro) ---
   ttsVoices: () => ipcRenderer.invoke('tts:voices'),
-  onTtsVoiceProgress: (callback: (data: { progress: number }) => void) => {
-    const listener = (_event: unknown, data: { progress: number }): void => callback(data)
+  prepareTtsVoice: (voice: string) => ipcRenderer.invoke('tts:prepare-voice', voice),
+  onTtsVoiceProgress: (
+    callback: (data: { voiceId?: string; progress: number | null; currentAsset?: string }) => void
+  ) => {
+    const listener = (
+      _event: unknown,
+      data: { voiceId?: string; progress: number | null; currentAsset?: string }
+    ): void => callback(data)
     ipcRenderer.on('tts:voice-progress', listener)
     return unsubscribe('tts:voice-progress', listener)
   },

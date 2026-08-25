@@ -6,19 +6,35 @@ import { getSetting } from './database'
  * TTS service. Keeping that composition out of the general IPC registry makes it independently
  * testable without duplicating voice-selection rules in a caller. */
 export function setupTtsIpc(): void {
-  ipcMain.handle('tts:voices', async (event) => {
+  const sendProgress = (
+    event: Electron.IpcMainInvokeEvent,
+    progress: import('@offgrid/executorch-speech').DownloadProgress
+  ): void => {
+    if (event.sender.isDestroyed()) return
+    event.sender.send('tts:voice-progress', {
+      voiceId: progress.voiceId,
+      progress: progress.percentage,
+      currentAsset: progress.currentAsset
+    })
+  }
+
+  ipcMain.handle('tts:voices', async () => {
     const { listVoiceCatalog } = await import('./tts')
     try {
-      return await listVoiceCatalog((progress) => {
-        if (!event.sender.isDestroyed()) event.sender.send('tts:voice-progress', { progress })
-      })
+      return await listVoiceCatalog()
     } catch (error) {
       console.error('[tts] voices failed', error)
       return []
     }
   })
 
-  ipcMain.handle('tts:speak', async (_event, text: string, voice?: string) => {
+  ipcMain.handle('tts:prepare-voice', async (event, voice: string) => {
+    const { prepareVoiceAssets } = await import('./tts')
+    await prepareVoiceAssets(voice, (progress) => sendProgress(event, progress))
+    return { ready: true }
+  })
+
+  ipcMain.handle('tts:speak', async (event, text: string, voice?: string) => {
     const { synthesize } = await import('./tts')
     let chosenVoice = voice
     if (!chosenVoice) {
@@ -28,6 +44,6 @@ export function setupTtsIpc(): void {
         /* synthesize owns the default voice when settings are unavailable */
       }
     }
-    return synthesize(text, chosenVoice)
+    return synthesize(text, chosenVoice, (progress) => sendProgress(event, progress))
   })
 }

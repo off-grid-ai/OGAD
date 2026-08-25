@@ -76,6 +76,7 @@ verify_packaged_helpers() {
 
 build_core() {
   echo "==> Building CORE (free) macOS DMG  v$VERSION"
+  npm run prepare:speech-defaults
   OFFGRID_FORCE_CORE=1 npx electron-vite build
   npx electron-builder --mac \
     -c.mac.notarize=false \
@@ -89,6 +90,7 @@ build_core() {
 
 build_pro() {
   echo "==> Building PRO macOS DMG  v$VERSION"
+  npm run prepare:speech-defaults
   npx electron-vite build
   npx electron-builder --mac \
     -c.mac.notarize=false \

@@ -3,7 +3,6 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import asar from '@electron/asar'
 import { configureRuntime, binRoots } from '../runtime-env'
 import { ffmpegBin } from '../transcription/whisper-cli'
 import { withElectronViteBuildLock } from './electron-vite-build-lock'
@@ -98,6 +97,9 @@ files:
   - package.json
   - '!node_modules/**'
 mac:
+  extraResources:
+    - from: ${yamlPath(path.join(root, '..', 'executorch-speech', 'native', 'bin', 'executorch-speech'))}
+      to: bin/executorch-speech
   target:
     - dir
   notarize: false
@@ -157,14 +159,11 @@ mac:
     }
   })
 
-  it('packages the compiled TTS worker beside its application dependencies', () => {
-    const archive = path.join(resourcesDir, 'app.asar')
-    const entries = asar.listPackage(archive, { isPack: false })
-
-    expect(entries).toContain('/out/main/tts-worker.js')
-    expect(fs.existsSync(path.join(resourcesDir, 'tts-worker.mjs'))).toBe(false)
-    expect(asar.extractFile(archive, 'out/main/tts-worker.js').toString('utf8')).toContain(
-      'kokoro-js'
-    )
+  it.skipIf(process.platform !== 'darwin')('packages the native ExecuTorch speech runtime', () => {
+    const runtime = path.join(resourcesDir, 'bin', 'executorch-speech')
+    const stat = fs.statSync(runtime)
+    expect(stat.isFile()).toBe(true)
+    expect(stat.size).toBeGreaterThan(1_000_000)
+    expect(fs.readFileSync(runtime).subarray(0, 4).toString('hex')).toBe('cffaedfe')
   })
 })

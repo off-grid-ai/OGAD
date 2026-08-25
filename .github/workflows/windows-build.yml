@@ -75,6 +75,24 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Check out the private Desktop speech package
+        uses: actions/checkout@v4
+        with:
+          repository: off-grid-ai/executorch-speech
+          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          path: _executorch_speech
+          lfs: false # The current native speech engine is macOS-only.
+          persist-credentials: false
+      - name: Put the speech package beside this checkout
+        shell: bash
+        run: |
+          if [ ! -f _executorch_speech/package.json ]; then
+            echo "::error::off-grid-ai/executorch-speech was not checked out. Check CI_CROSS_REPO_TOKEN."
+            exit 1
+          fi
+          rm -rf ../executorch-speech
+          mv _executorch_speech ../executorch-speech
+
       - name: Install dependencies
         run: npm ci
 

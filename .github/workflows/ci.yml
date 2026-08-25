@@ -108,6 +108,25 @@ jobs:
           npm --prefix ../shared/packages/sync run build
           npm --prefix ../shared/packages/models run build
           npm --prefix ../shared/packages/speech run build
+      - name: Check out the private Desktop speech runtime
+        uses: actions/checkout@v4
+        with:
+          repository: off-grid-ai/executorch-speech
+          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          path: _executorch_speech
+          lfs: false
+          persist-credentials: false
+      - name: Put the speech runtime beside this checkout
+        run: |
+          if [ ! -f _executorch_speech/package.json ]; then
+            echo "::error::off-grid-ai/executorch-speech was not checked out. Check CI_CROSS_REPO_TOKEN."
+            exit 1
+          fi
+          # Tests exercise the real native boundary, but ordinary CI does not need
+          # the 350 MB bundled English asset set used only by the Mac release.
+          git -C _executorch_speech lfs pull --include='native/bin/executorch-speech' --exclude=''
+          rm -rf ../executorch-speech
+          mv _executorch_speech ../executorch-speech
       - run: npm ci
       # Hard gates: types + the full test suite.
       - name: Typecheck (core)
