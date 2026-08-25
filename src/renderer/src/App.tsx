@@ -907,15 +907,8 @@ function AppContent() {
   }
 
   return (
-    <div
-      className="h-screen w-full overflow-hidden bg-neutral-950 relative"
-      /* The watched browser pane sets --browser-pane-width; reserving it here
-         shrinks the app content to the LEFT so the browser docks beside it as a
-         real split, not an overlay. 0 when no task is running. */
-      style={{ paddingRight: 'var(--browser-pane-width, 0px)' }}
-    >
-      {/* The web-task browser split: fixed + viewport-docked, rendered at the
-          root so no transformed chat ancestor becomes its containing block. */}
+    <div className="h-screen w-full overflow-hidden bg-neutral-950 relative">
+      {/* One root task panel owns Web Use and Computer Use tabs. */}
       <WatchedBrowserPane />
       <CommandPalette
         onOpenHit={handleOpenHit}

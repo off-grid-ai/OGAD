@@ -15,6 +15,12 @@ interface ChatToolRowsProps {
   tools: readonly DisplayTool[] | undefined
 }
 
+function displayToolName(name: string): string {
+  if (name === 'web_task' || name === 'web_use') return 'Web Use'
+  if (name === 'computer_task' || name === 'computer_use') return 'Computer Use'
+  return name
+}
+
 /** One tool layout for live previews and durable assistant messages. */
 export function ChatToolRows({ tools }: Readonly<ChatToolRowsProps>): React.JSX.Element | null {
   const visible = (tools ?? []).filter(
@@ -25,6 +31,7 @@ export function ChatToolRows({ tools }: Readonly<ChatToolRowsProps>): React.JSX.
   return (
     <div className="mt-1 flex w-full max-w-[85%] flex-col gap-1">
       {visible.map((tool, index) => {
+        const toolName = displayToolName(tool.name)
         const running = tool.status === 'running'
         const result = tool.result ?? ''
         const hasDetails = !running && result.trim().length > 0
@@ -44,7 +51,7 @@ export function ChatToolRows({ tools }: Readonly<ChatToolRowsProps>): React.JSX.
             >
               <Wrench className="h-3 w-3 shrink-0 text-neutral-600" aria-hidden="true" />
               <span className="min-w-0 flex-1 truncate">
-                {running ? `Using ${tool.name}...` : tool.name}
+                {running ? `Using ${toolName}...` : toolName}
               </span>
               {!running ? <span className="text-neutral-600">{completionLabel}</span> : null}
               {hasDetails ? (

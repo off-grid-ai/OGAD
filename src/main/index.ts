@@ -416,6 +416,8 @@ app.whenReady().then(async () => {
     registerBrowserViewIpc() // dock the live browser view to the pane's region
     const { registerVisionIpc } = await import('./vision/vision-controller')
     registerVisionIpc() // the vision rail's supervisor Stop/Pause/Resume
+    const { registerTaskHistoryIpc } = await import('./tasks/task-history')
+    registerTaskHistoryIpc() // one durable Web Use + Computer Use history
     setupDesktopBackupIPC()
     // one OpenAI-compatible local gateway (LLM + STT); auto-picks a free port. Async, so handle a
     // rejection on the promise (a try/catch around a fire-and-forget async call can't catch it).

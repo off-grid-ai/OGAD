@@ -72,6 +72,15 @@ const offGridApi = {
       return unsubscribe('actions:outcome', sub)
     }
   },
+  // One durable projection for Web Use and Computer Use tabs/history.
+  tasks: {
+    list: (limit?: number) => ipcRenderer.invoke('tasks:list', limit),
+    onChanged: (cb: (task: unknown) => void) => {
+      const sub = (_e: unknown, task: unknown): void => cb(task)
+      ipcRenderer.on('tasks:changed', sub)
+      return unsubscribe('tasks:changed', sub)
+    }
+  },
   // Browser rail (R2-C): the watched pane's step feed + the takeover handoff.
   browser: {
     resolveTakeover: (taskId: string, outcome: 'resumed' | 'cancelled') =>
@@ -80,6 +89,15 @@ const offGridApi = {
     // (null hides the view). Fire-and-forget on every mount/resize.
     setRegion: (rect: { x: number; y: number; width: number; height: number } | null) =>
       ipcRenderer.send('browser:set-region', rect),
+    control: (action: 'back' | 'forward' | 'reload' | 'stop') =>
+      ipcRenderer.invoke('browser:control', action),
+    navigate: (address: string) => ipcRenderer.invoke('browser:navigate', address),
+    reopen: (taskId?: string) => ipcRenderer.invoke('browser:reopen', taskId),
+    onNavigationState: (cb: (state: unknown) => void) => {
+      const sub = (_e: unknown, state: unknown): void => cb(state)
+      ipcRenderer.on('browser:navigation-state', sub)
+      return unsubscribe('browser:navigation-state', sub)
+    },
     onStep: (cb: (step: unknown) => void) => {
       const sub = (_e: unknown, step: unknown): void => cb(step)
       ipcRenderer.on('browser:step', sub)

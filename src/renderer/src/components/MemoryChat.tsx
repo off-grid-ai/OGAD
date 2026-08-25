@@ -87,6 +87,7 @@ import {
 import { Button } from '@renderer/components/ui/button'
 import { ActionGateDock } from '@renderer/components/actions/ActionGateDock'
 import { VisionSupervisorOverlay } from '@renderer/components/vision/VisionSupervisorOverlay'
+import { TaskPanelTrigger } from '@renderer/components/tasks/TaskPanelTrigger'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import {
   DropdownMenu,
@@ -4596,6 +4597,7 @@ export function MemoryChat({
             <circle cx="9" cy="9" r="1.5" fill="currentColor" />
           </svg>
         </button>
+        <TaskPanelTrigger />
       </header>
 
       {/* Body */}

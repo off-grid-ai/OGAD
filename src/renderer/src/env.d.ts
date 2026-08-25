@@ -127,9 +127,32 @@ interface RendererAPIOverrides {
     onGatePending: (cb: (request: unknown) => void) => () => void
     onOutcome: (cb: (outcome: unknown) => void) => () => void
   }
+  tasks?: {
+    list: (limit?: number) => Promise<
+      Array<{
+        taskId: string
+        kind: 'web_use' | 'computer_use'
+        title: string
+        status: 'running' | 'paused' | 'done' | 'failed' | 'stopped'
+        summary?: string
+        steps: string[]
+        startedAt: number
+        finishedAt?: number
+        updatedAt: number
+        lastUrl?: string
+        lastTitle?: string
+        screenshotPath?: string
+      }>
+    >
+    onChanged: (cb: (task: unknown) => void) => () => void
+  }
   browser?: {
     resolveTakeover: (taskId: string, outcome: 'resumed' | 'cancelled') => Promise<boolean>
     setRegion: (rect: { x: number; y: number; width: number; height: number } | null) => void
+    control: (action: 'back' | 'forward' | 'reload' | 'stop') => Promise<boolean>
+    navigate: (address: string) => Promise<{ ok: boolean; detail?: string }>
+    reopen: (taskId?: string) => Promise<boolean>
+    onNavigationState: (cb: (state: unknown) => void) => () => void
     onStep: (cb: (step: unknown) => void) => () => void
     onTakeover: (cb: (request: unknown) => void) => () => void
     onTaskState: (cb: (state: unknown) => void) => () => void

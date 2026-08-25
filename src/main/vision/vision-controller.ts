@@ -11,6 +11,7 @@
  */
 import { BrowserWindow, ipcMain } from 'electron'
 import type { VisionGuard } from './vision-guard'
+import { appendTaskStep, recordTaskRun } from '../tasks/task-history'
 
 function broadcast(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -49,6 +50,7 @@ export function registerVisionSession(guard: VisionGuard): () => void {
 /** Push a step-feed line to the overlay (and buffer it for a late subscriber). */
 export function emitVisionStep(taskId: string, note: string): void {
   currentSteps.push(note)
+  appendTaskStep(taskId, 'computer_use', currentState?.goal ?? 'Computer Use', note)
   broadcast('vision:step', { taskId, note })
 }
 
@@ -68,6 +70,14 @@ export function emitVisionState(state: TaskState): void {
     currentSteps = []
   }
   currentState = state
+  recordTaskRun({
+    taskId: state.taskId,
+    kind: 'computer_use',
+    title: state.goal,
+    status: state.status,
+    summary: state.summary,
+    steps: currentSteps
+  })
   broadcast('vision:task-state', state)
 }
 

@@ -32,6 +32,7 @@ import { visionModelNotice } from './vision-model-notice'
 import { getTakeoverCoordinator } from '../browser/takeover'
 import { loadActuation, actuationAvailable, type ActuationPort } from '../input/actuation'
 import { mapActionToScreen, type DisplayGeometry } from '../input/coordinate-mapping'
+import { recordTaskRun, taskScreenshotPath } from '../tasks/task-history'
 
 export type { ActuationPort }
 
@@ -47,7 +48,7 @@ export function visionActuationAvailable(): boolean {
 // actuate), so reusing one path is race-free and keeps the disk clean.
 const CAPTURE_FILE = path.join(os.tmpdir(), 'offgrid-vision-capture.png')
 
-function makeScreen(actuation: ActuationPort): VisionScreen {
+function makeScreen(actuation: ActuationPort, taskId: string, goal: string): VisionScreen {
   // The display the last screenshot was taken from. Its scaleFactor + origin move
   // the grounder's DIP coordinates into the actuation space (physical px on
   // Windows). capture() always runs before actuate() in the vision loop.
@@ -83,6 +84,14 @@ function makeScreen(actuation: ActuationPort): VisionScreen {
         )
       }
       fs.writeFileSync(CAPTURE_FILE, png)
+      const savedScreenshot = taskScreenshotPath(taskId)
+      fs.writeFileSync(savedScreenshot, png)
+      recordTaskRun({
+        taskId,
+        kind: 'computer_use',
+        title: goal,
+        screenshotPath: savedScreenshot
+      })
       // Return the file path - the grounder reads it from disk.
       return { image: CAPTURE_FILE, bounds: { width, height } as Bounds }
     },
@@ -174,7 +183,7 @@ class VisionHost {
     showSupervisorWindow()
     try {
       const result = await runVisionTask(goal, {
-        screen: makeScreen(actuation),
+        screen: makeScreen(actuation, taskId, goal),
         guard,
         ground: (g, image, history) =>
           llm.chat(buildVisionPrompt(g, history), [image], 60_000, 200, {

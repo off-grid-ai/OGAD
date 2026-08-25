@@ -19,6 +19,7 @@ import { VisionGuard } from '../vision/vision-guard'
 import { registerVisionSession } from '../vision/vision-controller'
 import { getMainWindow } from '../main-window'
 import type { BrowserRailHost } from './browser-rail'
+import { appendTaskStep, getTaskRun, recordTaskRun } from '../tasks/task-history'
 
 function broadcast(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -33,6 +34,50 @@ interface Rect {
   y: number
   width: number
   height: number
+}
+
+type BrowserControl = 'back' | 'forward' | 'reload' | 'stop'
+
+interface BrowserNavigationState {
+  url: string
+  title: string
+  canGoBack: boolean
+  canGoForward: boolean
+  isLoading: boolean
+}
+
+interface BrowserTaskState {
+  taskId: string
+  goal: string
+  status: 'running' | 'done' | 'failed'
+  summary?: string
+  steps: string[]
+}
+
+/** Convert what the user enters in the address field to a safe web URL. A host
+ *  gets HTTPS; other text becomes a search. The browser rail never accepts
+ *  file:, javascript:, or app protocols from this surface. */
+export function normalizeBrowserAddress(input: string): string | null {
+  const value = input.trim()
+  if (!value) {
+    return null
+  }
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      const parsed = new URL(value)
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.toString() : null
+    } catch {
+      return null
+    }
+  }
+  if (!/\s/.test(value) && value.includes('.')) {
+    try {
+      return new URL(`https://${value}`).toString()
+    } catch {
+      return null
+    }
+  }
+  return `https://www.google.com/search?q=${encodeURIComponent(value)}`
 }
 
 /** Fail-closed parse of the region the renderer reports. A missing/garbage value
@@ -72,6 +117,50 @@ class BrowserHost implements BrowserRailHost {
   private view: WebContentsView | null = null
   /** The pane region the renderer last reported. null => hide the view. */
   private region: Rect | null = null
+  private currentTask: BrowserTaskState | null = null
+  private navigationState: BrowserNavigationState = {
+    url: '',
+    title: 'New tab',
+    canGoBack: false,
+    canGoForward: false,
+    isLoading: false
+  }
+
+  private broadcastNavigationState(): void {
+    broadcast('browser:navigation-state', this.navigationState)
+  }
+
+  private readNavigationState(): BrowserNavigationState {
+    const contents = this.view?.webContents
+    if (!contents || contents.isDestroyed()) {
+      return this.navigationState
+    }
+    const history = contents.navigationHistory
+    return {
+      url: contents.getURL(),
+      title: contents.getTitle() || 'New tab',
+      canGoBack: history.canGoBack(),
+      canGoForward: history.canGoForward(),
+      isLoading: contents.isLoading()
+    }
+  }
+
+  private refreshNavigationState(): void {
+    this.navigationState = this.readNavigationState()
+    if (this.currentTask) {
+      recordTaskRun({
+        taskId: this.currentTask.taskId,
+        kind: 'web_use',
+        title: this.currentTask.goal,
+        status: this.currentTask.status,
+        summary: this.currentTask.summary,
+        steps: this.currentTask.steps,
+        lastUrl: this.navigationState.url,
+        lastTitle: this.navigationState.title
+      })
+    }
+    this.broadcastNavigationState()
+  }
 
   private setViewVisible(visible: boolean): void {
     const view = this.view
@@ -184,6 +273,19 @@ class BrowserHost implements BrowserRailHost {
     const win = getMainWindow()
     win?.contentView.addChildView(view)
     this.view = view
+    const refresh = (): void => this.refreshNavigationState()
+    view.webContents.on('did-start-loading', refresh)
+    view.webContents.on('did-stop-loading', refresh)
+    view.webContents.on('did-navigate', refresh)
+    view.webContents.on('did-navigate-in-page', refresh)
+    view.webContents.on('page-title-updated', refresh)
+    view.webContents.setWindowOpenHandler(({ url }) => {
+      const target = normalizeBrowserAddress(url)
+      if (target) {
+        void view.webContents.loadURL(target)
+      }
+      return { action: 'deny' }
+    })
     // Silence / tear down the browser when the window goes away. setRegion only
     // fires while the pane is mounted, so a video would keep playing behind a
     // hidden window (macOS keeps the app alive on window close) unless we react to
@@ -195,6 +297,65 @@ class BrowserHost implements BrowserRailHost {
     // setRegion.
     this.showView()
     return view
+  }
+
+  control(action: BrowserControl): boolean {
+    const contents = this.view?.webContents
+    if (!contents || contents.isDestroyed()) {
+      return false
+    }
+    const history = contents.navigationHistory
+    if (action === 'back' && history.canGoBack()) {
+      history.goBack()
+    } else if (action === 'forward' && history.canGoForward()) {
+      history.goForward()
+    } else if (action === 'reload') {
+      contents.reload()
+    } else if (action === 'stop') {
+      contents.stop()
+    } else {
+      return false
+    }
+    this.refreshNavigationState()
+    return true
+  }
+
+  async navigate(address: string): Promise<{ ok: boolean; detail?: string }> {
+    const target = normalizeBrowserAddress(address)
+    if (!target) {
+      return { ok: false, detail: 'Enter a website or search.' }
+    }
+    const view = this.ensureView()
+    try {
+      await this.loadNatively(view, target)
+      this.refreshNavigationState()
+      return { ok: true }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      return { ok: false, detail }
+    }
+  }
+
+  reopen(taskId?: string): boolean {
+    if (taskId && this.currentTask?.taskId !== taskId) {
+      const saved = getTaskRun(taskId)
+      if (!saved || saved.kind !== 'web_use') return false
+      this.currentTask = {
+        taskId: saved.taskId,
+        goal: saved.title,
+        status: saved.status === 'done' ? 'done' : 'failed',
+        summary: saved.summary,
+        steps: saved.steps
+      }
+      if (saved.lastUrl) void this.navigate(saved.lastUrl)
+    }
+    if (!this.currentTask) {
+      return false
+    }
+    this.showView()
+    broadcast('browser:task-state', this.currentTask)
+    this.broadcastNavigationState()
+    return true
   }
 
   /** Bring the view's renderer up on the start page NATIVELY before any CDP
@@ -232,8 +393,20 @@ class BrowserHost implements BrowserRailHost {
     // the loop through the vision:control seam.
     const guard = new VisionGuard()
     const releaseSession = registerVisionSession(guard)
+    const steps: string[] = []
     const setState = (status: 'running' | 'done' | 'failed', summary?: string): void => {
-      broadcast('browser:task-state', { taskId, goal, status, summary })
+      this.currentTask = { taskId, goal, status, summary, steps: [...steps] }
+      recordTaskRun({
+        taskId,
+        kind: 'web_use',
+        title: goal,
+        status,
+        summary,
+        steps,
+        lastUrl: this.navigationState.url,
+        lastTitle: this.navigationState.title
+      })
+      broadcast('browser:task-state', this.currentTask)
     }
     setState('running')
 
@@ -241,7 +414,10 @@ class BrowserHost implements BrowserRailHost {
       // Land the start page natively FIRST so the debugger has a live target,
       // THEN attach CDP for the snapshot/input the loop drives.
       await this.loadNatively(view, start)
-      broadcast('browser:step', { taskId, note: `opened ${start}` })
+      const opened = `opened ${start}`
+      steps.push(opened)
+      appendTaskStep(taskId, 'web_use', goal, opened)
+      broadcast('browser:step', { taskId, note: opened })
       const driver = new BrowserDriver(attachCdp(view))
       // startUrl is '' - the page is already loaded natively, so the loop goes
       // straight to snapshotting it instead of re-navigating over CDP.
@@ -258,6 +434,8 @@ class BrowserHost implements BrowserRailHost {
         },
         onStep: (note) => {
           console.log(`[web-task] step: ${note}`)
+          steps.push(note)
+          appendTaskStep(taskId, 'web_use', goal, note)
           broadcast('browser:step', { taskId, note })
         },
         shouldStop: () => guard.isHalted
@@ -274,8 +452,16 @@ class BrowserHost implements BrowserRailHost {
       // proper failed result so the engine sees an outcome, not an exception.
       const detail = error instanceof Error ? error.message : String(error)
       console.log(`[web-task] ERROR: ${detail}`)
-      setState('failed', `browser task error: ${detail}`)
-      return { ok: false, summary: `browser task error: ${detail}`, steps: [], takeovers: 0, finalUrl: '' }
+      steps.push(`error: ${detail}`)
+      appendTaskStep(taskId, 'web_use', goal, `error: ${detail}`)
+      setState('failed', `Web Use stopped: ${detail}`)
+      return {
+        ok: false,
+        summary: `Web Use stopped: ${detail}`,
+        steps,
+        takeovers: 0,
+        finalUrl: ''
+      }
     } finally {
       releaseSession()
     }
@@ -308,4 +494,19 @@ export function registerBrowserViewIpc(): void {
   ipcMain.on('browser:set-region', (_e, raw: unknown) => {
     browserHost().setRegion(parseRect(raw))
   })
+  ipcMain.handle('browser:control', (_e, action: unknown) => {
+    if (action !== 'back' && action !== 'forward' && action !== 'reload' && action !== 'stop') {
+      return false
+    }
+    return browserHost().control(action)
+  })
+  ipcMain.handle('browser:navigate', (_e, address: unknown) => {
+    if (typeof address !== 'string') {
+      return { ok: false, detail: 'Enter a website or search.' }
+    }
+    return browserHost().navigate(address)
+  })
+  ipcMain.handle('browser:reopen', (_event, taskId: unknown) =>
+    browserHost().reopen(typeof taskId === 'string' ? taskId : undefined)
+  )
 }
