@@ -35,6 +35,17 @@ export function planAspectPreservingResize(source: PixelSize, maxEdge: number): 
   }
 }
 
+/** Align an inference frame to a model's patch factor (UI-Mate uses 32). */
+export function alignPixelSize(size: PixelSize, factor: number): PixelSize {
+  if (!validSize(size) || !Number.isInteger(factor) || factor < 1) {
+    throw new Error('invalid screenshot alignment')
+  }
+  return {
+    width: Math.max(factor, Math.round(size.width / factor) * factor),
+    height: Math.max(factor, Math.round(size.height / factor) * factor)
+  }
+}
+
 export function withCaptureOffset(geometry: ScreenshotGeometry, offset: Point): ScreenshotGeometry {
   if (!Number.isFinite(offset.x) || !Number.isFinite(offset.y)) {
     throw new Error('invalid capture offset')

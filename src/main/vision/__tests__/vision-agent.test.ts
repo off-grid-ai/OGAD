@@ -99,6 +99,58 @@ describe('runVisionTask', () => {
     expect(result.steps.join('\n')).toContain('did not parse')
   })
 
+  it('stops invalid planning loops at the model step cap', async () => {
+    const w = world(['bad', 'bad', 'bad'])
+    w.deps.maxPlanningSteps = 2
+    const result = await runVisionTask('t', w.deps)
+    expect(result).toMatchObject({
+      ok: false,
+      summary: 'Computer use stopped after 2 planning steps.'
+    })
+    expect(w.actuated).toEqual([])
+  })
+
+  it('records the exact redacted policy message projection from the grounder', async () => {
+    const w = world([])
+    const observations: VisionStepObservation[] = []
+    w.deps.ground = async () => ({
+      response: "finished(content='ok')",
+      modelInput: '[exact adapter messages; screenshot redacted]'
+    })
+    w.deps.onObservation = (observation) => observations.push(observation)
+    await runVisionTask('t', w.deps)
+    expect(observations[0]?.promptContext).toBe('[exact adapter messages; screenshot redacted]')
+  })
+
+  it('records completed actions and the failing action when an ordered response fails', async () => {
+    const w = world([])
+    const observations: VisionStepObservation[] = []
+    w.deps.ground = async () => 'ordered actions'
+    w.deps.parseResponse = () => ({
+      kind: 'actions',
+      actionText: 'two clicks',
+      actions: [
+        { type: 'click', point: { x: 10, y: 10 } },
+        { type: 'click', point: { x: 20, y: 20 } }
+      ]
+    })
+    let actuation = 0
+    w.deps.screen.actuate = async (action) => {
+      actuation += 1
+      if (actuation === 2) throw new Error('second click failed')
+      return { mappedAction: action }
+    }
+    w.deps.onObservation = (observation) => observations.push(observation)
+
+    await expect(runVisionTask('t', w.deps)).rejects.toThrow('second click failed')
+    expect(observations[0]).toMatchObject({
+      result: 'error',
+      failedActionIndex: 1,
+      parsedAction: { type: 'click', point: { x: 20, y: 20 } },
+      mappedActions: [{ type: 'click', point: { x: 10, y: 10 } }]
+    })
+  })
+
   it('the step budget stops the run after its cap', async () => {
     const guard = new VisionGuard(2)
     const w = world(

@@ -23,6 +23,11 @@ export interface DecodedImage {
   mime: string // e.g. 'image/png' | 'image/jpeg' | 'image/webp'
 }
 
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant'
+  content: string | ContentPart[]
+}
+
 /** MIME type for an image path by extension, via the shared ext->MIME map (image/png
  *  fallback). Previously forced everything non-.png to image/jpeg, which mislabelled
  *  webp/gif/bmp/heic attachments in the RAG chat vision path (the vision model may
@@ -51,10 +56,8 @@ export function buildMessages(
   message: string,
   images: DecodedImage[],
   systemPrompt: string
-): { role: 'system' | 'user'; content: string | ContentPart[] }[] {
-  const messages: { role: 'system' | 'user'; content: string | ContentPart[] }[] = [
-    { role: 'user', content: buildContentParts(message, images) }
-  ]
+): ChatMessage[] {
+  const messages: ChatMessage[] = [{ role: 'user', content: buildContentParts(message, images) }]
   if (systemPrompt.trim()) {
     messages.unshift({ role: 'system', content: toWellFormedText(systemPrompt) })
   }

@@ -27,7 +27,7 @@ import {
   buildLaunchArgs,
   type PresetField
 } from './llm/settings-math'
-import { buildMessages, thinkingPayload } from './llm/chat-payload'
+import { buildMessages, thinkingPayload, type ChatMessage } from './llm/chat-payload'
 import { readImages } from './llm/read-images'
 import { detectThinkingDialect, type ThinkingDialect } from './llm/thinking-dialect'
 import { isValidGgufFile } from './models/gguf'
@@ -44,6 +44,8 @@ import {
   type TeardownOutcome
 } from './llm/engine-teardown'
 import { emitChangedLlmSettings } from './sync-mutation'
+import { loadGatedVisionModelAdapter } from './vision/model-adapters/registry'
+import type { VisionModelArtifacts } from './vision/model-adapters/types'
 
 export type { KvCacheType, PerformanceMode }
 
@@ -558,6 +560,32 @@ export class LLMService {
     return { id, vision: !!this.mmProjPath && fs.existsSync(this.mmProjPath) }
   }
 
+  /** Exact active artifacts for a model-family policy adapter. */
+  activeModelArtifacts(): VisionModelArtifacts | null {
+    this.resolveModel()
+    if (!fs.existsSync(this.modelPath)) return null
+    let id = path.basename(this.modelPath)
+    try {
+      const cfg = JSON.parse(fs.readFileSync(this.activeModelFile, 'utf-8'))
+      if (cfg?.id) id = cfg.id
+    } catch {
+      /* fall back to the filename */
+    }
+    const primaryFile = path.basename(this.modelPath)
+    const projectorFile = this.mmProjPath ? path.basename(this.mmProjPath) : null
+    return {
+      id,
+      primaryFile,
+      projectorFile,
+      availableFiles: [
+        ...(fs.existsSync(this.modelPath) ? [primaryFile] : []),
+        ...(this.mmProjPath && fs.existsSync(this.mmProjPath) && projectorFile
+          ? [projectorFile]
+          : [])
+      ]
+    }
+  }
+
   /** Cheap integrity check: a real GGUF starts with the "GGUF" magic and is more
    *  than a few bytes. Catches truncated/corrupt downloads before we hand the file
    *  to llama-server (which would otherwise crash on load). Delegates to the shared
@@ -613,7 +641,17 @@ export class LLMService {
         'The model file looks corrupt or incomplete. Re-download it from the Models screen.'
       )
     }
-    // mmproj is optional — if it's corrupt, drop it (text still works) rather than fail.
+    const activeArtifacts = this.activeModelArtifacts()
+    const loadGatedAdapter = activeArtifacts ? loadGatedVisionModelAdapter(activeArtifacts) : null
+    if (activeArtifacts && loadGatedAdapter) {
+      // UI-Mate is a screenshot policy, not a text fallback. The exact paired
+      // projector is mandatory at the engine boundary.
+      loadGatedAdapter.assertCapabilities(activeArtifacts)
+      if (!this.mmProjPath || !this.validateGguf(this.mmProjPath)) {
+        throw new Error('The UI-Mate mmproj file is corrupt or incomplete. Re-download it.')
+      }
+    }
+    // Other model families keep the existing optional-projector behavior.
     if (this.mmProjPath && !this.validateGguf(this.mmProjPath)) {
       console.warn(`[LLMService] mmproj failed validation; loading text-only: ${this.mmProjPath}`)
       this.mmProjPath = ''
@@ -980,56 +1018,97 @@ export class LLMService {
     await this.beginGeneration()
     try {
       this.assertImageInputSupported(images)
-      await this.ensureReady()
-
-      return await this.chatMutex.runExclusive(async () => {
-        try {
-          const messages = buildMessages(message, readImages(images), this.systemPrompt)
-          const payload: Record<string, unknown> = {
-            messages: messages,
-            max_tokens: maxTokensForWire(resolveMaxTokens(maxTokens, this.maxTokens)),
-            temperature: opts.temperature ?? this.temperature,
-            ...this.samplingPayload()
-          }
-          // Grammar-constrained output: llama.cpp converts the JSON schema to a
-          // GBNF grammar so the model can ONLY emit valid matching JSON.
-          if (opts.responseFormat) payload.response_format = opts.responseFormat
-          // Turn off the model's reasoning channel for fast, direct output (its
-          // chain-of-thought otherwise eats the token budget and leaves content empty).
-          if (opts.disableThinking) {
-            Object.assign(payload, thinkingPayload(false, this.thinkingDialect))
-          }
-          const body = JSON.stringify(payload)
-
-          console.log(
-            `[LLMService] Starting LLM request (timeout: ${timeoutMs / 1000}s, body: ${body.length} chars)...`
-          )
-
-          const raw = await this.httpPost(body, timeoutMs, opts.signal)
-          const data = JSON.parse(raw) as {
-            usage?: { total_tokens?: number }
-            choices?: { message?: { content?: string } }[]
-          }
-          console.log('[LLMService] LLM request completed')
-          // Best-effort fleet audit: record the local model call if enrolled in a
-          // console. The fleet console is a pro feature — it registers this hook in
-          // its activation; the free build has no hook and this is a no-op.
-          try {
-            const tokens = data.usage?.total_tokens ?? 0
-            const modelName = path.basename(this.modelPath) || 'local-llm'
-            callHook('console.recordModelCall', modelName, tokens, 'ok', false)
-          } catch {
-            /* audit is never load-bearing */
-          }
-          return data.choices?.[0]?.message?.content ?? ''
-        } catch (e: unknown) {
-          console.error('[LLMService] Chat error:', e instanceof Error ? e.message : e)
-          throw e
-        }
-      })
+      const messages = buildMessages(message, readImages(images), this.systemPrompt)
+      return await this.completeMessages(messages, timeoutMs, maxTokens, opts)
     } finally {
       this.finishGeneration()
     }
+  }
+
+  /** Send an exact OpenAI-style message history for model-family policy adapters. */
+  async chatMessages(
+    messages: ChatMessage[],
+    timeoutMs = 300000,
+    maxTokens?: number,
+    opts: {
+      temperature?: number
+      topP?: number
+      disableThinking?: boolean
+      signal?: AbortSignal
+    } = {}
+  ): Promise<string> {
+    await this.beginGeneration()
+    try {
+      const hasImages = messages.some(
+        (message) =>
+          Array.isArray(message.content) &&
+          message.content.some((part) => part.type === 'image_url')
+      )
+      this.assertImageInputSupported(hasImages ? ['message-image'] : [])
+      return await this.completeMessages(messages, timeoutMs, maxTokens, opts)
+    } finally {
+      this.finishGeneration()
+    }
+  }
+
+  private async completeMessages(
+    messages: ChatMessage[],
+    timeoutMs: number,
+    maxTokens: number | undefined,
+    opts: {
+      responseFormat?: unknown
+      temperature?: number
+      topP?: number
+      disableThinking?: boolean
+      signal?: AbortSignal
+    }
+  ): Promise<string> {
+    await this.ensureReady()
+    return this.chatMutex.runExclusive(async () => {
+      try {
+        const payload: Record<string, unknown> = {
+          messages: messages,
+          max_tokens: maxTokensForWire(resolveMaxTokens(maxTokens, this.maxTokens)),
+          temperature: opts.temperature ?? this.temperature,
+          ...this.samplingPayload(),
+          ...(opts.topP === undefined ? {} : { top_p: opts.topP })
+        }
+        // Grammar-constrained output: llama.cpp converts the JSON schema to a
+        // GBNF grammar so the model can ONLY emit valid matching JSON.
+        if (opts.responseFormat) payload.response_format = opts.responseFormat
+        // Turn off the model's reasoning channel for fast, direct output (its
+        // chain-of-thought otherwise eats the token budget and leaves content empty).
+        if (opts.disableThinking) {
+          Object.assign(payload, thinkingPayload(false, this.thinkingDialect))
+        }
+        const body = JSON.stringify(payload)
+
+        console.log(
+          `[LLMService] Starting LLM request (timeout: ${timeoutMs / 1000}s, body: ${body.length} chars)...`
+        )
+
+        const raw = await this.httpPost(body, timeoutMs, opts.signal)
+        const data = JSON.parse(raw) as {
+          usage?: { total_tokens?: number }
+          choices?: { message?: { content?: string } }[]
+        }
+        console.log('[LLMService] LLM request completed')
+        // Best-effort fleet audit: record the local model call if enrolled in a
+        // console. The fleet console is a pro feature — it registers this hook in
+        // its activation; the free build has no hook and this is a no-op.
+        try {
+          const tokens = data.usage?.total_tokens ?? 0
+          const modelName = path.basename(this.modelPath) || 'local-llm'
+          callHook('console.recordModelCall', modelName, tokens, 'ok', false)
+        } catch {
+          /* audit is never load-bearing */
+        }
+        return data.choices?.[0]?.message?.content ?? ''
+      } catch (e: unknown) {
+        console.error('[LLMService] Chat error:', e instanceof Error ? e.message : e)
+        throw e
+      }
+    })
   }
 
   // Streaming variant of chat(): posts with stream:true and invokes `onDelta`

@@ -22,6 +22,10 @@ describe('hotkeyToKeyNames', () => {
     expect(hotkeyToKeyNames('ctrl 1')).toEqual(['LeftControl', 'Num1'])
     expect(hotkeyToKeyNames('down')).toEqual(['Down'])
     expect(hotkeyToKeyNames('escape')).toEqual(['Escape'])
+    expect(hotkeyToKeyNames('f12')).toEqual(['F12'])
+    expect(hotkeyToKeyNames('home')).toEqual(['Home'])
+    expect(hotkeyToKeyNames('pagedown')).toEqual(['PageDown'])
+    expect(hotkeyToKeyNames(';')).toEqual(['Semicolon'])
   })
 
   it('fails closed on an empty or unrecognised combo', () => {

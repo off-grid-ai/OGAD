@@ -155,7 +155,7 @@ function makeElementActuator(actuation: ActuationPort, guard: VisionGuard): Elem
   }
   const clickCenter = async (el: AxElement): Promise<void> => {
     await actuation.moveMouse(el.cx, el.cy)
-    await actuation.click('left', false)
+    await actuation.click('left', 1)
   }
   return {
     async click(el) {

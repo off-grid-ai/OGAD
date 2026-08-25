@@ -11,13 +11,14 @@
  * refuses, when it pauses, when it stops.
  */
 import type { VisionAction, Bounds } from './vision-action'
-import { parseVisionAction } from './vision-action'
 import type { VisionGuard } from './vision-guard'
 import {
   computerUseHistoryTokenBudget,
   tailWithinTokenBudget
 } from '../../shared/computer-use-settings'
 import type { ScreenshotGeometry } from './screenshot-geometry'
+import { uiTarsAdapter } from './model-adapters/ui-tars'
+import type { VisionPolicyDecision, VisionPolicyHistoryStep } from './model-adapters/types'
 
 export interface VisionCaptureMetadata {
   path?: string
@@ -33,6 +34,13 @@ export interface VisionGroundingInput {
   image: string
   history: string[]
   retrievedFacts: string[]
+  policyHistory: readonly VisionPolicyHistoryStep[]
+}
+
+export interface VisionGroundingResult {
+  response: string
+  /** Exact adapter messages with binary image payloads replaced by a marker. */
+  modelInput: string
 }
 
 export interface VisionStepObservation {
@@ -42,9 +50,12 @@ export interface VisionStepObservation {
   retrievedFacts: string[]
   rawResponse?: string
   parsedAction?: VisionAction | null
+  parsedActions?: readonly VisionAction[]
+  failedActionIndex?: number
   mappedAction?: VisionAction
+  mappedActions?: readonly VisionAction[]
   durationMs: number
-  result: 'parse_failed' | 'actuated' | 'terminal' | 'handoff' | 'blocked' | 'error'
+  result: 'parse_failed' | 'actuated' | 'wait' | 'terminal' | 'handoff' | 'blocked' | 'error'
   error?: string
 }
 
@@ -59,7 +70,9 @@ export interface VisionTaskDeps {
   screen: VisionScreen
   guard: VisionGuard
   /** The grounding model: the goal + a screenshot in, one UI-TARS action out. */
-  ground: (input: VisionGroundingInput) => Promise<string>
+  ground: (input: VisionGroundingInput) => Promise<string | VisionGroundingResult>
+  /** Model-family parser. Defaults to the legacy UI-TARS adapter. */
+  parseResponse?: (response: string, bounds: Bounds) => VisionPolicyDecision
   /** Parks until the user finishes a call_user handoff. */
   waitForUser: (why: string) => Promise<void>
   onStep?: (note: string) => void
@@ -69,6 +82,7 @@ export interface VisionTaskDeps {
   checkpointInterval?: number
   retrievedFacts?: string[]
   now?: () => number
+  maxPlanningSteps?: number
 }
 
 export interface VisionTaskResult {
@@ -96,7 +110,10 @@ export async function runVisionTask(goal: string, deps: VisionTaskDeps): Promise
   let modelStep = 0
   const now = deps.now ?? Date.now
   const retrievedFacts = deps.retrievedFacts ?? []
+  const policyHistory: VisionPolicyHistoryStep[] = []
+  const parseResponse = deps.parseResponse ?? uiTarsAdapter.parseResponse
   const checkpointInterval = Math.max(1, Math.floor(deps.checkpointInterval ?? 9))
+  const maxPlanningSteps = Math.max(1, Math.floor(deps.maxPlanningSteps ?? 100))
   const note = (line: string): void => {
     steps.push(line)
     onStep?.(line)
@@ -108,6 +125,11 @@ export async function runVisionTask(goal: string, deps: VisionTaskDeps): Promise
   }
 
   for (;;) {
+    if (modelStep >= maxPlanningSteps) {
+      const summary = `Computer use stopped after ${maxPlanningSteps} planning steps.`
+      note(summary)
+      return { ok: false, summary, steps, handoffs }
+    }
     if (!guard.canActuate()) {
       const { state, reason } = guard.snapshot()
       if (state === 'paused') {
@@ -131,7 +153,7 @@ export async function runVisionTask(goal: string, deps: VisionTaskDeps): Promise
       steps,
       computerUseHistoryTokenBudget(deps.contextTokens ?? DEFAULT_HISTORY_TOKENS)
     )
-    const promptContext = [
+    let promptContext = [
       `Task: ${goal}`,
       retrievedFacts.length > 0 ? `Past task facts:\n${retrievedFacts.join('\n')}` : '',
       history.length > 0 ? `Current task history:\n${history.join('\n')}` : ''
@@ -140,7 +162,15 @@ export async function runVisionTask(goal: string, deps: VisionTaskDeps): Promise
       .join('\n\n')
     try {
       shot = await screen.capture()
-      rawResponse = await ground({ goal, image: shot.image, history, retrievedFacts })
+      const grounding = await ground({
+        goal,
+        image: shot.image,
+        history,
+        retrievedFacts,
+        policyHistory
+      })
+      rawResponse = typeof grounding === 'string' ? grounding : grounding.response
+      if (typeof grounding !== 'string') promptContext = grounding.modelInput
     } catch (error) {
       const message = error instanceof Error ? error.message : 'computer use step failed'
       deps.onObservation?.({
@@ -154,8 +184,9 @@ export async function runVisionTask(goal: string, deps: VisionTaskDeps): Promise
       })
       throw error
     }
-    const action = parseVisionAction(rawResponse, shot.bounds)
-    if (!action) {
+    const decision = parseResponse(rawResponse, shot.bounds)
+    policyHistory.push({ response: rawResponse, actionText: decision.actionText })
+    if (decision.kind === 'invalid') {
       deps.onObservation?.({
         step: modelStep,
         promptContext,
@@ -166,62 +197,77 @@ export async function runVisionTask(goal: string, deps: VisionTaskDeps): Promise
         durationMs: now() - startedAt,
         result: 'parse_failed'
       })
-      note('model action did not parse; re-observing')
+      note(`${decision.error}; re-observing`)
       checkpoint()
       continue
     }
-    if (action.type === 'finished') {
+    if (decision.kind === 'wait') {
+      await new Promise((resolve) => setTimeout(resolve, decision.durationMs))
       deps.onObservation?.({
         step: modelStep,
         promptContext,
         screenshot: shot,
         retrievedFacts,
         rawResponse,
-        parsedAction: action,
+        durationMs: now() - startedAt,
+        result: 'wait'
+      })
+      note(`wait ${decision.durationMs}ms`)
+      checkpoint()
+      continue
+    }
+    if (decision.kind === 'done' || decision.kind === 'failed') {
+      deps.onObservation?.({
+        step: modelStep,
+        promptContext,
+        screenshot: shot,
+        retrievedFacts,
+        rawResponse,
         durationMs: now() - startedAt,
         result: 'terminal'
       })
-      note(`done: ${action.content}`)
+      note(`${decision.kind === 'done' ? 'done' : 'failed'}: ${decision.summary}`)
       checkpoint()
-      return { ok: true, summary: action.content || 'done', steps, handoffs }
+      return {
+        ok: decision.kind === 'done',
+        summary: decision.summary,
+        steps,
+        handoffs
+      }
     }
-    if (action.type === 'call_user') {
+    if (decision.kind === 'handoff') {
       deps.onObservation?.({
         step: modelStep,
         promptContext,
         screenshot: shot,
         retrievedFacts,
         rawResponse,
-        parsedAction: action,
         durationMs: now() - startedAt,
         result: 'handoff'
       })
       handoffs += 1
-      note(`handoff: ${action.content}`)
+      note(`handoff: ${decision.reason}`)
       checkpoint()
-      await waitForUser(action.content)
+      await waitForUser(decision.reason)
       note('resumed by the user')
       continue
     }
-    // A real actuation: re-check the guard right before dispatch (the user may
-    // have hit Esc since canActuate above), then count the step.
-    if (!guard.canActuate()) {
-      deps.onObservation?.({
-        step: modelStep,
-        promptContext,
-        screenshot: shot,
-        retrievedFacts,
-        rawResponse,
-        parsedAction: action,
-        durationMs: now() - startedAt,
-        result: 'blocked'
-      })
-      checkpoint()
-      continue
-    }
-    let actuation: VisionActuationResult | void
+    const mappedActions: VisionAction[] = []
+    let actionIndex = 0
+    let blocked = false
     try {
-      actuation = await screen.actuate(action)
+      for (const [index, action] of decision.actions.entries()) {
+        actionIndex = index
+        // Re-check before EVERY action in a multi-action model response.
+        if (!guard.canActuate()) {
+          blocked = true
+          break
+        }
+        const actuation = await screen.actuate(action)
+        guard.countStep()
+        note(describeAction(action))
+        if (actuation?.mappedAction) mappedActions.push(actuation.mappedAction)
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'computer use action failed'
       deps.onObservation?.({
@@ -230,7 +276,11 @@ export async function runVisionTask(goal: string, deps: VisionTaskDeps): Promise
         screenshot: shot,
         retrievedFacts,
         rawResponse,
-        parsedAction: action,
+        parsedAction: decision.actions[actionIndex],
+        parsedActions: decision.actions,
+        failedActionIndex: actionIndex,
+        ...(mappedActions[0] ? { mappedAction: mappedActions[0] } : {}),
+        ...(mappedActions.length > 0 ? { mappedActions } : {}),
         durationMs: now() - startedAt,
         result: 'error',
         error: message
@@ -238,18 +288,18 @@ export async function runVisionTask(goal: string, deps: VisionTaskDeps): Promise
       checkpoint()
       throw error
     }
-    guard.countStep()
-    note(describeAction(action))
     deps.onObservation?.({
       step: modelStep,
       promptContext,
       screenshot: shot,
       retrievedFacts,
       rawResponse,
-      parsedAction: action,
-      ...(actuation?.mappedAction ? { mappedAction: actuation.mappedAction } : {}),
+      parsedAction: decision.actions[0],
+      parsedActions: decision.actions,
+      ...(mappedActions[0] ? { mappedAction: mappedActions[0] } : {}),
+      ...(mappedActions.length > 0 ? { mappedActions } : {}),
       durationMs: now() - startedAt,
-      result: 'actuated'
+      result: blocked ? 'blocked' : 'actuated'
     })
     checkpoint()
   }
@@ -261,17 +311,29 @@ function describeAction(action: VisionAction): string {
     case 'click':
     case 'double_click':
     case 'right_click':
+    case 'middle_click':
+    case 'triple_click':
       return `${action.type} at (${action.point.x}, ${action.point.y})`
     case 'drag':
       return `drag (${action.from.x}, ${action.from.y}) -> (${action.to.x}, ${action.to.y})`
+    case 'drag_to':
+      return `drag to (${action.to.x}, ${action.to.y})`
+    case 'mouse_move':
+      return `move to (${action.point.x}, ${action.point.y})`
     case 'type':
       return `type ${JSON.stringify(action.content.slice(0, 40))}`
     case 'hotkey':
       return `hotkey ${action.keys}`
+    case 'press':
+    case 'key_down':
+    case 'key_up':
+      return `${action.type} ${action.keys.join(' ')}`
     case 'scroll':
       return `scroll ${action.direction} at (${action.point.x}, ${action.point.y})`
+    case 'scroll_by':
+      return `scroll ${action.axis} by ${action.amount}`
     case 'wait':
-      return 'wait'
+      return `wait ${action.durationMs ?? 0}ms`
     default:
       return action.type
   }

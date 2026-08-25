@@ -23,11 +23,19 @@ export type VisionAction =
   | { type: 'click'; point: Point }
   | { type: 'double_click'; point: Point }
   | { type: 'right_click'; point: Point }
+  | { type: 'middle_click'; point: Point }
+  | { type: 'triple_click'; point: Point }
   | { type: 'drag'; from: Point; to: Point }
+  | { type: 'drag_to'; to: Point }
+  | { type: 'mouse_move'; point: Point }
   | { type: 'type'; content: string }
   | { type: 'hotkey'; keys: string }
+  | { type: 'press'; keys: readonly string[] }
+  | { type: 'key_down'; keys: readonly string[] }
+  | { type: 'key_up'; keys: readonly string[] }
   | { type: 'scroll'; point: Point; direction: 'up' | 'down' | 'left' | 'right' }
-  | { type: 'wait' }
+  | { type: 'scroll_by'; axis: 'vertical' | 'horizontal'; amount: number }
+  | { type: 'wait'; durationMs?: number }
   | { type: 'finished'; content: string }
   | { type: 'call_user'; content: string }
 

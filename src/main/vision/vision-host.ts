@@ -25,7 +25,6 @@ import { llm } from '../llm'
 import type { VisionAction, Bounds } from './vision-action'
 import { runVisionTask, type VisionScreen, type VisionTaskResult } from './vision-agent'
 import { VisionGuard } from './vision-guard'
-import { buildVisionPrompt } from './vision-prompt'
 import { emitVisionState, emitVisionStep, registerVisionSession } from './vision-controller'
 import { showSupervisorWindow, hideSupervisorWindow } from './supervisor-window'
 import { visionModelNotice } from './vision-model-notice'
@@ -44,8 +43,16 @@ import {
   SCREENSHOT_RESIZE_QUALITY,
   type ComputerUseSettings
 } from '../../shared/computer-use-settings'
-import { planAspectPreservingResize, type ScreenshotGeometry } from './screenshot-geometry'
+import {
+  alignPixelSize,
+  planAspectPreservingResize,
+  type ScreenshotGeometry
+} from './screenshot-geometry'
 import { recentVisualFacts } from './visual-context'
+import { resolveVisionModelAdapter } from './model-adapters'
+import type { VisionModelAdapter, VisionPolicyRequest } from './model-adapters/types'
+import { serializeVisionPolicyMessages } from './model-adapters/model-input'
+import { imageMime } from '../llm/chat-payload'
 
 export type { ActuationPort }
 
@@ -61,13 +68,30 @@ export function visionActuationAvailable(): boolean {
 // actuate), so reusing one path is race-free and keeps the disk clean.
 const CAPTURE_FILE = path.join(os.tmpdir(), 'offgrid-vision-capture.png')
 
+async function runPolicyRequest(request: VisionPolicyRequest): Promise<string> {
+  let lastError: unknown
+  for (let attempt = 1; attempt <= request.maxAttempts; attempt += 1) {
+    try {
+      return await llm.chatMessages(request.messages, request.timeoutMs, request.maxTokens, {
+        temperature: request.temperature,
+        topP: request.topP,
+        disableThinking: request.disableThinking
+      })
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('Computer-use model request failed.')
+}
+
 function makeScreen(input: {
   actuation: ActuationPort
   taskId: string
   goal: string
   settings: ComputerUseSettings
+  screenshotResizeFactor?: number
 }): VisionScreen {
-  const { actuation, taskId, goal, settings } = input
+  const { actuation, taskId, goal, settings, screenshotResizeFactor } = input
   // The display the last screenshot was taken from. Its scaleFactor + origin move
   // the grounder's DIP coordinates into the actuation space (physical px on
   // Windows). capture() always runs before actuate() in the vision loop.
@@ -106,10 +130,13 @@ function makeScreen(input: {
           sources.find((s) => String(s.display_id) === String(display.id)) ?? sources[0]
         if (source && !source.thumbnail.isEmpty()) {
           const sourceSize = source.thumbnail.getSize()
-          const target = planAspectPreservingResize(
+          const plannedTarget = planAspectPreservingResize(
             sourceSize,
             SCREENSHOT_MAX_EDGE[settings.screenshotSize]
           ).encodedSize
+          const target = screenshotResizeFactor
+            ? alignPixelSize(plannedTarget, screenshotResizeFactor)
+            : plannedTarget
           const thumbnail =
             target.width === sourceSize.width && target.height === sourceSize.height
               ? source.thumbnail
@@ -175,19 +202,33 @@ async function dispatch(actuation: ActuationPort, action: VisionAction): Promise
   switch (action.type) {
     case 'click':
       await actuation.moveMouse(action.point.x, action.point.y)
-      await actuation.click('left', false)
+      await actuation.click('left', 1)
       return
     case 'double_click':
       await actuation.moveMouse(action.point.x, action.point.y)
-      await actuation.click('left', true)
+      await actuation.click('left', 2)
       return
     case 'right_click':
       await actuation.moveMouse(action.point.x, action.point.y)
-      await actuation.click('right', false)
+      await actuation.click('right', 1)
+      return
+    case 'middle_click':
+      await actuation.moveMouse(action.point.x, action.point.y)
+      await actuation.click('middle', 1)
+      return
+    case 'triple_click':
+      await actuation.moveMouse(action.point.x, action.point.y)
+      await actuation.click('left', 3)
       return
     case 'drag':
       await actuation.moveMouse(action.from.x, action.from.y)
       await actuation.dragTo(action.to.x, action.to.y)
+      return
+    case 'drag_to':
+      await actuation.dragTo(action.to.x, action.to.y)
+      return
+    case 'mouse_move':
+      await actuation.moveMouse(action.point.x, action.point.y)
       return
     case 'type':
       await actuation.typeText(action.content)
@@ -195,9 +236,21 @@ async function dispatch(actuation: ActuationPort, action: VisionAction): Promise
     case 'hotkey':
       await actuation.tapKeys(action.keys)
       return
+    case 'press':
+      await actuation.pressKeys(action.keys)
+      return
+    case 'key_down':
+      await actuation.keyDown(action.keys)
+      return
+    case 'key_up':
+      await actuation.keyUp(action.keys)
+      return
     case 'scroll':
       await actuation.moveMouse(action.point.x, action.point.y)
       await actuation.scroll(action.direction)
+      return
+    case 'scroll_by':
+      await actuation.scrollBy(action.axis, action.amount)
       return
     default:
       return
@@ -239,6 +292,26 @@ class VisionHost {
     }
     const guard = new VisionGuard()
     const settings = getComputerUseSettings()
+    const activeArtifacts = llm.activeModelArtifacts()
+    if (!activeArtifacts) {
+      return {
+        ok: false,
+        summary: 'Load a computer-use model before you start this task.',
+        steps: [],
+        handoffs: 0
+      }
+    }
+    let modelAdapter: VisionModelAdapter
+    try {
+      modelAdapter = resolveVisionModelAdapter(activeArtifacts)
+    } catch (error) {
+      return {
+        ok: false,
+        summary: error instanceof Error ? error.message : 'The computer-use model is not ready.',
+        steps: [],
+        handoffs: 0
+      }
+    }
     const contextTokens = resolveComputerUseContextTokens(
       settings.context,
       llm.effectiveContextSize()
@@ -256,12 +329,28 @@ class VisionHost {
     showSupervisorWindow()
     try {
       const result = await runVisionTask(goal, {
-        screen: makeScreen({ actuation, taskId, goal, settings }),
+        screen: makeScreen({
+          actuation,
+          taskId,
+          goal,
+          settings,
+          screenshotResizeFactor: modelAdapter.screenshotResizeFactor
+        }),
         guard,
-        ground: ({ goal: currentGoal, image, history, retrievedFacts: facts }) =>
-          llm.chat(buildVisionPrompt(currentGoal, history, facts), [image], 60_000, 200, {
-            disableThinking: true
-          }),
+        ground: ({ goal: currentGoal, image, history, retrievedFacts: facts, policyHistory }) => {
+          const request = modelAdapter.buildRequest({
+            goal: currentGoal,
+            currentScreenshotDataUrl: `data:${imageMime(image)};base64,${fs.readFileSync(image).toString('base64')}`,
+            history: policyHistory,
+            recentSteps: history,
+            olderVisualFacts: facts
+          })
+          return runPolicyRequest(request).then((response) => ({
+            response,
+            modelInput: serializeVisionPolicyMessages(request.messages)
+          }))
+        },
+        parseResponse: modelAdapter.parseResponse,
         waitForUser: async (why) => {
           await coordinator.waitForTakeover(taskId, why)
         },
@@ -291,11 +380,22 @@ class VisionHost {
               : {}),
             retrievedFacts: observation.retrievedFacts,
             rawResponse: observation.rawResponse,
-            mappedAction: observation.mappedAction
-              ? JSON.stringify(observation.mappedAction)
-              : observation.parsedAction
-                ? JSON.stringify(observation.parsedAction)
-                : undefined,
+            mappedAction:
+              observation.failedActionIndex !== undefined
+                ? JSON.stringify({
+                    completed: observation.mappedActions ?? [],
+                    failedActionIndex: observation.failedActionIndex,
+                    failedAction: observation.parsedAction
+                  })
+                : observation.mappedActions?.length
+                  ? JSON.stringify(observation.mappedActions)
+                  : observation.mappedAction
+                    ? JSON.stringify(observation.mappedAction)
+                    : observation.parsedActions?.length
+                      ? JSON.stringify(observation.parsedActions)
+                      : observation.parsedAction
+                        ? JSON.stringify(observation.parsedAction)
+                        : undefined,
             execution: {
               status: observation.result === 'error' ? 'failed' : 'complete',
               durationMs: observation.durationMs,

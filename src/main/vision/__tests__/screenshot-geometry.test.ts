@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  alignPixelSize,
   imagePixelToDisplayPoint,
   planAspectPreservingResize,
   withCaptureOffset
@@ -21,6 +22,13 @@ describe('screenshot geometry', () => {
     expect(planAspectPreservingResize({ width: 800, height: 600 }, 1440)).toMatchObject({
       encodedSize: { width: 800, height: 600 },
       scale: 1
+    })
+  })
+
+  it('aligns UI-Mate frames to its official factor of 32', () => {
+    expect(alignPixelSize({ width: 955, height: 537 }, 32)).toEqual({
+      width: 960,
+      height: 544
     })
   })
 

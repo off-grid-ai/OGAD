@@ -35,7 +35,33 @@ const NAMED: Record<string, string> = {
   left: 'Left',
   right: 'Right',
   delete: 'Delete',
-  backspace: 'Backspace'
+  backspace: 'Backspace',
+  insert: 'Insert',
+  home: 'Home',
+  end: 'End',
+  pageup: 'PageUp',
+  pgup: 'PageUp',
+  pagedown: 'PageDown',
+  pgdown: 'PageDown',
+  printscreen: 'Print',
+  print: 'Print',
+  pause: 'Pause',
+  capslock: 'CapsLock',
+  numlock: 'NumLock',
+  scrolllock: 'ScrollLock',
+  menu: 'Menu',
+  fn: 'Fn',
+  '`': 'Grave',
+  '-': 'Minus',
+  '=': 'Equal',
+  '[': 'LeftBracket',
+  ']': 'RightBracket',
+  '\\': 'Backslash',
+  ';': 'Semicolon',
+  "'": 'Quote',
+  ',': 'Comma',
+  '.': 'Period',
+  '/': 'Slash'
 }
 
 /** One token -> a Key enum member name, or null if unrecognised. */
@@ -53,7 +79,15 @@ function tokenToKeyName(token: string): string | null {
   if (/^[0-9]$/.test(t)) {
     return `Num${t}`
   }
+  if (/^f(?:[1-9]|1[0-9]|2[0-4])$/.test(t)) {
+    return t.toUpperCase()
+  }
   return null
+}
+
+/** True when every UI-Mate key token has a real nut.js Key mapping. */
+export function visionKeysSupported(keys: readonly string[]): boolean {
+  return keys.length > 0 && keys.every((key) => hotkeyToKeyNames(key)?.length === 1)
 }
 
 /**

@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import fixtures from '../ui-mate/__fixtures__/official-responses.json'
+import { createHash } from 'node:crypto'
+import fixtures from '../model-adapters/ui-mate/__fixtures__/official-responses.json'
+import messageFixture from '../model-adapters/ui-mate/__fixtures__/official-messages.json'
+import { serializeVisionPolicyMessages } from '../model-adapters/model-input'
 import {
   buildUIMateMessages,
   compactUIMateResponse,
   parseUIMateResponse,
   UI_MATE_GENERATION_CONFIG,
   UI_MATE_MAX_HISTORY_STEPS,
+  UI_MATE_SYSTEM_PROMPT,
   UI_MATE_TOOL_SCHEMA
-} from '../ui-mate/policy'
+} from '../model-adapters/ui-mate/policy'
 
 describe('UI-Mate official response fixtures', () => {
   for (const fixture of fixtures.cases) {
@@ -63,6 +67,19 @@ describe('UI-Mate policy', () => {
     expect(parseUIMateResponse(response, { width: 100, height: 100 }).control).toBe('FAIL')
   })
 
+  it.each([
+    'This requires credentials.',
+    'This requires a language pack extension.',
+    'That feature is unavailable.'
+  ])('uses the official infeasibility fallback for %s', (action) => {
+    expect(
+      parseUIMateResponse(`<think>Blocked.</think><action>${action}</action>`, {
+        width: 100,
+        height: 100
+      }).control
+    ).toBe('FAIL')
+  })
+
   it('keeps exactly one current screenshot and compact text history', () => {
     const messages = buildUIMateMessages({
       instruction: 'Open the site.',
@@ -72,6 +89,10 @@ describe('UI-Mate policy', () => {
           actionText: 'Click the browser.',
           response:
             '<think>Old private chain.</think><action>Click the browser.</action><tool_call>call</tool_call>'
+        },
+        {
+          actionText: 'Type the address.',
+          response: '<action>Type the address.</action><tool_call>call</tool_call>'
         }
       ],
       includeThinkingInHistory: false
@@ -84,6 +105,28 @@ describe('UI-Mate policy', () => {
     ])
     expect(JSON.stringify(messages)).not.toContain('Old private chain')
     expect(JSON.stringify(messages)).toContain('This screenshot has been collapsed.')
+  })
+
+  it('matches the official build_messages alternation with one current screenshot', () => {
+    const messages = buildUIMateMessages(messageFixture.input)
+    const expected = messageFixture.expectedMessages.map((message) =>
+      message.role === 'system'
+        ? { ...message, content: [{ type: 'text', text: UI_MATE_SYSTEM_PROMPT }] }
+        : message
+    )
+    expect(messages).toEqual(expected)
+    expect(UI_MATE_SYSTEM_PROMPT).toContain('<IMPORTANT_NOTES>')
+    expect(createHash('sha256').update(UI_MATE_SYSTEM_PROMPT).digest('hex')).toBe(
+      '9612fe88a4b06775a3e18b2645eafb7497e3083ca303035b2382ce75403780bb'
+    )
+  })
+
+  it('persists exact messages without screenshot bytes', () => {
+    const messages = buildUIMateMessages(messageFixture.input)
+    const persisted = serializeVisionPolicyMessages(messages)
+    expect(persisted).toContain('[current screenshot]')
+    expect(persisted).not.toContain('data:image/png;base64,current')
+    expect(persisted).toContain('Open Firefox.')
   })
 
   it('uses the official response history boundary', () => {

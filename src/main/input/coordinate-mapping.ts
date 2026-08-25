@@ -82,6 +82,9 @@ export function mapActionToScreen(
     case 'click':
     case 'double_click':
     case 'right_click':
+    case 'middle_click':
+    case 'triple_click':
+    case 'mouse_move':
     case 'scroll': {
       const point = map(action.point)
       return point ? { ...action, point } : null
@@ -90,6 +93,10 @@ export function mapActionToScreen(
       const from = map(action.from)
       const to = map(action.to)
       return from && to ? { ...action, from, to } : null
+    }
+    case 'drag_to': {
+      const to = map(action.to)
+      return to ? { ...action, to } : null
     }
     default:
       return action

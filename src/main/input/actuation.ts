@@ -12,19 +12,24 @@ import { hotkeyToKeyNames } from '../vision/vision-keys'
 
 export interface ActuationPort {
   moveMouse(x: number, y: number): Promise<void>
-  click(button: 'left' | 'right', double: boolean): Promise<void>
+  click(button: 'left' | 'right' | 'middle', count: 1 | 2 | 3): Promise<void>
   dragTo(x: number, y: number): Promise<void>
   typeText(text: string): Promise<void>
   tapKeys(keys: string): Promise<void>
+  pressKeys(keys: readonly string[]): Promise<void>
+  keyDown(keys: readonly string[]): Promise<void>
+  keyUp(keys: readonly string[]): Promise<void>
   scroll(direction: 'up' | 'down' | 'left' | 'right'): Promise<void>
+  scrollBy(axis: 'vertical' | 'horizontal', amount: number): Promise<void>
 }
 
 /** The slice of the nut.js API the adapter uses. */
-interface NutApi {
+export interface NutApi {
   mouse: {
     setPosition(p: unknown): Promise<unknown>
     leftClick(): Promise<unknown>
     rightClick(): Promise<unknown>
+    click(btn: number): Promise<unknown>
     doubleClick(btn: number): Promise<unknown>
     drag(path: unknown[]): Promise<unknown>
     scrollUp(n: number): Promise<unknown>
@@ -56,17 +61,30 @@ export function loadActuation(): ActuationPort | null {
   } catch {
     return null
   }
+  return adaptNutActuation(nut)
+}
+
+/** Adapt the real nut.js primitives behind a stable, testable input contract. */
+export function adaptNutActuation(nut: NutApi): ActuationPort {
   const { mouse, keyboard, Point, Button, Key } = nut
   return {
     async moveMouse(x, y) {
       await mouse.setPosition(new Point(x, y))
     },
-    async click(button, double) {
-      if (double) {
-        await mouse.doubleClick(Button.LEFT)
+    async click(button, count) {
+      const nativeButton =
+        button === 'right' ? Button.RIGHT : button === 'middle' ? Button.MIDDLE : Button.LEFT
+      if (count === 2) {
+        await mouse.doubleClick(nativeButton)
         return
       }
-      await (button === 'right' ? mouse.rightClick() : mouse.leftClick())
+      if (count === 3) {
+        await mouse.click(nativeButton)
+        await mouse.click(nativeButton)
+        await mouse.click(nativeButton)
+        return
+      }
+      await mouse.click(nativeButton)
     },
     async dragTo(x, y) {
       await mouse.drag([new Point(x, y)])
@@ -86,6 +104,24 @@ export function loadActuation(): ActuationPort | null {
       await keyboard.pressKey(...codes)
       await keyboard.releaseKey(...codes)
     },
+    async pressKeys(keys) {
+      for (const key of keys) {
+        const names = hotkeyToKeyNames(key)
+        if (!names || names.length !== 1) throw new Error(`Unsupported key: ${key}`)
+        const code = Key[names[0]!]
+        if (typeof code !== 'number') throw new Error(`Unsupported key: ${key}`)
+        await keyboard.pressKey(code)
+        await keyboard.releaseKey(code)
+      }
+    },
+    async keyDown(keys) {
+      const codes = keyCodes(keys, Key)
+      await keyboard.pressKey(...codes)
+    },
+    async keyUp(keys) {
+      const codes = keyCodes([...keys].reverse(), Key)
+      await keyboard.releaseKey(...codes)
+    },
     async scroll(direction) {
       const steps = 3
       if (direction === 'up') {
@@ -97,8 +133,27 @@ export function loadActuation(): ActuationPort | null {
       } else {
         await mouse.scrollRight(steps)
       }
+    },
+    async scrollBy(axis, amount) {
+      const magnitude = Math.abs(amount)
+      if (magnitude === 0) return
+      if (axis === 'horizontal') {
+        await (amount > 0 ? mouse.scrollRight(magnitude) : mouse.scrollLeft(magnitude))
+      } else {
+        await (amount > 0 ? mouse.scrollUp(magnitude) : mouse.scrollDown(magnitude))
+      }
     }
   }
+}
+
+function keyCodes(keys: readonly string[], keyMap: Record<string, number>): number[] {
+  return keys.map((key) => {
+    const names = hotkeyToKeyNames(key)
+    if (!names || names.length !== 1) throw new Error(`Unsupported key: ${key}`)
+    const code = keyMap[names[0]!]
+    if (typeof code !== 'number') throw new Error(`Unsupported key: ${key}`)
+    return code
+  })
 }
 
 export function actuationAvailable(): boolean {
