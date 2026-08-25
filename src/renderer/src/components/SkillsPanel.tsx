@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { SidePanel } from './SidePanel'
 
 // Right-side panel to view, create, edit, and delete Skills — reusable
@@ -82,10 +82,12 @@ function buildTrigger(
 
 export function SkillsPanel({
   onClose,
-  onChanged
+  onChanged,
+  initialSkillName
 }: {
   onClose: () => void
   onChanged?: () => void
+  initialSkillName?: string
 }): React.JSX.Element {
   // Skill automation (triggers) is Pro; the free build shows manual packs only.
   const isProBuild = !!window.api.isPro
@@ -101,7 +103,7 @@ export function SkillsPanel({
   }
   useEffect(refresh, [])
 
-  const openSkill = async (name: string): Promise<void> => {
+  const openSkill = useCallback(async (name: string): Promise<void> => {
     const full = await window.api.getSkill(name)
     if (full)
       setDraft({
@@ -111,7 +113,11 @@ export function SkillsPanel({
         originalName: full.name,
         ...flattenTrigger(full)
       })
-  }
+  }, [])
+
+  useEffect(() => {
+    if (initialSkillName) void openSkill(initialSkillName)
+  }, [initialSkillName, openSkill])
 
   const save = async (): Promise<void> => {
     if (!draft || !draft.name.trim()) return

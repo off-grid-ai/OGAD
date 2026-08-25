@@ -41,6 +41,8 @@ export type PresetRequirement = 'pro' | 'phone-paired' | 'capture-history'
 
 export interface DemoPreset {
   id: string
+  /** Installed/bundled slash skill that owns this preset, when the run starts with one. */
+  skillName?: string
   /**
    * Card label, e.g. "Find a flight". A short name for the capability, NEVER the raw
    * prompt - the surface shows the label + blurb only; the prompt stays behind the tap.
@@ -145,6 +147,7 @@ export const PRESET_SECTIONS: readonly PresetSection[] = [
     presets: [
       {
         id: 'proposal-deck',
+        skillName: 'proposal-deck',
         icon: Presentation,
         title: 'Build a proposal deck',
         prompt:
@@ -207,6 +210,12 @@ export const PRESET_SECTIONS: readonly PresetSection[] = [
 export const ALL_PRESETS: readonly DemoPreset[] = PRESET_SECTIONS.flatMap(
   (section) => section.presets
 )
+
+/** Resolve a slash skill to its curated run without duplicating skill-to-preset routing in Chat. */
+export function presetForSkillName(name: string): DemoPreset | undefined {
+  const normalized = name.toLowerCase()
+  return ALL_PRESETS.find((preset) => preset.skillName?.toLowerCase() === normalized)
+}
 
 /** The reliable-by-default set to lead with (no setup, no data, no pairing needed). */
 export const HEADLINE_PRESETS: readonly DemoPreset[] = ALL_PRESETS.filter(

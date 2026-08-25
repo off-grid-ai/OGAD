@@ -49,15 +49,20 @@ interface ExploreSectionProps {
   /** Hide the built-in intro when the host renders its own header (the Explore screen). */
   showIntro?: boolean
   className?: string
+  /** Open a deep-linked preset directly in its setup state. */
+  initialPreset?: DemoPreset
 }
 
 export function ExploreSection({
   onRun,
   requestUrl,
   showIntro = true,
-  className = ''
+  className = '',
+  initialPreset
 }: ExploreSectionProps): React.ReactElement {
-  const [setupPreset, setSetupPreset] = useState<DemoPreset | null>(null)
+  const [setupPreset, setSetupPreset] = useState<DemoPreset | null>(() =>
+    initialPreset?.setup ? initialPreset : null
+  )
 
   if (setupPreset) {
     return (

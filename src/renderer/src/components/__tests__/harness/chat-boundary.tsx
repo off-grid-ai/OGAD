@@ -193,7 +193,7 @@ export class ChatBoundary {
     saveSetting: vi.fn(async () => {}),
     listProjects: vi.fn(async () => this.projects.map((item) => ({ ...item }))),
     styleThumbs: vi.fn(async () => ({})),
-    listSkills: vi.fn(async () => []),
+    listSkills: vi.fn(async (): Promise<{ name: string; description: string }[]> => []),
     ragChat: vi.fn(
       async (
         query: string,

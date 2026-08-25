@@ -1,4 +1,5 @@
 import { ExploreSection } from './ExploreSection'
+import { useEffect } from 'react'
 import { ALL_PRESETS, PRESET_SECTIONS, REQUEST_FORM_URL, type DemoPreset } from './presetCatalog'
 
 /**
@@ -11,10 +12,19 @@ import { ALL_PRESETS, PRESET_SECTIONS, REQUEST_FORM_URL, type DemoPreset } from 
  * the page header and hides the section's compact intro.
  */
 export function ExploreScreen({
-  onRunPreset
+  onRunPreset,
+  initialPresetId,
+  onTargetConsumed
 }: {
   onRunPreset: (preset: DemoPreset) => void
+  initialPresetId?: string
+  onTargetConsumed?: () => void
 }): React.ReactElement {
+  const initialPreset = ALL_PRESETS.find((preset) => preset.id === initialPresetId)
+  useEffect(() => {
+    if (initialPresetId) onTargetConsumed?.()
+  }, [initialPresetId, onTargetConsumed])
+
   return (
     <div className="w-full font-mono">
       <div className="mb-5 flex items-end justify-between gap-4 border-b border-neutral-900 pb-4">
@@ -28,7 +38,12 @@ export function ExploreScreen({
           {ALL_PRESETS.length} runs / {PRESET_SECTIONS.length} capabilities
         </span>
       </div>
-      <ExploreSection showIntro={false} onRun={onRunPreset} requestUrl={REQUEST_FORM_URL} />
+      <ExploreSection
+        showIntro={false}
+        onRun={onRunPreset}
+        requestUrl={REQUEST_FORM_URL}
+        initialPreset={initialPreset}
+      />
     </div>
   )
 }

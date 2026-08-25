@@ -50,7 +50,7 @@ import { VoiceBubble } from './VoiceBubble'
 import { stopAllVoicePlayback } from '@renderer/lib/voice-playback-bus'
 import { ChatVoiceComposer, VoiceModeControl } from './ChatVoiceComposer'
 import { ExploreSection } from './explore/ExploreSection'
-import { REQUEST_FORM_URL } from './explore/presetCatalog'
+import { REQUEST_FORM_URL, presetForSkillName, type DemoPreset } from './explore/presetCatalog'
 import { useChatVoiceTurns, type ChatVoicePhase } from './use-chat-voice-turns'
 import { SkillsPanel } from './SkillsPanel'
 import { ModelPicker } from './ModelPicker'
@@ -388,6 +388,8 @@ interface MemoryChatProps {
   readonly onOpenProject?: (projectId: string) => void
   /** Open the Replay screen seeked to a capture's moment (epoch ms). */
   readonly onSeekReplay?: (ts: number) => void
+  /** Open the catalog-owned setup/run surface for a skill mention. */
+  readonly onOpenSkillPreset?: (preset: DemoPreset) => void
   /** Open a specific conversation, or start a new one scoped to a project. */
   readonly openTarget?: Readonly<{
     conversationId?: string
@@ -1016,6 +1018,65 @@ function makeCiteComponents(
   }
 }
 
+const SKILL_MENTION_LINK_PREFIX = '#offgrid-skill-'
+
+function renderUserSkillMention(content: string, installedSkillNames: readonly string[]): string {
+  const match = /^\/([a-z0-9][a-z0-9_-]*)(?=\s|$)/i.exec(content)
+  if (!match) return content
+  const name = match[1]!
+  const isInstalled = installedSkillNames.some(
+    (installedName) => installedName.toLowerCase() === name.toLowerCase()
+  )
+  if (!isInstalled && !presetForSkillName(name)) return content
+  return `[/${name}](${SKILL_MENTION_LINK_PREFIX}${encodeURIComponent(name)})${content.slice(match[0].length)}`
+}
+
+function makeUserMessageComponents(navigation: ContextNavigation): Components {
+  return {
+    ...markdownComponents,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    a: ({ href, children }: any) => {
+      const encodedName =
+        typeof href === 'string' && href.startsWith(SKILL_MENTION_LINK_PREFIX)
+          ? href.slice(SKILL_MENTION_LINK_PREFIX.length)
+          : null
+      if (!encodedName) {
+        const DefaultAnchor = markdownComponents.a
+        return DefaultAnchor ? (
+          <DefaultAnchor href={href}>{children}</DefaultAnchor>
+        ) : (
+          <>{children}</>
+        )
+      }
+
+      const name = /^[a-z0-9][a-z0-9_-]*$/i.test(encodedName) ? encodedName : null
+      if (!name) return <>{children}</>
+      const preset = presetForSkillName(name)
+      const isInstalled = navigation.installedSkillNames?.some(
+        (installedName) => installedName.toLowerCase() === name.toLowerCase()
+      )
+      if (!preset && !isInstalled) return <>{children}</>
+
+      return (
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          className="mx-0.5 inline-flex h-6 border-green-500/40 bg-green-500/10 px-1.5 align-baseline font-mono font-normal text-green-500 shadow-none hover:bg-green-500/20 hover:text-green-400"
+          aria-label={`Open /${name} skill`}
+          title={`Open /${name}`}
+          onClick={() => {
+            if (preset && navigation.onOpenSkillPreset) navigation.onOpenSkillPreset(preset)
+            else navigation.onOpenInstalledSkill?.(name)
+          }}
+        >
+          {children}
+        </Button>
+      )
+    }
+  }
+}
+
 function MessageMarkdown({
   message,
   navigation
@@ -1026,10 +1087,17 @@ function MessageMarkdown({
   const components =
     message.role === 'assistant'
       ? makeCiteComponents(message.context?.unified, navigation)
-      : markdownComponents
+      : makeUserMessageComponents(navigation)
+  const content =
+    message.role === 'user'
+      ? renderUserSkillMention(
+          renderedMessageContent(message),
+          navigation.installedSkillNames ?? []
+        )
+      : renderedMessageContent(message)
   return (
     <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>
-      {renderedMessageContent(message)}
+      {content}
     </ReactMarkdown>
   )
 }
@@ -1433,6 +1501,9 @@ type ContextNavigation = Readonly<{
   onNavigateToEntity?: (entityId: number) => void
   onOpenProject?: (projectId: string) => void
   onSeekReplay?: (timestamp: number) => void
+  installedSkillNames?: readonly string[]
+  onOpenInstalledSkill?: (name: string) => void
+  onOpenSkillPreset?: (preset: DemoPreset) => void
 }>
 
 type UnifiedContextItem = NonNullable<RagContext['unified']>[number]
@@ -2200,6 +2271,7 @@ export function MemoryChat({
   onNavigateToEntity,
   onOpenProject,
   onSeekReplay,
+  onOpenSkillPreset,
   openTarget,
   onTargetConsumed
 }: MemoryChatProps) {
@@ -2564,6 +2636,7 @@ export function MemoryChat({
   }, [viewer, lightbox])
   const [canvasArtifact, setCanvasArtifact] = useState<Artifact | null>(null)
   const [skillsOpen, setSkillsOpen] = useState(false)
+  const [selectedSkillName, setSelectedSkillName] = useState<string | undefined>()
   const [showGallery, setShowGallery] = useState(false)
   // The canvas / text viewer / gallery belong to a specific message, so they must
   // not bleed across chats — close them whenever the active conversation changes
@@ -4075,8 +4148,8 @@ export function MemoryChat({
   useEffect(() => {
     window.api
       .listSkills()
-      .then((s) => setSkills(s))
-      .catch(() => {})
+      .then((listedSkills) => setSkills(Array.isArray(listedSkills) ? listedSkills : []))
+      .catch(() => setSkills([]))
   }, [])
 
   // Live streaming: route token/reasoning events to the in-flight assistant
@@ -4380,7 +4453,14 @@ export function MemoryChat({
     onNavigateToMeeting,
     onNavigateToEntity,
     onOpenProject,
-    onSeekReplay
+    onSeekReplay,
+    installedSkillNames: skills.map((skill) => skill.name),
+    onOpenSkillPreset,
+    onOpenInstalledSkill: (name) => {
+      closePanels()
+      setSelectedSkillName(name)
+      setSkillsOpen(true)
+    }
   }
   const messageActions: MessageRowActions = {
     copy: (text, key) => void copyText(text, key),
@@ -5921,13 +6001,17 @@ export function MemoryChat({
         {/* Skills — view / create / edit reusable instruction packs */}
         {skillsOpen && (
           <SkillsPanel
-            key="skills"
-            onClose={() => setSkillsOpen(false)}
+            key={`skills-${selectedSkillName ?? 'list'}`}
+            initialSkillName={selectedSkillName}
+            onClose={() => {
+              setSkillsOpen(false)
+              setSelectedSkillName(undefined)
+            }}
             onChanged={() =>
               window.api
                 .listSkills()
-                .then((s) => setSkills(s))
-                .catch(() => {})
+                .then((listedSkills) => setSkills(Array.isArray(listedSkills) ? listedSkills : []))
+                .catch(() => setSkills([]))
             }
           />
         )}

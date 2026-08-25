@@ -762,6 +762,13 @@ function AppContent() {
     setViewMode('memory-chat')
   }, [])
 
+  const [explorePresetId, setExplorePresetId] = useState<string | undefined>()
+  const handleOpenSkillPreset = useCallback((preset: DemoPreset) => {
+    setExplorePresetId(preset.id)
+    setViewMode('explore')
+  }, [])
+  const handleExploreTargetConsumed = useCallback(() => setExplorePresetId(undefined), [])
+
   // Global keyboard shortcuts for back/forward navigation (Cmd+[ and Cmd+])
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1160,7 +1167,11 @@ function AppContent() {
                   className="p-6 h-full overflow-y-auto"
                 >
                   {viewMode === 'explore' ? (
-                    <ExploreScreen onRunPreset={handleRunPreset} />
+                    <ExploreScreen
+                      onRunPreset={handleRunPreset}
+                      initialPresetId={explorePresetId}
+                      onTargetConsumed={handleExploreTargetConsumed}
+                    />
                   ) : viewMode === 'memory-chat' ? (
                     <MemoryChat
                       onNavigateToMemory={handleSelectMemory}
@@ -1177,6 +1188,7 @@ function AppContent() {
                         setReplayTarget(ts || Date.now())
                         setViewMode('replay')
                       }}
+                      onOpenSkillPreset={handleOpenSkillPreset}
                       openTarget={chatTarget}
                       onTargetConsumed={() => setChatTarget(null)}
                     />
