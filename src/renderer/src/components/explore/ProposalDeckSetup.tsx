@@ -117,7 +117,7 @@ export function ProposalDeckSetup({
         <FolderField
           id="proposal-style-folder"
           label="Style example (optional)"
-          help="ABSLI is an example. Choose any deck folder, or leave this blank."
+          help="Choose a prior proposal folder with narrative, skeleton, copy, or deck files."
           value={styleFolder}
           onChange={setStyleFolder}
         />
