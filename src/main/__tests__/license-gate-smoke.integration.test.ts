@@ -33,7 +33,10 @@ function runRunner(
   return spawnSync(process.execPath, args, {
     cwd: REPO_ROOT,
     encoding: 'utf8',
-    env: { ...process.env, ...extraEnvironment },
+    // A runner living inside Electron (VS Code tasks, agent sandboxes) exports
+    // ELECTRON_RUN_AS_NODE=1; inherited, it turns the Electron under test into
+    // plain Node and the launch dies before the gate can be observed.
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined, ...extraEnvironment },
     timeout: REAL_APP_TIMEOUT_MS
   })
 }

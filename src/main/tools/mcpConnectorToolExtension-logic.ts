@@ -1,3 +1,5 @@
+import type { ActionRisk } from '../actions/approval'
+
 export const MCP_TOOL_PREFIX = 'mcp__'
 
 export interface ConnectorToolDefinition {
@@ -17,6 +19,14 @@ export interface ConnectorToolSchema {
 
 export function isActionTool(tool: string): boolean {
   return !/^(list|get|search|read|fetch|whoami|describe)[_-]/i.test(tool)
+}
+
+/** Classify a connector tool for the shared approval seam. MCP gives us only the
+ *  tool name, so read-verb tools are reads and everything else is a mutate — we
+ *  cannot tell an irreversible connector call from a recoverable one by name, so
+ *  we gate conservatively as mutate rather than guessing 'irreversible'. */
+export function riskOf(tool: string): ActionRisk {
+  return isActionTool(tool) ? 'mutate' : 'read'
 }
 
 export function buildConnectorToolSchema(

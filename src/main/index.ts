@@ -19,9 +19,12 @@ import icon from '../../resources/icon.png?asset'
 import { setupIPC } from './ipc' // IMPORT FROM IPC ONLY
 import { setupRagIPC } from './rag-ipc'
 import { setupMcpIpc } from './mcp-ipc'
+import { registerToolExtension } from './tools'
+import { registerNativeActionTools } from './tools/nativeActionToolExtension'
 import { setupDesktopBackupIPC } from './backup/ipc'
 import { preloadPath } from './preload-path'
 import { rendererHtmlPath } from './renderer-path'
+import { setMainWindow } from './main-window'
 import { startModelServer, stopModelServer } from './model-server'
 import { startMediaServer, stopMediaServer, mediaUrlFor } from './media-server'
 import { capturePathFromUrl, serveCaptureFile } from './ogcapture-serve'
@@ -174,6 +177,10 @@ function createWindow(): void {
       devTools: is.dev // no inspector in the packaged/production build (tamper-proofing)
     }
   })
+
+  // Record THE main window so callers that lay a view over it (the browser
+  // rail) attach to the right window, not a stray overlay from getAllWindows().
+  setMainWindow(mainWindow)
 
   // Maximized before the first paint, not on ready-to-show: the window is still hidden here, so it
   // opens at full size instead of appearing at the constructed size and jumping. It also means anything
@@ -400,6 +407,15 @@ app.whenReady().then(async () => {
     setupIPC()
     setupRagIPC()
     setupMcpIpc() // basic MCP connectors (management + chat tool extension)
+    registerNativeActionTools(registerToolExtension) // the assistant's tools (macOS full set; Windows Outlook subset)
+    const { registerActionsIpc } = await import('./actions/actions-ipc')
+    registerActionsIpc() // Approval UX v2: inline gate cards + outcome/undo feed
+    const { registerBrowserIpc } = await import('./browser/browser-ipc')
+    registerBrowserIpc() // the browser rail's watched-pane takeover handoff
+    const { registerBrowserViewIpc } = await import('./browser/browser-host')
+    registerBrowserViewIpc() // dock the live browser view to the pane's region
+    const { registerVisionIpc } = await import('./vision/vision-controller')
+    registerVisionIpc() // the vision rail's supervisor Stop/Pause/Resume
     setupDesktopBackupIPC()
     // one OpenAI-compatible local gateway (LLM + STT); auto-picks a free port. Async, so handle a
     // rejection on the promise (a try/catch around a fire-and-forget async call can't catch it).
@@ -483,6 +499,14 @@ app.on('before-quit', (event) => {
   }
   event.preventDefault()
   void (async () => {
+    // Stop the agent browser first so a playing video's audio dies immediately,
+    // not whenever the process finally exits.
+    try {
+      const { disposeBrowserHost } = await import('./browser/browser-host')
+      disposeBrowserHost()
+    } catch {
+      /* best-effort — never block quit */
+    }
     try {
       const { llm } = await import('./llm')
       await llm.unload()

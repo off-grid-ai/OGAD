@@ -120,6 +120,27 @@ interface RendererAPIOverrides {
   // Host OS (process.platform), bridged at preload time. Used by lib/device.ts
   // to name the machine ('Mac' on darwin, else 'device').
   platform?: string
+  /** Approval UX v2: the inline gate card + outcome/undo feed. */
+  actions?: {
+    resolveGate: (actionId: string, decision: unknown) => Promise<boolean>
+    undo: (record: unknown) => Promise<{ ok: boolean; detail?: string }>
+    onGatePending: (cb: (request: unknown) => void) => () => void
+    onOutcome: (cb: (outcome: unknown) => void) => () => void
+  }
+  browser?: {
+    resolveTakeover: (taskId: string, outcome: 'resumed' | 'cancelled') => Promise<boolean>
+    setRegion: (rect: { x: number; y: number; width: number; height: number } | null) => void
+    onStep: (cb: (step: unknown) => void) => () => void
+    onTakeover: (cb: (request: unknown) => void) => () => void
+    onTaskState: (cb: (state: unknown) => void) => () => void
+  }
+  vision?: {
+    control: (command: 'stop' | 'pause' | 'resume') => Promise<boolean>
+    getCurrent: () => Promise<{ state: unknown; steps: string[] } | null>
+    onStep: (cb: (step: unknown) => void) => () => void
+    onTaskState: (cb: (state: unknown) => void) => () => void
+    onNotice: (cb: (notice: unknown) => void) => () => void
+  }
   proInvoke?: (channel: string, ...args: unknown[]) => Promise<unknown>
   proOn?: (channel: string, cb: (...a: unknown[]) => void) => () => void
   proOff?: (channel: string) => void

@@ -36,6 +36,7 @@ import { getActiveModal } from './active-models'
 import { embeddings } from './embeddings'
 import { docsText, docsHtml, openApiSpec } from './api-docs'
 import { handleMcpRequest } from './mcp-server'
+import { logActionTokenForDev } from './mcp-auth'
 import { llm, type LlmSettings } from './llm'
 import { GATEWAY_HOST, GATEWAY_BIND_HOST, GATEWAY_PORT } from '../shared/ports'
 import { pickFreePort } from './free-port'
@@ -1253,6 +1254,7 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
         console.log(
           `[model-server] multimodal gateway at http://${GATEWAY_HOST}:${boundGatewayPort}/v1`
         )
+        logActionTokenForDev(`http://${GATEWAY_HOST}:${boundGatewayPort}/mcp`)
         resolve()
       }
       listening.once('error', onError)

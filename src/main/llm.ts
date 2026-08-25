@@ -31,6 +31,7 @@ import { buildMessages, thinkingPayload } from './llm/chat-payload'
 import { readImages } from './llm/read-images'
 import { detectThinkingDialect, type ThinkingDialect } from './llm/thinking-dialect'
 import { isValidGgufFile } from './models/gguf'
+import { isGrounderModel } from '@offgrid/models'
 import { readGgufContextLength } from './models/gguf-metadata'
 import { pickFreePort, isPortFree } from './free-port'
 import { postCompletionOnce } from './llm/http-post'
@@ -336,8 +337,16 @@ export class LLMService {
       flashAttn: this.flashAttn,
       kvCacheType: this.kvCacheType,
       threads: this.threads,
-      batchSize: this.batchSize
+      batchSize: this.batchSize,
+      imageMinTokens: this.imageMinTokensForModel()
     })
+  }
+
+  /** Grounding models (UI-TARS / Qwen-VL) need a floor on image tokens for
+   *  accurate clicks; the weight filename carries enough for the grounder
+   *  heuristic. Only meaningful when a vision projector is loaded. */
+  private imageMinTokensForModel(): number | undefined {
+    return this.mmProjPath && isGrounderModel(path.basename(this.modelPath)) ? 1024 : undefined
   }
 
   /** Persist settings to disk. Writes the public settings PLUS the internal

@@ -16,6 +16,11 @@ import { readImages } from './llm/read-images'
 import { stripTags, htmlToText, decodeDdgHref } from './tools-parsers'
 import { evaluateArithmetic } from './calculator'
 import type { SearchKind, SearchResult } from '../shared/search-contract'
+import { selectToolExtensions } from './tools/extension-select'
+import { planTask } from './tools/planner'
+import { makePlanExecutor } from './tools/plan-executor'
+import { shouldPlan, backfillGoals, preferNativeApp } from './tools/planner-logic'
+import { resolveNativeApp } from './accessibility/ax-host'
 
 // Per-tool enable/disable, persisted as a list of disabled tool names.
 function disabledSet(): Set<string> {
@@ -376,7 +381,7 @@ function asToolResult(r: string | ToolResult): ToolResult {
  *  else the matching built-in. Any throw becomes an error-text result (a single
  *  tool failing never aborts the turn). No name-based special-casing — each tool
  *  owns its own text + side channels (sources / imageRequest) via its ToolResult. */
-async function runTool(
+export async function runTool(
   name: string,
   args: Record<string, unknown>,
   ctx: ToolContext,
@@ -400,10 +405,13 @@ async function runTool(
 // Mirrors mobile/src/services/tools/extensions.ts.
 export interface ToolExtension {
   id: string
-  /** A Pro built-in is available with Tools. Connector extensions remain behind
-   *  the separate Connectors control. */
-  scope?: 'tools' | 'connectors'
-  /** Pro built-ins shown beside core built-ins in Tools settings. Connector
+  /** What kind of capability this is. 'tool' = the assistant's own on-device
+   *  abilities (native actions) - included in every agentic turn. 'connector'
+   *  = external service accounts (MCP) - included only when the user turns
+   *  Connectors on. Defaults to 'connector' (fail closed for anything that
+   *  might touch an external service). */
+  category?: 'tool' | 'connector'
+  /** On-device tools shown beside core built-ins in Tools settings. Connector
    *  schemas have their own settings surface and omit this. */
   settings?: readonly { name: string; description: string }[]
   /** OpenAI tool schemas to add when extensions are enabled. Built once per turn;
@@ -440,6 +448,51 @@ export type UnifiedSource = SearchResult
  * callbacks (e.g. the pro skills-engine caller) and it just buffers - the final answer is
  * always the return value either way. Returns the final answer + the calls made.
  */
+/** Compose the closing reply after the orchestrator ran a plan: seed the model
+ *  with the plan's tool calls + results and stream one natural summary (the same
+ *  shape as the reactive loop's forced-final-answer). */
+async function composePlanAnswer(
+  sys: string,
+  query: string,
+  history: { role: string; content: string }[],
+  res: { toolCalls: ToolCall[]; stopped?: string },
+  signal: AbortSignal | undefined,
+  onDelta: (text: string, kind: 'content' | 'reasoning') => void
+): Promise<string> {
+  if (signal?.aborted) {
+    return ''
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const messages: any[] = [
+    { role: 'system', content: sys },
+    ...history.slice(-10).map((m) => ({ role: m.role, content: m.content })),
+    { role: 'user', content: query }
+  ]
+  res.toolCalls.forEach((c, i) => {
+    const id = `plan-${String(i)}`
+    messages.push({
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        { id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.args) } }
+      ]
+    })
+    messages.push({ role: 'tool', tool_call_id: id, content: c.result })
+  })
+  if (res.stopped) {
+    messages.push({
+      role: 'user',
+      content: `Note: the task stopped early - ${res.stopped}. Tell the user plainly what happened.`
+    })
+  }
+  const final = await llm.streamChat(messages, onDelta, {
+    temperature: 0.3,
+    thinking: false,
+    signal
+  })
+  return final.content.trim() || res.stopped || 'Done.'
+}
+
 export async function toolChat(
   query: string,
   history: { role: string; content: string }[] = [],
@@ -457,6 +510,8 @@ export async function toolChat(
     onDelta?: (text: string, kind: 'content' | 'reasoning') => void
     onStep?: (call: { name: string; args: Record<string, unknown> }) => void
     onToolResult?: (call: { name: string; result: string }) => void
+    /** The orchestrator's plan for this turn, emitted once before its steps run. */
+    onPlan?: (steps: { tool: string; why: string }[]) => void
   } = {}
 ): Promise<{
   answer: string
@@ -486,9 +541,7 @@ export async function toolChat(
   // alongside the built-ins. Schemas are built once per turn; each extension
   // caches whatever per-turn state it needs for execute(). Free build registers
   // no extensions, so this is just the built-ins.
-  const exts = getToolExtensions().filter(
-    (extension) => extension.scope === 'tools' || opts.connectors === true
-  )
+  const exts = selectToolExtensions(getToolExtensions(), { connectors: !!opts.connectors })
   const extSchemas: unknown[] = []
   const hints: string[] = []
   const disabled = disabledSet()
@@ -559,6 +612,62 @@ export async function toolChat(
   const sys =
     'You are Off Grid, a private on-device assistant. Use the provided tools when they help answer precisely. Keep answers concise.' +
     (hints.length ? ' ' + hints.join(' ') : '')
+
+  // --- Orchestrator: plan-and-execute for action requests --------------------
+  // Before the reactive loop, run ONE focused planning pass. It routes to the
+  // right tool and fills its args - the judgment a small model fumbles inline
+  // (open_url vs web_task, the missing url, sequencing contacts -> message). An
+  // empty/absent plan (a question, chit-chat, a request no tool fits) falls
+  // straight through to the reactive loop below, so normal chat is untouched.
+  if (shouldPlan(query)) {
+    try {
+      const catalog = tools
+        .map((t) => {
+          const fn = (t as { function?: { name?: unknown; description?: unknown } }).function
+          return { name: String(fn?.name ?? ''), description: String(fn?.description ?? '') }
+        })
+        .filter((c) => c.name.length > 0)
+      // Backfill an empty web_task/computer_task goal with the user's request,
+      // then apply rail-per-surface: a task naming a RUNNING native app drives
+      // the app (computer_task), not its website (web_task/open_url).
+      const nativeApp = await resolveNativeApp(query)
+      const plan = preferNativeApp(
+        backfillGoals(await planTask(query, history, catalog), query),
+        query,
+        nativeApp
+      )
+      console.log(
+        `[orchestrator] goal="${query}" plan=[${plan.steps.map((s) => s.tool).join(' -> ') || 'none'}]`
+      )
+      if (plan.steps.length > 0) {
+        opts.onPlan?.(plan.steps.map((s) => ({ tool: s.tool, why: s.why })))
+        const execute = makePlanExecutor((name, args) =>
+          runTool(
+            name,
+            args,
+            { conversationId: opts.conversationId, projectId: opts.projectId },
+            exts
+          )
+        )
+        const res = await execute(plan, { onStep: opts.onStep, onToolResult: opts.onToolResult })
+        const answer = await composePlanAnswer(sys, query, history, res, opts.signal, onDelta)
+        // The plan executor yields at most one image request; widen it to the plural
+        // contract (main's orchestrator return) and keep the singular compat alias.
+        return {
+          answer,
+          toolCalls: res.toolCalls,
+          unified: res.unified,
+          imageRequests: res.imageRequest ? [res.imageRequest] : [],
+          ...(res.imageRequest ? { imageRequest: res.imageRequest } : {})
+        }
+      }
+    } catch (e) {
+      console.warn(
+        '[orchestrator] planning failed; falling back to the reactive loop:',
+        (e as Error).message
+      )
+    }
+  }
 
   // Attached images ride on the current user turn so the vision model can read
   // them even in tools/connectors mode (otherwise they were silently dropped).
