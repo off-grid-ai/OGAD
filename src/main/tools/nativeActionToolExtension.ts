@@ -186,8 +186,12 @@ export class NativeActionToolExtension implements ToolExtension {
     if (!proposed.accepted) {
       return `Error: the action was refused: ${proposed.reason}`
     }
+    const taskReference =
+      actionType === 'web_task' || actionType === 'computer_task'
+        ? ` Task reference: ${proposed.id}.`
+        : ''
     if (proposed.deduped) {
-      return `That exact action is already queued — not queuing a duplicate. Tell the user it is already in flight.`
+      return `That exact action is already queued — not queuing a duplicate. Tell the user it is already in flight.${taskReference}`
     }
     // A computer_task is now queued: warn the chat at queue time only if the
     // loaded model can't ground AND the task will fall to vision (an AX-drivable
@@ -205,28 +209,28 @@ export class NativeActionToolExtension implements ToolExtension {
       actions.whenParked(proposed.id).then(() => ({ kind: 'parked' as const }))
     ])
     if (raced.kind === 'parked') {
-      return `Queued for the user's approval — ${spec.title(args)} will run only after they approve it. Do not assume it has happened; tell the user it's pending approval.`
+      return `Queued for the user's approval — ${spec.title(args)} will run only after they approve it. Do not assume it has happened; tell the user it's pending approval.${taskReference}`
     }
     if (!raced.outcome) {
       // Approved and still running past the wait window - NOT queued. Say so, or
       // the model wrongly tells the user to approve something already in flight.
-      return `"${spec.title(args)}" is running now and will finish shortly. It does NOT need approval - do not tell the user to approve it.`
+      return `"${spec.title(args)}" is running now and will finish shortly. It does NOT need approval - do not tell the user to approve it.${taskReference}`
     }
     const outcome = raced.outcome
     switch (outcome.outcome) {
       case 'done':
-        return spec.formatResult(undefined)
+        return `${spec.formatResult(undefined)}${taskReference}`
       case 'rejected':
-        return `The user declined — ${spec.title(args)} was not run.`
+        return `The user declined — ${spec.title(args)} was not run.${taskReference}`
       case 'needs_help': {
         const lastAttempt = outcome.record.attemptLog.at(-1)
         const detail = lastAttempt?.detail ? ` (${lastAttempt.detail})` : ''
-        return `It ran but could not be confirmed${detail}. Tell the user it needs their attention.`
+        return `It ran but could not be confirmed${detail}. Tell the user it needs their attention.${taskReference}`
       }
       case 'edited':
-        return `The user is editing this action before approving it. Tell them it is pending.`
+        return `The user is editing this action before approving it. Tell them it is pending.${taskReference}`
       case 'poisoned':
-        return `Error: ${outcome.error}`
+        return `Error: ${outcome.error}${taskReference}`
     }
   }
 }

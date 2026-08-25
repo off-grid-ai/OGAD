@@ -6,6 +6,8 @@ import {
   CollapsibleContent,
   CollapsibleTrigger
 } from '@renderer/components/ui/collapsible'
+import { useTaskSessions } from '@renderer/lib/task-session-store'
+import { ComputerUseStepDetails } from './tasks/ComputerUseStepDetails'
 
 type DisplayTool =
   | Pick<ProjectedSyncedTool, 'name' | 'arguments' | 'result' | 'status' | 'durationMs' | 'error'>
@@ -80,6 +82,16 @@ function normalizedToolKey(name: string): string {
     .toLowerCase()
 }
 
+const TASK_REFERENCE = /(?:^|\s)Task reference:\s*([A-Za-z0-9_-]+)\.?/i
+
+export function taskReferenceFromResult(result: string | undefined): string | undefined {
+  return result?.match(TASK_REFERENCE)?.[1]
+}
+
+function visibleToolResult(result: string | undefined): string {
+  return (result ?? '').replace(TASK_REFERENCE, '').trim()
+}
+
 function titleFromIdentifier(name: string): string {
   const clean = normalizedToolKey(name)
     .replace(/[:._-]+/g, ' ')
@@ -101,7 +113,7 @@ export function workStepLabel(tool: DisplayTool): string {
 }
 
 function workStatus(tool: DisplayTool): WorkStatus {
-  const result = tool.result ?? ''
+  const result = visibleToolResult(tool.result)
   if ('error' in tool && tool.error?.trim()) return 'failed'
   if (/^\s*(error|failed)\s*:/i.test(result)) return 'failed'
   if (tool.status === 'failed') return 'failed'
@@ -134,7 +146,7 @@ function shortResult(tool: DisplayTool): string {
   if (key === 'read_url') return 'Read the selected web page.'
   if (key.startsWith('search_')) return 'Found matching items.'
   if (status === 'failed') return 'This step failed. Open it for details.'
-  const value = ('error' in tool && tool.error?.trim()) || tool.result?.trim() || ''
+  const value = ('error' in tool && tool.error?.trim()) || visibleToolResult(tool.result)
   if (!value) return 'Step finished.'
   const firstLine = value
     .split(/\r?\n/, 1)[0]!
@@ -170,6 +182,7 @@ function overallStatus(tools: readonly DisplayTool[]): WorkStatus {
 
 /** One persisted execution timeline for both live previews and durable assistant turns. */
 export function ChatToolRows({ tools }: Readonly<ChatToolRowsProps>): React.JSX.Element | null {
+  const { tasks } = useTaskSessions()
   const visible = tools ?? []
   if (visible.length === 0) return null
   const status = overallStatus(visible)
@@ -194,10 +207,13 @@ export function ChatToolRows({ tools }: Readonly<ChatToolRowsProps>): React.JSX.
         <ol className="ml-1 border-l border-neutral-800">
           {visible.map((tool, index) => {
             const stepStatus = workStatus(tool)
-            const result = tool.result?.trim() ?? ''
+            const result = visibleToolResult(tool.result)
             const error = 'error' in tool ? tool.error?.trim() : undefined
             const details = error || result
             const durationMs = 'durationMs' in tool ? tool.durationMs : undefined
+            const taskId = taskReferenceFromResult(tool.result)
+            const linkedTask = taskId ? tasks.find((task) => task.taskId === taskId) : undefined
+            const hasComputerDetails = Boolean(linkedTask?.stepDetails?.length)
             return (
               <li key={`${tool.name}:${index}`} className="relative pb-2 pl-4 last:pb-0">
                 <span className="absolute -left-1.5 top-1 flex h-3 w-3 items-center justify-center bg-neutral-950">
@@ -205,7 +221,7 @@ export function ChatToolRows({ tools }: Readonly<ChatToolRowsProps>): React.JSX.
                 </span>
                 <Collapsible>
                   <CollapsibleTrigger
-                    disabled={!details}
+                    disabled={!details && !hasComputerDetails}
                     className="group flex w-full items-start gap-2 text-left disabled:cursor-default"
                     aria-label={`${workStepLabel(tool)}, ${stepStatus}`}
                   >
@@ -219,16 +235,17 @@ export function ChatToolRows({ tools }: Readonly<ChatToolRowsProps>): React.JSX.
                       {durationMs !== undefined ? `${Math.round(durationMs)} ms · ` : ''}
                       {stepStatus}
                     </span>
-                    {details ? (
+                    {details || hasComputerDetails ? (
                       <CaretDown
                         className="mt-0.5 h-3 w-3 shrink-0 transition-transform group-data-[state=open]:rotate-180"
                         aria-hidden="true"
                       />
                     ) : null}
                   </CollapsibleTrigger>
-                  {details ? (
+                  {details || hasComputerDetails ? (
                     <CollapsibleContent className="mt-1 border-l-2 border-neutral-800 pl-3 text-xs leading-relaxed text-neutral-500">
-                      <ChatMarkdown content={details} />
+                      {details ? <ChatMarkdown content={details} /> : null}
+                      <ComputerUseStepDetails details={linkedTask?.stepDetails} />
                     </CollapsibleContent>
                   ) : null}
                 </Collapsible>

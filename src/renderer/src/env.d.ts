@@ -142,6 +142,7 @@ interface RendererAPIOverrides {
         lastUrl?: string
         lastTitle?: string
         screenshotPath?: string
+        stepDetails?: import('./lib/task-session-store').ComputerUseStepDetail[]
       }>
     >
     onChanged: (cb: (task: unknown) => void) => () => void
@@ -149,10 +150,37 @@ interface RendererAPIOverrides {
   browser?: {
     resolveTakeover: (taskId: string, outcome: 'resumed' | 'cancelled') => Promise<boolean>
     setRegion: (rect: { x: number; y: number; width: number; height: number } | null) => void
-    control: (action: 'back' | 'forward' | 'reload' | 'stop') => Promise<boolean>
-    navigate: (address: string) => Promise<{ ok: boolean; detail?: string }>
+    newTab: () => Promise<{ sessionId: string }>
+    getSessions: () => Promise<{
+      activeSessionId: string | null
+      sessions: Array<{
+        sessionId: string
+        historyId?: string
+        kind: 'manual' | 'task'
+        taskId?: string
+        status: 'open' | 'running' | 'done' | 'failed'
+        url: string
+        title: string
+        canGoBack: boolean
+        canGoForward: boolean
+        isLoading: boolean
+      }>
+    }>
+    activateSession: (sessionId: string) => Promise<boolean>
+    closeSession: (sessionId: string) => Promise<boolean>
+    control: (
+      action: 'back' | 'forward' | 'reload' | 'stop',
+      sessionId?: string
+    ) => Promise<boolean>
+    navigate: (address: string, sessionId?: string) => Promise<{ ok: boolean; detail?: string }>
     reopen: (taskId?: string) => Promise<boolean>
+    listManualHistory: () => Promise<
+      Array<{ historyId: string; title: string; url: string; updatedAt: number }>
+    >
+    reopenManual: (historyId: string) => Promise<{ sessionId: string } | null>
+    onSessionsState: (cb: (state: unknown) => void) => () => void
     onNavigationState: (cb: (state: unknown) => void) => () => void
+    onPointer: (cb: (event: unknown) => void) => () => void
     onStep: (cb: (step: unknown) => void) => () => void
     onTakeover: (cb: (request: unknown) => void) => () => void
     onTaskState: (cb: (state: unknown) => void) => () => void

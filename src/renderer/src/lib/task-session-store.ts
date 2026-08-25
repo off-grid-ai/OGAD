@@ -3,6 +3,29 @@ import type { TaskPanelKind } from './task-side-panel'
 
 export type TaskSessionStatus = 'running' | 'paused' | 'done' | 'failed' | 'stopped'
 
+export interface ComputerUseStepDetail {
+  stepId: string
+  at: number
+  modelInput?: string
+  screenshot?: {
+    path?: string
+    originalWidth: number
+    originalHeight: number
+    inferenceWidth: number
+    inferenceHeight: number
+  }
+  retrievedFacts?: string[]
+  tokenUsage?: { input?: number; output?: number; context?: number }
+  rawResponse?: string
+  mappedAction?: string
+  execution?: {
+    status: 'complete' | 'failed'
+    durationMs?: number
+    result?: string
+    error?: string
+  }
+}
+
 export interface TaskSession {
   taskId: string
   kind: TaskPanelKind
@@ -16,6 +39,7 @@ export interface TaskSession {
   lastUrl?: string
   lastTitle?: string
   screenshotPath?: string
+  stepDetails?: ComputerUseStepDetail[]
 }
 
 interface TaskSessionState {
@@ -53,7 +77,7 @@ function upsert(task: TaskSession): void {
 function start(): void {
   if (started) return
   started = true
-  const api = window.api.tasks
+  const api = window.api?.tasks
   if (!api) {
     emit({ ...state, ready: true })
     return

@@ -1,10 +1,28 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it } from 'vitest'
-import { ChatToolRows } from '../ChatToolRows'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ChatToolRows, taskReferenceFromResult } from '../ChatToolRows'
+import { resetTaskSessionStoreForTests } from '@renderer/lib/task-session-store'
 
-afterEach(cleanup)
+beforeEach(() => {
+  resetTaskSessionStoreForTests()
+  Object.defineProperty(window, 'api', {
+    configurable: true,
+    writable: true,
+    value: {
+      tasks: {
+        list: vi.fn(async () => []),
+        onChanged: vi.fn(() => () => undefined)
+      }
+    }
+  })
+})
+
+afterEach(() => {
+  cleanup()
+  resetTaskSessionStoreForTests()
+})
 
 describe('<ChatToolRows/> work timeline', () => {
   it('uses one customer-facing timeline for every ordered execution step', async () => {
@@ -62,5 +80,61 @@ describe('<ChatToolRows/> work timeline', () => {
 
     await user.click(screen.getByRole('button', { name: 'Web Use, failed' }))
     expect(await screen.findByText('Error: browser timed out')).toBeTruthy()
+  })
+
+  it('shows persisted redacted Computer Use evidence inside the assistant turn', async () => {
+    const user = userEvent.setup()
+    window.api.tasks!.list = vi.fn(async () => [
+      {
+        taskId: 'act_1',
+        kind: 'computer_use' as const,
+        title: 'Prepare slides',
+        status: 'done' as const,
+        steps: ['Opened Keynote'],
+        startedAt: 1,
+        finishedAt: 2,
+        updatedAt: 2,
+        stepDetails: [
+          {
+            stepId: 'open-keynote',
+            at: 1,
+            modelInput: 'Open Keynote',
+            screenshot: {
+              originalWidth: 3024,
+              originalHeight: 1964,
+              inferenceWidth: 1512,
+              inferenceHeight: 982
+            },
+            mappedAction: 'Click Keynote',
+            execution: {
+              status: 'complete' as const,
+              durationMs: 24,
+              result: 'Opened Keynote'
+            }
+          }
+        ]
+      }
+    ])
+
+    render(
+      <ChatToolRows
+        tools={[
+          {
+            name: 'computer_task',
+            status: 'completed',
+            result: 'Done. Task reference: act_1.'
+          }
+        ]}
+      />
+    )
+
+    expect(taskReferenceFromResult('Done. Task reference: act_1.')).toBe('act_1')
+    await user.click(screen.getByRole('button', { name: /Work done/ }))
+    await user.click(screen.getByRole('button', { name: 'Computer Use, complete' }))
+    expect(await screen.findByText('Computer Use details')).toBeTruthy()
+    expect(screen.queryByText(/Task reference/)).toBeNull()
+    await user.click(screen.getByRole('button', { name: /Click Keynote/ }))
+    expect(await screen.findByText('Open Keynote')).toBeTruthy()
+    expect(screen.getByText('Opened Keynote')).toBeTruthy()
   })
 })

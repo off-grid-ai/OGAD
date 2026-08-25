@@ -4,6 +4,10 @@ import path from 'path'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { getDB } from '../database'
 import { TaskHistoryStore, type TaskRunSnapshot, type TaskRunUpdate } from './task-history-store'
+import {
+  sanitizeComputerUseStepDetail,
+  type ComputerUseStepDetail
+} from './task-step-details'
 
 let store: TaskHistoryStore | null = null
 
@@ -68,6 +72,21 @@ export function appendTaskStep(
   pruneSnapshots()
   broadcast(snapshot)
   return snapshot
+}
+
+/** Persist one redacted, bounded planning-step record without changing orchestration state. */
+export function appendComputerUseStepDetail(
+  taskId: string,
+  title: string,
+  detail: ComputerUseStepDetail
+): TaskRunSnapshot {
+  const previous = taskHistoryStore().get(taskId)
+  return recordTaskRun({
+    taskId,
+    kind: 'computer_use',
+    title,
+    stepDetails: [...(previous?.stepDetails ?? []), sanitizeComputerUseStepDetail(detail)]
+  })
 }
 
 export function registerTaskHistoryIpc(): void {

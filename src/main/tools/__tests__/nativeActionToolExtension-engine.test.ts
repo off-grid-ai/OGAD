@@ -257,7 +257,8 @@ describe('the engine path', () => {
       risk: 'mutate'
     })
     expect(run).not.toHaveBeenCalled()
-    expect(reply).toBe('Done.')
+    expect(reply).toContain('Done.')
+    expect(reply).toContain('Task reference: act_1.')
   })
 
   it('web_task uses the engine EVEN WHEN a pro queue is listening - no connector runs a web task', async () => {
@@ -297,7 +298,8 @@ describe('the engine path', () => {
       risk: 'mutate'
     })
     expect(run).not.toHaveBeenCalled()
-    expect(reply).toBe('Done.')
+    expect(reply).toContain('Done.')
+    expect(reply).toContain('Task reference: act_1.')
   })
 
   it('queuing a computer_task announces the grounder nudge - but a web_task or a semantic tool does not', async () => {

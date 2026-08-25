@@ -7,6 +7,11 @@
  * reads the same rows after a restart, so live tabs and history cannot drift
  * into separate persistence systems.
  */
+import {
+  boundComputerUseStepDetails,
+  type ComputerUseStepDetail
+} from './task-step-details'
+
 export type TaskRunKind = 'web_use' | 'computer_use'
 export type LegacyTaskRunKind = TaskRunKind | 'web_task' | 'computer_task'
 export type TaskRunStatus = 'running' | 'paused' | 'done' | 'failed' | 'stopped'
@@ -24,6 +29,7 @@ export interface TaskRunSnapshot {
   lastUrl?: string
   lastTitle?: string
   screenshotPath?: string
+  stepDetails?: ComputerUseStepDetail[]
 }
 
 export interface TaskRunUpdate {
@@ -37,6 +43,7 @@ export interface TaskRunUpdate {
   lastUrl?: string
   lastTitle?: string
   screenshotPath?: string
+  stepDetails?: ComputerUseStepDetail[]
 }
 
 interface StatementLike {
@@ -63,6 +70,7 @@ interface TaskRunRow {
   last_url: string | null
   last_title: string | null
   screenshot_path: string | null
+  step_details_json?: string | null
 }
 
 export const TASK_HISTORY_LIMIT = 50
@@ -95,7 +103,19 @@ function rowToSnapshot(row: TaskRunRow): TaskRunSnapshot {
     updatedAt: row.updated_at,
     ...(row.last_url ? { lastUrl: row.last_url } : {}),
     ...(row.last_title ? { lastTitle: row.last_title } : {}),
-    ...(row.screenshot_path ? { screenshotPath: row.screenshot_path } : {})
+    ...(row.screenshot_path ? { screenshotPath: row.screenshot_path } : {}),
+    ...(row.step_details_json
+      ? { stepDetails: boundComputerUseStepDetails(safeStepDetails(row.step_details_json)) }
+      : {})
+  }
+}
+
+function safeStepDetails(raw: string): ComputerUseStepDetail[] {
+  try {
+    const value = JSON.parse(raw) as unknown
+    return Array.isArray(value) ? (value as ComputerUseStepDetail[]) : []
+  } catch {
+    return []
   }
 }
 
@@ -119,11 +139,19 @@ export class TaskHistoryStore {
         updated_at INTEGER NOT NULL,
         last_url TEXT,
         last_title TEXT,
-        screenshot_path TEXT
+        screenshot_path TEXT,
+        step_details_json TEXT NOT NULL DEFAULT '[]'
       );
       CREATE INDEX IF NOT EXISTS task_run_history_recent
         ON task_run_history (updated_at DESC);
     `)
+    try {
+      this.db.exec(
+        "ALTER TABLE task_run_history ADD COLUMN step_details_json TEXT NOT NULL DEFAULT '[]'"
+      )
+    } catch {
+      // Existing databases may already have the column.
+    }
   }
 
   upsert(update: TaskRunUpdate): TaskRunSnapshot {
@@ -166,6 +194,11 @@ export class TaskHistoryStore {
         ? { screenshotPath: update.screenshotPath }
         : previous?.screenshotPath
           ? { screenshotPath: previous.screenshotPath }
+          : {}),
+      ...(update.stepDetails !== undefined
+        ? { stepDetails: boundComputerUseStepDetails(update.stepDetails) }
+        : previous?.stepDetails
+          ? { stepDetails: previous.stepDetails }
           : {})
     }
 
@@ -173,8 +206,8 @@ export class TaskHistoryStore {
       .prepare(
         `INSERT INTO task_run_history (
            task_id, kind, title, status, summary, steps_json, started_at,
-           finished_at, updated_at, last_url, last_title, screenshot_path
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           finished_at, updated_at, last_url, last_title, screenshot_path, step_details_json
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(task_id) DO UPDATE SET
            kind = excluded.kind,
            title = excluded.title,
@@ -185,7 +218,8 @@ export class TaskHistoryStore {
            updated_at = excluded.updated_at,
            last_url = excluded.last_url,
            last_title = excluded.last_title,
-           screenshot_path = excluded.screenshot_path`
+           screenshot_path = excluded.screenshot_path,
+           step_details_json = excluded.step_details_json`
       )
       .run(
         snapshot.taskId,
@@ -199,7 +233,8 @@ export class TaskHistoryStore {
         snapshot.updatedAt,
         snapshot.lastUrl ?? null,
         snapshot.lastTitle ?? null,
-        snapshot.screenshotPath ?? null
+        snapshot.screenshotPath ?? null,
+        JSON.stringify(snapshot.stepDetails ?? [])
       )
     this.trim()
     return snapshot
