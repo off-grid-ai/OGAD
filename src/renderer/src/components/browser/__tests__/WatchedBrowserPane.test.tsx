@@ -190,6 +190,13 @@ describe('<WatchedBrowserPane/> shared task panel', () => {
     expect(screen.getByTestId('task-tab-web-old')).toBeTruthy()
   })
 
+  it('opens an empty task history instead of ignoring the Tasks button', async () => {
+    render(<WatchedBrowserPane />)
+    openTaskSidePanel()
+    await waitFor(() => screen.getByTestId('task-side-panel'))
+    expect(screen.getByText('No task history yet')).toBeTruthy()
+  })
+
   it('closing the panel hides it without destroying the running task', async () => {
     render(<WatchedBrowserPane />)
     emitTaskChange(task('web-hide', 'web_use', 'research', 'running'))

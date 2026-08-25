@@ -92,7 +92,7 @@ export function WatchedBrowserPane(): React.JSX.Element | null {
         // hidden tab so closing a tab never makes an old run unreachable.
         setHiddenIds(new Set())
         if (currentTabs[0]) setActiveId(currentTabs[0].taskId)
-        setVisible(currentTabs.length > 0)
+        setVisible(true)
         return
       }
       const requested =
@@ -175,12 +175,38 @@ export function WatchedBrowserPane(): React.JSX.Element | null {
     }
   }, [active?.kind, active?.status, active?.taskId, visible])
 
-  if (!visible || !active || visibleTabs.length === 0) return null
-
   const hidePanel = (): void => {
     window.api.browser?.setRegion?.(null)
     setVisible(false)
   }
+
+  if (!visible) return null
+
+  if (!active || visibleTabs.length === 0) {
+    return (
+      <SidePanel
+        ariaLabel="Task activity"
+        onClose={hidePanel}
+        className="w-[48vw] min-w-[560px] max-w-[90vw]"
+      >
+        <div data-testid="task-side-panel" className="flex min-h-0 flex-1 flex-col">
+          <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2.5">
+            <span className="text-xs uppercase tracking-wide text-neutral-400">Tasks</span>
+            <Button size="sm" variant="ghost" onClick={hidePanel} aria-label="Close task panel">
+              Close
+            </Button>
+          </div>
+          <div className="flex flex-1 flex-col items-center justify-center px-8 text-center">
+            <p className="text-sm text-neutral-200">No task history yet</p>
+            <p className="mt-2 max-w-sm text-xs leading-5 text-neutral-500">
+              Web Use and Computer Use runs will appear here with their status, steps, and results.
+            </p>
+          </div>
+        </div>
+      </SidePanel>
+    )
+  }
+
   const closeTab = (taskId: string): void => {
     setHiddenIds((current) => new Set(current).add(taskId))
     const next = visibleTabs.find((tab) => tab.taskId !== taskId)
