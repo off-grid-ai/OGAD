@@ -56,6 +56,68 @@ const offGridApi = {
       return unsubscribe('license:changed', sub)
     }
   },
+  // Approval UX v2: the inline gate card + outcome/undo feed (core surface).
+  actions: {
+    resolveGate: (actionId: string, decision: unknown) =>
+      ipcRenderer.invoke('actions:resolve-gate', actionId, decision),
+    undo: (record: unknown) => ipcRenderer.invoke('actions:undo', record),
+    onGatePending: (cb: (request: unknown) => void) => {
+      const sub = (_e: unknown, request: unknown): void => cb(request)
+      ipcRenderer.on('actions:gate-pending', sub)
+      return unsubscribe('actions:gate-pending', sub)
+    },
+    onOutcome: (cb: (outcome: unknown) => void) => {
+      const sub = (_e: unknown, outcome: unknown): void => cb(outcome)
+      ipcRenderer.on('actions:outcome', sub)
+      return unsubscribe('actions:outcome', sub)
+    }
+  },
+  // Browser rail (R2-C): the watched pane's step feed + the takeover handoff.
+  browser: {
+    resolveTakeover: (taskId: string, outcome: 'resumed' | 'cancelled') =>
+      ipcRenderer.invoke('browser:resolve-takeover', taskId, outcome),
+    // Report the watched pane's on-screen region so the live view docks to it
+    // (null hides the view). Fire-and-forget on every mount/resize.
+    setRegion: (rect: { x: number; y: number; width: number; height: number } | null) =>
+      ipcRenderer.send('browser:set-region', rect),
+    onStep: (cb: (step: unknown) => void) => {
+      const sub = (_e: unknown, step: unknown): void => cb(step)
+      ipcRenderer.on('browser:step', sub)
+      return unsubscribe('browser:step', sub)
+    },
+    onTakeover: (cb: (request: unknown) => void) => {
+      const sub = (_e: unknown, request: unknown): void => cb(request)
+      ipcRenderer.on('browser:takeover', sub)
+      return unsubscribe('browser:takeover', sub)
+    },
+    onTaskState: (cb: (state: unknown) => void) => {
+      const sub = (_e: unknown, state: unknown): void => cb(state)
+      ipcRenderer.on('browser:task-state', sub)
+      return unsubscribe('browser:task-state', sub)
+    }
+  },
+  // Vision rail (R2-D): the supervised overlay's Stop/Pause/Resume + its feed.
+  vision: {
+    control: (command: 'stop' | 'pause' | 'resume') =>
+      ipcRenderer.invoke('vision:control', command),
+    // The current run's state + step history, for a surface that mounts mid-task.
+    getCurrent: () => ipcRenderer.invoke('vision:current'),
+    onStep: (cb: (step: unknown) => void) => {
+      const sub = (_e: unknown, step: unknown): void => cb(step)
+      ipcRenderer.on('vision:step', sub)
+      return unsubscribe('vision:step', sub)
+    },
+    onTaskState: (cb: (state: unknown) => void) => {
+      const sub = (_e: unknown, state: unknown): void => cb(state)
+      ipcRenderer.on('vision:task-state', sub)
+      return unsubscribe('vision:task-state', sub)
+    },
+    onNotice: (cb: (notice: unknown) => void) => {
+      const sub = (_e: unknown, notice: unknown): void => cb(notice)
+      ipcRenderer.on('vision:notice', sub)
+      return unsubscribe('vision:notice', sub)
+    }
+  },
   // Generic passthrough so pro renderer code can reach pro IPC channels without
   // the core preload bundle enumerating them.
   proInvoke: (channel: string, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args),

@@ -102,6 +102,9 @@ export interface LaunchArgsInput {
   kvCacheType: KvCacheType
   threads: number | undefined
   batchSize: number | undefined
+  // Floor on image tokens. GUI-grounding (Qwen-VL / UI-TARS) models need >=1024
+  // or they ground inaccurately (llama.cpp warns); undefined = engine default.
+  imageMinTokens?: number
 }
 
 /** Build the exact argv passed to `llama-server`. Pure: same inputs → same args, no I/O.
@@ -137,6 +140,11 @@ export function buildLaunchArgs(i: LaunchArgsInput): string[] {
   }
   if (typeof i.batchSize === 'number') {
     args.push('-b', String(i.batchSize))
+  }
+  // Grounding models (UI-TARS / Qwen-VL) need a minimum image-token budget or
+  // clicks land in the wrong place; only set when a projector is present.
+  if (i.mmProjPath && typeof i.imageMinTokens === 'number') {
+    args.push('--image-min-tokens', String(i.imageMinTokens))
   }
   return args
 }

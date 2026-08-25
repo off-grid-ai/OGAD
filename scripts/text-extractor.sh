@@ -10,8 +10,9 @@ CLAUDE="$ROOT_DIR/text-extractor/claude.swift"
 GENERIC="$ROOT_DIR/text-extractor/generic.swift"
 CHATGPT="$ROOT_DIR/text-extractor/chatgpt.swift"
 GEMINI="$ROOT_DIR/text-extractor/gemini.swift"
+ELEMENTS="$ROOT_DIR/text-extractor/elements.swift"
 
 OUT="/tmp/your-memories-text-extractor"
 
-"$SWIFT_BIN" -emit-executable "$ENTRY" "$CORE" "$COMMON" "$CLASSIFIERS" "$CLAUDE" "$GENERIC" "$CHATGPT" "$GEMINI" -o "$OUT"
+"$SWIFT_BIN" -emit-executable "$ENTRY" "$CORE" "$COMMON" "$CLASSIFIERS" "$CLAUDE" "$GENERIC" "$CHATGPT" "$GEMINI" "$ELEMENTS" -o "$OUT"
 exec "$OUT" "$@"

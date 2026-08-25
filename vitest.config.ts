@@ -8,12 +8,15 @@ import { createVitestProjects } from './src/main/__tests__/vitest-projects'
 // pro-specific threshold group when pro is actually checked out, so a core-only
 // run measures + gates core alone instead of erroring on an empty pro/** glob.
 const hasPro = existsSync(resolve(__dirname, 'pro/tsconfig.json'))
+// The pro test globs are gated the same way the pro thresholds already are:
+// a core-only checkout can carry stray pro/ files (this repo tracks a handful
+// of pro test files with no implementations beside them), and collecting
+// orphan tests fails the suite for everyone without desktop-pro access.
 const productTestFiles = [
   'integration-tests/*.test.ts',
   'src/**/*.test.ts',
   'src/**/*.test.tsx',
-  'pro/**/*.test.ts',
-  'pro/**/*.test.tsx'
+  ...(hasPro ? ['pro/**/*.test.ts', 'pro/**/*.test.tsx'] : [])
 ]
 const commonExcludes = ['e2e/**', 'node_modules/**', 'out/**']
 
@@ -65,6 +68,15 @@ export default defineConfig({
     projects: createVitestProjects(productTestFiles, commonExcludes),
     coverage: {
       provider: 'v8',
+      // Write the report even when a test FAILS. Without this, one flaky pro
+      // test (the sandbox-only sync/ambient timing flakes) suppresses the whole
+      // coverage report, leaving a stale coverage-final.json on disk - so the
+      // new-code gate then measures thoroughly-tested files as 0% and blocks a
+      // green branch. A failing test's own coverage is unaffected; every OTHER
+      // test's coverage is still collected and written. The failing TEST still
+      // fails the run; this only decouples "a test flaked" from "the coverage
+      // report is missing". Mirrors vitest.db.config.ts.
+      reportOnFailure: true,
       // all:true + an `include` of the LOGIC surface (.ts, both core src AND the pro
       // submodule) => every logic file is in the denominator whether or not a test imports
       // it, so untested modules show as 0% and are VISIBLE (previously all:false hid them -
@@ -91,6 +103,34 @@ export default defineConfig({
         // (rebuilds better-sqlite3 for the node ABI); can't load the native module here.
         'src/main/database.ts',
         'src/main/rag/store.ts',
+        // The actions runtime composition: Electron + app-DB wiring over tested,
+        // injectable modules; covered by use-runtime.integration.dbtest.ts (real DB,
+        // helper boundary mocked). Its pure seam (pickByPlatform) IS measured here.
+        'src/main/actions/use-runtime.ts',
+        // The rail hosts: the browser's WebContentsView + CDP debugger, and the
+        // vision rail's screen capture + actuation + overlay, over the unit-
+        // tested collector/driver/loop/guard/executor. A real display drives
+        // them - the e2e tour and the real-machine pass, not this runner.
+        'src/main/browser/browser-host.ts',
+        'src/main/vision/vision-host.ts',
+        // The floating supervisor NSPanel: BrowserWindow glue over the tested feed.
+        'src/main/vision/supervisor-window.ts',
+        // On-demand grounder swap: reloads llama-server with UI-TARS and back,
+        // needs the multi-GB models on disk. Its decision (isGrounderActive) is
+        // measured; the reload orchestration is exercised by the A/B run.
+        'src/main/vision/grounder-loader.ts',
+        // The accessibility rail's live host: get-windows I/O + the Swift helper
+        // spawn + synthetic input + the Accessibility grant, over the unit-tested
+        // parser/router/loop/target-picker. Driven on a real Mac (the T1f pass).
+        'src/main/accessibility/ax-host.ts',
+        // The shared synthetic-input adapter: dynamically requires the OPTIONAL
+        // native addon (nut.js) and needs a real display to actuate - the same
+        // class of shell as the rail hosts above.
+        'src/main/input/actuation.ts',
+        // powershell.exe-spawning I/O shell (Windows-only twin of native-helper's
+        // spawn side); its parsing is the shared parseHelperResponse, which is
+        // covered. Exercised on a real Windows machine per WINDOWS_TEST_PLAN.md.
+        'src/main/actions/win-powershell.ts',
         // SQLite settings shell; prompt registry and filling remain measured.
         'src/main/prompt-store.ts',
         // SQLite settings shell; policy is measured in runtime-residency-logic.ts.
@@ -228,9 +268,7 @@ export default defineConfig({
         lines: 80,
         // pro/** stays separately regression-guarded (mobile pattern), same uniform floor.
         // Only applied when pro is checked out (see hasPro) so a core-only CI run doesn't error.
-        ...(hasPro
-          ? { 'pro/**': { statements: 80, branches: 80, functions: 80, lines: 80 } }
-          : {})
+        ...(hasPro ? { 'pro/**': { statements: 80, branches: 80, functions: 80, lines: 80 } } : {})
       }
     }
   }

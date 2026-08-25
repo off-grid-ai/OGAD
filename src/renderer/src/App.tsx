@@ -4,6 +4,8 @@ import { CommandPalette } from './components/CommandPalette'
 import logo from './assets/logo.png'
 import { useMeetingRecorder } from './useMeetingRecorder'
 import { MemoryChat } from './components/MemoryChat'
+import { ExploreScreen } from './components/explore/ExploreScreen'
+import type { DemoPreset } from './components/explore/presetCatalog'
 import { Settings } from './components/Settings'
 import { SettingsPanel } from './components/SettingsPanel'
 import { ModelsScreen } from './components/ModelsScreen'
@@ -35,6 +37,7 @@ import { NavThemeToggle } from './components/ThemeToggle'
 import { motion, AnimatePresence } from 'motion/react'
 import {
   IconMessageCircle,
+  IconCompass,
   IconSettings,
   IconDownload,
   IconFolders,
@@ -54,6 +57,7 @@ import { OFF_GRID_MOBILE_URL, openExternal } from './constants/links'
 import { cn } from './lib/utils'
 import { normalizeProNavigationIntent, type ProNavigationIntent } from './lib/pro-navigation'
 import { navigateSearchHit } from './lib/search-navigation'
+import { WatchedBrowserPane } from './components/browser/WatchedBrowserPane'
 import {
   OPEN_MODEL_SETTINGS_PANEL_EVENT,
   type ModelSettingsPanelTab
@@ -73,6 +77,7 @@ import {
 
 type ViewMode =
   | 'dashboard'
+  | 'explore'
   | 'day'
   | 'replay'
   | 'reflect'
@@ -324,6 +329,7 @@ function AppContent() {
     conversationId?: string
     projectId?: string
     openGallery?: boolean
+    seedPrompt?: string
   } | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const rec = useMeetingRecorder()
@@ -357,6 +363,7 @@ function AppContent() {
     const path = window.location.pathname
     const viewMap: Record<string, ViewMode> = {
       '/': 'day',
+      '/explore': 'explore',
       '/day': 'day',
       '/replay': 'replay',
       '/reflect': 'reflect',
@@ -449,6 +456,7 @@ function AppContent() {
   // Update browser URL when view mode changes
   useEffect(() => {
     const urlMap: Record<ViewMode, string> = {
+      explore: '/explore',
       day: '/day',
       replay: '/replay',
       reflect: '/reflect',
@@ -738,6 +746,14 @@ function AppContent() {
     []
   )
 
+  // Run an Explore preset: open a fresh chat seeded with the preset's prompt, which auto-sends so
+  // the agent takes over and asks its own follow-ups. Same handoff whether the tap came from the
+  // Explore screen or the chat empty state.
+  const handleRunPreset = useCallback((preset: DemoPreset) => {
+    setChatTarget({ seedPrompt: preset.prompt })
+    setViewMode('memory-chat')
+  }, [])
+
   // Global keyboard shortcuts for back/forward navigation (Cmd+[ and Cmd+])
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -779,6 +795,11 @@ function AppContent() {
   }
   // Icons take no color — the nav button drives it (emerald when active).
   const mainNav: { label: string; icon: React.ReactNode; view: ViewMode; locked?: boolean }[] = [
+    {
+      label: 'Explore',
+      icon: <IconCompass className="h-5 w-5 shrink-0" />,
+      view: 'explore' as ViewMode
+    },
     proItem('search'),
     proItem('day'),
     proItem('replay'),
@@ -878,7 +899,16 @@ function AppContent() {
   }
 
   return (
-    <div className="h-screen w-full overflow-hidden bg-neutral-950 relative">
+    <div
+      className="h-screen w-full overflow-hidden bg-neutral-950 relative"
+      /* The watched browser pane sets --browser-pane-width; reserving it here
+         shrinks the app content to the LEFT so the browser docks beside it as a
+         real split, not an overlay. 0 when no task is running. */
+      style={{ paddingRight: 'var(--browser-pane-width, 0px)' }}
+    >
+      {/* The web-task browser split: fixed + viewport-docked, rendered at the
+          root so no transformed chat ancestor becomes its containing block. */}
+      <WatchedBrowserPane />
       <CommandPalette
         onOpenHit={handleOpenHit}
         onSeeAll={openSearch}
@@ -1128,7 +1158,9 @@ function AppContent() {
                   transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
                   className="p-6 h-full overflow-y-auto"
                 >
-                  {viewMode === 'memory-chat' ? (
+                  {viewMode === 'explore' ? (
+                    <ExploreScreen onRunPreset={handleRunPreset} />
+                  ) : viewMode === 'memory-chat' ? (
                     <MemoryChat
                       onNavigateToMemory={handleSelectMemory}
                       onNavigateToChat={handleSelectChat}
