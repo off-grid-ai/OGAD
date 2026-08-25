@@ -38,13 +38,17 @@ describe('<ExploreSection/>', () => {
 
     fireEvent.click(screen.getByTestId('explore-preset-proposal-deck'))
     expect(screen.getByTestId('proposal-deck-setup')).toBeTruthy()
+    expect(screen.queryByTestId('explore-preset-find-flight')).toBeNull()
     const source = screen.getByLabelText('Content folder')
+    const output = screen.getByLabelText('Save under')
     fireEvent.change(source, { target: { value: '/tmp/client-material' } })
+    fireEvent.change(output, { target: { value: '/tmp/client-output' } })
     fireEvent.click(screen.getByRole('button', { name: 'Start in chat' }))
 
     expect(onRun).toHaveBeenCalledTimes(1)
     expect(onRun.mock.calls[0]?.[0].prompt).toContain('/tmp/client-material')
-    expect(onRun.mock.calls[0]?.[0].prompt).toContain('only local folders I authorize')
+    expect(onRun.mock.calls[0]?.[0].prompt).toContain('Q: Where should the finished deck be saved?')
+    expect(onRun.mock.calls[0]?.[0].prompt).toContain('A: /tmp/client-output')
   })
 
   it('annotates a gated preset so it never dead-ends silently', () => {

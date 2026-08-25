@@ -58,6 +58,19 @@ export function ExploreSection({
   className = ''
 }: ExploreSectionProps): React.ReactElement {
   const [setupPreset, setSetupPreset] = useState<DemoPreset | null>(null)
+
+  if (setupPreset) {
+    return (
+      <div className={`@container w-full font-mono ${className}`}>
+        <ProposalDeckSetup
+          preset={setupPreset}
+          onRun={onRun}
+          onCancel={() => setSetupPreset(null)}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className={`@container font-mono ${className}`}>
       {showIntro ? (
@@ -125,13 +138,6 @@ export function ExploreSection({
                     </div>
                   </button>
                 ))}
-                {setupPreset && section.id === 'creation' ? (
-                  <ProposalDeckSetup
-                    preset={setupPreset}
-                    onRun={onRun}
-                    onCancel={() => setSetupPreset(null)}
-                  />
-                ) : null}
               </div>
             </section>
           )

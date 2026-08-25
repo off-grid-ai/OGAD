@@ -76,10 +76,11 @@ test('proposal setup scopes the content, style, and output folders before chat',
   const setup = page.getByTestId('proposal-deck-setup')
   await expect(setup).toBeVisible()
   await expect(setup.getByRole('textbox', { name: 'Content folder' })).toHaveValue('')
-  await expect(setup.getByRole('textbox', { name: 'Save under' })).toHaveValue(
-    '/Users/user/wednesday/cro/proposals'
-  )
+  await expect(setup.getByRole('textbox', { name: 'Save under' })).toHaveValue('')
+  await expect(setup.getByRole('textbox', { name: 'Style example (optional)' })).toHaveValue('')
   await setup.getByRole('textbox', { name: 'Content folder' }).fill('/tmp/client-material')
+  await expect(setup.getByRole('button', { name: 'Start in chat' })).toBeDisabled()
+  await setup.getByRole('textbox', { name: 'Save under' }).fill('/tmp/client-output')
   await expect(setup.getByRole('button', { name: 'Start in chat' })).toBeEnabled()
   await page.screenshot({ path: 'e2e/screenshots/explore-proposal-setup.png' })
 })

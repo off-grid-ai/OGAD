@@ -3,9 +3,6 @@ import { FolderOpen } from '@phosphor-icons/react'
 import { Button } from '@/components/ui/button'
 import type { DemoPreset } from './presetCatalog'
 
-const DEFAULT_OUTPUT = '/Users/user/wednesday/cro/proposals'
-const EXAMPLE_STYLE = '/Users/user/wednesday/cro/proposals/ABSLI'
-
 interface ProposalDeckSetupProps {
   preset: DemoPreset
   onRun: (preset: DemoPreset) => void
@@ -63,20 +60,30 @@ export function ProposalDeckSetup({
   onCancel
 }: ProposalDeckSetupProps): React.ReactElement {
   const [sourceFolder, setSourceFolder] = useState('')
-  const [outputFolder, setOutputFolder] = useState(DEFAULT_OUTPUT)
-  const [styleFolder, setStyleFolder] = useState(EXAMPLE_STYLE)
+  const [outputFolder, setOutputFolder] = useState('')
+  const [styleFolder, setStyleFolder] = useState('')
   const canStart = sourceFolder.trim() && outputFolder.trim()
 
   const start = (): void => {
     if (!canStart) return
+    const styleAnswer = styleFolder.trim() || 'Use the standard Off Grid AI presentation style.'
     const prompt = [
-      preset.prompt,
-      `I selected this content folder: ${sourceFolder.trim()}`,
-      `Save the completed deck under this folder: ${outputFolder.trim()}`,
-      styleFolder.trim()
-        ? `Use this folder only as a visual style example: ${styleFolder.trim()}`
-        : 'Use the standard Off Grid AI presentation style.',
-      'These are the only local folders I authorize for this proposal.'
+      '/proposal-deck',
+      '',
+      'Q: What should we create?',
+      'A: A new client proposal. Ask me for the company, meeting context, sale mode, audience geography, and optional website before you begin.',
+      '',
+      'Q: Which folder contains the source material?',
+      `A: ${sourceFolder.trim()}`,
+      '',
+      'Q: Where should the finished deck be saved?',
+      `A: ${outputFolder.trim()}`,
+      '',
+      'Q: Which folder should guide the visual style?',
+      `A: ${styleAnswer}`,
+      '',
+      'Q: Which local folders may Off Grid AI read?',
+      `A: ${[sourceFolder.trim(), styleFolder.trim()].filter(Boolean).join(', ')}`
     ].join('\n')
     onRun({ ...preset, prompt })
   }

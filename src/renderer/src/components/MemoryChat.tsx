@@ -4824,36 +4824,36 @@ export function MemoryChat({
             {/* Messages */}
             <div ref={scrollRef} onScroll={onScrollFollow} className="flex-1 overflow-y-auto">
               {messages.length === 0 ? (
-                <div
-                  className={`mx-auto flex min-h-full flex-col items-center justify-center px-6 py-6 text-center ${mode === 'image' ? 'max-w-6xl' : 'max-w-2xl'}`}
-                >
-                  <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-neutral-800 bg-neutral-900 shadow-sm">
-                    <svg
-                      className="h-8 w-8 text-green-500"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={1.5}
-                        d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
-                      />
-                    </svg>
+                <div className="flex min-h-full w-full flex-col items-center justify-center px-6 py-6 text-center">
+                  <div className="mx-auto flex max-w-2xl flex-col items-center">
+                    <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-neutral-800 bg-neutral-900 shadow-sm">
+                      <svg
+                        className="h-8 w-8 text-green-500"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={1.5}
+                          d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
+                        />
+                      </svg>
+                    </div>
+                    <h2 className="text-3xl font-semibold tracking-tight text-neutral-100">
+                      {mode === 'image' ? 'Create an image' : 'Start a conversation'}
+                    </h2>
+                    <p className="mt-3 max-w-md text-sm text-neutral-500">
+                      {mode === 'image'
+                        ? 'Pick a style, then describe your subject — generated on-device.'
+                        : activeProjectName
+                          ? `Grounded in the “${activeProjectName}” knowledge base.`
+                          : isPro
+                            ? 'Ask across your memories, chats, and entities from every source.'
+                            : 'Ask anything, generate images, or build — all on-device.'}
+                    </p>
                   </div>
-                  <h2 className="text-3xl font-semibold tracking-tight text-neutral-100">
-                    {mode === 'image' ? 'Create an image' : 'Start a conversation'}
-                  </h2>
-                  <p className="mt-3 max-w-md text-sm text-neutral-500">
-                    {mode === 'image'
-                      ? 'Pick a style, then describe your subject — generated on-device.'
-                      : activeProjectName
-                        ? `Grounded in the “${activeProjectName}” knowledge base.`
-                        : isPro
-                          ? 'Ask across your memories, chats, and entities from every source.'
-                          : 'Ask anything, generate images, or build — all on-device.'}
-                  </p>
                   {mode !== 'image' ? (
                     <ExploreSection
                       onRun={(preset) => {

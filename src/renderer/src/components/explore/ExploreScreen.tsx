@@ -16,7 +16,7 @@ export function ExploreScreen({
   onRunPreset: (preset: DemoPreset) => void
 }): React.ReactElement {
   return (
-    <div className="mx-auto max-w-6xl font-mono">
+    <div className="w-full font-mono">
       <div className="mb-5 flex items-end justify-between gap-4 border-b border-neutral-900 pb-4">
         <div>
           <h1 className="text-lg tracking-tight text-white">Explore</h1>
