@@ -1,6 +1,6 @@
 # Retention backup: archive-before-delete + automatic history cleanup
 
-Status: Phase 1 in progress (branch `feat/retention-backup`). Phase 2 not started.
+Status: Phase 1 and Phase 2 code-complete on branch `feat/retention-backup` (pending on-device verification + PR).
 
 ## Problem
 

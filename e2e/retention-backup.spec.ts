@@ -75,3 +75,20 @@ test('Back up first is offered for file categories and arms visibly', async () =
 
   await page.screenshot({ path: 'e2e/screenshots/retention-backup-panel.png' })
 })
+
+test('Automatic cleanup arms from Off and reveals folder + Run now', async () => {
+  await expect(page.getByText('Automatic cleanup')).toBeVisible()
+  const off = page.getByRole('button', { name: 'Off', exact: true })
+  await expect(off).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('button', { name: /run now/i })).toHaveCount(0)
+
+  await page.getByRole('button', { name: '30 days', exact: true }).click()
+  await expect(page.getByRole('button', { name: '30 days', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  )
+  await expect(page.getByText(/no backup - choose a folder/i)).toBeVisible()
+  await expect(page.getByRole('button', { name: /run now/i })).toBeVisible()
+
+  await page.screenshot({ path: 'e2e/screenshots/retention-auto-cleanup.png' })
+})
