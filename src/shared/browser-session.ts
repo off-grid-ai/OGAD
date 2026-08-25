@@ -4,6 +4,7 @@ export type BrowserControl = 'back' | 'forward' | 'reload' | 'stop'
 export interface BrowserChromeState {
   url: string
   title: string
+  faviconUrl?: string
   canGoBack: boolean
   canGoForward: boolean
   isLoading: boolean

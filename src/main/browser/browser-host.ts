@@ -254,6 +254,16 @@ class BrowserHost implements BrowserRailHost {
     view.webContents.on('did-navigate', refresh)
     view.webContents.on('did-navigate-in-page', refresh)
     view.webContents.on('page-title-updated', refresh)
+    view.webContents.on('page-favicon-updated', (_event, favicons) => {
+      const current = this.sessions.get(record.sessionId)
+      if (!current) return
+      this.sessions.updateChrome(record.sessionId, {
+        ...current.chrome,
+        faviconUrl: favicons[0]
+      })
+      this.broadcastSessions()
+      this.broadcastNavigation(current)
+    })
     view.webContents.setWindowOpenHandler(({ url }) => {
       const target = normalizeBrowserAddress(url)
       if (target) void this.navigate(target, record.sessionId)

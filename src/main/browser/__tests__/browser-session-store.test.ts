@@ -13,6 +13,7 @@ describe('BrowserSessionStore', () => {
     store.updateChrome('manual-1', {
       url: 'https://example.com/',
       title: 'Example',
+      faviconUrl: 'https://example.com/favicon.ico',
       canGoBack: true,
       canGoForward: false,
       isLoading: false
@@ -34,6 +35,7 @@ describe('BrowserSessionStore', () => {
           taskId: undefined,
           status: 'open',
           title: 'Example',
+          faviconUrl: 'https://example.com/favicon.ico',
           url: 'https://example.com/'
         }),
         expect.objectContaining({
