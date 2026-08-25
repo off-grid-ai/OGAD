@@ -15,6 +15,8 @@ import {
   BACKUP_EXPORT_ALL_CHANNEL,
   BACKUP_IMPORT_CHANNEL,
   RETENTION_ARCHIVE_CLEAR_CHANNEL,
+  type AutoCleanupRunContract,
+  type AutoCleanupStatusContract,
   type BackupDeliveryContract,
   type BackupRestoreSummaryContract,
   type RetentionArchiveClearContract
@@ -414,6 +416,11 @@ const offGridApi = {
       id,
       olderThanDays
     ) as Promise<RetentionArchiveClearContract>,
+  getAutoCleanupStatus: () =>
+    ipcRenderer.invoke('data:auto-cleanup-status') as Promise<AutoCleanupStatusContract>,
+  runAutoCleanupNow: () =>
+    ipcRenderer.invoke('data:auto-cleanup-run') as Promise<AutoCleanupRunContract>,
+  pickArchiveDir: () => ipcRenderer.invoke('data:pick-archive-dir') as Promise<string | null>,
   deleteAllData: () => ipcRenderer.invoke('data:delete-all'),
   exportBackup: () =>
     ipcRenderer.invoke(BACKUP_EXPORT_ALL_CHANNEL) as Promise<BackupDeliveryContract | null>,

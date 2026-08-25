@@ -401,6 +401,8 @@ app.whenReady().then(async () => {
     setupRagIPC()
     setupMcpIpc() // basic MCP connectors (management + chat tool extension)
     setupDesktopBackupIPC()
+    // Automatic history cleanup (archive-then-prune old captures) - daily, opt-in.
+    import('./backup/retention-archive-ipc').then((m) => m.setupAutoCleanupScheduler())
     // one OpenAI-compatible local gateway (LLM + STT); auto-picks a free port. Async, so handle a
     // rejection on the promise (a try/catch around a fire-and-forget async call can't catch it).
     startModelServer().catch((e) => console.error('[model-server] start failed', e))

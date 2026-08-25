@@ -1713,6 +1713,16 @@ export function setupIPC() {
       m.archiveThenClearCategory(id, olderThanDays)
     )
   )
+  // Automatic history cleanup: status, manual run, and the archive-folder picker.
+  ipcMain.handle('data:auto-cleanup-status', () =>
+    import('./backup/retention-archive-ipc').then((m) => m.getAutoCleanupStatus())
+  )
+  ipcMain.handle('data:auto-cleanup-run', () =>
+    import('./backup/retention-archive-ipc').then((m) => m.runAutoCleanupNow())
+  )
+  ipcMain.handle('data:pick-archive-dir', () =>
+    import('./backup/retention-archive-ipc').then((m) => m.pickArchiveDir())
+  )
 
   // --- Image generation (stable-diffusion.cpp) ----------------------------
   ipcMain.handle('imagegen:status', async () => {
