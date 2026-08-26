@@ -60,7 +60,7 @@ function installApi(
     ),
     getRagMessages: vi.fn(async () => []),
     createRagConversation,
-    addRagMessage: vi.fn(async () => 1),
+    addRagMessage: vi.fn(async () => ({ id: 1, uuid: 'project-message-1' })),
     saveArtifact: vi.fn(async () => ''),
     getSettings: vi.fn(async () => ({})),
     saveSetting: vi.fn(async () => {}),
@@ -104,7 +104,9 @@ describe('<MemoryChat/> - new chat inherits its project (#54)', () => {
     // A fresh id was minted for this conversation rather than an existing one reused. It is a UUID now
     // (crypto.randomUUID) instead of the old rag- prefix, because the id has to be unique across every
     // device that syncs the conversation, not just within one Mac's table.
-    expect(conversationId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+    expect(conversationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    )
     expect(title).toBe('What is the launch date?')
     expect(persistedProjectId).toBe(project.id)
 

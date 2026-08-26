@@ -8,6 +8,10 @@ import { createVitestProjects } from './src/main/__tests__/vitest-projects'
 // pro-specific threshold group when pro is actually checked out, so a core-only
 // run measures + gates core alone instead of erroring on an empty pro/** glob.
 const hasPro = existsSync(resolve(__dirname, 'pro/tsconfig.json'))
+// CI and the pre-push hook merge this report with the DB and optional e2e reports, then
+// gate only the lines this branch adds. The fast suite is one input to that aggregate,
+// so applying the whole-tree floor here would stop before the complementary reports run.
+const usesAggregateCoverageGate = process.env.OFFGRID_AGGREGATE_COVERAGE === '1'
 // The pro test globs are gated the same way the pro thresholds already are:
 // a core-only checkout can carry stray pro/ files (this repo tracks a handful
 // of pro test files with no implementations beside them), and collecting
@@ -251,25 +255,29 @@ export default defineConfig({
         'src/renderer/src/**/*.tsx',
         'pro/renderer/**/*.tsx'
       ],
-      thresholds: {
-        // Uniform 80% floor across every metric. Set deliberately per the maintainer's call
-        // (2026-08-05), down from 85: pro BRANCHES sit right on the old line (85.5% local, ~85.2%
-        // measured in CI, because CI legitimately skips the native-dep ambient journeys), so a
-        // 0.3% environment swing decided whether the gate was red. That is a gate reporting the
-        // runner rather than the code.
-        //
-        // What 80 actually loosens is branches ALONE — statements, functions and lines all measure
-        // 91-93% in pro and higher in core, so they stay far above either line. It is a floor
-        // against regression, not a target: the standard in CLAUDE.md is still 85%, every change
-        // that adds logic adds tests, and this number only moves back UP.
-        statements: 80,
-        branches: 80,
-        functions: 80,
-        lines: 80,
-        // pro/** stays separately regression-guarded (mobile pattern), same uniform floor.
-        // Only applied when pro is checked out (see hasPro) so a core-only CI run doesn't error.
-        ...(hasPro ? { 'pro/**': { statements: 80, branches: 80, functions: 80, lines: 80 } } : {})
-      }
+      thresholds: usesAggregateCoverageGate
+        ? undefined
+        : {
+            // Uniform 80% floor across every metric. Set deliberately per the maintainer's call
+            // (2026-08-05), down from 85: pro BRANCHES sit right on the old line (85.5% local, ~85.2%
+            // measured in CI, because CI legitimately skips the native-dep ambient journeys), so a
+            // 0.3% environment swing decided whether the gate was red. That is a gate reporting the
+            // runner rather than the code.
+            //
+            // What 80 actually loosens is branches ALONE — statements, functions and lines all measure
+            // 91-93% in pro and higher in core, so they stay far above either line. It is a floor
+            // against regression, not a target: the standard in CLAUDE.md is still 85%, every change
+            // that adds logic adds tests, and this number only moves back UP.
+            statements: 80,
+            branches: 80,
+            functions: 80,
+            lines: 80,
+            // pro/** stays separately regression-guarded (mobile pattern), same uniform floor.
+            // Only applied when pro is checked out (see hasPro) so a core-only CI run doesn't error.
+            ...(hasPro
+              ? { 'pro/**': { statements: 80, branches: 80, functions: 80, lines: 80 } }
+              : {})
+          }
     }
   }
 })

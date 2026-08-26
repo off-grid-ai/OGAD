@@ -23,14 +23,19 @@ import { readReasoning } from '@renderer/lib/message-persistence'
 
 type StreamEvent = { streamId: string; type: 'content' | 'reasoning' | 'step'; text?: string }
 type AddRagArgs = [convId: string, role: string, content: string, context?: unknown]
-type AddRagMessageBoundary = Mock<(...args: AddRagArgs) => Promise<void>>
+type AddedRagMessage = { id: number; uuid: string }
+type AddRagMessageBoundary = Mock<(...args: AddRagArgs) => Promise<AddedRagMessage>>
 
 /** window.api where ragChat streams a reasoning event through the REAL onRagStream
  *  callback (keyed by the streamId it is handed), then resolves. addRagMessage is the
  *  assertion subject — its context arg is what persists / reloads. */
 function installApi(): { addRagMessage: AddRagMessageBoundary } {
   let streamCb: ((e: StreamEvent) => void) | null = null
-  const addRagMessage = vi.fn(async (..._a: AddRagArgs) => {})
+  let nextMessageId = 0
+  const addRagMessage = vi.fn(async (..._a: AddRagArgs) => {
+    nextMessageId += 1
+    return { id: nextMessageId, uuid: `reasoning-message-${nextMessageId}` }
+  })
   const api = {
     isPro: false,
     imageGenStatus: vi.fn(async () => ({ available: false, models: [], active: '' })),

@@ -26,6 +26,10 @@ jobs:
     timeout-minutes: 50 # backstop: a hung step fails fast instead of running for hours (unit gates + e2e tour)
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The authoritative coverage gate compares the checked-out change with
+          # origin/main. A depth-1 checkout has no merge base to measure.
+          fetch-depth: 0
       # Check out pro on the branch that MATCHES this PR/push (so a coordinated
       # core+pro change is tested together). If pro has no such branch (most PRs),
       # this step's checkout fails quietly and the fallback below pulls pro `main`.
@@ -41,6 +45,7 @@ jobs:
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
           path: pro
           ref: ${{ github.head_ref || github.ref_name }}
+          fetch-depth: 0
           # Don't leave the cross-repo PAT in ./pro/.git/config where a later
           # PR-controlled step could reuse it — we only need it for the clone.
           persist-credentials: false
@@ -52,6 +57,7 @@ jobs:
           repository: off-grid-ai/desktop-pro
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
           path: pro
+          fetch-depth: 0
           persist-credentials: false
       # pro MUST be present: without it the guarded typecheck/coverage path is skipped and
       # CI would pass core-only with cratered/misleading coverage (the failure the
@@ -147,16 +153,17 @@ jobs:
       # The later DB journey script restores the Electron ABI in its EXIT trap.
       - name: Rebuild SQLite for the Node test runner
         run: npm rebuild better-sqlite3-multiple-ciphers
-      # Runs the full vitest suite AND enforces the coverage ratchet floor
-      # (vitest.config.ts `thresholds`) — the same gate as the pre-push hook, so a
-      # coverage regression fails CI, not just local pushes. The pro/** threshold
-      # group applies only when pro was checked out above (guarded in the config).
-      - name: Test + coverage thresholds
+      # This is the fast report, not the complete coverage measurement. DB-only
+      # journeys run next and e2e can add coarse coverage later. Test failures still
+      # block here; the aggregate new-code gate below owns the coverage decision.
+      - name: Test + fast coverage report
         # The tests finish in about four minutes. V8 then maps coverage across the
         # complete core + Pro source set, including files no test imported. That
-        # aggregation can take another six minutes on a busy runner, so keep the
-        # thresholds unchanged and give report generation enough time to finish.
+        # aggregation can take another six minutes on a busy runner, so give report
+        # generation enough time to finish.
         timeout-minutes: 20
+        env:
+          OFFGRID_AGGREGATE_COVERAGE: '1'
         run: npm run test:coverage
       # The DB journeys - 74 files, 255 cases - which CI has NEVER run.
       #
@@ -183,7 +190,7 @@ jobs:
           # reason is recorded in vitest.db.ci.config.ts with the evidence from the run that found it. 243 of the
           # 248 cases still run here.
           OFFGRID_DB_VITEST_CONFIG: vitest.db.ci.config.ts
-        run: npm run test:db
+        run: npm run test:db -- --coverage
       # Build/native/port integration tests (packaging, whisper build-staging, the
       # model-port + System Health seams that own :8439). These need a packaged
       # build / native toolchain / a live engine port the pure `verify` runner
@@ -268,6 +275,27 @@ jobs:
           else
             echo "no e2e coverage captured (the suite may not have launched)"
           fi
+      # Match the pre-push authority: merge every report that can cover this change,
+      # then gate only executable lines added on this branch. The floors are the same
+      # ratchets as scripts/hooks/pre-push; neither whole-tree debt nor a partial suite
+      # can decide the result.
+      - name: Coverage gate (new code across all suites)
+        run: |
+          reports="coverage/coverage-final.json coverage-db/coverage-final.json"
+          for report in $reports; do
+            if [ ! -f "$report" ]; then
+              echo "::error::required coverage report is missing: $report"
+              exit 1
+            fi
+          done
+          coarse=""
+          if [ -f coverage-e2e/coverage-final.json ]; then
+            coarse="--coarse=coverage-e2e/coverage-final.json"
+          fi
+          node ../shared/scripts/new-code-coverage.mjs . $reports $coarse \
+            --min-statements=78 --min-branches=57 --min-functions=52 --min-lines=78
+          node ../shared/scripts/new-code-coverage.mjs ./pro $reports $coarse \
+            --min-statements=72 --min-branches=45 --min-functions=46 --min-lines=72
       - name: Upload e2e coverage
         if: ${{ always() && vars.OFFGRID_CI_E2E == '1' }}
         uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4

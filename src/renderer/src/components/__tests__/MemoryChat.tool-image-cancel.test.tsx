@@ -21,7 +21,11 @@ import { TooltipProvider } from '../ui/tooltip'
 type AddRag = ReturnType<typeof vi.fn>
 
 function installApi(): { addRagMessage: AddRag } {
-  const addRagMessage = vi.fn(async () => {})
+  let nextMessageId = 0
+  const addRagMessage = vi.fn(async () => {
+    nextMessageId += 1
+    return { id: nextMessageId, uuid: `tool-image-message-${nextMessageId}` }
+  })
   const api = {
     isPro: false,
     imageGenStatus: vi.fn(async () => ({ available: true, models: ['sd'], active: 'sd' })),
