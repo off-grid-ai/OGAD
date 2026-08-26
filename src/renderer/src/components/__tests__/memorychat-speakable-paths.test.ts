@@ -22,19 +22,23 @@ describe('<MemoryChat/> speakable message integration', () => {
 
   it('shows and synthesizes a clean voice transcript instead of raw Markdown', async () => {
     const boundary = new ChatBoundary()
-    boundary.messages['conversation-b']![0]!.content =
-      '**Release ready.**\n\n[private-source]: https://secret.invalid/token'
-    boundary.api.getSettings.mockResolvedValue({ composerVoiceMode: true })
+    boundary.messages['conversation-a'] = [
+      {
+        id: 1,
+        role: 'assistant',
+        content: '**Release ready.**\n\n[private-source]: https://secret.invalid/token'
+      }
+    ]
+    boundary.conversations.find(({ id }) => id === 'conversation-a')!.message_count = 1
     installBoundary(boundary)
     const user = userEvent.setup()
 
-    renderChat({ conversationId: 'conversation-b' })
+    renderChat({ conversationId: 'conversation-a' })
 
-    await user.click(await screen.findByRole('button', { name: 'Show transcript' }))
-    expect(screen.getByText('Release ready.')).toBeTruthy()
+    expect(await screen.findByText('Release ready.')).toBeTruthy()
     expect(screen.queryByText(/\*\*|private-source|secret\.invalid/)).toBeNull()
 
-    await user.click(screen.getByTitle('Play'))
+    await user.click(screen.getByRole('button', { name: 'Speak' }))
     await waitFor(() => expect(boundary.speechTurns).toHaveLength(1))
     expect(boundary.api.speak).toHaveBeenCalledWith('Release ready.')
   })

@@ -67,6 +67,15 @@ describe('<App/> locked Pro navigation integration', () => {
     const navigation = screen.getByRole('navigation', { name: 'Primary navigation' })
 
     for (const feature of PRO_FEATURES) {
+      if (!within(navigation).queryByText(feature.label)) {
+        const closedGroups = Array.from(
+          navigation.querySelectorAll<HTMLButtonElement>('button[aria-expanded="false"]')
+        )
+        for (const group of closedGroups) {
+          await user.click(group)
+          if (within(navigation).queryByText(feature.label)) break
+        }
+      }
       const label = within(navigation).getByText(feature.label)
       const navButton = label.closest('button')
       expect(navButton).not.toBeNull()
@@ -103,6 +112,12 @@ describe('<App/> locked Pro navigation integration', () => {
     installAppBoundary({
       isPro: true,
       license: {
+        status: async () => ({
+          isPro: true,
+          tier: 'pro',
+          expiry: null,
+          verifiedAt: Date.now()
+        }),
         onChanged: (listener: (info: ProLicenseInfo) => void) => {
           publishLicense = listener
           return () => {
