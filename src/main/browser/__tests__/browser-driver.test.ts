@@ -296,6 +296,8 @@ describe('click and type', () => {
     expect(String(pointerFrames[0]?.params?.expression)).toContain('__offgrid_agent_pointer__')
     expect(String(pointerFrames[0]?.params?.expression)).toContain('prefers-reduced-motion')
     expect(String(pointerFrames[1]?.params?.expression)).toContain("'pressed'")
+    expect(String(pointerFrames[1]?.params?.expression)).toContain('__offgrid_agent_click_marker__')
+    expect(String(pointerFrames[1]?.params?.expression)).toContain('{"x":200,"y":80}')
     expect(String(pointerFrames[1]?.params?.expression)).toContain('pulse.animate')
     expect(String(pointerFrames[2]?.params?.expression)).not.toContain('cursor?.remove')
     expect(pointer.slice(-3)).toEqual([

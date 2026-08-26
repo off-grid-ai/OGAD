@@ -376,6 +376,42 @@ describe('general vision native tool policy', () => {
     fs.unlinkSync(file)
   })
 
+  it('persists the exact normalized grid image used by every Web Use model', async () => {
+    const file = path.join(os.tmpdir(), `offgrid-model-grid-${Date.now()}.png`)
+    const original = await sharp({
+      create: { width: 1000, height: 600, channels: 4, background: '#ffffff' }
+    })
+      .png()
+      .toBuffer()
+    fs.writeFileSync(file, original)
+
+    const prepared = await modelScreenshot({
+      goal: 'Use the control.',
+      image: file,
+      history: [],
+      retrievedFacts: [],
+      policyHistory: [],
+      guidance: [],
+      coordinateFrame: {
+        encoded: { width: 1000, height: 600 },
+        source: { width: 1000, height: 600 }
+      }
+    })
+
+    const persisted = fs.readFileSync(file)
+    expect(persisted.equals(original)).toBe(false)
+    expect(prepared.dataUrl).toBe(`data:image/png;base64,${persisted.toString('base64')}`)
+    expect(await sharp(persisted).metadata()).toMatchObject({ width: 1000, height: 600 })
+    const raw = await sharp(persisted).removeAlpha().raw().toBuffer()
+    const rgbAt = (x: number, y: number): number[] => {
+      const offset = (y * 1000 + x) * 3
+      return [raw[offset]!, raw[offset + 1]!, raw[offset + 2]!]
+    }
+    expect(rgbAt(20, 200)).not.toEqual([255, 255, 255])
+    expect(rgbAt(10, 200)).toEqual([255, 255, 255])
+    fs.unlinkSync(file)
+  })
+
   it('rejects mismatched image and coordinate dimensions before model inference', async () => {
     const file = path.join(os.tmpdir(), `offgrid-model-frame-mismatch-${Date.now()}.png`)
     fs.writeFileSync(

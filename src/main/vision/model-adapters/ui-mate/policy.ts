@@ -402,7 +402,16 @@ function normalizedCoordinate(
   const y = Number(value[1])
   if (!Number.isFinite(x) || !Number.isFinite(y)) return undefined
   if (x < 0 || x > 999 || y < 0 || y > 999) return undefined
-  return [Math.trunc((x * width) / 999), Math.trunc((y * height) / 999)]
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) {
+    return undefined
+  }
+  // UI-Mate is trained against a 1000 x 1000 action grid whose valid values
+  // are 0..999. Keep that grid intact. Dividing by 999 shifts every non-zero
+  // point and maps the last value outside the encoded image.
+  return [
+    Math.min(width - 1, Math.trunc((x * width) / 1000)),
+    Math.min(height - 1, Math.trunc((y * height) / 1000))
+  ]
 }
 
 function parsedAction(

@@ -4,16 +4,36 @@ import {
   createBrowserVisionScreen,
   mapBrowserVisionAction,
   normalizeBrowserShortcut,
-  remapPageActionToCurrentViewport,
+  normalizeBrowserModelFrame,
+  resolveBrowserModelViewport,
   isTransientBrowserFailure
 } from '../browser-vision-screen'
 import { browserPageHasVisualContent } from '../browser-page-evidence'
 import sharp from 'sharp'
 import { createBrowserCoordinateTransform } from '../../../shared/browser-coordinate-transform'
 import { DEFAULT_COMPUTER_USE_SETTINGS } from '../../../shared/computer-use-settings'
+import type { WebContentsView } from 'electron'
+import type { BrowserDriver } from '../browser-driver'
+
+const browserEvidenceMocks = vi.hoisted(() => ({
+  writeFileSync: vi.fn(),
+  recordTaskRun: vi.fn()
+}))
+
+vi.mock('node:fs', () => ({
+  default: { writeFileSync: browserEvidenceMocks.writeFileSync }
+}))
+
+vi.mock('../../tasks/task-history', () => ({
+  getTaskExecutionDevice: () => ({ id: 'test-device', name: 'Test device' }),
+  recordTaskRun: browserEvidenceMocks.recordTaskRun,
+  taskScreenshotPath: (taskId: string, captureNumber: number) =>
+    `/tmp/${taskId}-${captureNumber}.png`
+}))
 
 afterEach(() => {
   vi.useRealTimers()
+  vi.clearAllMocks()
 })
 
 describe('browser visual coordinate mapping', () => {
@@ -81,32 +101,6 @@ describe('browser visual coordinate mapping', () => {
   it('does not transform actions without image coordinates', () => {
     const action = { type: 'type', content: 'Pune' } as const
     expect(mapBrowserVisionAction(action, encoded, viewport)).toEqual(action)
-  })
-})
-
-describe('browser resize coordinate recalculation', () => {
-  it('rescales a captured page click into the current browser viewport', () => {
-    expect(
-      remapPageActionToCurrentViewport(
-        { type: 'click', point: { x: 400, y: 300 } },
-        { width: 800, height: 600 },
-        { width: 1200, height: 900 }
-      )
-    ).toEqual({ type: 'click', point: { x: 600, y: 450 } })
-  })
-
-  it('rescales both drag endpoints after a proportional browser resize', () => {
-    expect(
-      remapPageActionToCurrentViewport(
-        { type: 'drag', from: { x: 80, y: 60 }, to: { x: 720, y: 540 } },
-        { width: 800, height: 600 },
-        { width: 400, height: 300 }
-      )
-    ).toEqual({
-      type: 'drag',
-      from: { x: 40, y: 30 },
-      to: { x: 360, y: 270 }
-    })
   })
 })
 
@@ -212,21 +206,60 @@ describe('browser shortcut normalization', () => {
 })
 
 describe('browser screenshot evidence', () => {
+  it('uses the selected screenshot size for one fixed 16:10 browser frame', async () => {
+    const retina = await sharp({
+      create: { width: 2048, height: 1280, channels: 4, background: '#ffffff' }
+    })
+      .png()
+      .toBuffer()
+
+    const target = resolveBrowserModelViewport(DEFAULT_COMPUTER_USE_SETTINGS)
+    expect(target).toEqual({ width: 1440, height: 900 })
+    await expect(
+      sharp(
+        await normalizeBrowserModelFrame(
+          retina,
+          target,
+          DEFAULT_COMPUTER_USE_SETTINGS.screenshotQuality
+        )
+      ).metadata()
+    ).resolves.toMatchObject(target)
+  })
+
+  it('aligns the selected frame when the model requires patch-sized images', () => {
+    expect(resolveBrowserModelViewport(DEFAULT_COMPUTER_USE_SETTINGS, 32)).toEqual({
+      width: 1440,
+      height: 896
+    })
+  })
+
   it('waits inside one capture while Chromium paints instead of spending model steps', async () => {
     vi.useFakeTimers()
-    const capturePage = vi.fn(async () => ({ isEmpty: () => true }))
-    const invalidate = vi.fn()
+    const capturePage = vi.fn(async () => ({
+      isEmpty: () => true,
+      toPNG: () => Buffer.alloc(0),
+      getSize: () => ({ width: 0, height: 0 })
+    }))
     const screen = createBrowserVisionScreen({
-      activeView: () =>
-        ({ webContents: { capturePage, invalidate } }) as unknown as ReturnType<
-          Parameters<typeof createBrowserVisionScreen>[0]['activeView']
-        >,
-      activeDriver: () =>
-        ({
-          ensurePageReady: async () => ({ url: 'https://example.test' })
-        }) as unknown as ReturnType<
-          Parameters<typeof createBrowserVisionScreen>[0]['activeDriver']
-        >,
+      activePage: () => ({
+        view: {
+          webContents: {
+            invalidate: vi.fn(),
+            capturePage,
+            getURL: () => 'https://example.test',
+            getTitle: () => 'Example'
+          }
+        } as unknown as WebContentsView,
+        driver: {
+          ensurePageReady: async () => ({
+            url: 'https://example.test',
+            readyState: 'complete',
+            documentId: 'document-a'
+          }),
+          ensurePointer: vi.fn(async () => undefined),
+          viewportSize: vi.fn(async () => ({ width: 1920, height: 1200 }))
+        } as unknown as BrowserDriver
+      }),
       taskId: 'paint-recovery',
       journeyId: 'paint-recovery-chat',
       goal: 'Wait for the rendered page',
@@ -240,7 +273,83 @@ describe('browser screenshot evidence', () => {
       message: expect.stringContaining('empty screenshot')
     })
     expect(capturePage.mock.calls.length).toBeGreaterThan(1)
-    expect(invalidate).toHaveBeenCalledTimes(capturePage.mock.calls.length)
+  })
+
+  it('keeps one exact model frame and clicks the captured target after the pane resizes', async () => {
+    const sourcePng = await sharp({
+      create: { width: 1920, height: 1200, channels: 4, background: '#ffffff' }
+    })
+      .composite([
+        {
+          input: Buffer.from(
+            '<svg width="120" height="80"><rect width="120" height="80" fill="#059669"/></svg>'
+          ),
+          left: 900,
+          top: 560
+        }
+      ])
+      .png()
+      .toBuffer()
+    const ensurePointer = vi.fn(async () => undefined)
+    const capturePage = vi.fn(async () => ({
+      isEmpty: () => false,
+      toPNG: () => sourcePng,
+      getSize: () => ({ width: 1920, height: 1200 })
+    }))
+    const viewportSize = vi
+      .fn()
+      .mockResolvedValueOnce({ width: 1920, height: 1200 })
+      .mockResolvedValueOnce({ width: 1920, height: 1200 })
+      // The former click-time remap consumed this transient resize value.
+      .mockResolvedValue({ width: 1, height: 1 })
+    const actuate = vi.fn(async () => ({ ok: true as const }))
+    const driver = {
+      ensurePageReady: vi.fn(async () => ({
+        url: 'https://example.test',
+        readyState: 'complete',
+        documentId: 'document-a'
+      })),
+      ensurePointer,
+      viewportSize,
+      pageState: vi.fn(async () => ({
+        url: 'https://example.test',
+        readyState: 'complete',
+        documentId: 'document-a'
+      })),
+      actuate
+    } as unknown as BrowserDriver
+    const view = {
+      webContents: {
+        invalidate: vi.fn(),
+        capturePage,
+        getURL: () => 'https://example.test',
+        getTitle: () => 'Example'
+      }
+    } as unknown as WebContentsView
+    const screen = createBrowserVisionScreen({
+      activePage: () => ({ view, driver }),
+      taskId: 'resize-journey',
+      journeyId: 'resize-journey-chat',
+      goal: 'Click the center target',
+      settings: { ...DEFAULT_COMPUTER_USE_SETTINGS, screenshotSize: 'compact' },
+      platform: 'darwin'
+    })
+
+    const captured = await screen.capture()
+    const persistedPng = browserEvidenceMocks.writeFileSync.mock.calls[0]?.[1] as Buffer
+    expect(captured.image).toMatch(/^\/tmp\/resize-journey-[0-9a-f-]{36}-1\.png$/)
+    expect(captured.bounds).toEqual({ width: 1024, height: 640 })
+    expect(await sharp(persistedPng).metadata()).toMatchObject({ width: 1024, height: 640 })
+    expect(ensurePointer.mock.invocationCallOrder[0]).toBeLessThan(
+      capturePage.mock.invocationCallOrder[0]!
+    )
+
+    // This is the exact inference point that the real run incorrectly remapped
+    // to (1, 1) while the user resized the task pane.
+    await screen.actuate({ type: 'click', point: { x: 281, y: 186 } })
+
+    expect(actuate).toHaveBeenCalledWith({ type: 'click', point: { x: 527, y: 349 } })
+    expect(viewportSize).toHaveBeenCalledTimes(2)
   })
 
   it('rejects a valid PNG that contains only a blank browser background', async () => {

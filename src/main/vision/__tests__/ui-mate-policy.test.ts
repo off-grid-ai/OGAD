@@ -25,7 +25,16 @@ describe('UI-Mate official response fixtures', () => {
 
   it('scales official 0-999 coordinates to the real viewport', () => {
     const parsed = parseUIMateResponse(fixtures.cases[0]!.response, fixtures.viewport)
-    expect(parsed.actions[0]?.coordinate).toEqual([36, 606])
+    expect(parsed.actions[0]?.coordinate).toEqual([36, 605])
+  })
+
+  it('keeps the complete UI-Mate action grid inside the encoded image', () => {
+    const response =
+      '<action>Click the lower-right target.</action><tool_call><function=computer_use><parameter=action>left_click</parameter><parameter=coordinate>[999, 999]</parameter></function></tool_call>'
+
+    expect(parseUIMateResponse(response, { width: 832, height: 732 }).actions[0]?.coordinate).toEqual(
+      [831, 731]
+    )
   })
 })
 

@@ -256,12 +256,12 @@ class BrowserHost implements BrowserRailHost {
   private coarseBounds(): Rect {
     const win = getMainWindow()
     const [width, height] = (win ? win.getContentSize() : [1200, 800]) as [number, number]
-    return {
+    return fitWebUseDesktopRegion({
       x: Math.round(width * 0.58),
       y: 56,
       width: Math.round(width * 0.42),
       height: Math.max(200, height - 260)
-    }
+    })
   }
 
   private syncViewVisibility(): void {
@@ -270,11 +270,12 @@ class BrowserHost implements BrowserRailHost {
       const live = this.sessions.get(record.sessionId)
       if (!live) continue
       const visible = Boolean(active && active.sessionId === live.sessionId && this.region)
-      if (visible) {
-        const bounds = this.region ?? this.coarseBounds()
-        live.resource.setBounds(bounds)
-        live.resource.webContents.setZoomFactor(webUseDesktopZoomFactor(bounds))
-      }
+      // Keep every page at a real desktop render size even while its pane is
+      // hidden. Visibility is presentation only; it must not collapse the page
+      // viewport that CDP captures for Web Use.
+      const bounds = this.region ?? this.coarseBounds()
+      live.resource.setBounds(bounds)
+      live.resource.webContents.setZoomFactor(webUseDesktopZoomFactor(bounds))
       this.setViewVisible(live.resource, visible)
     }
   }
@@ -338,6 +339,7 @@ class BrowserHost implements BrowserRailHost {
           if (live) this.setViewVisible(live.resource, false)
         }
       })
+      win.on('show', () => this.syncViewVisibility())
       win.once('close', () => this.dispose())
     }
     this.syncViewVisibility()
@@ -705,12 +707,10 @@ class BrowserHost implements BrowserRailHost {
         if (!ownsRun()) return replacedResult()
         recordStep(`continued at ${record.chrome.url || 'the current page'}`)
       }
-      const activeDriver = (): BrowserDriver => {
+      const activePage = (): { view: WebContentsView; driver: BrowserDriver } => {
         const page = this.sessions.findJourney(journeyId) ?? record
-        return this.driverFor(page)
+        return { view: page.resource, driver: this.driverFor(page) }
       }
-      const activeView = (): WebContentsView =>
-        (this.sessions.findJourney(journeyId) ?? record).resource
 
       // The model publishes cumulative text for the current step, then starts the
       // next step with an empty live event. Keep one transcript per task so a step
@@ -757,8 +757,7 @@ class BrowserHost implements BrowserRailHost {
           adapter: selection.adapter,
           guard,
           plan,
-          activeView,
-          activeDriver,
+          activePage,
           waitForUser: async (why) => {
             if (!ownsRun()) return
             broadcast('browser:takeover', { sessionId: record.sessionId, taskId, why })
@@ -805,7 +804,7 @@ class BrowserHost implements BrowserRailHost {
         })
       })
       if (!ownsRun()) return replacedResult()
-      const finalContents = activeView().webContents
+      const finalContents = activePage().view.webContents
       const finalUrl = finalContents.getURL()
       const finalTitle = finalContents.getTitle()
       const status = visual.ok ? 'done' : guard.isHalted ? 'stopped' : 'failed'

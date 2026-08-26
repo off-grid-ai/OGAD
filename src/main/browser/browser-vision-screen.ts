@@ -1,18 +1,19 @@
 import fs from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import sharp from 'sharp'
 import type { NativeImage, WebContentsView } from 'electron'
-import type { ComputerUseSettings } from '../../shared/computer-use-settings'
-import { SCREENSHOT_MAX_EDGE, SCREENSHOT_RESIZE_QUALITY } from '../../shared/computer-use-settings'
+import { SCREENSHOT_MAX_EDGE, type ComputerUseSettings } from '../../shared/computer-use-settings'
+import { WEB_USE_DESKTOP_VIEWPORT } from '../../shared/browser-session'
 import { getTaskExecutionDevice, recordTaskRun, taskScreenshotPath } from '../tasks/task-history'
 import type { VisionAction } from '../vision/vision-action'
 import { RecoverableVisionError, type VisionScreen } from '../vision/vision-agent'
-import { alignPixelSize, planAspectPreservingResize } from '../vision/screenshot-geometry'
 import type { BrowserDriver } from './browser-driver'
 import { createBrowserCoordinateTransform } from '../../shared/browser-coordinate-transform'
 import { browserPageHasVisualContent } from './browser-page-evidence'
+import { alignPixelSize, planAspectPreservingResize } from '../vision/screenshot-geometry'
 
 interface BrowserVisionScreenInput {
-  activeView: () => WebContentsView
-  activeDriver: () => BrowserDriver
+  activePage: () => { view: WebContentsView; driver: BrowserDriver }
   taskId: string
   journeyId: string
   goal: string
@@ -32,23 +33,87 @@ function waitForPaintRetry(): Promise<void> {
   })
 }
 
+export function resolveBrowserModelViewport(
+  settings: ComputerUseSettings,
+  screenshotResizeFactor?: number
+): { width: number; height: number } {
+  const planned = planAspectPreservingResize(
+    WEB_USE_DESKTOP_VIEWPORT,
+    SCREENSHOT_MAX_EDGE[settings.screenshotSize]
+  ).encodedSize
+  return screenshotResizeFactor ? alignPixelSize(planned, screenshotResizeFactor) : planned
+}
+
+export async function normalizeBrowserModelFrame(
+  sourcePng: Buffer,
+  target: { width: number; height: number },
+  quality: ComputerUseSettings['screenshotQuality']
+): Promise<Buffer> {
+  const kernel =
+    quality === 'efficient'
+      ? sharp.kernel.nearest
+      : quality === 'detailed'
+        ? sharp.kernel.lanczos3
+        : sharp.kernel.cubic
+  return sharp(sourcePng)
+    .resize({ ...target, fit: 'fill', kernel })
+    .png()
+    .toBuffer()
+}
+
 /** Chromium can report a complete DOM before the compositor has a frame for
  * capturePage(), especially after an SPA route change or native-view resize.
  * Keep that transient wait inside the capture boundary so it does not spend
  * model steps or create false rejected observations. */
-async function capturePaintedBrowserFrame(view: WebContentsView): Promise<NativeImage> {
+interface CapturedBrowserFrame {
+  image: NativeImage
+  viewport: { width: number; height: number }
+}
+
+function stableWebUseViewport(
+  left: { width: number; height: number },
+  right: { width: number; height: number }
+): boolean {
+  const tolerance = 2
+  const closeToFixedFrame = (viewport: { width: number; height: number }): boolean =>
+    Math.abs(viewport.width - WEB_USE_DESKTOP_VIEWPORT.width) <= tolerance &&
+    Math.abs(viewport.height - WEB_USE_DESKTOP_VIEWPORT.height) <= tolerance
+  return (
+    closeToFixedFrame(left) &&
+    closeToFixedFrame(right) &&
+    Math.abs(left.width - right.width) <= 1 &&
+    Math.abs(left.height - right.height) <= 1
+  )
+}
+
+async function capturePaintedBrowserFrame(
+  view: WebContentsView,
+  driver: BrowserDriver
+): Promise<CapturedBrowserFrame> {
   const deadline = Date.now() + PAINTED_FRAME_TIMEOUT_MS
   let sawPixels = false
   for (;;) {
+    // The injected pointer is part of the page. Put it in the compositor frame
+    // before capture so Task history and the model receive the same pixels.
+    await driver.ensurePointer(true)
+    const viewportBefore = await driver.viewportSize()
+    if (!stableWebUseViewport(viewportBefore, viewportBefore)) {
+      if (Date.now() >= deadline) break
+      await waitForPaintRetry()
+      continue
+    }
     view.webContents.invalidate()
     const image = await view.webContents.capturePage(undefined, {
       stayHidden: true,
       stayAwake: true
     })
-    if (!image.isEmpty()) {
+    const viewportAfter = await driver.viewportSize()
+    if (!image.isEmpty() && stableWebUseViewport(viewportBefore, viewportAfter)) {
       sawPixels = true
       const png = image.toPNG()
-      if (png.length && (await browserPageHasVisualContent(png))) return image
+      if (await browserPageHasVisualContent(png)) {
+        return { image, viewport: viewportBefore }
+      }
     }
     if (Date.now() >= deadline) break
     await waitForPaintRetry()
@@ -113,17 +178,6 @@ export function mapBrowserVisionAction(
   }
 }
 
-/** Recalculate a page-local action when the live browser was resized after the
- * screenshot. Web Use keeps one fixed 1920x1200 CSS viewport and changes only
- * its native zoom, so this proportional transform preserves the target. */
-export function remapPageActionToCurrentViewport(
-  action: VisionAction,
-  capturedPage: { width: number; height: number },
-  currentViewport: { width: number; height: number }
-): VisionAction {
-  return mapBrowserVisionAction(action, capturedPage, currentViewport)
-}
-
 /** Translate the model's generic desktop shortcuts into the host platform's
  * primary modifier before browser actuation. */
 export function normalizeBrowserShortcut(
@@ -142,41 +196,39 @@ export function normalizeBrowserShortcut(
  * isolated agent page, then execute the official computer-use action space by
  * CDP. The saved frame is also the durable last state for Task history. */
 export function createBrowserVisionScreen(input: BrowserVisionScreenInput): VisionScreen {
+  // Freeze the selected model frame for the full task. Settings and pane bounds
+  // cannot change the coordinate space between an observation and its action.
+  const modelViewport = resolveBrowserModelViewport(input.settings, input.screenshotResizeFactor)
   let encoded = { width: 1, height: 1 }
   let viewport = { width: 1, height: 1 }
   let captureNumber = 0
-  let capturedPageUrl = ''
+  const captureSeriesId = randomUUID()
+  let capturedDocumentId = ''
+  let capturedPage: ReturnType<BrowserVisionScreenInput['activePage']> | undefined
   let transientCaptureFailures = 0
   let transientActuationFailures = 0
   return {
     async capture() {
       try {
-        const view = input.activeView()
-        const driver = input.activeDriver()
+        const page = input.activePage()
+        const { view, driver } = page
         const ready = await driver.ensurePageReady()
-        const image = await capturePaintedBrowserFrame(view)
-        capturedPageUrl = ready.url
-        const capturedPixels = image.getSize()
-        viewport = await input.activeDriver().viewportSize()
-        const planned = planAspectPreservingResize(
-          capturedPixels,
-          SCREENSHOT_MAX_EDGE[input.settings.screenshotSize]
-        ).encodedSize
-        const target = input.screenshotResizeFactor
-          ? alignPixelSize(planned, input.screenshotResizeFactor)
-          : planned
-        const inferenceImage =
-          target.width === capturedPixels.width && target.height === capturedPixels.height
-            ? image
-            : image.resize({
-                ...target,
-                quality: SCREENSHOT_RESIZE_QUALITY[input.settings.screenshotQuality]
-              })
-        encoded = inferenceImage.getSize()
-        const png = inferenceImage.toPNG()
+        const captured = await capturePaintedBrowserFrame(view, driver)
+        const sourcePng = captured.image.toPNG()
+        capturedDocumentId = ready.documentId
+        capturedPage = page
+        viewport = captured.viewport
+        encoded = modelViewport
+        // Normalize the complete rendered surface once. This exact PNG is both
+        // the model input and the Task-history image.
+        const png = await normalizeBrowserModelFrame(
+          sourcePng,
+          modelViewport,
+          input.settings.screenshotQuality
+        )
         if (!png.length) throw new Error('The browser returned an invalid screenshot.')
         captureNumber += 1
-        const savedPath = taskScreenshotPath(input.taskId, captureNumber)
+        const savedPath = taskScreenshotPath(input.taskId, `${captureSeriesId}-${captureNumber}`)
         fs.writeFileSync(savedPath, png)
         const device = getTaskExecutionDevice()
         recordTaskRun({
@@ -190,6 +242,7 @@ export function createBrowserVisionScreen(input: BrowserVisionScreenInput): Visi
           lastTitle: view.webContents.getTitle()
         })
         transientCaptureFailures = 0
+        transientActuationFailures = 0
         return {
           image: savedPath,
           bounds: encoded,
@@ -197,12 +250,9 @@ export function createBrowserVisionScreen(input: BrowserVisionScreenInput): Visi
             path: savedPath,
             viewport,
             geometry: {
-              sourceBounds: { x: 0, y: 0, ...capturedPixels },
+              sourceBounds: { x: 0, y: 0, ...captured.image.getSize() },
               encodedSize: encoded,
-              scale: Math.min(
-                encoded.width / capturedPixels.width,
-                encoded.height / capturedPixels.height
-              )
+              scale: modelViewport.width / captured.image.getSize().width
             }
           }
         }
@@ -219,9 +269,13 @@ export function createBrowserVisionScreen(input: BrowserVisionScreenInput): Visi
           mapBrowserVisionAction(action, encoded, viewport),
           input.platform ?? process.platform
         )
-        const driver = input.activeDriver()
+        const driver = capturedPage?.driver
+        if (!driver) return { rejected: 'Take a new screenshot before acting.' }
         const pageState = await driver.pageState()
-        if (pageState.url !== capturedPageUrl || pageState.readyState === 'loading') {
+        if (
+          pageState.readyState === 'loading' ||
+          (capturedDocumentId && pageState.documentId !== capturedDocumentId)
+        ) {
           transientActuationFailures += 1
           if (transientActuationFailures > MAX_TRANSIENT_RECOVERIES) {
             throw new Error(
@@ -233,9 +287,9 @@ export function createBrowserVisionScreen(input: BrowserVisionScreenInput): Visi
               'The page changed or started loading after the screenshot. Take a new screenshot before acting.'
           }
         }
-        const currentViewport = await driver.viewportSize()
-        const pageAction = remapPageActionToCurrentViewport(mapped, viewport, currentViewport)
-        const result = await driver.actuate(pageAction)
+        // The captured CSS viewport owns this action. Native pane bounds and
+        // zoom are presentation only and must not remap an approved target.
+        const result = await driver.actuate(mapped)
         if (!result.ok) {
           if (result.reason === 'takeover') return { handoff: result.detail }
           if (result.reason === 'recoverable') return { rejected: result.detail }
@@ -246,7 +300,7 @@ export function createBrowserVisionScreen(input: BrowserVisionScreenInput): Visi
           timer.unref()
         })
         transientActuationFailures = 0
-        return { mappedAction: pageAction }
+        return { mappedAction: mapped }
       } catch (error) {
         if (browserRecoveryDisposition(error, transientActuationFailures) === 'fail') throw error
         transientActuationFailures += 1

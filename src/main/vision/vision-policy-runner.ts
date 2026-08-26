@@ -1,7 +1,6 @@
 import fs from 'node:fs'
 import sharp from 'sharp'
 import { llm } from '../llm'
-import { imageMime } from '../llm/chat-payload'
 import { TASK_GUIDANCE_APPLIED_TRACE } from '../tasks/task-guide'
 import type { VisionGroundingInput, VisionGroundingResult } from './vision-agent'
 import type { VisionAction } from './vision-action'
@@ -196,6 +195,40 @@ interface PreviousClickMarker {
   y: number
 }
 
+const COORDINATE_GRID_MAX = 1_000
+const COORDINATE_GRID_INTERVAL = 20
+const COORDINATE_GRID_LABEL_INTERVAL = 20
+
+/** Draw one stable 0-1000 reference grid without changing image dimensions.
+ * The grid is evidence, so it is persisted with the exact model bytes. */
+function normalizedCoordinateGrid(width: number, height: number): Buffer {
+  const lineCount = COORDINATE_GRID_MAX / COORDINATE_GRID_INTERVAL + 1
+  const labelCount = COORDINATE_GRID_MAX / COORDINATE_GRID_LABEL_INTERVAL + 1
+  const verticalLines = Array.from({ length: lineCount }, (_, index) => {
+    const x = Math.round((index * COORDINATE_GRID_INTERVAL * (width - 1)) / COORDINATE_GRID_MAX)
+    return `<line x1="${x}" y1="0" x2="${x}" y2="${height}"/>`
+  }).join('')
+  const horizontalLines = Array.from({ length: lineCount }, (_, index) => {
+    const y = Math.round((index * COORDINATE_GRID_INTERVAL * (height - 1)) / COORDINATE_GRID_MAX)
+    return `<line x1="0" y1="${y}" x2="${width}" y2="${y}"/>`
+  }).join('')
+  const xLabels = Array.from({ length: labelCount }, (_, index) => {
+    const value = index * COORDINATE_GRID_LABEL_INTERVAL
+    const x = Math.round((value * (width - 1)) / COORDINATE_GRID_MAX)
+    const labelX = Math.min(Math.max(3, x + 3), Math.max(3, width - 48))
+    return `<text x="${labelX}" y="15">${value}</text>`
+  }).join('')
+  const yLabels = Array.from({ length: labelCount }, (_, index) => {
+    const value = index * COORDINATE_GRID_LABEL_INTERVAL
+    const y = Math.round((value * (height - 1)) / COORDINATE_GRID_MAX)
+    const labelY = Math.min(Math.max(30, y + 14), Math.max(30, height - 4))
+    return `<text x="3" y="${labelY}">${value}</text>`
+  }).join('')
+  return Buffer.from(
+    `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"><g stroke="#059669" stroke-width="1" stroke-dasharray="4 6" opacity="0.22">${verticalLines}${horizontalLines}</g><g fill="#064E3B" stroke="#FFFFFF" stroke-width="2" paint-order="stroke" font-family="Menlo,monospace" font-size="11" font-weight="700" opacity="0.8">${xLabels}${yLabels}</g></svg>`
+  )
+}
+
 function clickPoint(action: VisionAction): { x: number; y: number } | undefined {
   switch (action.type) {
     case 'click':
@@ -258,46 +291,28 @@ export async function modelScreenshot(input: VisionGroundingInput): Promise<{
   const metadata = await sharp(source).metadata()
   if (metadata.width !== expected.width || metadata.height !== expected.height) {
     throw new Error(
-      `The visual model frame dimensions do not match: image is ${metadata.width ?? 0}x${metadata.height ?? 0}, coordinate frame is ${expected.width}x${expected.height}.`
+      `The visual model frame dimensions do not match: image is ${metadata.width}x${metadata.height}, coordinate frame is ${expected.width}x${expected.height}.`
     )
   }
   const marker = previousClickMarker(input)
-  if (!marker) {
-    return { dataUrl: `data:${imageMime(input.image)};base64,${source.toString('base64')}` }
-  }
-  const markerSize = Math.max(
-    14,
-    Math.min(
-      24,
-      Math.round(
-        Math.min(input.coordinateFrame!.encoded.width, input.coordinateFrame!.encoded.height) *
-          0.025
-      )
+  const overlays: Array<{ input: Buffer; left: number; top: number }> = [
+    { input: normalizedCoordinateGrid(expected.width, expected.height), left: 0, top: 0 }
+  ]
+  if (marker) {
+    const markerSize = Math.max(
+      14,
+      Math.min(24, Math.round(Math.min(expected.width, expected.height) * 0.025))
     )
-  )
-  const radius = markerSize / 2
-  const overlay = Buffer.from(
-    `<svg width="${markerSize}" height="${markerSize}" xmlns="http://www.w3.org/2000/svg"><circle cx="${radius}" cy="${radius}" r="${Math.max(2, radius - 2)}" fill="#34D399" stroke="#FFFFFF" stroke-width="2"/></svg>`
-  )
-  const annotated = await sharp(source)
-    .composite([
-      {
-        input: overlay,
-        left: Math.max(
-          0,
-          Math.min(input.coordinateFrame!.encoded.width - markerSize, Math.round(marker.x - radius))
-        ),
-        top: Math.max(
-          0,
-          Math.min(
-            input.coordinateFrame!.encoded.height - markerSize,
-            Math.round(marker.y - radius)
-          )
-        )
-      }
-    ])
-    .png()
-    .toBuffer()
+    const radius = markerSize / 2
+    overlays.push({
+      input: Buffer.from(
+        `<svg width="${markerSize}" height="${markerSize}" xmlns="http://www.w3.org/2000/svg"><circle cx="${radius}" cy="${radius}" r="${Math.max(2, radius - 2)}" fill="#34D399" stroke="#FFFFFF" stroke-width="2"/></svg>`
+      ),
+      left: Math.max(0, Math.min(expected.width - markerSize, Math.round(marker.x - radius))),
+      top: Math.max(0, Math.min(expected.height - markerSize, Math.round(marker.y - radius)))
+    })
+  }
+  const annotated = await sharp(source).composite(overlays).png().toBuffer()
   fs.writeFileSync(input.image, annotated)
   return { dataUrl: `data:image/png;base64,${annotated.toString('base64')}`, marker }
 }

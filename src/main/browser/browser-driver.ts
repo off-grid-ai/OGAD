@@ -57,6 +57,7 @@ export interface BrowserPointerMotion {
 export interface BrowserPageState {
   url: string
   readyState: string
+  documentId: string
 }
 
 interface BrowserNavigationHistory {
@@ -146,6 +147,8 @@ function isBrowserReloadChord(keys: readonly string[]): boolean {
 
 export class BrowserDriver {
   private pointer: BrowserPointerEvent
+  private lastClick: { x: number; y: number } | null = null
+  private readonly documentIdentityProperty = `__offgrid_document_${Math.random().toString(36).slice(2)}`
   private readonly onPointer?: (event: BrowserPointerEvent) => void
   private readonly pageReadyTimeoutMs: number
 
@@ -187,6 +190,7 @@ export class BrowserDriver {
     const pointerMarkup = browserPointerSvgMarkup()
     const expression = `(() => {
       const id = '__offgrid_agent_pointer__';
+      const markerId = '__offgrid_agent_click_marker__';
       const observerKey = '__offgrid_agent_pointer_observer__';
       const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       let cursor = document.getElementById(id);
@@ -197,8 +201,17 @@ export class BrowserDriver {
         cursor.style.cssText = 'position:fixed;left:0;top:0;width:${BROWSER_POINTER_VISUAL.width}px;height:${BROWSER_POINTER_VISUAL.height}px;pointer-events:none;z-index:2147483647;will-change:transform;filter:drop-shadow(0 0 5px ${BROWSER_POINTER_VISUAL.glow}) drop-shadow(0 1px 1px rgba(0,0,0,.5));';
         cursor.innerHTML = ${JSON.stringify(pointerMarkup)};
       }
+      const lastClick = ${JSON.stringify(this.lastClick)};
+      let marker = document.getElementById(markerId);
+      if (lastClick && !marker) {
+        marker = document.createElement('div');
+        marker.id = markerId;
+        marker.setAttribute('aria-hidden', 'true');
+        marker.style.cssText = 'position:fixed;left:0;top:0;width:14px;height:14px;margin:-7px 0 0 -7px;border:2px solid ${BROWSER_POINTER_VISUAL.action};border-radius:9999px;pointer-events:none;z-index:2147483646;box-sizing:border-box;box-shadow:0 0 0 2px rgba(255,255,255,.9),0 0 7px ${BROWSER_POINTER_VISUAL.glow};';
+      }
       const mount = () => {
         if (!cursor.isConnected) (document.body || document.documentElement).appendChild(cursor);
+        if (marker && !marker.isConnected) (document.body || document.documentElement).appendChild(marker);
       };
       mount();
       if (!window[observerKey]) {
@@ -212,6 +225,9 @@ export class BrowserDriver {
       if (!${JSON.stringify(onlyIfMissing)} || !cursor.dataset.positioned) {
         cursor.style.transform = 'translate3d(${Math.round(event.x - BROWSER_POINTER_VISUAL.hotspotX)}px,${Math.round(event.y - BROWSER_POINTER_VISUAL.hotspotY)}px,0)';
         cursor.dataset.positioned = 'true';
+      }
+      if (marker && lastClick) {
+        marker.style.transform = 'translate3d(' + Math.round(lastClick.x) + 'px,' + Math.round(lastClick.y) + 'px,0)';
       }
       if (${JSON.stringify(event.phase)} === 'pressed') {
         const pulse = document.createElement('div');
@@ -294,14 +310,19 @@ export class BrowserDriver {
     const response = await this.send<{ result?: { value?: BrowserPageState } }>(
       'Runtime.evaluate',
       {
-        expression: '({ url: location.href, readyState: document.readyState })',
+        expression: `(() => {
+          const key = ${JSON.stringify(this.documentIdentityProperty)};
+          if (!globalThis[key]) globalThis[key] = Math.random().toString(36).slice(2);
+          return { url: location.href, readyState: document.readyState, documentId: globalThis[key] };
+        })()`,
         returnByValue: true
       }
     )
     return (
       response.result?.value ?? {
         url: '',
-        readyState: 'loading'
+        readyState: 'loading',
+        documentId: ''
       }
     )
   }
@@ -427,6 +448,7 @@ export class BrowserDriver {
     clickCount: number
   ): Promise<DriverResult> {
     await this.movePointerTo(x, y)
+    this.lastClick = { x, y }
     const phases = [
       { type: 'mousePressed', phase: 'pressed' },
       { type: 'mouseReleased', phase: 'released' }

@@ -5,6 +5,7 @@ import { appendTaskStepDetail, getTaskExecutionDevice } from '../tasks/task-hist
 import type { ComputerUseStepDetail } from '../tasks/task-step-details'
 import type { TaskExecutionPlan } from '../../shared/task-execution-plan'
 import { resolveComputerUseContextTokens } from '../../shared/computer-use-settings'
+import { recentVisualFacts } from '../vision/visual-context'
 import {
   type VisionStepObservation,
   type VisionTaskProgress,
@@ -93,8 +94,7 @@ interface BrowserVisualTaskInput {
   adapter: VisionModelAdapter
   guard: VisionGuard
   plan: TaskExecutionPlan
-  activeView: () => WebContentsView
-  activeDriver: () => BrowserDriver
+  activePage: () => { view: WebContentsView; driver: BrowserDriver }
   takeGuidance: () => readonly string[]
   waitForUser: (why: string) => Promise<void>
   onStep: (note: string) => void
@@ -111,8 +111,7 @@ export function runBrowserVisualTask(input: BrowserVisualTaskInput): Promise<Vis
   const executionDevice = getTaskExecutionDevice()
   return runVisionTaskGraph(input.goal, {
     screen: createBrowserVisionScreen({
-      activeView: input.activeView,
-      activeDriver: input.activeDriver,
+      activePage: input.activePage,
       taskId: input.taskId,
       journeyId: input.journeyId,
       goal: input.goal,
@@ -132,6 +131,7 @@ export function runBrowserVisualTask(input: BrowserVisualTaskInput): Promise<Vis
     contextTokens: resolveComputerUseContextTokens(settings.context, llm.effectiveContextSize()),
     checkpointInterval: settings.checkpointInterval,
     visualHistoryFrames: settings.visualHistoryFrames,
+    retrievedFacts: settings.retrieveOlderVisuals ? recentVisualFacts(input.taskId) : [],
     signal: input.signal,
     onObservation: (observation) => {
       const detail = browserVisionStepDetail(observation, executionDevice)
