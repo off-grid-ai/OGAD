@@ -59,6 +59,11 @@ export interface BrowserPageState {
   readyState: string
 }
 
+interface BrowserNavigationHistory {
+  currentIndex: number
+  entries: ReadonlyArray<{ id: number; url: string }>
+}
+
 const NAVIGATION_TIMEOUT_MS = 20_000
 /** A single CDP command should return in well under a second on a live page.
  *  When the WebContents/network service is wedged (e.g. after a "Network
@@ -98,6 +103,37 @@ export function browserPointerMotion(
       index === 0 || point.x !== all[index - 1]!.x || point.y !== all[index - 1]!.y
   )
   return { durationMs, points }
+}
+
+/** Models commonly spell chords with either spaces or plus signs. CDP needs
+ * separate key values, and browser-history chords need semantic handling. */
+export function browserHotkeyTokens(keys: string): string[] {
+  return keys
+    .trim()
+    .split(/[+\s]+/)
+    .map((key) => key.trim())
+    .filter(Boolean)
+}
+
+/** Browser chrome is not part of the captured page. Convert its portable
+ * back/forward shortcuts into history movement instead of page key events. */
+export function browserHistoryDelta(keys: readonly string[]): -1 | 0 | 1 {
+  const chord = keys.map((key) => key.toLowerCase())
+  if (chord.length !== 2) return 0
+  const [modifier, key] = chord
+  if ((modifier === 'alt' || modifier === 'option') && key === 'left') return -1
+  if ((modifier === 'alt' || modifier === 'option') && key === 'right') return 1
+  if (['cmd', 'command', 'meta'].includes(modifier ?? '') && key === '[') return -1
+  if (['cmd', 'command', 'meta'].includes(modifier ?? '') && key === ']') return 1
+  return 0
+}
+
+function isUnsupportedBrowserChromeChord(keys: readonly string[]): boolean {
+  const chord = keys.map((key) => key.toLowerCase())
+  if (chord.length !== 2) return false
+  const [modifier, key] = chord
+  const primary = ['ctrl', 'control', 'cmd', 'command', 'meta'].includes(modifier ?? '')
+  return primary && (key === 'l' || key === 'w')
 }
 
 export class BrowserDriver {
@@ -333,6 +369,36 @@ export class BrowserDriver {
     return { ok: true }
   }
 
+  private async moveThroughHistory(delta: -1 | 1): Promise<DriverResult> {
+    const history = await this.send<BrowserNavigationHistory>('Page.getNavigationHistory')
+    const target = history.entries[history.currentIndex + delta]
+    if (!target) {
+      return {
+        ok: false,
+        reason: 'recoverable',
+        detail: delta < 0 ? 'There is no earlier browser page.' : 'There is no later browser page.'
+      }
+    }
+    await this.send('Page.navigateToHistoryEntry', { entryId: target.id })
+    const deadline = Date.now() + this.pageReadyTimeoutMs
+    do {
+      const state = await this.pageState()
+      if (state.url === target.url && state.readyState !== 'loading') {
+        await this.ensurePointer(true)
+        return { ok: true }
+      }
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 100)
+        timer.unref()
+      })
+    } while (Date.now() <= deadline)
+    return {
+      ok: false,
+      reason: 'recoverable',
+      detail: 'The browser did not finish moving through its history.'
+    }
+  }
+
   async click(el: PageElement): Promise<DriverResult> {
     return this.clickPoint(el.cx, el.cy, 'left', 1)
   }
@@ -508,8 +574,20 @@ export class BrowserDriver {
         })
         return { ok: true }
       }
-      case 'hotkey':
-        return this.dispatchKeys(action.keys.split(/\s+/), true)
+      case 'hotkey': {
+        const keys = browserHotkeyTokens(action.keys)
+        const historyDelta = browserHistoryDelta(keys)
+        if (historyDelta) return this.moveThroughHistory(historyDelta)
+        if (isUnsupportedBrowserChromeChord(keys)) {
+          return {
+            ok: false,
+            reason: 'recoverable',
+            detail:
+              'The embedded browser has no page-level address bar or tab strip. Use Alt+Left or Alt+Right for browser history.'
+          }
+        }
+        return this.dispatchKeys(keys, true)
+      }
       case 'press':
         return this.dispatchKeys(action.keys, false)
       case 'key_down':

@@ -6,7 +6,13 @@
  * webContents.debugger); everything above it runs real.
  */
 import { describe, expect, it } from 'vitest'
-import { BrowserDriver, browserPointerMotion, type CdpTransport } from '../browser-driver'
+import {
+  BrowserDriver,
+  browserHistoryDelta,
+  browserHotkeyTokens,
+  browserPointerMotion,
+  type CdpTransport
+} from '../browser-driver'
 import type { PageElement } from '../page-script'
 
 interface Sent {
@@ -114,6 +120,56 @@ describe('navigate', () => {
     )
     const result = await new BrowserDriver(t.cdp).navigate('https://nope.invalid')
     expect(result).toEqual({ ok: false, reason: 'error', detail: 'net::ERR_NAME_NOT_RESOLVED' })
+  })
+})
+
+describe('browser hotkeys', () => {
+  it('accepts plus-delimited and space-delimited chord spellings', () => {
+    expect(browserHotkeyTokens('ALT+LEFT')).toEqual(['ALT', 'LEFT'])
+    expect(browserHotkeyTokens('cmd l')).toEqual(['cmd', 'l'])
+    expect(browserHistoryDelta(['ALT', 'LEFT'])).toBe(-1)
+    expect(browserHistoryDelta(['Option', 'Right'])).toBe(1)
+    expect(browserHistoryDelta(['Meta', '['])).toBe(-1)
+  })
+
+  it('turns Alt+Left into a direct browser-history command', async () => {
+    const t = makeTransport((method) => {
+      if (method === 'Page.getNavigationHistory') {
+        return {
+          currentIndex: 1,
+          entries: [
+            { id: 10, url: 'https://x.test/results' },
+            { id: 11, url: 'https://x.test/booking' }
+          ]
+        }
+      }
+      if (method === 'Runtime.evaluate') {
+        return { result: { value: { url: 'https://x.test/results', readyState: 'complete' } } }
+      }
+      return {}
+    })
+
+    await expect(
+      new BrowserDriver(t.cdp).actuate({ type: 'hotkey', keys: 'ALT+LEFT' })
+    ).resolves.toEqual({ ok: true })
+    expect(t.sent.some((entry) => entry.method === 'Input.dispatchKeyEvent')).toBe(false)
+    expect(t.sent).toEqual(
+      expect.arrayContaining([
+        { method: 'Page.getNavigationHistory', params: undefined },
+        { method: 'Page.navigateToHistoryEntry', params: { entryId: 10 } }
+      ])
+    )
+  })
+
+  it('rejects address-bar and close-tab chords instead of pretending they worked', async () => {
+    const t = makeTransport()
+    await expect(
+      new BrowserDriver(t.cdp).actuate({ type: 'hotkey', keys: 'CTRL+L' })
+    ).resolves.toMatchObject({ ok: false, reason: 'recoverable' })
+    await expect(
+      new BrowserDriver(t.cdp).actuate({ type: 'hotkey', keys: 'CMD+W' })
+    ).resolves.toMatchObject({ ok: false, reason: 'recoverable' })
+    expect(t.sent).toEqual([])
   })
 })
 
