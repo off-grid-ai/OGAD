@@ -198,9 +198,22 @@ const shot = async (page, name) => {
   console.log(`SHOT ${target}`)
 }
 const nativeShot = (name) => {
+  nativeWindowId = execFileSync('swift', [
+    path.resolve('scripts/cg-window-id.swift'),
+    String(app.process().pid)
+  ])
+    .toString()
+    .trim()
   if (!nativeWindowId) throw new Error('Native Electron window ID is unavailable')
   const target = path.join(evidenceDir, `${name}.png`)
-  execFileSync('screencapture', ['-x', `-l${nativeWindowId}`, target])
+  try {
+    execFileSync('screencapture', ['-x', `-l${nativeWindowId}`, target])
+  } catch (error) {
+    console.warn(
+      `NATIVE SHOT unavailable (grant Screen Recording permission to capture it): ${error instanceof Error ? error.message : String(error)}`
+    )
+    return
+  }
   evidence.push(target)
   console.log(`SHOT ${target}`)
 }
@@ -324,13 +337,15 @@ try {
     env: evidenceEnvironment({
       profile,
       extra: {
-        OFFGRID_E2E_HEADLESS: '1',
+        OFFGRID_E2E_HEADLESS: process.env.OFFGRID_E2E_HEADLESS ?? '1',
         OFFGRID_E2E_ISOLATED_INSTANCE: '1',
         OFFGRID_BIN_DIR: path.join(profile, 'bin')
       }
     })
   })
   const page = await app.firstWindow()
+  page.on('console', (message) => console.log(`[renderer:${message.type()}] ${message.text()}`))
+  page.on('pageerror', (error) => console.error(`[renderer:error] ${error.stack ?? error.message}`))
   await page.waitForLoadState('domcontentloaded')
   await page.waitForURL((url) => url.protocol === 'file:')
   await page.emulateMedia({ reducedMotion: 'reduce' })
