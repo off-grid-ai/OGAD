@@ -2506,6 +2506,8 @@ export function MemoryChat({
   const chatBodyFrameRef = useRef<number | null>(null)
   const taskWorkspaceFrameRef = useRef<number | null>(null)
   const [taskWorkspaceSize, setTaskWorkspaceSize] = useState(48)
+  const taskWorkspaceSizeRef = useRef(48)
+  const taskWorkspaceVisibleRef = useRef(taskWorkspaceVisible)
   const [taskWorkspaceDragging, setTaskWorkspaceDragging] = useState(false)
   const reduceWorkspaceMotion = useReducedMotion()
   const chatBodyRef = useRef<ImperativePanelHandle>(null)
@@ -2519,6 +2521,10 @@ export function MemoryChat({
   useEffect(() => {
     chatBodyCollapsedRef.current = chatBodyCollapsed
   }, [chatBodyCollapsed])
+
+  useEffect(() => {
+    taskWorkspaceVisibleRef.current = taskWorkspaceVisible
+  }, [taskWorkspaceVisible])
 
   useEffect(
     () => () => {
@@ -2555,7 +2561,12 @@ export function MemoryChat({
       chatBodyFrameRef.current = null
       try {
         if (collapsed) chatBodyRef.current?.collapse()
-        else chatBodyRef.current?.expand()
+        else if (taskWorkspaceVisibleRef.current) {
+          // Immersive task detail grows the task panel to 100%. Restore the
+          // last user-selected split instead of asking the panel group to
+          // guess which sibling to collapse when Chat returns.
+          taskWorkspaceRef.current?.resize(taskWorkspaceSizeRef.current)
+        } else chatBodyRef.current?.expand()
       } catch {
         // State remains authoritative until the panel group is measured.
       }
@@ -6375,7 +6386,13 @@ export function MemoryChat({
             collapsedSize={0}
             className="min-w-0"
             style={{ transition: taskWorkspaceTransition }}
-            onResize={setTaskWorkspaceSize}
+            onResize={(size) => {
+              // A temporary immersive 100% layout is not the user's preferred
+              // split. Keep the last normal task width for Expand Chat.
+              if (chatBodyCollapsedRef.current) return
+              taskWorkspaceSizeRef.current = size
+              setTaskWorkspaceSize(size)
+            }}
           >
             <TaskWorkspace
               mainWorkspaceCollapsed={chatBodyCollapsed}

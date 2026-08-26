@@ -534,6 +534,13 @@ describe('<App/> desktop navigation integration', () => {
       expect(screen.getByRole('button', { name: 'Expand Chat' })).toBeTruthy()
     })
 
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Chat' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('task-side-panel')).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Hide task pane' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Collapse Chat' })).toBeTruthy()
+    })
+
     act(() =>
       emitTaskChange?.({
         ...task,
