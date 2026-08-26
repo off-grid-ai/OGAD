@@ -93,8 +93,14 @@ func runTextExtractor() {
         runAppsList()
         return
     }
+    // Screenshot-only vision asks only whether the focused native field is safe.
+    // The helper never reads or emits the field value.
+    if args.count >= 2 && args[1] == "--focused-element" {
+        runFocusedElementInspector()
+        return
+    }
     if args.count < 2 {
-        print("Usage: text-extractor <app-name>  |  text-extractor --elements <app-name>")
+        print("Usage: text-extractor <app-name> | --elements <app-name> | --focused-element")
         exit(1)
     }
 

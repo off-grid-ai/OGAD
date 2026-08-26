@@ -147,6 +147,54 @@ func runAppsList() {
     }
 }
 
+/** Classify the frontmost app's focused field without reading or emitting its
+ * value. Vision Computer Use uses this immediately before synthetic typing. */
+func runFocusedElementInspector() {
+    let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: false] as CFDictionary
+    guard AXIsProcessTrustedWithOptions(options),
+          let app = NSWorkspace.shared.frontmostApplication
+    else {
+        print("{\"state\":\"unknown\"}")
+        return
+    }
+    let appElem = AXUIElementCreateApplication(app.processIdentifier)
+    var focusedValue: AnyObject?
+    let result = AXUIElementCopyAttributeValue(
+        appElem,
+        kAXFocusedUIElementAttribute as CFString,
+        &focusedValue
+    )
+    guard result == .success,
+          let focused = focusedValue,
+          CFGetTypeID(focused) == AXUIElementGetTypeID()
+    else {
+        print("{\"state\":\"unknown\"}")
+        return
+    }
+    let element = focused as! AXUIElement
+    let role = axStr(element, kAXRoleAttribute as String) ?? ""
+    let subrole = axStr(element, kAXSubroleAttribute as String) ?? ""
+    let secure = role == "AXSecureTextField" || subrole == "AXSecureTextField"
+    if secure {
+        print("{\"state\":\"secure\"}")
+        return
+    }
+    let editableRoles: Set<String> = [
+        "AXTextField", "AXTextArea", "AXSearchField", "AXComboBox"
+    ]
+    var settable = DarwinBoolean(false)
+    let settableResult = AXUIElementIsAttributeSettable(
+        element,
+        kAXValueAttribute as CFString,
+        &settable
+    )
+    if editableRoles.contains(role) && settableResult == .success && settable.boolValue {
+        print("{\"state\":\"safe\"}")
+    } else {
+        print("{\"state\":\"unknown\"}")
+    }
+}
+
 func runElementsExtractor(_ appName: String) {
     let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
     if !AXIsProcessTrustedWithOptions(options) {

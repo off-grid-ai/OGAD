@@ -56,6 +56,8 @@
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@lancedb/lancedb": "^0.30.0",
+    "@langchain/core": "^1.2.9",
+    "@langchain/langgraph": "^1.4.12",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@offgrid/clipboard": "file:./packages/clipboard",
     "@offgrid/design": "file:./packages/design",
