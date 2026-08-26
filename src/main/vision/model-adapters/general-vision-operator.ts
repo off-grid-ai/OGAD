@@ -1,4 +1,4 @@
-import { parseVisionActionFromSourcePixels } from '../vision-action'
+import { parseVisionAction } from '../vision-action'
 import {
   type CanonicalDirection,
   DIRECTION_VERDICTS,
@@ -134,7 +134,7 @@ function parsePerformAction(
   if (!isSingleActionProtocol(action)) {
     return { command: null, error: 'perform_action did not contain exactly one action' }
   }
-  if (!parseVisionActionFromSourcePixels(action, encodedBounds, encodedBounds)) {
+  if (!parseVisionAction(action, encodedBounds)) {
     return { command: null, error: 'the action did not match the action protocol' }
   }
   return {
@@ -256,7 +256,7 @@ function taskContext(input: VisionPolicyInput): string {
       ? `Older task outcomes. These can be stale:\n${input.olderVisualFacts.join('\n')}`
       : '',
     encoded
-      ? `Screenshot coordinate space:\nThe supplied screenshot is ${encoded.width} pixels wide and ${encoded.height} pixels high. Return action coordinates in this exact pixel space.`
+      ? `Screenshot coordinate space:\nThe supplied screenshot is ${encoded.width} pixels wide and ${encoded.height} pixels high. Return every action point in the model's 0-1000 normalized coordinate space: x=0 is the left edge, x=1000 is the right edge, y=0 is the top edge, and y=1000 is the bottom edge.`
       : '',
     'Inspect the screenshot and choose exactly one transition command.'
   ]
@@ -296,7 +296,7 @@ export function parseGeneralVisionOperatorResponse(
     }
   }
   const actionResponse = `Decision: ${command.summary}\nAction: ${command.action}`
-  const action = parseVisionActionFromSourcePixels(actionResponse, encoded, encoded)
+  const action = parseVisionAction(actionResponse, encoded)
   if (!action) {
     return {
       kind: 'invalid',

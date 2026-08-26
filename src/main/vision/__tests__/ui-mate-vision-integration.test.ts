@@ -71,7 +71,7 @@ describe('specialist models use the canonical vision policy', () => {
     (_name, adapter) => {
       expect(adapter.parseResponse(verdict(), bounds)).toMatchObject({
         kind: 'actions',
-        actions: [{ type: 'click', point: { x: 500, y: 250 } }]
+        actions: [{ type: 'click', point: { x: 480, y: 136 } }]
       })
       expect(
         request(adapter).validateResponse?.(

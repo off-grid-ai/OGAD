@@ -77,9 +77,8 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
     const offOpen = onOpenTaskSidePanel((request) => requests.push(request))
     renderChat({ conversationId: 'conversation-b' })
 
-    await userEvent.click(
-      await screen.findByRole('button', { name: 'Open task details for Work done' })
-    )
+    await userEvent.click(await screen.findByRole('button', { name: /Work done/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Web Use, complete' }))
     expect(requests.at(-1)).toEqual({
       taskId: 'memory-web-task',
       kind: 'web_use',

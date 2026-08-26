@@ -115,6 +115,7 @@ describe('General vision operator adapter', () => {
     expect(serialized).toContain('Prior validated commands')
     expect(serialized).toContain('The site is open')
     expect(serialized).toContain('744 pixels wide and 1024 pixels high')
+    expect(serialized).toContain('0-1000 normalized coordinate space')
     expect(serialized).toContain('summary must directly report every concrete value requested')
     expect(serialized).not.toContain('subtask_complete()')
     expect(serialized).not.toContain('1064 pixels wide')
@@ -149,7 +150,7 @@ describe('General vision operator adapter', () => {
     expect(request.validateResponse?.(verdict())).toBe(true)
     expect(adapter.parseResponse(verdict(), bounds)).toMatchObject({
       kind: 'actions',
-      actions: [{ type: 'click', point: { x: 100, y: 295 } }]
+      actions: [{ type: 'click', point: { x: 74, y: 302 } }]
     })
   })
 
@@ -221,12 +222,24 @@ describe('General vision operator adapter', () => {
     expect(parsed).not.toHaveProperty('actions')
   })
 
-  it('preserves approved coordinates in the exact encoded screenshot space', () => {
+  it('maps canonical 0-1000 coordinates into the encoded screenshot space', () => {
     const parsed = parseGeneralVisionOperatorResponse(verdict(), bounds)
 
     expect(parsed).toMatchObject({
       kind: 'actions',
-      actions: [{ type: 'click', point: { x: 100, y: 295 } }]
+      actions: [{ type: 'click', point: { x: 74, y: 302 } }]
+    })
+  })
+
+  it('maps the observed 1024x640 flight-search output without pushing Y too low', () => {
+    const parsed = parseGeneralVisionOperatorResponse(
+      verdict({ action: "click(point='280 355')" }),
+      { width: 1024, height: 640 }
+    )
+
+    expect(parsed).toMatchObject({
+      kind: 'actions',
+      actions: [{ type: 'click', point: { x: 287, y: 227 } }]
     })
   })
 

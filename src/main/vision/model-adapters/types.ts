@@ -28,9 +28,9 @@ export interface VisionPolicyInput {
   /** Marker drawn into the current screenshot at the previous click position.
    * This lets the visual judge verify where the last action landed. */
   previousClickMarker?: { x: number; y: number }
-  /** The image sent to the model and the capture pixel space used by a
-   * general model's coordinates. Specialist adapters keep their native
-   * coordinate protocol. */
+  /** The image sent to the model and its encoded/capture geometry. Model
+   * actions use the canonical 0-1000 normalized coordinate protocol and are
+   * converted into encoded pixels before actuation. */
   coordinateFrame?: VisionPolicyCoordinateFrame
 }
 

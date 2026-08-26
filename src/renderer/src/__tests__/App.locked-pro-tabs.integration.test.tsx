@@ -59,12 +59,12 @@ describe('<App/> locked Pro navigation integration', () => {
     })
 
     render(<App />)
-    // The sidebar opens expanded, so the labels this test reads are already on screen and there is no
-    // "Expand sidebar" control to click - it exists only on the collapsed rail. Assert the expanded state
-    // rather than assuming it, so a change of default fails here with the reason rather than as a
-    // missing-label mystery further down.
-    expect(await screen.findByRole('button', { name: 'Collapse sidebar' })).toBeTruthy()
-    const navigation = screen.getByRole('navigation', { name: 'Primary navigation' })
+    // The sidebar is a collapsed rail until the user points at it. Exercise the
+    // production hover interaction before reading its labels.
+    const navigation = await screen.findByRole('navigation', { name: 'Primary navigation' })
+    expect(navigation.getAttribute('aria-expanded')).toBe('false')
+    await user.hover(navigation)
+    await waitFor(() => expect(navigation.getAttribute('aria-expanded')).toBe('true'))
 
     for (const feature of PRO_FEATURES) {
       if (!within(navigation).queryByText(feature.label)) {
@@ -87,6 +87,10 @@ describe('<App/> locked Pro navigation integration', () => {
       expect(screen.getAllByRole('button', { name: /Get Pro/ })).toHaveLength(1)
       expect(screen.getAllByText('Everything in Pro')).toHaveLength(1)
       expect(window.location.pathname).toBe(`/${feature.route}`)
+
+      // Route changes rerender the shell. Restore the production hover state
+      // before inspecting the next navigation label.
+      await user.hover(navigation)
     }
 
     await user.click(screen.getByRole('button', { name: /Get Pro/ }))

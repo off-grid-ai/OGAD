@@ -20,7 +20,7 @@ export const GENERAL_STEP_SYSTEM_PROMPT = [
   'The application owns milestone advancement. Never include an action in complete_milestone.',
   'Use perform_action only for one visible, verified action from this action space:',
   COMMAND_ACTION_SPACE,
-  'Coordinates are pixels in the exact screenshot supplied with this request.',
+  'Coordinates use a 0-1000 normalized space over the exact screenshot supplied with this request: x=0 is the left edge, x=1000 is the right edge, y=0 is the top edge, and y=1000 is the bottom edge.',
   'When an emerald-green marker is visible, it marks the exact point of the previous click. Judge where that click landed before choosing the next command.',
   'If the marked click did not produce the required visible result, do not repeat the same click. Choose a different visible target or use rethink.',
   'Before choosing perform_action, verify that the action advances the Task brief and every proposed point is visibly inside the named target control.',
