@@ -115,12 +115,26 @@ export function taskPlanPrompt(
 ): string {
   const agent = surface === 'computer' ? 'computer-use agent' : 'web agent'
   const target = surface === 'computer' ? 'Target app' : 'Starting website'
+  const surfaceRules =
+    surface === 'web'
+      ? [
+          'Each phase must end in a page state that the web agent can confirm from the visible page.',
+          'For search or form tasks, put each route, date, filter, or other constraint in exactly one setup phase. Do not repeat those constraints in a later results phase.',
+          'Use navigation as its own phase only when opening the correct website or page is a distinct prerequisite.'
+        ]
+      : [
+          'Each phase must end in an app state that the computer-use agent can confirm from the visible interface.'
+        ]
   return [
     `Create a short execution plan for a ${agent}.`,
     `User goal: ${goal}`,
     targetLabel ? `${target}: ${targetLabel}` : '',
     'Return 3 to 6 outcome-based phases in the order the user and agent should expect.',
-    'Use short titles such as "Open booking.com" or "Set the travel filters".',
+    'Make every phase a distinct, non-overlapping outcome. A phase must not repeat, contain, or depend on work assigned to a later phase.',
+    'Include every required user detail in exactly one phase, after its prerequisites and before any phase that uses its result.',
+    ...surfaceRules,
+    'Name the visible result that completes the final phase. Do not use a generic phase such as "Complete the requested work" or "Verify the result".',
+    'Use short, specific titles such as "Open booking.com", "Set Paris stays for 2 guests", or "Show the matching stays".',
     'Do not include individual clicks, typing actions, hidden reasoning, or safety policy.',
     'Reply with only JSON: {"phases":["First phase","Second phase","Final phase"]}'
   ]

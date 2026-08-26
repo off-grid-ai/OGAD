@@ -7,6 +7,39 @@ import {
 } from '../task-execution-plan-service'
 
 describe('task execution plan service', () => {
+  it('asks for distinct web phases with visible, non-repeated outcomes', async () => {
+    const plan = await createTaskExecutionPlan({
+      goal: 'Find round-trip flights from Seattle to London for September 1 to 8, 2027',
+      surface: 'web',
+      targetLabel: 'Google Flights',
+      generate: async (prompt) => {
+        expect(prompt).toContain('web agent')
+        expect(prompt).toContain('Starting website: Google Flights')
+        expect(prompt).toContain('distinct, non-overlapping outcome')
+        expect(prompt).toContain('page state that the web agent can confirm from the visible page')
+        expect(prompt).toContain(
+          'put each route, date, filter, or other constraint in exactly one setup phase'
+        )
+        expect(prompt).toContain('Do not repeat those constraints in a later results phase')
+        expect(prompt).toContain('Name the visible result that completes the final phase')
+        expect(prompt).toContain('Do not use a generic phase')
+        return JSON.stringify({
+          phases: [
+            'Open Google Flights',
+            'Set Seattle to London for September 1 to 8, 2027',
+            'Show matching round-trip flights'
+          ]
+        })
+      }
+    })
+
+    expect(plan.phases.map((phase) => phase.title)).toEqual([
+      'Open Google Flights',
+      'Set Seattle to London for September 1 to 8, 2027',
+      'Show matching round-trip flights'
+    ])
+  })
+
   it('persists one computer-use plan before any dynamic task step', async () => {
     const recorded: string[] = []
     const plan = await prepareTaskExecutionPlan(
