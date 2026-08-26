@@ -11,6 +11,7 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 jobs:
   # ONE job per repo, matching mobile and mobile-pro: typecheck, tests + coverage, boundaries, lint and the
   # Playwright e2e all report as a single `ci` check.
