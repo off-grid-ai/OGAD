@@ -155,14 +155,10 @@ export function getActionsRuntime(): ActionsRuntime {
   const rawBrowserExecute = makeBrowserRailExecutor({
     runTask: (request) => getBrowserRailHost().runTask(request)
   })
-  const browserExecute = async (action: ActionRecord): Promise<ExecuteResult> => {
-    if (process.env.OFFGRID_GROUNDER === '0') return rawBrowserExecute(action)
-    const { result, timing } = await withGrounder(() => rawBrowserExecute(action))
-    console.log(
-      `[web-task] visual operator: skippedSwap=${timing.skippedSwap} swapInMs=${timing.swapInMs} runMs=${timing.runMs} swapOutMs=${timing.swapOutMs}`
-    )
-    return result
-  }
+  // BrowserHost owns the Web Use model lifecycle. It resolves the adapter and
+  // records the model identity only after the specialist swap completes. A
+  // second wrapper here caused nested swaps and restored Chat too early.
+  const browserExecute = rawBrowserExecute
   // The vision rail's live host (screen capture + actuation + grounding model),
   // created lazily on first computer_task.
   const visionExecute = makeVisionRailExecutor({
