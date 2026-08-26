@@ -35,6 +35,38 @@ afterEach(() => {
 })
 
 describe('<ChatToolRows/> work timeline', () => {
+  it('shows and opens a live Web Use task before its durable tool call arrives', async () => {
+    const requests: OpenTaskPanelRequest[] = []
+    const offOpen = onOpenTaskSidePanel((request) => requests.push(request))
+    const user = userEvent.setup()
+
+    render(
+      <ChatToolRows
+        liveTask={{
+          taskId: 'web-live-before-result',
+          journeyId: 'conversation-a',
+          kind: 'web_use',
+          title: 'Research flights',
+          status: 'running',
+          currentAction: 'Entering the destination airport',
+          steps: [],
+          startedAt: 1,
+          updatedAt: 2
+        }}
+      />
+    )
+
+    expect(screen.getByRole('button', { name: /Working/ })).toBeTruthy()
+    expect(screen.getByText('Entering the destination airport')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Web Use, running' }))
+    expect(requests.at(-1)).toEqual({
+      taskId: 'web-live-before-result',
+      kind: 'web_use',
+      detail: true
+    })
+    offOpen()
+  })
+
   it('keeps the work card generic and opens exact task detail from the Web Use row', async () => {
     const requests: OpenTaskPanelRequest[] = []
     const offOpen = onOpenTaskSidePanel((request) => requests.push(request))

@@ -193,6 +193,8 @@ type ChatMessage = {
   generationTimeMs?: number
   provenance?: RecordProvenance
   reasoning?: string
+  /** Keep the live Thinking row visible before the first reasoning token arrives. */
+  reasoningRequested?: boolean
   cutoff?: ResponseCutoffContract
   imageMemoryRetry?: {
     request: ImageGenerationRequestContract
@@ -844,7 +846,9 @@ function MessageThinkingHeader({ message }: Readonly<{ message: ChatMessage }>):
     return (
       <div className="mb-1.5 flex flex-col gap-1.5">
         {showLiveActivity ? <LoadingDots /> : null}
-        {message.reasoning?.trim() ? <ChatThinkingBlock content={message.reasoning} live /> : null}
+        {message.reasoningRequested || message.reasoning?.trim() ? (
+          <ChatThinkingBlock content={message.reasoning ?? ''} live />
+        ) : null}
         {showLiveActivity && activity ? (
           <span className="text-[11px] text-neutral-500">{activity}</span>
         ) : null}
@@ -3695,7 +3699,14 @@ export function MemoryChat({
         streamConvRef.current.set(toolStreamId, convId!)
         setConvMessages(convId, (prev) => [
           ...prev,
-          { id: toolStreamId, role: 'assistant', content: '', reasoning: '', streaming: true }
+          {
+            id: toolStreamId,
+            role: 'assistant',
+            content: '',
+            reasoning: '',
+            reasoningRequested: thinkingEnabled,
+            streaming: true
+          }
         ])
         const tr = await window.api.toolChat(modelQuery, history, {
           connectors: connectorsOn,
@@ -3878,7 +3889,14 @@ export function MemoryChat({
       streamConvRef.current.set(streamId, convId!)
       setConvMessages(convId, (prev) => [
         ...prev,
-        { id: streamId, role: 'assistant', content: '', reasoning: '', streaming: true }
+        {
+          id: streamId,
+          role: 'assistant',
+          content: '',
+          reasoning: '',
+          reasoningRequested: thinkingEnabled,
+          streaming: true
+        }
       ])
       const result = await window.api.ragChat(
         modelQuery,

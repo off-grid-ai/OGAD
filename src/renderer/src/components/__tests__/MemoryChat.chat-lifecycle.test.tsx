@@ -203,6 +203,7 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     await send('Compare the two release plans', user)
     await waitFor(() => expect(boundary.calls).toHaveLength(1))
     expect(boundary.calls[0]!.thinking).toBe(true)
+    expect(screen.getByRole('button', { name: 'Thinking…' })).toBeTruthy()
 
     boundary.emitReasoning(0, 'First compare risk, then reversibility.')
     boundary.emit(0, 'Choose plan B because it is reversible.')
@@ -735,6 +736,45 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
 
     await user.click(screen.getByTitle('Edit this message'))
     await waitFor(() => expect(boundary.stopBrowserTask).toHaveBeenCalledTimes(2))
+  })
+
+  it('shows Thinking and the live Web Use row while an edited turn is running', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-a'] = [
+      { id: 20, role: 'user', content: 'Find flights to Pune' },
+      { id: 21, role: 'assistant', content: 'Old answer', context: { unified: [] } }
+    ]
+    boundary.conversations[0]!.message_count = 2
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+
+    await user.click(await screen.findByRole('button', { name: 'Thinking' }))
+    await user.click(screen.getByTitle('Edit this message'))
+    const editor = screen.getByDisplayValue('Find flights to Pune')
+    await user.clear(editor)
+    await user.type(editor, 'Find one-way flights to Pune')
+    await user.click(screen.getByRole('button', { name: 'Save & submit' }))
+
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+    expect(screen.getByRole('button', { name: 'Thinking…' })).toBeTruthy()
+
+    act(() => {
+      boundary.emitTask({
+        taskId: 'web-edit-live',
+        journeyId: 'conversation-a',
+        kind: 'web_use',
+        title: 'Find one-way flights to Pune',
+        status: 'running',
+        currentAction: 'Entering the destination airport',
+        steps: [],
+        startedAt: 1,
+        updatedAt: 2
+      })
+    })
+
+    expect(await screen.findByRole('button', { name: 'Web Use, running' })).toBeTruthy()
+    expect(screen.getByText('Entering the destination airport')).toBeTruthy()
   })
 
   it('shows a failed turn, clears busy state, and permits the next send (#48)', async () => {

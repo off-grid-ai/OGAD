@@ -238,7 +238,20 @@ export function ChatToolRows({
 }: Readonly<ChatToolRowsProps>): React.JSX.Element | null {
   const { tasks } = useTaskSessions()
   const taskWorkspaceOpen = useTaskWorkspaceOpen()
-  const visible = tools ?? []
+  // Web Use can start before toolChat returns its durable tool result. Project one
+  // pending row from the live task so the chat reports work at the time it happens.
+  // Once the real tool call arrives, it replaces this transient projection.
+  const visible: readonly DisplayTool[] =
+    tools?.length || !liveTask
+      ? (tools ?? [])
+      : [
+          {
+            name: liveTask.kind === 'web_use' ? 'web_use' : 'computer_use',
+            arguments: '{}',
+            result: '',
+            status: 'running'
+          }
+        ]
   if (visible.length === 0) return null
   const liveToolIndex = liveTaskToolIndex(visible, liveTask)
   const projected = visible.map((tool, index) => {
