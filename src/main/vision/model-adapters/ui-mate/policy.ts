@@ -37,7 +37,6 @@ export const UI_MATE_GENERATION_CONFIG = {
 } as const
 
 export const UI_MATE_MAX_HISTORY_STEPS = 100
-export const UI_MATE_IMAGES_TO_KEEP = 5
 
 export interface UIMateAction {
   action: UIMateActionName
@@ -242,9 +241,10 @@ function instructionText(
   return `\nPlease generate the next move according to the UI screenshot, instruction and previous actions.\n\nInstruction: ${instruction}\n\nPrevious actions:\n${previousActions}`
 }
 
-/** Build the official UI-Mate trajectory: instruction + first screenshot,
- * assistant action, then screenshot tool responses. The newest five images stay
- * available and older visual turns collapse to the official marker. */
+/** Build the UI-Mate trajectory with one authoritative visual frame. Prior
+ * actions remain as compact text, but prior images collapse so a coordinate can
+ * only refer to the current screenshot. The current frame already carries the
+ * previous-click marker needed to judge the last action. */
 export function buildUIMateMessages(input: BuildUIMateMessagesInput): UIMateMessage[] {
   const history = input.history ?? []
   const totalSteps = history.length + 1
@@ -267,12 +267,8 @@ export function buildUIMateMessages(input: BuildUIMateMessagesInput): UIMateMess
     }
   ]
 
-  const firstRetainedImage = Math.max(0, retainedHistory.length - UI_MATE_IMAGES_TO_KEEP)
   const turns = [
-    ...retainedHistory.map((step, index) => ({
-      screenshot: index >= firstRetainedImage ? step.screenshotDataUrl : undefined,
-      step
-    })),
+    ...retainedHistory.map((step) => ({ screenshot: undefined, step })),
     { screenshot: input.currentScreenshotDataUrl, step: null }
   ]
   for (const [index, turn] of turns.entries()) {

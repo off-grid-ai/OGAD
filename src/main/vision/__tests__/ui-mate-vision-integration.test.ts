@@ -13,6 +13,7 @@ describe('specialist vision protocols', () => {
   it('keeps UI-Mate on its native XML trajectory and execution-plan extension', () => {
     const request = uiMateAdapter.buildRequest({
       goal: 'Use the visible control.',
+      operatorEnvironment: 'embedded_browser',
       currentMilestone: 'Open the menu.',
       currentScreenshotDataUrl: 'data:image/png;base64,current',
       coordinateFrame: { encoded: bounds, source: bounds },
@@ -29,6 +30,52 @@ describe('specialist vision protocols', () => {
     expect(serialized).toContain('<function=computer_use>')
     expect(serialized).toContain('Current milestone: Open the menu.')
     expect(serialized).toContain('subtask_complete')
+    expect(serialized).toContain('exact web page viewport')
+    expect(serialized).toContain('does not include a browser address bar')
+    expect(serialized).toContain('Do not add an offset')
+  })
+
+  it('uses the exact display frame for desktop Computer Use', () => {
+    const request = uiMateAdapter.buildRequest({
+      goal: 'Open the visible desktop control.',
+      operatorEnvironment: 'desktop',
+      currentScreenshotDataUrl: 'data:image/png;base64,current',
+      coordinateFrame: { encoded: bounds, source: bounds },
+      history: [],
+      recentSteps: [],
+      olderVisualFacts: [],
+      verifiedActions: []
+    })
+    const serialized = JSON.stringify(request.messages)
+
+    expect(serialized).toContain('exact current display frame')
+    expect(serialized).not.toContain('exact web page viewport')
+  })
+
+  it('uses one current visual frame as the coordinate source of truth', () => {
+    const request = uiMateAdapter.buildRequest({
+      goal: 'Use the visible control.',
+      currentScreenshotDataUrl: 'data:image/png;base64,current',
+      coordinateFrame: { encoded: bounds, source: bounds },
+      history: [
+        {
+          response: uiMate(
+            'left_click',
+            '<parameter=coordinate>[500, 250]</parameter>'
+          ),
+          actionText: 'Click the old control.',
+          screenshotDataUrl: 'data:image/png;base64,stale'
+        }
+      ],
+      recentSteps: ['The page changed after the click.'],
+      olderVisualFacts: [],
+      verifiedActions: ['click at (480, 136)']
+    })
+    const serialized = JSON.stringify(request.messages)
+
+    expect(serialized).toContain('data:image/png;base64,current')
+    expect(serialized).not.toContain('data:image/png;base64,stale')
+    expect(serialized).toContain('<action>Use the visible control.</action>')
   })
 
   it('maps UI-Mate actions, milestone completion, and handoff through its native parser', () => {

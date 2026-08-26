@@ -75,6 +75,20 @@ function toVisionAction(action: UIMateAction): VisionAction | null {
 function policyInstruction(input: Parameters<VisionModelAdapter['buildRequest']>[0]): string {
   return [
     input.goal,
+    input.operatorEnvironment === 'embedded_browser'
+      ? [
+          'Coordinate frame:',
+          '- The screenshot is the exact web page viewport. It does not include a browser address bar, tab strip, title bar, sidebar, or app chrome.',
+          '- Return x and y from 0 to 999 over this exact screenshot: (0, 0) is its top-left pixel and (999, 999) is its bottom-right pixel.',
+          '- Do not add an offset for browser controls or screen padding.',
+          '- Use hotkey ALT+LEFT for Browser Back, CTRL+R to reload, or navigate with an HTTPS URL. Never click an imagined address bar.'
+        ].join('\n')
+      : [
+          'Coordinate frame:',
+          '- The screenshot is the exact current display frame.',
+          '- Return x and y from 0 to 999 over this exact screenshot: (0, 0) is its top-left pixel and (999, 999) is its bottom-right pixel.',
+          '- Do not add an offset for window borders, screen padding, or controls outside the screenshot.'
+        ].join('\n'),
     input.currentMilestone
       ? `Current execution plan and verified progress:\nCurrent milestone: ${input.currentMilestone}`
       : '',

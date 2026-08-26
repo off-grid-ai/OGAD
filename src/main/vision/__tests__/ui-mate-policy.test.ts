@@ -123,7 +123,7 @@ describe('UI-Mate policy', () => {
     expect(JSON.stringify(messages)).toContain('This screenshot has been collapsed.')
   })
 
-  it('keeps only the newest five screenshots under adversarial long history', () => {
+  it('keeps only the current screenshot under adversarial visual history', () => {
     const messages = buildUIMateMessages({
       instruction: 'Continue.',
       currentScreenshotDataUrl: 'data:image/png;base64,current',
@@ -134,11 +134,10 @@ describe('UI-Mate policy', () => {
       }))
     })
     const serialized = JSON.stringify(messages)
-    expect(serialized.match(/data:image\/png;base64/g) ?? []).toHaveLength(6)
+    expect(serialized.match(/data:image\/png;base64/g) ?? []).toHaveLength(1)
     expect(serialized).not.toContain('history-0')
-    expect(serialized).not.toContain('history-2')
-    expect(serialized).toContain('history-3')
-    expect(serialized).toContain('history-7')
+    expect(serialized).not.toContain('history-7')
+    expect(serialized).toContain('data:image/png;base64,current')
   })
 
   it('matches the official build_messages alternation with one current screenshot', () => {
