@@ -23,7 +23,7 @@ import path from 'path'
 import { desktopCapturer, globalShortcut, screen, systemPreferences } from 'electron'
 import { llm } from '../llm'
 import type { VisionAction, Bounds } from './vision-action'
-import { runVisionTask, type VisionScreen, type VisionTaskResult } from './vision-agent'
+import { type VisionScreen, type VisionTaskResult } from './vision-agent'
 import { VisionGuard } from './vision-guard'
 import { emitVisionState, emitVisionStep, registerVisionSession } from './vision-controller'
 import { showSupervisorWindow, hideSupervisorWindow } from './supervisor-window'
@@ -60,6 +60,7 @@ import { registerTaskGuideHandler } from '../tasks/task-guide'
 import { createVisionGrounder } from './vision-policy-runner'
 import { resolveModelIdentity } from '../models-manager'
 import { computerUsePermissionBlock } from './computer-use-permissions'
+import { runVisionTaskGraph } from './vision-task-graph'
 
 export type { ActuationPort }
 
@@ -324,7 +325,7 @@ class VisionHost {
           },
           (marker) => emitVisionStep(taskId, marker)
         ))
-      const result = await runVisionTask(goal, {
+      const result = await runVisionTaskGraph(goal, {
         screen: makeScreen({
           actuation,
           taskId,
@@ -334,7 +335,7 @@ class VisionHost {
           screenshotResizeFactor: modelAdapter.screenshotResizeFactor
         }),
         guard,
-        ground: createVisionGrounder(modelAdapter),
+        decide: createVisionGrounder(modelAdapter),
         parseResponse: modelAdapter.parseResponse,
         waitForUser: async (why) => {
           await coordinator.waitForTakeover(taskId, why)
