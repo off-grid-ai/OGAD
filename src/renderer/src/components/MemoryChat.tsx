@@ -2553,7 +2553,7 @@ export function MemoryChat({
   }, [TaskWorkspace, taskWorkspaceVisible])
 
   const setChatBodyVisibility = useCallback((collapsed: boolean): void => {
-    if (chatBodyCollapsedRef.current === collapsed) return
+    if (chatBodyCollapsedRef.current === collapsed && collapsed) return
     chatBodyCollapsedRef.current = collapsed
     setChatBodyCollapsed(collapsed)
     if (chatBodyFrameRef.current !== null) cancelAnimationFrame(chatBodyFrameRef.current)
@@ -2561,17 +2561,38 @@ export function MemoryChat({
       chatBodyFrameRef.current = null
       try {
         if (collapsed) chatBodyRef.current?.collapse()
-        else if (taskWorkspaceVisibleRef.current) {
+        else {
+          // Expanding the sibling alone is not sufficient after the task pane
+          // owned the full PanelGroup. Restore Chat explicitly first.
+          chatBodyRef.current?.expand()
+        }
+        if (!collapsed && taskWorkspaceVisibleRef.current) {
           // Immersive task detail grows the task panel to 100%. Restore the
           // last user-selected split instead of asking the panel group to
           // guess which sibling to collapse when Chat returns.
           taskWorkspaceRef.current?.resize(taskWorkspaceSizeRef.current)
-        } else chatBodyRef.current?.expand()
+        }
       } catch {
         // State remains authoritative until the panel group is measured.
       }
     })
   }, [])
+
+  const toggleConversationList = useCallback((): void => {
+    const shouldShow = chatBodyCollapsedRef.current || !showHistory
+    if (!shouldShow) {
+      historyPanelRef.current?.collapse()
+      return
+    }
+    setChatBodyVisibility(false)
+    requestAnimationFrame(() => {
+      try {
+        historyPanelRef.current?.expand()
+      } catch {
+        // The panel state remains authoritative while its parent is restored.
+      }
+    })
+  }, [setChatBodyVisibility, showHistory])
 
   const handleTaskDetailModeChange = useCallback(
     (detailOpen: boolean): void => {
@@ -4867,14 +4888,18 @@ export function MemoryChat({
       {/* Header */}
       <header className="flex items-center gap-3 border-b border-neutral-900 px-6 py-4">
         <button
-          onClick={() => {
-            const panel = historyPanelRef.current
-            if (showHistory) panel?.collapse()
-            else panel?.expand()
-          }}
+          onClick={toggleConversationList}
           className="rounded-md border border-neutral-800 p-1.5 text-neutral-500 transition-colors hover:border-green-500 hover:text-green-500"
-          title={showHistory ? 'Collapse conversation list' : 'Show conversations'}
-          aria-label={showHistory ? 'Collapse conversation list' : 'Show conversations'}
+          title={
+            chatBodyCollapsed || !showHistory
+              ? 'Show conversations'
+              : 'Collapse conversation list'
+          }
+          aria-label={
+            chatBodyCollapsed || !showHistory
+              ? 'Show conversations'
+              : 'Collapse conversation list'
+          }
         >
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <rect x="3" y="4" width="18" height="16" rx="2" strokeWidth={2} />
