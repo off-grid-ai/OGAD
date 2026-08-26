@@ -5,12 +5,7 @@ import { waitingLabel } from '@renderer/lib/chat-labels'
 import { parseSqliteUtc, shiftLocalDay, startOfLocalDay, timeAgo } from '@renderer/lib/time'
 import { writeClipboardWithFallback } from '@renderer/lib/clipboard-write'
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
-import {
-  Panel,
-  PanelGroup,
-  PanelResizeHandle,
-  type ImperativePanelHandle
-} from 'react-resizable-panels'
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 import { toSpeakableText } from '@renderer/lib/speakable'
 import { isAgenticTurn } from '@renderer/lib/agentic-active'
 import { applyStreamEvent, hasLiveStreamActivity } from '@renderer/lib/stream-reducer'
@@ -90,6 +85,7 @@ import { Button } from '@renderer/components/ui/button'
 import { ActionGateDock } from '@renderer/components/actions/ActionGateDock'
 import { TaskPanelTrigger } from '@renderer/components/tasks/TaskPanelTrigger'
 import { useTaskWorkspaceOpen } from '@renderer/lib/task-side-panel'
+import { useWorkspacePaneController } from './workspace/useWorkspacePaneController'
 import {
   guidanceTaskForJourney,
   useTaskSessions,
@@ -2497,102 +2493,29 @@ export function MemoryChat({
     return () => stopAllVoicePlayback()
   }, [activeConversationId])
   const [openTabs, setOpenTabs] = useState<string[]>([]) // conversation ids open as tabs
-  const [showHistory, setShowHistory] = useState(true)
-  const historyPanelRef = useRef<ImperativePanelHandle>(null)
   const TaskWorkspace = isPro ? getSlot(SLOTS.taskWorkspace) : undefined
   const taskWorkspaceVisible = useTaskWorkspaceOpen() && Boolean(TaskWorkspace)
-  const [chatBodyCollapsed, setChatBodyCollapsed] = useState(false)
-  const chatBodyCollapsedRef = useRef(false)
-  const chatBodyFrameRef = useRef<number | null>(null)
-  const taskWorkspaceFrameRef = useRef<number | null>(null)
-  const [taskWorkspaceSize, setTaskWorkspaceSize] = useState(48)
-  const taskWorkspaceSizeRef = useRef(48)
-  const taskWorkspaceVisibleRef = useRef(taskWorkspaceVisible)
   const [taskWorkspaceDragging, setTaskWorkspaceDragging] = useState(false)
   const reduceWorkspaceMotion = useReducedMotion()
-  const chatBodyRef = useRef<ImperativePanelHandle>(null)
-  const taskWorkspaceRef = useRef<ImperativePanelHandle>(null)
+  const {
+    chatBodyRef,
+    historyPanelRef,
+    taskWorkspaceRef,
+    chatCollapsed: chatBodyCollapsed,
+    conversationsVisible: showHistory,
+    taskWorkspaceSize,
+    toggleChat: toggleChatBodyVisibility,
+    toggleConversations: toggleConversationList,
+    setChatCollapsed: setChatBodyVisibility,
+    setConversationsVisible,
+    reportTaskSize,
+    resizeTaskFromKeyboard: resizeTaskWorkspaceFromKeyboard
+  } = useWorkspacePaneController(taskWorkspaceVisible)
   const taskWorkspaceTransition =
     reduceWorkspaceMotion || taskWorkspaceDragging
       ? 'none'
       : 'flex-grow 420ms cubic-bezier(0.22, 1, 0.36, 1)'
   const galleryTriggerRef = useRef<HTMLButtonElement>(null)
-
-  useEffect(() => {
-    chatBodyCollapsedRef.current = chatBodyCollapsed
-  }, [chatBodyCollapsed])
-
-  useEffect(() => {
-    taskWorkspaceVisibleRef.current = taskWorkspaceVisible
-  }, [taskWorkspaceVisible])
-
-  useEffect(
-    () => () => {
-      if (chatBodyFrameRef.current !== null) cancelAnimationFrame(chatBodyFrameRef.current)
-      if (taskWorkspaceFrameRef.current !== null) {
-        cancelAnimationFrame(taskWorkspaceFrameRef.current)
-      }
-    },
-    []
-  )
-
-  useEffect(() => {
-    if (!TaskWorkspace) return
-    if (taskWorkspaceFrameRef.current !== null) {
-      cancelAnimationFrame(taskWorkspaceFrameRef.current)
-    }
-    taskWorkspaceFrameRef.current = requestAnimationFrame(() => {
-      taskWorkspaceFrameRef.current = null
-      try {
-        if (taskWorkspaceVisible) taskWorkspaceRef.current?.expand()
-        else taskWorkspaceRef.current?.collapse()
-      } catch {
-        // The next measured frame applies the requested visibility.
-      }
-    })
-  }, [TaskWorkspace, taskWorkspaceVisible])
-
-  const setChatBodyVisibility = useCallback((collapsed: boolean): void => {
-    if (chatBodyCollapsedRef.current === collapsed && collapsed) return
-    chatBodyCollapsedRef.current = collapsed
-    setChatBodyCollapsed(collapsed)
-    if (chatBodyFrameRef.current !== null) cancelAnimationFrame(chatBodyFrameRef.current)
-    chatBodyFrameRef.current = requestAnimationFrame(() => {
-      chatBodyFrameRef.current = null
-      try {
-        if (collapsed) chatBodyRef.current?.collapse()
-        else {
-          // Expanding the sibling alone is not sufficient after the task pane
-          // owned the full PanelGroup. Restore Chat explicitly first.
-          chatBodyRef.current?.expand()
-        }
-        if (!collapsed && taskWorkspaceVisibleRef.current) {
-          // Immersive task detail grows the task panel to 100%. Restore the
-          // last user-selected split instead of asking the panel group to
-          // guess which sibling to collapse when Chat returns.
-          taskWorkspaceRef.current?.resize(taskWorkspaceSizeRef.current)
-        }
-      } catch {
-        // State remains authoritative until the panel group is measured.
-      }
-    })
-  }, [])
-
-  const toggleConversationList = useCallback((): void => {
-    const shouldShow = chatBodyCollapsedRef.current || !showHistory
-    if (!shouldShow) {
-      historyPanelRef.current?.collapse()
-      return
-    }
-    setChatBodyVisibility(false)
-    requestAnimationFrame(() => {
-      try {
-        historyPanelRef.current?.expand()
-      } catch {
-        // The panel state remains authoritative while its parent is restored.
-      }
-    })
-  }, [setChatBodyVisibility, showHistory])
 
   const handleTaskDetailModeChange = useCallback(
     (detailOpen: boolean): void => {
@@ -2601,17 +2524,6 @@ export function MemoryChat({
     },
     [onTaskDetailModeChange, setChatBodyVisibility]
   )
-
-  const resizeTaskWorkspaceFromKeyboard = (key: string): void => {
-    if (key !== 'ArrowLeft' && key !== 'ArrowRight') return
-    const next = Math.min(68, Math.max(32, taskWorkspaceSize + (key === 'ArrowLeft' ? 5 : -5)))
-    setTaskWorkspaceSize(next)
-    try {
-      taskWorkspaceRef.current?.resize(next)
-    } catch {
-      // The next measured layout applies the announced size.
-    }
-  }
 
   const [mode, setMode] = useState<ChatMode>('ask')
   const [showImageOptions, setShowImageOptions] = useState(false)
@@ -5011,7 +4923,6 @@ export function MemoryChat({
       {/* Body */}
       <PanelGroup
         direction="horizontal"
-        autoSaveId="offgrid-chat-task-workspace"
         className="min-h-0 flex-1"
         data-testid="main-task-workspace"
       >
@@ -5024,8 +4935,8 @@ export function MemoryChat({
           collapsible
           collapsedSize={0}
           style={{ transition: taskWorkspaceTransition }}
-          onCollapse={() => setChatBodyCollapsed(true)}
-          onExpand={() => setChatBodyCollapsed(false)}
+          onCollapse={() => setChatBodyVisibility(true)}
+          onExpand={() => setChatBodyVisibility(false)}
           className="min-w-0"
         >
           <PanelGroup
@@ -5042,8 +4953,8 @@ export function MemoryChat({
               maxSize={40}
               collapsible
               collapsedSize={0}
-              onCollapse={() => setShowHistory(false)}
-              onExpand={() => setShowHistory(true)}
+              onCollapse={() => setConversationsVisible(false)}
+              onExpand={() => setConversationsVisible(true)}
               className="min-w-0 overflow-hidden transition-[flex-grow] duration-200 ease-out motion-reduce:transition-none"
             >
               <aside className="h-full overflow-hidden border-r border-neutral-900">
@@ -6411,17 +6322,11 @@ export function MemoryChat({
             collapsedSize={0}
             className="min-w-0"
             style={{ transition: taskWorkspaceTransition }}
-            onResize={(size) => {
-              // A temporary immersive 100% layout is not the user's preferred
-              // split. Keep the last normal task width for Expand Chat.
-              if (chatBodyCollapsedRef.current) return
-              taskWorkspaceSizeRef.current = size
-              setTaskWorkspaceSize(size)
-            }}
+            onResize={reportTaskSize}
           >
             <TaskWorkspace
               mainWorkspaceCollapsed={chatBodyCollapsed}
-              onToggleMainWorkspace={() => setChatBodyVisibility(!chatBodyCollapsed)}
+              onToggleMainWorkspace={toggleChatBodyVisibility}
               onDetailModeChange={handleTaskDetailModeChange}
               routeActive
               conversationId={activeConversationId}

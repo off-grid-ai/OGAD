@@ -544,6 +544,29 @@ describe('<App/> desktop navigation integration', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Collapse Chat' }))
     await waitFor(() => {
+      expect(screen.getByTestId('task-side-panel')).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Hide task pane' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Expand Chat' })).toBeTruthy()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Chat' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('task-side-panel')).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Hide task pane' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Collapse Chat' })).toBeTruthy()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse conversation list' }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Show conversations' })).toBeTruthy()
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Show conversations' }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Collapse conversation list' })).toBeTruthy()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse Chat' }))
+    await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Expand Chat' })).toBeTruthy()
       expect(screen.getByRole('button', { name: 'Show conversations' })).toBeTruthy()
     })
