@@ -14,7 +14,9 @@ import {
   type VisionTaskDeps
 } from '../vision-agent'
 import { VisionGuard } from '../vision-guard'
+import { parseVisionAction, type Bounds } from '../vision-action'
 import { dispatchVisionAction } from '../vision-actuation'
+import type { VisionPolicyDecision } from '../model-adapters/types'
 import type { ActuationPort } from '../../input/actuation'
 import { sanitizeComputerUseStepDetail } from '../../tasks/task-step-details'
 import { PRIVATE_INPUT_HANDOFF } from '../secure-input-policy'
@@ -22,6 +24,27 @@ import { fallbackTaskExecutionPlan } from '../../../shared/task-execution-plan'
 import { TASK_GUIDANCE_TRACE } from '../../tasks/task-guide'
 
 const bounds = { width: 1000, height: 1000 }
+
+function parseScriptedDecision(response: string, target: Bounds): VisionPolicyDecision {
+  const action = parseVisionAction(response, target)
+  if (!action) {
+    return { kind: 'invalid', actionText: response, error: 'scripted action did not parse' }
+  }
+  if (action.type === 'finished') {
+    return { kind: 'done', actionText: 'done', summary: action.content || 'done' }
+  }
+  if (action.type === 'call_user') {
+    return { kind: 'handoff', actionText: 'user handoff', reason: action.content }
+  }
+  if (action.type === 'wait') {
+    return { kind: 'wait', actionText: 'wait', durationMs: action.durationMs ?? 1_000 }
+  }
+  return {
+    kind: 'actions',
+    actionText: action.type === 'type' ? 'type text' : response,
+    actions: [action]
+  }
+}
 
 const world = (
   replies: string[],
@@ -48,6 +71,9 @@ const world = (
       screen,
       guard,
       ground: async () => replies.shift() ?? "finished(content='script exhausted')",
+      // This suite owns the loop state machine. The strict JSON adapter has its
+      // own contract suite, so scripted actions enter through the injected seam.
+      parseResponse: parseScriptedDecision,
       waitForUser: async (why) => {
         userWaits.push(why)
       }

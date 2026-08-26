@@ -124,5 +124,8 @@ describe('<RemoteVisionSettingsTab/>', () => {
         model: ''
       })
     )
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Use remote server' }))
+    expect(screen.getByPlaceholderText('https://models.example')).toBeTruthy()
   })
 })

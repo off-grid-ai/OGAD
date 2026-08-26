@@ -307,6 +307,12 @@ describe('General vision operator adapter', () => {
     ).toBe('action was not text or null')
   })
 
+  it('accepts the strict decision fields in any JSON object order', () => {
+    const shuffled = Object.fromEntries(Object.entries(JSON.parse(verdict())).reverse())
+
+    expect(parseGeneralStepDecision(JSON.stringify(shuffled), bounds)).not.toBeNull()
+  })
+
   it('does not misclassify action-like text inside a single type action', () => {
     expect(
       parseGeneralStepDecision(verdict({ action: "type(content='Then, click(save)')" }), bounds)

@@ -97,11 +97,11 @@ function decisionConsistencyError(
 }
 
 function generalStepFieldsError(value: Record<string, unknown>): string | undefined {
-  const receivedFields = Object.keys(value).sort()
-  const expectedFields: string[] = [...GENERAL_STEP_FIELDS].sort()
-  if (receivedFields.join(',') === expectedFields.join(',')) return undefined
+  const receivedFields = Object.keys(value)
+  const expectedFields: string[] = [...GENERAL_STEP_FIELDS]
   const missing = expectedFields.filter((field) => !receivedFields.includes(field))
   const extra = receivedFields.filter((field) => !expectedFields.includes(field))
+  if (missing.length === 0 && extra.length === 0) return undefined
   return [
     missing.length ? `missing fields: ${missing.join(', ')}` : '',
     extra.length ? `unexpected fields: ${extra.join(', ')}` : ''

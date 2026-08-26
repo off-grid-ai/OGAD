@@ -201,7 +201,10 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
     )
     requestAnimationFrame(() => {
       const input = document.getElementById('remote-server-model-search')
-      input?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+      const scrollable = input as {
+        scrollIntoView?: (options?: ScrollIntoViewOptions) => void
+      } | null
+      scrollable?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
       input?.focus()
     })
   }
@@ -371,7 +374,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                 setModelQuery('')
                 setStatus('Not tested.')
               }}
-              placeholder="http://192.168.1.50:7878"
+              placeholder="https://models.example"
               className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-1.5 text-xs text-neutral-200 outline-none placeholder:text-neutral-600 focus-visible:border-green-500"
             />
           </Row>
