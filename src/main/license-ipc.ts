@@ -26,15 +26,17 @@ import {
   PRO_PAY_PAGE_URL,
   type ProLicenseInfo
 } from './licensing/license-service'
+import { effectiveProLicenseInfo } from './licensing/effective-license'
 
 export function setupLicenseIpc(): void {
   // Push entitlement changes to every window and stop live paid services when
   // access closes.
   setLicenseChangeNotifier((info: ProLicenseInfo) => {
+    const effectiveInfo = effectiveProLicenseInfo(info, proEnabled())
     for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send('license:changed', info)
+      win.webContents.send('license:changed', effectiveInfo)
     }
-    if (!info.isPro && !proEnabled()) {
+    if (!effectiveInfo.isPro) {
       void deactivateProFeaturesMain().catch((error) => {
         console.error('[pro] entitlement-loss shutdown failed', error)
       })
@@ -50,7 +52,10 @@ export function setupLicenseIpc(): void {
     e.returnValue = proEntitlementBootstrapEnabled()
   })
 
-  ipcMain.handle('license:status', () => getProLicenseInfo())
+  ipcMain.handle('license:status', () => {
+    const info = getProLicenseInfo()
+    return effectiveProLicenseInfo(info, proEnabled())
+  })
   ipcMain.handle('license:activate', (_e, key: string) => activateProByKey(key))
   ipcMain.handle('license:list-devices', () => listProDevices())
   ipcMain.handle('license:deactivate', (_e, machineId: string) => deactivateProDevice(machineId))
