@@ -18,7 +18,8 @@ import {
 
 const boundary: NativeActionToolBoundary = {
   run: vi.fn(async () => ({ ok: true as const, result: {} })),
-  proposeApproval: vi.fn(() => undefined)
+  proposeApproval: vi.fn(() => undefined),
+  isProEntitled: () => true
 }
 
 describe('specsForPlatform', () => {

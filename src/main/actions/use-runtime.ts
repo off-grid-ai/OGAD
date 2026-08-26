@@ -43,6 +43,7 @@ import {
 import { getAxRailHost } from '../accessibility/ax-host'
 import { withGrounder } from '../vision/grounder-loader'
 import { getComputerUseSettings } from '../computer-use-settings'
+import { isProEntitled } from '../licensing/license-service'
 
 export interface ActionsRuntime {
   propose(
@@ -212,9 +213,15 @@ export function getActionsRuntime(): ActionsRuntime {
           return semanticExecute(action)
         }
         if (rail === 'browser') {
+          if (!isProEntitled()) {
+            return { ok: false, detail: 'Browser Use requires Off Grid AI Pro.' }
+          }
           return browserExecute(action)
         }
         if (rail === 'vision') {
+          if (!isProEntitled()) {
+            return { ok: false, detail: 'Computer Use requires Off Grid AI Pro.' }
+          }
           // computer_task: accessibility-first, vision as the fallback tier.
           return computerTaskExecute(action)
         }

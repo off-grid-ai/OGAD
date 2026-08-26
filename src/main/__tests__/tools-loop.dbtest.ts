@@ -175,6 +175,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       {
         run: async () => ({ ok: true, result: undefined }),
         proposeApproval: () => undefined,
+        isProEntitled: () => true,
         actions
       },
       'darwin'
@@ -240,6 +241,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       {
         run: async () => ({ ok: true, result: undefined }),
         proposeApproval: () => undefined,
+        isProEntitled: () => true,
         actions
       },
       'darwin'
@@ -311,6 +313,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       {
         run: async () => ({ ok: true, result: undefined }),
         proposeApproval: () => undefined,
+        isProEntitled: () => true,
         actions
       },
       'darwin'

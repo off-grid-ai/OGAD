@@ -41,12 +41,13 @@ function makePort(
 
 const run = vi.fn(async () => ({ ok: true as const, result: { id: 'r1' } }))
 const proposeApproval = vi.fn(() => undefined)
+const proEntitled = () => true
 
 // Pin darwin: these assert the full macOS tool set (messages_send, the inline
 // reads, etc.). Without it the extension defaults to process.platform, and on
 // a Linux CI runner specsForPlatform('linux') is empty - every tool unknown.
 const makeExtension = (actions?: ActionsPort): NativeActionToolExtension =>
-  new NativeActionToolExtension({ run, proposeApproval, actions }, 'darwin')
+  new NativeActionToolExtension({ run, proposeApproval, isProEntitled: proEntitled, actions }, 'darwin')
 
 describe('the tool-to-action-type map', () => {
   it('covers exactly the mutating tools', () => {
@@ -102,7 +103,7 @@ describe('the engine path', () => {
   it('starts the exact Web Use brief selected by the Chat model without a second gate', async () => {
     const port = makePort()
     const extension = new NativeActionToolExtension(
-      { run, proposeApproval, actions: port },
+      { run, proposeApproval, isProEntitled: proEntitled, actions: port },
       'darwin'
     )
 
@@ -251,7 +252,7 @@ describe('the engine path', () => {
     const legacyPropose = vi.fn(() => true)
     const port = makePort({ approvalHookActive: () => true })
     const extension = new NativeActionToolExtension(
-      { run, proposeApproval: legacyPropose, actions: port },
+      { run, proposeApproval: legacyPropose, isProEntitled: proEntitled, actions: port },
       'darwin'
     )
     const reply = await extension.execute('reminders_create', { title: 'x' })
@@ -264,7 +265,7 @@ describe('the engine path', () => {
     run.mockClear()
     const legacyPropose = vi.fn(() => undefined)
     const extension = new NativeActionToolExtension(
-      { run, proposeApproval: legacyPropose },
+      { run, proposeApproval: legacyPropose, isProEntitled: proEntitled },
       'darwin'
     )
     await extension.execute('reminders_create', { title: 'x' })
@@ -309,7 +310,7 @@ describe('the engine path', () => {
     const legacyPropose = vi.fn(() => true)
     const port = makePort({ approvalHookActive: () => true })
     const extension = new NativeActionToolExtension(
-      { run, proposeApproval: legacyPropose, actions: port },
+      { run, proposeApproval: legacyPropose, isProEntitled: proEntitled, actions: port },
       'darwin'
     )
     await extension.execute('web_task', { goal: 'order lunch' })
@@ -321,7 +322,7 @@ describe('the engine path', () => {
   it('web_task refuses cleanly when no engine is wired, rather than falling to a connector', async () => {
     const legacyPropose = vi.fn(() => true)
     const extension = new NativeActionToolExtension(
-      { run, proposeApproval: legacyPropose },
+      { run, proposeApproval: legacyPropose, isProEntitled: proEntitled },
       'darwin'
     )
     const reply = await extension.execute('web_task', { goal: 'x' })
@@ -349,7 +350,7 @@ describe('the engine path', () => {
     const announceComputerTask = vi.fn()
     const port = makePort()
     const extension = new NativeActionToolExtension(
-      { run, proposeApproval, announceComputerTask, actions: port },
+      { run, proposeApproval, isProEntitled: proEntitled, announceComputerTask, actions: port },
       'darwin'
     )
     await extension.execute('computer_task', { goal: 'share the deck' })
@@ -368,7 +369,7 @@ describe('the engine path', () => {
     const legacyPropose = vi.fn(() => true)
     const port = makePort({ approvalHookActive: () => true })
     const extension = new NativeActionToolExtension(
-      { run, proposeApproval: legacyPropose, actions: port },
+      { run, proposeApproval: legacyPropose, isProEntitled: proEntitled, actions: port },
       'darwin'
     )
     await extension.execute('computer_task', { goal: 'x' })

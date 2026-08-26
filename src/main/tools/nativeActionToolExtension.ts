@@ -21,6 +21,7 @@ import { grounderNudgeForQueuedTask } from '../vision/vision-model-notice'
 import { emitVisionNotice } from '../vision/vision-controller'
 import { getAxRailHost } from '../accessibility/ax-host'
 import { axRailViable } from '../accessibility/ax-router'
+import { isProEntitled } from '../licensing/license-service'
 import { makeWinInlineRunner } from '../actions/semantic-rail-win'
 import { runNativeAction } from '../actions/native-helper'
 import type { NativeActionCommand, NativeActionResponse } from '../actions/native-helper-logic'
@@ -46,6 +47,8 @@ export interface ActionsPort {
 export interface NativeActionToolBoundary {
   run: (cmd: NativeActionCommand) => Promise<NativeActionResponse>
   proposeApproval: (request: ActionApprovalRequest) => boolean | undefined
+  /** Browser Use and Computer Use are paid capabilities. */
+  isProEntitled: () => boolean
   actions?: ActionsPort
   /** Called when a computer_task is queued: warns the chat, at queue time, if
    *  the loaded model is not a grounder AND the task will fall to the vision
@@ -79,6 +82,7 @@ const inlineRun = inlineRunnerForPlatform(process.platform)
 const productionBoundary: NativeActionToolBoundary = {
   run: inlineRun,
   proposeApproval: proposeActionApproval,
+  isProEntitled,
   get actions(): ActionsPort {
     // The import is static (the main bundle is one CJS chunk); the runtime
     // itself builds lazily on first access, once the DB exists.
@@ -115,15 +119,17 @@ export class NativeActionToolExtension implements ToolExtension {
   ) {}
 
   schemas(): unknown[] {
-    return buildNativeToolSchemas(specsForPlatform(this.platform))
+    return buildNativeToolSchemas(specsForPlatform(this.platform, this.boundary.isProEntitled()))
   }
 
   canHandle(name: string): boolean {
-    return specsForPlatform(this.platform).some((spec) => spec.name === name)
+    return specsForPlatform(this.platform, this.boundary.isProEntitled()).some(
+      (spec) => spec.name === name
+    )
   }
 
   systemHint(): string {
-    return systemHintForPlatform(this.platform)
+    return systemHintForPlatform(this.platform, this.boundary.isProEntitled())
   }
 
   async execute(
@@ -131,6 +137,9 @@ export class NativeActionToolExtension implements ToolExtension {
     args: Record<string, unknown>,
     context?: ToolContext
   ): Promise<string | ToolResult> {
+    if ((name === 'web_task' || name === 'computer_task') && !this.boundary.isProEntitled()) {
+      return 'Error: Browser Use and Computer Use require Off Grid AI Pro.'
+    }
     const spec = this.canHandle(name) ? findNativeToolSpec(name) : undefined
     if (!spec) {
       return `Error: unknown action ${name}`

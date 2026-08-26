@@ -20,6 +20,11 @@ class FakeBoundary implements NativeActionToolBoundary {
   readonly approvals: ActionApprovalRequest[] = []
   queueApprovals = false
   response: NativeActionResponse = { ok: true, result: { id: 'E1' } }
+  proEntitled = true
+
+  isProEntitled(): boolean {
+    return this.proEntitled
+  }
 
   async run(cmd: NativeActionCommand): Promise<NativeActionResponse> {
     this.commands.push(cmd)
@@ -48,6 +53,24 @@ describe('NativeActionToolExtension', () => {
     expect(ext.canHandle('calendar_create_event')).toBe(true)
     expect(ext.canHandle('calendar_list_events')).toBe(true)
     expect(ext.canHandle('mcp__1__send')).toBe(false)
+  })
+
+  it('hides and refuses Browser Use and Computer Use without Pro', async () => {
+    boundary.proEntitled = false
+
+    expect(ext.canHandle('web_task')).toBe(false)
+    expect(ext.canHandle('computer_task')).toBe(false)
+    expect(ext.schemas()).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ function: expect.objectContaining({ name: 'web_task' }) })
+      ])
+    )
+    expect(ext.systemHint()).not.toContain('web_task')
+    await expect(ext.execute('web_task', { goal: 'Buy something' })).resolves.toBe(
+      'Error: Browser Use and Computer Use require Off Grid AI Pro.'
+    )
+    expect(boundary.commands).toEqual([])
+    expect(boundary.approvals).toEqual([])
   })
 
   it('queues a create for approval and does not run the helper when queued', async () => {

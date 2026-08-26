@@ -286,23 +286,39 @@ export const WINDOWS_TOOL_NAMES: ReadonlySet<string> = new Set([
   'computer_task'
 ])
 
-export function specsForPlatform(platform: NodeJS.Platform): NativeToolSpec[] {
+export const PRO_USE_TOOL_NAMES: ReadonlySet<string> = new Set(['web_task', 'computer_task'])
+
+export function specsForPlatform(
+  platform: NodeJS.Platform,
+  includeProUse = true
+): NativeToolSpec[] {
+  let specs: NativeToolSpec[]
   if (platform === 'darwin') {
-    return NATIVE_TOOL_SPECS
+    specs = NATIVE_TOOL_SPECS
+  } else if (platform === 'win32') {
+    specs = NATIVE_TOOL_SPECS.filter((spec) => WINDOWS_TOOL_NAMES.has(spec.name))
+  } else {
+    specs = []
   }
-  if (platform === 'win32') {
-    return NATIVE_TOOL_SPECS.filter((spec) => WINDOWS_TOOL_NAMES.has(spec.name))
-  }
-  return []
+  return includeProUse ? specs : specs.filter((spec) => !PRO_USE_TOOL_NAMES.has(spec.name))
 }
 
 /** The model-facing capability hint, per platform - never promise a tool the
  *  platform does not expose. */
-export function systemHintForPlatform(platform: NodeJS.Platform): string {
+export function systemHintForPlatform(
+  platform: NodeJS.Platform,
+  includeProUse = true
+): string {
   if (platform === 'darwin') {
+    if (!includeProUse) {
+      return "You can act on the user's Mac: manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme with open_url; it opens the target without interacting with it. Use ISO 8601 for all times. Anything that creates or sends needs the user's approval; tell them it is pending until they approve."
+    }
     return "You can act on the user's Mac: manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme (like whatsapp://send) with open_url - it ONLY opens, no interaction. To actually DO something on a website - play or watch a video, search and click a result, check in, order, fill a form, log in - use web_task (NOT open_url); it runs the task inside Off Grid's own built-in browser without touching the user's cursor or their own browser, so they keep working, and hands back for any sign-in or payment. For a task that needs to control a desktop app with no web version, use computer_task - the user watches and can take over. Prefer the direct tools and web_task when they fit. Use ISO 8601 for all times. Anything that creates, sends, or runs a task needs the user's approval; tell them it is pending until they approve."
   }
   if (platform === 'win32') {
+    if (!includeProUse) {
+      return "You can act on the user's PC through Outlook: create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url; it opens the target without interacting with it. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Anything that creates or sends needs the user's approval; tell them it is pending until they approve."
+    }
     return "You can act on the user's PC through Outlook: create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url - it ONLY opens, no interaction. To DO something on a website - play or watch a video, search and click a result, check in, order, fill a form, log in - use web_task (NOT open_url); it runs the task inside Off Grid's own built-in browser without touching the user's cursor or their own browser, so they keep working, and hands back for any sign-in or payment. For a task that needs to control a desktop app with no web version, use computer_task - the user watches and can take over. Prefer the direct tools and web_task when they fit. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Anything that creates, sends, or runs a task needs the user's approval; tell them it is pending until they approve."
   }
   return ''
