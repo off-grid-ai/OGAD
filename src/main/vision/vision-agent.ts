@@ -64,8 +64,8 @@ export interface VisionGroundingInput {
   currentMilestone?: string
   verifiedActions?: readonly string[]
   /** Last action that crossed the execution boundary, in the pixel frame used
-   * when the model selected it. The policy runner uses this only to annotate an
-   * in-memory copy of the next screenshot. */
+   * when the model selected it. The policy runner annotates the exact next
+   * screenshot used by both the model and task history. */
   previousVerifiedAction?: {
     action: VisionAction
     coordinateFrame: VisionPolicyCoordinateFrame

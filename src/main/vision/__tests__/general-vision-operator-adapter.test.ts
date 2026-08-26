@@ -15,6 +15,7 @@ import type { VisionPolicyResponse } from '../model-adapters/types'
 import {
   answerAfterThinking,
   createVisionGrounder,
+  modelScreenshot,
   normalizedPolicyAnswer,
   previousClickMarker,
   remoteVisionProviderError,
@@ -338,6 +339,41 @@ describe('general vision native tool policy', () => {
         }
       })
     ).toEqual({ x: 143, y: 74 })
+  })
+
+  it('persists the exact annotated model image for task history', async () => {
+    const file = path.join(os.tmpdir(), `offgrid-model-frame-${Date.now()}.png`)
+    const original = await sharp({
+      create: { width: 100, height: 100, channels: 4, background: '#ffffff' }
+    })
+      .png()
+      .toBuffer()
+    fs.writeFileSync(file, original)
+
+    const prepared = await modelScreenshot({
+      goal: 'Use the control.',
+      image: file,
+      history: [],
+      retrievedFacts: [],
+      policyHistory: [],
+      guidance: [],
+      previousVerifiedAction: {
+        action: { type: 'click', point: { x: 50, y: 50 } },
+        coordinateFrame: {
+          encoded: { width: 100, height: 100 },
+          source: { width: 100, height: 100 }
+        }
+      },
+      coordinateFrame: {
+        encoded: { width: 100, height: 100 },
+        source: { width: 100, height: 100 }
+      }
+    })
+
+    const persisted = fs.readFileSync(file)
+    expect(persisted.equals(original)).toBe(false)
+    expect(prepared.dataUrl).toBe(`data:image/png;base64,${persisted.toString('base64')}`)
+    fs.unlinkSync(file)
   })
 
   it('preserves safe remote transport and provider error detail', () => {

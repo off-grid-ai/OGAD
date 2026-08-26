@@ -243,7 +243,10 @@ export function previousClickMarker(input: VisionGroundingInput): PreviousClickM
   }
 }
 
-async function modelScreenshot(input: VisionGroundingInput): Promise<{
+/** Build the exact image used by the model and persist those same bytes at the
+ * capture path used by task history. This keeps model evidence and the visible
+ * task screenshot on one source of truth. */
+export async function modelScreenshot(input: VisionGroundingInput): Promise<{
   dataUrl: string
   marker?: PreviousClickMarker
 }> {
@@ -285,6 +288,7 @@ async function modelScreenshot(input: VisionGroundingInput): Promise<{
     ])
     .png()
     .toBuffer()
+  fs.writeFileSync(input.image, annotated)
   return { dataUrl: `data:image/png;base64,${annotated.toString('base64')}`, marker }
 }
 
