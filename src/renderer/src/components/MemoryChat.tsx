@@ -88,9 +88,7 @@ import {
 } from '../../../shared/image-generation-contract'
 import { Button } from '@renderer/components/ui/button'
 import { ActionGateDock } from '@renderer/components/actions/ActionGateDock'
-import { VisionSupervisorOverlay } from '@renderer/components/vision/VisionSupervisorOverlay'
 import { TaskPanelTrigger } from '@renderer/components/tasks/TaskPanelTrigger'
-import { TaskLiveActivity } from '@renderer/components/browser/tasks/TaskLiveActivity'
 import {
   guidanceTaskForJourney,
   useTaskSessions,
@@ -2694,6 +2692,8 @@ export function MemoryChat({
   // Pro registers this slot after the core renderer starts. Resolve it on each render so an
   // execution-chat approval cannot stay hidden behind a value cached before Pro activation.
   const ChatMessagesFooter = isPro ? getSlot(SLOTS.chatMessagesFooter) : undefined
+  const TaskLiveActivity = isPro ? getSlot(SLOTS.taskLiveActivity) : undefined
+  const TaskSupervisorOverlay = isPro ? getSlot(SLOTS.taskSupervisorOverlay) : undefined
   // Esc closes the open overlay (attachment viewer / image lightbox).
   useEffect(() => {
     if (!viewer && !lightbox) return
@@ -5200,7 +5200,9 @@ export function MemoryChat({
                       promptEnhancementComplete={promptEnhancementComplete}
                     />
                   ) : null}
-                  {liveJourneyTask ? <TaskLiveActivity task={liveJourneyTask} /> : null}
+                  {TaskLiveActivity && liveJourneyTask ? (
+                    <TaskLiveActivity task={liveJourneyTask} />
+                  ) : null}
                   {!!activeConversationId &&
                   !liveJourneyTask &&
                   generatingConvs.has(activeConversationId) &&
@@ -5687,7 +5689,7 @@ export function MemoryChat({
                   {/* Approval UX v2: pending gate cards + outcomes, in-flow above the composer */}
                   <ActionGateDock />
                   {/* Vision rail: the supervisor overlay slides in during a computer-use task */}
-                  <VisionSupervisorOverlay />
+                  {TaskSupervisorOverlay ? <TaskSupervisorOverlay /> : null}
                   {voiceTurns.microphoneDenied && (
                     <div
                       role="alert"

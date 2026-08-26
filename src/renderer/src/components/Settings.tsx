@@ -17,7 +17,6 @@ import { SoftwareUpdateSection } from './SoftwareUpdateSection'
 import { ProcessingControls } from './ProcessingControls'
 import { BackupRestoreSection } from './BackupRestoreSection'
 import { SettingsPermissionsPanel } from './PermissionsPanel'
-import { ComputerUseSettingsSection } from './ComputerUseSettingsSection'
 import { RemoteVisionSettingsTab } from './RemoteVisionSettingsTab'
 export { ModelPipelineSection } from './ProcessingControls'
 
@@ -188,14 +187,6 @@ export function Settings({
                 </div>
               )}
               <ProcessingControls />
-            </SettingsCard>
-
-            <SettingsCard
-              title="Computer use"
-              summary="Control screen detail, task context, and recovery checkpoints."
-              delay={0.15}
-            >
-              <ComputerUseSettingsSection />
             </SettingsCard>
 
             <SettingsCard

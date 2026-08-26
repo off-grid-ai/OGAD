@@ -20,6 +20,8 @@ import {
 import { TooltipProvider } from '../components/ui/tooltip'
 import { closeTaskWorkspace, openTaskSidePanel } from '../lib/task-side-panel'
 import { resetTaskSessionStoreForTests } from '../lib/task-session-store'
+import { registerSlot, SLOTS, clearRegisteredSlots } from '../bootstrap/slotRegistry'
+import { WatchedBrowserPane } from '../../../../pro/renderer/components/browser/WatchedBrowserPane'
 import {
   APP_PROJECTS,
   installAppBoundary,
@@ -57,12 +59,14 @@ describe('<App/> desktop navigation integration', () => {
     installAppBrowserBoundary()
     closeTaskWorkspace()
     resetTaskSessionStoreForTests()
+    registerSlot(SLOTS.taskWorkspace, WatchedBrowserPane)
   })
 
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
     vi.useRealTimers()
+    clearRegisteredSlots()
   })
 
   it('keeps a dense project master-detail state through Cmd+[ and Cmd+] (#50, #59)', async () => {
@@ -390,6 +394,7 @@ describe('<App/> desktop navigation integration', () => {
     const setRegion = vi.fn()
     window.history.replaceState(null, '', '/chat')
     installAppBoundary({
+      isPro: true,
       tasks: { list: async () => [], onChanged: () => () => {} },
       browser: { setRegion },
       actions: { onGatePending: () => () => {}, onOutcome: () => () => {} }
@@ -426,6 +431,7 @@ describe('<App/> desktop navigation integration', () => {
     let emitSessions: ((snapshot: unknown) => void) | undefined
     window.history.replaceState(null, '', '/chat')
     installAppBoundary({
+      isPro: true,
       getRagConversations: async () => [
         { id: 'chat-web-start', title: 'Web start', updated_at: '2026-08-25T00:00:00.000Z' }
       ],

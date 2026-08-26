@@ -33,5 +33,11 @@ export const SLOTS = {
   connectorSetup: 'connectors.setup',
   /** Rows appended after the message list of the open conversation (e.g. a reply
    *  streaming live on another device). Receives `{ conversationId }`. */
-  chatMessagesFooter: 'chat.messagesFooter'
+  chatMessagesFooter: 'chat.messagesFooter',
+  /** Licensed Browser Use and Computer Use task workspace. */
+  taskWorkspace: 'tasks.workspace',
+  /** Evidence-based live task activity shown in the originating chat. */
+  taskLiveActivity: 'tasks.liveActivity',
+  /** Optional task supervisor surface mounted above the chat composer. */
+  taskSupervisorOverlay: 'tasks.supervisorOverlay'
 } as const

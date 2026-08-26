@@ -40,6 +40,15 @@ export const PRO_SETTINGS_SLOTS: ProSettingsSlot[] = [
     }
   },
   {
+    id: 'computer-use',
+    delay: 0.15,
+    placeholder: {
+      title: 'Computer use',
+      description:
+        'Let Off Grid complete supervised work in a browser or on your screen while you stay in control.'
+    }
+  },
+  {
     id: 'sync',
     delay: 0.16,
     placeholder: {

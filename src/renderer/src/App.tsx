@@ -62,7 +62,7 @@ import { OFF_GRID_MOBILE_URL, openExternal } from './constants/links'
 import { cn } from './lib/utils'
 import { normalizeProNavigationIntent, type ProNavigationIntent } from './lib/pro-navigation'
 import { navigateSearchHit } from './lib/search-navigation'
-import { WatchedBrowserPane } from './components/browser/WatchedBrowserPane'
+import { getSlot, SLOTS } from './bootstrap/slotRegistry'
 import {
   Panel,
   PanelGroup,
@@ -281,6 +281,7 @@ function AppContent() {
   // Re-render once pro renderer features have activated (registers the view-router).
   const [proReady, setProReady] = useState(false)
   const [proActivation, setProActivation] = useState<ProRendererActivation>('none')
+  const TaskWorkspace = isPro && proReady ? getSlot(SLOTS.taskWorkspace) : undefined
   const [externalUnreadCount, setExternalUnreadCount] = useState(0)
   useEffect(() => {
     let mounted = true
@@ -1511,10 +1512,14 @@ function AppContent() {
                           onActiveConversationChange={setActiveChatConversationId}
                         />
                       ) : viewMode === 'tasks' ? (
-                        <WatchedBrowserPane
-                          standalone
-                          onDetailModeChange={setTaskDetailSidebarMode}
-                        />
+                        TaskWorkspace ? (
+                          <TaskWorkspace
+                            standalone
+                            onDetailModeChange={setTaskDetailSidebarMode}
+                          />
+                        ) : (
+                          <UpgradeScreen feature={getProFeature(viewMode)} />
+                        )
                       ) : viewMode === 'chats' ? (
                         <ChatList onSelectSession={setSelectedSessionId} />
                       ) : viewMode === 'models' ? (
@@ -1611,13 +1616,15 @@ function AppContent() {
             style={{ transition: taskWorkspaceTransition }}
             onResize={setTaskWorkspaceSize}
           >
-            <WatchedBrowserPane
-              mainWorkspaceCollapsed={mainWorkspaceCollapsed}
-              onToggleMainWorkspace={toggleMainWorkspace}
-              onDetailModeChange={setDockedTaskDetailMode}
-              routeActive={taskWorkspaceRouteActive}
-              conversationId={activeChatConversationId}
-            />
+            {TaskWorkspace ? (
+              <TaskWorkspace
+                mainWorkspaceCollapsed={mainWorkspaceCollapsed}
+                onToggleMainWorkspace={toggleMainWorkspace}
+                onDetailModeChange={setDockedTaskDetailMode}
+                routeActive={taskWorkspaceRouteActive}
+                conversationId={activeChatConversationId}
+              />
+            ) : null}
           </Panel>
         </PanelGroup>
       </div>
