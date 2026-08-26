@@ -30,13 +30,15 @@ import path from 'path'
 import { randomUUID } from 'crypto'
 import { desktopExtraction } from './rag/extractors'
 import * as tts from './tts'
-import { generateImage, imageGenStatus, activeImageModel, type ImageGenParams } from './imagegen'
+import { imageGenStatus, activeImageModel, type ImageGenParams } from './imagegen'
+import { imageGenerationJobs } from './imagegen/job-service'
+import { pollProgress, shapeImageResponse } from './model-server/image-route'
 import { whisperModel } from './rag/extractors'
 import { getActiveModal } from './active-models'
 import { embeddings } from './embeddings'
 import { docsText, docsHtml, openApiSpec } from './api-docs'
 import { handleMcpRequest } from './mcp-server'
-import { logActionTokenForDev } from './mcp-auth'
+import { isActionAuthorized, logActionTokenForDev } from './mcp-auth'
 import { llm, type LlmSettings } from './llm'
 import { GATEWAY_HOST, GATEWAY_BIND_HOST, GATEWAY_PORT } from '../shared/ports'
 import { pickFreePort } from './free-port'
@@ -187,6 +189,8 @@ function handlePoll(res: http.ServerResponse, id: string): void {
   }
   if (r.status === 'completed') body.result = r.result
   if (r.status === 'failed') body.error = r.error
+  const progress = pollProgress(r.kind, r.status, imageGenerationJobs.status())
+  if (progress) body.progress = progress
   json(res, 200, body)
 }
 
@@ -743,22 +747,22 @@ async function executeImage(
       err.status = 501
       throw err
     }
-    const out = await generateImage(params)
-    const b64 = out.dataUrl.slice(out.dataUrl.indexOf(',') + 1)
-    const datum =
-      responseFormat === 'url'
-        ? {
-            url: `file://${out.path}`,
-            revised_prompt: out.prompt,
-            seed: out.seed,
-            model: out.model
-          }
-        : { b64_json: b64, revised_prompt: out.prompt, seed: out.seed, model: out.model }
-    return {
-      created: Math.floor(Date.now() / 1000),
-      data: [datum],
-      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+    // Through the job service, not generateImage() directly - one owner of job
+    // identity for every caller. That restores the single-job admission the
+    // renderer already respects, and gives the image a syncId + sidecar, so it
+    // appears in this Mac's gallery and ships to paired devices over the mesh
+    // exactly like a locally started generation.
+    try {
+      imageGenerationJobs.assertCanStart()
+    } catch (busyError) {
+      const err = new Error(
+        busyError instanceof Error ? busyError.message : String(busyError)
+      ) as Error & { status?: number }
+      err.status = 429
+      throw err
     }
+    const out = await imageGenerationJobs.start(params)
+    return shapeImageResponse(out, responseFormat)
   } finally {
     cleanup?.()
   }
@@ -1150,10 +1154,28 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
         )
       return
     }
-    if (url === '/v1/images' && method === 'POST') return void handleImagesUnified(req, res, rid)
-    if (url === '/v1/images/generations' && method === 'POST')
+    // Image routes: opportunistic auth. A caller that presents a bearer gets it
+    // verified against the live per-device action tokens (a paired phone sends
+    // its own); presenting an invalid credential is a hard 401. No credentials
+    // keeps the gateway's documented open-LAN posture unchanged.
+    const imageAuthRejected = (): boolean => {
+      if (!req.headers.authorization) return false
+      if (isActionAuthorized(req)) return false
+      json(res, 401, errBody('Invalid bearer token.', 'unauthorized'))
+      return true
+    }
+    if (url === '/v1/images' && method === 'POST') {
+      if (imageAuthRejected()) return
+      return void handleImagesUnified(req, res, rid)
+    }
+    if (url === '/v1/images/generations' && method === 'POST') {
+      if (imageAuthRejected()) return
       return void handleImageGeneration(req, res, rid)
-    if (url === '/v1/images/edits' && method === 'POST') return void handleImageEdit(req, res, rid)
+    }
+    if (url === '/v1/images/edits' && method === 'POST') {
+      if (imageAuthRejected()) return
+      return void handleImageEdit(req, res, rid)
+    }
 
     // --- Model management (pull / delete / activate / list) — the full headless
     // repertoire, so the gateway is self-sufficient without the desktop UI. ---
