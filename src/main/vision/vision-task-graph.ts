@@ -284,11 +284,9 @@ class VisionTaskGraphRuntime {
       const grounding = await this.deps.decide(this.groundingInput(captured))
       this.actionResponse = grounding.response
       this.actionModelInput = grounding.modelInput
-      this.decision = this.parseResponse(
-        grounding.response,
-        captured.shot.bounds,
-        coordinateFrame(captured.shot)
-      )
+      this.decision =
+        grounding.decision ??
+        this.parseResponse(grounding.response, captured.shot.bounds, coordinateFrame(captured.shot))
       this.pendingPolicyHistory = {
         response: grounding.response,
         actionText: this.decision.actionText,

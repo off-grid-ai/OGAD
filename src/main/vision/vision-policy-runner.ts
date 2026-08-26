@@ -9,7 +9,8 @@ import type {
   VisionModelAdapter,
   VisionPolicyInput,
   VisionPolicyMessage,
-  VisionPolicyRequest
+  VisionPolicyRequest,
+  VisionPolicyResponse
 } from './model-adapters/types'
 import { serializeVisionPolicyMessages } from './model-adapters/model-input'
 
@@ -30,7 +31,7 @@ export function normalizedPolicyAnswer(response: string): string {
 }
 
 const MALFORMED_POLICY_RETRY =
-  'Return only the exact required JSON keys and value types. Do not rename, omit, or add fields.'
+  'Use the exact required decision contract. Do not rename, omit, or add fields or tool calls.'
 
 /** One retry policy for every vision transport. */
 export function visionPolicyMessagesForAttempt(
@@ -95,7 +96,7 @@ export async function runVisionPolicyRequest(
   request: VisionPolicyRequest,
   signal?: AbortSignal,
   onReasoningDelta?: (text: string) => void
-): Promise<string> {
+): Promise<VisionPolicyResponse> {
   let lastError: unknown
   let priorInvalidAnswer: string | undefined
   let priorValidationError: string | undefined
@@ -108,26 +109,29 @@ export async function runVisionPolicyRequest(
         priorInvalidAnswer,
         priorValidationError
       )
-      const response =
-        onReasoningDelta && request.separateReasoning
-          ? (
-              await llm.streamChat(
-                messages,
-                (text, kind) => {
-                  if (kind === 'reasoning') onReasoningDelta(text)
-                },
-                {
-                  temperature: request.temperature,
-                  topP: request.topP,
-                  thinking: request.enableThinking === true && request.disableThinking !== true,
-                  responseFormat: request.responseFormat,
-                  maxTokens: request.maxTokens,
-                  signal
-                },
-                request.timeoutMs
-              )
-            ).content
-          : await llm.chatMessages(messages, request.timeoutMs, request.maxTokens, {
+      const useStream = Boolean(
+        request.tools?.length || (onReasoningDelta && request.separateReasoning)
+      )
+      const rawResponse = useStream
+        ? await llm.streamChat(
+            messages,
+            (text, kind) => {
+              if (kind === 'reasoning') onReasoningDelta?.(text)
+            },
+            {
+              temperature: request.temperature,
+              topP: request.topP,
+              thinking: request.enableThinking === true && request.disableThinking !== true,
+              responseFormat: request.responseFormat,
+              tools: request.tools,
+              toolChoice: request.toolChoice,
+              maxTokens: request.maxTokens,
+              signal
+            },
+            request.timeoutMs
+          )
+        : {
+            content: await llm.chatMessages(messages, request.timeoutMs, request.maxTokens, {
               temperature: request.temperature,
               topP: request.topP,
               responseFormat: request.responseFormat,
@@ -135,36 +139,56 @@ export async function runVisionPolicyRequest(
               disableThinking: request.disableThinking,
               separateReasoning: request.separateReasoning,
               signal
-            })
-      if (!response.trim()) {
+            }),
+            toolCalls: []
+          }
+      if (!rawResponse.content.trim() && rawResponse.toolCalls.length === 0) {
         throw new Error('Computer-use model returned no response.')
       }
-      const answer = normalizedPolicyAnswer(response)
+      const response: VisionPolicyResponse = {
+        content: normalizedPolicyAnswer(rawResponse.content),
+        toolCalls: rawResponse.toolCalls
+      }
+      const answer = response.content
       if (request.requireFinalAnswer && !answer) {
         throw new Error('Computer-use model returned reasoning without a final answer.')
       }
-      if (request.validateResponse && !request.validateResponse(answer)) {
-        priorInvalidAnswer = answer
-        const reason = request.responseValidationError?.(answer)
+      if (request.validateResponse && !request.validateResponse(response)) {
+        priorInvalidAnswer = serializeVisionPolicyResponse(response)
+        const reason = request.responseValidationError?.(response)
         priorValidationError = reason
         console.warn(
-          `[vision-policy] local final answer rejected: ${reason || 'unknown validation error'}; answer=${JSON.stringify(answer.slice(0, 4_000))}`
+          `[vision-policy] model decision rejected: ${reason || 'unknown validation error'}; response=${JSON.stringify(priorInvalidAnswer.slice(0, 4_000))}`
         )
-        // Return the final malformed command to the graph after the bounded
-        // same-frame retry. The parser converts it to an invalid transition,
-        // and LangGraph safely captures a fresh frame instead of ending the task.
-        if (attempt === request.maxAttempts) return answer
+        // Return the final malformed decision to the graph after the bounded
+        // same-frame retry. The adapter supplies an invalid transition, and
+        // LangGraph captures a fresh frame instead of ending the task.
+        if (attempt === request.maxAttempts) return response
         throw new Error(
           `Computer-use model returned an invalid final answer${reason ? `: ${reason}` : ''}.`
         )
       }
-      return answer
+      return response
     } catch (error) {
       if (signal?.aborted) throw error
       lastError = error
     }
   }
   throw lastError instanceof Error ? lastError : new Error('Computer-use model request failed.')
+}
+
+/** Stable audit/history form. Tool arguments are already model output; this
+ * serialization never controls a transition. */
+export function serializeVisionPolicyResponse(response: VisionPolicyResponse): string {
+  if (response.toolCalls.length === 0) return response.content
+  return JSON.stringify({
+    ...(response.content ? { content: response.content } : {}),
+    tool_calls: response.toolCalls.map(({ id, name, arguments: rawArguments }) => ({
+      id,
+      name,
+      arguments: rawArguments
+    }))
+  })
 }
 
 interface PreviousClickMarker {
@@ -304,9 +328,20 @@ export function createVisionGrounder(
       visionPolicyInput(input, screenshot.dataUrl, screenshot.marker, operatorEnvironment)
     )
     input.reportProgress?.('Reviewing direction, milestone, and next action')
-    const response = await runVisionPolicyRequest(request, input.signal, input.reportReasoning)
+    const policyResponse = await runVisionPolicyRequest(
+      request,
+      input.signal,
+      input.reportReasoning
+    )
+    const response = serializeVisionPolicyResponse(policyResponse)
+    const decision = adapter.parsePolicyResponse?.(
+      policyResponse,
+      input.coordinateFrame?.encoded ?? { width: 0, height: 0 },
+      input.coordinateFrame
+    )
     return {
       response,
+      ...(decision ? { decision } : {}),
       modelInput: redactGuidance(
         `Visual step decision request:\n${serializeVisionPolicyMessages(request.messages)}`,
         input.guidance

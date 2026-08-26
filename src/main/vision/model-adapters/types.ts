@@ -46,13 +46,27 @@ export interface VisionPolicyMessage {
   content: string | ContentPart[]
 }
 
+export interface VisionPolicyToolCall {
+  id: string
+  name: string
+  arguments: string
+}
+
+export interface VisionPolicyResponse {
+  content: string
+  toolCalls: readonly VisionPolicyToolCall[]
+}
+
 export interface VisionPolicyRequest {
   messages: VisionPolicyMessage[]
   maxTokens: number
   timeoutMs: number
   maxAttempts: number
-  /** Grammar-constrained final output at the local model boundary. */
+  /** Optional structured-output grammar for specialist text protocols. */
   responseFormat?: unknown
+  /** OpenAI-compatible native tools. General/remote operators use this path. */
+  tools?: unknown[]
+  toolChoice?: string
   temperature?: number
   topP?: number
   /** Preserve the model's inline <think> protocol while explicitly enabling its template mode. */
@@ -63,9 +77,9 @@ export interface VisionPolicyRequest {
   /** Require a final answer outside the model's private reasoning channel. */
   requireFinalAnswer?: boolean
   /** Reject a malformed final answer so the request can use its normal retry budget. */
-  validateResponse?(answer: string): boolean
+  validateResponse?(response: VisionPolicyResponse): boolean
   /** Explain which strict contract rule failed without exposing private reasoning. */
-  responseValidationError?(answer: string): string | undefined
+  responseValidationError?(response: VisionPolicyResponse): string | undefined
 }
 
 export type VisionPolicyDecision = (
@@ -99,6 +113,13 @@ export interface VisionModelAdapter {
   buildRequest(input: VisionPolicyInput): VisionPolicyRequest
   parseResponse(
     response: string,
+    bounds: Bounds,
+    coordinateFrame?: VisionPolicyCoordinateFrame
+  ): VisionPolicyDecision
+  /** General and remote models route from native tool calls. Specialist text
+   * protocols omit this hook and continue through parseResponse. */
+  parsePolicyResponse?(
+    response: VisionPolicyResponse,
     bounds: Bounds,
     coordinateFrame?: VisionPolicyCoordinateFrame
   ): VisionPolicyDecision
