@@ -39,48 +39,41 @@ export function SidebarNavigationMenu<Item extends { view: string; label: string
     })
   }, [activeGroup])
 
-  if (!expanded) {
-    return (
-      <div className="flex flex-col" aria-label="Menu sections">
-        {groups.map((group, index) => (
-          <div
-            key={group.label}
-            role="group"
-            aria-label={group.label}
-            className={`flex flex-col gap-1 ${index > 0 ? 'mt-2 border-t border-neutral-800 pt-2' : ''}`}
-          >
-            {group.items.map(renderItem)}
-          </div>
-        ))}
-      </div>
-    )
-  }
-
   return (
-    <div className="flex flex-col gap-1" aria-label="Menu sections">
-      {groups.map((group) => {
-        const open = openGroups.has(group.label)
+    <div className={expanded ? 'flex flex-col gap-1' : 'flex flex-col'} aria-label="Menu sections">
+      {groups.map((group, index) => {
+        const open = expanded ? openGroups.has(group.label) : true
         const activeItem = group.items.find((item) => item.view === activeView)
         return (
           <Collapsible
             key={group.label}
             open={open}
-            onOpenChange={(nextOpen) =>
+            role="group"
+            aria-label={group.label}
+            className={!expanded && index > 0 ? 'mt-2 border-t border-neutral-800 pt-2' : undefined}
+            onOpenChange={(nextOpen) => {
+              if (!expanded) return
               setOpenGroups((current) => {
                 const next = new Set(current)
                 if (nextOpen) next.add(group.label)
                 else next.delete(group.label)
                 return next
               })
-            }
+            }}
           >
             <CollapsibleTrigger asChild>
               <button
                 type="button"
+                tabIndex={expanded ? 0 : -1}
+                aria-hidden={!expanded}
                 aria-label={
                   !open && activeItem ? `${group.label}, current: ${activeItem.label}` : group.label
                 }
-                className="group flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[10px] uppercase tracking-[0.14em] text-neutral-500 transition-colors hover:bg-neutral-500/10 hover:text-white"
+                className={
+                  expanded
+                    ? 'group flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[10px] uppercase tracking-[0.14em] text-neutral-500 transition-colors hover:bg-neutral-500/10 hover:text-white'
+                    : 'hidden'
+                }
               >
                 <span className="min-w-0 flex-1 truncate">{group.label}</span>
                 {!open && activeItem ? (

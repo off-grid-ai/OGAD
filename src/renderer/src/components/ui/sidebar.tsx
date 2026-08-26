@@ -91,7 +91,8 @@ export const DesktopSidebar = ({
           'h-full px-4 py-4 flex flex-col bg-neutral-100 dark:bg-neutral-800 shrink-0',
           className
         )}
-        // Constant — width is driven by an explicit open/close toggle, NOT hover.
+        // App owns hover and keyboard-focus intent; this primitive owns only the
+        // smooth width transition between the rail and expanded navigation.
         animate={{
           width: animate ? (open ? '220px' : '60px') : '220px'
         }}

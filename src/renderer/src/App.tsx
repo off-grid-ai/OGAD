@@ -48,8 +48,6 @@ import {
   IconPlug,
   IconServer2,
   IconLock,
-  IconLayoutSidebarLeftCollapse,
-  IconLayoutSidebarLeftExpand,
   IconLoader2,
   IconArrowLeft,
   IconArrowRight,
@@ -383,27 +381,11 @@ function AppContent() {
     setPendingNavigation(null)
     navigation?.proceed()
   }, [pendingNavigation])
-  const [sidebarOpen, setSidebarOpen] = useState(true)
-  const sidebarOpenRef = useRef(sidebarOpen)
-  const sidebarOpenedByHoverRef = useRef(false)
-  const sidebarBeforeTaskDetailRef = useRef<boolean | null>(null)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const rec = useMeetingRecorder()
 
-  useEffect(() => {
-    sidebarOpenRef.current = sidebarOpen
-  }, [sidebarOpen])
-
   const setTaskDetailSidebarMode = useCallback((detailOpen: boolean): void => {
-    if (detailOpen) {
-      if (sidebarBeforeTaskDetailRef.current === null) {
-        sidebarBeforeTaskDetailRef.current = sidebarOpenRef.current
-      }
-      setSidebarOpen(false)
-      return
-    }
-    const previous = sidebarBeforeTaskDetailRef.current
-    sidebarBeforeTaskDetailRef.current = null
-    if (previous !== null) setSidebarOpen(previous)
+    if (detailOpen) setSidebarOpen(false)
   }, [])
 
   // The meeting recording lifecycle (detect → record → warn → stop → finalize) is
@@ -1044,10 +1026,6 @@ function AppContent() {
       setSelectedMemoryId(null)
       setSelectedEntityId(null)
       setReplayTarget(null)
-      if (sidebarOpenedByHoverRef.current) {
-        sidebarOpenedByHoverRef.current = false
-        setSidebarOpen(false)
-      }
     })
   }
   const renderNavItem = (item: {
@@ -1117,7 +1095,6 @@ function AppContent() {
         ]}
         onGoTo={(view, subroute) => {
           goToView(view as ViewMode, subroute)
-          sidebarOpenedByHoverRef.current = false
           setSidebarOpen(false)
         }}
       />
@@ -1203,46 +1180,27 @@ function AppContent() {
           <SidebarBody
             role="navigation"
             aria-label="Primary navigation"
+            aria-expanded={sidebarOpen}
             className="justify-between gap-3 bg-neutral-900/80 backdrop-blur-xl border-r border-neutral-800"
-            onMouseEnter={() => {
-              if (sidebarOpenRef.current) return
-              sidebarOpenedByHoverRef.current = true
-              setSidebarOpen(true)
-            }}
-            onMouseLeave={() => {
-              if (!sidebarOpenedByHoverRef.current) return
-              sidebarOpenedByHoverRef.current = false
-              setSidebarOpen(false)
+            onMouseEnter={() => setSidebarOpen(true)}
+            onMouseLeave={() => setSidebarOpen(false)}
+            onFocusCapture={() => setSidebarOpen(true)}
+            onBlurCapture={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) setSidebarOpen(false)
             }}
           >
             <div className="flex min-h-0 flex-1 flex-col">
-              {/* Brand + a dedicated collapse/expand toggle */}
-              {sidebarOpen ? (
-                <div className="flex items-center gap-2 py-2">
-                  <img src={logo} alt="Off Grid AI" className="h-8 w-8 shrink-0 rounded-lg" />
+              {/* The rail expands only while hovered or keyboard-focused. */}
+              <div
+                className={cn('flex items-center py-2', sidebarOpen ? 'gap-2' : 'justify-center')}
+              >
+                <img src={logo} alt="Off Grid AI" className="h-8 w-8 shrink-0 rounded-lg" />
+                {sidebarOpen ? (
                   <span className="flex-1 text-left font-semibold text-white whitespace-pre">
                     Off Grid AI
                   </span>
-                  <button
-                    onClick={() => setSidebarOpen(false)}
-                    aria-label="Collapse sidebar"
-                    title="Collapse"
-                    className="shrink-0 rounded-lg p-1.5 text-neutral-400 transition-colors hover:bg-neutral-800/60 hover:text-white"
-                  >
-                    <IconLayoutSidebarLeftCollapse className="h-5 w-5" />
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setSidebarOpen(true)}
-                  aria-label="Expand sidebar"
-                  title="Expand"
-                  className="group/exp flex w-full flex-col items-center gap-1.5 py-2"
-                >
-                  <img src={logo} alt="Off Grid AI" className="h-8 w-8 shrink-0 rounded-lg" />
-                  <IconLayoutSidebarLeftExpand className="h-5 w-5 text-neutral-500 transition-colors group-hover/exp:text-white" />
-                </button>
-              )}
+                ) : null}
+              </div>
 
               {/* Back / forward — a distinct control (filled), available everywhere (⌘[ / ⌘]) */}
               <div className={cn('mt-3 flex items-center gap-1', !sidebarOpen && 'justify-center')}>

@@ -93,9 +93,8 @@ describe('<App/> desktop navigation integration', () => {
     })
     observer.observe(document.body, { childList: true, subtree: true })
     try {
-      // By role and name, not by title: the sidebar starts expanded, and the title attribute is the
-      // COLLAPSED-rail affordance only (App.tsx sets title={!sidebarOpen ? item.label : undefined}), so
-      // the expanded nav carries its label as visible text instead.
+      // By role and name: the collapsed rail still exposes every destination to
+      // assistive technology even when its visible text is hidden.
       await user.click(screen.getByRole('button', { name: 'Integrations' }))
       await waitFor(() => expect(shortcutDispatched).toBe(true))
     } finally {
@@ -131,21 +130,44 @@ describe('<App/> desktop navigation integration', () => {
     expect(screen.getByText('Configure it for me')).toBeTruthy()
   })
 
-  it('opens a collapsed sidebar on hover and closes it after navigation', async () => {
+  it('starts collapsed and stays expanded only while hovered', async () => {
     const user = userEvent.setup()
     render(<App />)
 
     await screen.findByRole('heading', { name: 'Projects' })
-    await user.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
+    const navigation = screen.getByRole('navigation', { name: 'Primary navigation' })
+    expect(navigation.getAttribute('aria-expanded')).toBe('false')
     expect(screen.queryByText('Menu')).toBeNull()
 
-    const navigation = screen.getByRole('navigation', { name: 'Primary navigation' })
     await user.hover(navigation)
     expect(await screen.findByText('Menu')).toBeTruthy()
+    expect(navigation.getAttribute('aria-expanded')).toBe('true')
 
     fireEvent.click(screen.getByRole('button', { name: 'Integrations' }))
     await waitFor(() => expect(window.location.pathname).toBe('/connectors'))
+    expect(navigation.getAttribute('aria-expanded')).toBe('true')
+
+    await user.unhover(navigation)
+    await waitFor(() => expect(navigation.getAttribute('aria-expanded')).toBe('false'))
     expect(screen.queryByText('Menu')).toBeNull()
+  })
+
+  it('expands for keyboard focus and collapses when focus leaves the navigation', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'Projects' })
+    const navigation = screen.getByRole('navigation', { name: 'Primary navigation' })
+    expect(navigation.getAttribute('aria-expanded')).toBe('false')
+
+    await user.tab()
+    await waitFor(() => expect(navigation.getAttribute('aria-expanded')).toBe('true'))
+
+    const outside = document.createElement('button')
+    document.body.append(outside)
+    outside.focus()
+    await waitFor(() => expect(navigation.getAttribute('aria-expanded')).toBe('false'))
+    outside.remove()
   })
 
   it('collapses the sidebar after Command-K navigation to a screen', async () => {
@@ -153,7 +175,8 @@ describe('<App/> desktop navigation integration', () => {
     render(<App />)
 
     await screen.findByRole('heading', { name: 'Projects' }, { timeout: 5_000 })
-    expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeTruthy()
+    const navigation = screen.getByRole('navigation', { name: 'Primary navigation' })
+    expect(navigation.getAttribute('aria-expanded')).toBe('false')
 
     await user.keyboard('{Meta>}k{/Meta}')
     const input = await screen.findByPlaceholderText(/jump to a screen/i)
@@ -161,8 +184,7 @@ describe('<App/> desktop navigation integration', () => {
     await user.click(await screen.findByTestId('palette-screen-settings-root'))
 
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Collapse sidebar' })).toBeNull()
+    expect(navigation.getAttribute('aria-expanded')).toBe('false')
   })
 
   it('subscribes to notification routes only after Pro target hooks finish activating (#114)', async () => {
@@ -468,7 +490,8 @@ describe('<App/> desktop navigation integration', () => {
     )
 
     expect((await screen.findAllByText('Web start')).length).toBeGreaterThan(0)
-    expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeTruthy()
+    const navigation = screen.getByRole('navigation', { name: 'Primary navigation' })
+    expect(navigation.getAttribute('aria-expanded')).toBe('false')
     await waitFor(() => {
       expect(emitTaskChange).toBeTypeOf('function')
       expect(emitSessions).toBeTypeOf('function')
@@ -506,8 +529,7 @@ describe('<App/> desktop navigation integration', () => {
 
     expect(await screen.findByTestId('task-details-web-start-task')).toBeTruthy()
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeTruthy()
-      expect(screen.queryByRole('button', { name: 'Collapse sidebar' })).toBeNull()
+      expect(navigation.getAttribute('aria-expanded')).toBe('false')
       expect(screen.getByRole('heading', { name: 'Off Grid AI' })).toBeTruthy()
       expect(screen.getByRole('button', { name: 'Expand Chat' })).toBeTruthy()
     })
@@ -522,15 +544,14 @@ describe('<App/> desktop navigation integration', () => {
       })
     )
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeTruthy()
-      expect(screen.queryByRole('button', { name: 'Expand sidebar' })).toBeNull()
+      expect(navigation.getAttribute('aria-expanded')).toBe('false')
       expect(screen.getByRole('button', { name: 'Collapse Chat' })).toBeTruthy()
     })
 
     act(() => emitTaskChange?.({ ...task, updatedAt: 3 }))
     expect(await screen.findByTestId('task-details-web-start-task')).toBeTruthy()
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeTruthy()
+      expect(navigation.getAttribute('aria-expanded')).toBe('false')
       expect(screen.getByRole('heading', { name: 'Off Grid AI' })).toBeTruthy()
       expect(screen.getByRole('button', { name: 'Expand Chat' })).toBeTruthy()
     })
@@ -538,14 +559,14 @@ describe('<App/> desktop navigation integration', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Back to Task History' }))
     await waitFor(() => {
       expect(screen.queryByTestId('task-details-web-start-task')).toBeNull()
-      expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeTruthy()
+      expect(navigation.getAttribute('aria-expanded')).toBe('false')
       expect(screen.getByRole('button', { name: 'Collapse Chat' })).toBeTruthy()
     })
 
     act(() => emitTaskChange?.({ ...task, steps: ['Opened the page'], updatedAt: 4 }))
     await waitFor(() => {
       expect(screen.queryByTestId('task-details-web-start-task')).toBeNull()
-      expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeTruthy()
+      expect(navigation.getAttribute('aria-expanded')).toBe('false')
       expect(screen.getByRole('button', { name: 'Collapse Chat' })).toBeTruthy()
     })
   })
