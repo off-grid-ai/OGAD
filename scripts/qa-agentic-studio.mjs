@@ -548,12 +548,15 @@ try {
     window.api.browser
       .getSessions()
       .then((state) =>
-        state.sessions.some(
-          (session) =>
-            session.url.includes('example.com') &&
-            session.title.includes('Example Domain') &&
-            !session.isLoading
-        )
+        state.sessions.some((session) => {
+          let hostname = ''
+          try {
+            hostname = new URL(session.url).hostname
+          } catch {
+            return false
+          }
+          return hostname === 'example.com' && session.title.includes('Example Domain') && !session.isLoading
+        })
       )
   )
   await shot(page, '05-live-browser-example')

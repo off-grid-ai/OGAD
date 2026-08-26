@@ -94,12 +94,14 @@ const READABLE_SOURCE = /\.(md|markdown|txt|csv|json|html|css)$/i
 const DOCUMENT_SOURCE = /\.(pdf|docx|pptx)$/i
 
 function decodeXmlText(value: string): string {
-  return value
-    .replaceAll('&amp;', '&')
-    .replaceAll('&lt;', '<')
-    .replaceAll('&gt;', '>')
-    .replaceAll('&quot;', '"')
-    .replaceAll('&apos;', "'")
+  const entities: Record<string, string> = {
+    '&amp;': '&',
+    '&lt;': '<',
+    '&gt;': '>',
+    '&quot;': '"',
+    '&apos;': "'"
+  }
+  return value.replace(/&(amp|lt|gt|quot|apos);/g, (entity) => entities[entity] ?? entity)
 }
 
 async function extractPresentation(file: string, maxChars: number): Promise<string> {

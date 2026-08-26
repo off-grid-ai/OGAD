@@ -115,7 +115,9 @@ jobs:
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
           path: _executorch_speech
           lfs: false
-          persist-credentials: false
+          # Keep the checkout credential only until the selective LFS pull in
+          # the next step. That step removes it before any project code runs.
+          persist-credentials: true
       - name: Put the speech runtime beside this checkout
         run: |
           if [ ! -f _executorch_speech/package.json ]; then
@@ -125,6 +127,7 @@ jobs:
           # Tests exercise the real native boundary, but ordinary CI does not need
           # the 350 MB bundled English asset set used only by the Mac release.
           git -C _executorch_speech lfs pull --include='native/bin/executorch-speech' --exclude=''
+          git -C _executorch_speech config --unset-all http.https://github.com/.extraheader || true
           rm -rf ../executorch-speech
           mv _executorch_speech ../executorch-speech
       - run: npm ci

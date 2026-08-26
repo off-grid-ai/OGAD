@@ -17,11 +17,18 @@ export function authorizeBearer(headerValue: string | undefined, token: string):
   if (!headerValue) {
     return false
   }
-  const match = /^Bearer\s+(.+)$/i.exec(headerValue.trim())
-  if (!match || !match[1]) {
+  const trimmed = headerValue.trim()
+  let separator = 0
+  while (separator < trimmed.length && trimmed.charCodeAt(separator) > 32) separator += 1
+  if (separator === trimmed.length || trimmed.slice(0, separator).toLowerCase() !== 'bearer') {
     return false
   }
-  const provided = Buffer.from(match[1], 'utf8')
+  while (separator < trimmed.length && trimmed.charCodeAt(separator) <= 32) separator += 1
+  const credential = trimmed.slice(separator)
+  if (!credential || credential.trim() !== credential || credential.includes(' ')) {
+    return false
+  }
+  const provided = Buffer.from(credential, 'utf8')
   const expected = Buffer.from(token, 'utf8')
   if (provided.length !== expected.length) {
     return false
