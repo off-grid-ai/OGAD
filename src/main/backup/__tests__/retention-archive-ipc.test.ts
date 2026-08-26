@@ -39,8 +39,10 @@ vi.mock('../../data-privacy', () => ({
 import {
   archiveThenClearCategory,
   getAutoCleanupStatus,
+  maybeRunScheduledCleanup,
   pickArchiveDir,
   readAutoCleanupConfig,
+  registerRetentionIpc,
   runAutoCleanupNow
 } from '../retention-archive-ipc'
 
@@ -143,5 +145,45 @@ describe('pickArchiveDir', () => {
   it('returns the chosen folder', async () => {
     boundary.dialogResult = { canceled: false, filePaths: ['/Volumes/SSD/Archive'] }
     expect(await pickArchiveDir()).toBe('/Volumes/SSD/Archive')
+  })
+})
+
+describe('registerRetentionIpc', () => {
+  it('registers all four channels and dispatches through to the handlers', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mirrors the boundary signature
+    const handlers = new Map<string, (event: unknown, ...args: any[]) => unknown>()
+    registerRetentionIpc({ handle: (channel, handler) => void handlers.set(channel, handler) })
+    expect([...handlers.keys()].sort()).toEqual([
+      'data:archive-clear',
+      'data:auto-cleanup-run',
+      'data:auto-cleanup-status',
+      'data:pick-archive-dir'
+    ])
+    // Dispatch smoke: the refusal branch proves args flow through the boundary.
+    const refused = (await handlers.get('data:archive-clear')!(null, 'chats')) as {
+      status: string
+    }
+    expect(refused.status).toBe('failed')
+    const status = (await handlers.get('data:auto-cleanup-status')!(null)) as {
+      config: { retentionDays: number }
+    }
+    expect(status.config.retentionDays).toBe(0)
+    expect(await handlers.get('data:pick-archive-dir')!(null)).toBeNull()
+  })
+})
+
+describe('maybeRunScheduledCleanup', () => {
+  it('does nothing while retention is off', async () => {
+    await maybeRunScheduledCleanup()
+    expect(boundary.clearCalls).toEqual([])
+    expect(boundary.settings.has('autoCleanupLastRun')).toBe(false)
+  })
+
+  it('runs once when due, then holds until the next day', async () => {
+    boundary.settings.set('autoCleanup', { retentionDays: 30, archiveDir: null })
+    await maybeRunScheduledCleanup() // never ran -> due
+    expect(boundary.clearCalls).toHaveLength(1)
+    await maybeRunScheduledCleanup() // just ran -> not due
+    expect(boundary.clearCalls).toHaveLength(1)
   })
 })

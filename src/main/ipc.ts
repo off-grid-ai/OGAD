@@ -1706,23 +1706,9 @@ export function setupIPC() {
     )
   )
   ipcMain.handle('data:delete-all', () => import('./data-privacy').then((m) => m.deleteAllData()))
-  // Archive-before-delete: ZIP what the delete would remove to a user-picked
-  // destination, then clear - fail closed (see backup/retention-archive.ts).
-  ipcMain.handle('data:archive-clear', (_e, id: string, olderThanDays?: number) =>
-    import('./backup/retention-archive-ipc').then((m) =>
-      m.archiveThenClearCategory(id, olderThanDays)
-    )
-  )
-  // Automatic history cleanup: status, manual run, and the archive-folder picker.
-  ipcMain.handle('data:auto-cleanup-status', () =>
-    import('./backup/retention-archive-ipc').then((m) => m.getAutoCleanupStatus())
-  )
-  ipcMain.handle('data:auto-cleanup-run', () =>
-    import('./backup/retention-archive-ipc').then((m) => m.runAutoCleanupNow())
-  )
-  ipcMain.handle('data:pick-archive-dir', () =>
-    import('./backup/retention-archive-ipc').then((m) => m.pickArchiveDir())
-  )
+  // Archive-before-delete + automatic history cleanup - the channel map lives with
+  // its handlers (backup/retention-archive-ipc.ts) behind an injectable boundary.
+  void import('./backup/retention-archive-ipc').then((m) => m.registerRetentionIpc(ipcMain))
 
   // --- Image generation (stable-diffusion.cpp) ----------------------------
   ipcMain.handle('imagegen:status', async () => {

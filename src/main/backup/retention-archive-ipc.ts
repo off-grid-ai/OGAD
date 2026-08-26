@@ -88,7 +88,7 @@ export async function runAutoCleanupNow(): Promise<AutoCleanupRunContract> {
   }
 }
 
-async function maybeRunScheduledCleanup(): Promise<void> {
+export async function maybeRunScheduledCleanup(): Promise<void> {
   try {
     const { config, lastRun } = getAutoCleanupStatus()
     if (config.retentionDays <= 0) return
@@ -105,6 +105,22 @@ async function maybeRunScheduledCleanup(): Promise<void> {
 export function setupAutoCleanupScheduler(): void {
   setTimeout(() => void maybeRunScheduledCleanup(), 90_000)
   setInterval(() => void maybeRunScheduledCleanup(), 60 * 60_000)
+}
+
+/** IPC registration over an injectable boundary (same seam as backup/ipc.ts), so the
+ *  channel->handler map is testable without Electron's real ipcMain. */
+export interface RetentionIpcBoundary {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mirrors Electron's ipcMain.handle signature
+  handle(channel: string, handler: (event: unknown, ...args: any[]) => unknown): void
+}
+
+export function registerRetentionIpc(ipc: RetentionIpcBoundary): void {
+  ipc.handle('data:archive-clear', (_e, id: string, olderThanDays?: number) =>
+    archiveThenClearCategory(id, olderThanDays)
+  )
+  ipc.handle('data:auto-cleanup-status', () => getAutoCleanupStatus())
+  ipc.handle('data:auto-cleanup-run', () => runAutoCleanupNow())
+  ipc.handle('data:pick-archive-dir', () => pickArchiveDir())
 }
 
 /** Native folder picker for the archive destination. Returns null when canceled. */
