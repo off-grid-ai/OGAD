@@ -89,6 +89,7 @@ describe('Models > Storage download rows', () => {
     expect(await screen.findByText('35%')).toBeTruthy()
     expect(screen.getByText(/244 MB of 703 MB/)).toBeTruthy()
     expect(screen.getByText(/2\.7 MB\/s/)).toBeTruthy()
+    expect(screen.getByText(/~3 min left/)).toBeTruthy()
     expect(document.body.textContent).not.toMatch(/NaN|Infinity/)
 
     await user.click(screen.getByRole('button', { name: 'Cancel Qwen/Qwen3.5-9B' }))
@@ -142,6 +143,7 @@ describe('Models > Storage download rows', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Refresh' }))
     await waitFor(() => expect(screen.getAllByText(/1\.3 GB of 6\.0 GB/)).toHaveLength(2))
     expect(screen.getAllByText(/2\.7 MB\/s/)).toHaveLength(2)
+    expect(screen.getAllByText(/~30 min left/)).toHaveLength(2)
     expect(document.body.textContent).not.toContain('Total size unavailable')
   })
 })

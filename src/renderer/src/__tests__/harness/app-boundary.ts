@@ -48,6 +48,12 @@ export function installAppBoundary(overrides: Record<string, unknown> = {}): voi
     onMeetingState: eventSubscription,
     onModelProgress: eventSubscription,
     proOn: eventSubscription,
+    actions: {
+      onGatePending: eventSubscription,
+      onOutcome: eventSubscription,
+      resolveGate: async () => undefined,
+      undo: async () => ({ ok: true })
+    },
     ...overrides
   }
   const api = new Proxy(values, {

@@ -37,6 +37,10 @@ function stubApi(platform = 'darwin'): void {
         if (prop === 'getLlmSettings') {
           return () => Promise.resolve({ performanceMode: 'balanced' })
         }
+        if (prop === 'getRemoteVisionServer') {
+          return () =>
+            Promise.resolve({ provider: 'local', endpoint: '', model: '', hasApiKey: false })
+        }
         if (prop === 'setupPlan') return () => Promise.resolve(null)
         if (prop === 'systemHealth') {
           return () => Promise.resolve({ components: [], ramGb: 0, activeModel: null })
@@ -79,6 +83,19 @@ describe('Settings pro-section registry seam (D31)', () => {
     expect(screen.getByText('Processing priority')).toBeTruthy()
     expect(screen.getByText('Chat and capture model')).toBeTruthy()
     expect(screen.queryByTestId('fake-capture')).toBeNull()
+  })
+
+  it('shows remote model server settings in the main Settings screen', async () => {
+    vi.resetModules()
+    stubApi()
+    const { Settings } = await import('../Settings')
+    const user = userEvent.setup()
+    render(<Settings />)
+
+    await user.click(screen.getByText('Remote model server'))
+    expect(await screen.findByRole('switch', { name: 'Use remote server' })).toBeTruthy()
+    expect(screen.getByText('Local model is active.')).toBeTruthy()
+    expect(screen.queryByText(/OpenRouter/i)).toBeNull()
   })
 
   it('pro build composes the registered capture owner with shared processing controls', async () => {

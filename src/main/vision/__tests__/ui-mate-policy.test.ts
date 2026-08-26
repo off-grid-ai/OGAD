@@ -7,6 +7,7 @@ import {
   buildUIMateMessages,
   compactUIMateResponse,
   parseUIMateResponse,
+  summarizeUIMateThinking,
   UI_MATE_GENERATION_CONFIG,
   UI_MATE_MAX_HISTORY_STEPS,
   UI_MATE_SYSTEM_PROMPT,
@@ -59,6 +60,12 @@ describe('UI-Mate policy', () => {
         { width: 100, height: 100 }
       ).control
     ).toBe('FAIL')
+    expect(
+      parseUIMateResponse(
+        '<action>Click it.</action><tool_call><function=computer_use><parameter=action>left_click</parameter><parameter=coordinate>[1001, 500]</parameter></function></tool_call>',
+        { width: 100, height: 100 }
+      ).control
+    ).toBe('FAIL')
   })
 
   it('maps failed completion to FAIL', () => {
@@ -69,15 +76,24 @@ describe('UI-Mate policy', () => {
 
   it.each([
     'This requires credentials.',
-    'This requires a language pack extension.',
+    'Continue with the task.',
     'That feature is unavailable.'
-  ])('uses the official infeasibility fallback for %s', (action) => {
+  ])('does not classify free-form wording as a task outcome for %s', (action) => {
     expect(
-      parseUIMateResponse(`<think>Blocked.</think><action>${action}</action>`, {
+      parseUIMateResponse(`<think>Review.</think><action>${action}</action>`, {
         width: 100,
         height: 100
-      }).control
-    ).toBe('FAIL')
+      })
+    ).toMatchObject({ control: 'FAIL', error: 'Missing computer_use tool call.' })
+  })
+
+  it('keeps an explicit user handoff even when its text mentions credentials', () => {
+    expect(
+      parseUIMateResponse(
+        '<action>Ask the user.</action><tool_call><function=computer_use><parameter=action>call_user</parameter><parameter=text>This requires credentials.</parameter></function></tool_call>',
+        { width: 100, height: 100 }
+      )
+    ).toMatchObject({ control: 'USER', actions: [{ action: 'call_user' }] })
   })
 
   it('keeps exactly one current screenshot and compact text history', () => {
@@ -105,6 +121,24 @@ describe('UI-Mate policy', () => {
     ])
     expect(JSON.stringify(messages)).not.toContain('Old private chain')
     expect(JSON.stringify(messages)).toContain('This screenshot has been collapsed.')
+  })
+
+  it('keeps only the newest five screenshots under adversarial long history', () => {
+    const messages = buildUIMateMessages({
+      instruction: 'Continue.',
+      currentScreenshotDataUrl: 'data:image/png;base64,current',
+      history: Array.from({ length: 8 }, (_, index) => ({
+        actionText: `Step ${index}`,
+        response: `<action>Step ${index}</action>`,
+        screenshotDataUrl: `data:image/png;base64,history-${index}`
+      }))
+    })
+    const serialized = JSON.stringify(messages)
+    expect(serialized.match(/data:image\/png;base64/g) ?? []).toHaveLength(6)
+    expect(serialized).not.toContain('history-0')
+    expect(serialized).not.toContain('history-2')
+    expect(serialized).toContain('history-3')
+    expect(serialized).toContain('history-7')
   })
 
   it('matches the official build_messages alternation with one current screenshot', () => {
@@ -135,6 +169,19 @@ describe('UI-Mate policy', () => {
       '<action>click</action>\n<tool_call>call</tool_call>'
     )
     expect(compactUIMateResponse(response, true)).toBe(response)
+  })
+
+  it('derives a bounded, redacted rationale without exposing the full thought block', () => {
+    const response = `<think>I found the sign-in form. password=hunter2. I should type "private code 1234" and then inspect several unrelated details that must not be exposed in full.</think><action>Focus the password field.</action>`
+    const rationale = summarizeUIMateThinking(response)
+
+    expect(rationale).toBe('I found the sign-in form. password=[redacted].')
+    expect(rationale).not.toContain('hunter2')
+    expect(rationale).not.toContain('private code 1234')
+    expect(parseUIMateResponse(response, { width: 100, height: 100 })).toMatchObject({
+      actionText: 'Focus the password field.',
+      decisionRationale: rationale
+    })
   })
 
   it('bounds compact text history to the official trajectory limit', () => {

@@ -105,6 +105,7 @@ type ProcessImage = (
 type InstallApiOptions = {
   active: string
   models: string[]
+  isPro?: boolean
   settings?: Record<string, unknown>
   styleThumbs?: Record<string, string>
   conversations?: TestConversation[]
@@ -241,7 +242,7 @@ function installApi(opts: InstallApiOptions): InstalledApi {
   }))
   const listGeneratedImages = vi.fn(async () => generatedGallery.map((image) => ({ ...image })))
   const api = {
-    isPro: false,
+    isPro: opts.isPro ?? false,
     // --- assertion subjects ---
     generateImage,
     setActiveModalModel,
@@ -486,7 +487,7 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
 
   it('reloads a received image while Gallery is open, then Escape restores trigger focus', async () => {
     const user = userEvent.setup()
-    const api = installApi({ active: FULL, models: [FULL] })
+    const api = installApi({ active: FULL, models: [FULL], isPro: true })
     renderChat()
 
     const trigger = await screen.findByTitle('Generated images')

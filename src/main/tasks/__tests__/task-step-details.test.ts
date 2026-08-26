@@ -10,9 +10,13 @@ describe('Computer Use step observability', () => {
     const detail = sanitizeComputerUseStepDetail({
       stepId: 'inspect-settings',
       at: Number.NaN,
-      modelInput: 'authorization: Bearer visible-token',
+      modelInput:
+        'authorization: Bearer visible-token\n<think>prior hidden reasoning</think>\nAction: click settings',
       retrievedFacts: ['API_KEY=visible-key'],
-      rawResponse: '{"password":"visible-password"}',
+      decisionSummary: 'Open Settings',
+      decisionRationale: 'The Settings control matches the current task stage.',
+      rawResponse:
+        '<think>private chain of thought</think><action>Open Settings</action><tool_call>{"password":"visible-password"}</tool_call>',
       screenshot: {
         originalWidth: Number.POSITIVE_INFINITY,
         originalHeight: 800,
@@ -26,11 +30,51 @@ describe('Computer Use step observability', () => {
     expect(serialized).not.toContain('visible-token')
     expect(serialized).not.toContain('visible-key')
     expect(serialized).not.toContain('visible-password')
+    expect(serialized).not.toContain('private chain of thought')
+    expect(serialized).not.toContain('prior hidden reasoning')
+    expect(detail.modelInput).toContain('Action: click settings')
+    expect(detail.decisionSummary).toBe('Open Settings')
+    expect(detail.decisionRationale).toBe(
+      'The Settings control matches the current task stage.'
+    )
+    expect(detail.modelOutput).toContain('<action>Open Settings</action>')
+    expect(detail).not.toHaveProperty('rawResponse')
     expect(serialized).not.toContain('access_token=visible')
     expect(serialized).not.toContain('NaN')
     expect(serialized).not.toContain('Infinity')
     expect(detail.screenshot).toBeUndefined()
     expect(detail.execution).toEqual({ status: 'failed', error: 'access_token=[redacted]' })
+  })
+
+  it('removes an untagged UI-TARS Thought preface but keeps its action', () => {
+    const detail = sanitizeComputerUseStepDetail({
+      stepId: 'click-send',
+      at: 1,
+      rawResponse:
+        'Thought: I should inspect every private possibility before choosing.\nAction: click(point="640 900")'
+    })
+
+    expect(detail.modelOutput).toBe('Action: click(point="640 900")')
+    expect(JSON.stringify(detail)).not.toContain('private possibility')
+  })
+
+  it('never persists text entered by a Computer Use action', () => {
+    const detail = sanitizeComputerUseStepDetail({
+      stepId: 'enter-code',
+      at: 1,
+      modelInput: "Action: type(content='prior-secret')",
+      rawResponse: "Thought: use the supplied code\nAction: type(content='839201')",
+      decisionSummary: 'type "decision-secret"',
+      mappedAction: '{"type":"type","content":"hunter2"}'
+    })
+
+    const serialized = JSON.stringify(detail)
+    expect(serialized).not.toContain('prior-secret')
+    expect(serialized).not.toContain('839201')
+    expect(serialized).not.toContain('decision-secret')
+    expect(serialized).not.toContain('hunter2')
+    expect(detail.modelOutput).toBe("Action: type(content='[redacted]')")
+    expect(detail.mappedAction).toContain('[redacted]')
   })
 
   it('keeps only the newest bounded detail records', () => {

@@ -21,8 +21,15 @@ describe('BrowserSessionStore', () => {
     store.create({
       sessionId: 'task:research',
       kind: 'task',
+      journeyId: 'chat:one',
       resource: { name: 'agent view' },
-      task: { taskId: 'research', goal: 'Find facts', status: 'running', steps: [] }
+      task: {
+        taskId: 'research',
+        journeyId: 'chat:one',
+        goal: 'Find facts',
+        status: 'running',
+        steps: []
+      }
     })
 
     expect(store.snapshot()).toEqual({
@@ -41,6 +48,7 @@ describe('BrowserSessionStore', () => {
         expect.objectContaining({
           sessionId: 'task:research',
           kind: 'task',
+          journeyId: 'chat:one',
           taskId: 'research',
           status: 'running',
           title: 'New tab'
@@ -70,8 +78,15 @@ describe('BrowserSessionStore', () => {
     store.create({
       sessionId: 'task:one',
       kind: 'task',
+      journeyId: 'chat:one',
       resource: 'live agent view',
-      task: { taskId: 'one', goal: 'Research', status: 'running', steps: [] }
+      task: {
+        taskId: 'one',
+        journeyId: 'chat:one',
+        goal: 'Research',
+        status: 'running',
+        steps: []
+      }
     })
 
     expect(store.deactivate('task:one')).toBe(true)
@@ -84,12 +99,20 @@ describe('BrowserSessionStore', () => {
     store.create({
       sessionId: 'task:one',
       kind: 'task',
+      journeyId: 'chat:one',
       resource: 'view',
-      task: { taskId: 'one', goal: 'Research', status: 'running', steps: [] }
+      task: {
+        taskId: 'one',
+        journeyId: 'chat:one',
+        goal: 'Research',
+        status: 'running',
+        steps: []
+      }
     })
     const steps = ['opened page']
     store.updateTask('task:one', {
       taskId: 'one',
+      journeyId: 'chat:one',
       goal: 'Research',
       status: 'done',
       steps
@@ -100,6 +123,61 @@ describe('BrowserSessionStore', () => {
     expect(() =>
       store.create({ sessionId: 'task:one', kind: 'manual', resource: 'duplicate' })
     ).toThrow(/already exists/)
+  })
+
+  it('keeps follow-up actions and child pages inside one journey workspace', () => {
+    const store = new BrowserSessionStore<string>()
+    store.create({
+      sessionId: 'journey:chat-one',
+      kind: 'task',
+      journeyId: 'chat-one',
+      resource: 'root page',
+      task: {
+        taskId: 'action-one',
+        journeyId: 'chat-one',
+        goal: 'Find the report',
+        status: 'done',
+        steps: ['opened report']
+      }
+    })
+    store.create({
+      sessionId: 'child-one',
+      kind: 'task',
+      journeyId: 'chat-one',
+      parentSessionId: 'journey:chat-one',
+      resource: 'popup page',
+      task: {
+        taskId: 'action-one',
+        journeyId: 'chat-one',
+        goal: 'Find the report',
+        status: 'done',
+        steps: ['opened report']
+      }
+    })
+
+    expect(store.findJourney('chat-one')?.resource).toBe('popup page')
+    expect(
+      store.updateJourneyTask('chat-one', {
+        taskId: 'action-two',
+        journeyId: 'chat-one',
+        goal: 'Download it',
+        status: 'running',
+        steps: []
+      })
+    ).toBe(2)
+    expect(store.snapshot().sessions).toEqual([
+      expect.objectContaining({
+        sessionId: 'journey:chat-one',
+        journeyId: 'chat-one',
+        taskId: 'action-two'
+      }),
+      expect.objectContaining({
+        sessionId: 'child-one',
+        journeyId: 'chat-one',
+        parentSessionId: 'journey:chat-one',
+        taskId: 'action-two'
+      })
+    ])
   })
 
   it('returns every owned resource during process teardown', () => {

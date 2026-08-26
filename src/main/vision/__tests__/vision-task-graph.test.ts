@@ -1,0 +1,193 @@
+import { describe, expect, it } from 'vitest'
+import type { TaskExecutionPlan } from '../../../shared/task-execution-plan'
+import type { VisionPolicyDecision } from '../model-adapters/types'
+import type { VisionStepObservation } from '../vision-agent'
+import { VisionGuard } from '../vision-guard'
+import { runVisionTaskGraph, type VisionTaskGraphDeps } from '../vision-task-graph'
+
+const bounds = { width: 1000, height: 1000 }
+const plan: TaskExecutionPlan = {
+  version: 1,
+  phases: [
+    { id: 'phase-1', title: 'Navigate to the site' },
+    { id: 'phase-2', title: 'Enter the requested details' }
+  ]
+}
+
+function complete(summary = 'The milestone result is visible.'): VisionPolicyDecision {
+  return {
+    kind: 'phase_complete',
+    actionText: 'Milestone complete',
+    summary,
+    decisionRationale: 'The required result is visible.'
+  }
+}
+
+function action(): VisionPolicyDecision {
+  return {
+    kind: 'actions',
+    actionText: 'Click the visible control',
+    actions: [{ type: 'click', point: { x: 100, y: 295 } }],
+    decisionRationale: 'The point is visibly inside the named control.'
+  }
+}
+
+function workflow(decisions: VisionPolicyDecision[]): {
+  deps: VisionTaskGraphDeps
+  observations: VisionStepObservation[]
+  phases: string[]
+  actuated: string[]
+  policyHistory: string[][]
+  decisionCalls: number
+} {
+  const observations: VisionStepObservation[] = []
+  const phases: string[] = []
+  const actuated: string[] = []
+  const policyHistory: string[][] = []
+  const queue = [...decisions]
+  const state = {
+    observations,
+    phases,
+    actuated,
+    policyHistory,
+    decisionCalls: 0,
+    deps: {} as VisionTaskGraphDeps
+  }
+  state.deps = {
+    screen: {
+      capture: async () => ({ image: '/tmp/current-frame.png', bounds }),
+      actuate: async (nextAction) => {
+        const point = 'point' in nextAction ? `${nextAction.point.x},${nextAction.point.y}` : ''
+        actuated.push(`${nextAction.type}:${point}`)
+      }
+    },
+    guard: new VisionGuard(),
+    decide: async (input) => {
+      state.decisionCalls += 1
+      policyHistory.push(input.policyHistory.map((step) => step.actionText))
+      return { response: `decision-${state.decisionCalls}`, modelInput: 'one visual request' }
+    },
+    parseResponse: () =>
+      queue.shift() ?? {
+        kind: 'invalid',
+        actionText: '',
+        error: 'The model action did not parse.'
+      },
+    waitForUser: async () => undefined,
+    plan,
+    onPhase: (phaseId) => phases.push(phaseId),
+    onObservation: (observation) => observations.push(observation)
+  }
+  return state
+}
+
+describe('runVisionTaskGraph', () => {
+  it('records and advances every completed milestone exactly once without an action request', async () => {
+    const w = workflow([complete('Site visible.'), complete('Details visible.')])
+
+    const result = await runVisionTaskGraph('Complete both milestones.', w.deps)
+
+    expect(result.ok).toBe(true)
+    expect(w.decisionCalls).toBe(2)
+    expect(w.phases).toEqual(['phase-1', 'phase-2'])
+    expect(result.steps.filter((step) => step.startsWith('milestone complete:'))).toEqual([
+      'milestone complete: Navigate to the site',
+      'milestone complete: Enter the requested details'
+    ])
+    expect(w.actuated).toEqual([])
+    expect(w.observations.map((item) => item.result)).toEqual(['terminal', 'terminal'])
+  })
+
+  it('uses one decision call for one approved action and preserves screenshot coordinates', async () => {
+    const w = workflow([action(), complete()])
+    w.deps.plan = { version: 1, phases: [{ id: 'only', title: 'Use the visible control' }] }
+
+    const result = await runVisionTaskGraph('Use the visible control.', w.deps)
+
+    expect(result.ok).toBe(true)
+    expect(w.decisionCalls).toBe(2)
+    expect(w.actuated).toEqual(['click:100,295'])
+    expect(w.policyHistory).toEqual([[], ['Click the visible control']])
+    expect(w.observations.map((item) => item.result)).toEqual(['reviewed', 'actuated', 'terminal'])
+  })
+
+  it('publishes reasoning through the separated live channel and closes that state', async () => {
+    const w = workflow([complete()])
+    w.deps.plan = { version: 1, phases: [{ id: 'only', title: 'Confirm the result' }] }
+    const reasoning: Array<{ step: number; content: string; live: boolean }> = []
+    w.deps.onReasoning = (event) => reasoning.push(event)
+    w.deps.decide = async (input) => {
+      input.reportReasoning?.('The result page ')
+      input.reportReasoning?.('is visible.')
+      return { response: 'complete', modelInput: 'one visual request' }
+    }
+
+    await runVisionTaskGraph('Confirm the result.', w.deps)
+
+    expect(reasoning).toEqual([
+      { step: 1, content: '', live: true },
+      { step: 1, content: 'The result page ', live: true },
+      { step: 1, content: 'The result page is visible.', live: true },
+      { step: 1, content: 'The result page is visible.', live: false }
+    ])
+  })
+
+  it('does not tell the model that a rejected action was executed', async () => {
+    const w = workflow([action(), complete()])
+    w.deps.plan = { version: 1, phases: [{ id: 'only', title: 'Use the visible control' }] }
+    w.deps.screen.actuate = async () => ({ rejected: 'The captured viewport changed.' })
+
+    const result = await runVisionTaskGraph('Use the visible control.', w.deps)
+
+    expect(result.ok).toBe(true)
+    expect(w.policyHistory).toEqual([[], []])
+    expect(w.observations.map((item) => item.result)).toEqual(['reviewed', 'blocked', 'terminal'])
+  })
+
+  it('does not execute an action when completion and approval are both true', async () => {
+    const w = workflow([complete()])
+    w.deps.plan = { version: 1, phases: [{ id: 'only', title: 'Confirm the result' }] }
+
+    await runVisionTaskGraph('Confirm the result.', w.deps)
+
+    expect(w.decisionCalls).toBe(1)
+    expect(w.actuated).toEqual([])
+  })
+
+  it.each(['aligned', 'off_course'] as const)(
+    're-observes a %s rethink verdict without actuation',
+    async (direction) => {
+      const w = workflow([
+        {
+          kind: 'rethink',
+          actionText: 'rethink',
+          summary: 'The proposed point is not verified.',
+          direction,
+          decisionRationale: 'The point is outside the named control.'
+        },
+        complete()
+      ])
+      w.deps.plan = { version: 1, phases: [{ id: 'only', title: 'Use the control' }] }
+
+      const result = await runVisionTaskGraph('Use the control.', w.deps)
+
+      expect(result.ok).toBe(true)
+      expect(w.decisionCalls).toBe(2)
+      expect(w.actuated).toEqual([])
+      expect(result.steps).toContain(`${direction}: The proposed point is not verified.`)
+    }
+  )
+
+  it('fails closed when the consolidated decision is malformed', async () => {
+    const w = workflow([
+      { kind: 'invalid', actionText: '', error: 'The model action did not parse.' }
+    ])
+
+    const result = await runVisionTaskGraph('Use the visible control.', w.deps)
+
+    expect(result.ok).toBe(false)
+    expect(result.summary).toContain('The model action did not parse.')
+    expect(w.decisionCalls).toBe(1)
+    expect(w.actuated).toEqual([])
+  })
+})

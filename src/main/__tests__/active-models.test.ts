@@ -9,11 +9,12 @@
 import { describe, it, expect } from 'vitest'
 import { modalityForKind, isModelActive } from '../active-models-logic'
 
-const NONE = { image: null, speech: null, transcription: null } as const
+const NONE = { computer_use: null, image: null, speech: null, transcription: null } as const
 
 describe('modalityForKind', () => {
   it('maps non-chat kinds to a modality and chat/unknown kinds to null', () => {
     expect(modalityForKind('image')).toBe('image')
+    expect(modalityForKind('computer_use')).toBe('computer_use')
     expect(modalityForKind('voice')).toBe('speech')
     // Idempotent on the storage vocab too, so setActiveModalChoice accepts BOTH the
     // setup 'voice' AND the dispatched 'speech' (D26 — "Configure for me" passes
@@ -76,6 +77,17 @@ describe('isModelActive', () => {
         id: 'whisper-small',
         activeChatId: null,
         modals: { ...NONE, transcription: 'whisper-small' }
+      })
+    ).toBe(true)
+  })
+
+  it('computer use matches its saved policy model id', () => {
+    expect(
+      isModelActive({
+        kind: 'computer_use',
+        id: 'bartowski/tencent_UI-Mate-9B-GGUF',
+        activeChatId: null,
+        modals: { ...NONE, computer_use: 'bartowski/tencent_UI-Mate-9B-GGUF' }
       })
     ).toBe(true)
   })

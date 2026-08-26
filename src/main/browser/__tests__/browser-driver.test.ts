@@ -6,7 +6,7 @@
  * webContents.debugger); everything above it runs real.
  */
 import { describe, expect, it } from 'vitest'
-import { BrowserDriver, type CdpTransport } from '../browser-driver'
+import { BrowserDriver, browserPointerMotion, type CdpTransport } from '../browser-driver'
 import type { PageElement } from '../page-script'
 
 interface Sent {
@@ -49,6 +49,25 @@ const el = (over: Partial<PageElement> = {}): PageElement => ({
 })
 
 describe('snapshot', () => {
+  it('parks and publishes the semantic pointer before the first browser action', async () => {
+    const t = makeTransport()
+    const pointer: Array<{ phase: string; x: number; y: number }> = []
+    const driver = new BrowserDriver(t.cdp, undefined, {
+      onPointer: (event) => pointer.push(event)
+    })
+
+    await driver.ensurePointer()
+
+    const expression = String(t.sent[0]?.params?.expression)
+    expect(expression).toContain('__offgrid_agent_pointer__')
+    expect(expression).toContain('viewBox=\\"0 0 24 24\\"')
+    expect(expression).toContain('fill=\\"#0A0A0A\\"')
+    expect(expression).toContain('stroke=\\"#FFFFFF\\"')
+    expect(expression).toContain('drop-shadow(0 0 5px #059669)')
+    expect(expression).not.toContain('clip-path:polygon')
+    expect(pointer).toEqual([{ phase: 'released', x: 32, y: 32 }])
+  })
+
   it('evaluates the injected collector and parses its JSON', async () => {
     const { cdp, sent } = makeTransport(() => ({
       result: {
@@ -59,6 +78,8 @@ describe('snapshot', () => {
     expect(snapshot.url).toBe('https://x.test')
     expect(sent[0]?.method).toBe('Runtime.evaluate')
     expect(String(sent[0]?.params?.expression)).toContain('collectInteractiveElements')
+    expect(String(sent[1]?.params?.expression)).toContain('__offgrid_agent_pointer__')
+    expect(String(sent[1]?.params?.expression)).not.toContain('cursor?.remove')
   })
 
   it('throws when the page returns nothing rather than inventing an empty page', async () => {
@@ -70,13 +91,21 @@ describe('snapshot', () => {
 describe('navigate', () => {
   it('resolves once the load event fires', async () => {
     const t = makeTransport()
-    const driver = new BrowserDriver(t.cdp)
+    const pointer: Array<{ phase: string; x: number; y: number }> = []
+    const driver = new BrowserDriver(t.cdp, undefined, {
+      onPointer: (event) => pointer.push(event)
+    })
     const nav = driver.navigate('https://x.test')
     // Page.enable + Page.navigate dispatched; the load event releases the wait.
     await new Promise((r) => setImmediate(r))
     t.emit('Page.loadEventFired')
     expect(await nav).toEqual({ ok: true })
-    expect(t.sent.map((s) => s.method)).toEqual(['Page.enable', 'Page.navigate'])
+    expect(t.sent.map((s) => s.method)).toEqual([
+      'Page.enable',
+      'Page.navigate',
+      'Runtime.evaluate'
+    ])
+    expect(pointer).toEqual([{ phase: 'released', x: 32, y: 32 }])
   })
 
   it('surfaces a navigation error as the honest failure', async () => {
@@ -88,17 +117,84 @@ describe('navigate', () => {
   })
 })
 
+describe('page readiness recovery', () => {
+  it('accepts a committed canvas-only page and executes the visual action without DOM heuristics', async () => {
+    const t = makeTransport((method) => {
+      if (method !== 'Runtime.evaluate') return {}
+      return {
+        result: {
+          value: { url: 'https://x.test/canvas', readyState: 'complete' }
+        }
+      }
+    })
+    const driver = new BrowserDriver(t.cdp, undefined, { pageReadyTimeoutMs: 0 })
+
+    await expect(driver.ensurePageReady()).resolves.toEqual({
+      url: 'https://x.test/canvas',
+      readyState: 'complete'
+    })
+    await expect(driver.actuate({ type: 'click', point: { x: 320, y: 180 } })).resolves.toEqual({
+      ok: true
+    })
+
+    const readinessProbe = String(t.sent[0]?.params?.expression)
+    expect(readinessProbe).not.toContain('querySelectorAll')
+    expect(readinessProbe).not.toContain('innerText')
+    expect(t.sent.some((entry) => entry.method === 'Page.reload')).toBe(false)
+    expect(
+      t.sent.filter((entry) => entry.method === 'Input.dispatchMouseEvent').at(-1)?.params
+    ).toMatchObject({ type: 'mouseReleased', x: 320, y: 180 })
+  })
+
+  it('does not accept about:blank as an actionable webpage', async () => {
+    const t = makeTransport(() => ({
+      result: {
+        value: {
+          url: 'about:blank',
+          readyState: 'complete'
+        }
+      }
+    }))
+    const driver = new BrowserDriver(t.cdp, undefined, { pageReadyTimeoutMs: 0 })
+
+    await expect(driver.ensurePageReady()).rejects.toThrow(/did not finish loading/)
+    expect(t.sent.some((entry) => entry.method === 'Page.reload')).toBe(true)
+  })
+})
+
 describe('click and type', () => {
+  it('builds a short eased path that ends at the exact model coordinate', () => {
+    const motion = browserPointerMotion({ x: 32, y: 32 }, { x: 200, y: 80 })
+
+    expect(motion.durationMs).toBeGreaterThanOrEqual(120)
+    expect(motion.durationMs).toBeLessThanOrEqual(240)
+    expect(motion.points.length).toBeGreaterThan(2)
+    expect(motion.points.at(-1)).toEqual({ x: 200, y: 80 })
+    expect(motion.points.every((point) => point.x >= 32 && point.x <= 200)).toBe(true)
+  })
+
   it('moves to the real element center, then emits pressed and released phases', async () => {
     const t = makeTransport()
     const pointer: Array<{ phase: string; x: number; y: number }> = []
-    await new BrowserDriver(t.cdp, undefined, (event) => pointer.push(event)).click(el())
-    expect(t.sent.map((s) => [s.method, s.params?.type, s.params?.x])).toEqual([
-      ['Input.dispatchMouseEvent', 'mouseMoved', 200],
-      ['Input.dispatchMouseEvent', 'mousePressed', 200],
-      ['Input.dispatchMouseEvent', 'mouseReleased', 200]
+    await new BrowserDriver(t.cdp, undefined, {
+      onPointer: (event) => pointer.push(event)
+    }).click(el())
+    const mouseEvents = t.sent.filter((entry) => entry.method === 'Input.dispatchMouseEvent')
+    expect(mouseEvents.length).toBeGreaterThan(3)
+    expect(mouseEvents.slice(-3).map((event) => event.params?.type)).toEqual([
+      'mouseMoved',
+      'mousePressed',
+      'mouseReleased'
     ])
-    expect(pointer).toEqual([
+    expect(mouseEvents.at(-1)?.params).toMatchObject({ x: 200, y: 80 })
+    const pointerFrames = t.sent.filter((entry) => entry.method === 'Runtime.evaluate')
+    expect(pointerFrames).toHaveLength(3)
+    expect(String(pointerFrames[0]?.params?.expression)).toContain('__offgrid_agent_pointer__')
+    expect(String(pointerFrames[0]?.params?.expression)).toContain('prefers-reduced-motion')
+    expect(String(pointerFrames[1]?.params?.expression)).toContain("'pressed'")
+    expect(String(pointerFrames[1]?.params?.expression)).toContain('pulse.animate')
+    expect(String(pointerFrames[2]?.params?.expression)).not.toContain('cursor?.remove')
+    expect(pointer.slice(-3)).toEqual([
       { phase: 'moved', x: 200, y: 80 },
       { phase: 'pressed', x: 200, y: 80 },
       { phase: 'released', x: 200, y: 80 }
@@ -106,11 +202,12 @@ describe('click and type', () => {
   })
 
   it('type focuses, selects the prefilled value, then inserts the text', async () => {
-    const t = makeTransport()
+    const t = makeTransport((method) =>
+      method === 'Runtime.evaluate' ? { result: { value: false } } : {}
+    )
     await new BrowserDriver(t.cdp).type(el(), 'KX93F')
-    const methods = t.sent.map((s) => s.method)
-    expect(methods).toEqual([
-      'Input.dispatchMouseEvent',
+    const methods = t.sent.map((s) => s.method).filter((method) => method !== 'Runtime.evaluate')
+    expect(methods.slice(-5)).toEqual([
       'Input.dispatchMouseEvent',
       'Input.dispatchMouseEvent',
       'Input.dispatchKeyEvent',
@@ -131,11 +228,41 @@ describe('click and type', () => {
     expect(t.sent).toEqual([])
   })
 
+  it('REFUSES visual typing when the focused field is private', async () => {
+    const t = makeTransport((method) =>
+      method === 'Runtime.evaluate' ? { result: { value: true } } : {}
+    )
+    const result = await new BrowserDriver(t.cdp).actuate({ type: 'type', content: '839201' })
+
+    expect(result).toMatchObject({ ok: false, reason: 'takeover' })
+    expect(t.sent.some((entry) => entry.method === 'Input.insertText')).toBe(false)
+    expect(JSON.stringify(t.sent)).not.toContain('839201')
+  })
+
+  it('dispatches an approved visual type action without a DOM editability veto', async () => {
+    const t = makeTransport((method) =>
+      method === 'Runtime.evaluate' ? { result: { value: false } } : {}
+    )
+
+    const result = await new BrowserDriver(t.cdp).actuate({ type: 'type', content: 'Pune' })
+
+    expect(result).toEqual({ ok: true })
+    expect(t.sent.filter((entry) => entry.method === 'Input.dispatchKeyEvent')).toHaveLength(2)
+    expect(t.sent.find((entry) => entry.method === 'Input.insertText')?.params).toEqual({
+      text: 'Pune'
+    })
+  })
+
   it('clicking an identity field is allowed - focusing the login form is how the human takes over', async () => {
     const t = makeTransport()
     const result = await new BrowserDriver(t.cdp).click(el({ identity: true }))
     expect(result).toEqual({ ok: true })
-    expect(t.sent).toHaveLength(3)
+    const mouseEvents = t.sent.filter((entry) => entry.method === 'Input.dispatchMouseEvent')
+    expect(mouseEvents.length).toBeGreaterThan(3)
+    expect(mouseEvents.slice(-2).map((event) => event.params?.type)).toEqual([
+      'mousePressed',
+      'mouseReleased'
+    ])
   })
 })
 
@@ -154,6 +281,36 @@ describe('pressKey', () => {
     const result = await new BrowserDriver(t.cdp).pressKey('F13')
     expect(result).toMatchObject({ ok: false, reason: 'error' })
     expect(t.sent).toEqual([])
+  })
+})
+
+describe('visual operator actions', () => {
+  it('actuates the exact visual point without DOM target resolution', async () => {
+    const t = makeTransport()
+    const driver = new BrowserDriver(t.cdp)
+
+    await driver.actuate({ type: 'click', point: { x: 139, y: 245 } })
+
+    const pressed = t.sent.find((entry) => entry.params?.type === 'mousePressed')
+    expect(pressed?.params).toMatchObject({ x: 139, y: 245 })
+    const evaluatedSource = t.sent
+      .filter((entry) => entry.method === 'Runtime.evaluate')
+      .map((entry) => String(entry.params?.expression))
+      .join('\n')
+    expect(evaluatedSource).not.toContain('elementFromPoint')
+    expect(evaluatedSource).not.toContain("querySelectorAll('body *')")
+  })
+
+  it('keeps UI-Mate scroll direction semantics in Chromium', async () => {
+    const t = makeTransport()
+    const driver = new BrowserDriver(t.cdp)
+    await driver.actuate({ type: 'scroll_by', axis: 'vertical', amount: 240 })
+    await driver.actuate({ type: 'scroll_by', axis: 'horizontal', amount: 120 })
+    const wheel = t.sent.filter((entry) => entry.params?.type === 'mouseWheel')
+    expect(wheel.map((entry) => [entry.params?.deltaX, entry.params?.deltaY])).toEqual([
+      [0, -240],
+      [120, 0]
+    ])
   })
 })
 

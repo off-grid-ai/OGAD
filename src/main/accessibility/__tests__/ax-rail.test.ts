@@ -59,7 +59,13 @@ describe('makeComputerTaskExecutor', () => {
 
     const result = await exec(action())
 
-    expect(tiers.runAx).toHaveBeenCalledWith('message sidd on Slack', 'act-1', 'Slack', routing.snapshot)
+    expect(tiers.runAx).toHaveBeenCalledWith(
+      'message sidd on Slack',
+      'act-1',
+      'act-1',
+      'Slack',
+      routing.snapshot
+    )
     expect(tiers.visionExecute).not.toHaveBeenCalled()
     expect(result).toEqual({ ok: true, effectId: 'act-1' })
   })
@@ -110,6 +116,22 @@ describe('makeComputerTaskExecutor', () => {
     await exec(action({ args: { goal: 'open the DM with sidd' } }))
 
     expect(routingSnapshot).toHaveBeenCalledWith('open the DM with sidd')
+  })
+
+  it('keeps the originating Chat as the AX task journey', async () => {
+    const routing: AxRouting = { app: 'Slack', snapshot: richSnapshot() }
+    const tiers = makeTiers({ routingSnapshot: vi.fn(async () => routing) })
+    const exec = makeComputerTaskExecutor(tiers)
+
+    await exec(action({ sourceRef: 'chat-42' }))
+
+    expect(tiers.runAx).toHaveBeenCalledWith(
+      'message sidd on Slack',
+      'act-1',
+      'chat-42',
+      'Slack',
+      routing.snapshot
+    )
   })
 
   describe('forced rail (A/B)', () => {

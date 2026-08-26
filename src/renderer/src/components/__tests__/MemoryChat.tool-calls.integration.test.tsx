@@ -8,12 +8,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ChatBoundary, installBoundary, renderChat, send } from './harness/chat-boundary'
+import { resetTaskSessionStoreForTests } from '@renderer/lib/task-session-store'
+import {
+  closeTaskWorkspace,
+  onOpenTaskSidePanel,
+  type OpenTaskPanelRequest
+} from '@renderer/lib/task-side-panel'
 
 const LONG_RESULT =
   'GitHub — off-grid-ai/OGAD: Off Grid AI Desktop, a local-first on-device AI runtime.'
 
 describe('<MemoryChat/> tool calls — persistent + inline', () => {
   beforeEach(() => {
+    resetTaskSessionStoreForTests()
+    closeTaskWorkspace()
     ;(Element.prototype as unknown as { scrollIntoView(): void }).scrollIntoView = () => {}
     globalThis.requestAnimationFrame = (cb: FrameRequestCallback): number => {
       cb(0)
@@ -22,7 +30,62 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
   })
   afterEach(() => {
     cleanup()
+    closeTaskWorkspace()
+    resetTaskSessionStoreForTests()
     vi.unstubAllGlobals()
+  })
+
+  it('opens a persisted Web Use work card on its exact task detail', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-b'] = [
+      {
+        id: 1,
+        role: 'assistant',
+        content: 'The research is ready.',
+        context: {
+          unified: [],
+          toolCalls: [
+            {
+              name: 'web_use',
+              status: 'completed',
+              result: 'Task reference: memory-web-task.'
+            }
+          ]
+        }
+      }
+    ]
+    installBoundary(boundary)
+    window.api.tasks = {
+      list: vi.fn(async () => [
+        {
+          taskId: 'memory-web-task',
+          kind: 'web_use' as const,
+          title: 'Research suppliers',
+          status: 'done' as const,
+          steps: ['Saved the result'],
+          startedAt: 1,
+          updatedAt: 2
+        }
+      ]),
+      retryAvailability: vi.fn(async () => ({ available: false })),
+      retry: vi.fn(async () => ({ available: false })),
+      guideAvailability: vi.fn(async () => ({ available: false })),
+      guideTask: vi.fn(async () => ({ available: false, accepted: false })),
+      onChanged: vi.fn(() => () => undefined)
+    }
+    const requests: OpenTaskPanelRequest[] = []
+    const offOpen = onOpenTaskSidePanel((request) => requests.push(request))
+    renderChat({ conversationId: 'conversation-b' })
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Open task details for Work done' })
+    )
+    expect(requests.at(-1)).toEqual({
+      taskId: 'memory-web-task',
+      kind: 'web_use',
+      detail: true
+    })
+    offOpen()
   })
 
   it('renders each tool call below its answer and expands the full result inline', async () => {
@@ -136,7 +199,7 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
     const user = userEvent.setup()
     renderChat({ conversationId: 'conversation-b' })
 
-    const work = await screen.findByRole('button', { name: /Work done/ })
+    const work = await screen.findByRole('button', { name: /Action needed/ })
     expect(work.textContent).toContain('8 steps · needs attention')
     if (work.getAttribute('aria-expanded') !== 'true') await user.click(work)
     const labels = [
@@ -236,5 +299,27 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
 
     boundary.emit(0, 'Here is the release status.')
     boundary.resolve(0, 'Here is the release status.')
+  })
+
+  it('keeps a final Web Use intake result as Action needed, not Work done', async () => {
+    const boundary = new ChatBoundary()
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+
+    await send('Continue the flight search', user)
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+
+    const result = 'Web Use was not started. Please confirm the departure airport.'
+    boundary.emitToolStep(0, 'web_task')
+    boundary.emitToolResult(0, 'web_task', result, 'pending')
+    boundary.resolve(0, result, {
+      toolCalls: [{ name: 'web_task', result, status: 'pending' }],
+      unified: []
+    })
+
+    expect(await screen.findByRole('button', { name: /Action needed/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Work done/ })).toBeNull()
+    expect(await screen.findByText(result)).toBeTruthy()
   })
 })

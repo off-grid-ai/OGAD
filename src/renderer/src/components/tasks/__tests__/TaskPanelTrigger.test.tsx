@@ -55,4 +55,35 @@ describe('<TaskPanelTrigger/>', () => {
     await waitFor(() => expect(screen.getByTestId('task-attention-badge').textContent).toBe('1'))
     expect(screen.getByLabelText('Tasks, 1 need attention')).toBeTruthy()
   })
+
+  it('counts only tasks owned by the current Chat', async () => {
+    render(
+      <TooltipProvider>
+        <TaskPanelTrigger conversationId="chat-current" />
+      </TooltipProvider>
+    )
+    emitTask({
+      taskId: 'web-other',
+      journeyId: 'chat-other',
+      kind: 'web_use',
+      title: 'Other task',
+      status: 'failed',
+      steps: [],
+      startedAt: 1,
+      updatedAt: 2
+    })
+    await waitFor(() => expect(screen.queryByTestId('task-attention-badge')).toBeNull())
+
+    emitTask({
+      taskId: 'web-current',
+      journeyId: 'chat-current',
+      kind: 'web_use',
+      title: 'Current task',
+      status: 'running',
+      steps: [],
+      startedAt: 3,
+      updatedAt: 4
+    })
+    await waitFor(() => expect(screen.getByTestId('task-attention-badge').textContent).toBe('1'))
+  })
 })

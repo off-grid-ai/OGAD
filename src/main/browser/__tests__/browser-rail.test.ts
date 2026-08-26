@@ -10,14 +10,15 @@ import { HandlerRegistry, type ActionRecord } from '@offgrid/use'
 import { makeBrowserRailExecutor, registerBrowserRail, type BrowserRailHost } from '../browser-rail'
 import type { WebTaskResult } from '../web-task-agent'
 
-const action = (args: Record<string, unknown>): ActionRecord =>
+const action = (args: Record<string, unknown>, sourceRef?: string): ActionRecord =>
   ({
     id: 'act_web',
     type: 'web_task',
     intent: 'check in for my flight',
     args,
     risk: 'mutate',
-    rail: 'browser'
+    rail: 'browser',
+    sourceRef
   }) as unknown as ActionRecord
 
 const run = (over: Partial<WebTaskResult> = {}): WebTaskResult => ({
@@ -50,20 +51,35 @@ describe('makeBrowserRailExecutor', () => {
     const result = await makeBrowserRailExecutor(host)(
       action({ goal: 'check in', url: 'https://air.test' })
     )
-    expect(host.runTask).toHaveBeenCalledWith('check in', 'https://air.test', 'act_web')
+    expect(host.runTask).toHaveBeenCalledWith({
+      goal: 'check in',
+      url: 'https://air.test',
+      taskId: 'act_web',
+      journeyId: 'act_web'
+    })
     expect(result).toEqual({ ok: true, effectId: 'https://air.test/boarding-pass' })
   })
 
   it('falls back to the action intent when no explicit goal is given', async () => {
     const host: BrowserRailHost = { runTask: vi.fn(async () => run()) }
     await makeBrowserRailExecutor(host)(action({}))
-    expect(host.runTask).toHaveBeenCalledWith('check in for my flight', undefined, 'act_web')
+    expect(host.runTask).toHaveBeenCalledWith({
+      goal: 'check in for my flight',
+      url: undefined,
+      taskId: 'act_web',
+      journeyId: 'act_web'
+    })
   })
 
   it('ignores a non-http start url rather than navigating somewhere unsafe', async () => {
     const host: BrowserRailHost = { runTask: vi.fn(async () => run()) }
     await makeBrowserRailExecutor(host)(action({ goal: 'x', url: 'file:///etc/passwd' }))
-    expect(host.runTask).toHaveBeenCalledWith('x', undefined, 'act_web')
+    expect(host.runTask).toHaveBeenCalledWith({
+      goal: 'x',
+      url: undefined,
+      taskId: 'act_web',
+      journeyId: 'act_web'
+    })
   })
 
   it('surfaces a failed run as the honest failure with its summary', async () => {
@@ -80,5 +96,16 @@ describe('makeBrowserRailExecutor', () => {
     const host: BrowserRailHost = { runTask: vi.fn(async () => run({ finalUrl: '' })) }
     const result = await makeBrowserRailExecutor(host)(action({ goal: 'x' }))
     expect(result).toEqual({ ok: true, effectId: 'act_web' })
+  })
+
+  it('keeps action identity separate from its conversation journey', async () => {
+    const host: BrowserRailHost = { runTask: vi.fn(async () => run()) }
+    await makeBrowserRailExecutor(host)(action({ goal: 'continue from this page' }, 'chat-42'))
+    expect(host.runTask).toHaveBeenCalledWith({
+      goal: 'continue from this page',
+      url: undefined,
+      taskId: 'act_web',
+      journeyId: 'chat-42'
+    })
   })
 })

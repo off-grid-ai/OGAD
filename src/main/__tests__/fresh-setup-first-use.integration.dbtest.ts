@@ -50,6 +50,10 @@ interface JourneyModel {
   files: CatalogFile[]
 }
 
+function isFirstUseModelKind(kind: string): kind is JourneyModel['kind'] {
+  return ['text', 'vision', 'image', 'transcription', 'voice'].includes(kind)
+}
+
 const PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 const delivery = new Map<string, Buffer>()
@@ -274,6 +278,9 @@ describe('fresh setup to first use', () => {
     const baselineModels: JourneyModel[] = plan.items.map((item) => {
       const catalogEntry = CATALOG.find((entry) => entry.id === item.id)
       if (!catalogEntry) throw new Error(`Setup selected a model outside the catalog: ${item.id}`)
+      if (!isFirstUseModelKind(catalogEntry.kind)) {
+        throw new Error(`Setup selected an optional ${catalogEntry.kind} model: ${item.id}`)
+      }
       return {
         id: item.id,
         kind: catalogEntry.kind,
@@ -285,8 +292,11 @@ describe('fresh setup to first use', () => {
     // entry is one any more: every shipped chat model is multimodal, so it is kind 'vision' and carries an
     // mmproj beside its weights. Naming 'text' here asked first-use to download a model that does not
     // exist, which is a stale fixture rather than a gap in setup.
-    const requiredKinds: JourneyModel['kind'][] = MODEL_KINDS.filter((kind) =>
-      CATALOG.some((entry) => entry.kind === kind)
+    // Computer Use stays an explicit Models-catalog choice. Fresh setup must not add its multi-GB
+    // policy package to the baseline that prepares chat, image, transcription, and voice.
+    const requiredKinds = MODEL_KINDS.filter(
+      (kind): kind is JourneyModel['kind'] =>
+        isFirstUseModelKind(kind) && CATALOG.some((entry) => entry.kind === kind)
     )
     expect(requiredKinds).toEqual(
       expect.arrayContaining(['vision', 'image', 'transcription', 'voice'])
@@ -438,6 +448,7 @@ describe('fresh setup to first use', () => {
     expect(active).toEqual({
       text: visionModel.id,
       image: expect.any(String),
+      computer_use: null,
       transcription: transcriptionModel.id,
       speech: voiceModel.id
     })

@@ -138,6 +138,7 @@ export async function startFakeLlamaServer(): Promise<FakeLlamaServer> {
                   {
                     message: {
                       content: turn.content ?? '',
+                      ...(turn.reasoning ? { reasoning_content: turn.reasoning } : {}),
                       ...(turn.toolCalls?.length
                         ? {
                             tool_calls: turn.toolCalls.map((tc, i) => ({

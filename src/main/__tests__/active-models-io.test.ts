@@ -43,6 +43,7 @@ afterEach(() => {
 describe('getActiveModal', () => {
   it('returns null for every modality when the store file is absent', () => {
     expect(store.get('image')).toBeNull()
+    expect(store.get('computer_use')).toBeNull()
     expect(store.get('speech')).toBeNull()
     expect(store.get('transcription')).toBeNull()
   })
@@ -99,35 +100,57 @@ describe('setActiveModal', () => {
 
 describe('getAllActiveModals', () => {
   it('fills every modality with null when the store is empty', () => {
-    expect(store.all()).toEqual({ image: null, speech: null, transcription: null })
+    expect(store.all()).toEqual({
+      computer_use: null,
+      image: null,
+      speech: null,
+      transcription: null
+    })
   })
 
   it('returns all three modalities, defaulting the unset ones to null', () => {
     store.set('image', 'img-x')
-    expect(store.all()).toEqual({ image: 'img-x', speech: null, transcription: null })
+    expect(store.all()).toEqual({
+      computer_use: null,
+      image: 'img-x',
+      speech: null,
+      transcription: null
+    })
   })
 
   it('reflects a full round trip across all three modalities', () => {
     store.set('image', 'a')
+    store.set('computer_use', 'grounder')
     store.set('speech', 'b')
     store.set('transcription', 'c')
-    expect(store.all()).toEqual({ image: 'a', speech: 'b', transcription: 'c' })
+    expect(store.all()).toEqual({
+      computer_use: 'grounder',
+      image: 'a',
+      speech: 'b',
+      transcription: 'c'
+    })
   })
 })
 
 describe('production active-model functions', () => {
   it('persist and read all modalities in the configured runtime profile', () => {
     setActiveModal('image', 'image-model')
+    setActiveModal('computer_use', 'computer-use-model')
     setActiveModal('speech', 'speech-model')
 
     expect(getActiveModal('image')).toBe('image-model')
     expect(getAllActiveModals()).toEqual({
+      computer_use: 'computer-use-model',
       image: 'image-model',
       speech: 'speech-model',
       transcription: null
     })
     expect(
       JSON.parse(fs.readFileSync(path.join(tmpDir, 'models', 'active-modalities.json'), 'utf-8'))
-    ).toEqual({ image: 'image-model', speech: 'speech-model' })
+    ).toEqual({
+      computer_use: 'computer-use-model',
+      image: 'image-model',
+      speech: 'speech-model'
+    })
   })
 })

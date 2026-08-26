@@ -208,6 +208,25 @@ describe('the reply being generated, as published to anything that follows it', 
     ])
   })
 
+  it('publishes a tool-owned needs-attention result as pending', () => {
+    bindChatStream('stream-a', 'conversation-1')
+    noteChatStreamToolStarted('stream-a', 'web_task')
+    noteChatStreamToolCompleted(
+      'stream-a',
+      'web_task',
+      'Please answer the missing questions.',
+      'pending'
+    )
+
+    expect(published.at(-1)?.tools).toEqual([
+      {
+        name: 'web_task',
+        status: 'pending',
+        result: 'Please answer the missing questions.'
+      }
+    ])
+  })
+
   it('says nothing more once a turn has ended, even if a late delta arrives', () => {
     bindChatStream('stream-a', 'conversation-1')
     endChatStream('stream-a')

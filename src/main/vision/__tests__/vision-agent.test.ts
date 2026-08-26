@@ -1,18 +1,25 @@
 /**
  * The vision loop's control flow, every boundary scripted: it actuates under
  * the guard, finishes on the model's `finished`, hands off on `call_user`,
- * pauses when the user takes over and resumes after, re-observes an
+ * pauses after an explicit takeover and resumes after, re-observes an
  * unparseable action, and stops the moment the kill switch or step budget
  * closes the guard - never actuating past it.
  */
 import { describe, expect, it } from 'vitest'
 import {
+  RecoverableVisionError,
   runVisionTask,
   type VisionScreen,
   type VisionStepObservation,
   type VisionTaskDeps
 } from '../vision-agent'
 import { VisionGuard } from '../vision-guard'
+import { dispatchVisionAction } from '../vision-actuation'
+import type { ActuationPort } from '../../input/actuation'
+import { sanitizeComputerUseStepDetail } from '../../tasks/task-step-details'
+import { PRIVATE_INPUT_HANDOFF } from '../secure-input-policy'
+import { fallbackTaskExecutionPlan } from '../../../shared/task-execution-plan'
+import { TASK_GUIDANCE_TRACE } from '../../tasks/task-guide'
 
 const bounds = { width: 1000, height: 1000 }
 
@@ -49,6 +56,83 @@ const world = (
 }
 
 describe('runVisionTask', () => {
+  it('uses one execution plan, reports phases, and keeps private guidance authoritative', async () => {
+    const w = world(["click(point='<point>500 500</point>')", "finished(content='done')"])
+    const plan = fallbackTaskExecutionPlan('Notes', 'computer')
+    const phases: string[] = []
+    const observations: VisionStepObservation[] = []
+    const groundingInputs: Array<{
+      goal: string
+      history: string[]
+      guidance: readonly string[]
+      verifiedActions: readonly string[]
+    }> = []
+    const privateGuidance = 'Use the second note, private-839201'
+    const guidance = [privateGuidance]
+    w.deps.plan = plan
+    w.deps.onPhase = (phaseId) => phases.push(phaseId)
+    w.deps.onObservation = (observation) => observations.push(observation)
+    w.deps.takeGuidance = () => guidance.splice(0)
+    const originalGround = w.deps.ground
+    w.deps.ground = async (input) => {
+      groundingInputs.push({
+        goal: input.goal,
+        history: input.history,
+        guidance: input.guidance,
+        verifiedActions: input.verifiedActions ?? []
+      })
+      return originalGround(input)
+    }
+
+    const result = await runVisionTask('update a note', w.deps)
+
+    expect(groundingInputs[0]?.history.join('\n')).toContain('Execution plan:')
+    expect(groundingInputs[0]?.guidance).toEqual([privateGuidance])
+    expect(groundingInputs[1]?.guidance).toEqual([privateGuidance])
+    expect(groundingInputs[0]?.goal).toContain('Original request: update a note')
+    expect(groundingInputs[0]?.goal).toContain(privateGuidance)
+    expect(groundingInputs[1]?.goal).toContain(privateGuidance)
+    expect(groundingInputs[0]?.verifiedActions).toEqual([])
+    expect(groundingInputs[1]?.verifiedActions).toEqual(['click at (500, 500)'])
+    // Low-level actions and a terminal claim must not manufacture milestone
+    // progress. Only explicit verified phase signals advance the plan.
+    expect(phases).toEqual(['phase-1'])
+    expect(JSON.stringify(groundingInputs[0]?.history)).not.toContain(privateGuidance)
+    expect(JSON.stringify(observations)).not.toContain(privateGuidance)
+    expect(TASK_GUIDANCE_TRACE).not.toContain(privateGuidance)
+    expect(result.steps.filter((step) => step.includes('GUIDANCE'))).toEqual([])
+  })
+
+  it('uses guidance received after start in the next and all later visual decisions', async () => {
+    const w = world([
+      "click(point='<point>500 500</point>')",
+      "click(point='<point>600 500</point>')",
+      "finished(content='ready')"
+    ])
+    const guidance = 'From San Francisco to Pune on September 1, budget $500-$3000'
+    const objectives: string[] = []
+    let decision = 0
+    w.deps.takeGuidance = () => {
+      decision += 1
+      return decision === 2 ? [guidance] : []
+    }
+    const originalGround = w.deps.ground
+    w.deps.ground = async (input) => {
+      objectives.push(input.goal)
+      return originalGround(input)
+    }
+
+    const result = await runVisionTask(
+      'Open Skyscanner and ask me for route, dates, and budget',
+      w.deps
+    )
+
+    expect(result.ok).toBe(true)
+    expect(objectives[0]).not.toContain(guidance)
+    expect(objectives[1]).toContain(guidance)
+    expect(objectives[2]).toContain(guidance)
+  })
+
   it('actuates a click then finishes, reporting the summary', async () => {
     const w = world([
       "click(point='<point>500 500</point>')",
@@ -58,6 +142,70 @@ describe('runVisionTask', () => {
     expect(result).toMatchObject({ ok: true, summary: 'shared the file', handoffs: 0 })
     expect(w.actuated).toEqual(['click'])
     expect(w.guard.snapshot().steps).toBe(1)
+  })
+
+  it('advances milestones only on an explicit verified completion signal', async () => {
+    const w = world(['phase', 'phase', "finished(content='done')"])
+    const phases: string[] = []
+    w.deps.plan = fallbackTaskExecutionPlan('Notes', 'computer')
+    w.deps.onPhase = (phaseId) => phases.push(phaseId)
+    w.deps.parseResponse = (response) =>
+      response === 'phase'
+        ? { kind: 'phase_complete', actionText: 'Opened Notes', summary: 'Opened Notes' }
+        : { kind: 'done', actionText: 'done', summary: 'done' }
+
+    const result = await runVisionTask('update a note', w.deps)
+
+    expect(result.ok).toBe(true)
+    expect(phases).toEqual(['phase-1', 'phase-2', 'phase-3'])
+    expect(w.actuated).toEqual([])
+    expect(result.steps).toContain('milestone complete: Open Notes')
+  })
+
+  it('publishes one next-phase transition for one phase_complete verdict', async () => {
+    const w = world(['phase', "finished(content='done')"])
+    const phases: string[] = []
+    const milestones: Array<string | undefined> = []
+    w.deps.plan = fallbackTaskExecutionPlan('Notes', 'computer')
+    w.deps.onPhase = (phaseId) => phases.push(phaseId)
+    const originalGround = w.deps.ground
+    w.deps.ground = async (input) => {
+      milestones.push(input.currentMilestone)
+      return originalGround(input)
+    }
+    w.deps.parseResponse = (response) =>
+      response === 'phase'
+        ? {
+            kind: 'phase_complete',
+            actionText: 'Milestone complete',
+            summary: 'Notes is open.'
+          }
+        : { kind: 'done', actionText: 'done', summary: 'done' }
+
+    await runVisionTask('update a note', w.deps)
+
+    expect(phases).toEqual(['phase-1', 'phase-2'])
+    expect(milestones).toEqual(['Open Notes', 'Complete the requested work'])
+    expect(w.actuated).toEqual([])
+  })
+
+  it('finishes when the judge completes the final milestone', async () => {
+    const w = world(['phase', 'phase', 'phase'])
+    const phases: string[] = []
+    w.deps.plan = fallbackTaskExecutionPlan('Notes', 'computer')
+    w.deps.onPhase = (phaseId) => phases.push(phaseId)
+    w.deps.parseResponse = () => ({
+      kind: 'phase_complete',
+      actionText: 'Milestone complete',
+      summary: 'The requested result is visible.'
+    })
+
+    const result = await runVisionTask('update a note', w.deps)
+
+    expect(result).toMatchObject({ ok: true, summary: 'The requested result is visible.' })
+    expect(phases).toEqual(['phase-1', 'phase-2', 'phase-3'])
+    expect(w.actuated).toEqual([])
+    expect(result.steps.filter((step) => step.startsWith('milestone complete:'))).toHaveLength(3)
   })
 
   it('call_user hands off and resumes after the user acts', async () => {
@@ -71,15 +219,17 @@ describe('runVisionTask', () => {
     expect(result.steps.join('\n')).toContain('resumed by the user')
   })
 
-  it('pauses when the user takes over mid-run and resumes on their signal', async () => {
+  it('pauses only after explicit takeover and resumes from the same task', async () => {
     const guard = new VisionGuard()
     const w = world(["click(point='<point>1 1</point>')", "finished(content='ok')"], guard)
-    // The user grabs the mouse before the first action is dispatched.
-    guard.pauseForUser('you moved the mouse')
+    guard.pauseForUser('you selected Take Over')
+    w.deps.onProgress = (progress) => {
+      if (progress.phase === 'paused') guard.resume()
+    }
     const result = await runVisionTask('t', w.deps)
-    expect(w.userWaits).toEqual(['you moved the mouse'])
+    expect(w.userWaits).toEqual([])
     expect(result.ok).toBe(true)
-    expect(result.steps.join('\n')).toContain('paused: you moved the mouse')
+    expect(result.steps.join('\n')).toContain('paused: you selected Take Over')
   })
 
   it('stops immediately when the kill switch is down, actuating nothing', async () => {
@@ -97,6 +247,57 @@ describe('runVisionTask', () => {
     expect(result.ok).toBe(true)
     expect(w.actuated).toEqual([])
     expect(result.steps.join('\n')).toContain('did not parse')
+  })
+
+  it('re-observes a recoverable focus miss without failing the task or milestone', async () => {
+    const w = world(["type(content='Pune')", "finished(content='done')"])
+    const observations: VisionStepObservation[] = []
+    let captures = 0
+    w.deps.screen.capture = async () => {
+      captures += 1
+      return { image: `frame-${captures}.png`, bounds }
+    }
+    w.deps.screen.actuate = async () => ({
+      rejected:
+        'No editable field is focused. Take a new screenshot and click the intended input before typing.'
+    })
+    w.deps.onObservation = (observation) => observations.push(observation)
+
+    const result = await runVisionTask('enter the destination', w.deps)
+
+    expect(result).toMatchObject({ ok: true, summary: 'done' })
+    expect(captures).toBe(2)
+    expect(w.guard.snapshot().steps).toBe(0)
+    expect(result.steps).toContain(
+      'rejected action: No editable field is focused. Take a new screenshot and click the intended input before typing.'
+    )
+    expect(observations[0]).toMatchObject({
+      phase: 'checking',
+      result: 'blocked',
+      parsedAction: { type: 'type', content: 'Pune' }
+    })
+  })
+
+  it('takes a fresh screenshot after a recoverable capture boundary failure', async () => {
+    const w = world(["finished(content='done')"])
+    const observations: VisionStepObservation[] = []
+    let captures = 0
+    w.deps.screen.capture = async () => {
+      captures += 1
+      if (captures === 1) {
+        throw new RecoverableVisionError('The browser target was detached.')
+      }
+      return { image: `frame-${captures}.png`, bounds }
+    }
+    w.deps.onObservation = (observation) => observations.push(observation)
+
+    const result = await runVisionTask('continue browsing', w.deps)
+
+    expect(result).toMatchObject({ ok: true, summary: 'done' })
+    expect(captures).toBe(2)
+    expect(result.steps).toContain('rejected observation: The browser target was detached.')
+    expect(observations[0]).toMatchObject({ result: 'blocked', phase: 'checking' })
+    expect(observations[1]).toMatchObject({ result: 'terminal' })
   })
 
   it('stops invalid planning loops at the model step cap', async () => {
@@ -120,6 +321,59 @@ describe('runVisionTask', () => {
     w.deps.onObservation = (observation) => observations.push(observation)
     await runVisionTask('t', w.deps)
     expect(observations[0]?.promptContext).toBe('[exact adapter messages; screenshot redacted]')
+  })
+
+  it('does not expose typed text in progress or task notes', async () => {
+    const secret = '839201-private'
+    const w = world([`type(content='${secret}')`, "finished(content='ok')"])
+    const progress: string[] = []
+    w.deps.onProgress = (item) => progress.push(item.action)
+
+    const result = await runVisionTask('enter the code', w.deps)
+
+    expect(progress.join('\n')).not.toContain(secret)
+    expect(result.steps.join('\n')).not.toContain(secret)
+    expect(progress).toContain('type text')
+    expect(result.steps).toContain('type text')
+  })
+
+  it('turns an execution-boundary credential block into a content-free handoff', async () => {
+    const secret = '839201-private-value'
+    const w = world([`type(content='${secret}')`, "finished(content='ok')"])
+    const typed: string[] = []
+    const port = {
+      typeText: async (text: string) => void typed.push(text)
+    } as ActuationPort
+    const observations: VisionStepObservation[] = []
+    w.deps.screen.actuate = (action) =>
+      dispatchVisionAction({
+        actuation: port,
+        action,
+        goal: 'Enter the verification code',
+        inspectFocused: async () => ({ state: 'unknown' })
+      })
+    w.deps.onObservation = (observation) => observations.push(observation)
+
+    const result = await runVisionTask('Enter the verification code', w.deps)
+    const durableProjection = observations.map((observation) =>
+      sanitizeComputerUseStepDetail({
+        stepId: String(observation.step),
+        at: 1,
+        modelInput: observation.promptContext,
+        rawResponse: observation.rawResponse,
+        decisionSummary: observation.decisionSummary,
+        mappedAction: observation.parsedAction
+          ? JSON.stringify(observation.parsedAction)
+          : undefined,
+        execution: { status: 'complete', result: observation.result }
+      })
+    )
+
+    expect(typed).toEqual([])
+    expect(w.userWaits).toEqual([PRIVATE_INPUT_HANDOFF])
+    expect(result.handoffs).toBe(1)
+    expect(result.steps.join('\n')).not.toContain(secret)
+    expect(JSON.stringify(durableProjection)).not.toContain(secret)
   })
 
   it('records completed actions and the failing action when an ordered response fails', async () => {
@@ -170,14 +424,17 @@ describe('runVisionTask', () => {
   it('re-checks the guard right before dispatch - a kill mid-decision actuates nothing more', async () => {
     const guard = new VisionGuard()
     const w = world(["click(point='<point>1 1</point>')"], guard)
+    const phases: string[] = []
     // Ground resolves, THEN the user hits Esc before dispatch.
     w.deps.ground = async () => {
       guard.halt('stopped with Esc')
       return "click(point='<point>1 1</point>')"
     }
+    w.deps.onProgress = ({ phase }) => phases.push(phase)
     const result = await runVisionTask('t', w.deps)
     expect(w.actuated).toEqual([])
     expect(result.summary).toBe('stopped with Esc')
+    expect(phases.at(-1)).toBe('stopped')
   })
 
   it('uses one current screenshot per planning step and passes older outcomes as text', async () => {

@@ -64,4 +64,24 @@ describe('MemoryChat builds send history from the target conversation (D8 wiring
   it('builds history via buildSendHistory from the target conversation', () => {
     expect(src).toMatch(/buildSendHistory\(\s*messagesByConv\[convId\]/)
   })
+
+  it('keeps task guidance visible in Chat but out of the resident model history', () => {
+    expect(
+      buildSendHistory(
+        [
+          { role: 'user', content: 'Start the task' },
+          {
+            role: 'user',
+            content: 'Use a one-way flight',
+            context: { taskGuidance: { taskId: 'task-1' } }
+          }
+        ],
+        false,
+        'What did you find?'
+      )
+    ).toEqual([
+      { role: 'user', content: 'Start the task' },
+      { role: 'user', content: 'What did you find?' }
+    ])
+  })
 })

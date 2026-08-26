@@ -8,11 +8,12 @@
 // boundary stands in for them. No Off Grid component, hook, store, or orchestration code
 // is mocked.
 
-import { cleanup, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryChat } from '../MemoryChat'
 import { TooltipProvider } from '../ui/tooltip'
+import { resetTaskSessionStoreForTests } from '../../lib/task-session-store'
 import {
   ChatBoundary,
   installBoundary,
@@ -29,11 +30,153 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
       callback(0)
       return 1
     }
+    resetTaskSessionStoreForTests()
   })
 
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
+  })
+
+  it('opens a task follow-up as a confirmed draft in its owning conversation', async () => {
+    const boundary = new ChatBoundary()
+    installBoundary(boundary)
+
+    renderChat({
+      conversationId: 'conversation-a',
+      draftPrompt: 'Continue from the completed browser task'
+    })
+
+    const composer = await screen.findByPlaceholderText('Ask about “Project Alpha”…')
+    expect((composer as HTMLTextAreaElement).value).toBe('Continue from the completed browser task')
+    expect(document.activeElement).toBe(composer)
+    expect(boundary.calls).toHaveLength(0)
+  })
+
+  it('routes new Chat input to the live task without starting a memory turn', async () => {
+    const boundary = new ChatBoundary()
+    boundary.listTasks.mockResolvedValue([
+      {
+        taskId: 'web-live-guidance',
+        journeyId: 'conversation-a',
+        kind: 'web_use',
+        title: 'Find a flight',
+        status: 'running',
+        steps: [],
+        startedAt: 1,
+        updatedAt: 2
+      }
+    ])
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+
+    await send('Use a one-way flight', user)
+
+    await waitFor(() =>
+      expect(boundary.guideTask).toHaveBeenCalledWith('web-live-guidance', {
+        text: 'Use a one-way flight',
+        attachments: []
+      })
+    )
+    expect(boundary.calls).toHaveLength(0)
+    await waitFor(() =>
+      expect(boundary.addRagMessage).toHaveBeenCalledWith(
+        'conversation-a',
+        'user',
+        'Use a one-way flight',
+        expect.objectContaining({
+          taskGuidance: expect.objectContaining({ taskId: 'web-live-guidance' })
+        })
+      )
+    )
+    expect(await screen.findByText('Task guidance')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Resend' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy()
+  })
+
+  it('shows Web Use reasoning only in the originating Chat and keeps its final state', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-a'] = [
+      { id: 20, role: 'user', content: 'Find a one-way flight to Pune' }
+    ]
+    boundary.conversations[0]!.message_count = 1
+    installBoundary(boundary)
+    const view = renderChat({ conversationId: 'conversation-a' })
+    await screen.findByPlaceholderText('Ask about “Project Alpha”…')
+    await waitFor(() => expect(boundary.api.tasks.onChanged).toHaveBeenCalled())
+
+    act(() => {
+      boundary.emitTask({
+        taskId: 'web-chat-reasoning',
+        journeyId: 'conversation-a',
+        kind: 'web_use',
+        title: 'Find a flight',
+        status: 'running',
+        steps: [],
+        currentAction: 'Reviewing the flight form',
+        currentReasoning: 'The origin field is visible and empty.',
+        reasoningLive: true,
+        currentStep: 1,
+        startedAt: 1,
+        updatedAt: 2
+      })
+    })
+
+    expect(await screen.findByRole('button', { name: 'Web Use thinking…' })).toBeTruthy()
+    expect(screen.getByText('The origin field is visible and empty.')).toBeTruthy()
+
+    act(() => {
+      boundary.emitTask({
+        taskId: 'web-chat-reasoning',
+        journeyId: 'conversation-a',
+        kind: 'web_use',
+        title: 'Find a flight',
+        status: 'running',
+        steps: [],
+        currentAction: 'Checking the flight form',
+        currentReasoning: 'The origin field is visible and empty.',
+        reasoningLive: false,
+        currentStep: 1,
+        startedAt: 1,
+        updatedAt: 3
+      })
+    })
+    expect(screen.getByRole('button', { name: 'Web Use reasoning complete' })).toBeTruthy()
+
+    view.rerender(
+      <TooltipProvider>
+        <MemoryChat openTarget={{ conversationId: 'conversation-b' }} />
+      </TooltipProvider>
+    )
+    expect(await screen.findByText('Conversation B baseline')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Web Use (?:thinking|reasoning)/ })).toBeNull()
+    expect(screen.queryByText('The origin field is visible and empty.')).toBeNull()
+  })
+
+  it('shows a completed task result written to the originating Chat', async () => {
+    const boundary = new ChatBoundary()
+    installBoundary(boundary)
+    renderChat({ conversationId: 'conversation-a' })
+    await screen.findByPlaceholderText('Ask about “Project Alpha”…')
+
+    boundary.messages['conversation-a']!.push({
+      id: 'task-result-message',
+      role: 'assistant',
+      content: 'The cheapest one-way SFO to Pune flight for September 1, 2026 is $503.',
+      context: { taskResult: { taskId: 'web-complete' } },
+      created_at: '2026-01-01 09:01:00'
+    })
+    await act(async () => {
+      boundary.emitConversationChanged('conversation-a')
+    })
+
+    expect(
+      await screen.findByText(
+        'The cheapest one-way SFO to Pune flight for September 1, 2026 is $503.'
+      )
+    ).toBeTruthy()
   })
 
   it('renders streamed reasoning separately from the final answer when Thinking is enabled (#36)', async () => {
@@ -313,6 +456,93 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     expect(screen.queryByText('No response returned.')).toBeNull()
   })
 
+  it('stops the live Web Use task owned by the Chat when Stop is pressed', async () => {
+    const boundary = new ChatBoundary()
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+
+    await send('Find a flight', user)
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+    const listCallsBeforeStop = boundary.listTasks.mock.calls.length
+    await act(async () => {
+      boundary.emitTask({
+        taskId: 'web-live-stop',
+        journeyId: 'conversation-a',
+        kind: 'web_use',
+        title: 'Find a flight',
+        status: 'running',
+        steps: [],
+        startedAt: 1,
+        updatedAt: 2
+      })
+    })
+    await user.click(screen.getByRole('button', { name: /stop generating/i }))
+
+    await waitFor(() => expect(boundary.stopBrowserTask).toHaveBeenCalledWith('web-live-stop'))
+    expect(boundary.cancelRag).toHaveBeenCalledWith(boundary.calls[0]!.streamId)
+    expect(boundary.listTasks).toHaveBeenCalledTimes(listCallsBeforeStop)
+  })
+
+  it('stops the live Computer Use task owned by the Chat when Stop is pressed', async () => {
+    const boundary = new ChatBoundary()
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+
+    await send('Update the desktop app', user)
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+    await act(async () => {
+      boundary.emitTask({
+        taskId: 'computer-live-stop',
+        journeyId: 'conversation-a',
+        kind: 'computer_use',
+        title: 'Update the desktop app',
+        status: 'running',
+        steps: [],
+        startedAt: 1,
+        updatedAt: 2
+      })
+    })
+
+    await user.click(screen.getByRole('button', { name: /stop generating/i }))
+
+    await waitFor(() =>
+      expect(boundary.stopComputerTask).toHaveBeenCalledWith('stop', 'computer-live-stop')
+    )
+    expect(boundary.stopBrowserTask).not.toHaveBeenCalled()
+    expect(boundary.cancelRag).toHaveBeenCalledWith(boundary.calls[0]!.streamId)
+  })
+
+  it('shows a Stop failure and keeps the originating task busy', async () => {
+    const boundary = new ChatBoundary()
+    boundary.stopBrowserTask.mockResolvedValue(false)
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+
+    await send('Find a flight', user)
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+    await act(async () => {
+      boundary.emitTask({
+        taskId: 'web-stop-fails',
+        journeyId: 'conversation-a',
+        kind: 'web_use',
+        title: 'Find a flight',
+        status: 'running',
+        steps: [],
+        startedAt: 1,
+        updatedAt: 2
+      })
+    })
+
+    await user.click(screen.getByRole('button', { name: /stop generating/i }))
+
+    expect(await screen.findByText('Web Use could not be stopped on this device.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /stop generating/i })).toBeTruthy()
+    expect(boundary.cancelRag).not.toHaveBeenCalled()
+  })
+
   it('drains queued messages in send order without duplication or loss (#40)', async () => {
     const boundary = new ChatBoundary()
     installBoundary(boundary)
@@ -459,6 +689,40 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     )
   })
 
+  it('stops the originating live Web Use task before resending or editing its instruction', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-a'] = [
+      { id: 20, role: 'user', content: 'Find the lowest flight price' },
+      { id: 21, role: 'assistant', content: 'I am searching now.', context: { unified: [] } }
+    ]
+    boundary.conversations[0]!.message_count = 2
+    boundary.listTasks.mockResolvedValue([
+      {
+        taskId: 'web-live-1',
+        journeyId: 'conversation-a',
+        kind: 'web_use',
+        title: 'Find the lowest flight price',
+        status: 'running',
+        steps: [],
+        startedAt: 1,
+        updatedAt: 2
+      }
+    ])
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+
+    await user.click(await screen.findByRole('button', { name: 'Resend' }))
+    await waitFor(() => expect(boundary.stopBrowserTask).toHaveBeenCalledWith('web-live-1'))
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+    expect(boundary.stopBrowserTask.mock.invocationCallOrder[0]).toBeLessThan(
+      boundary.api.ragChat.mock.invocationCallOrder[0]!
+    )
+
+    await user.click(screen.getByTitle('Edit this message'))
+    await waitFor(() => expect(boundary.stopBrowserTask).toHaveBeenCalledTimes(2))
+  })
+
   it('shows a failed turn, clears busy state, and permits the next send (#48)', async () => {
     const boundary = new ChatBoundary()
     installBoundary(boundary)
@@ -485,5 +749,30 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
       'first turn fails',
       'second turn succeeds'
     ])
+  })
+
+  it('shows the remote provider failure instead of hiding it behind a generic error', async () => {
+    const boundary = new ChatBoundary()
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+
+    await send('start a web task', user)
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+    boundary.reject(
+      0,
+      new Error(
+        "Error invoking remote method 'tools:chat': Error: Remote text model returned HTTP 400 from Azure: Invalid task_plan schema."
+      )
+    )
+
+    expect(
+      await screen.findByText(
+        'Remote text model returned HTTP 400 from Azure: Invalid task_plan schema.'
+      )
+    ).toBeTruthy()
+    expect(
+      screen.queryByText('Sorry, something went wrong while generating a response.')
+    ).toBeNull()
   })
 })

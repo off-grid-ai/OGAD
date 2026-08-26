@@ -69,6 +69,13 @@ describe('<ActionGateDock/>', () => {
     await waitFor(() => expect(screen.queryByTestId('gate-card')).toBeNull())
   })
 
+  it('does not duplicate Pro execution outcomes above the composer', async () => {
+    window.api = { ...window.api, isPro: true } as never
+    render(<ActionGateDock />)
+    emitOutcome({ id: 'act_pro', outcome: 'needs_help', undoable: false, record: {} })
+    await waitFor(() => expect(screen.queryByTestId('outcome-row')).toBeNull())
+  })
+
   it('Approve resolves the gate with the approve decision', async () => {
     render(<ActionGateDock />)
     emitPending(request)

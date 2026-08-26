@@ -43,14 +43,27 @@ describe('makeVisionRailExecutor', () => {
   it('runs the task with the goal and returns the action id as the effect', async () => {
     const host: VisionRailHost = { runTask: vi.fn(async () => run()) }
     const result = await makeVisionRailExecutor(host)(action({ goal: 'share the deck' }))
-    expect(host.runTask).toHaveBeenCalledWith('share the deck', 'act_vis')
+    expect(host.runTask).toHaveBeenCalledWith('share the deck', 'act_vis', 'act_vis')
     expect(result).toEqual({ ok: true, effectId: 'act_vis' })
   })
 
   it('falls back to the action intent when no explicit goal is given', async () => {
     const host: VisionRailHost = { runTask: vi.fn(async () => run()) }
     await makeVisionRailExecutor(host)(action({}))
-    expect(host.runTask).toHaveBeenCalledWith('share the deck over WhatsApp', 'act_vis')
+    expect(host.runTask).toHaveBeenCalledWith(
+      'share the deck over WhatsApp',
+      'act_vis',
+      'act_vis'
+    )
+  })
+
+  it('keeps the originating Chat as the task journey', async () => {
+    const host: VisionRailHost = { runTask: vi.fn(async () => run()) }
+    const originatingChat = { ...action({ goal: 'share the deck' }), sourceRef: 'chat-42' }
+
+    await makeVisionRailExecutor(host)(originatingChat)
+
+    expect(host.runTask).toHaveBeenCalledWith('share the deck', 'act_vis', 'chat-42')
   })
 
   it('surfaces a stopped or failed run as the honest failure', async () => {

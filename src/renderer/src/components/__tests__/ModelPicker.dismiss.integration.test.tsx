@@ -23,13 +23,62 @@ function renderPicker(onClose = vi.fn()) {
     }),
     getInstalledModels: vi.fn().mockResolvedValue(['local/qwen']),
     getActiveModel: vi.fn().mockResolvedValue(null),
-    getActiveModalities: vi.fn().mockResolvedValue({})
+    getActiveModalities: vi.fn().mockResolvedValue({}),
+    getActiveModelIds: vi.fn().mockResolvedValue([])
   }
   render(<ModelPicker onClose={onClose} />)
   return onClose
 }
 
+function renderPickerWithRemote() {
+  const activateModel = vi.fn().mockResolvedValue({ success: true })
+  ;(window as unknown as { api: Record<string, unknown> }).api = {
+    getModelCatalog: vi.fn().mockResolvedValue({
+      models: [
+        {
+          id: 'remote-vision:home:google%2Fgemma-4',
+          name: 'google/gemma-4',
+          kind: 'vision',
+          files: [],
+          remoteServerId: 'home'
+        }
+      ]
+    }),
+    getInstalledModels: vi.fn().mockResolvedValue(['remote-vision:home:google%2Fgemma-4']),
+    getActiveModel: vi.fn().mockResolvedValue(null),
+    getActiveModalities: vi.fn().mockResolvedValue({}),
+    getActiveModelIds: vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(['remote-vision:home:google%2Fgemma-4']),
+    activateModel
+  }
+  render(<ModelPicker onClose={vi.fn()} />)
+  return activateModel
+}
+
 describe('<ModelPicker/> dismissal', () => {
+  it('describes local and remote text models as one active model selection', async () => {
+    renderPicker()
+    expect(
+      await screen.findByText(
+        'Your selected Text & Vision model handles chat and supported vision work. Image, Voice, and Transcription use their selected models.'
+      )
+    ).toBeTruthy()
+    expect(screen.queryByText(/swaps the chat model/i)).toBeNull()
+  })
+
+  it('shows and activates a saved remote model through the shared model seam', async () => {
+    const activateModel = renderPickerWithRemote()
+    const button = (await screen.findByText('google/gemma-4')).closest('button')
+    expect(button).toBeTruthy()
+    fireEvent.click(button as HTMLButtonElement)
+    await waitFor(() =>
+      expect(activateModel).toHaveBeenCalledWith('remote-vision:home:google%2Fgemma-4')
+    )
+    expect(await screen.findByText('Remote')).toBeTruthy()
+  })
+
   it('closes on Escape', () => {
     const onClose = renderPicker()
     fireEvent.keyDown(window, { key: 'Escape' })

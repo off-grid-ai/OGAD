@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   assertUIMateModelCapabilities,
+  UI_MATE_27B_GGUF_REPOSITORY,
   UI_MATE_GGUF_REPOSITORY
 } from '../model-adapters/ui-mate/capabilities'
 import { loadGatedVisionModelAdapter, resolveVisionModelAdapter } from '../model-adapters/registry'
@@ -42,6 +43,51 @@ describe('UI-Mate model capability gate', () => {
       primaryFile: primary,
       projectorFile: projector
     })
+  })
+
+  it('accepts a content-addressed package transferred from another device', () => {
+    expect(
+      assertUIMateModelCapabilities({
+        repositoryId: `model-package-v1:${'a'.repeat(64)}`,
+        primaryFile: primary,
+        projectorFile: projector,
+        availableFiles: [primary, projector]
+      })
+    ).toEqual({
+      repositoryId: UI_MATE_GGUF_REPOSITORY,
+      primaryFile: primary,
+      projectorFile: projector
+    })
+  })
+
+  it('uses the same verified UI-Mate policy for the official 27B family', () => {
+    const primary27 = 'tencent_UI-Mate-27B-Q4_K_M.gguf'
+    const projector27 = 'mmproj-tencent_UI-Mate-27B-f16.gguf'
+    const model = {
+      id: UI_MATE_27B_GGUF_REPOSITORY,
+      primaryFile: primary27,
+      projectorFile: projector27,
+      availableFiles: [primary27, projector27]
+    }
+
+    expect(resolveVisionModelAdapter(model).id).toBe('ui-mate')
+    expect(loadGatedVisionModelAdapter(model)?.id).toBe('ui-mate')
+    expect(assertUIMateModelCapabilities({ ...model, repositoryId: model.id })).toEqual({
+      repositoryId: UI_MATE_27B_GGUF_REPOSITORY,
+      primaryFile: primary27,
+      projectorFile: projector27
+    })
+  })
+
+  it('rejects a projector from the other UI-Mate size', () => {
+    expect(() =>
+      assertUIMateModelCapabilities({
+        repositoryId: UI_MATE_27B_GGUF_REPOSITORY,
+        primaryFile: 'tencent_UI-Mate-27B-Q4_K_M.gguf',
+        projectorFile: projector,
+        availableFiles: ['tencent_UI-Mate-27B-Q4_K_M.gguf', projector]
+      })
+    ).toThrow(/matching/)
   })
 
   it.each([

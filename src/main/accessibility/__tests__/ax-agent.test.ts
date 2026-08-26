@@ -14,6 +14,8 @@ import {
   type ElementTaskDeps
 } from '../ax-agent'
 import type { AxElement, AxSnapshot } from '../ax-elements'
+import { fallbackTaskExecutionPlan } from '../../../shared/task-execution-plan'
+import { TASK_GUIDANCE_TRACE } from '../../tasks/task-guide'
 
 const el = (index: number, over: Partial<AxElement> = {}): AxElement => ({
   index,
@@ -53,6 +55,37 @@ const world = (
 }
 
 describe('runElementTask', () => {
+  it('uses one execution plan, reports phases, and keeps private guidance out of evidence', async () => {
+    const w = world(['{"action":"press","index":1}', '{"action":"done","summary":"sent"}'])
+    const plan = fallbackTaskExecutionPlan('Messages', 'computer')
+    const prompts: string[] = []
+    const evidencePrompts: string[] = []
+    const phases: string[] = []
+    const privateGuidance = 'Send to the second Sam, private-839201'
+    const guidance = [privateGuidance]
+    const originalDecide = w.deps.decide
+    w.deps.decide = async (prompt) => {
+      prompts.push(prompt)
+      return originalDecide(prompt)
+    }
+    w.deps.onObservation = (observation) => evidencePrompts.push(observation.prompt)
+
+    const result = await runElementTask('send a message', {
+      ...w.deps,
+      plan,
+      onPhase: (phaseId) => phases.push(phaseId),
+      takeGuidance: () => guidance.splice(0)
+    })
+
+    expect(prompts[0]).toContain('Execution plan:')
+    expect(prompts[0]).toContain(privateGuidance)
+    expect(prompts[1]).toContain(privateGuidance)
+    expect(evidencePrompts[0]).toContain(TASK_GUIDANCE_TRACE)
+    expect(evidencePrompts.join('\n')).not.toContain(privateGuidance)
+    expect(phases).toEqual(['phase-1', 'phase-2', 'phase-3'])
+    expect(result.steps.filter((step) => step.includes('GUIDANCE'))).toEqual([])
+  })
+
   it('presses an actionable element, types into a field, then finishes', async () => {
     const w = world([
       '{"action":"type","index":2,"text":"hi"}',

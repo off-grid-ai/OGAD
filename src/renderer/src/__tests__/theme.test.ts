@@ -100,6 +100,19 @@ describe('setThemeMode', () => {
     expect(localStorage.getItem('og-theme')).toBe('light')
     expect(document.documentElement.dataset.theme).toBe('light')
   })
+
+  it('notifies mounted controls when another surface changes the mode', async () => {
+    const { onThemeModeChanged, setThemeMode } = await loadTheme()
+    const modes: string[] = []
+    const unsubscribe = onThemeModeChanged((mode) => modes.push(mode))
+
+    setThemeMode('light')
+    setThemeMode('dark')
+    unsubscribe()
+    setThemeMode('system')
+
+    expect(modes).toEqual(['light', 'dark'])
+  })
 })
 
 describe('cycleThemeMode', () => {

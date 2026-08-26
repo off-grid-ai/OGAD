@@ -10,19 +10,41 @@ export type StreamEvent = {
   type: 'content' | 'reasoning' | 'step' | 'tool_result'
   text?: string
   step?: unknown
-  call?: { name: string; result: string }
+  call?: { name: string; result: string; status: 'completed' | 'failed' | 'pending' }
 }
 type ThinkSplitter = { push: (text: string) => void; answer: () => string }
 export type ThinkSplitterFactory = (
   emit: (event: { text: string; kind: 'content' | 'reasoning' }) => void
 ) => ThinkSplitter
-type RagResult = RagChatResultContract
+type RagResult = RagChatResultContract & {
+  unified?: unknown[]
+  toolCalls?: Array<{
+    name: string
+    result: string
+    status?: 'completed' | 'failed' | 'pending'
+  }>
+}
 type StoredMessage = {
   id: number | string
   role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
   context?: unknown
   created_at?: string
+}
+type TaskSnapshot = {
+  taskId: string
+  journeyId?: string
+  kind: 'web_use' | 'computer_use'
+  title: string
+  status: 'running' | 'paused' | 'waiting' | 'reconnecting' | 'done' | 'failed' | 'stopped'
+  summary?: string
+  steps: string[]
+  currentAction?: string
+  currentReasoning?: string
+  reasoningLive?: boolean
+  currentStep?: number
+  startedAt: number
+  updatedAt: number
 }
 
 /**
@@ -99,11 +121,19 @@ export class ChatBoundary {
   readonly speechTurns: ReturnType<typeof deferred<{ dataUrl: string }>>[] = []
 
   private streamCallback: ((event: StreamEvent) => void) | null = null
+  private taskChangedCallback: ((task: TaskSnapshot) => void) | null = null
+  private conversationChangedCallback:
+    | ((change: { conversationId: string; projectId?: string | null }) => void)
+    | null = null
   private readonly rawSplitters = new Map<number, ThinkSplitter>()
   private nextMessageId = 10
   private pendingUserWrite: ReturnType<typeof deferred<void>> | null = null
 
   readonly cancelRag = vi.fn()
+  readonly listTasks = vi.fn(async () => [] as TaskSnapshot[])
+  readonly stopBrowserTask = vi.fn(async () => true)
+  readonly stopComputerTask = vi.fn(async () => true)
+  readonly guideTask = vi.fn(async () => ({ available: true, accepted: true }))
   readonly saveArtifact = vi.fn(async () => 'artifact-id')
   readonly addRagMessage = vi.fn(
     async (
@@ -144,7 +174,29 @@ export class ChatBoundary {
     imageGenStatus: vi.fn(async () => ({ available: false, models: [], active: '' })),
     cancelImageGen: vi.fn(),
     cancelRag: this.cancelRag,
+    tasks: {
+      list: this.listTasks,
+      guideTask: this.guideTask,
+      onChanged: vi.fn((callback: (task: TaskSnapshot) => void) => {
+        this.taskChangedCallback = callback
+        return () => {
+          if (this.taskChangedCallback === callback) this.taskChangedCallback = null
+        }
+      })
+    },
+    browser: { stopTask: this.stopBrowserTask },
+    vision: { control: this.stopComputerTask },
     onImageGenProgress: vi.fn(() => () => {}),
+    onRagConversationsChanged: vi.fn(
+      (callback: (change: { conversationId: string; projectId?: string | null }) => void) => {
+        this.conversationChangedCallback = callback
+        return () => {
+          if (this.conversationChangedCallback === callback) {
+            this.conversationChangedCallback = null
+          }
+        }
+      }
+    ),
     onRagStream: vi.fn((callback: (event: StreamEvent) => void) => {
       this.streamCallback = callback
       return () => {
@@ -247,9 +299,18 @@ export class ChatBoundary {
     })
   }
 
-  emitToolResult(callIndex: number, name: string, result: string): void {
+  emitToolResult(
+    callIndex: number,
+    name: string,
+    result: string,
+    status: 'completed' | 'failed' | 'pending' = 'completed'
+  ): void {
     const call = this.calls[callIndex]!
-    this.streamCallback?.({ streamId: call.streamId, type: 'tool_result', call: { name, result } })
+    this.streamCallback?.({
+      streamId: call.streamId,
+      type: 'tool_result',
+      call: { name, result, status }
+    })
   }
 
   emitRaw(callIndex: number, text: string): void {
@@ -282,6 +343,14 @@ export class ChatBoundary {
     this.calls[callIndex]!.turn.reject(error)
   }
 
+  emitTask(task: TaskSnapshot): void {
+    this.taskChangedCallback?.(task)
+  }
+
+  emitConversationChanged(conversationId: string): void {
+    this.conversationChangedCallback?.({ conversationId })
+  }
+
   private conversation(id: string, title: string, projectId: string | null): Conversation {
     return {
       id,
@@ -301,6 +370,7 @@ export function installBoundary(boundary: ChatBoundary): void {
 export function renderChat(target: {
   conversationId?: string
   projectId?: string
+  draftPrompt?: string
 }): ReturnType<typeof render> {
   return render(
     <TooltipProvider>

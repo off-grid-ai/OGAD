@@ -1,18 +1,27 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ChatToolRows, taskReferenceFromResult } from '../ChatToolRows'
+import { ChatToolRows } from '../ChatToolRows'
+import { taskReferenceFromResult } from '../chat-tool-projection'
 import { resetTaskSessionStoreForTests } from '@renderer/lib/task-session-store'
+import {
+  closeTaskWorkspace,
+  onOpenTaskSidePanel,
+  type OpenTaskPanelRequest
+} from '@renderer/lib/task-side-panel'
 
 beforeEach(() => {
   resetTaskSessionStoreForTests()
+  closeTaskWorkspace()
   Object.defineProperty(window, 'api', {
     configurable: true,
     writable: true,
     value: {
       tasks: {
         list: vi.fn(async () => []),
+        retryAvailability: vi.fn(async () => ({ available: false, reason: 'Not retryable.' })),
+        retry: vi.fn(async () => ({ available: false, reason: 'Not retryable.' })),
         onChanged: vi.fn(() => () => undefined)
       }
     }
@@ -21,10 +30,138 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  closeTaskWorkspace()
   resetTaskSessionStoreForTests()
 })
 
 describe('<ChatToolRows/> work timeline', () => {
+  it('opens the exact task detail from the work card and Web Use row by keyboard', async () => {
+    const requests: OpenTaskPanelRequest[] = []
+    const offOpen = onOpenTaskSidePanel((request) => requests.push(request))
+    window.api.tasks!.list = vi.fn(async () => [
+      {
+        taskId: 'web-keyboard',
+        kind: 'web_use' as const,
+        title: 'Research flights',
+        status: 'done' as const,
+        steps: ['Opened results'],
+        startedAt: 1,
+        finishedAt: 2,
+        updatedAt: 2
+      }
+    ])
+    const user = userEvent.setup()
+    render(
+      <ChatToolRows
+        tools={[{ name: 'web_task', status: 'completed', result: 'Task reference: web-keyboard.' }]}
+      />
+    )
+
+    const card = await screen.findByRole('button', { name: 'Open task details for Work done' })
+    card.focus()
+    await user.keyboard('{Enter}')
+    expect(requests.at(-1)).toEqual({ taskId: 'web-keyboard', kind: 'web_use', detail: true })
+
+    const row = screen.getByRole('button', { name: 'Web Use, complete' })
+    await user.click(row)
+    expect(requests.at(-1)).toEqual({ taskId: 'web-keyboard', kind: 'web_use', detail: true })
+
+    const toggle = screen.getByRole('button', { name: 'Close task details' })
+    await user.click(toggle)
+    expect(await screen.findByRole('button', { name: 'Open task details' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Open task details' }))
+    expect(requests.at(-1)).toEqual({ taskId: 'web-keyboard', kind: 'web_use', detail: true })
+    offOpen()
+  })
+
+  it('opens a linked Web Use row with Space when the work card is already open', async () => {
+    const requests: OpenTaskPanelRequest[] = []
+    const offOpen = onOpenTaskSidePanel((request) => requests.push(request))
+    window.api.tasks!.list = vi.fn(async () => [
+      {
+        taskId: 'web-space',
+        kind: 'web_use' as const,
+        title: 'Watch a run',
+        status: 'running' as const,
+        currentAction:
+          'Judge incomplete: The destination is empty. Next: Enter Pune in the destination field.',
+        steps: [],
+        startedAt: 1,
+        updatedAt: 2
+      }
+    ])
+    const user = userEvent.setup()
+    render(
+      <ChatToolRows
+        tools={[{ name: 'web_task', status: 'running', result: 'Task reference: web-space.' }]}
+      />
+    )
+    const row = await screen.findByRole('button', { name: 'Web Use, running' })
+    expect(screen.getByRole('button', { name: /Current operation/ })).toBeTruthy()
+    expect(
+      screen.getByText(
+        'Judge incomplete: The destination is empty. Next: Enter Pune in the destination field.'
+      )
+    ).toBeTruthy()
+    row.focus()
+    await user.keyboard(' ')
+    expect(requests.at(-1)).toEqual({ taskId: 'web-space', kind: 'web_use', detail: true })
+    offOpen()
+  })
+
+  it('shows separated Web Use reasoning from the linked task in live and final states', async () => {
+    let changed: ((task: unknown) => void) | undefined
+    window.api.tasks!.list = vi.fn(async () => [
+      {
+        taskId: 'web-reasoning',
+        journeyId: 'conversation-a',
+        kind: 'web_use' as const,
+        title: 'Research flights',
+        status: 'running' as const,
+        currentAction: 'Preparing a click',
+        currentReasoning: 'The one-way option is visible beside the trip type control.',
+        reasoningLive: true,
+        steps: [],
+        startedAt: 1,
+        updatedAt: 2
+      }
+    ])
+    window.api.tasks!.onChanged = vi.fn((listener) => {
+      changed = listener
+      return () => undefined
+    })
+
+    render(
+      <ChatToolRows
+        tools={[{ name: 'web_task', status: 'running', result: 'Task reference: web-reasoning.' }]}
+      />
+    )
+
+    expect(await screen.findByRole('button', { name: 'Web Use thinking…' })).toBeTruthy()
+    expect(
+      screen.getByText('The one-way option is visible beside the trip type control.')
+    ).toBeTruthy()
+    expect(screen.queryByText('Preparing a click')).toBeNull()
+
+    act(() => {
+      changed?.({
+        taskId: 'web-reasoning',
+        journeyId: 'conversation-a',
+        kind: 'web_use',
+        title: 'Research flights',
+        status: 'done',
+        currentReasoning: 'The one-way option is visible beside the trip type control.',
+        reasoningLive: false,
+        steps: ['selected one-way'],
+        startedAt: 1,
+        finishedAt: 3,
+        updatedAt: 3
+      })
+    })
+
+    expect(screen.getByRole('button', { name: 'Web Use reasoning complete' })).toBeTruthy()
+  })
+
   it('uses one customer-facing timeline for every ordered execution step', async () => {
     const user = userEvent.setup()
     render(
@@ -48,7 +185,7 @@ describe('<ChatToolRows/> work timeline', () => {
       />
     )
 
-    expect(screen.getByRole('button', { name: /Work done/ }).textContent).toContain(
+    expect(screen.getByRole('button', { name: /Working/ }).textContent).toContain(
       '5 steps · running'
     )
     expect(screen.getByText('Listed folder')).toBeTruthy()
@@ -72,7 +209,7 @@ describe('<ChatToolRows/> work timeline', () => {
         ]}
       />
     )
-    await user.click(screen.getByRole('button', { name: /Work done/ }))
+    await user.click(screen.getByRole('button', { name: /Work failed/ }))
     expect(screen.getByText('Web Use')).toBeTruthy()
     expect(screen.getByText('Searched messages')).toBeTruthy()
     expect(screen.queryByText(/web_task/)).toBeNull()
@@ -80,6 +217,14 @@ describe('<ChatToolRows/> work timeline', () => {
 
     await user.click(screen.getByRole('button', { name: 'Web Use, failed' }))
     expect(await screen.findByText('Error: browser timed out')).toBeTruthy()
+  })
+
+  it('names work that needs the user without calling it done', () => {
+    render(<ChatToolRows tools={[{ name: 'action_approval', status: 'pending', result: '' }]} />)
+
+    const heading = screen.getByRole('button', { name: /Action needed/ })
+    expect(heading.textContent).toContain('1 step · needs attention')
+    expect(screen.queryByRole('button', { name: /Work done/ })).toBeNull()
   })
 
   it('shows persisted redacted Computer Use evidence inside the assistant turn', async () => {
@@ -136,5 +281,128 @@ describe('<ChatToolRows/> work timeline', () => {
     await user.click(screen.getByRole('button', { name: /Click Keynote/ }))
     expect(await screen.findByText('Open Keynote')).toBeTruthy()
     expect(screen.getByText('Opened Keynote')).toBeTruthy()
+  })
+
+  it('projects a linked Web Use failure into the originating Chat work card', async () => {
+    let changed: ((task: unknown) => void) | undefined
+    window.api.tasks!.onChanged = vi.fn((listener) => {
+      changed = listener
+      return () => undefined
+    })
+    window.api.tasks!.retryAvailability = vi.fn(async () => ({ available: true }))
+    window.api.tasks!.retry = vi.fn(async () => ({
+      available: true,
+      taskId: 'web-flight-retry',
+      journeyId: 'chat-flight'
+    }))
+
+    render(
+      <ChatToolRows
+        tools={[
+          {
+            name: 'web_task',
+            status: 'completed',
+            result: 'The task is in progress. Task reference: web-flight.'
+          }
+        ]}
+      />
+    )
+
+    await waitFor(() => expect(changed).toBeTypeOf('function'))
+    act(() => {
+      changed?.({
+        taskId: 'web-flight',
+        journeyId: 'chat-flight',
+        kind: 'web_use',
+        title: 'Find a flight',
+        status: 'failed',
+        summary: 'The traveler control could not be completed.',
+        steps: [],
+        startedAt: 1,
+        finishedAt: 2,
+        updatedAt: 2
+      })
+    })
+
+    expect(screen.getByRole('button', { name: /Work failed/ }).textContent).toContain('failed')
+    await userEvent.click(screen.getByRole('button', { name: /Work failed/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Web Use, failed' }))
+    expect(screen.getAllByText('The traveler control could not be completed.')).toHaveLength(2)
+    const retry = await screen.findByRole('button', { name: 'Retry' })
+    await userEvent.click(retry)
+    expect(window.api.tasks!.retry).toHaveBeenCalledWith('web-flight')
+
+    act(() => {
+      changed?.({
+        taskId: 'web-flight-retry',
+        journeyId: 'chat-flight',
+        kind: 'web_use',
+        title: 'Find a flight',
+        status: 'running',
+        summary: 'Taking a fresh look before continuing.',
+        steps: ['Taking a fresh observation.'],
+        startedAt: 3,
+        updatedAt: 3
+      })
+    })
+    expect(screen.getByRole('button', { name: /Working/ }).textContent).toContain('running')
+
+    act(() => {
+      changed?.({
+        taskId: 'web-flight-retry',
+        journeyId: 'chat-flight',
+        kind: 'web_use',
+        title: 'Find a flight',
+        status: 'done',
+        summary: 'The flight options are ready.',
+        steps: ['Took a fresh observation.', 'Found the flight options.'],
+        startedAt: 3,
+        finishedAt: 4,
+        updatedAt: 4
+      })
+    })
+    expect(screen.getByRole('button', { name: /Work done/ }).textContent).toContain('complete')
+  })
+
+  it('shows the execution device when a synced task cannot retry here', async () => {
+    window.api.tasks!.list = vi.fn(async () => [
+      {
+        taskId: 'remote-task',
+        journeyId: 'remote-chat',
+        kind: 'computer_use' as const,
+        title: 'Edit the deck',
+        status: 'failed' as const,
+        summary: 'Keynote closed.',
+        steps: [],
+        startedAt: 1,
+        finishedAt: 2,
+        updatedAt: 2,
+        executionDeviceId: 'studio-mac',
+        executionDeviceName: 'Studio Mac'
+      }
+    ])
+    window.api.tasks!.retryAvailability = vi.fn(async () => ({
+      available: false,
+      reason: 'Retry this task on Studio Mac.',
+      executionDeviceId: 'studio-mac',
+      executionDeviceName: 'Studio Mac'
+    }))
+
+    render(
+      <ChatToolRows
+        tools={[
+          {
+            name: 'computer_task',
+            status: 'failed',
+            result: 'Task reference: remote-task.'
+          }
+        ]}
+      />
+    )
+
+    await userEvent.click(await screen.findByRole('button', { name: /Work failed/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Computer Use, failed' }))
+    const retry = await screen.findByRole('button', { name: 'Retry on Studio Mac' })
+    expect((retry as HTMLButtonElement).disabled).toBe(true)
   })
 })

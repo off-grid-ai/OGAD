@@ -8,7 +8,7 @@
 // reached through real clicks and KeyboardEvents, and assertions stay on the
 // rendered view and selected project.
 
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { registerHook } from '../bootstrap/hookRegistry'
@@ -18,6 +18,8 @@ import {
   resolveProNotificationTarget
 } from '../../../../pro/shared/notification-target'
 import { TooltipProvider } from '../components/ui/tooltip'
+import { closeTaskWorkspace, openTaskSidePanel } from '../lib/task-side-panel'
+import { resetTaskSessionStoreForTests } from '../lib/task-session-store'
 import {
   APP_PROJECTS,
   installAppBoundary,
@@ -53,6 +55,8 @@ describe('<App/> desktop navigation integration', () => {
     window.history.replaceState(null, '', '/projects')
     installAppBoundary()
     installAppBrowserBoundary()
+    closeTaskWorkspace()
+    resetTaskSessionStoreForTests()
   })
 
   afterEach(() => {
@@ -102,6 +106,59 @@ describe('<App/> desktop navigation integration', () => {
     expect(
       await screen.findByRole('heading', { name: 'Integrations' }, { timeout: 5_000 })
     ).not.toBeNull()
+  })
+
+  it.each([
+    ['ready', /Model server: model running/i],
+    ['down', /Model server stopped/i]
+  ] as const)('opens Setup & health from the %s model status row', async (status, label) => {
+    const user = userEvent.setup()
+    installAppBoundary({
+      systemHealth: async () => ({ ramGb: 16, components: [{ id: 'chat', status }] })
+    })
+    render(<App />)
+
+    const modelStatus = await screen.findByRole('button', { name: label })
+    await user.click(modelStatus)
+
+    await waitFor(() => expect(window.location.pathname).toBe('/settings/setup'))
+    expect(await screen.findByRole('heading', { name: 'Settings' })).toBeTruthy()
+    expect(screen.getByText('Setup & health')).toBeTruthy()
+    expect(screen.getByText('Configure it for me')).toBeTruthy()
+  })
+
+  it('opens a collapsed sidebar on hover and closes it after navigation', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'Projects' })
+    await user.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
+    expect(screen.queryByText('Menu')).toBeNull()
+
+    const navigation = screen.getByRole('navigation', { name: 'Primary navigation' })
+    await user.hover(navigation)
+    expect(await screen.findByText('Menu')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Integrations' }))
+    await waitFor(() => expect(window.location.pathname).toBe('/connectors'))
+    expect(screen.queryByText('Menu')).toBeNull()
+  })
+
+  it('collapses the sidebar after Command-K navigation to a screen', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'Projects' }, { timeout: 5_000 })
+    expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeTruthy()
+
+    await user.keyboard('{Meta>}k{/Meta}')
+    const input = await screen.findByPlaceholderText(/jump to a screen/i)
+    await user.type(input, 'settings')
+    await user.click(await screen.findByTestId('palette-screen-settings-root'))
+
+    expect(await screen.findByRole('heading', { name: 'Settings' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Collapse sidebar' })).toBeNull()
   })
 
   it('subscribes to notification routes only after Pro target hooks finish activating (#114)', async () => {
@@ -327,5 +384,253 @@ describe('<App/> desktop navigation integration', () => {
       )
     })
     expect(await screen.findByText('System permissions')).toBeTruthy()
+  })
+
+  it('shows Tasks only on Chat routes and restores it after route navigation', async () => {
+    const setRegion = vi.fn()
+    window.history.replaceState(null, '', '/chat')
+    installAppBoundary({
+      tasks: { list: async () => [], onChanged: () => () => {} },
+      browser: { setRegion },
+      actions: { onGatePending: () => () => {}, onOutcome: () => () => {} }
+    })
+    render(
+      <TooltipProvider>
+        <App />
+      </TooltipProvider>
+    )
+
+    act(() => openTaskSidePanel())
+    expect(await screen.findByTestId('task-side-panel')).toBeTruthy()
+    setRegion.mockClear()
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('og:navigate', { detail: { view: 'search' } }))
+    })
+    await waitFor(() => expect(screen.queryByTestId('task-side-panel')).toBeNull())
+    expect(setRegion).toHaveBeenCalledWith(null)
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('og:navigate', { detail: { view: 'memory-chat' } }))
+    })
+    expect(await screen.findByTestId('task-side-panel')).toBeTruthy()
+    const separator = screen.getByRole('separator', { name: 'Resize Chat and task' })
+    const initialSize = Number(separator.getAttribute('aria-valuenow'))
+    fireEvent.keyDown(separator, { key: 'ArrowLeft' })
+    expect(Number(separator.getAttribute('aria-valuenow'))).toBe(initialSize + 5)
+    expect(separator.getAttribute('aria-valuetext')).toContain('Task workspace')
+  })
+
+  it('gives each new local Web Use attempt one immersive detail reveal', async () => {
+    let emitTaskChange: ((task: unknown) => void) | undefined
+    let emitSessions: ((snapshot: unknown) => void) | undefined
+    window.history.replaceState(null, '', '/chat')
+    installAppBoundary({
+      getRagConversations: async () => [
+        { id: 'chat-web-start', title: 'Web start', updated_at: '2026-08-25T00:00:00.000Z' }
+      ],
+      getRagMessages: async () => [],
+      getActiveRagStreams: async () => [],
+      imageGenJobStatus: async () => ({}),
+      tasks: {
+        list: async () => [],
+        onChanged: (listener: (task: unknown) => void) => {
+          emitTaskChange = listener
+          return () => {}
+        }
+      },
+      browser: {
+        getSessions: async () => ({ activeSessionId: null, sessions: [] }),
+        listManualHistory: async () => [],
+        setRegion: vi.fn(),
+        onSessionsState: (listener: (snapshot: unknown) => void) => {
+          emitSessions = listener
+          return () => {}
+        }
+      },
+      actions: { onGatePending: () => () => {}, onOutcome: () => () => {} }
+    })
+    render(
+      <TooltipProvider>
+        <App />
+      </TooltipProvider>
+    )
+
+    expect((await screen.findAllByText('Web start')).length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeTruthy()
+    await waitFor(() => {
+      expect(emitTaskChange).toBeTypeOf('function')
+      expect(emitSessions).toBeTypeOf('function')
+    })
+
+    const task = {
+      taskId: 'web-start-task',
+      journeyId: 'chat-web-start',
+      kind: 'web_use',
+      title: 'Open the launch page',
+      status: 'running',
+      steps: [],
+      startedAt: 1,
+      updatedAt: 1
+    }
+    act(() => {
+      emitTaskChange?.(task)
+      emitSessions?.({
+        activeSessionId: 'session:web-start-task',
+        sessions: [
+          {
+            sessionId: 'session:web-start-task',
+            kind: 'task',
+            taskId: 'web-start-task',
+            status: 'running',
+            url: 'https://example.com/launch',
+            title: 'Launch',
+            canGoBack: false,
+            canGoForward: false,
+            isLoading: false
+          }
+        ]
+      })
+    })
+
+    expect(await screen.findByTestId('task-details-web-start-task')).toBeTruthy()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeTruthy()
+      expect(screen.queryByRole('button', { name: 'Collapse sidebar' })).toBeNull()
+      expect(screen.getByRole('button', { name: 'Show main workspace' })).toBeTruthy()
+    })
+
+    act(() =>
+      emitTaskChange?.({
+        ...task,
+        status: 'done',
+        summary: 'The launch page opened.',
+        finishedAt: 2,
+        updatedAt: 2
+      })
+    )
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeTruthy()
+      expect(screen.queryByRole('button', { name: 'Expand sidebar' })).toBeNull()
+      expect(screen.getByRole('button', { name: 'Hide main workspace' })).toBeTruthy()
+    })
+
+    act(() => emitTaskChange?.({ ...task, updatedAt: 3 }))
+    expect(await screen.findByTestId('task-details-web-start-task')).toBeTruthy()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Show main workspace' })).toBeTruthy()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Task History' }))
+    await waitFor(() => {
+      expect(screen.queryByTestId('task-details-web-start-task')).toBeNull()
+      expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Hide main workspace' })).toBeTruthy()
+    })
+
+    act(() => emitTaskChange?.({ ...task, steps: ['Opened the page'], updatedAt: 4 }))
+    await waitFor(() => {
+      expect(screen.queryByTestId('task-details-web-start-task')).toBeNull()
+      expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Hide main workspace' })).toBeTruthy()
+    })
+  })
+
+  it('keeps the user in Chat until they confirm sidebar or internal navigation', async () => {
+    const user = userEvent.setup()
+    window.history.replaceState(null, '', '/chat')
+    installAppBoundary({
+      getRagConversations: async () => [
+        { id: 'chat-guard', title: 'Guard test', updated_at: '2026-08-25T00:00:00.000Z' }
+      ],
+      tasks: {
+        list: async () => [
+          {
+            taskId: 'running-web-task',
+            journeyId: 'chat-guard',
+            kind: 'web_use',
+            title: 'Research',
+            status: 'running',
+            steps: [],
+            startedAt: 1,
+            updatedAt: 2
+          }
+        ],
+        onChanged: () => () => {}
+      },
+      actions: { onGatePending: () => () => {}, onOutcome: () => () => {} }
+    })
+    render(
+      <TooltipProvider>
+        <App />
+      </TooltipProvider>
+    )
+
+    expect((await screen.findAllByText('Guard test')).length).toBeGreaterThan(0)
+    await user.click(screen.getByRole('button', { name: 'Projects' }))
+    expect(
+      await screen.findByRole('dialog', { name: 'Leave this chat while the task is running?' })
+    ).toBeTruthy()
+    expect(window.location.pathname).toBe('/chat')
+
+    await user.click(screen.getByRole('button', { name: 'Stay in chat' }))
+    expect(
+      screen.queryByRole('dialog', { name: 'Leave this chat while the task is running?' })
+    ).toBeNull()
+    expect(window.location.pathname).toBe('/chat')
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('og:navigate', { detail: { view: 'settings' } }))
+    })
+    expect(
+      await screen.findByRole('dialog', { name: 'Leave this chat while the task is running?' })
+    ).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Leave chat' }))
+    await waitFor(() => expect(window.location.pathname).toBe('/settings'))
+  })
+
+  it('defers Back history changes until the user confirms leaving Chat', async () => {
+    const user = userEvent.setup()
+    installAppBoundary({
+      getRagConversations: async () => [
+        { id: 'chat-guard', title: 'Guard test', updated_at: '2026-08-25T00:00:00.000Z' }
+      ],
+      tasks: {
+        list: async () => [
+          {
+            taskId: 'running-computer-task',
+            journeyId: 'chat-guard',
+            kind: 'computer_use',
+            title: 'Organize files',
+            status: 'running',
+            steps: [],
+            startedAt: 1,
+            updatedAt: 2
+          }
+        ],
+        onChanged: () => () => {}
+      },
+      actions: { onGatePending: () => () => {}, onOutcome: () => () => {} }
+    })
+    render(
+      <TooltipProvider>
+        <App />
+      </TooltipProvider>
+    )
+    await screen.findByRole('heading', { name: 'Projects' })
+    await user.click(screen.getByRole('button', { name: 'Chat' }))
+    expect((await screen.findAllByText('Guard test')).length).toBeGreaterThan(0)
+
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+    expect(
+      await screen.findByRole('dialog', { name: 'Leave this chat while the task is running?' })
+    ).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Stay in chat' }))
+    expect(window.location.pathname).toBe('/chat')
+
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+    await user.click(screen.getByRole('button', { name: 'Leave chat' }))
+    await waitFor(() => expect(window.location.pathname).toBe('/projects'))
   })
 })

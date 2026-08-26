@@ -10,6 +10,7 @@ import { describe, it, expect, afterAll, beforeAll, beforeEach, afterEach, vi } 
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import type { TickOutcome } from '@offgrid/use'
 import { startFakeLlamaServer, type FakeLlamaServer } from './harness/fake-llama-server'
 
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-tools-it-'))
@@ -28,13 +29,21 @@ import {
   listTools,
   setToolEnabled,
   registerToolExtension,
+  unregisterToolExtension,
   getToolExtensions,
   readUrlText
 } from '../tools'
 import { llm } from '../llm'
 import { HOOKS, registerHook, unregisterHook } from '../bootstrap/hookRegistry'
+import { NativeActionToolExtension, type ActionsPort } from '../tools/nativeActionToolExtension'
 
 let fake: FakeLlamaServer
+type FakeTurn = Parameters<FakeLlamaServer['enqueue']>[number]
+
+/** Queue the model turns consumed by the normal tool-calling loop. */
+function enqueueReactiveAfterEmptyPlan(...turns: FakeTurn[]): void {
+  fake.enqueue(...turns)
+}
 
 beforeAll(async () => {
   fake = await startFakeLlamaServer()
@@ -77,7 +86,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
   })
 
   it('streams reasoning + content and returns the answer when no tool is called', async () => {
-    fake.enqueue({ reasoning: 'Let me think', content: 'Hi there' })
+    enqueueReactiveAfterEmptyPlan({ reasoning: 'Let me think', content: 'Hi there' })
     const deltas: { text: string; kind: string }[] = []
     const steps: string[] = []
     const r = await toolChat('hi', [], {
@@ -105,7 +114,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     const prev = svc.maxTokens
     svc.maxTokens = 5000 // a distinctive user cap
     try {
-      fake.enqueue({ content: 'a long answer' })
+      enqueueReactiveAfterEmptyPlan({ content: 'a long answer' })
       await toolChat('write a lot', [])
       const round1 = fake.requests[0] as { max_tokens?: number }
       expect(round1.max_tokens).toBe(5000) // inherits the user's setting…
@@ -120,7 +129,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     const prev = svc.maxTokens
     svc.maxTokens = 0 // MAX_TOKENS_AUTO
     try {
-      fake.enqueue({ content: 'ok' })
+      enqueueReactiveAfterEmptyPlan({ content: 'ok' })
       await toolChat('hi', [])
       expect((fake.requests[0] as { max_tokens?: number }).max_tokens).toBe(-1)
     } finally {
@@ -143,8 +152,195 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     expect(round2.messages?.some((m) => m.role === 'assistant')).toBe(true)
   })
 
+  it('proposes the explicit Skyscanner Web Use tool call selected by the model', async () => {
+    const query =
+      'Go to skyscanner.com and help me find the cheapest flight to book for a one way trip from San Francisco 2026 to Pune on 1st September 2026 with a budget range of $500 - $3000'
+    const proposals: Array<{ input: unknown; meta: unknown }> = []
+    const actions: ActionsPort = {
+      approvalHookActive: () => false,
+      propose: async (input, meta) => {
+        proposals.push({ input, meta })
+        return { accepted: true, id: 'web-skyscanner-1', deduped: false }
+      },
+      waitForOutcome: async () =>
+        ({
+          id: 'web-skyscanner-1',
+          outcome: 'done',
+          record: { attemptLog: [] }
+        }) as unknown as TickOutcome,
+      whenParked: () => new Promise<void>(() => {}),
+      kick: () => {}
+    }
+    const extension = new NativeActionToolExtension(
+      {
+        run: async () => ({ ok: true, result: undefined }),
+        proposeApproval: () => undefined,
+        actions
+      },
+      'darwin'
+    )
+    registerToolExtension(extension)
+    fake.enqueue(
+      {
+        reasoning: 'The request is complete, so Web Use can start.',
+        toolCalls: [{ name: 'web_task', args: { goal: query, url: 'https://skyscanner.com' } }]
+      },
+      { content: 'Web Use is ready.' }
+    )
+    const steps: string[] = []
+    try {
+      const result = await toolChat(query, [], {
+        conversationId: 'chat-skyscanner',
+        onStep: ({ name }) => steps.push(name)
+      })
+
+      expect(steps).toEqual(['web_task'])
+      expect(result.toolCalls.map(({ name }) => name)).toEqual(['web_task'])
+      expect(result.answer).toBe('Web Use is ready.')
+      expect(fake.requests).toHaveLength(2)
+      expect(proposals).toEqual([
+        {
+          input: {
+            type: 'web_task',
+            intent: query,
+            args: { goal: query, url: 'https://skyscanner.com' },
+            risk: 'mutate'
+          },
+          meta: { source: 'chat', sourceRef: 'chat-skyscanner' }
+        }
+      ])
+    } finally {
+      unregisterToolExtension(extension.id, extension)
+    }
+  })
+
+  it('starts the complete Web Use goal selected from the full conversation', async () => {
+    const originalRequest =
+      'Go to skyscanner.com and help me find the cheapest flight to book for a one way trip from San Francisco 2026 to Pune on 1st September 2026 with a budget range of $500 - $3000'
+    const followUp = '1. SFO 2. Nothing really 3. 1 stop'
+    const completeGoal =
+      'Find the cheapest one-way flight from SFO to Pune on September 1, 2026, within $500-$3,000, with at most one stop and no airline or cabin preference.'
+    const proposals: Array<{ input: unknown; meta: unknown }> = []
+    const actions: ActionsPort = {
+      approvalHookActive: () => false,
+      propose: async (input, meta) => {
+        proposals.push({ input, meta })
+        return { accepted: true, id: 'web-flight-follow-up', deduped: false }
+      },
+      waitForOutcome: async () =>
+        ({
+          id: 'web-flight-follow-up',
+          outcome: 'done',
+          record: { attemptLog: [] }
+        }) as unknown as TickOutcome,
+      whenParked: () => new Promise<void>(() => {}),
+      kick: () => {}
+    }
+    const extension = new NativeActionToolExtension(
+      {
+        run: async () => ({ ok: true, result: undefined }),
+        proposeApproval: () => undefined,
+        actions
+      },
+      'darwin'
+    )
+    registerToolExtension(extension)
+    fake.enqueue(
+      {
+        reasoning: 'The earlier request and follow-up provide the full task.',
+        toolCalls: [
+          {
+            name: 'web_task',
+            args: { goal: completeGoal, url: 'https://skyscanner.com' }
+          }
+        ]
+      },
+      { content: 'Web Use is ready.' }
+    )
+    const activities: string[] = []
+
+    try {
+      const history = [
+        { role: 'user', content: originalRequest },
+        { role: 'assistant', content: 'Which airport and how many stops?' }
+      ]
+      const second = await toolChat(followUp, history, {
+        conversationId: 'chat-flight-follow-up',
+        onActivity: ({ label }) => activities.push(label)
+      })
+
+      expect(second.answer).toBe('Web Use is ready.')
+      expect(second.toolCalls).toEqual([
+        expect.objectContaining({ name: 'web_task', status: 'completed' })
+      ])
+      expect(activities).toEqual([])
+      expect(proposals).toEqual([
+        {
+          input: {
+            type: 'web_task',
+            intent: completeGoal,
+            args: { goal: completeGoal, url: 'https://skyscanner.com' },
+            risk: 'mutate'
+          },
+          meta: { source: 'chat', sourceRef: 'chat-flight-follow-up' }
+        }
+      ])
+    } finally {
+      unregisterToolExtension(extension.id, extension)
+    }
+  })
+
+  it('runs a reactive Web Use call without an application-side intake gate', async () => {
+    const proposals: unknown[] = []
+    const actions: ActionsPort = {
+      approvalHookActive: () => false,
+      propose: async (input) => {
+        proposals.push(input)
+        return { accepted: true, id: 'reactive-web-task', deduped: false }
+      },
+      waitForOutcome: async () =>
+        ({
+          id: 'reactive-web-task',
+          outcome: 'done',
+          record: { attemptLog: [] }
+        }) as unknown as TickOutcome,
+      whenParked: () => new Promise<void>(() => {}),
+      kick: () => {}
+    }
+    const extension = new NativeActionToolExtension(
+      {
+        run: async () => ({ ok: true, result: undefined }),
+        proposeApproval: () => undefined,
+        actions
+      },
+      'darwin'
+    )
+    registerToolExtension(extension)
+    fake.enqueue(
+      {
+        toolCalls: [
+          {
+            name: 'web_task',
+            args: { goal: 'Find a flight', url: 'https://skyscanner.com' }
+          }
+        ]
+      },
+      { content: 'I have initiated Web Use.' }
+    )
+
+    try {
+      const result = await toolChat('do it', [], { conversationId: 'chat-reactive-intake' })
+      expect(result.answer).toBe('I have initiated Web Use.')
+      expect(result.toolCalls[0]?.status).toBe('completed')
+      expect(proposals).toHaveLength(1)
+      expect(fake.requests).toHaveLength(2)
+    } finally {
+      unregisterToolExtension(extension.id, extension)
+    }
+  })
+
   it('passes the tool schemas + tool_choice to the model on the first round', async () => {
-    fake.enqueue({ content: 'ok' })
+    enqueueReactiveAfterEmptyPlan({ content: 'ok' })
     await toolChat('hi', [])
     const round1 = fake.requests[0] as { tools?: unknown[]; tool_choice?: string }
     expect(Array.isArray(round1.tools)).toBe(true)
@@ -206,10 +402,12 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     // Five tool-call rounds exhaust the loop; instead of a canned "stopped" reply,
     // the loop makes ONE more no-tools generation so the user gets a real answer
     // built from what the tools returned.
-    for (let i = 0; i < 5; i++) {
-      fake.enqueue({ toolCalls: [{ name: 'get_datetime', args: {} }] })
-    }
-    fake.enqueue({ content: 'Based on the tools, here is your answer.' })
+    enqueueReactiveAfterEmptyPlan(
+      ...Array.from({ length: 5 }, () => ({
+        toolCalls: [{ name: 'get_datetime', args: {} }]
+      })),
+      { content: 'Based on the tools, here is your answer.' }
+    )
     const r = await toolChat('keep going', [])
     expect(r.answer).toBe('Based on the tools, here is your answer.')
     expect(r.answer).not.toMatch(/too many tool steps/i)
@@ -219,7 +417,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
   })
 
   it('rejects a non-arithmetic calculator expression (real guard branch)', async () => {
-    fake.enqueue(
+    enqueueReactiveAfterEmptyPlan(
       { toolCalls: [{ name: 'calculator', args: { expression: 'process.exit(1)' } }] },
       { content: 'Cannot compute that.' }
     )
@@ -229,7 +427,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
 
   it('tolerates malformed tool arguments (non-JSON args string)', async () => {
     // The engine can emit invalid JSON for arguments; the real accumulator/parse must not throw.
-    fake.enqueue(
+    enqueueReactiveAfterEmptyPlan(
       { toolCalls: [{ name: 'get_datetime', argsRaw: 'not-json' }] },
       { content: 'done' }
     )
@@ -239,7 +437,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
   })
 
   it('surfaces an actionable server error (context overflow) instead of a bare status', async () => {
-    fake.enqueue({
+    enqueueReactiveAfterEmptyPlan({
       errorStatus: 400,
       errorBody: JSON.stringify({
         error: { message: 'the request exceeds the available context size' }
@@ -250,20 +448,20 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
 
   // --- generate_image (gated + deferred side-channel) ---------------------------
   it('offers generate_image only when an image model is available', async () => {
-    fake.enqueue({ content: 'ok' })
+    enqueueReactiveAfterEmptyPlan({ content: 'ok' })
     await toolChat('draw a cat', [], { imageAvailable: true })
     const withImg = fake.requests[0] as { tools: { function: { name: string } }[] }
     expect(withImg.tools.map((t) => t.function.name)).toContain('generate_image')
 
     fake.reset()
-    fake.enqueue({ content: 'ok' })
+    enqueueReactiveAfterEmptyPlan({ content: 'ok' })
     await toolChat('draw a cat', [], { imageAvailable: false })
     const withoutImg = fake.requests[0] as { tools: { function: { name: string } }[] }
     expect(withoutImg.tools.map((t) => t.function.name)).not.toContain('generate_image')
   })
 
   it('records the requested prompt as imageRequest, fires onStep, and still returns the answer', async () => {
-    fake.enqueue(
+    enqueueReactiveAfterEmptyPlan(
       { toolCalls: [{ name: 'generate_image', args: { prompt: 'a red bicycle on a beach' } }] },
       { content: 'Here is your image.' }
     )
@@ -279,7 +477,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
   })
 
   it('keeps every generate_image request in tool-call order', async () => {
-    fake.enqueue(
+    enqueueReactiveAfterEmptyPlan(
       {
         toolCalls: [
           { name: 'generate_image', args: { prompt: 'first' } },
@@ -293,7 +491,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
   })
 
   it('does not record an imageRequest when the prompt is empty', async () => {
-    fake.enqueue(
+    enqueueReactiveAfterEmptyPlan(
       { toolCalls: [{ name: 'generate_image', args: { prompt: '   ' } }] },
       { content: 'I could not tell what to draw.' }
     )
@@ -419,7 +617,7 @@ describe('web tools — real parsers over fetch faked at the network boundary', 
       'fetch',
       vi.fn(async () => ({ ok: true, text: async () => html }))
     )
-    fake.enqueue(
+    enqueueReactiveAfterEmptyPlan(
       { toolCalls: [{ name: 'web_search', args: { query: 'achilles' } }] },
       { content: 'Here is what I found.' }
     )

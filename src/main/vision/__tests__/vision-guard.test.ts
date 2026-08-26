@@ -1,6 +1,6 @@
 /**
  * The supervised-tier guard's priority rules: the kill switch is terminal and
- * outranks everything, a user touch pauses until they explicitly resume, and
+ * outranks everything, an explicit command pauses until Resume, and
  * the step budget halts a flailing model. canActuate() is the one gate the
  * loop checks - these tests pin exactly when it opens and closes.
  */
@@ -28,13 +28,15 @@ describe('VisionGuard', () => {
     expect(guard.canActuate()).toBe(false)
   })
 
-  it('a user touch pauses until they explicitly resume', () => {
+  it('an explicit Take Over command pauses until Resume', async () => {
     const guard = new VisionGuard()
-    guard.pauseForUser('you moved the mouse')
+    guard.pauseForUser('you selected Take Over')
     expect(guard.canActuate()).toBe(false)
     expect(guard.isPaused).toBe(true)
-    expect(guard.snapshot().reason).toBe('you moved the mouse')
+    expect(guard.snapshot().reason).toBe('you selected Take Over')
+    const resumed = guard.waitUntilRunnable()
     guard.resume()
+    expect(await resumed).toMatchObject({ state: 'running' })
     expect(guard.canActuate()).toBe(true)
   })
 
@@ -50,7 +52,7 @@ describe('VisionGuard', () => {
   it('a pause never overrides a halt', () => {
     const guard = new VisionGuard()
     guard.halt()
-    guard.pauseForUser('you moved the mouse')
+    guard.pauseForUser('you selected Take Over')
     expect(guard.isHalted).toBe(true)
     expect(guard.isPaused).toBe(false)
   })

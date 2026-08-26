@@ -19,14 +19,13 @@ describe('model catalog — vision capability matches the mmproj data', () => {
     expect(e2b!.files.some((f) => f.role === 'mmproj')).toBe(true)
   })
 
-  it('every vision model ships an mmproj, and no text model carries one', () => {
-    // The invariant the engine relies on: kind==='vision' ⇔ a role:'mmproj' file. If a
-    // future entry breaks it, the model would either claim vision it can't do or hide
-    // vision it can — both are the bug this test exists to catch.
+  it('every image-reading model ships an mmproj, and text-only models do not', () => {
+    // Computer Use models also read screenshots. The capability invariant is therefore
+    // vision-or-computer_use ⇔ a projector, while text-only families must not carry one.
     for (const m of entries) {
       const hasMmproj = m.files.some((f) => f.role === 'mmproj')
-      if (m.kind === 'vision') {
-        expect(hasMmproj, `${m.id} is vision but has no mmproj`).toBe(true)
+      if (m.kind === 'vision' || m.kind === 'computer_use') {
+        expect(hasMmproj, `${m.id} is ${m.kind} but has no mmproj`).toBe(true)
       } else {
         expect(hasMmproj, `${m.id} is ${m.kind} but carries an mmproj`).toBe(false)
       }

@@ -8,7 +8,8 @@ import {
   findDownloaded,
   readDownloaded,
   installedDownloadedIds,
-  downloadedProtectedNames
+  downloadedProtectedNames,
+  reconcileDownloadedModelRegistry
 } from '../downloaded-models'
 
 // Real temp models dir with real files — no mocks. This is the exact registry logic
@@ -91,5 +92,22 @@ describe('downloaded-models registry (real temp dir)', () => {
     fs.writeFileSync(path.join(dir, 'downloaded-models.json'), 'not json{')
     expect(readDownloaded(dir)).toEqual([]) // corrupt -> empty, no throw
     expect(installedDownloadedIds(dir)).toEqual([])
+  })
+
+  it('repairs a transferred model when its catalog family gains a specialist role', () => {
+    const transferred = {
+      ...MINICPM,
+      id: `model-package-v1:${'a'.repeat(64)}`,
+      familyId: MINICPM.id,
+      packageIdentity: `model-package-v1:${'a'.repeat(64)}`
+    }
+    writeFiles(transferred.files)
+    recordDownloaded(dir, transferred)
+
+    expect(
+      reconcileDownloadedModelRegistry(dir, [
+        { id: MINICPM.id, kind: 'computer_use', files: transferred.files.map((name) => ({ name })) }
+      ])[0]
+    ).toMatchObject({ id: transferred.id, familyId: MINICPM.id, kind: 'computer_use' })
   })
 })

@@ -28,9 +28,14 @@ const fixtures = CATALOG.flatMap((entry) => {
 
 // 'text' dropped: the chat model is a vision model now (mmproj), so there's no
 // standalone text kind to select.
-const activeSelectionFixtures = ['vision', 'image', 'voice', 'transcription'].map(
+const activeSelectionFixtures = ['vision', 'image', 'computer_use', 'voice', 'transcription'].map(
   (kind) => {
-    const entry = CATALOG.find((candidate) => candidate.kind === kind && candidate.files.length > 0)
+    const entry = CATALOG.find(
+      (candidate) =>
+        candidate.kind === kind &&
+        candidate.files.length > 0 &&
+        candidate.availability !== 'coming_soon'
+    )
     if (!entry) throw new Error(`Model catalog needs an installable ${kind} fixture`)
     return { kind, entry }
   }
@@ -97,6 +102,25 @@ afterAll(() => {
 })
 
 describe('model-manager GGUF integrity', () => {
+  it('refuses a coming-soon Computer Use model before any network or disk work', async () => {
+    const model = CATALOG.find(
+      (entry) => entry.kind === 'computer_use' && entry.availability === 'coming_soon'
+    )
+    expect(model).toBeTruthy()
+    const fetchBoundary = vi.fn()
+    vi.stubGlobal('fetch', fetchBoundary)
+
+    const result = await manager.downloadModel(model!.id)
+
+    expect(result).toEqual({ success: false, error: model!.availabilityNote })
+    expect(fetchBoundary).not.toHaveBeenCalled()
+    expect(await manager.listInstalled()).not.toContain(model!.id)
+    await expect(manager.loadComputerUseModel(model!.id)).resolves.toEqual({
+      success: false,
+      error: model!.availabilityNote
+    })
+  })
+
   it('rejects a truncated GGUF download before promotion or installation', async () => {
     const truncated = Buffer.from('GGUF', 'ascii')
     vi.stubGlobal(
@@ -349,6 +373,7 @@ describe('active model deletion', () => {
       expect(await manager.getActiveModelIds()).not.toContain(entry.id)
       expect(manager.getActiveModalities()).toEqual({
         text: null,
+        computer_use: null,
         image: null,
         speech: null,
         transcription: null
@@ -361,6 +386,7 @@ describe('active model deletion', () => {
       const restartedManager = await import('../../models-manager')
       expect(restartedManager.getActiveModalities()).toEqual({
         text: null,
+        computer_use: null,
         image: null,
         speech: null,
         transcription: null
@@ -393,10 +419,12 @@ describe('active model persistence', () => {
 
   it('keeps every selected modal model active after a module-style relaunch', async () => {
     const modalModels = activeSelectionFixtures.filter(({ kind }) =>
-      ['image', 'voice', 'transcription'].includes(kind)
+      ['computer_use', 'image', 'voice', 'transcription'].includes(kind)
     )
-    if (modalModels.length !== 3) {
-      throw new Error('Model catalog needs installable image, voice, and transcription fixtures')
+    if (modalModels.length !== 4) {
+      throw new Error(
+        'Model catalog needs installable computer use, image, voice, and transcription fixtures'
+      )
     }
 
     for (const { entry } of modalModels) {
@@ -410,6 +438,7 @@ describe('active model persistence', () => {
     expect(await manager.getActiveModelIds()).toEqual(expect.arrayContaining(selectedIds))
     const activeBeforeRestart = manager.getActiveModalities()
     expect(activeBeforeRestart).toMatchObject({
+      computer_use: expect.any(String),
       image: expect.any(String),
       speech: expect.any(String),
       transcription: expect.any(String)

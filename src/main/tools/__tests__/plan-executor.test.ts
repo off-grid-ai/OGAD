@@ -8,17 +8,30 @@ import { describe, expect, it, vi } from 'vitest'
 import { makePlanExecutor, applyBindings, type DispatchResult } from '../plan-executor'
 import type { Plan } from '../planner-logic'
 
-const R = (text: string, extra: Partial<DispatchResult> = {}): DispatchResult => ({ text, ...extra })
+const R = (text: string, extra: Partial<DispatchResult> = {}): DispatchResult => ({
+  text,
+  ...extra
+})
 
 describe('applyBindings', () => {
   it('fills an arg from an earlier contacts result', () => {
-    const step = { tool: 'messages_send', args: { text: 'hi' }, why: '', bindings: [{ arg: 'to', fromStep: 0, field: 'phone' }] }
+    const step = {
+      tool: 'messages_send',
+      args: { text: 'hi' },
+      why: '',
+      bindings: [{ arg: 'to', fromStep: 0, field: 'phone' }]
+    }
     const args = applyBindings(step, [JSON.stringify([{ name: 'Sidd', phone: '+15550000' }])])
     expect(args).toEqual({ text: 'hi', to: '+15550000' })
   })
 
   it('returns null when the source is missing or unresolvable (halt, do not send blank)', () => {
-    const step = { tool: 'messages_send', args: { text: 'hi' }, why: '', bindings: [{ arg: 'to', fromStep: 0, field: 'phone' }] }
+    const step = {
+      tool: 'messages_send',
+      args: { text: 'hi' },
+      why: '',
+      bindings: [{ arg: 'to', fromStep: 0, field: 'phone' }]
+    }
     expect(applyBindings(step, [])).toBeNull()
     expect(applyBindings(step, [JSON.stringify([{ name: 'nobody' }])])).toBeNull()
   })
@@ -29,10 +42,20 @@ describe('makePlanExecutor', () => {
     const dispatch = vi.fn(async () => R('opened youtube and played the video'))
     const exec = makePlanExecutor(dispatch)
     const plan: Plan = {
-      steps: [{ tool: 'web_task', args: { goal: 'play X', url: 'https://youtube.com' }, why: 'interactive', bindings: [] }]
+      steps: [
+        {
+          tool: 'web_task',
+          args: { goal: 'play X', url: 'https://youtube.com' },
+          why: 'interactive',
+          bindings: []
+        }
+      ]
     }
     const result = await exec(plan)
-    expect(dispatch).toHaveBeenCalledWith('web_task', { goal: 'play X', url: 'https://youtube.com' })
+    expect(dispatch).toHaveBeenCalledWith('web_task', {
+      goal: 'play X',
+      url: 'https://youtube.com'
+    })
     expect(result.toolCalls).toHaveLength(1)
     expect(result.stopped).toBeUndefined()
   })
@@ -46,8 +69,18 @@ describe('makePlanExecutor', () => {
     const exec = makePlanExecutor(dispatch)
     const plan: Plan = {
       steps: [
-        { tool: 'contacts_search', args: { query: 'Dishit' }, why: 'resolve recipient', bindings: [] },
-        { tool: 'messages_send', args: { text: 'hi' }, why: 'send', bindings: [{ arg: 'to', fromStep: 0, field: 'phone' }] }
+        {
+          tool: 'contacts_search',
+          args: { query: 'Dishit' },
+          why: 'resolve recipient',
+          bindings: []
+        },
+        {
+          tool: 'messages_send',
+          args: { text: 'hi' },
+          why: 'send',
+          bindings: [{ arg: 'to', fromStep: 0, field: 'phone' }]
+        }
       ]
     }
     const result = await exec(plan)
@@ -61,7 +94,12 @@ describe('makePlanExecutor', () => {
     const plan: Plan = {
       steps: [
         { tool: 'contacts_search', args: { query: 'ghost' }, why: '', bindings: [] },
-        { tool: 'messages_send', args: { text: 'hi' }, why: '', bindings: [{ arg: 'to', fromStep: 0, field: 'phone' }] }
+        {
+          tool: 'messages_send',
+          args: { text: 'hi' },
+          why: '',
+          bindings: [{ arg: 'to', fromStep: 0, field: 'phone' }]
+        }
       ]
     }
     const result = await exec(plan)
@@ -73,7 +111,10 @@ describe('makePlanExecutor', () => {
     const dispatch = vi.fn(async (name: string) =>
       name === 'a'
         ? R('x', { sources: [{ key: 's1' } as never] })
-        : R('y', { sources: [{ key: 's1' } as never, { key: 's2' } as never], imageRequest: { prompt: 'p' } })
+        : R('y', {
+            sources: [{ key: 's1' } as never, { key: 's2' } as never],
+            imageRequest: { prompt: 'p' }
+          })
     )
     const exec = makePlanExecutor(dispatch)
     const plan: Plan = {
@@ -85,5 +126,25 @@ describe('makePlanExecutor', () => {
     const result = await exec(plan)
     expect(result.unified.map((s) => s.key)).toEqual(['s1', 's2']) // deduped
     expect(result.imageRequest).toEqual({ prompt: 'p' })
+  })
+
+  it('stops on an authoritative needs-attention result and keeps its status', async () => {
+    const dispatch = vi.fn(async () =>
+      R('Please answer the missing questions.', {
+        status: 'pending',
+        authoritative: true
+      })
+    )
+    const exec = makePlanExecutor(dispatch)
+    const result = await exec({
+      steps: [
+        { tool: 'web_task', args: { goal: 'Find a flight' }, why: '', bindings: [] },
+        { tool: 'messages_send', args: { text: 'must not run' }, why: '', bindings: [] }
+      ]
+    })
+
+    expect(dispatch).toHaveBeenCalledTimes(1)
+    expect(result.authoritativeAnswer).toBe('Please answer the missing questions.')
+    expect(result.toolCalls[0]).toMatchObject({ status: 'pending' })
   })
 })

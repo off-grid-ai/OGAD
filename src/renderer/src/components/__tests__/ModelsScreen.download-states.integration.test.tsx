@@ -8,8 +8,8 @@
 // Grounded in the macOS session of 2026-08-09: a download the main process had REFUSED
 // (reason=application_shutdown) left the card showing a spinner at 0% for hours with no message and
 // no way to learn why. The card's job is to say what is true and offer the one action that helps.
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 const MODEL = {
@@ -216,6 +216,7 @@ describe('<ModelsScreen/> — what a download looks like', () => {
     // through formatSize, so this assertion finally matches the intent stated above it.
     expect(screen.getByText(/1\.4 GB of 6\.6 GB/)).toBeTruthy()
     expect(screen.getByText(/2\.8 MB\/s/)).toBeTruthy()
+    expect(screen.getByText(/~30 min left/)).toBeTruthy()
     // Which part is moving, without giving it a second percent of its own.
     expect(screen.getByText(/file 1 of 2/)).toBeTruthy()
     // The action row holds the action, on the same line as the status.
@@ -241,6 +242,43 @@ describe('<ModelsScreen/> — what a download looks like', () => {
     expect(await screen.findByText('Downloading')).toBeTruthy()
     expect(document.body.textContent).not.toContain('NaN')
     expect(document.body.textContent).not.toContain('Infinity')
+    expect(document.body.textContent).not.toContain('left')
     expect(screen.getByRole('button', { name: /cancel/i })).toBeTruthy()
+  })
+
+  it('shows progress at most every two seconds and never lets a stale tick replace failure', async () => {
+    render(<ModelsScreen />)
+    expect(await screen.findByText(MODEL.name)).toBeTruthy()
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    try {
+      act(() => emit({ modelId: MODEL.id, status: 'downloading', percent: 10 }))
+      expect(screen.getByText('10%')).toBeTruthy()
+
+      act(() => {
+        emit({ modelId: MODEL.id, status: 'downloading', percent: 20 })
+        emit({ modelId: MODEL.id, status: 'downloading', percent: 30 })
+      })
+      expect(screen.getByText('10%')).toBeTruthy()
+      expect(screen.queryByText('30%')).toBeNull()
+
+      act(() => vi.advanceTimersByTime(1_999))
+      expect(screen.queryByText('30%')).toBeNull()
+      act(() => vi.advanceTimersByTime(1))
+      expect(screen.getByText('30%')).toBeTruthy()
+
+      act(() => {
+        emit({ modelId: MODEL.id, status: 'downloading', percent: 40 })
+        emit({ modelId: MODEL.id, status: 'failed', error: 'network connection lost' })
+      })
+      expect(screen.getByText('network connection lost')).toBeTruthy()
+      expect(screen.queryByText('40%')).toBeNull()
+
+      act(() => vi.advanceTimersByTime(2_000))
+      expect(screen.getByText('network connection lost')).toBeTruthy()
+      expect(screen.queryByText('40%')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

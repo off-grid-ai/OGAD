@@ -6,13 +6,14 @@
 // UpgradeScreen. Only the preload/browser boundary is faked. The entitlement
 // value is the production renderer boundary populated from OFFGRID_PRO=0 by main.
 
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getRegisteredNav } from '../bootstrap/navRegistry'
 import { getRegisteredScreens } from '../bootstrap/screenRegistry'
 import { getRegisteredSettingsSections } from '../bootstrap/sectionRegistry'
 import { getSlot, SLOTS } from '../bootstrap/slotRegistry'
+import { registerProView } from '../bootstrap/proView'
 import { PRO_FEATURES } from '../components/pro/proCatalog'
 import { PRO_PURCHASE_URL } from '@offgrid/core/shared/product-links'
 import {
@@ -94,5 +95,43 @@ describe('<App/> locked Pro navigation integration', () => {
     expect(onNewAction).not.toHaveBeenCalled()
     expect(proOn).not.toHaveBeenCalled()
     expect(proInvoke).not.toHaveBeenCalled()
+  }, 30_000)
+
+  it('unmounts the open Pro screen and shows the purchase screen when the license expires', async () => {
+    let publishLicense: ((info: ProLicenseInfo) => void) | undefined
+    window.history.replaceState(null, '', '/day')
+    installAppBoundary({
+      isPro: true,
+      license: {
+        onChanged: (listener: (info: ProLicenseInfo) => void) => {
+          publishLicense = listener
+          return () => {
+            publishLicense = undefined
+          }
+        }
+      }
+    })
+    // Vitest maps the private renderer package to the production free-build
+    // stub. Register the paid-package boundary through the same public seam the
+    // packaged Pro build uses, then test the real App gate around it.
+    registerProView((view) => (view === 'day' ? <h1>Today</h1> : null))
+
+    render(<App />)
+    expect(await screen.findByRole('heading', { name: 'Today' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Get Pro/ })).toBeNull()
+
+    act(() => {
+      publishLicense?.({
+        isPro: false,
+        tier: null,
+        expiry: '2026-08-25T12:00:00.000Z',
+        verifiedAt: Date.now()
+      })
+    })
+
+    expect(await screen.findByRole('heading', { name: 'Day' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Get Pro/ })).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: 'Today' })).toBeNull()
+    await waitFor(() => expect(window.location.pathname).toBe('/day'))
   }, 30_000)
 })

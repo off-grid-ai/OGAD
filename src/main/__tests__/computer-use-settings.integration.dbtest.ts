@@ -31,6 +31,7 @@ afterAll(() => fs.rmSync(TMP_DIR, { recursive: true, force: true }))
 describe('Computer Use settings persistence', () => {
   it('persists one normalized object in SQLite', () => {
     setComputerUseSettings({
+      modelStrategy: 'same_as_chat',
       context: '32k',
       screenshotSize: 'large',
       screenshotQuality: 'detailed',
@@ -39,6 +40,7 @@ describe('Computer Use settings persistence', () => {
     })
 
     expect(getComputerUseSettings()).toEqual({
+      modelStrategy: 'same_as_chat',
       context: '32k',
       screenshotSize: 'large',
       screenshotQuality: 'detailed',

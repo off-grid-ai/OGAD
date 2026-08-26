@@ -12,13 +12,18 @@ import {
   TOOL_ACTION_TYPES
 } from '../nativeActionToolExtension-logic'
 
-function makePort(overrides: Partial<ActionsPort> = {}): ActionsPort & { proposed: unknown[] } {
+function makePort(
+  overrides: Partial<ActionsPort> = {}
+): ActionsPort & { proposed: unknown[]; proposalMeta: unknown[] } {
   const proposed: unknown[] = []
+  const proposalMeta: unknown[] = []
   return {
     proposed,
+    proposalMeta,
     approvalHookActive: () => false,
-    async propose(input) {
+    async propose(input, meta) {
       proposed.push(input)
+      proposalMeta.push(meta)
       return { accepted: true, id: 'act_1', deduped: false }
     },
     async waitForOutcome() {
@@ -94,6 +99,31 @@ describe('the spec table', () => {
 })
 
 describe('the engine path', () => {
+  it('starts the exact Web Use brief selected by the Chat model without a second gate', async () => {
+    const port = makePort()
+    const extension = new NativeActionToolExtension(
+      { run, proposeApproval, actions: port },
+      'darwin'
+    )
+
+    await extension.execute(
+      'web_task',
+      {
+        goal: 'Open the release page and stop when version 4.2 is visible.',
+        url: 'https://example.test/releases'
+      },
+      { conversationId: 'chat-release', userQuery: 'Show me version 4.2 on the release page' }
+    )
+
+    expect(port.proposed[0]).toMatchObject({
+      intent: 'Open the release page and stop when version 4.2 is visible.',
+      args: {
+        goal: 'Open the release page and stop when version 4.2 is visible.',
+        url: 'https://example.test/releases'
+      }
+    })
+  })
+
   it('a mutation becomes a durable Action with the mapped type, intent, and risk', async () => {
     run.mockClear()
     const port = makePort()
@@ -259,6 +289,19 @@ describe('the engine path', () => {
     expect(run).not.toHaveBeenCalled()
     expect(reply).toContain('Done.')
     expect(reply).toContain('Task reference: act_1.')
+  })
+
+  it('links a Web Use action to the chat journey', async () => {
+    const port = makePort()
+    const extension = makeExtension(port)
+
+    await extension.execute(
+      'web_task',
+      { goal: 'check in for my flight' },
+      { conversationId: 'chat-journey-1', userQuery: 'Check me in' }
+    )
+
+    expect(port.proposalMeta).toEqual([{ source: 'chat', sourceRef: 'chat-journey-1' }])
   })
 
   it('web_task uses the engine EVEN WHEN a pro queue is listening - no connector runs a web task', async () => {

@@ -148,15 +148,42 @@ describe('activating the licensed half of the renderer', () => {
   })
 
   it('survives an activation that throws, rather than taking the app down with it', async () => {
-    pro.activateRenderer = vi.fn(() => {
-      throw new Error('a screen failed to register')
-    })
+    pro.activateRenderer = vi.fn(
+      (api: { registerHook: (name: string, fn: () => void) => void }) => {
+        api.registerHook('partially-registered', () => {})
+        throw new Error('a screen failed to register')
+      }
+    )
     setBridge({ isPro: true })
 
     // A blank window is the worst outcome here. One broken pro surface must cost the user that surface, not
     // the whole app - and the failure is logged rather than swallowed.
     await expect(load()).resolves.toBe('none')
     expect(console.error).toHaveBeenCalledWith('[pro] activateRenderer failed', expect.any(Error))
+    const { callHook } = await import('../hookRegistry')
+    expect(callHook('partially-registered')).toBeUndefined()
+  })
+
+  it('does not register paid capabilities when entitlement changes while the private chunk loads', async () => {
+    const activate = vi.fn()
+    let release: (() => void) | undefined
+    setBridge({ isPro: true })
+    vi.resetModules()
+    vi.doMock(
+      '@offgrid/pro/renderer',
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ activateRenderer: activate })
+        })
+    )
+
+    const pending = load()
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    setBridge({ isPro: false })
+    release?.()
+
+    await expect(pending).resolves.toBe('none')
+    expect(activate).not.toHaveBeenCalled()
   })
 
   it('treats a preload bridge that is not there as unentitled', async () => {
