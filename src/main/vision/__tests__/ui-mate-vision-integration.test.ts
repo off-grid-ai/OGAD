@@ -1,122 +1,94 @@
 import { describe, expect, it } from 'vitest'
+import { generalVisionOperatorAdapter } from '../model-adapters/general-vision-operator'
 import { uiMateAdapter } from '../model-adapters/ui-mate'
 import { uiTarsAdapter } from '../model-adapters/ui-tars'
-import type { VisionPolicyRequest } from '../model-adapters/types'
 
 const bounds = { width: 960, height: 544 }
 
-function verdict(overrides: Record<string, unknown> = {}): string {
-  return JSON.stringify({
-    command: {
-      name: 'perform_action',
-      direction: 'aligned',
-      summary: 'Open the visible control.',
-      visible_evidence: 'The control is visible in the current screenshot.',
-      action: "click(point='500 250')",
-      action_reason: 'The point is inside the visible control.',
-      ...overrides
-    }
-  })
+function uiMate(action: string, parameters = ''): string {
+  return `<think>The visible control is ready.</think><action>Use the visible control.</action><tool_call><function=computer_use><parameter=action>${action}</parameter>${parameters}</function></tool_call>`
 }
 
-function complete(overrides: Record<string, unknown> = {}): string {
-  return JSON.stringify({
-    command: {
-      name: 'complete_milestone',
-      summary: 'The menu is visibly open.',
-      visible_evidence: 'The open menu is visible in the screenshot.',
-      ...overrides
-    }
+describe('specialist vision protocols', () => {
+  it('keeps UI-Mate on its native XML trajectory and execution-plan extension', () => {
+    const request = uiMateAdapter.buildRequest({
+      goal: 'Use the visible control.',
+      currentMilestone: 'Open the menu.',
+      currentScreenshotDataUrl: 'data:image/png;base64,current',
+      coordinateFrame: { encoded: bounds, source: bounds },
+      history: [],
+      recentSteps: ['The page is ready.'],
+      olderVisualFacts: [],
+      verifiedActions: []
+    })
+    const serialized = JSON.stringify(request.messages)
+
+    expect(request.tools).toBeUndefined()
+    expect(request.responseFormat).toBeUndefined()
+    expect(request.maxTokens).toBe(16_384)
+    expect(serialized).toContain('<function=computer_use>')
+    expect(serialized).toContain('Current milestone: Open the menu.')
+    expect(serialized).toContain('subtask_complete')
   })
-}
 
-function request(adapter: typeof uiMateAdapter | typeof uiTarsAdapter): VisionPolicyRequest {
-  return adapter.buildRequest({
-    goal: 'Use the visible control.',
-    currentMilestone: 'Open the menu.',
-    currentScreenshotDataUrl: 'data:image/png;base64,current',
-    coordinateFrame: { encoded: bounds, source: bounds },
-    history: [],
-    recentSteps: ['The page is ready.'],
-    olderVisualFacts: [],
-    verifiedActions: []
+  it('maps UI-Mate actions, milestone completion, and handoff through its native parser', () => {
+    expect(
+      uiMateAdapter.parseResponse(
+        uiMate('left_click', '<parameter=coordinate>[500, 250]</parameter>'),
+        bounds
+      )
+    ).toMatchObject({
+      kind: 'actions',
+      actions: [{ type: 'click', point: { x: 480, y: 136 } }],
+      decisionRationale: 'The visible control is ready.'
+    })
+    expect(uiMateAdapter.parseResponse(uiMate('subtask_complete'), bounds)).toMatchObject({
+      kind: 'phase_complete',
+      summary: 'Use the visible control.'
+    })
+    expect(
+      uiMateAdapter.parseResponse(
+        uiMate('call_user', '<parameter=text>Enter the one-time code.</parameter>'),
+        bounds
+      )
+    ).toMatchObject({ kind: 'handoff', reason: 'Enter the one-time code.' })
   })
-}
 
-describe('specialist models use the canonical vision policy', () => {
-  it.each([
-    ['UI-Mate', uiMateAdapter],
-    ['UI-TARS', uiTarsAdapter]
-  ] as const)(
-    'builds one thinking-enabled strict judge/action request for %s',
-    (_name, adapter) => {
-      const policy = request(adapter)
+  it('keeps UI-TARS on its native single action-text protocol', () => {
+    const request = uiTarsAdapter.buildRequest({
+      goal: 'Use the visible control.',
+      currentMilestone: 'Open the menu.',
+      currentScreenshotDataUrl: 'data:image/png;base64,current',
+      coordinateFrame: { encoded: bounds, source: bounds },
+      history: [],
+      recentSteps: ['The page is ready.'],
+      olderVisualFacts: [],
+      verifiedActions: []
+    })
 
-      expect(policy).toMatchObject({
-        enableThinking: true,
-        separateReasoning: true,
-        requireFinalAnswer: true,
-        maxAttempts: 2,
-        responseFormat: { json_schema: { name: 'visual_step_command', strict: true } }
-      })
-      expect(policy.validateResponse?.(verdict())).toBe(true)
-    }
-  )
-
-  it.each([
-    ['UI-Mate', uiMateAdapter],
-    ['UI-TARS', uiTarsAdapter]
-  ] as const)(
-    'returns zero or one action for %s and rejects multi-action output',
-    (_name, adapter) => {
-      expect(adapter.parseResponse(verdict(), bounds)).toMatchObject({
-        kind: 'actions',
-        actions: [{ type: 'click', point: { x: 480, y: 136 } }]
-      })
-      expect(
-        request(adapter).validateResponse?.(
-          verdict({ action: ["click(point='500 250')", "click(point='600 250')"] })
-        )
-      ).toBe(false)
-      expect(
-        adapter.parseResponse(
-          verdict({ action: "click(point='500 250'); click(point='600 250')" }),
-          bounds
-        )
-      ).toMatchObject({ kind: 'invalid' })
-    }
-  )
-
-  it.each([
-    ['UI-Mate', uiMateAdapter],
-    ['UI-TARS', uiTarsAdapter]
-  ] as const)('rejects the superseded free-form protocol for %s', (_name, adapter) => {
-    const xml = `<think>Use two controls.</think><action>Use both.</action>
-<tool_call><function=computer_use><parameter=action>left_click</parameter><parameter=coordinate>[100, 200]</parameter></function></tool_call>
-<tool_call><function=computer_use><parameter=action>left_click</parameter><parameter=coordinate>[300, 400]</parameter></function></tool_call>`
-
-    expect(adapter.parseResponse(xml, bounds)).toMatchObject({
-      kind: 'invalid',
-      error: 'the final answer was not valid JSON'
+    expect(request.tools).toBeUndefined()
+    expect(request.disableThinking).toBe(true)
+    expect(JSON.stringify(request.messages)).toContain('Current milestone: Open the menu.')
+    expect(
+      uiTarsAdapter.parseResponse("Action: click(point='<point>500 250</point>')", bounds)
+    ).toMatchObject({
+      kind: 'actions',
+      actions: [{ type: 'click', point: { x: 480, y: 136 } }]
+    })
+    expect(uiTarsAdapter.parseResponse('Action: subtask_complete()', bounds)).toMatchObject({
+      kind: 'phase_complete'
     })
   })
 
-  it.each([
-    ['UI-Mate', uiMateAdapter],
-    ['UI-TARS', uiTarsAdapter]
-  ] as const)('uses explicit structured control decisions for %s', (_name, adapter) => {
+  it('does not let general models control the graph with answer text', () => {
     expect(
-      adapter.parseResponse(
-        verdict({
-          action: "call_user(content='Enter the code directly.')",
-          summary: 'User input is required.'
-        }),
+      generalVisionOperatorAdapter.parseResponse(
+        '{"command":{"name":"complete_milestone"}}',
         bounds
       )
-    ).toMatchObject({ kind: 'handoff', reason: 'Enter the code directly.' })
-    expect(adapter.parseResponse(complete(), bounds)).toMatchObject({
-      kind: 'phase_complete',
-      summary: 'The menu is visibly open.'
+    ).toMatchObject({
+      kind: 'invalid',
+      error: 'The general vision model did not return a native tool decision.'
     })
   })
 })

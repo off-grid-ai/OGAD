@@ -81,6 +81,9 @@ export interface VisionGroundingInput {
 
 export interface VisionGroundingResult {
   response: string
+  /** A native tool-call adapter can validate the graph transition before this
+   * result crosses the model boundary. */
+  decision?: VisionPolicyDecision
   /** Exact adapter messages with binary image payloads replaced by a marker. */
   modelInput: string
   /** The model-ready frame retained only inside the bounded policy history. */
@@ -249,6 +252,7 @@ export async function runVisionTask(goal: string, deps: VisionTaskDeps): Promise
     const startedAt = now()
     let shot: Awaited<ReturnType<VisionScreen['capture']>> | undefined
     let rawResponse: string
+    let groundingDecision: VisionPolicyDecision | undefined
     let screenshotDataUrl: string | undefined
     const newGuidance = deps.takeGuidance?.() ?? []
     taskBrief.accept(newGuidance)
@@ -304,6 +308,7 @@ export async function runVisionTask(goal: string, deps: VisionTaskDeps): Promise
       if (typeof grounding !== 'string') {
         promptContext = grounding.modelInput
         screenshotDataUrl = grounding.screenshotDataUrl
+        groundingDecision = grounding.decision
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'computer use step failed'
@@ -336,12 +341,14 @@ export async function runVisionTask(goal: string, deps: VisionTaskDeps): Promise
       throw error
     }
     const sourceBounds = shot.metadata?.geometry?.sourceBounds
-    const decision = parseResponse(rawResponse, shot.bounds, {
-      encoded: shot.bounds,
-      source: sourceBounds
-        ? { width: sourceBounds.width, height: sourceBounds.height }
-        : shot.bounds
-    })
+    const decision =
+      groundingDecision ??
+      parseResponse(rawResponse, shot.bounds, {
+        encoded: shot.bounds,
+        source: sourceBounds
+          ? { width: sourceBounds.width, height: sourceBounds.height }
+          : shot.bounds
+      })
     policyHistory.push({
       response: rawResponse,
       actionText: decision.actionText,
