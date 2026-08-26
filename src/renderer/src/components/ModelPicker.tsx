@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { IconLoader2, IconCheck, IconCpu, IconX, IconPower } from '@tabler/icons-react'
 import { SidePanel } from './SidePanel'
+import {
+  COMPUTER_USE_SETTINGS_KEY,
+  DEFAULT_COMPUTER_USE_SETTINGS,
+  normalizeComputerUseSettings,
+  type ComputerUseModelStrategy
+} from '../../../shared/computer-use-settings'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const api = (): any => (window as any).api
@@ -48,12 +54,32 @@ function primaryFile(m: ModelEntry): string {
   return m.files?.find((f) => f.role === 'primary')?.name ?? m.files?.[0]?.name ?? m.id
 }
 
+function selectedModel(
+  models: ModelEntry[],
+  selection: string | null | undefined
+): ModelEntry | undefined {
+  if (!selection) return undefined
+  return models.find((model) => model.id === selection || primaryFile(model) === selection)
+}
+
+function computerUseDescription(
+  strategy: ComputerUseModelStrategy,
+  specialist: ModelEntry | undefined
+): string {
+  if (strategy === 'same_as_chat') return 'Uses the active Text & Vision model.'
+  if (specialist) return 'Loads for Computer Use tasks, then restores Chat.'
+  return 'Choose a specialist in Settings > Computer Use.'
+}
+
 export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactElement {
   const [models, setModels] = useState<ModelEntry[]>([])
   const [installed, setInstalled] = useState<string[]>([])
   // The active selection per modality: id for text, filename for image/STT.
   const [active, setActive] = useState<Record<string, string | null>>({})
   const [activeIds, setActiveIds] = useState<Set<string>>(new Set())
+  const [computerUseStrategy, setComputerUseStrategy] = useState<ComputerUseModelStrategy>(
+    DEFAULT_COMPUTER_USE_SETTINGS.modelStrategy
+  )
   const [busy, setBusy] = useState<string | null>(null)
   const [unload, setUnload] = useState<Record<string, UnloadStatus>>({})
 
@@ -64,6 +90,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     setInstalled((await api().getInstalledModels?.()) ?? [])
     const text = await api().getActiveModel?.()
     const modal = (await api().getActiveModalities?.()) ?? {}
+    const settings = await api().getSettings?.()
     const nextActiveIds = new Set<string>((await api().getActiveModelIds?.()) ?? [])
     const remoteTextActive = catalogModels.some(
       (model) => model.remoteServerId && nextActiveIds.has(model.id)
@@ -73,8 +100,12 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
       text: remoteTextActive ? null : (text ?? modal.text ?? null),
       image: modal.image ?? null,
       speech: modal.speech ?? null,
-      transcription: modal.transcription ?? null
+      transcription: modal.transcription ?? null,
+      computer_use: modal.computer_use ?? null
     })
+    setComputerUseStrategy(
+      normalizeComputerUseSettings(settings?.[COMPUTER_USE_SETTINGS_KEY]).modelStrategy
+    )
   }, [])
   useEffect(() => {
     void load()
@@ -137,6 +168,16 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     }
   }
 
+  const computerUseChatModel =
+    selectedModel(models, active.text) ?? models.find((model) => activeIds.has(model.id))
+  const computerUseSpecialist = selectedModel(models, active.computer_use)
+  const computerUseModel =
+    computerUseStrategy === 'same_as_chat' ? computerUseChatModel : computerUseSpecialist
+  const computerUseFallback =
+    computerUseStrategy === 'same_as_chat' ? active.text : active.computer_use
+  const computerUseRelationship =
+    computerUseStrategy === 'same_as_chat' ? 'Same as Chat' : 'Separate specialist'
+
   return (
     <SidePanel ariaLabel="Active models" onClose={onClose} className="w-[30vw] min-w-[420px]">
       <div className="flex items-center justify-between border-b border-neutral-900 px-4 py-3">
@@ -148,6 +189,29 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
         </button>
       </div>
       <div className="flex-1 space-y-5 overflow-y-auto p-4">
+        <section aria-labelledby="active-computer-use-model">
+          <div className="mb-1.5 flex items-center justify-between">
+            <h2
+              id="active-computer-use-model"
+              className="text-[10px] uppercase tracking-wide text-neutral-600"
+            >
+              Computer Use
+            </h2>
+          </div>
+          <div className="rounded-md border border-green-500/60 bg-neutral-900 px-3 py-2">
+            <div className="flex items-center justify-between gap-3 text-xs">
+              <span className="min-w-0 truncate text-white">
+                {computerUseModel?.name ?? computerUseFallback ?? 'No active model'}
+              </span>
+              <span className="shrink-0 rounded-sm border border-neutral-700 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-neutral-400">
+                {computerUseRelationship}
+              </span>
+            </div>
+            <p className="mt-1 text-[10px] leading-relaxed text-neutral-500">
+              {computerUseDescription(computerUseStrategy, computerUseSpecialist)}
+            </p>
+          </div>
+        </section>
         {MODALITIES.map(({ label, kinds, mode }) => {
           const list = models.filter((m) => kinds.includes(m.kind) && installed.includes(m.id))
           const cur = active[mode]
@@ -232,8 +296,8 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
           )
         })}
         <p className="px-1 pt-1 text-[10px] leading-relaxed text-neutral-600">
-          Your selected Text &amp; Vision model handles chat and supported vision work. Image, Voice,
-          and Transcription use their selected models.
+          Your selected Text &amp; Vision model handles chat and supported vision work. Image,
+          Voice, and Transcription use their selected models.
         </p>
       </div>
     </SidePanel>
