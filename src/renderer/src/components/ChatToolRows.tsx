@@ -21,7 +21,7 @@ type DisplayTool =
   | ChatStreamTool
 
 interface ChatToolRowsProps {
-  tools: readonly DisplayTool[] | undefined
+  tools?: readonly DisplayTool[]
   /** The task that belongs to this live Chat turn before its tool result contains a task id. */
   liveTask?: TaskSession
 }
