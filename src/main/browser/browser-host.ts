@@ -168,11 +168,6 @@ class BrowserHost implements BrowserRailHost {
       onPointer: (next) => {
         this.taskPointers.set(record.sessionId, next)
         broadcast('browser:pointer', { sessionId: record.sessionId, ...next })
-        // A macOS child-view compositor can drop the visible surface while the
-        // WebContents continues to load and capture correctly. Reassert the
-        // active view after each agent interaction so the watched page heals
-        // without waiting for a resize or navigation event.
-        this.syncViewVisibility()
       },
       initialPointer: pointer
     })

@@ -187,6 +187,7 @@ export class BrowserDriver {
     const pointerMarkup = browserPointerSvgMarkup()
     const expression = `(() => {
       const id = '__offgrid_agent_pointer__';
+      const observerKey = '__offgrid_agent_pointer_observer__';
       const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       let cursor = document.getElementById(id);
       if (!cursor) {
@@ -195,7 +196,15 @@ export class BrowserDriver {
         cursor.setAttribute('aria-hidden', 'true');
         cursor.style.cssText = 'position:fixed;left:0;top:0;width:${BROWSER_POINTER_VISUAL.width}px;height:${BROWSER_POINTER_VISUAL.height}px;pointer-events:none;z-index:2147483647;will-change:transform;filter:drop-shadow(0 0 5px ${BROWSER_POINTER_VISUAL.glow}) drop-shadow(0 1px 1px rgba(0,0,0,.5));';
         cursor.innerHTML = ${JSON.stringify(pointerMarkup)};
-        document.documentElement.appendChild(cursor);
+      }
+      const mount = () => {
+        if (!cursor.isConnected) (document.body || document.documentElement).appendChild(cursor);
+      };
+      mount();
+      if (!window[observerKey]) {
+        const observer = new MutationObserver(mount);
+        observer.observe(document.documentElement, { childList: true, subtree: true });
+        window[observerKey] = observer;
       }
       cursor.style.transition = reduceMotion || ${transitionMs} <= 0
         ? 'none'
