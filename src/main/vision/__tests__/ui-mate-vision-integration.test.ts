@@ -7,14 +7,26 @@ const bounds = { width: 960, height: 544 }
 
 function verdict(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
-    direction: 'aligned',
-    milestone_complete: false,
-    action_verdict: 'approve',
-    summary: 'Open the visible control.',
-    visible_evidence: 'The control is visible in the current screenshot.',
-    action: "click(point='500 250')",
-    action_reason: 'The point is inside the visible control.',
-    ...overrides
+    command: {
+      name: 'perform_action',
+      direction: 'aligned',
+      summary: 'Open the visible control.',
+      visible_evidence: 'The control is visible in the current screenshot.',
+      action: "click(point='500 250')",
+      action_reason: 'The point is inside the visible control.',
+      ...overrides
+    }
+  })
+}
+
+function complete(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    command: {
+      name: 'complete_milestone',
+      summary: 'The menu is visibly open.',
+      visible_evidence: 'The open menu is visible in the screenshot.',
+      ...overrides
+    }
   })
 }
 
@@ -44,8 +56,8 @@ describe('specialist models use the canonical vision policy', () => {
         enableThinking: true,
         separateReasoning: true,
         requireFinalAnswer: true,
-        maxAttempts: 1,
-        responseFormat: { json_schema: { name: 'visual_step_decision', strict: true } }
+        maxAttempts: 2,
+        responseFormat: { json_schema: { name: 'visual_step_command', strict: true } }
       })
       expect(policy.validateResponse?.(verdict())).toBe(true)
     }
@@ -102,16 +114,9 @@ describe('specialist models use the canonical vision policy', () => {
         bounds
       )
     ).toMatchObject({ kind: 'handoff', reason: 'Enter the code directly.' })
-    expect(
-      adapter.parseResponse(
-        verdict({
-          milestone_complete: true,
-          action_verdict: 'none',
-          action: null,
-          summary: 'The menu is visibly open.'
-        }),
-        bounds
-      )
-    ).toMatchObject({ kind: 'phase_complete', summary: 'The menu is visibly open.' })
+    expect(adapter.parseResponse(complete(), bounds)).toMatchObject({
+      kind: 'phase_complete',
+      summary: 'The menu is visibly open.'
+    })
   })
 })

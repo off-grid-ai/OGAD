@@ -1,32 +1,40 @@
 import { parseVisionActionFromSourcePixels } from '../vision-action'
 import {
-  ACTION_VERDICTS,
-  type CanonicalActionVerdict,
   type CanonicalDirection,
   DIRECTION_VERDICTS,
-  GENERAL_STEP_FIELDS,
   GENERAL_STEP_RESPONSE_FORMAT,
-  GENERAL_STEP_SYSTEM_PROMPT
+  GENERAL_STEP_SYSTEM_PROMPT,
+  VISION_STEP_COMMANDS
 } from './canonical-vision-contract'
 import type { VisionModelAdapter, VisionPolicyDecision, VisionPolicyInput } from './types'
 
 export { GENERAL_STEP_RESPONSE_FORMAT } from './canonical-vision-contract'
 
-interface GeneralStepDecision {
-  direction: CanonicalDirection
-  milestoneComplete: boolean
-  actionVerdict: CanonicalActionVerdict
-  summary: string
-  visibleEvidence: string
-  action: string
-  actionReason: string
-}
+type GeneralStepCommand =
+  | {
+      name: 'complete_milestone'
+      summary: string
+      visibleEvidence: string
+    }
+  | {
+      name: 'perform_action'
+      direction: CanonicalDirection
+      summary: string
+      visibleEvidence: string
+      action: string
+      actionReason: string
+    }
+  | {
+      name: 'rethink'
+      direction: CanonicalDirection
+      summary: string
+      visibleEvidence: string
+    }
 
-function normalizedText(value: unknown, allowEmpty = false): string | null {
+function normalizedText(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const text = value.replace(/\s+/g, ' ').trim()
-  if (!text && !allowEmpty) return null
-  return text
+  return text || null
 }
 
 const ACTION_PROTOCOL_START =
@@ -62,46 +70,18 @@ function isSingleActionProtocol(value: string): boolean {
   return false
 }
 
-export function parseGeneralStepDecision(
-  answer: string,
-  encodedBounds: { width: number; height: number }
-): GeneralStepDecision | null {
-  return parseGeneralStepDecisionResult(answer, encodedBounds).decision
-}
+type GeneralStepCommandResult =
+  | { command: GeneralStepCommand; error?: undefined }
+  | { command: null; error: string }
 
-type GeneralStepDecisionResult =
-  | { decision: GeneralStepDecision; error?: undefined }
-  | { decision: null; error: string }
-
-function decisionConsistencyError(
+function fieldsError(
   value: Record<string, unknown>,
-  action: string,
-  encodedBounds: { width: number; height: number }
-): string | undefined {
-  const actionVerdict = value.action_verdict as GeneralStepDecision['actionVerdict']
-  if (value.milestone_complete) {
-    if (actionVerdict !== 'none') return 'a completed milestone did not use a none verdict'
-    if (value.action !== null) return 'a completed milestone included an action'
-    return undefined
-  }
-  if (actionVerdict !== 'approve') {
-    return value.action === null ? undefined : `a ${actionVerdict} verdict included an action`
-  }
-  if (!action) return 'an approved verdict had no action'
-  if (!isSingleActionProtocol(action)) {
-    return 'an approved verdict did not contain exactly one action'
-  }
-  return parseVisionActionFromSourcePixels(action, encodedBounds, encodedBounds)
-    ? undefined
-    : 'the approved action did not match the action protocol'
-}
-
-function generalStepFieldsError(value: Record<string, unknown>): string | undefined {
+  expectedFields: readonly string[]
+): string | null {
   const receivedFields = Object.keys(value)
-  const expectedFields: string[] = [...GENERAL_STEP_FIELDS]
   const missing = expectedFields.filter((field) => !receivedFields.includes(field))
   const extra = receivedFields.filter((field) => !expectedFields.includes(field))
-  if (missing.length === 0 && extra.length === 0) return undefined
+  if (missing.length === 0 && extra.length === 0) return null
   return [
     missing.length ? `missing fields: ${missing.join(', ')}` : '',
     extra.length ? `unexpected fields: ${extra.join(', ')}` : ''
@@ -110,74 +90,148 @@ function generalStepFieldsError(value: Record<string, unknown>): string | undefi
     .join('; ')
 }
 
-function parseGeneralStepDecisionResult(
-  answer: string,
+function parseCompleteMilestone(value: Record<string, unknown>): GeneralStepCommandResult {
+  const fieldError = fieldsError(value, ['name', 'summary', 'visible_evidence'])
+  if (fieldError) return { command: null, error: fieldError }
+  const summary = normalizedText(value.summary)
+  const visibleEvidence = normalizedText(value.visible_evidence)
+  if (!summary) return { command: null, error: 'summary was empty or was not text' }
+  if (!visibleEvidence) {
+    return { command: null, error: 'visible_evidence was empty or was not text' }
+  }
+  return { command: { name: 'complete_milestone', summary, visibleEvidence } }
+}
+
+function parsePerformAction(
+  value: Record<string, unknown>,
   encodedBounds: { width: number; height: number }
-): GeneralStepDecisionResult {
-  try {
-    const parsed: unknown = JSON.parse(answer)
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return { decision: null, error: 'the final value was not a JSON object' }
-    }
-    const value = parsed as Record<string, unknown>
-    const fieldsError = generalStepFieldsError(value)
-    if (fieldsError) return { decision: null, error: fieldsError }
-    if (!DIRECTION_VERDICTS.includes(value.direction as GeneralStepDecision['direction'])) {
-      return {
-        decision: null,
-        error: `direction ${JSON.stringify(value.direction)} was not "aligned" or "off_course"`
-      }
-    }
-    if (!ACTION_VERDICTS.includes(value.action_verdict as GeneralStepDecision['actionVerdict'])) {
-      return { decision: null, error: 'action_verdict was not approve, rethink, or none' }
-    }
-    if (typeof value.milestone_complete !== 'boolean') {
-      return { decision: null, error: 'milestone_complete was not a boolean' }
-    }
-    const summary = normalizedText(value.summary)
-    const visibleEvidence = normalizedText(value.visible_evidence)
-    const actionVerdict = value.action_verdict as GeneralStepDecision['actionVerdict']
-    const action = value.action === null ? '' : normalizedText(value.action, true)
-    const actionReason = normalizedText(value.action_reason)
-    if (!summary) return { decision: null, error: 'summary was empty or was not text' }
-    if (!visibleEvidence)
-      return {
-        decision: null,
-        error: 'visible_evidence was empty or was not text'
-      }
-    if (action === null)
-      return {
-        decision: null,
-        error: 'action was not text or null'
-      }
-    if (!actionReason)
-      return {
-        decision: null,
-        error: 'action_reason was empty or was not text'
-      }
-    const consistencyError = decisionConsistencyError(value, action, encodedBounds)
-    if (consistencyError) return { decision: null, error: consistencyError }
+): GeneralStepCommandResult {
+  const fieldError = fieldsError(value, [
+    'name',
+    'direction',
+    'summary',
+    'visible_evidence',
+    'action',
+    'action_reason'
+  ])
+  if (fieldError) return { command: null, error: fieldError }
+  if (!DIRECTION_VERDICTS.includes(value.direction as CanonicalDirection)) {
     return {
-      decision: {
-        direction: value.direction as GeneralStepDecision['direction'],
-        milestoneComplete: value.milestone_complete,
-        actionVerdict,
-        summary,
-        visibleEvidence,
-        action,
-        actionReason
-      }
+      command: null,
+      error: `direction ${JSON.stringify(value.direction)} was not "aligned" or "off_course"`
     }
-  } catch {
-    return { decision: null, error: 'the final answer was not valid JSON' }
+  }
+  const summary = normalizedText(value.summary)
+  const visibleEvidence = normalizedText(value.visible_evidence)
+  const action = normalizedText(value.action)
+  const actionReason = normalizedText(value.action_reason)
+  if (!summary) return { command: null, error: 'summary was empty or was not text' }
+  if (!visibleEvidence) {
+    return { command: null, error: 'visible_evidence was empty or was not text' }
+  }
+  if (!action) return { command: null, error: 'action was empty or was not text' }
+  if (!actionReason) return { command: null, error: 'action_reason was empty or was not text' }
+  if (!isSingleActionProtocol(action)) {
+    return { command: null, error: 'perform_action did not contain exactly one action' }
+  }
+  if (!parseVisionActionFromSourcePixels(action, encodedBounds, encodedBounds)) {
+    return { command: null, error: 'the action did not match the action protocol' }
+  }
+  return {
+    command: {
+      name: 'perform_action',
+      direction: value.direction as CanonicalDirection,
+      summary,
+      visibleEvidence,
+      action,
+      actionReason
+    }
   }
 }
 
-export function generalStepDecisionFailure(
+function parseRethink(value: Record<string, unknown>): GeneralStepCommandResult {
+  const fieldError = fieldsError(value, ['name', 'direction', 'summary', 'visible_evidence'])
+  if (fieldError) return { command: null, error: fieldError }
+  if (!DIRECTION_VERDICTS.includes(value.direction as CanonicalDirection)) {
+    return {
+      command: null,
+      error: `direction ${JSON.stringify(value.direction)} was not "aligned" or "off_course"`
+    }
+  }
+  const summary = normalizedText(value.summary)
+  const visibleEvidence = normalizedText(value.visible_evidence)
+  if (!summary) return { command: null, error: 'summary was empty or was not text' }
+  if (!visibleEvidence) {
+    return { command: null, error: 'visible_evidence was empty or was not text' }
+  }
+  return {
+    command: {
+      name: 'rethink',
+      direction: value.direction as CanonicalDirection,
+      summary,
+      visibleEvidence
+    }
+  }
+}
+
+/** Accept only the safe part of the retired flat contract. Old or weaker local
+ * models can still report a completed milestone, but any mixed-in action is
+ * discarded before LangGraph sees the transition. */
+function parseLegacyCompletion(value: Record<string, unknown>): GeneralStepCommandResult | null {
+  if (value.milestone_complete !== true) return null
+  const summary = normalizedText(value.summary)
+  const visibleEvidence = normalizedText(value.visible_evidence)
+  if (!summary) return { command: null, error: 'summary was empty or was not text' }
+  if (!visibleEvidence) {
+    return { command: null, error: 'visible_evidence was empty or was not text' }
+  }
+  return { command: { name: 'complete_milestone', summary, visibleEvidence } }
+}
+
+function parseGeneralStepCommandResult(
+  answer: string,
+  encodedBounds: { width: number; height: number }
+): GeneralStepCommandResult {
+  try {
+    const parsed: unknown = JSON.parse(answer)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { command: null, error: 'the final value was not a JSON object' }
+    }
+    const value = parsed as Record<string, unknown>
+    const legacy = parseLegacyCompletion(value)
+    if (legacy) return legacy
+    const outerFieldsError = fieldsError(value, ['command'])
+    if (outerFieldsError) return { command: null, error: outerFieldsError }
+    if (!value.command || typeof value.command !== 'object' || Array.isArray(value.command)) {
+      return { command: null, error: 'command was not an object' }
+    }
+    const command = value.command as Record<string, unknown>
+    if (!VISION_STEP_COMMANDS.includes(command.name as GeneralStepCommand['name'])) {
+      return {
+        command: null,
+        error: 'command name was not complete_milestone, perform_action, or rethink'
+      }
+    }
+    if (command.name === 'complete_milestone') return parseCompleteMilestone(command)
+    if (command.name === 'perform_action') return parsePerformAction(command, encodedBounds)
+    return parseRethink(command)
+  } catch {
+    return { command: null, error: 'the final answer was not valid JSON' }
+  }
+}
+
+export function parseGeneralStepCommand(
+  answer: string,
+  encodedBounds: { width: number; height: number }
+): GeneralStepCommand | null {
+  return parseGeneralStepCommandResult(answer, encodedBounds).command
+}
+
+export function generalStepCommandFailure(
   answer: string,
   encodedBounds: { width: number; height: number }
 ): string | undefined {
-  return parseGeneralStepDecisionResult(answer, encodedBounds).error
+  return parseGeneralStepCommandResult(answer, encodedBounds).error
 }
 
 function taskContext(input: VisionPolicyInput): string {
@@ -188,8 +242,11 @@ function taskContext(input: VisionPolicyInput): string {
     input.verifiedActions?.length
       ? `Recent verified actions:\n${input.verifiedActions.slice(-12).join('\n')}`
       : 'Recent verified actions:\nNone yet.',
+    input.previousClickMarker
+      ? `Previous action to judge:\n${input.verifiedActions?.at(-1) ?? 'click'}\nThe emerald-green marker at (${input.previousClickMarker.x}, ${input.previousClickMarker.y}) shows where that click landed in the current screenshot. Verify its visible result before choosing the next command.`
+      : '',
     input.history.length
-      ? `Prior validated judge decisions:\n${input.history
+      ? `Prior validated commands:\n${input.history
           .slice(-12)
           .map((step) => step.response)
           .join('\n')}`
@@ -201,7 +258,7 @@ function taskContext(input: VisionPolicyInput): string {
     encoded
       ? `Screenshot coordinate space:\nThe supplied screenshot is ${encoded.width} pixels wide and ${encoded.height} pixels high. Return action coordinates in this exact pixel space.`
       : '',
-    'Inspect the screenshot. Produce the final consolidated direction, milestone, and validated-action decision.'
+    'Inspect the screenshot and choose exactly one transition command.'
   ]
     .filter(Boolean)
     .join('\n\n')
@@ -213,47 +270,47 @@ export function parseGeneralVisionOperatorResponse(
   coordinateFrame?: Parameters<VisionModelAdapter['parseResponse']>[2]
 ): VisionPolicyDecision {
   const encoded = coordinateFrame?.encoded ?? bounds
-  const verdict = parseGeneralStepDecision(response, encoded)
-  if (!verdict) {
+  const command = parseGeneralStepCommand(response, encoded)
+  if (!command) {
     return {
       kind: 'invalid',
       actionText: '',
-      error: generalStepDecisionFailure(response, encoded) ?? 'The model decision did not validate.'
+      error: generalStepCommandFailure(response, encoded) ?? 'The model command did not validate.'
     }
   }
-  if (verdict.milestoneComplete) {
+  if (command.name === 'complete_milestone') {
     return {
       kind: 'phase_complete',
       actionText: 'Milestone complete',
-      summary: verdict.summary,
-      decisionRationale: verdict.visibleEvidence
+      summary: command.summary,
+      decisionRationale: command.visibleEvidence
     }
   }
-  if (verdict.actionVerdict !== 'approve') {
+  if (command.name === 'rethink') {
     return {
       kind: 'rethink',
-      actionText: verdict.actionVerdict,
-      summary: verdict.actionReason,
-      direction: verdict.direction,
-      decisionRationale: verdict.visibleEvidence
+      actionText: 'rethink',
+      summary: command.summary,
+      direction: command.direction,
+      decisionRationale: command.visibleEvidence
     }
   }
-  const actionResponse = `Decision: ${verdict.summary}\nAction: ${verdict.action}`
+  const actionResponse = `Decision: ${command.summary}\nAction: ${command.action}`
   const action = parseVisionActionFromSourcePixels(actionResponse, encoded, encoded)
   if (!action) {
     return {
       kind: 'invalid',
       actionText: '',
       error: 'The model action did not parse.',
-      decisionRationale: verdict.visibleEvidence
+      decisionRationale: command.visibleEvidence
     }
   }
   if (action.type === 'finished') {
     return {
       kind: 'done',
       actionText: action.content,
-      summary: action.content || verdict.summary,
-      decisionRationale: verdict.visibleEvidence
+      summary: action.content || command.summary,
+      decisionRationale: command.visibleEvidence
     }
   }
   if (action.type === 'call_user') {
@@ -261,7 +318,7 @@ export function parseGeneralVisionOperatorResponse(
       kind: 'handoff',
       actionText: action.content,
       reason: action.content,
-      decisionRationale: verdict.visibleEvidence
+      decisionRationale: command.visibleEvidence
     }
   }
   if (action.type === 'wait') {
@@ -269,14 +326,14 @@ export function parseGeneralVisionOperatorResponse(
       kind: 'wait',
       actionText: 'wait',
       durationMs: 0,
-      decisionRationale: verdict.visibleEvidence
+      decisionRationale: command.visibleEvidence
     }
   }
   return {
     kind: 'actions',
-    actionText: verdict.summary,
+    actionText: command.summary,
     actions: [action],
-    decisionRationale: `${verdict.visibleEvidence} ${verdict.actionReason}`
+    decisionRationale: `${command.visibleEvidence} ${command.actionReason}`
   }
 }
 
@@ -297,7 +354,7 @@ export function buildCanonicalVisionOperatorRequest(
     ],
     maxTokens: 1_200,
     timeoutMs: 90_000,
-    maxAttempts: 1,
+    maxAttempts: 2,
     responseFormat: GENERAL_STEP_RESPONSE_FORMAT,
     temperature: 0.1,
     topP: 0.9,
@@ -305,9 +362,9 @@ export function buildCanonicalVisionOperatorRequest(
     separateReasoning: true,
     requireFinalAnswer: true,
     validateResponse: (answer) =>
-      encoded ? parseGeneralStepDecision(answer, encoded) !== null : false,
+      encoded ? parseGeneralStepCommand(answer, encoded) !== null : false,
     responseValidationError: (answer) =>
-      encoded ? generalStepDecisionFailure(answer, encoded) : 'screenshot bounds were missing'
+      encoded ? generalStepCommandFailure(answer, encoded) : 'screenshot bounds were missing'
   }
 }
 

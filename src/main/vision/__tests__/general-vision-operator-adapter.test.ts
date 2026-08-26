@@ -1,12 +1,13 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import sharp from 'sharp'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { llm } from '../../llm'
 import {
   generalVisionOperatorAdapter,
-  generalStepDecisionFailure,
-  parseGeneralStepDecision,
+  generalStepCommandFailure,
+  parseGeneralStepCommand,
   parseGeneralVisionOperatorResponse
 } from '../model-adapters/general-vision-operator'
 import { resolveVisionModelAdapter } from '../model-adapters/registry'
@@ -16,6 +17,7 @@ import {
   answerAfterThinking,
   createVisionGrounder,
   normalizedPolicyAnswer,
+  previousClickMarker,
   remoteVisionProviderError,
   remoteVisionTransportError,
   visionPolicyMessagesForAttempt,
@@ -44,14 +46,37 @@ const bounds = { width: 744, height: 1024 }
 
 function verdict(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
-    direction: 'aligned',
-    milestone_complete: false,
-    action_verdict: 'approve',
-    summary: 'The milestone still needs one result.',
-    visible_evidence: 'The Roundtrip control is visible near the upper left.',
-    action: "click(point='100 295')",
-    action_reason: 'The point is visibly inside the Roundtrip control.',
-    ...overrides
+    command: {
+      name: 'perform_action',
+      direction: 'aligned',
+      summary: 'The milestone still needs one result.',
+      visible_evidence: 'The Roundtrip control is visible near the upper left.',
+      action: "click(point='100 295')",
+      action_reason: 'The point is visibly inside the Roundtrip control.',
+      ...overrides
+    }
+  })
+}
+
+function complete(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    command: {
+      name: 'complete_milestone',
+      summary: 'The milestone result is visible.',
+      visible_evidence: 'The requested result is visible in the screenshot.',
+      ...overrides
+    }
+  })
+}
+
+function rethink(direction: 'aligned' | 'off_course'): string {
+  return JSON.stringify({
+    command: {
+      name: 'rethink',
+      direction,
+      summary: 'No safe action can be verified.',
+      visible_evidence: 'The intended target is not visibly confirmed.'
+    }
   })
 }
 
@@ -67,7 +92,7 @@ describe('General vision operator adapter', () => {
       coordinateFrame: { encoded: bounds, source: { width: 1064, height: 1464 } },
       history: [
         {
-          response: verdict({ summary: 'The site is open.' }),
+          response: complete({ summary: 'The site is open.' }),
           actionText: 'Open the site'
         }
       ],
@@ -81,16 +106,17 @@ describe('General vision operator adapter', () => {
     expect(request.separateReasoning).toBe(true)
     expect(request.requireFinalAnswer).toBe(true)
     expect(request.responseFormat).toMatchObject({
-      json_schema: { name: 'visual_step_decision', strict: true }
+      json_schema: { name: 'visual_step_command', strict: true }
     })
     const serialized = JSON.stringify(request.messages)
     expect(serialized).toContain('Find a one-way flight from SFO to PNQ')
     expect(serialized).toContain('Enter the flight details')
     expect(serialized).toContain('Opened the site')
-    expect(serialized).toContain('Prior validated judge decisions')
+    expect(serialized).toContain('Prior validated commands')
     expect(serialized).toContain('The site is open')
     expect(serialized).toContain('744 pixels wide and 1024 pixels high')
     expect(serialized).toContain('summary must directly report every concrete value requested')
+    expect(serialized).not.toContain('subtask_complete()')
     expect(serialized).not.toContain('1064 pixels wide')
   })
 
@@ -116,8 +142,8 @@ describe('General vision operator adapter', () => {
       enableThinking: true,
       separateReasoning: true,
       requireFinalAnswer: true,
-      maxAttempts: 1,
-      responseFormat: { json_schema: { name: 'visual_step_decision', strict: true } }
+      maxAttempts: 2,
+      responseFormat: { json_schema: { name: 'visual_step_command', strict: true } }
     })
     expect(request.disableThinking).not.toBe(true)
     expect(request.validateResponse?.(verdict())).toBe(true)
@@ -135,7 +161,7 @@ describe('General vision operator adapter', () => {
   it('normalizes a fenced final answer without weakening its JSON schema', () => {
     expect(normalizedPolicyAnswer(`\`\`\`json\n${verdict()}\n\`\`\``)).toBe(verdict())
     expect(
-      parseGeneralStepDecision(normalizedPolicyAnswer(`\`\`\`json\n${verdict()}\n\`\`\``), bounds)
+      parseGeneralStepCommand(normalizedPolicyAnswer(`\`\`\`json\n${verdict()}\n\`\`\``), bounds)
     ).not.toBeNull()
   })
 
@@ -147,14 +173,16 @@ describe('General vision operator adapter', () => {
         messages,
         2,
         '{"wrong":true}',
-        'direction "complete" was not "aligned" or "off_course"'
+        'command name was not complete_milestone, perform_action, or rethink'
       )
     ).toEqual([
       ...messages,
       { role: 'assistant', content: '{"wrong":true}' },
       expect.objectContaining({
         role: 'system',
-        content: expect.stringContaining('direction "complete" was not "aligned" or "off_course"')
+        content: expect.stringContaining(
+          'command name was not complete_milestone, perform_action, or rethink'
+        )
       })
     ])
   })
@@ -186,11 +214,8 @@ describe('General vision operator adapter', () => {
     )
   })
 
-  it('keeps milestone completion independent and suppresses its proposed action', () => {
-    const parsed = parseGeneralVisionOperatorResponse(
-      verdict({ milestone_complete: true, action_verdict: 'none', action: null }),
-      bounds
-    )
+  it('routes a complete_milestone command without an action', () => {
+    const parsed = parseGeneralVisionOperatorResponse(complete(), bounds)
 
     expect(parsed).toMatchObject({ kind: 'phase_complete' })
     expect(parsed).not.toHaveProperty('actions')
@@ -205,6 +230,30 @@ describe('General vision operator adapter', () => {
     })
   })
 
+  it('projects the previous click into the current screenshot coordinate frame', () => {
+    expect(
+      previousClickMarker({
+        goal: 'Use the control.',
+        image: '/tmp/current.png',
+        history: [],
+        retrievedFacts: [],
+        policyHistory: [],
+        guidance: [],
+        previousVerifiedAction: {
+          action: { type: 'click', point: { x: 285, y: 148 } },
+          coordinateFrame: {
+            encoded: { width: 1000, height: 1000 },
+            source: { width: 1000, height: 1000 }
+          }
+        },
+        coordinateFrame: {
+          encoded: { width: 500, height: 500 },
+          source: { width: 500, height: 500 }
+        }
+      })
+    ).toEqual({ x: 143, y: 74 })
+  })
+
   it('allows an approved corrective action while direction is off-course', () => {
     const parsed = parseGeneralVisionOperatorResponse(
       verdict({ direction: 'off_course', action_reason: 'This returns to the correct task path.' }),
@@ -215,53 +264,31 @@ describe('General vision operator adapter', () => {
   })
 
   it.each(['aligned', 'off_course'] as const)(
-    'turns a %s rethink verdict into a non-actuating decision',
+    'turns a %s rethink command into a non-actuating decision',
     (direction) => {
-      const parsed = parseGeneralVisionOperatorResponse(
-        verdict({ direction, action_verdict: 'rethink', action: null }),
-        bounds
-      )
+      const parsed = parseGeneralVisionOperatorResponse(rethink(direction), bounds)
 
       expect(parsed).toMatchObject({ kind: 'rethink', direction })
     }
   )
 
-  it('accepts a null action when no action should run', () => {
+  it('accepts the retired flat completion as a safe compatibility transition', () => {
     expect(
-      parseGeneralStepDecision(
-        verdict({ milestone_complete: true, action_verdict: 'none', action: null }),
+      parseGeneralStepCommand(
+        JSON.stringify({
+          milestone_complete: true,
+          summary: 'The site is open.',
+          visible_evidence: 'Google Flights is visible.',
+          action: "click(point='100 295')"
+        }),
         bounds
       )
-    ).toMatchObject({ milestoneComplete: true, actionVerdict: 'none', action: '' })
+    ).toMatchObject({ name: 'complete_milestone', summary: 'The site is open.' })
   })
-
-  it.each(['none', 'null', 'subtask_complete()'])(
-    'rejects the non-structured no-action literal %s',
-    (action) => {
-      expect(
-        parseGeneralStepDecision(
-          verdict({ milestone_complete: true, action_verdict: 'none', action }),
-          bounds
-        )
-      ).toBeNull()
-    }
-  )
-
-  it.each(['approve', 'rethink'] as const)(
-    'rejects a completed milestone with an inconsistent %s verdict',
-    (actionVerdict) => {
-      expect(
-        parseGeneralStepDecision(
-          verdict({ milestone_complete: true, action_verdict: actionVerdict, action: null }),
-          bounds
-        )
-      ).toBeNull()
-    }
-  )
 
   it('does not reject concise decision text because of an arbitrary character limit', () => {
     expect(
-      parseGeneralStepDecision(
+      parseGeneralStepCommand(
         verdict({
           summary: 's'.repeat(500),
           visible_evidence: 'e'.repeat(800),
@@ -272,50 +299,49 @@ describe('General vision operator adapter', () => {
     ).not.toBeNull()
   })
 
-  it('rejects a null action when an action is approved', () => {
-    expect(generalStepDecisionFailure(verdict({ action: null }), bounds)).toBe(
-      'an approved verdict had no action'
+  it('rejects a perform_action command without an action', () => {
+    expect(generalStepCommandFailure(verdict({ action: null }), bounds)).toBe(
+      'action was empty or was not text'
     )
   })
 
   it('reports the rejected direction value', () => {
-    expect(generalStepDecisionFailure(verdict({ direction: 'complete' }), bounds)).toBe(
+    expect(generalStepCommandFailure(verdict({ direction: 'complete' }), bounds)).toBe(
       'direction "complete" was not "aligned" or "off_course"'
     )
   })
 
   it('rejects malformed or extra structured fields', () => {
-    expect(parseGeneralStepDecision('{"direction":"aligned"}', bounds)).toBeNull()
-    expect(parseGeneralStepDecision(verdict({ unexpected: true }), bounds)).toBeNull()
-    expect(generalStepDecisionFailure('{"direction":"aligned"}', bounds)).toContain(
-      'missing fields'
-    )
-    expect(generalStepDecisionFailure(verdict({ action: 'not_an_action' }), bounds)).toBe(
-      'an approved verdict did not contain exactly one action'
+    expect(parseGeneralStepCommand('{"direction":"aligned"}', bounds)).toBeNull()
+    expect(parseGeneralStepCommand(verdict({ unexpected: true }), bounds)).toBeNull()
+    expect(generalStepCommandFailure('{"direction":"aligned"}', bounds)).toContain('missing fields')
+    expect(generalStepCommandFailure(verdict({ action: 'not_an_action' }), bounds)).toBe(
+      'perform_action did not contain exactly one action'
     )
     expect(
-      generalStepDecisionFailure(
+      generalStepCommandFailure(
         verdict({ action: "click(point='100 295'), click(point='200 300')" }),
         bounds
       )
-    ).toBe('an approved verdict did not contain exactly one action')
+    ).toBe('perform_action did not contain exactly one action')
     expect(
-      generalStepDecisionFailure(verdict({ action: "click(point='100 295') trailing" }), bounds)
-    ).toBe('an approved verdict did not contain exactly one action')
-    expect(
-      generalStepDecisionFailure(verdict({ action: ["click(point='100 295')"] }), bounds)
-    ).toBe('action was not text or null')
+      generalStepCommandFailure(verdict({ action: "click(point='100 295') trailing" }), bounds)
+    ).toBe('perform_action did not contain exactly one action')
+    expect(generalStepCommandFailure(verdict({ action: ["click(point='100 295')"] }), bounds)).toBe(
+      'action was empty or was not text'
+    )
   })
 
-  it('accepts the strict decision fields in any JSON object order', () => {
-    const shuffled = Object.fromEntries(Object.entries(JSON.parse(verdict())).reverse())
+  it('accepts the strict command fields in any JSON object order', () => {
+    const source = JSON.parse(verdict()) as { command: Record<string, unknown> }
+    const shuffled = { command: Object.fromEntries(Object.entries(source.command).reverse()) }
 
-    expect(parseGeneralStepDecision(JSON.stringify(shuffled), bounds)).not.toBeNull()
+    expect(parseGeneralStepCommand(JSON.stringify(shuffled), bounds)).not.toBeNull()
   })
 
   it('does not misclassify action-like text inside a single type action', () => {
     expect(
-      parseGeneralStepDecision(verdict({ action: "type(content='Then, click(save)')" }), bounds)
+      parseGeneralStepCommand(verdict({ action: "type(content='Then, click(save)')" }), bounds)
     ).not.toBeNull()
   })
 
@@ -355,8 +381,56 @@ describe('General vision operator adapter', () => {
     }
   })
 
-  it('fails closed after malformed final answers exhaust retries', async () => {
-    vi.spyOn(llm, 'chatMessages').mockResolvedValue('{"direction":"aligned"}')
+  it('draws the previous click marker into only the model-input screenshot', async () => {
+    const imagePath = path.join(os.tmpdir(), `offgrid-vision-marker-${process.pid}.png`)
+    const original = await sharp({
+      create: { width: 100, height: 100, channels: 3, background: '#000000' }
+    })
+      .png()
+      .toBuffer()
+    fs.writeFileSync(imagePath, original)
+    const chat = vi.spyOn(llm, 'chatMessages').mockResolvedValue(verdict())
+
+    try {
+      const ground = createVisionGrounder(generalVisionOperatorAdapter)
+      const result = await ground({
+        goal: 'Open the trip type menu.',
+        image: imagePath,
+        history: [],
+        retrievedFacts: [],
+        policyHistory: [],
+        guidance: [],
+        verifiedActions: ['click at (50, 30)'],
+        previousVerifiedAction: {
+          action: { type: 'click', point: { x: 50, y: 30 } },
+          coordinateFrame: {
+            encoded: { width: 100, height: 100 },
+            source: { width: 100, height: 100 }
+          }
+        },
+        coordinateFrame: {
+          encoded: { width: 100, height: 100 },
+          source: { width: 100, height: 100 }
+        }
+      })
+
+      const annotated = Buffer.from(result.screenshotDataUrl!.split(',')[1]!, 'base64')
+      const { data, info } = await sharp(annotated).removeAlpha().raw().toBuffer({
+        resolveWithObject: true
+      })
+      const offset = (30 * info.width + 50) * info.channels
+      expect([...data.subarray(offset, offset + 3)]).toEqual([52, 211, 153])
+      expect(fs.readFileSync(imagePath)).toEqual(original)
+      expect(JSON.stringify(chat.mock.calls[0]?.[0])).toContain(
+        'The emerald-green marker at (50, 30) shows where that click landed'
+      )
+    } finally {
+      fs.rmSync(imagePath, { force: true })
+    }
+  })
+
+  it('returns a malformed command after bounded retries so LangGraph can re-observe', async () => {
+    const chat = vi.spyOn(llm, 'chatMessages').mockResolvedValue('{"direction":"aligned"}')
     const request = generalVisionOperatorAdapter.buildRequest({
       goal: 'Open the control.',
       currentScreenshotDataUrl: 'data:image/png;base64,current',
@@ -366,6 +440,7 @@ describe('General vision operator adapter', () => {
       olderVisualFacts: []
     })
 
-    await expect(runVisionPolicyRequest(request)).rejects.toThrow('invalid final answer')
+    await expect(runVisionPolicyRequest(request)).resolves.toBe('{"direction":"aligned"}')
+    expect(chat).toHaveBeenCalledTimes(2)
   })
 })

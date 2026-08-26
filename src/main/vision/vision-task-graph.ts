@@ -125,6 +125,10 @@ class VisionTaskGraphRuntime {
   private readonly steps: string[] = []
   private readonly policyHistory: VisionPolicyHistoryStep[] = []
   private readonly verifiedActions: string[] = []
+  private previousVerifiedAction?: {
+    action: VisionAction
+    coordinateFrame: ReturnType<typeof coordinateFrame>
+  }
   private handoffs = 0
   private modelStep = 0
   private phaseIndex = 0
@@ -285,7 +289,6 @@ class VisionTaskGraphRuntime {
         captured.shot.bounds,
         coordinateFrame(captured.shot)
       )
-      if (this.decision.kind === 'invalid') throw new Error(this.decision.error)
       this.pendingPolicyHistory = {
         response: grounding.response,
         actionText: this.decision.actionText,
@@ -344,6 +347,18 @@ class VisionTaskGraphRuntime {
       return { route: 'end' }
     }
     if (decision.kind === 'actions') {
+      const repeatedClick = decision.actions.find((action) =>
+        isSameClickAction(action, this.previousVerifiedAction?.action)
+      )
+      if (repeatedClick) {
+        const summary = `Repeated click blocked at (${repeatedClick.point.x}, ${repeatedClick.point.y}). The previous click marker shows where it landed; choose a different visible target or rethink.`
+        this.discardPendingPolicyHistory()
+        this.observeDecision('blocked', summary)
+        this.note(summary)
+        this.progress('checking', 'Choosing a different target after a repeated click')
+        this.checkpoint()
+        return { route: 'gate' }
+      }
       this.observeDecision('reviewed')
       this.note(`action approved: ${decision.actionText}`)
       this.checkpoint()
@@ -439,6 +454,10 @@ class VisionTaskGraphRuntime {
         const verified = describeAction(action)
         this.note(verified)
         this.verifiedActions.push(verified)
+        this.previousVerifiedAction = {
+          action,
+          coordinateFrame: coordinateFrame(captured.shot)
+        }
         if (actuation?.mappedAction) mappedActions.push(actuation.mappedAction)
       }
     } catch (error) {
@@ -525,6 +544,7 @@ class VisionTaskGraphRuntime {
       guidance: captured.guidance,
       currentMilestone: captured.currentMilestone,
       verifiedActions: [...this.verifiedActions],
+      previousVerifiedAction: this.previousVerifiedAction,
       coordinateFrame: coordinateFrame(captured.shot),
       signal: this.deps.signal,
       reportProgress: (action) => this.progress('thinking', action),
@@ -683,5 +703,26 @@ function describeAction(action: VisionAction): string {
       return `wait ${action.durationMs ?? 0}ms`
     default:
       return action.type
+  }
+}
+
+function isSameClickAction(
+  action: VisionAction,
+  previous: VisionAction | undefined
+): action is Extract<VisionAction, { point: { x: number; y: number } }> {
+  if (!previous || action.type !== previous.type) return false
+  switch (action.type) {
+    case 'click':
+    case 'double_click':
+    case 'right_click':
+    case 'middle_click':
+    case 'triple_click':
+      return (
+        'point' in previous &&
+        action.point.x === previous.point.x &&
+        action.point.y === previous.point.y
+      )
+    default:
+      return false
   }
 }

@@ -1,10 +1,13 @@
 import fs from 'node:fs'
+import sharp from 'sharp'
 import { llm } from '../llm'
 import { imageMime } from '../llm/chat-payload'
 import { TASK_GUIDANCE_APPLIED_TRACE } from '../tasks/task-guide'
 import type { VisionGroundingInput, VisionGroundingResult } from './vision-agent'
+import type { VisionAction } from './vision-action'
 import type {
   VisionModelAdapter,
+  VisionPolicyInput,
   VisionPolicyMessage,
   VisionPolicyRequest
 } from './model-adapters/types'
@@ -147,6 +150,10 @@ export async function runVisionPolicyRequest(
         console.warn(
           `[vision-policy] local final answer rejected: ${reason || 'unknown validation error'}; answer=${JSON.stringify(answer.slice(0, 4_000))}`
         )
+        // Return the final malformed command to the graph after the bounded
+        // same-frame retry. The parser converts it to an invalid transition,
+        // and LangGraph safely captures a fresh frame instead of ending the task.
+        if (attempt === request.maxAttempts) return answer
         throw new Error(
           `Computer-use model returned an invalid final answer${reason ? `: ${reason}` : ''}.`
         )
@@ -160,7 +167,108 @@ export async function runVisionPolicyRequest(
   throw lastError instanceof Error ? lastError : new Error('Computer-use model request failed.')
 }
 
-function visionPolicyInput(input: VisionGroundingInput, screenshotDataUrl: string) {
+interface PreviousClickMarker {
+  x: number
+  y: number
+}
+
+function clickPoint(action: VisionAction): { x: number; y: number } | undefined {
+  switch (action.type) {
+    case 'click':
+    case 'double_click':
+    case 'right_click':
+    case 'middle_click':
+    case 'triple_click':
+      return action.point
+    default:
+      return undefined
+  }
+}
+
+/** Project the prior click into the current encoded screenshot frame. */
+export function previousClickMarker(input: VisionGroundingInput): PreviousClickMarker | undefined {
+  const previous = input.previousVerifiedAction
+  const currentFrame = input.coordinateFrame
+  const point = previous ? clickPoint(previous.action) : undefined
+  if (!previous || !currentFrame || !point) return undefined
+  const previousBounds = previous.coordinateFrame.encoded
+  const currentBounds = currentFrame.encoded
+  if (
+    previousBounds.width <= 0 ||
+    previousBounds.height <= 0 ||
+    currentBounds.width <= 0 ||
+    currentBounds.height <= 0
+  ) {
+    return undefined
+  }
+  return {
+    x: Math.max(
+      0,
+      Math.min(
+        currentBounds.width - 1,
+        Math.round((point.x * currentBounds.width) / previousBounds.width)
+      )
+    ),
+    y: Math.max(
+      0,
+      Math.min(
+        currentBounds.height - 1,
+        Math.round((point.y * currentBounds.height) / previousBounds.height)
+      )
+    )
+  }
+}
+
+async function modelScreenshot(input: VisionGroundingInput): Promise<{
+  dataUrl: string
+  marker?: PreviousClickMarker
+}> {
+  const source = fs.readFileSync(input.image)
+  const marker = previousClickMarker(input)
+  if (!marker) {
+    return { dataUrl: `data:${imageMime(input.image)};base64,${source.toString('base64')}` }
+  }
+  const markerSize = Math.max(
+    14,
+    Math.min(
+      24,
+      Math.round(
+        Math.min(input.coordinateFrame!.encoded.width, input.coordinateFrame!.encoded.height) *
+          0.025
+      )
+    )
+  )
+  const radius = markerSize / 2
+  const overlay = Buffer.from(
+    `<svg width="${markerSize}" height="${markerSize}" xmlns="http://www.w3.org/2000/svg"><circle cx="${radius}" cy="${radius}" r="${Math.max(2, radius - 2)}" fill="#34D399" stroke="#FFFFFF" stroke-width="2"/></svg>`
+  )
+  const annotated = await sharp(source)
+    .composite([
+      {
+        input: overlay,
+        left: Math.max(
+          0,
+          Math.min(input.coordinateFrame!.encoded.width - markerSize, Math.round(marker.x - radius))
+        ),
+        top: Math.max(
+          0,
+          Math.min(
+            input.coordinateFrame!.encoded.height - markerSize,
+            Math.round(marker.y - radius)
+          )
+        )
+      }
+    ])
+    .png()
+    .toBuffer()
+  return { dataUrl: `data:image/png;base64,${annotated.toString('base64')}`, marker }
+}
+
+function visionPolicyInput(
+  input: VisionGroundingInput,
+  screenshotDataUrl: string,
+  marker?: PreviousClickMarker
+): VisionPolicyInput {
   return {
     goal: input.goal,
     currentScreenshotDataUrl: screenshotDataUrl,
@@ -169,6 +277,7 @@ function visionPolicyInput(input: VisionGroundingInput, screenshotDataUrl: strin
     olderVisualFacts: input.retrievedFacts,
     currentMilestone: input.currentMilestone,
     verifiedActions: input.verifiedActions,
+    previousClickMarker: marker,
     coordinateFrame: input.coordinateFrame
   }
 }
@@ -187,8 +296,10 @@ export function createVisionGrounder(
   adapter: VisionModelAdapter
 ): (input: VisionGroundingInput) => Promise<VisionGroundingResult> {
   return async (input) => {
-    const screenshotDataUrl = `data:${imageMime(input.image)};base64,${fs.readFileSync(input.image).toString('base64')}`
-    const request = adapter.buildRequest(visionPolicyInput(input, screenshotDataUrl))
+    const screenshot = await modelScreenshot(input)
+    const request = adapter.buildRequest(
+      visionPolicyInput(input, screenshot.dataUrl, screenshot.marker)
+    )
     input.reportProgress?.('Reviewing direction, milestone, and next action')
     const response = await runVisionPolicyRequest(request, input.signal, input.reportReasoning)
     return {
@@ -197,7 +308,7 @@ export function createVisionGrounder(
         `Visual step decision request:\n${serializeVisionPolicyMessages(request.messages)}`,
         input.guidance
       ),
-      screenshotDataUrl
+      screenshotDataUrl: screenshot.dataUrl
     }
   }
 }

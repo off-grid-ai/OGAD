@@ -114,8 +114,8 @@ export function mapBrowserVisionAction(
 }
 
 /** Recalculate a page-local action when the live browser was resized after the
- * screenshot. The model coordinates remain tied to the captured image; only
- * the final CDP viewport coordinates change. */
+ * screenshot. Web Use keeps one fixed 1920x1200 CSS viewport and changes only
+ * its native zoom, so this proportional transform preserves the target. */
 export function remapPageActionToCurrentViewport(
   action: VisionAction,
   capturedPage: { width: number; height: number },

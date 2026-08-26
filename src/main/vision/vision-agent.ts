@@ -63,6 +63,13 @@ export interface VisionGroundingInput {
   guidance: readonly string[]
   currentMilestone?: string
   verifiedActions?: readonly string[]
+  /** Last action that crossed the execution boundary, in the pixel frame used
+   * when the model selected it. The policy runner uses this only to annotate an
+   * in-memory copy of the next screenshot. */
+  previousVerifiedAction?: {
+    action: VisionAction
+    coordinateFrame: VisionPolicyCoordinateFrame
+  }
   coordinateFrame?: VisionPolicyCoordinateFrame
   /** Audit-safe stage updates only. Never send hidden reasoning through this callback. */
   reportProgress?: (action: string) => void

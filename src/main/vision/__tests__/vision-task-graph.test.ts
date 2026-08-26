@@ -111,6 +111,26 @@ describe('runVisionTaskGraph', () => {
     expect(w.observations.map((item) => item.result)).toEqual(['reviewed', 'actuated', 'terminal'])
   })
 
+  it('blocks an identical repeated click and asks the next judge pass for another target', async () => {
+    const w = workflow([action(), action(), complete()])
+    w.deps.plan = { version: 1, phases: [{ id: 'only', title: 'Use the visible control' }] }
+
+    const result = await runVisionTaskGraph('Use the visible control.', w.deps)
+
+    expect(result.ok).toBe(true)
+    expect(w.decisionCalls).toBe(3)
+    expect(w.actuated).toEqual(['click:100,295'])
+    expect(result.steps).toContain(
+      'Repeated click blocked at (100, 295). The previous click marker shows where it landed; choose a different visible target or rethink.'
+    )
+    expect(w.observations.map((item) => item.result)).toEqual([
+      'reviewed',
+      'actuated',
+      'blocked',
+      'terminal'
+    ])
+  })
+
   it('publishes reasoning through the separated live channel and closes that state', async () => {
     const w = workflow([complete()])
     w.deps.plan = { version: 1, phases: [{ id: 'only', title: 'Confirm the result' }] }
@@ -144,7 +164,7 @@ describe('runVisionTaskGraph', () => {
     expect(w.observations.map((item) => item.result)).toEqual(['reviewed', 'blocked', 'terminal'])
   })
 
-  it('does not execute an action when completion and approval are both true', async () => {
+  it('never routes a complete_milestone transition through the execution node', async () => {
     const w = workflow([complete()])
     w.deps.plan = { version: 1, phases: [{ id: 'only', title: 'Confirm the result' }] }
 
@@ -178,16 +198,18 @@ describe('runVisionTaskGraph', () => {
     }
   )
 
-  it('fails closed when the consolidated decision is malformed', async () => {
+  it('takes a fresh observation when a transition command is malformed', async () => {
     const w = workflow([
-      { kind: 'invalid', actionText: '', error: 'The model action did not parse.' }
+      { kind: 'invalid', actionText: '', error: 'The model command did not parse.' },
+      complete()
     ])
+    w.deps.plan = { version: 1, phases: [{ id: 'only', title: 'Use the visible control' }] }
 
     const result = await runVisionTaskGraph('Use the visible control.', w.deps)
 
-    expect(result.ok).toBe(false)
-    expect(result.summary).toContain('The model action did not parse.')
-    expect(w.decisionCalls).toBe(1)
+    expect(result.ok).toBe(true)
+    expect(w.decisionCalls).toBe(2)
     expect(w.actuated).toEqual([])
+    expect(w.observations.map((item) => item.result)).toEqual(['parse_failed', 'terminal'])
   })
 })

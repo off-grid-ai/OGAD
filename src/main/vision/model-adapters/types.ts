@@ -25,6 +25,9 @@ export interface VisionPolicyInput {
   currentMilestone?: string
   /** Actions that crossed the execution boundary without an error. */
   verifiedActions?: readonly string[]
+  /** Marker drawn into the current screenshot at the previous click position.
+   * This lets the visual judge verify where the last action landed. */
+  previousClickMarker?: { x: number; y: number }
   /** The image sent to the model and the capture pixel space used by a
    * general model's coordinates. Specialist adapters keep their native
    * coordinate protocol. */
