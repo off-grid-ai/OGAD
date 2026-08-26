@@ -11,7 +11,10 @@ import { isProEntitled } from '../licensing/license-service'
 import { getForcedProActivation } from './pro-activation'
 import { app, ipcMain, type IpcMainInvokeEvent } from 'electron'
 
-type ProIpcHandler = (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
+// IPC is an untyped Electron boundary. Individual handlers validate and type
+// their own argument tuples before use.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ProIpcHandler = (event: IpcMainInvokeEvent, ...args: any[]) => unknown
 
 // What the pro main entry receives. Pro registers IPC handlers + intervals +
 // tool extensions itself, using these core helpers (no core→pro imports).

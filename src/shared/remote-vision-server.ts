@@ -111,6 +111,7 @@ export const REMOTE_VISION_DEFAULTS: Record<
 
 export function remoteVisionEndpoint(provider: RemoteVisionProvider, endpoint: string): string {
   if (provider === 'local') return ''
+  if (provider === 'custom') return endpoint.trim().replace(/\/+$/, '')
   return endpoint.trim().replace(/\/+$/, '') || REMOTE_VISION_DEFAULTS[provider] || ''
 }
 
