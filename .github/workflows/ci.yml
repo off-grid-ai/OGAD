@@ -108,6 +108,7 @@ jobs:
           npm --prefix ../shared/packages/sync run build
           npm --prefix ../shared/packages/models run build
           npm --prefix ../shared/packages/speech run build
+          npm --prefix ../shared/packages/ui run build
       - name: Check out the private Desktop speech runtime
         uses: actions/checkout@v4
         with:
