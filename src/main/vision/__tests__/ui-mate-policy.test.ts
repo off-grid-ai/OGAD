@@ -123,6 +123,24 @@ describe('UI-Mate policy', () => {
     expect(JSON.stringify(messages)).toContain('This screenshot has been collapsed.')
   })
 
+  it('uses milestone completion instead of task completion for an active execution plan', () => {
+    const messages = buildUIMateMessages({
+      instruction:
+        'Current execution plan and verified progress:\nCurrent milestone: Open the flight results.',
+      currentScreenshotDataUrl: 'data:image/png;base64,current'
+    })
+    const systemText = messages[0]?.content
+      .filter((part) => part.type === 'text')
+      .map((part) => part.text)
+      .join('\n')
+
+    expect(systemText).toContain('return action=subtask_complete')
+    expect(systemText).toContain(
+      'Never use action=finished while a current execution milestone is active.'
+    )
+    expect(systemText).toContain('The execution-plan controller decides when the full task ends.')
+  })
+
   it('keeps only the current screenshot under adversarial visual history', () => {
     const messages = buildUIMateMessages({
       instruction: 'Continue.',

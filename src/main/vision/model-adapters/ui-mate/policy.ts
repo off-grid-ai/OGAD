@@ -227,9 +227,13 @@ Rules:
 
 const UI_MATE_WORKFLOW_EXTENSION = `# Execution-plan extension
 
-When the current milestone is visibly complete, return the normal response format with this tool call:
+The instruction contains one current execution milestone. Work only on that milestone. The following rules override the task-termination rules above:
+- When the current milestone is visibly complete, return action=subtask_complete with this tool call:
 <tool_call><function=computer_use><parameter=action>subtask_complete</parameter></function></tool_call>
-Do not mark a milestone complete before its result is visible in the screenshot.`
+- Never use action=finished while a current execution milestone is active.
+- The execution-plan controller decides when the full task ends.
+- If the milestone is blocked or infeasible, use action=call_user and explain the problem.
+Do not mark the current milestone complete before its result is visible in the screenshot. Do not start a later milestone.`
 
 function instructionText(
   instruction: string,
