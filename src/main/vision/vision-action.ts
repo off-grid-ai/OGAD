@@ -35,6 +35,7 @@ export type VisionAction =
   | { type: 'key_up'; keys: readonly string[] }
   | { type: 'scroll'; point: Point; direction: 'up' | 'down' | 'left' | 'right' }
   | { type: 'scroll_by'; axis: 'vertical' | 'horizontal'; amount: number }
+  | { type: 'navigate'; url: string }
   | { type: 'wait'; durationMs?: number }
   | { type: 'finished'; content: string }
   | { type: 'call_user'; content: string }
@@ -135,6 +136,18 @@ function parseVisionActionWithMapper(
       return point && DIRECTIONS.has(direction)
         ? { type: 'scroll', point, direction: direction as 'up' | 'down' | 'left' | 'right' }
         : null
+    }
+    case 'navigate': {
+      const value = argOf(actionText, 'url')?.trim()
+      if (!value) return null
+      try {
+        const url = new URL(value)
+        return url.protocol === 'http:' || url.protocol === 'https:'
+          ? { type: 'navigate', url: url.toString() }
+          : null
+      } catch {
+        return null
+      }
     }
     case 'wait':
       return { type: 'wait' }

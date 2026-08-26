@@ -136,6 +136,13 @@ function isUnsupportedBrowserChromeChord(keys: readonly string[]): boolean {
   return primary && (key === 'l' || key === 'w')
 }
 
+function isBrowserReloadChord(keys: readonly string[]): boolean {
+  const chord = keys.map((key) => key.toLowerCase())
+  if (chord.length !== 2) return false
+  const [modifier, key] = chord
+  return ['ctrl', 'control', 'cmd', 'command', 'meta'].includes(modifier ?? '') && key === 'r'
+}
+
 export class BrowserDriver {
   private pointer: BrowserPointerEvent
   private readonly onPointer?: (event: BrowserPointerEvent) => void
@@ -574,10 +581,17 @@ export class BrowserDriver {
         })
         return { ok: true }
       }
+      case 'navigate':
+        return this.navigate(action.url)
       case 'hotkey': {
         const keys = browserHotkeyTokens(action.keys)
         const historyDelta = browserHistoryDelta(keys)
         if (historyDelta) return this.moveThroughHistory(historyDelta)
+        if (isBrowserReloadChord(keys)) {
+          await this.reloadAndWait()
+          await this.ensurePointer(true)
+          return { ok: true }
+        }
         if (isUnsupportedBrowserChromeChord(keys)) {
           return {
             ok: false,

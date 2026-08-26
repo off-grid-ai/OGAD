@@ -24,6 +24,10 @@ describe('parseVisionAction - the shipped verbs', () => {
     ['wait()', { type: 'wait' }],
     ["finished(content='sent the file')", { type: 'finished', content: 'sent the file' }],
     [
+      "navigate(url='https://www.google.com/flights')",
+      { type: 'navigate', url: 'https://www.google.com/flights' }
+    ],
+    [
       "call_user(content='need your password')",
       { type: 'call_user', content: 'need your password' }
     ]
@@ -111,5 +115,10 @@ describe('fail-closed', () => {
     ]) {
       expect(parseVisionAction(raw, bounds)).toBeNull()
     }
+  })
+
+  it('refuses navigation outside HTTP and HTTPS', () => {
+    expect(parseVisionAction("navigate(url='file:///etc/passwd')", bounds)).toBeNull()
+    expect(parseVisionAction("navigate(url='javascript:alert(1)')", bounds)).toBeNull()
   })
 })

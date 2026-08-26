@@ -14,7 +14,7 @@
 export const VISION_ACTION_SPACE = [
   "click(point='<point>x y</point>'), left_double(...), right_single(...),",
   "drag(start_box='(x,y)', end_box='(x,y)'), type(content='...'), hotkey(key='...'),",
-  "scroll(point='<point>x y</point>', direction='down'), wait(), subtask_complete(), finished(content='...'), call_user(content='...')."
+  "scroll(point='<point>x y</point>', direction='down'), navigate(url='https://...') (Web Use only), wait(), subtask_complete(), finished(content='...'), call_user(content='...')."
 ].join('\n')
 
 export const VISION_SYSTEM_PROMPT = [

@@ -38,7 +38,7 @@ function normalizedText(value: unknown): string | null {
 }
 
 const ACTION_PROTOCOL_START =
-  /^\s*(?:Action:\s*)?(?:click|left_single|left_double|double_click|right_single|right_click|drag|type|hotkey|scroll|wait|finished|call_user)\s*\(/i
+  /^\s*(?:Action:\s*)?(?:click|left_single|left_double|double_click|right_single|right_click|drag|type|hotkey|scroll|navigate|wait|finished|call_user)\s*\(/i
 
 function isSingleActionProtocol(value: string): boolean {
   if (/<\/?(?:tool_call|action)\b/i.test(value)) return false
@@ -238,6 +238,17 @@ function taskContext(input: VisionPolicyInput): string {
   const encoded = input.coordinateFrame?.encoded
   return [
     `Task brief:\n${input.goal}`,
+    input.operatorEnvironment === 'embedded_browser'
+      ? [
+          'Web Use control limits:',
+          '- The screenshot contains the web page only. It has no native address bar or tab strip.',
+          "- Use hotkey(key='ALT+LEFT') for Browser Back and hotkey(key='ALT+RIGHT') for Browser Forward.",
+          "- Use hotkey(key='CTRL+R') only to reload the current page. The host maps the primary modifier for its platform.",
+          "- Use navigate(url='https://...') to open a different website. Do not try to focus an address bar first.",
+          '- Never use CTRL+L, CMD+L, CTRL+W, or CMD+W. Those browser-chrome controls do not exist in this action surface.',
+          '- To leave an accidental detail or booking page, use Browser Back.'
+        ].join('\n')
+      : '',
     input.currentMilestone ? `Current milestone:\n${input.currentMilestone}` : '',
     input.verifiedActions?.length
       ? `Recent verified actions:\n${input.verifiedActions.slice(-12).join('\n')}`

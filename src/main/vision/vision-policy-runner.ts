@@ -267,10 +267,12 @@ async function modelScreenshot(input: VisionGroundingInput): Promise<{
 function visionPolicyInput(
   input: VisionGroundingInput,
   screenshotDataUrl: string,
-  marker?: PreviousClickMarker
+  marker?: PreviousClickMarker,
+  operatorEnvironment: VisionPolicyInput['operatorEnvironment'] = 'desktop'
 ): VisionPolicyInput {
   return {
     goal: input.goal,
+    operatorEnvironment,
     currentScreenshotDataUrl: screenshotDataUrl,
     history: input.policyHistory,
     recentSteps: input.history,
@@ -293,12 +295,13 @@ function redactGuidance(serializedInput: string, guidance: readonly string[]): s
  * milestone completion, action choice, and action validation in this request;
  * specialist adapters keep their native one-call protocol. */
 export function createVisionGrounder(
-  adapter: VisionModelAdapter
+  adapter: VisionModelAdapter,
+  operatorEnvironment: VisionPolicyInput['operatorEnvironment'] = 'desktop'
 ): (input: VisionGroundingInput) => Promise<VisionGroundingResult> {
   return async (input) => {
     const screenshot = await modelScreenshot(input)
     const request = adapter.buildRequest(
-      visionPolicyInput(input, screenshot.dataUrl, screenshot.marker)
+      visionPolicyInput(input, screenshot.dataUrl, screenshot.marker, operatorEnvironment)
     )
     input.reportProgress?.('Reviewing direction, milestone, and next action')
     const response = await runVisionPolicyRequest(request, input.signal, input.reportReasoning)

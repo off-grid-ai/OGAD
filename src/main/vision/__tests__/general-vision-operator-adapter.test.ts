@@ -121,6 +121,23 @@ describe('General vision operator adapter', () => {
     expect(serialized).not.toContain('1064 pixels wide')
   })
 
+  it('tells Web Use models which browser controls exist', () => {
+    const request = generalVisionOperatorAdapter.buildRequest({
+      goal: 'Return to the results page.',
+      operatorEnvironment: 'embedded_browser',
+      currentScreenshotDataUrl: 'data:image/png;base64,current',
+      coordinateFrame: { encoded: bounds, source: bounds },
+      history: [],
+      recentSteps: [],
+      olderVisualFacts: []
+    })
+    const serialized = JSON.stringify(request.messages)
+
+    expect(serialized).toContain('Web Use control limits')
+    expect(serialized).toContain("hotkey(key='ALT+LEFT')")
+    expect(serialized).toContain('Never use CTRL+L, CMD+L, CTRL+W, or CMD+W')
+  })
+
   it.each([
     ['UI-Mate', uiMateModel, 'ui-mate'],
     ['UI-TARS', uiTarsModel, 'ui-tars'],

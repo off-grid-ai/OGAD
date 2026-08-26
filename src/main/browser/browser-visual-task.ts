@@ -87,7 +87,7 @@ export function runBrowserVisualTask(input: BrowserVisualTaskInput): Promise<Vis
       screenshotResizeFactor: input.adapter.screenshotResizeFactor
     }),
     guard: input.guard,
-    decide: createVisionGrounder(input.adapter),
+    decide: createVisionGrounder(input.adapter, 'embedded_browser'),
     parseResponse: input.adapter.parseResponse,
     waitForUser: input.waitForUser,
     onStep: input.onStep,

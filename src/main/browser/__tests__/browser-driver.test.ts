@@ -121,6 +121,23 @@ describe('navigate', () => {
     const result = await new BrowserDriver(t.cdp).navigate('https://nope.invalid')
     expect(result).toEqual({ ok: false, reason: 'error', detail: 'net::ERR_NAME_NOT_RESOLVED' })
   })
+
+  it('executes a validated navigate action through the browser boundary', async () => {
+    const t = makeTransport()
+    const navigation = new BrowserDriver(t.cdp).actuate({
+      type: 'navigate',
+      url: 'https://x.test/results'
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+    t.emit('Page.loadEventFired')
+
+    await expect(navigation).resolves.toEqual({ ok: true })
+    expect(t.sent).toEqual(
+      expect.arrayContaining([
+        { method: 'Page.navigate', params: { url: 'https://x.test/results' } }
+      ])
+    )
+  })
 })
 
 describe('browser hotkeys', () => {
@@ -170,6 +187,20 @@ describe('browser hotkeys', () => {
       new BrowserDriver(t.cdp).actuate({ type: 'hotkey', keys: 'CMD+W' })
     ).resolves.toMatchObject({ ok: false, reason: 'recoverable' })
     expect(t.sent).toEqual([])
+  })
+
+  it('turns the primary reload chord into a direct page reload', async () => {
+    const t = makeTransport((method) =>
+      method === 'Runtime.evaluate'
+        ? { result: { value: { url: 'https://x.test/results', readyState: 'complete' } } }
+        : {}
+    )
+
+    await expect(
+      new BrowserDriver(t.cdp).actuate({ type: 'hotkey', keys: 'CMD+R' })
+    ).resolves.toEqual({ ok: true })
+    expect(t.sent.some((entry) => entry.method === 'Page.reload')).toBe(true)
+    expect(t.sent.some((entry) => entry.method === 'Input.dispatchKeyEvent')).toBe(false)
   })
 })
 

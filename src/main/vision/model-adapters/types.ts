@@ -17,6 +17,8 @@ export interface VisionPolicyHistoryStep {
 
 export interface VisionPolicyInput {
   goal: string
+  /** The action surface changes which shortcuts are real controls. */
+  operatorEnvironment?: 'desktop' | 'embedded_browser'
   currentScreenshotDataUrl: string
   history: readonly VisionPolicyHistoryStep[]
   recentSteps: readonly string[]
