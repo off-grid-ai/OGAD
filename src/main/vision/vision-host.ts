@@ -59,6 +59,7 @@ import { prepareTaskExecutionPlan } from '../tasks/task-execution-plan-service'
 import { registerTaskGuideHandler } from '../tasks/task-guide'
 import { createVisionGrounder } from './vision-policy-runner'
 import { resolveModelIdentity } from '../models-manager'
+import { computerUsePermissionBlock } from './computer-use-permissions'
 
 export type { ActuationPort }
 
@@ -194,19 +195,19 @@ function makeScreen(input: {
   }
 }
 
-/** macOS needs the Accessibility grant to post synthetic input to other apps.
- *  Returns the honest failure (prompting once) when it is missing. */
-function accessibilityBlock(): VisionTaskResult | null {
-  if (process.platform !== 'darwin') {
-    return null
-  }
-  if (systemPreferences.isTrustedAccessibilityClient(true)) {
-    return null
-  }
+/** Fail before model loading when macOS cannot capture or control the screen. */
+function permissionBlock(): VisionTaskResult | null {
+  const summary = computerUsePermissionBlock({
+    platform: process.platform,
+    accessibilityGranted:
+      process.platform !== 'darwin' || systemPreferences.isTrustedAccessibilityClient(true),
+    screenRecordingGranted:
+      process.platform !== 'darwin' || systemPreferences.getMediaAccessStatus('screen') === 'granted'
+  })
+  if (!summary) return null
   return {
     ok: false,
-    summary:
-      'Off Grid needs Accessibility access to control the screen. Grant it in System Settings > Privacy & Security > Accessibility, then run this again.',
+    summary,
     steps: [],
     handoffs: 0
   }
@@ -228,7 +229,7 @@ class VisionHost {
         handoffs: 0
       }
     }
-    const blocked = accessibilityBlock()
+    const blocked = permissionBlock()
     if (blocked) {
       return blocked
     }
