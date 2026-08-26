@@ -14,6 +14,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryChat } from '../MemoryChat'
 import { TooltipProvider } from '../ui/tooltip'
 import { resetTaskSessionStoreForTests } from '../../lib/task-session-store'
+import { clearRegisteredSlots, registerSlot, SLOTS } from '../../bootstrap/slotRegistry'
+import { TaskLiveActivity } from '../../../../../pro/renderer/components/browser/tasks/TaskLiveActivity'
 import {
   ChatBoundary,
   installBoundary,
@@ -36,6 +38,7 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
+    clearRegisteredSlots()
   })
 
   it('opens a task follow-up as a confirmed draft in its owning conversation', async () => {
@@ -98,6 +101,8 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
 
   it('shows Web Use reasoning only in the originating Chat and keeps its final state', async () => {
     const boundary = new ChatBoundary()
+    boundary.api.isPro = true
+    registerSlot(SLOTS.taskLiveActivity, TaskLiveActivity)
     boundary.messages['conversation-a'] = [
       { id: 20, role: 'user', content: 'Find a one-way flight to Pune' }
     ]
