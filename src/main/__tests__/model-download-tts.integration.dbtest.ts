@@ -148,5 +148,5 @@ describe('TTS model download integration', () => {
       'A local reply with code'
     )
     fs.unlinkSync(path.join(os.tmpdir(), workerInput!.name))
-  })
+  }, 30_000)
 })

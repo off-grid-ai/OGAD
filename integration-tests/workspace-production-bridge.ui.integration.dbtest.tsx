@@ -129,10 +129,11 @@ let TooltipProvider: typeof import('../src/renderer/src/components/ui/tooltip').
 async function bootProductionMain(): Promise<void> {
   bridge.handlers.clear()
   bridge.mainListeners.clear()
-  const [{ setupIPC }, { setupRagIPC }, { llm }] = await Promise.all([
+  const [{ setupIPC }, { setupRagIPC }, { llm }, { registerTaskHistoryIpc }] = await Promise.all([
     import('../src/main/ipc'),
     import('../src/main/rag-ipc'),
-    import('../src/main/llm')
+    import('../src/main/llm'),
+    import('../src/main/tasks/task-history')
   ])
   const service = llm as unknown as { port: number; initialized: boolean; paused: boolean }
   service.port = fake.port
@@ -140,6 +141,7 @@ async function bootProductionMain(): Promise<void> {
   service.paused = false
   setupIPC()
   setupRagIPC()
+  registerTaskHistoryIpc()
 }
 
 function renderChat(target?: { conversationId?: string; projectId?: string }): void {
