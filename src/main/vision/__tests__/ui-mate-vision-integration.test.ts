@@ -29,6 +29,11 @@ describe('specialist vision protocols', () => {
     expect(request.maxTokens).toBe(16_384)
     expect(serialized).toContain('<function=computer_use>')
     expect(serialized).toContain('Current milestone: Open the menu.')
+    expect(serialized).toContain('Only active instruction: Open the menu.')
+    expect(serialized).toContain('If this result is already visible, return subtask_complete now.')
+    expect(serialized.indexOf('Only active instruction: Open the menu.')).toBeLessThan(
+      serialized.indexOf('Full task context for reference only: Use the visible control.')
+    )
     expect(serialized).toContain('subtask_complete')
     expect(serialized).toContain('exact web page viewport')
     expect(serialized).toContain('does not include a browser address bar')

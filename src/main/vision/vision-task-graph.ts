@@ -332,6 +332,10 @@ class VisionTaskGraphRuntime {
       this.finish(true, this.decision.summary)
       return { route: 'end' }
     }
+    // A model trajectory belongs to one milestone. Do not let actions from a
+    // completed milestone bias the first decision for the next milestone.
+    this.policyHistory.length = 0
+    this.pendingPolicyHistory = undefined
     this.phaseIndex += 1
     this.reportPhase(this.phaseIndex)
     return { route: 'gate' }

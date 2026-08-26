@@ -83,8 +83,15 @@ function toVisionAction(action: UIMateAction): VisionAction | null {
 }
 
 function policyInstruction(input: Parameters<VisionModelAdapter['buildRequest']>[0]): string {
+  const activeInstruction = input.currentMilestone
+    ? [
+        `Only active instruction: ${input.currentMilestone}`,
+        'If this result is already visible, return subtask_complete now. Do not perform any action for a later milestone.',
+        `Full task context for reference only: ${input.goal}`
+      ].join('\n')
+    : input.goal
   return [
-    input.goal,
+    activeInstruction,
     input.operatorEnvironment === 'embedded_browser'
       ? [
           'Coordinate frame:',

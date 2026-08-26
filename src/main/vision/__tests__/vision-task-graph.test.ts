@@ -107,6 +107,16 @@ describe('runVisionTaskGraph', () => {
     expect(w.observations.map((item) => item.result)).toEqual(['terminal', 'terminal'])
   })
 
+  it('starts each milestone with a fresh model trajectory', async () => {
+    const w = workflow([action(), complete('Site visible.'), complete('Details visible.')])
+
+    const result = await runVisionTaskGraph('Complete both milestones.', w.deps)
+
+    expect(result.ok).toBe(true)
+    expect(w.policyHistory).toEqual([[], ['Click the visible control'], []])
+    expect(w.phases).toEqual(['phase-1', 'phase-2'])
+  })
+
   it('does not let a model-level done verdict skip remaining execution-plan milestones', async () => {
     const w = workflow([done('Everything is complete.'), complete('Final result verified.')])
 
