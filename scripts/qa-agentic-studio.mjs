@@ -275,7 +275,7 @@ const readModelState = async () => {
 const readNativePointer = async () =>
   app.evaluate(async ({ BrowserWindow }, expectedUrl) => {
     const win = BrowserWindow.getAllWindows()[0]
-    const view = win?.contentView.children.find(
+    const view = win?.contentView.children.findLast(
       (candidate) =>
         'webContents' in candidate && candidate.webContents.getURL().startsWith(String(expectedUrl))
     )
@@ -294,7 +294,7 @@ const setNativePageTheme = async (theme) =>
   app.evaluate(
     async ({ BrowserWindow }, { expectedUrl, theme }) => {
       const win = BrowserWindow.getAllWindows()[0]
-      const view = win?.contentView.children.find(
+      const view = win?.contentView.children.findLast(
         (candidate) =>
           'webContents' in candidate &&
           candidate.webContents.getURL().startsWith(String(expectedUrl))
@@ -371,7 +371,7 @@ try {
   const retryButton = page.getByRole('button', { name: 'Retry failed step' })
   await retryButton.waitFor()
   await waitForShellLayout(page, { sidebarCollapsed: false, mainCollapsed: false })
-  await page.getByRole('tab', { name: 'CU-004 Pointer Lab', exact: true }).click()
+  await page.getByRole('tab', { name: 'CU-004 Pointer Lab', exact: true }).last().click()
   await page.waitForFunction(
     (expectedUrl) =>
       window.api.browser.getSessions().then((state) => {
@@ -392,6 +392,18 @@ try {
   if (!existsSync(modelPortFile)) throw new Error('The isolated model did not publish its port')
   modelPort = Number(readFileSync(modelPortFile, 'utf8'))
   await waitForPendingDecision()
+  // Retrying replaces the browser task session. Re-select the seeded local tab
+  // after that replacement so the approved action executes against the same
+  // fixed viewport that produced the test evidence.
+  await page.getByRole('tab', { name: 'CU-004 Pointer Lab', exact: true }).last().click()
+  await page.waitForFunction(
+    (expectedUrl) =>
+      window.api.browser.getSessions().then((state) => {
+        const active = state.sessions.find((session) => session.sessionId === state.activeSessionId)
+        return active?.url === expectedUrl
+      }),
+    localPageUrl
+  )
   await page.waitForFunction(async () => {
     const tasks = await window.api.tasks.list(50)
     return tasks.some((task) => task.taskId === 'web-failed' && task.status === 'running')
@@ -471,7 +483,10 @@ try {
   console.log(`TAKEOVER ${JSON.stringify(takeoverState)}`)
   if (takeoverState?.status !== 'waiting') throw new Error('Web Use did not enter takeover')
   await page.getByText('Your turn', { exact: true }).waitFor()
-  await page.getByText('Confirm the protected account step yourself.', { exact: true }).waitFor()
+  await page
+    .getByTestId('task-live-pane')
+    .getByText('Confirm the protected account step yourself.', { exact: true })
+    .waitFor()
   await shot(page, '04b-web-use-pointer-and-takeover')
   nativeShot('04c-web-use-pointer-and-takeover-native-window')
   await page.getByRole('button', { name: 'Resume', exact: true }).click()
@@ -488,7 +503,11 @@ try {
   }
   const terminalDetails = page.getByTestId(`task-details-${retryAttempt.taskId}`)
   await terminalDetails.waitFor()
-  await terminalDetails.getByText(/CU-004 terminal model failure/).waitFor()
+  await terminalDetails
+    .getByText('Visual decision failed: LLM Server Error: 500 CU-004 terminal model failure', {
+      exact: true
+    })
+    .waitFor()
   await waitForShellLayout(page, { sidebarCollapsed: false, mainCollapsed: false })
   const terminalPointer = await readNativePointer()
   if (!terminalPointer?.visible) throw new Error('Web Use pointer disappeared after task failure')
@@ -505,8 +524,9 @@ try {
   await shot(page, '04g-web-use-execution-plan-detail')
   await page.getByRole('button', { name: 'Back to Task History' }).click()
 
-  await page.getByRole('button', { name: 'New browser tab' }).click()
+  await page.evaluate(() => window.api.browser.newTab())
   const address = page.getByRole('textbox', { name: 'Browser address' })
+  await address.waitFor()
   await address.fill('https://example.com/')
   await address.press('Enter')
   await page.waitForFunction(() =>

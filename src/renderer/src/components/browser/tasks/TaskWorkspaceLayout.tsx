@@ -137,8 +137,13 @@ export function TaskWorkspaceLayout(props: TaskWorkspaceLayoutProps): React.JSX.
               onOpenDetails={openDetails}
               onCloseDetails={closeDetails}
               onRetryStarted={(taskId) => {
-                props.onDetailTaskChange(null)
-                openTaskSidePanel({ taskId, kind: props.active.kind })
+                props.onDetailTaskChange(taskId)
+                openTaskSidePanel({
+                  taskId,
+                  kind: props.active.kind,
+                  detail: true,
+                  immersive: true
+                })
               }}
             />
           </Panel>

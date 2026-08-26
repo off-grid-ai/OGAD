@@ -85,7 +85,7 @@ export function useTaskSelection(
           })
           setActiveId(requested.taskId)
           setDetailTaskId(request.detail ? requested.taskId : null)
-          setImmersiveTaskId(null)
+          setImmersiveTaskId(request.immersive ? requested.taskId : null)
           showTaskWorkspace()
           return
         }

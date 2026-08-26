@@ -7,6 +7,7 @@ export interface OpenTaskPanelRequest {
   taskId?: string
   kind?: LegacyTaskPanelKind
   detail?: boolean
+  immersive?: boolean
 }
 
 type Listener = (request: OpenTaskPanelRequest) => void
