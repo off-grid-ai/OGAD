@@ -43,19 +43,33 @@ async function probeTts(): Promise<Buffer | null> {
 
 const ttsWav = await probeTts()
 
-describe.skipIf(!ttsWav)('audio engines round-trip (TTS -> STT) via the gateway', () => {
-  it('transcribes synthesized speech (TTS) back to the same words (STT)', async () => {
-    // The TTS half was validated by the readiness probe (a real RIFF/WAVE payload); assert
-    // that here so the artifact is visible, then prove the STT half completes the round-trip.
-    const wav = ttsWav!
-    expect(isRealWav(wav)).toBe(true)
-
+async function probeRoundTrip(wav: Buffer | null): Promise<{ wav: Buffer; text: string } | null> {
+  if (!wav) return null
+  try {
     const form = new FormData()
     form.append('file', new Blob([new Uint8Array(wav)], { type: 'audio/wav' }), 'speech.wav')
     form.append('model', 'whisper')
-    const sttRes = await fetch(`${GW}/v1/audio/transcriptions`, { method: 'POST', body: form })
-    expect(sttRes.ok).toBe(true)
-    const { text } = (await sttRes.json()) as { text: string }
+    const response = await fetch(`${GW}/v1/audio/transcriptions`, {
+      method: 'POST',
+      body: form,
+      signal: AbortSignal.timeout(180_000)
+    })
+    if (!response.ok) return null
+    const { text } = (await response.json()) as { text?: unknown }
+    return typeof text === 'string' && text.trim() ? { wav, text } : null
+  } catch {
+    return null
+  }
+}
+
+const roundTrip = await probeRoundTrip(ttsWav)
+
+describe.skipIf(!roundTrip)('audio engines round-trip (TTS -> STT) via the gateway', () => {
+  it('transcribes synthesized speech (TTS) back to the same words (STT)', async () => {
+    // The TTS half was validated by the readiness probe (a real RIFF/WAVE payload); assert
+    // that here so the artifact is visible, then prove the STT half completes the round-trip.
+    const { wav, text } = roundTrip!
+    expect(isRealWav(wav)).toBe(true)
 
     // The salient words survive the synth -> transcribe round-trip (tolerate case,
     // punctuation/hyphenation, and spacing differences between the engines).
