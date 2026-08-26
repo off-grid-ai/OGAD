@@ -101,6 +101,33 @@ describe('specialist vision protocols', () => {
     ).toMatchObject({ kind: 'handoff', reason: 'Enter the one-time code.' })
   })
 
+  it('converts UI-Mate wheel steps into a visible scroll distance', () => {
+    expect(
+      uiMateAdapter.parseResponse(
+        uiMate(
+          'scroll',
+          '<parameter=direction>vertical</parameter><parameter=pixels>-3</parameter>'
+        ),
+        bounds
+      )
+    ).toMatchObject({
+      kind: 'actions',
+      actions: [{ type: 'scroll_by', axis: 'vertical', amount: -360 }]
+    })
+    expect(
+      uiMateAdapter.parseResponse(
+        uiMate(
+          'scroll',
+          '<parameter=direction>horizontal</parameter><parameter=pixels>5</parameter>'
+        ),
+        bounds
+      )
+    ).toMatchObject({
+      kind: 'actions',
+      actions: [{ type: 'scroll_by', axis: 'horizontal', amount: 600 }]
+    })
+  })
+
   it('keeps UI-TARS on its native single action-text protocol', () => {
     const request = uiTarsAdapter.buildRequest({
       goal: 'Use the visible control.',

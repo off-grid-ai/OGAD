@@ -135,7 +135,10 @@ export function adaptNutActuation(nut: NutApi): ActuationPort {
       }
     },
     async scrollBy(axis, amount) {
-      const magnitude = Math.abs(amount)
+      // VisionAction scroll_by uses pixels on every surface. nut.js accepts
+      // wheel steps, so convert at this native boundary instead of allowing
+      // browser and desktop behavior to drift.
+      const magnitude = Math.ceil(Math.abs(amount) / 120)
       if (magnitude === 0) return
       if (axis === 'horizontal') {
         await (amount > 0 ? mouse.scrollRight(magnitude) : mouse.scrollLeft(magnitude))

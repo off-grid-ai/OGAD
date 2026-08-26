@@ -10,6 +10,14 @@ import {
 import type { VisionModelAdapter, VisionPolicyDecision } from './types'
 
 const MAX_WAIT_MS = 30_000
+const UI_MATE_SCROLL_STEP_PIXELS = 120
+
+/** UI-Mate commonly returns small signed wheel steps despite naming the field
+ * `pixels`. Convert those native step values once at the model boundary so the
+ * shared VisionAction carries a real pixel distance on every surface. */
+function uiMateScrollPixels(amount: number): number {
+  return Math.abs(amount) <= 10 ? amount * UI_MATE_SCROLL_STEP_PIXELS : amount
+}
 
 function toVisionAction(action: UIMateAction): VisionAction | null {
   switch (action.action) {
@@ -65,7 +73,7 @@ function toVisionAction(action: UIMateAction): VisionAction | null {
         : {
             type: 'scroll_by',
             axis: action.direction ?? 'vertical',
-            amount: action.pixels
+            amount: uiMateScrollPixels(action.pixels)
           }
     default:
       return null

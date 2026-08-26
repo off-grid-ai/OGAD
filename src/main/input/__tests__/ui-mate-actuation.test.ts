@@ -68,8 +68,8 @@ describe('UI-Mate nut.js actuation contract', () => {
       'releaseKey:[12]',
       'pressKey:[13,11]',
       'releaseKey:[11,13]',
-      'scrollDown:[240]',
-      'scrollRight:[120]'
+      'scrollDown:[2]',
+      'scrollRight:[1]'
     ])
   })
 })
