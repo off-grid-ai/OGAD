@@ -18,12 +18,25 @@ import { remoteVisionModelId } from '../../shared/remote-vision-server'
 import { createVisionGrounder } from '../vision/vision-policy-runner'
 import { runVisionTaskGraph } from '../vision/vision-task-graph'
 import type { VisionGuard } from '../vision/vision-guard'
+import { withGrounder } from '../vision/grounder-loader'
+import { resolveModelIdentity, type ModelIdentity } from '../models-manager'
 import type { BrowserDriver } from './browser-driver'
 import { createBrowserVisionScreen } from './browser-vision-screen'
 
 export interface BrowserVisionSelection {
   adapter: VisionModelAdapter
   modelId: string
+}
+
+export interface ActiveBrowserVision {
+  selection: BrowserVisionSelection
+  identity: ModelIdentity
+}
+
+export interface ActiveBrowserVisionDependencies {
+  withSelectedModel<T>(task: () => Promise<T>): Promise<{ result: T }>
+  resolveSelection(): BrowserVisionSelection
+  resolveIdentity(modelId: string): Promise<ModelIdentity>
 }
 
 /** Capture the adapter and model ID from one active-model read. The task host
@@ -51,6 +64,26 @@ export function resolveActiveBrowserVisionSelection(): BrowserVisionSelection {
 /** Back-compatible adapter-only boundary for callers that do not own a task. */
 export function resolveActiveBrowserVisionAdapter(): VisionModelAdapter {
   return resolveActiveBrowserVisionSelection().adapter
+}
+
+const productionActiveBrowserVisionDependencies: ActiveBrowserVisionDependencies = {
+  withSelectedModel: withGrounder,
+  resolveSelection: resolveActiveBrowserVisionSelection,
+  resolveIdentity: resolveModelIdentity
+}
+
+/** Run only after the selected Computer Use model is resident. Identity and
+ * adapter come from the same post-swap snapshot that performs the task. */
+export async function withActiveBrowserVision<T>(
+  task: (active: ActiveBrowserVision) => Promise<T>,
+  dependencies: ActiveBrowserVisionDependencies = productionActiveBrowserVisionDependencies
+): Promise<T> {
+  const { result } = await dependencies.withSelectedModel(async () => {
+    const selection = dependencies.resolveSelection()
+    const identity = await dependencies.resolveIdentity(selection.modelId)
+    return task({ selection, identity })
+  })
+  return result
 }
 
 interface BrowserVisualTaskInput {

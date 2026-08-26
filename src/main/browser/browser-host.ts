@@ -51,8 +51,7 @@ import { fitWebUseDesktopRegion, webUseDesktopZoomFactor } from '../../shared/br
 import { encodeTaskPhase } from '../../shared/task-execution-plan'
 import { prepareTaskExecutionPlan } from '../tasks/task-execution-plan-service'
 import { retryPlanningGoal, TASK_RETRY_TRACE } from '../tasks/task-retry'
-import { resolveModelIdentity } from '../models-manager'
-import { resolveActiveBrowserVisionSelection, runBrowserVisualTask } from './browser-visual-task'
+import { runBrowserVisualTask, withActiveBrowserVision } from './browser-visual-task'
 import { BrowserJourneyRunOwners } from './browser-run-owners'
 
 function broadcast(channel: string, payload: unknown): void {
@@ -684,16 +683,6 @@ class BrowserHost implements BrowserRailHost {
             (error: unknown) => ({ ok: false as const, error })
           )
         : undefined
-      const visionSelection = resolveActiveBrowserVisionSelection()
-      const modelIdentity = await resolveModelIdentity(visionSelection.modelId)
-      if (!ownsRun()) return replacedResult()
-      recordTaskRun({
-        taskId,
-        journeyId,
-        kind: 'web_use',
-        title: goal,
-        ...modelIdentity
-      })
       const plan =
         checkpoint?.plan ??
         (await prepareTaskExecutionPlan(
@@ -756,58 +745,69 @@ class BrowserHost implements BrowserRailHost {
       // Web Use is vision-only: capture, judge, persist evidence, then either
       // advance the milestone or choose one visual action. Never silently
       // replace this contract with semantic DOM control.
-      const visual = await runBrowserVisualTask({
-        goal,
-        taskId,
-        journeyId,
-        adapter: visionSelection.adapter,
-        guard,
-        plan,
-        activeView,
-        activeDriver,
-        waitForUser: async (why) => {
-          if (!ownsRun()) return
-          broadcast('browser:takeover', { sessionId: record.sessionId, taskId, why })
-          setState('waiting', why)
-          const outcome = await coordinator.waitForTakeover(taskId, why)
-          if (!ownsRun()) return
-          setState(outcome === 'resumed' ? 'running' : 'stopped', '')
-          if (outcome !== 'resumed') guard.halt('cancelled by the user')
-        },
-        onStep: recordStep,
-        onPhase: (phaseId) => recordStep(encodeTaskPhase(phaseId)),
-        onProgress: (progress) => {
-          if (!ownsRun()) return
-          recordTaskRun({
-            taskId,
-            journeyId,
-            kind: 'web_use',
-            title: goal,
-            status:
-              progress.phase === 'paused'
-                ? 'paused'
-                : progress.phase === 'stopped'
-                  ? 'stopped'
-                  : 'running',
-            phase: progress.phase,
-            currentStep: progress.step,
-            currentAction: progress.action
-          })
-        },
-        onReasoning: (reasoning) => {
-          if (!ownsRun()) return
-          const transcript = reasoningTranscript(reasoning)
-          recordTaskRun({
-            taskId,
-            journeyId,
-            kind: 'web_use',
-            title: goal,
-            ...(transcript ? { currentReasoning: transcript } : {}),
-            reasoningLive: reasoning.live
-          })
-        },
-        takeGuidance: () => (ownsRun() ? queuedGuidance.splice(0) : []),
-        signal: owner.controller.signal
+      const visual = await withActiveBrowserVision(async ({ selection, identity }) => {
+        if (!ownsRun()) owner.controller.abort()
+        owner.controller.signal.throwIfAborted()
+        recordTaskRun({
+          taskId,
+          journeyId,
+          kind: 'web_use',
+          title: goal,
+          ...identity
+        })
+        return runBrowserVisualTask({
+          goal,
+          taskId,
+          journeyId,
+          adapter: selection.adapter,
+          guard,
+          plan,
+          activeView,
+          activeDriver,
+          waitForUser: async (why) => {
+            if (!ownsRun()) return
+            broadcast('browser:takeover', { sessionId: record.sessionId, taskId, why })
+            setState('waiting', why)
+            const outcome = await coordinator.waitForTakeover(taskId, why)
+            if (!ownsRun()) return
+            setState(outcome === 'resumed' ? 'running' : 'stopped', '')
+            if (outcome !== 'resumed') guard.halt('cancelled by the user')
+          },
+          onStep: recordStep,
+          onPhase: (phaseId) => recordStep(encodeTaskPhase(phaseId)),
+          onProgress: (progress) => {
+            if (!ownsRun()) return
+            recordTaskRun({
+              taskId,
+              journeyId,
+              kind: 'web_use',
+              title: goal,
+              status:
+                progress.phase === 'paused'
+                  ? 'paused'
+                  : progress.phase === 'stopped'
+                    ? 'stopped'
+                    : 'running',
+              phase: progress.phase,
+              currentStep: progress.step,
+              currentAction: progress.action
+            })
+          },
+          onReasoning: (reasoning) => {
+            if (!ownsRun()) return
+            const transcript = reasoningTranscript(reasoning)
+            recordTaskRun({
+              taskId,
+              journeyId,
+              kind: 'web_use',
+              title: goal,
+              ...(transcript ? { currentReasoning: transcript } : {}),
+              reasoningLive: reasoning.live
+            })
+          },
+          takeGuidance: () => (ownsRun() ? queuedGuidance.splice(0) : []),
+          signal: owner.controller.signal
+        })
       })
       if (!ownsRun()) return replacedResult()
       const finalContents = activeView().webContents

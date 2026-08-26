@@ -5,12 +5,10 @@
  * A computer-use run wants a GUI-grounding model loaded. Three cases:
  *  - the active model is ALREADY a grounder  -> run as-is, pay no swap
  *  - the dedicated grounder IS downloaded     -> swap it in, restore the chat model after
- *  - the dedicated grounder is NOT downloaded -> fall back to the active model rather
- *    than hard-failing the whole task on a missing model. The host warns the user the
- *    active model is not a grounder (clicks may be less precise); downloading the
- *    grounder is the accurate path.
+ *  - the dedicated grounder is NOT downloaded -> fail before model selection.
+ *    A visible specialist choice must never run on a hidden chat-model fallback.
  */
-export type GrounderPlan = 'use-active-grounder' | 'swap-in-grounder' | 'fallback-active-model'
+export type GrounderPlan = 'use-active-grounder' | 'swap-in-grounder' | 'missing-grounder'
 
 export function resolveGrounderPlan(
   alreadyGrounder: boolean,
@@ -19,5 +17,5 @@ export function resolveGrounderPlan(
   if (alreadyGrounder) {
     return 'use-active-grounder'
   }
-  return grounderDownloaded ? 'swap-in-grounder' : 'fallback-active-model'
+  return grounderDownloaded ? 'swap-in-grounder' : 'missing-grounder'
 }

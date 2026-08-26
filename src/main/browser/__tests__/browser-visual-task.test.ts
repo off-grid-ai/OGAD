@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { llm } from '../../llm'
-import { browserVisionStepDetail, resolveActiveBrowserVisionAdapter } from '../browser-visual-task'
+import { createGrounderRunner } from '../../vision/grounder-loader'
+import { uiMateAdapter } from '../../vision/model-adapters/ui-mate'
+import {
+  browserVisionStepDetail,
+  resolveActiveBrowserVisionAdapter,
+  withActiveBrowserVision
+} from '../browser-visual-task'
 
 describe('browser visual task boundary', () => {
   it('keeps the captured screenshot and structured judge evidence in task details', () => {
@@ -118,5 +124,55 @@ describe('browser visual task boundary', () => {
     expect(() => resolveActiveBrowserVisionAdapter()).toThrow(
       'Web Use requires an active model with installed vision support.'
     )
+  })
+
+  it('records the specialist identity after swap and restores remote chat selection', async () => {
+    const chatModel = 'google/gemini-3.7-flash'
+    const specialist = 'tencent/UI-Mate-9B-GGUF'
+    const remoteSelection = { id: 'openrouter', model: chatModel }
+    let localModel = chatModel
+    let remote: typeof remoteSelection | null = remoteSelection
+    const runWithSpecialist = createGrounderRunner({
+      modelStrategy: () => 'separate_specialist',
+      selectedModelId: () => specialist,
+      installed: async () => true,
+      activeModel: () => ({ id: localModel, vision: true }),
+      activeModelId: () => localModel,
+      activeRemote: () => remote,
+      isGrounder: (model) => model.id === specialist,
+      load: async (modelId) => {
+        localModel = modelId
+      },
+      restoreLocal: async (modelId) => {
+        localModel = modelId
+      },
+      suspendRemote: () => {
+        remote = null
+      },
+      restoreRemote: (selection) => {
+        remote = selection
+      }
+    })
+    let taskRecord: { modelId: string; modelName: string } | undefined
+
+    const result = await withActiveBrowserVision(
+      async ({ selection, identity }) => {
+        expect(remote).toBeNull()
+        expect(localModel).toBe(specialist)
+        expect(selection.modelId).toBe(specialist)
+        taskRecord = identity
+        return 'ran on UI-Mate'
+      },
+      {
+        withSelectedModel: runWithSpecialist,
+        resolveSelection: () => ({ adapter: uiMateAdapter, modelId: localModel }),
+        resolveIdentity: async (modelId) => ({ modelId, modelName: 'UI-Mate 9B' })
+      }
+    )
+
+    expect(result).toBe('ran on UI-Mate')
+    expect(taskRecord).toEqual({ modelId: specialist, modelName: 'UI-Mate 9B' })
+    expect(localModel).toBe(chatModel)
+    expect(remote).toEqual(remoteSelection)
   })
 })

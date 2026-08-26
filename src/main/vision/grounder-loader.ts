@@ -27,7 +27,11 @@ import { isGrounderActive } from './vision-model-notice'
 import { resolveGrounderPlan } from './grounder-plan'
 import { runRestoredModelSwap } from './grounder-swap'
 import { getComputerUseSettings } from '../computer-use-settings'
-import { getActiveRemoteVisionServer } from './remote-vision-server'
+import {
+  activateRemoteVisionModel,
+  deactivateRemoteVisionModel,
+  getActiveRemoteVisionServer
+} from './remote-vision-server'
 
 /** Migration default for people who used computer tasks before the Computer Use catalog existed. */
 export const GROUNDER_MODEL_ID = 'mradermacher/UI-TARS-1.5-7B-GGUF'
@@ -70,6 +74,120 @@ async function restoreChatModel(previousId: string): Promise<void> {
   await llm.restart()
 }
 
+interface GrounderRemoteSelection {
+  id: string
+  model: string
+}
+
+interface GrounderActiveModel {
+  id: string
+  vision: boolean
+}
+
+export interface GrounderRunnerDependencies {
+  modelStrategy(): 'same_as_chat' | 'separate_specialist'
+  selectedModelId(): string
+  installed(modelId: string): Promise<boolean>
+  activeModel(): GrounderActiveModel | null
+  activeModelId(): string | null
+  activeRemote(): GrounderRemoteSelection | null
+  isGrounder(model: GrounderActiveModel): boolean
+  load(modelId: string): Promise<void>
+  restoreLocal(modelId: string): Promise<void>
+  suspendRemote(): void
+  restoreRemote(selection: GrounderRemoteSelection): void
+}
+
+const productionGrounderDependencies: GrounderRunnerDependencies = {
+  modelStrategy: () => getComputerUseSettings().modelStrategy,
+  selectedModelId: selectedGrounderModelId,
+  installed: grounderInstalled,
+  activeModel: () => llm.activeModelInfo(),
+  activeModelId: getActiveModel,
+  activeRemote: getActiveRemoteVisionServer,
+  isGrounder: isGrounderActive,
+  load: loadGrounder,
+  restoreLocal: restoreChatModel,
+  suspendRemote: deactivateRemoteVisionModel,
+  restoreRemote(selection) {
+    if (!activateRemoteVisionModel(selection.id, selection.model)) {
+      throw new Error('The remote chat model could not be restored.')
+    }
+  }
+}
+
+async function directRun<T>(
+  task: () => Promise<T>,
+  now: () => number
+): Promise<{ result: T; timing: GrounderTiming }> {
+  const startRun = now()
+  const result = await task()
+  return {
+    result,
+    timing: { skippedSwap: true, swapInMs: 0, runMs: now() - startRun, swapOutMs: 0 }
+  }
+}
+
+/** Build the lifecycle once so production and the model-boundary integration
+ * harness exercise the same remote/local restore path. */
+export function createGrounderRunner(
+  dependencies: GrounderRunnerDependencies
+): <T>(
+  task: () => Promise<T>,
+  now?: () => number
+) => Promise<{ result: T; timing: GrounderTiming }> {
+  return async <T>(task: () => Promise<T>, now: () => number = Date.now) => {
+    if (dependencies.modelStrategy() === 'same_as_chat') return directRun(task, now)
+
+    const grounderId = dependencies.selectedModelId()
+    const active = dependencies.activeModel()
+    const alreadyGrounder = active?.id === grounderId && dependencies.isGrounder(active)
+    const plan = resolveGrounderPlan(alreadyGrounder, await dependencies.installed(grounderId))
+    if (plan === 'missing-grounder') {
+      throw new Error(
+        `The selected Computer Use model is not downloaded: ${grounderId}. Download it before starting Web Use.`
+      )
+    }
+
+    const previousLocalId = dependencies.activeModelId()
+    const previousRemote = dependencies.activeRemote()
+    const loadSelected = plan === 'swap-in-grounder'
+    const suspendRemote = previousRemote !== null
+
+    if (!loadSelected && !suspendRemote) return directRun(task, now)
+
+    // With no prior resident model there is nothing to restore. Keep the
+    // selected specialist resident after the run, matching the old behavior.
+    if (loadSelected && !previousLocalId && !previousRemote) {
+      const swapStartedAt = now()
+      await dependencies.load(grounderId)
+      const swapInMs = now() - swapStartedAt
+      const runStartedAt = now()
+      const result = await task()
+      return {
+        result,
+        timing: { skippedSwap: false, swapInMs, runMs: now() - runStartedAt, swapOutMs: 0 }
+      }
+    }
+
+    const swapped = await runRestoredModelSwap({
+      swapIn: async () => {
+        if (suspendRemote) dependencies.suspendRemote()
+        if (loadSelected) await dependencies.load(grounderId)
+      },
+      run: task,
+      restore: async () => {
+        if (loadSelected && previousLocalId) await dependencies.restoreLocal(previousLocalId)
+        if (previousRemote) dependencies.restoreRemote(previousRemote)
+      },
+      now
+    })
+    return { result: swapped.result, timing: { skippedSwap: false, ...swapped.timing } }
+  }
+}
+
+const runWithProductionGrounder = createGrounderRunner(productionGrounderDependencies)
+
 /**
  * Run `task` with the grounder loaded. If a grounder is already active, runs it
  * directly (no swap). Restores the previous chat model on the way out, even if
@@ -79,55 +197,5 @@ export async function withGrounder<T>(
   task: () => Promise<T>,
   now: () => number = Date.now
 ): Promise<{ result: T; timing: GrounderTiming }> {
-  if (
-    getActiveRemoteVisionServer() ||
-    getComputerUseSettings().modelStrategy === 'same_as_chat'
-  ) {
-    const startRun = now()
-    const result = await task()
-    return {
-      result,
-      timing: { skippedSwap: true, swapInMs: 0, runMs: now() - startRun, swapOutMs: 0 }
-    }
-  }
-  const grounderId = selectedGrounderModelId()
-  const active = llm.activeModelInfo()
-  const alreadyGrounder = active?.id === grounderId && isGrounderActive(active)
-  const plan = resolveGrounderPlan(alreadyGrounder, await grounderInstalled(grounderId))
-  if (plan === 'fallback-active-model') {
-    console.warn(
-      `[grounder] ${grounderId} is not downloaded - running computer use on the active model; grounding may be less accurate. Download the grounder for precise clicks.`
-    )
-  }
-  const willSwap = plan === 'swap-in-grounder'
-  const previousId = getActiveModel()
-
-  if (!willSwap) {
-    const startRun = now()
-    const result = await task()
-    return {
-      result,
-      timing: { skippedSwap: true, swapInMs: 0, runMs: now() - startRun, swapOutMs: 0 }
-    }
-  }
-
-  if (!previousId) {
-    const swapStartedAt = now()
-    await loadGrounder(grounderId)
-    const swapInMs = now() - swapStartedAt
-    const runStartedAt = now()
-    const result = await task()
-    return {
-      result,
-      timing: { skippedSwap: false, swapInMs, runMs: now() - runStartedAt, swapOutMs: 0 }
-    }
-  }
-
-  const swapped = await runRestoredModelSwap({
-    swapIn: () => loadGrounder(grounderId),
-    run: task,
-    restore: () => restoreChatModel(previousId),
-    now
-  })
-  return { result: swapped.result, timing: { skippedSwap: false, ...swapped.timing } }
+  return runWithProductionGrounder(task, now)
 }

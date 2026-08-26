@@ -11,9 +11,7 @@ describe('resolveGrounderPlan', () => {
     expect(resolveGrounderPlan(false, true)).toBe('swap-in-grounder')
   })
 
-  it('falls back to the active model when the grounder is NOT downloaded - never hard-fails', () => {
-    // The whole point of this change: a missing grounder must not kill the task; the
-    // computer-use run proceeds on the active vision model (with a warning) instead.
-    expect(resolveGrounderPlan(false, false)).toBe('fallback-active-model')
+  it('reports a missing selected grounder instead of using a hidden active-model fallback', () => {
+    expect(resolveGrounderPlan(false, false)).toBe('missing-grounder')
   })
 })
