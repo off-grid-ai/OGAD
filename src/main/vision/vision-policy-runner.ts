@@ -251,6 +251,16 @@ export async function modelScreenshot(input: VisionGroundingInput): Promise<{
   marker?: PreviousClickMarker
 }> {
   const source = fs.readFileSync(input.image)
+  const expected = input.coordinateFrame?.encoded
+  if (!expected) {
+    throw new Error('The visual model frame has no encoded dimensions.')
+  }
+  const metadata = await sharp(source).metadata()
+  if (metadata.width !== expected.width || metadata.height !== expected.height) {
+    throw new Error(
+      `The visual model frame dimensions do not match: image is ${metadata.width ?? 0}x${metadata.height ?? 0}, coordinate frame is ${expected.width}x${expected.height}.`
+    )
+  }
   const marker = previousClickMarker(input)
   if (!marker) {
     return { dataUrl: `data:${imageMime(input.image)};base64,${source.toString('base64')}` }

@@ -376,6 +376,34 @@ describe('general vision native tool policy', () => {
     fs.unlinkSync(file)
   })
 
+  it('rejects mismatched image and coordinate dimensions before model inference', async () => {
+    const file = path.join(os.tmpdir(), `offgrid-model-frame-mismatch-${Date.now()}.png`)
+    fs.writeFileSync(
+      file,
+      await sharp({
+        create: { width: 200, height: 100, channels: 4, background: '#ffffff' }
+      })
+        .png()
+        .toBuffer()
+    )
+
+    await expect(
+      modelScreenshot({
+        goal: 'Use the control.',
+        image: file,
+        history: [],
+        retrievedFacts: [],
+        policyHistory: [],
+        guidance: [],
+        coordinateFrame: {
+          encoded: { width: 100, height: 100 },
+          source: { width: 200, height: 100 }
+        }
+      })
+    ).rejects.toThrow('image is 200x100, coordinate frame is 100x100')
+    fs.unlinkSync(file)
+  })
+
   it('preserves safe remote transport and provider error detail', () => {
     const transport = new Error('fetch failed', {
       cause: Object.assign(new Error('the peer closed'), { code: 'UND_ERR_SOCKET' })
