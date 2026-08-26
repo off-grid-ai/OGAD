@@ -138,6 +138,7 @@ function isUnsupportedBrowserChromeChord(keys: readonly string[]): boolean {
 
 function isBrowserReloadChord(keys: readonly string[]): boolean {
   const chord = keys.map((key) => key.toLowerCase())
+  if (chord.length === 1) return chord[0] === 'f5'
   if (chord.length !== 2) return false
   const [modifier, key] = chord
   return ['ctrl', 'control', 'cmd', 'command', 'meta'].includes(modifier ?? '') && key === 'r'
@@ -603,6 +604,11 @@ export class BrowserDriver {
         return this.dispatchKeys(keys, true)
       }
       case 'press':
+        if (isBrowserReloadChord(action.keys)) {
+          await this.reloadAndWait()
+          await this.ensurePointer(true)
+          return { ok: true }
+        }
         return this.dispatchKeys(action.keys, false)
       case 'key_down':
         return this.dispatchKeyPhase(action.keys, 'rawKeyDown')

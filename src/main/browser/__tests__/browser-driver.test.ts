@@ -202,6 +202,20 @@ describe('browser hotkeys', () => {
     expect(t.sent.some((entry) => entry.method === 'Page.reload')).toBe(true)
     expect(t.sent.some((entry) => entry.method === 'Input.dispatchKeyEvent')).toBe(false)
   })
+
+  it('turns UI-Mate press F5 into a direct page reload', async () => {
+    const t = makeTransport((method) =>
+      method === 'Runtime.evaluate'
+        ? { result: { value: { url: 'https://x.test/results', readyState: 'complete' } } }
+        : {}
+    )
+
+    await expect(
+      new BrowserDriver(t.cdp).actuate({ type: 'press', keys: ['f5'] })
+    ).resolves.toEqual({ ok: true })
+    expect(t.sent.some((entry) => entry.method === 'Page.reload')).toBe(true)
+    expect(t.sent.some((entry) => entry.method === 'Input.dispatchKeyEvent')).toBe(false)
+  })
 })
 
 describe('page readiness recovery', () => {
