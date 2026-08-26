@@ -8,6 +8,7 @@
 import http from 'http'
 import {
   parseSseLine,
+  displayableReasoningDelta,
   createThinkSplitter,
   createToolCallAccumulator,
   createToolMarkupFilter,
@@ -57,7 +58,8 @@ export function createCompletionStreamAccumulator(
       const frame = parseSseLine(line)
       if (!frame) continue
       if (frame.finishReason) finishReason = frame.finishReason
-      if (frame.delta.reasoning_content) reasoningMarkup.push(frame.delta.reasoning_content)
+      const reasoning = displayableReasoningDelta(frame.delta)
+      if (reasoning) reasoningMarkup.push(reasoning)
       if (frame.delta.content) splitter.push(frame.delta.content)
       if (frame.delta.tool_calls) tools.push(frame.delta.tool_calls)
     }

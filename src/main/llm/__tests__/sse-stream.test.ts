@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   parseSseLine,
+  displayableReasoningDelta,
   createThinkSplitter,
   createToolCallAccumulator,
   createToolMarkupFilter,
@@ -26,6 +27,17 @@ describe('parseSseLine', () => {
   it('parses a reasoning_content delta frame', () => {
     const d = parseSseLine('data: {"choices":[{"delta":{"reasoning_content":"why"}}]}')
     expect(d).toEqual({ delta: { reasoning_content: 'why' }, finishReason: null })
+  })
+
+  it('projects OpenRouter structured reasoning text without encrypted payloads', () => {
+    const frame = parseSseLine(
+      'data: {"choices":[{"delta":{"reasoning_details":[{"type":"reasoning.text","text":"Checking the route. "},{"type":"reasoning.summary","summary":"Compared prices."},{"type":"reasoning.encrypted","data":"secret"}]}}]}'
+    )
+
+    expect(frame).not.toBeNull()
+    expect(displayableReasoningDelta(frame!.delta)).toBe(
+      'Checking the route. Compared prices.'
+    )
   })
 
   it('handles an untrimmed line with leading/trailing whitespace (trims internally)', () => {
