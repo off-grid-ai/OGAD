@@ -11,6 +11,7 @@ import {
   browserHistoryDelta,
   browserHotkeyTokens,
   browserPointerMotion,
+  browserShortcutCommand,
   type CdpTransport
 } from '../browser-driver'
 import type { PageElement } from '../page-script'
@@ -150,6 +151,9 @@ describe('browser hotkeys', () => {
     expect(browserHistoryDelta(['ALT', 'LEFT'])).toBe(-1)
     expect(browserHistoryDelta(['Option', 'Right'])).toBe(1)
     expect(browserHistoryDelta(['Meta', '['])).toBe(-1)
+    expect(browserShortcutCommand(['CTRL', 'SHIFT', 'R'])).toBe('hard_reload')
+    expect(browserShortcutCommand(['F12'])).toBe('blocked_chrome')
+    expect(browserShortcutCommand(['Tab'])).toBe('page')
   })
 
   it('turns Alt+Left into a direct browser-history command', async () => {
@@ -218,6 +222,34 @@ describe('browser hotkeys', () => {
     ).resolves.toEqual({ ok: true })
     expect(t.sent.some((entry) => entry.method === 'Page.reload')).toBe(true)
     expect(t.sent.some((entry) => entry.method === 'Input.dispatchKeyEvent')).toBe(false)
+  })
+
+  it('turns a hard-reload alias into a direct cache-bypassing reload', async () => {
+    const t = makeTransport((method) =>
+      method === 'Runtime.evaluate'
+        ? { result: { value: { url: 'https://x.test/results', readyState: 'complete' } } }
+        : {}
+    )
+
+    await expect(
+      new BrowserDriver(t.cdp).actuate({ type: 'hotkey', keys: 'CTRL+SHIFT+R' })
+    ).resolves.toEqual({ ok: true })
+    expect(t.sent).toEqual(
+      expect.arrayContaining([{ method: 'Page.reload', params: { ignoreCache: true } }])
+    )
+    expect(t.sent.some((entry) => entry.method === 'Input.dispatchKeyEvent')).toBe(false)
+  })
+
+  it('blocks Developer Tools keys instead of reporting a false success', async () => {
+    const t = makeTransport()
+
+    await expect(
+      new BrowserDriver(t.cdp).actuate({ type: 'press', keys: ['f12'] })
+    ).resolves.toMatchObject({ ok: false, reason: 'recoverable' })
+    await expect(
+      new BrowserDriver(t.cdp).actuate({ type: 'hotkey', keys: 'CTRL+SHIFT+I' })
+    ).resolves.toMatchObject({ ok: false, reason: 'recoverable' })
+    expect(t.sent).toEqual([])
   })
 })
 

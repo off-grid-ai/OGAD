@@ -1,5 +1,7 @@
 import type { VisionAction } from '../vision-action'
 import { visionKeysSupported } from '../vision-keys'
+import { WEB_USE_CONTROL_INSTRUCTIONS } from '../../../shared/web-use-control'
+import { NORMALIZED_COORDINATE_GRID_INSTRUCTION } from '../../../shared/vision-coordinate-grid'
 import { assertUIMateModelCapabilities, UI_MATE_GGUF_REPOSITORIES } from './ui-mate/capabilities'
 import {
   buildUIMateMessages,
@@ -88,13 +90,15 @@ function policyInstruction(input: Parameters<VisionModelAdapter['buildRequest']>
           'Coordinate frame:',
           '- The screenshot is the exact web page viewport. It does not include a browser address bar, tab strip, title bar, sidebar, or app chrome.',
           '- Return x and y from 0 to 999 over this exact screenshot: (0, 0) is its top-left pixel and (999, 999) is its bottom-right pixel.',
+          `- ${NORMALIZED_COORDINATE_GRID_INSTRUCTION}`,
           '- Do not add an offset for browser controls or screen padding.',
-          '- Use hotkey ALT+LEFT for Browser Back, CTRL+R to reload, or navigate with an HTTPS URL. Never click an imagined address bar.'
+          ...WEB_USE_CONTROL_INSTRUCTIONS.map((instruction) => `- ${instruction}`)
         ].join('\n')
       : [
           'Coordinate frame:',
           '- The screenshot is the exact current display frame.',
           '- Return x and y from 0 to 999 over this exact screenshot: (0, 0) is its top-left pixel and (999, 999) is its bottom-right pixel.',
+          `- ${NORMALIZED_COORDINATE_GRID_INSTRUCTION}`,
           '- Do not add an offset for window borders, screen padding, or controls outside the screenshot.'
         ].join('\n'),
     input.currentMilestone

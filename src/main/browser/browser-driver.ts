@@ -119,30 +119,83 @@ export function browserHotkeyTokens(keys: string): string[] {
 /** Browser chrome is not part of the captured page. Convert its portable
  * back/forward shortcuts into history movement instead of page key events. */
 export function browserHistoryDelta(keys: readonly string[]): -1 | 0 | 1 {
-  const chord = keys.map((key) => key.toLowerCase())
-  if (chord.length !== 2) return 0
-  const [modifier, key] = chord
-  if ((modifier === 'alt' || modifier === 'option') && key === 'left') return -1
-  if ((modifier === 'alt' || modifier === 'option') && key === 'right') return 1
-  if (['cmd', 'command', 'meta'].includes(modifier ?? '') && key === '[') return -1
-  if (['cmd', 'command', 'meta'].includes(modifier ?? '') && key === ']') return 1
-  return 0
+  const command = browserShortcutCommand(keys)
+  return command === 'back' ? -1 : command === 'forward' ? 1 : 0
 }
 
-function isUnsupportedBrowserChromeChord(keys: readonly string[]): boolean {
-  const chord = keys.map((key) => key.toLowerCase())
-  if (chord.length !== 2) return false
-  const [modifier, key] = chord
-  const primary = ['ctrl', 'control', 'cmd', 'command', 'meta'].includes(modifier ?? '')
-  return primary && (key === 'l' || key === 'w')
+export type BrowserShortcutCommand =
+  | 'back'
+  | 'forward'
+  | 'reload'
+  | 'hard_reload'
+  | 'blocked_chrome'
+  | 'page'
+
+function canonicalShortcutTokens(keys: readonly string[]): Set<string> {
+  const aliases: Record<string, string> = {
+    control: 'ctrl',
+    command: 'cmd',
+    meta: 'cmd',
+    option: 'alt',
+    opt: 'alt',
+    esc: 'escape',
+    return: 'enter'
+  }
+  return new Set(keys.map((key) => aliases[key.toLowerCase()] ?? key.toLowerCase()))
 }
 
-function isBrowserReloadChord(keys: readonly string[]): boolean {
-  const chord = keys.map((key) => key.toLowerCase())
-  if (chord.length === 1) return chord[0] === 'f5'
-  if (chord.length !== 2) return false
-  const [modifier, key] = chord
-  return ['ctrl', 'control', 'cmd', 'command', 'meta'].includes(modifier ?? '') && key === 'r'
+function shortcutSignature(keys: readonly string[]): string {
+  return [...canonicalShortcutTokens(keys)].sort().join('+')
+}
+
+const browserShortcutCommands = new Map<string, BrowserShortcutCommand>()
+const registerBrowserShortcuts = (
+  command: BrowserShortcutCommand,
+  shortcuts: readonly (readonly string[])[]
+): void => {
+  for (const shortcut of shortcuts)
+    browserShortcutCommands.set(shortcutSignature(shortcut), command)
+}
+
+registerBrowserShortcuts('back', [
+  ['alt', 'left'],
+  ['cmd', '[']
+])
+registerBrowserShortcuts('forward', [
+  ['alt', 'right'],
+  ['cmd', ']']
+])
+registerBrowserShortcuts('reload', [['f5'], ['ctrl', 'r'], ['cmd', 'r']])
+registerBrowserShortcuts('hard_reload', [
+  ['ctrl', 'shift', 'r'],
+  ['cmd', 'shift', 'r'],
+  ['ctrl', 'f5'],
+  ['shift', 'f5']
+])
+registerBrowserShortcuts('blocked_chrome', [
+  ['f11'],
+  ['f12'],
+  ['shift', 'escape'],
+  ...['ctrl', 'cmd'].flatMap((primary) =>
+    ['l', 'w', 't', 'n', 'p', 's', 'o', 'u', 'j', 'h', 'd', 'f', '+', '-', '=', '0'].map((key) => [
+      primary,
+      key
+    ])
+  ),
+  ...['ctrl', 'cmd'].flatMap((primary) =>
+    ['i', 'j', 'c', 'b', 'n', 't'].map((key) => [primary, 'shift', key])
+  ),
+  ...Array.from({ length: 9 }, (_, index) => ['cmd', String(index + 1)]),
+  ['ctrl', 'tab'],
+  ['ctrl', 'shift', 'tab'],
+  ['ctrl', 'pageup'],
+  ['ctrl', 'pagedown']
+])
+
+/** Resolve shortcuts that belong to browser chrome. Page-level keys remain
+ * ordinary CDP input. Invisible or unsafe chrome commands fail explicitly. */
+export function browserShortcutCommand(keys: readonly string[]): BrowserShortcutCommand {
+  return browserShortcutCommands.get(shortcutSignature(keys)) ?? 'page'
 }
 
 export class BrowserDriver {
@@ -357,8 +410,8 @@ export class BrowserDriver {
     throw new Error('The browser page did not finish loading after guarded recovery.')
   }
 
-  async reloadAndWait(): Promise<BrowserPageState> {
-    await this.send('Page.reload', { ignoreCache: false })
+  async reloadAndWait(ignoreCache = false): Promise<BrowserPageState> {
+    await this.send('Page.reload', { ignoreCache })
     const recovered = await this.waitForReadyDocument()
     if (recovered) return recovered
     throw new Error('The browser page did not finish loading after reload.')
@@ -543,6 +596,26 @@ export class BrowserDriver {
     return { ok: true }
   }
 
+  private async actuateShortcut(keys: readonly string[], chord: boolean): Promise<DriverResult> {
+    const command = browserShortcutCommand(keys)
+    if (command === 'back') return this.moveThroughHistory(-1)
+    if (command === 'forward') return this.moveThroughHistory(1)
+    if (command === 'reload' || command === 'hard_reload') {
+      await this.reloadAndWait(command === 'hard_reload')
+      await this.ensurePointer(true)
+      return { ok: true }
+    }
+    if (command === 'blocked_chrome') {
+      return {
+        ok: false,
+        reason: 'recoverable',
+        detail:
+          'That browser-chrome shortcut is not available in Web Use. Use Navigate, Alt+Left, Alt+Right, Ctrl+R, Ctrl+Shift+R, or visual page controls.'
+      }
+    }
+    return this.dispatchKeys(keys, chord)
+  }
+
   /** Execute the shared visual action space against this isolated browser page. */
   async actuate(action: VisionAction): Promise<DriverResult> {
     switch (action.type) {
@@ -617,30 +690,10 @@ export class BrowserDriver {
         return this.navigate(action.url)
       case 'hotkey': {
         const keys = browserHotkeyTokens(action.keys)
-        const historyDelta = browserHistoryDelta(keys)
-        if (historyDelta) return this.moveThroughHistory(historyDelta)
-        if (isBrowserReloadChord(keys)) {
-          await this.reloadAndWait()
-          await this.ensurePointer(true)
-          return { ok: true }
-        }
-        if (isUnsupportedBrowserChromeChord(keys)) {
-          return {
-            ok: false,
-            reason: 'recoverable',
-            detail:
-              'The embedded browser has no page-level address bar or tab strip. Use Alt+Left or Alt+Right for browser history.'
-          }
-        }
-        return this.dispatchKeys(keys, true)
+        return this.actuateShortcut(keys, true)
       }
       case 'press':
-        if (isBrowserReloadChord(action.keys)) {
-          await this.reloadAndWait()
-          await this.ensurePointer(true)
-          return { ok: true }
-        }
-        return this.dispatchKeys(action.keys, false)
+        return this.actuateShortcut(action.keys, false)
       case 'key_down':
         return this.dispatchKeyPhase(action.keys, 'rawKeyDown')
       case 'key_up':

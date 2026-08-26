@@ -1,4 +1,6 @@
 import { GENERAL_STEP_SYSTEM_PROMPT } from './canonical-vision-contract'
+import { WEB_USE_CONTROL_INSTRUCTIONS } from '../../../shared/web-use-control'
+import { NORMALIZED_COORDINATE_GRID_INSTRUCTION } from '../../../shared/vision-coordinate-grid'
 import {
   GENERAL_VISION_TOOLS,
   generalVisionPolicyFailure,
@@ -25,12 +27,7 @@ function browserControlContext(input: VisionPolicyInput): string {
   if (input.operatorEnvironment !== 'embedded_browser') return ''
   return [
     'Web Use control limits:',
-    '- The screenshot contains the web page only. It has no native address bar or tab strip.',
-    '- Use a structured hotkey action with keys ALT+LEFT for Browser Back and ALT+RIGHT for Browser Forward.',
-    '- Use a structured hotkey action with keys CTRL+R only to reload the current page. The host maps the primary modifier for its platform.',
-    '- Use a structured navigate action with an HTTPS URL to open a different website. Do not try to focus an address bar first.',
-    '- Never use CTRL+L, CMD+L, CTRL+W, or CMD+W. Those browser-chrome controls do not exist in this action surface.',
-    '- To leave an accidental detail or booking page, use Browser Back.'
+    ...WEB_USE_CONTROL_INSTRUCTIONS.map((instruction) => `- ${instruction}`)
   ].join('\n')
 }
 
@@ -63,7 +60,7 @@ function taskContext(input: VisionPolicyInput): string {
       ? `Older task outcomes. These can be stale:\n${input.olderVisualFacts.join('\n')}`
       : '',
     encoded
-      ? `Screenshot coordinate space:\nThe supplied screenshot is ${encoded.width} pixels wide and ${encoded.height} pixels high. Return every action point in the model's 0-1000 normalized coordinate space: x=0 is the left edge, x=1000 is the right edge, y=0 is the top edge, and y=1000 is the bottom edge.`
+      ? `Screenshot coordinate space:\nThe supplied screenshot is ${encoded.width} pixels wide and ${encoded.height} pixels high. Return every action point in the model's 0-1000 normalized coordinate space: x=0 is the left edge, x=1000 is the right edge, y=0 is the top edge, and y=1000 is the bottom edge. ${NORMALIZED_COORDINATE_GRID_INSTRUCTION}`
       : '',
     'Inspect the screenshot and call exactly one transition tool.'
   ]
