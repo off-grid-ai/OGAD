@@ -6,7 +6,7 @@ import { useMeetingRecorder } from './useMeetingRecorder'
 import { MemoryChat } from './components/MemoryChat'
 import { ExploreScreen } from './components/explore/ExploreScreen'
 import type { DemoPreset } from './components/explore/presetCatalog'
-import { Settings } from './components/Settings'
+import { Settings, SETTINGS_DESTINATIONS } from './components/Settings'
 import { SettingsPanel } from './components/SettingsPanel'
 import { ModelsScreen } from './components/ModelsScreen'
 import { ProjectsScreen } from './components/ProjectsScreen'
@@ -18,9 +18,13 @@ import type { SearchHit } from './types'
 // Open-core: pro screens live in the private pro package and render through the
 // pro view-router; the free build shows the UpgradeScreen for those tabs.
 import {
+  clearProFeaturesRenderer,
   loadProFeaturesRenderer,
   type ProRendererActivation
 } from './bootstrap/loadProFeaturesRenderer'
+import { RendererEntitlementProvider } from './bootstrap/RendererEntitlementProvider'
+import { shouldRemovePaidRendererAccess } from './bootstrap/entitlementRegistry'
+import { useRendererEntitlement } from './bootstrap/useRendererEntitlement'
 import { renderProView, type ProViewContext } from './bootstrap/proView'
 import { UpgradeScreen } from './components/pro/UpgradeScreen'
 import { getProFeature, proFeatureComingSoon } from './components/pro/proCatalog'
@@ -34,7 +38,7 @@ import { GridBackdrop } from './components/ui/grid-backdrop'
 import { StarfieldBackdrop } from './components/ui/starfield-backdrop'
 import { Sidebar, SidebarBody } from './components/ui/sidebar'
 import { NavThemeToggle } from './components/ThemeToggle'
-import { motion, AnimatePresence } from 'motion/react'
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
 import {
   IconMessageCircle,
   IconCompass,
@@ -51,6 +55,7 @@ import {
   IconArrowRight,
   IconActivityHeartbeat,
   IconDeviceMobile,
+  IconListCheck,
   IconExternalLink
 } from '@tabler/icons-react'
 import { OFF_GRID_MOBILE_URL, openExternal } from './constants/links'
@@ -58,6 +63,25 @@ import { cn } from './lib/utils'
 import { normalizeProNavigationIntent, type ProNavigationIntent } from './lib/pro-navigation'
 import { navigateSearchHit } from './lib/search-navigation'
 import { WatchedBrowserPane } from './components/browser/WatchedBrowserPane'
+import {
+  Panel,
+  PanelGroup,
+  PanelResizeHandle,
+  type ImperativePanelHandle
+} from 'react-resizable-panels'
+import { useTaskWorkspaceOpen } from './lib/task-side-panel'
+import { useTaskSessions } from './lib/task-session-store'
+import { shouldConfirmChatLeave } from './lib/chat-leave-guard'
+import { SidebarNavigationMenu } from './components/navigation/SidebarNavigationMenu'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from './components/ui/dialog'
+import { Button } from './components/ui/button'
 import {
   OPEN_MODEL_SETTINGS_PANEL_EVENT,
   type ModelSettingsPanelTab
@@ -88,6 +112,7 @@ type ViewMode =
   | 'memories'
   | 'entities'
   | 'memory-chat'
+  | 'tasks'
   | 'models'
   | 'gateway'
   | 'projects'
@@ -103,6 +128,8 @@ interface NavigationIntent {
   view: ViewMode
   section?: string
   subroute?: string
+  conversationId?: string
+  draftPrompt?: string
 }
 
 // Navigation state type for history tracking
@@ -227,13 +254,10 @@ function ModelStatusDot({
         : status === 'starting'
           ? 'Model starting'
           : 'Model stopped'
-  // Collapsed: clicking opens the sidebar (the label/restart action lives there).
-  // Expanded: clicking goes to Settings to restart.
-  const label = open
-    ? status === 'down'
-      ? 'Model server stopped. Open Settings to restart.'
-      : `Model server: ${text.toLowerCase()}`
-    : `${text} - expand for details`
+  const label =
+    status === 'down'
+      ? 'Model server stopped. Open Setup and health.'
+      : `Model server: ${text.toLowerCase()}. Open Setup and health.`
   return (
     <button
       type="button"
@@ -251,9 +275,9 @@ function ModelStatusDot({
 function AppContent() {
   const { addNotification, unreadCount } = useNotifications()
 
-  // Pro entitlement (preload reads OFFGRID_PRO; absent submodule => false at runtime).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const isPro = !!(window as any).api?.isPro
+  // Main owns entitlement truth. The preload value seeds this renderer, then
+  // license:changed keeps it live without a restart.
+  const { isPro, setIsPro } = useRendererEntitlement()
   // Re-render once pro renderer features have activated (registers the view-router).
   const [proReady, setProReady] = useState(false)
   const [proActivation, setProActivation] = useState<ProRendererActivation>('none')
@@ -292,7 +316,7 @@ function AppContent() {
 
   // Free users land on Models (download a model first, with the sidebar to
   // explore); Mac Pro users land on Day. Never land on a locked or unavailable tab.
-  const [viewMode, setViewMode] = useState<ViewMode>(isPro && isMac() ? 'day' : 'models')
+  const [viewMode, commitViewMode] = useState<ViewMode>(isPro && isMac() ? 'day' : 'models')
   const [settingsSection, setSettingsSection] = useState<string | null>(null)
   const [settingsNavigationKey, setSettingsNavigationKey] = useState(0)
   const [navigationSubroute, setNavigationSubroute] = useState<string | null>(null)
@@ -330,9 +354,155 @@ function AppContent() {
     projectId?: string
     openGallery?: boolean
     seedPrompt?: string
+    draftPrompt?: string
   } | null>(null)
+  const [activeChatConversationId, setActiveChatConversationId] = useState<string | null>(null)
+  const { tasks: taskSessions } = useTaskSessions()
+  const [pendingNavigation, setPendingNavigation] = useState<{
+    destination: ViewMode
+    proceed: () => void
+  } | null>(null)
+  const navigateTo = useCallback(
+    (destination: ViewMode, prepare?: () => void): void => {
+      const proceed = (): void => {
+        prepare?.()
+        commitViewMode(destination)
+      }
+      if (
+        shouldConfirmChatLeave({
+          currentView: viewMode,
+          nextView: destination,
+          conversationId: activeChatConversationId,
+          tasks: taskSessions
+        })
+      ) {
+        setPendingNavigation({ destination, proceed })
+        return
+      }
+      setPendingNavigation(null)
+      proceed()
+    },
+    [activeChatConversationId, taskSessions, viewMode]
+  )
+  const confirmPendingNavigation = useCallback((): void => {
+    const navigation = pendingNavigation
+    setPendingNavigation(null)
+    navigation?.proceed()
+  }, [pendingNavigation])
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const sidebarOpenRef = useRef(sidebarOpen)
+  const sidebarOpenedByHoverRef = useRef(false)
+  const sidebarBeforeTaskDetailRef = useRef<boolean | null>(null)
+  const taskWorkspaceOpen = useTaskWorkspaceOpen()
+  const taskWorkspaceRouteActive = viewMode === 'memory-chat' || viewMode === 'chats'
+  const taskWorkspaceVisible = taskWorkspaceOpen && taskWorkspaceRouteActive
+  const [mainWorkspaceCollapsed, setMainWorkspaceCollapsed] = useState(false)
+  const mainWorkspaceCollapsedRef = useRef(false)
+  const mainWorkspaceFrameRef = useRef<number | null>(null)
+  const taskWorkspaceFrameRef = useRef<number | null>(null)
+  const [taskWorkspaceSize, setTaskWorkspaceSize] = useState(48)
+  const [taskWorkspaceDragging, setTaskWorkspaceDragging] = useState(false)
+  const reduceWorkspaceMotion = useReducedMotion()
+  const mainWorkspaceRef = useRef<ImperativePanelHandle>(null)
+  const taskWorkspaceRef = useRef<ImperativePanelHandle>(null)
   const rec = useMeetingRecorder()
+  const taskWorkspaceTransition =
+    reduceWorkspaceMotion || taskWorkspaceDragging
+      ? 'none'
+      : 'flex-grow 420ms cubic-bezier(0.22, 1, 0.36, 1)'
+
+  useEffect(() => {
+    sidebarOpenRef.current = sidebarOpen
+  }, [sidebarOpen])
+
+  useEffect(() => {
+    mainWorkspaceCollapsedRef.current = mainWorkspaceCollapsed
+  }, [mainWorkspaceCollapsed])
+
+  useEffect(
+    () => () => {
+      if (mainWorkspaceFrameRef.current !== null) {
+        cancelAnimationFrame(mainWorkspaceFrameRef.current)
+      }
+      if (taskWorkspaceFrameRef.current !== null) {
+        cancelAnimationFrame(taskWorkspaceFrameRef.current)
+      }
+    },
+    []
+  )
+
+  useEffect(() => {
+    if (taskWorkspaceFrameRef.current !== null) {
+      cancelAnimationFrame(taskWorkspaceFrameRef.current)
+    }
+    taskWorkspaceFrameRef.current = requestAnimationFrame(() => {
+      taskWorkspaceFrameRef.current = null
+      const taskPanel = taskWorkspaceRef.current
+      if (!taskPanel) return
+      try {
+        if (taskWorkspaceVisible) taskPanel.expand()
+        else taskPanel.collapse()
+      } catch {
+        // The next measured frame applies the requested visibility.
+      }
+    })
+  }, [taskWorkspaceVisible])
+
+  const setMainWorkspaceVisibility = useCallback((collapsed: boolean): void => {
+    if (mainWorkspaceCollapsedRef.current === collapsed) return
+    mainWorkspaceCollapsedRef.current = collapsed
+    setMainWorkspaceCollapsed(collapsed)
+    if (mainWorkspaceFrameRef.current !== null) {
+      cancelAnimationFrame(mainWorkspaceFrameRef.current)
+    }
+    mainWorkspaceFrameRef.current = requestAnimationFrame(() => {
+      mainWorkspaceFrameRef.current = null
+      const panel = mainWorkspaceRef.current
+      if (!panel) return
+      try {
+        if (collapsed) panel.collapse()
+        else panel.expand()
+      } catch {
+        // State is authoritative if the panel group still has not measured.
+      }
+    })
+  }, [])
+
+  const toggleMainWorkspace = (): void => {
+    setMainWorkspaceVisibility(!mainWorkspaceCollapsed)
+  }
+
+  const setTaskDetailSidebarMode = useCallback((detailOpen: boolean): void => {
+    if (detailOpen) {
+      if (sidebarBeforeTaskDetailRef.current === null) {
+        sidebarBeforeTaskDetailRef.current = sidebarOpenRef.current
+      }
+      setSidebarOpen(false)
+      return
+    }
+    const previous = sidebarBeforeTaskDetailRef.current
+    sidebarBeforeTaskDetailRef.current = null
+    if (previous !== null) setSidebarOpen(previous)
+  }, [])
+
+  const setDockedTaskDetailMode = useCallback(
+    (detailOpen: boolean): void => {
+      setTaskDetailSidebarMode(detailOpen)
+      setMainWorkspaceVisibility(detailOpen)
+    },
+    [setMainWorkspaceVisibility, setTaskDetailSidebarMode]
+  )
+
+  const resizeTaskWorkspaceFromKeyboard = (key: string): void => {
+    if (key !== 'ArrowLeft' && key !== 'ArrowRight') return
+    const next = Math.min(68, Math.max(32, taskWorkspaceSize + (key === 'ArrowLeft' ? 5 : -5)))
+    setTaskWorkspaceSize(next)
+    try {
+      taskWorkspaceRef.current?.resize(next)
+    } catch {
+      // The next measured layout applies the announced size.
+    }
+  }
 
   // The meeting recording lifecycle (detect → record → warn → stop → finalize) is
   // owned by the main-process MeetingController. This view just reflects rec.* and
@@ -357,6 +527,60 @@ function AppContent() {
     setCanGoBack(navigationHistory.current.length > 1)
     setCanGoForward(forwardHistory.current.length > 0)
   }, [])
+
+  const removePaidRendererAccess = useCallback((): void => {
+    // Remove capability seams before React changes the route. No paid view,
+    // slot, settings section, hook, screen, or nav entry can run after this.
+    clearProFeaturesRenderer()
+    setIsPro(false)
+    setProActivation('none')
+    setProReady(true)
+
+    navigationHistory.current = []
+    forwardHistory.current = []
+    isNavigatingHistory.current = false
+    setCanGoBack(false)
+    setCanGoForward(false)
+    setSettingsSection(null)
+    setNavigationSubroute(null)
+    setModelSettingsOpen(false)
+    setModelSettingsTab('model')
+    setSelectedSessionId(null)
+    setSelectedMemoryId(null)
+    setSelectedEntityId(null)
+    setSelectedProjectId(null)
+    setSearchQuery('')
+    setSearchSources([])
+    setSearchSort('relevance')
+    setReplayTarget(null)
+    setMeetingTarget(null)
+    setActionsMode(null)
+    setActionTarget(null)
+    setApprovalTarget(null)
+    setCalendarEventTarget(null)
+    setActionsEntity(null)
+    setChatTarget(null)
+    commitViewMode('day')
+  }, [setIsPro])
+
+  useEffect(() => {
+    const license = window.api.license
+    if (!license || typeof license.onChanged !== 'function') return
+    let active = true
+    const applyStatus = (info: ProLicenseInfo): void => {
+      if (!active || !shouldRemovePaidRendererAccess(info)) return
+      removePaidRendererAccess()
+    }
+    const off = license.onChanged(applyStatus)
+    void license
+      .status()
+      .then(applyStatus)
+      .catch(() => {})
+    return () => {
+      active = false
+      off()
+    }
+  }, [removePaidRendererAccess])
 
   // Handle browser URL changes
   useEffect(() => {
@@ -393,7 +617,7 @@ function AppContent() {
       }
       setSettingsSection(section)
       setNavigationSubroute(null)
-      setViewMode('settings')
+      commitViewMode('settings')
     } else if (path.startsWith('/devices/')) {
       let subroute: string | null = null
       try {
@@ -403,11 +627,11 @@ function AppContent() {
       }
       setNavigationSubroute(subroute)
       setSettingsSection(null)
-      setViewMode('devices')
+      commitViewMode('devices')
     } else if (viewMap[path]) {
       setNavigationSubroute(null)
       setSettingsSection(null)
-      setViewMode(viewMap[path])
+      commitViewMode(viewMap[path])
     }
   }, [])
 
@@ -417,30 +641,42 @@ function AppContent() {
     const onNav = (e: Event): void => {
       const intent = (e as CustomEvent<unknown>).detail
       if (typeof intent === 'string') {
-        setSettingsSection(null)
-        setNavigationSubroute(null)
-        setViewMode(intent as ViewMode)
+        navigateTo(intent as ViewMode, () => {
+          setSettingsSection(null)
+          setNavigationSubroute(null)
+        })
         return
       }
       if (!intent || typeof intent !== 'object' || !('view' in intent)) return
       const navigation = intent as NavigationIntent
-      setSettingsSection(navigation.view === 'settings' ? (navigation.section ?? null) : null)
-      if (navigation.view === 'settings') setSettingsNavigationKey((value) => value + 1)
-      setNavigationSubroute(navigation.view === 'devices' ? (navigation.subroute ?? null) : null)
-      setViewMode(navigation.view)
+      navigateTo(navigation.view, () => {
+        setSettingsSection(navigation.view === 'settings' ? (navigation.section ?? null) : null)
+        if (navigation.view === 'settings') setSettingsNavigationKey((value) => value + 1)
+        setNavigationSubroute(navigation.view === 'devices' ? (navigation.subroute ?? null) : null)
+        if (
+          navigation.view === 'memory-chat' &&
+          (navigation.conversationId || navigation.draftPrompt)
+        ) {
+          setChatTarget({
+            conversationId: navigation.conversationId,
+            draftPrompt: navigation.draftPrompt
+          })
+        }
+      })
     }
     window.addEventListener('og:navigate', onNav)
     // Main-driven navigation (tray → a screen).
     const offNav = window.api.onNavigate?.((v: string) => {
-      setNavigationSubroute(null)
-      setSettingsSection(null)
-      setViewMode(v as ViewMode)
+      navigateTo(v as ViewMode, () => {
+        setNavigationSubroute(null)
+        setSettingsSection(null)
+      })
     })
     return () => {
       window.removeEventListener('og:navigate', onNav)
       offNav?.()
     }
-  }, [])
+  }, [navigateTo])
 
   useEffect(() => {
     const open = (event: Event): void => {
@@ -466,6 +702,7 @@ function AppContent() {
       dashboard: '/dashboard',
       'memory-chat': '/chat',
       chats: '/chats',
+      tasks: '/tasks',
       memories: '/memories',
       entities: '/entities',
       models: '/models',
@@ -589,68 +826,70 @@ function AppContent() {
   // Navigate back using history stack
   const navigateBack = useCallback(() => {
     if (navigationHistory.current.length > 1) {
-      isNavigatingHistory.current = true
-      // Pop current state and push to forward history
-      const currentState = navigationHistory.current.pop()
-      if (currentState) {
-        forwardHistory.current.push(currentState)
-      }
-      // Get previous state
-      const previousState = navigationHistory.current[navigationHistory.current.length - 1]
+      const previousState = navigationHistory.current[navigationHistory.current.length - 2]
       if (previousState) {
-        setViewMode(previousState.viewMode)
-        setNavigationSubroute(previousState.subroute)
-        setSettingsSection(previousState.settingsSection)
-        setSelectedSessionId(previousState.selectedSessionId)
-        setSelectedMemoryId(previousState.selectedMemoryId)
-        setSelectedEntityId(previousState.selectedEntityId)
-        setSelectedProjectId(previousState.selectedProjectId)
+        navigateTo(previousState.viewMode, () => {
+          isNavigatingHistory.current = true
+          const currentState = navigationHistory.current.pop()
+          if (currentState) forwardHistory.current.push(currentState)
+          setNavigationSubroute(previousState.subroute)
+          setSettingsSection(previousState.settingsSection)
+          setSelectedSessionId(previousState.selectedSessionId)
+          setSelectedMemoryId(previousState.selectedMemoryId)
+          setSelectedEntityId(previousState.selectedEntityId)
+          setSelectedProjectId(previousState.selectedProjectId)
+          syncNavFlags()
+        })
       }
-      syncNavFlags()
     }
-  }, [syncNavFlags])
+  }, [navigateTo, syncNavFlags])
 
   // Navigate forward using forward history stack
   const navigateForward = useCallback(() => {
     if (forwardHistory.current.length > 0) {
-      isNavigatingHistory.current = true
-      // Pop from forward history
-      const nextState = forwardHistory.current.pop()
+      const nextState = forwardHistory.current[forwardHistory.current.length - 1]
       if (nextState) {
-        // Push to back history
-        navigationHistory.current.push(nextState)
-        // Apply the state
-        setViewMode(nextState.viewMode)
-        setNavigationSubroute(nextState.subroute)
-        setSettingsSection(nextState.settingsSection)
-        setSelectedSessionId(nextState.selectedSessionId)
-        setSelectedMemoryId(nextState.selectedMemoryId)
-        setSelectedEntityId(nextState.selectedEntityId)
-        setSelectedProjectId(nextState.selectedProjectId)
+        navigateTo(nextState.viewMode, () => {
+          isNavigatingHistory.current = true
+          forwardHistory.current.pop()
+          navigationHistory.current.push(nextState)
+          setNavigationSubroute(nextState.subroute)
+          setSettingsSection(nextState.settingsSection)
+          setSelectedSessionId(nextState.selectedSessionId)
+          setSelectedMemoryId(nextState.selectedMemoryId)
+          setSelectedEntityId(nextState.selectedEntityId)
+          setSelectedProjectId(nextState.selectedProjectId)
+          syncNavFlags()
+        })
       }
-      syncNavFlags()
     }
-  }, [syncNavFlags])
+  }, [navigateTo, syncNavFlags])
 
   const handleBack = useCallback(() => {
     navigateBack()
   }, [navigateBack])
 
   // Navigation handlers for Dashboard and MemoryChat
-  const handleSelectChat = useCallback((sessionId: string) => {
-    setViewMode('chats')
-    setSelectedSessionId(sessionId)
-  }, [])
+  const handleSelectChat = useCallback(
+    (sessionId: string) => {
+      navigateTo('chats', () => setSelectedSessionId(sessionId))
+    },
+    [navigateTo]
+  )
 
-  const handleSelectMemory = useCallback((memoryId: number) => {
-    setViewMode('memories')
-    setSelectedMemoryId(memoryId)
-  }, [])
+  const handleSelectMemory = useCallback(
+    (memoryId: number) => {
+      navigateTo('memories', () => setSelectedMemoryId(memoryId))
+    },
+    [navigateTo]
+  )
 
-  const handleSelectEntity = useCallback((entityId: number) => {
-    setViewMode('entities')
-    setSelectedEntityId(entityId)
-  }, [])
+  const handleSelectEntity = useCallback(
+    (entityId: number) => {
+      navigateTo('entities', () => setSelectedEntityId(entityId))
+    },
+    [navigateTo]
+  )
 
   // Universal-search result → jump to the exact thing: open its source URL, the
   // owning entity/memory/meeting, or seek Replay to that captured moment.
@@ -660,58 +899,59 @@ function AppContent() {
         selectEntity: handleSelectEntity,
         selectMemory: handleSelectMemory,
         openMeeting: (meetingId) => {
-          setMeetingTarget(meetingId)
-          setViewMode('meetings')
+          navigateTo('meetings', () => setMeetingTarget(meetingId))
         },
         openChat: (target) => {
-          setChatTarget(target)
-          setViewMode('memory-chat')
+          navigateTo('memory-chat', () => setChatTarget(target))
         },
         openReplay: (timestamp) => {
-          setReplayTarget(timestamp)
-          setViewMode('replay')
+          navigateTo('replay', () => setReplayTarget(timestamp))
         }
       })
     },
-    [handleSelectEntity, handleSelectMemory]
+    [handleSelectEntity, handleSelectMemory, navigateTo]
   )
 
-  const openSearch = useCallback((q: string) => {
-    setSearchQuery(q)
-    setViewMode('search')
-  }, [])
+  const openSearch = useCallback(
+    (q: string) => {
+      navigateTo('search', () => setSearchQuery(q))
+    },
+    [navigateTo]
+  )
 
-  const handleProNavigate = useCallback((rawIntent: ProNavigationIntent): void => {
-    const intent = normalizeProNavigationIntent(rawIntent)
-    if (!intent) return
+  const handleProNavigate = useCallback(
+    (rawIntent: ProNavigationIntent): void => {
+      const intent = normalizeProNavigationIntent(rawIntent)
+      if (!intent) return
 
-    if (intent.view === 'chat') {
-      if ('conversationId' in intent) {
-        setChatTarget({ conversationId: intent.conversationId })
-        setViewMode('memory-chat')
+      if (intent.view === 'chat') {
+        if ('conversationId' in intent) {
+          navigateTo('memory-chat', () => setChatTarget({ conversationId: intent.conversationId }))
+          return
+        }
+        void window.api.approvalsExecutionChat(intent.approvalId).then((conversationId) => {
+          if (!conversationId) return
+          navigateTo('memory-chat', () => setChatTarget({ conversationId }))
+        })
         return
       }
-      void window.api.approvalsExecutionChat(intent.approvalId).then((conversationId) => {
-        if (!conversationId) return
-        setChatTarget({ conversationId })
-        setViewMode('memory-chat')
+      navigateTo(intent.view, () => {
+        if (intent.view === 'actions') {
+          setActionTarget(intent.actionId ?? null)
+          setApprovalTarget(intent.approvalId ?? null)
+          setActionsMode(intent.mode ?? (intent.approvalId ? 'approvals' : 'todo'))
+          setActionsEntity(intent.entity ?? null)
+        } else if (intent.view === 'day') {
+          setCalendarEventTarget(intent.calendarEventId ?? null)
+        } else if (intent.view === 'replay') {
+          setReplayTarget(intent.seekMs ?? null)
+        } else {
+          setMeetingTarget(intent.meetingId ?? null)
+        }
       })
-      return
-    }
-    if (intent.view === 'actions') {
-      setActionTarget(intent.actionId ?? null)
-      setApprovalTarget(intent.approvalId ?? null)
-      setActionsMode(intent.mode ?? (intent.approvalId ? 'approvals' : 'todo'))
-      setActionsEntity(intent.entity ?? null)
-    } else if (intent.view === 'day') {
-      setCalendarEventTarget(intent.calendarEventId ?? null)
-    } else if (intent.view === 'replay') {
-      setReplayTarget(intent.seekMs ?? null)
-    } else {
-      setMeetingTarget(intent.meetingId ?? null)
-    }
-    setViewMode(intent.view)
-  }, [])
+    },
+    [navigateTo]
+  )
 
   useEffect(() => {
     if (!proReady || !isPro) return
@@ -745,33 +985,35 @@ function AppContent() {
   // Open a project chat in the main Chat screen (existing convo or new-in-project).
   const handleOpenProjectChat = useCallback(
     (target: { conversationId?: string; projectId?: string }) => {
-      setChatTarget(target)
-      setViewMode('memory-chat')
+      navigateTo('memory-chat', () => setChatTarget(target))
     },
-    []
+    [navigateTo]
   )
 
   const handleOpenChatOwner = useCallback(
     (target: { conversationId?: string; openGallery?: boolean }) => {
-      setChatTarget(target)
-      setViewMode('memory-chat')
+      navigateTo('memory-chat', () => setChatTarget(target))
     },
-    []
+    [navigateTo]
   )
 
   // Run an Explore preset: open a fresh chat seeded with the preset's prompt, which auto-sends so
   // the agent takes over and asks its own follow-ups. Same handoff whether the tap came from the
   // Explore screen or the chat empty state.
-  const handleRunPreset = useCallback((preset: DemoPreset) => {
-    setChatTarget({ seedPrompt: preset.prompt })
-    setViewMode('memory-chat')
-  }, [])
+  const handleRunPreset = useCallback(
+    (preset: DemoPreset) => {
+      navigateTo('memory-chat', () => setChatTarget({ seedPrompt: preset.prompt }))
+    },
+    [navigateTo]
+  )
 
   const [explorePresetId, setExplorePresetId] = useState<string | undefined>()
-  const handleOpenSkillPreset = useCallback((preset: DemoPreset) => {
-    setExplorePresetId(preset.id)
-    setViewMode('explore')
-  }, [])
+  const handleOpenSkillPreset = useCallback(
+    (preset: DemoPreset) => {
+      navigateTo('explore', () => setExplorePresetId(preset.id))
+    },
+    [navigateTo]
+  )
   const handleExploreTargetConsumed = useCallback(() => setExplorePresetId(undefined), [])
 
   // Global keyboard shortcuts for back/forward navigation (Cmd+[ and Cmd+])
@@ -814,53 +1056,75 @@ function AppContent() {
     }
   }
   // Icons take no color — the nav button drives it (emerald when active).
-  const mainNav: { label: string; icon: React.ReactNode; view: ViewMode; locked?: boolean }[] = [
+  type NavItem = { label: string; icon: React.ReactNode; view: ViewMode; locked?: boolean }
+  const navigationItems = (
+    [
+      {
+        label: 'Explore',
+        icon: <IconCompass className="h-5 w-5 shrink-0" />,
+        view: 'explore' as ViewMode
+      },
+      proItem('search'),
+      proItem('day'),
+      proItem('replay'),
+      proItem('reflect'),
+      proItem('meetings'),
+      proItem('actions'),
+      proItem('entities'),
+      {
+        label: 'Projects',
+        icon: <IconFolders className="h-5 w-5 shrink-0" />,
+        view: 'projects' as ViewMode
+      },
+      {
+        label: 'Chat',
+        icon: <IconMessageCircle className="h-5 w-5 shrink-0" />,
+        view: 'memory-chat' as ViewMode
+      },
+      {
+        label: 'Tasks',
+        icon: <IconListCheck className="h-5 w-5 shrink-0" />,
+        view: 'tasks' as ViewMode
+      },
+      proItem('voice'),
+      proItem('vault'),
+      proItem('clipboard'),
+      proItem('devices'),
+      {
+        label: 'Integrations',
+        icon: <IconPlug className="h-5 w-5 shrink-0" />,
+        view: 'connectors' as ViewMode
+      },
+      {
+        label: 'Models',
+        icon: <IconDownload className="h-5 w-5 shrink-0" />,
+        view: 'models' as ViewMode
+      },
+      {
+        label: 'Gateway',
+        icon: <IconServer2 className="h-5 w-5 shrink-0" />,
+        view: 'gateway' as ViewMode
+      },
+      proItem('notifications')
+    ] as Array<NavItem | null>
+  ).filter((item): item is NavItem => item !== null)
+  const navigationGroupDefinitions: { label: string; views: readonly ViewMode[] }[] = [
+    { label: 'Discover', views: ['explore', 'search', 'day', 'replay', 'reflect'] },
     {
-      label: 'Explore',
-      icon: <IconCompass className="h-5 w-5 shrink-0" />,
-      view: 'explore' as ViewMode
+      label: 'Work',
+      views: ['meetings', 'actions', 'entities', 'projects', 'memory-chat', 'tasks', 'voice']
     },
-    proItem('search'),
-    proItem('day'),
-    proItem('replay'),
-    proItem('reflect'),
-    proItem('meetings'),
-    proItem('actions'),
-    proItem('entities'),
-    {
-      label: 'Projects',
-      icon: <IconFolders className="h-5 w-5 shrink-0" />,
-      view: 'projects' as ViewMode
-    },
-    {
-      label: 'Chat',
-      icon: <IconMessageCircle className="h-5 w-5 shrink-0" />,
-      view: 'memory-chat' as ViewMode
-    },
-    proItem('voice'),
-    proItem('vault'),
-    proItem('clipboard'),
-    proItem('devices'),
-    {
-      label: 'Integrations',
-      icon: <IconPlug className="h-5 w-5 shrink-0" />,
-      view: 'connectors' as ViewMode
-    },
-    {
-      label: 'Models',
-      icon: <IconDownload className="h-5 w-5 shrink-0" />,
-      view: 'models' as ViewMode
-    },
-    {
-      label: 'Gateway',
-      icon: <IconServer2 className="h-5 w-5 shrink-0" />,
-      view: 'gateway' as ViewMode
-    },
-    proItem('notifications')
-  ].filter(
-    (i): i is { label: string; icon: React.ReactNode; view: ViewMode; locked: boolean } =>
-      i !== null
-  )
+    { label: 'Private data', views: ['vault', 'clipboard', 'devices'] },
+    { label: 'System', views: ['connectors', 'models', 'gateway', 'notifications'] }
+  ]
+  const navigationGroups = navigationGroupDefinitions
+    .map((group) => ({
+      label: group.label,
+      items: group.views
+        .map((view) => navigationItems.find((item) => item.view === view))
+        .filter((item): item is NavItem => item !== undefined)
+    }))
+    .filter((group) => group.items.length > 0)
   const bottomNav: { label: string; icon: React.ReactNode; view: ViewMode; locked?: boolean }[] = [
     {
       label: 'Settings',
@@ -871,13 +1135,22 @@ function AppContent() {
   // One way in to a screen, used by the sidebar and by the command palette: switching screens also
   // drops whatever row was selected in the old one, so a stale detail pane never rides along.
   const goToView = (view: ViewMode, subroute: string | null = null): void => {
-    setNavigationSubroute(view === 'devices' ? subroute : null)
-    setSettingsSection(null)
-    setViewMode(view)
-    setSelectedSessionId(null)
-    setSelectedMemoryId(null)
-    setSelectedEntityId(null)
-    setReplayTarget(null)
+    navigateTo(view, () => {
+      // Chat, Task details, and the watched Browser are independent panes. The first
+      // Web Use reveal may focus Task by collapsing Chat, but an explicit Chat
+      // navigation always restores Chat without closing either Task or Browser.
+      if (view === 'memory-chat' || view === 'chats') setMainWorkspaceVisibility(false)
+      setNavigationSubroute(view === 'devices' ? subroute : null)
+      setSettingsSection(view === 'settings' ? subroute : null)
+      setSelectedSessionId(null)
+      setSelectedMemoryId(null)
+      setSelectedEntityId(null)
+      setReplayTarget(null)
+      if (sidebarOpenedByHoverRef.current) {
+        sidebarOpenedByHoverRef.current = false
+        setSidebarOpen(false)
+      }
+    })
   }
   const renderNavItem = (item: {
     label: string
@@ -920,14 +1193,12 @@ function AppContent() {
 
   return (
     <div className="h-screen w-full overflow-hidden bg-neutral-950 relative">
-      {/* One root task panel owns Web Use and Computer Use tabs. */}
-      <WatchedBrowserPane />
       <CommandPalette
         onOpenHit={handleOpenHit}
         onSeeAll={openSearch}
         /* The sidebar IS the list of screens - the palette searches that, never a second copy. */
         screens={[
-          ...[...mainNav, ...bottomNav].map(({ label, view, locked }) => ({
+          ...[...navigationItems, ...bottomNav].map(({ label, view, locked }) => ({
             label,
             view,
             locked
@@ -943,9 +1214,14 @@ function AppContent() {
             view: 'devices',
             subroute: 'files',
             locked: !isPro && proActivation !== 'entitlement-bootstrap'
-          }
+          },
+          ...SETTINGS_DESTINATIONS
         ]}
-        onGoTo={(view, subroute) => goToView(view as ViewMode, subroute)}
+        onGoTo={(view, subroute) => {
+          goToView(view as ViewMode, subroute)
+          sidebarOpenedByHoverRef.current = false
+          setSidebarOpen(false)
+        }}
       />
       {/* Recording indicator — auto-records detected meetings; always visible. */}
       {(rec.recording || rec.busy) && (
@@ -1030,6 +1306,16 @@ function AppContent() {
             role="navigation"
             aria-label="Primary navigation"
             className="justify-between gap-3 bg-neutral-900/80 backdrop-blur-xl border-r border-neutral-800"
+            onMouseEnter={() => {
+              if (sidebarOpenRef.current) return
+              sidebarOpenedByHoverRef.current = true
+              setSidebarOpen(true)
+            }}
+            onMouseLeave={() => {
+              if (!sidebarOpenedByHoverRef.current) return
+              sidebarOpenedByHoverRef.current = false
+              setSidebarOpen(false)
+            }}
           >
             <div className="flex min-h-0 flex-1 flex-col">
               {/* Brand + a dedicated collapse/expand toggle */}
@@ -1089,8 +1375,18 @@ function AppContent() {
               </div>
 
               {/* Navigation (scrolls; Settings is pinned to the bottom) */}
-              <div className="mt-6 flex flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden pr-0.5">
-                {mainNav.map(renderNavItem)}
+              <div className="mt-5 flex flex-1 flex-col overflow-y-auto overflow-x-hidden pr-0.5">
+                {sidebarOpen && (
+                  <div className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-neutral-500">
+                    Menu
+                  </div>
+                )}
+                <SidebarNavigationMenu
+                  activeView={viewMode}
+                  expanded={sidebarOpen}
+                  groups={navigationGroups}
+                  renderItem={renderNavItem}
+                />
               </div>
             </div>
 
@@ -1101,13 +1397,11 @@ function AppContent() {
               <ModelStatusDot
                 open={sidebarOpen}
                 onClick={() => {
-                  if (!sidebarOpen) {
-                    setSidebarOpen(true)
-                    return
-                  }
-                  setNavigationSubroute(null)
-                  setSettingsSection(null)
-                  setViewMode('settings')
+                  navigateTo('settings', () => {
+                    setNavigationSubroute(null)
+                    setSettingsSection('setup')
+                    setSettingsNavigationKey((key) => key + 1)
+                  })
                 }}
               />
               <NavThemeToggle expanded={sidebarOpen} />
@@ -1129,135 +1423,203 @@ function AppContent() {
           </SidebarBody>
         </Sidebar>
 
-        {/* Main Content */}
-        <div className="flex-1 flex flex-col h-full overflow-hidden">
-          {/* Global reprocessing banner */}
-          <AnimatePresence>
-            <ReprocessingBanner />
-          </AnimatePresence>
-          {/* Content Area */}
-          <div className="flex-1 overflow-hidden">
-            <AnimatePresence mode="wait">
-              {viewMode === 'chats' && selectedSessionId ? (
-                <motion.div
-                  key={`chat-detail-${selectedSessionId}`}
-                  initial={{ opacity: 0, filter: 'blur(10px)' }}
-                  animate={{ opacity: 1, filter: 'blur(0px)' }}
-                  exit={{ opacity: 0, filter: 'blur(5px)' }}
-                  transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
-                  className="h-full"
-                >
-                  <ChatDetail
-                    sessionId={selectedSessionId}
-                    onBack={handleBack}
-                    onSelectEntity={(entityId) => {
-                      setSelectedEntityId(entityId)
-                      setViewMode('entities')
-                      setSelectedSessionId(null)
-                    }}
-                    onSelectMemory={(memoryId) => {
-                      setSelectedMemoryId(memoryId)
-                      setViewMode('memories')
-                      setSelectedSessionId(null)
-                    }}
-                  />
-                </motion.div>
-              ) : (
-                <motion.div
-                  key={viewMode}
-                  initial={{ opacity: 0, filter: 'blur(10px)' }}
-                  animate={{ opacity: 1, filter: 'blur(0px)' }}
-                  exit={{ opacity: 0, filter: 'blur(5px)' }}
-                  transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
-                  className="p-6 h-full overflow-y-auto"
-                >
-                  {viewMode === 'explore' ? (
-                    <ExploreScreen
-                      onRunPreset={handleRunPreset}
-                      initialPresetId={explorePresetId}
-                      onTargetConsumed={handleExploreTargetConsumed}
-                    />
-                  ) : viewMode === 'memory-chat' ? (
-                    <MemoryChat
-                      onNavigateToMemory={handleSelectMemory}
-                      onNavigateToChat={handleSelectChat}
-                      onNavigateToMeeting={(meetingId) =>
-                        handleProNavigate({ view: 'meetings', meetingId })
-                      }
-                      onNavigateToEntity={handleSelectEntity}
-                      onOpenProject={(id) => {
-                        setSelectedProjectId(id)
-                        setViewMode('projects')
-                      }}
-                      onSeekReplay={(ts) => {
-                        setReplayTarget(ts || Date.now())
-                        setViewMode('replay')
-                      }}
-                      onOpenSkillPreset={handleOpenSkillPreset}
-                      openTarget={chatTarget}
-                      onTargetConsumed={() => setChatTarget(null)}
-                    />
-                  ) : viewMode === 'chats' ? (
-                    <ChatList onSelectSession={setSelectedSessionId} />
-                  ) : viewMode === 'models' ? (
-                    <ModelsScreen />
-                  ) : viewMode === 'projects' ? (
-                    <ProjectsScreen
-                      onOpenChat={handleOpenProjectChat}
-                      selectedProjectId={selectedProjectId}
-                      onSelectProject={setSelectedProjectId}
-                    />
-                  ) : viewMode === 'connectors' ? (
-                    <ConnectorsScreen />
-                  ) : viewMode === 'gateway' ? (
-                    <GatewayScreen />
-                  ) : viewMode === 'settings' ? (
-                    <Settings
-                      key={settingsNavigationKey}
-                      activeSection={settingsSection}
-                      onSectionChange={setSettingsSection}
-                    />
-                  ) : proFeatureComingSoon(viewMode, currentPlatform(), isPro) ? (
-                    <UpgradeScreen variant="coming-soon" feature={getProFeature(viewMode)} />
+        <PanelGroup
+          direction="horizontal"
+          autoSaveId="offgrid-main-task-workspace"
+          className="min-w-0 flex-1"
+          data-testid="main-task-workspace"
+        >
+          {/* Main Content remains mounted and interactive while a task is open. */}
+          <Panel
+            ref={mainWorkspaceRef}
+            id="main-workspace"
+            order={1}
+            defaultSize={52}
+            minSize={28}
+            collapsible
+            collapsedSize={0}
+            style={{ transition: taskWorkspaceTransition }}
+            onCollapse={() => setMainWorkspaceCollapsed(true)}
+            onExpand={() => setMainWorkspaceCollapsed(false)}
+          >
+            <div data-testid="main-workspace" className="flex h-full flex-col overflow-hidden">
+              {/* Global reprocessing banner */}
+              <AnimatePresence>
+                <ReprocessingBanner />
+              </AnimatePresence>
+              {/* Content Area */}
+              <div className="flex-1 overflow-hidden">
+                <AnimatePresence mode="wait">
+                  {viewMode === 'chats' && selectedSessionId ? (
+                    <motion.div
+                      key={`chat-detail-${selectedSessionId}`}
+                      initial={{ opacity: 0, filter: 'blur(10px)' }}
+                      animate={{ opacity: 1, filter: 'blur(0px)' }}
+                      exit={{ opacity: 0, filter: 'blur(5px)' }}
+                      transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
+                      className="h-full"
+                    >
+                      <ChatDetail
+                        sessionId={selectedSessionId}
+                        onBack={handleBack}
+                        onSelectEntity={(entityId) => {
+                          navigateTo('entities', () => {
+                            setSelectedEntityId(entityId)
+                            setSelectedSessionId(null)
+                          })
+                        }}
+                        onSelectMemory={(memoryId) => {
+                          navigateTo('memories', () => {
+                            setSelectedMemoryId(memoryId)
+                            setSelectedSessionId(null)
+                          })
+                        }}
+                      />
+                    </motion.div>
                   ) : (
-                    // Pro tabs: render through the pro view-router when active,
-                    // otherwise show the upgrade writeup for that feature.
-                    (renderProView(viewMode, {
-                      setView: (v) => setViewMode(v as ViewMode),
-                      onNavigate: handleProNavigate,
-                      navigationSubroute,
-                      setNavigationSubroute,
-                      navigateBack,
-                      replayTarget,
-                      meetingTarget,
-                      actionTarget,
-                      approvalTarget,
-                      calendarEventTarget,
-                      actionsMode,
-                      actionsEntity,
-                      searchQuery,
-                      onSearchQueryChange: setSearchQuery,
-                      searchSources,
-                      onSearchSourcesChange: setSearchSources,
-                      searchSort,
-                      onSearchSortChange: setSearchSort,
-                      selectedMemoryId,
-                      setSelectedMemoryId,
-                      selectedEntityId,
-                      rec,
-                      onSelectEntity: handleSelectEntity,
-                      onSelectMemory: handleSelectMemory,
-                      onOpenHit: handleOpenHit,
-                      openChatOwner: handleOpenChatOwner
-                    } satisfies ProViewContext) ?? (
-                      <UpgradeScreen feature={getProFeature(viewMode)} />
-                    ))
+                    <motion.div
+                      key={viewMode}
+                      initial={{ opacity: 0, filter: 'blur(10px)' }}
+                      animate={{ opacity: 1, filter: 'blur(0px)' }}
+                      exit={{ opacity: 0, filter: 'blur(5px)' }}
+                      transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
+                      className="p-6 h-full overflow-y-auto"
+                    >
+                      {viewMode === 'explore' ? (
+                        <ExploreScreen
+                          onRunPreset={handleRunPreset}
+                          initialPresetId={explorePresetId}
+                          onTargetConsumed={handleExploreTargetConsumed}
+                        />
+                      ) : viewMode === 'memory-chat' ? (
+                        <MemoryChat
+                          onNavigateToMemory={handleSelectMemory}
+                          onNavigateToChat={handleSelectChat}
+                          onNavigateToMeeting={(meetingId) =>
+                            handleProNavigate({ view: 'meetings', meetingId })
+                          }
+                          onNavigateToEntity={handleSelectEntity}
+                          onOpenProject={(id) => {
+                            navigateTo('projects', () => setSelectedProjectId(id))
+                          }}
+                          onSeekReplay={(ts) => {
+                            navigateTo('replay', () => setReplayTarget(ts || Date.now()))
+                          }}
+                          onOpenSkillPreset={handleOpenSkillPreset}
+                          openTarget={chatTarget}
+                          onTargetConsumed={() => setChatTarget(null)}
+                          onActiveConversationChange={setActiveChatConversationId}
+                        />
+                      ) : viewMode === 'tasks' ? (
+                        <WatchedBrowserPane
+                          standalone
+                          onDetailModeChange={setTaskDetailSidebarMode}
+                        />
+                      ) : viewMode === 'chats' ? (
+                        <ChatList onSelectSession={setSelectedSessionId} />
+                      ) : viewMode === 'models' ? (
+                        <ModelsScreen />
+                      ) : viewMode === 'projects' ? (
+                        <ProjectsScreen
+                          onOpenChat={handleOpenProjectChat}
+                          selectedProjectId={selectedProjectId}
+                          onSelectProject={setSelectedProjectId}
+                        />
+                      ) : viewMode === 'connectors' ? (
+                        <ConnectorsScreen />
+                      ) : viewMode === 'gateway' ? (
+                        <GatewayScreen />
+                      ) : viewMode === 'settings' ? (
+                        <Settings
+                          key={settingsNavigationKey}
+                          activeSection={settingsSection}
+                          onSectionChange={setSettingsSection}
+                        />
+                      ) : !isPro ? (
+                        <UpgradeScreen feature={getProFeature(viewMode)} />
+                      ) : proFeatureComingSoon(viewMode, currentPlatform(), isPro) ? (
+                        <UpgradeScreen variant="coming-soon" feature={getProFeature(viewMode)} />
+                      ) : (
+                        // Pro tabs: render through the pro view-router when active,
+                        // otherwise show the upgrade writeup for that feature.
+                        (renderProView(viewMode, {
+                          setView: (v) => navigateTo(v as ViewMode),
+                          onNavigate: handleProNavigate,
+                          navigationSubroute,
+                          setNavigationSubroute,
+                          navigateBack,
+                          replayTarget,
+                          meetingTarget,
+                          actionTarget,
+                          approvalTarget,
+                          calendarEventTarget,
+                          actionsMode,
+                          actionsEntity,
+                          searchQuery,
+                          onSearchQueryChange: setSearchQuery,
+                          searchSources,
+                          onSearchSourcesChange: setSearchSources,
+                          searchSort,
+                          onSearchSortChange: setSearchSort,
+                          selectedMemoryId,
+                          setSelectedMemoryId,
+                          selectedEntityId,
+                          rec,
+                          onSelectEntity: handleSelectEntity,
+                          onSelectMemory: handleSelectMemory,
+                          onOpenHit: handleOpenHit,
+                          openChatOwner: handleOpenChatOwner
+                        } satisfies ProViewContext) ?? (
+                          <UpgradeScreen feature={getProFeature(viewMode)} />
+                        ))
+                      )}
+                    </motion.div>
                   )}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        </div>
+                </AnimatePresence>
+              </div>
+            </div>
+          </Panel>
+          <PanelResizeHandle
+            aria-label="Resize Chat and task"
+            title="Drag to resize Chat and task"
+            className={`group relative w-2 shrink-0 cursor-col-resize border-x border-neutral-800 bg-neutral-950 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-green-500 ${
+              taskWorkspaceVisible ? '' : 'hidden'
+            }`}
+            onDragging={setTaskWorkspaceDragging}
+            onKeyDown={(event) => {
+              if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+              event.preventDefault()
+              event.stopPropagation()
+              resizeTaskWorkspaceFromKeyboard(event.key)
+            }}
+            aria-valuemin={32}
+            aria-valuemax={68}
+            aria-valuenow={Math.round(taskWorkspaceSize)}
+            aria-valuetext={`Task workspace ${Math.round(taskWorkspaceSize)} percent`}
+          >
+            <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px bg-transparent group-hover:bg-green-500/50 group-focus-visible:bg-green-500 group-data-[resize-handle-state=drag]:bg-green-500" />
+          </PanelResizeHandle>
+          <Panel
+            ref={taskWorkspaceRef}
+            id="task-workspace"
+            order={2}
+            defaultSize={48}
+            minSize={32}
+            collapsible
+            collapsedSize={0}
+            className="min-w-0"
+            style={{ transition: taskWorkspaceTransition }}
+            onResize={setTaskWorkspaceSize}
+          >
+            <WatchedBrowserPane
+              mainWorkspaceCollapsed={mainWorkspaceCollapsed}
+              onToggleMainWorkspace={toggleMainWorkspace}
+              onDetailModeChange={setDockedTaskDetailMode}
+              routeActive={taskWorkspaceRouteActive}
+              conversationId={activeChatConversationId}
+            />
+          </Panel>
+        </PanelGroup>
       </div>
       <AnimatePresence>
         {modelSettingsOpen && (
@@ -1268,6 +1630,28 @@ function AppContent() {
           />
         )}
       </AnimatePresence>
+      <Dialog
+        open={pendingNavigation !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingNavigation(null)
+        }}
+      >
+        <DialogContent className="rounded-none border-neutral-700 bg-neutral-950 sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Leave this chat while the task is running?</DialogTitle>
+            <DialogDescription className="leading-relaxed">
+              Web Use or Computer Use can keep running, but leaving this chat can reduce task
+              performance. Stay here for the best result.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={confirmPendingNavigation}>
+              Leave chat
+            </Button>
+            <Button onClick={() => setPendingNavigation(null)}>Stay in chat</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -1284,15 +1668,17 @@ function App() {
   if (!onboarded) return <Onboarding onComplete={() => setOnboarded(true)} />
 
   return (
-    <PermissionGate>
-      <NotificationProvider>
-        <ToastProvider>
-          <ReprocessingProvider>
-            <AppContent />
-          </ReprocessingProvider>
-        </ToastProvider>
-      </NotificationProvider>
-    </PermissionGate>
+    <RendererEntitlementProvider>
+      <PermissionGate>
+        <NotificationProvider>
+          <ToastProvider>
+            <ReprocessingProvider>
+              <AppContent />
+            </ReprocessingProvider>
+          </ToastProvider>
+        </NotificationProvider>
+      </PermissionGate>
+    </RendererEntitlementProvider>
   )
 }
 

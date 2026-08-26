@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
-import { formatContextWindow, resolveModelName } from '../lib/model-summary'
+import { formatContextWindow, resolveActiveTextModel } from '../lib/model-summary'
 import { recommendedContextWindow } from '../lib/ctx-options'
 
 type ActiveModelApi = Partial<
-  Pick<typeof window.api, 'getModelCatalog' | 'getActiveModel' | 'getLlmSettings'>
+  Pick<
+    typeof window.api,
+    'getModelCatalog' | 'getActiveModel' | 'getActiveModelIds' | 'getLlmSettings'
+  >
 >
 
 export interface ActiveModelSummary {
@@ -36,15 +39,21 @@ export function useActiveModelSummary(refreshWhen: unknown): ActiveModelSummary 
       try {
         const catalog = await api?.getModelCatalog?.()
         const activeId = (await api?.getActiveModel?.()) ?? null
+        const activeIds = new Set<string>((await api?.getActiveModelIds?.()) ?? [])
         const settings = await api?.getLlmSettings?.()
         if (!request.active) {
           return
         }
+        const activeModel = resolveActiveTextModel(catalog?.models ?? [], activeId, activeIds)
         setSummary({
-          name: resolveModelName(catalog?.models ?? [], activeId),
-          ctx: formatContextWindow(settings?.effectiveCtxSize ?? settings?.ctxSize),
-          configuredCtx: formatContextWindow(settings?.ctxSize),
-          recommendedCtx: formatContextWindow(recommendedContextWindow(settings?.modelMaxCtx))
+          name: activeModel.name,
+          ctx: activeModel.remote
+            ? null
+            : formatContextWindow(settings?.effectiveCtxSize ?? settings?.ctxSize),
+          configuredCtx: activeModel.remote ? null : formatContextWindow(settings?.ctxSize),
+          recommendedCtx: activeModel.remote
+            ? null
+            : formatContextWindow(recommendedContextWindow(settings?.modelMaxCtx))
         })
       } catch {
         if (request.active)

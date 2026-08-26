@@ -6,9 +6,12 @@ import { SetupPanel } from './setup/SetupPanel'
 import { deviceNoun } from '@renderer/lib/device'
 import { PermissionsPanel } from './PermissionsPanel'
 import { usePermissionController } from './use-permission-controller'
+import { useRendererEntitlement } from '@renderer/bootstrap/useRendererEntitlement'
 import { formatTransferSpeed } from '@offgrid/sync'
 import { projectProgress, type ProgressLike } from '@offgrid/ui'
 import { formatStorageBytes } from './setup/storage-format'
+import { useTaskWorkspaceOpen } from '@renderer/lib/task-side-panel'
+import { useModelDownloadProgress } from '@renderer/hooks/useModelDownloadProgress'
 
 interface PermissionGateProps {
   children: React.ReactNode
@@ -19,7 +22,7 @@ type VisionIssue =
   | { kind: 'choose-vision-model'; modelId: string | null; modelName: string | null }
 
 export function PermissionGate({ children }: PermissionGateProps) {
-  const isPro = window.api.isPro === true
+  const { isPro } = useRendererEntitlement()
   const [modelStatus, setModelStatus] = useState<{ downloaded: boolean; modelsDir: string } | null>(
     null
   )
@@ -97,22 +100,22 @@ export function PermissionGate({ children }: PermissionGateProps) {
   useEffect(() => {
     if (!isPro) return
     const offCapture = window.api.proOn?.('capture:changed', () => void checkCaptureVision())
-    const offProgress = window.api.onModelProgress?.((progress) => {
-      if (progress.modelId !== visionIssue?.modelId) return
-      if (progress.status === 'completed') {
-        setVisionDownloadProgress(null)
-        void checkCaptureVision()
-      } else if (progress.status === 'failed' || progress.status === 'cancelled') {
-        setVisionDownloadProgress(null)
-      } else {
-        setVisionDownloadProgress(progress)
-      }
-    })
     return () => {
       if (typeof offCapture === 'function') offCapture()
-      if (typeof offProgress === 'function') offProgress()
     }
-  }, [checkCaptureVision, isPro, visionIssue?.modelId])
+  }, [checkCaptureVision, isPro])
+
+  useModelDownloadProgress((progress) => {
+    if (progress.modelId !== visionIssue?.modelId) return
+    if (progress.status === 'completed') {
+      setVisionDownloadProgress(null)
+      void checkCaptureVision()
+    } else if (progress.status === 'failed' || progress.status === 'cancelled') {
+      setVisionDownloadProgress(null)
+    } else {
+      setVisionDownloadProgress(progress)
+    }
+  }, isPro)
 
   // Permission polling is owned by usePermissionController. Keep model polling here
   // because model readiness is a separate setup boundary.
@@ -331,6 +334,27 @@ function SetupNudge({
   onOpen: () => void
   onDismiss: () => void
 }) {
+  const taskWorkspaceOpen = useTaskWorkspaceOpen()
+  const [taskLeft, setTaskLeft] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (!taskWorkspaceOpen) {
+      setTaskLeft(null)
+      return
+    }
+    const taskPane = document.querySelector<HTMLElement>('[data-testid="task-side-panel"]')
+    if (!taskPane) return
+    const measure = (): void => setTaskLeft(taskPane.getBoundingClientRect().left)
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(taskPane)
+    window.addEventListener('resize', measure)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [taskWorkspaceOpen])
+
   // Model-first wording. Missing a model is the thing that actually blocks you, and
   // "Configure for me" handles it in one click — so lead with that for both tiers.
   // Capture permissions (Pro-only) are the secondary, optional step.
@@ -367,19 +391,25 @@ function SetupNudge({
           : missingModel
             ? 'Configure'
             : 'Set up'
+  // When Tasks consumes the whole usable workspace, defer this non-blocking
+  // prompt. In split mode, keep it wholly inside Chat and away from native
+  // browser content.
+  if (taskLeft !== null && taskLeft < 520) return null
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] }}
-      className="fixed bottom-14 right-4 z-50 flex items-center gap-3 rounded-xl border border-green-500/30 bg-neutral-900/95 px-4 py-3 shadow-xl backdrop-blur-xl"
+      className="fixed bottom-14 z-50 flex max-w-[min(560px,calc(100vw-2rem))] items-center gap-3 rounded-xl border border-green-500/30 bg-background/95 px-4 py-3 text-foreground shadow-xl backdrop-blur-xl"
+      style={{ right: taskLeft === null ? 16 : window.innerWidth - taskLeft + 16 }}
     >
       <Cpu className="h-4 w-4 shrink-0 text-green-500" />
       <div className="text-xs leading-tight">
-        <div className="font-medium text-white">{title}</div>
-        <div className="text-neutral-500">{detail}</div>
+        <div className="font-medium text-foreground">{title}</div>
+        <div className="text-muted-foreground">{detail}</div>
         {presentedProgress ? (
-          <div className="mt-1 tabular-nums text-neutral-500">
+          <div className="mt-1 tabular-nums text-muted-foreground">
             {presentedProgress.totalBytes !== undefined
               ? `${formatStorageBytes(presentedProgress.currentBytes)} / ${formatStorageBytes(presentedProgress.totalBytes)}`
               : 'Total size unavailable'}
@@ -399,7 +429,7 @@ function SetupNudge({
       <button
         onClick={onDismiss}
         aria-label="Dismiss"
-        className="rounded-md p-1 text-neutral-500 transition-colors hover:text-white"
+        className="rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground"
       >
         <X className="h-3.5 w-3.5" />
       </button>

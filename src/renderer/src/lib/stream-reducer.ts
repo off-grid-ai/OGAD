@@ -9,7 +9,7 @@ export interface StreamEvent {
   type: 'content' | 'reasoning' | 'step' | 'tool_result' | 'done'
   text?: string
   step?: unknown
-  call?: { name: string; result: string }
+  call?: { name: string; result: string; status: 'completed' | 'failed' | 'pending' }
 }
 
 export interface StreamedMessage {
@@ -21,6 +21,16 @@ export interface StreamedMessage {
     status?: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
   }[]
   activity?: unknown
+}
+
+/** A completed tool result can arrive before the chat model writes its final
+ * sentence. Do not present the completed tool as live work during that phase. */
+export function hasLiveStreamActivity(message: StreamedMessage): boolean {
+  const activity = message.activity as { kind?: unknown } | undefined
+  if (activity?.kind === 'running_tool') return true
+  const tools = message.toolCalls ?? []
+  if (tools.length === 0) return true
+  return tools.some((tool) => tool.status === 'pending' || tool.status === 'running')
 }
 
 export function applyStreamEvent<T extends StreamedMessage>(m: T, e: StreamEvent): T {
@@ -37,7 +47,12 @@ export function applyStreamEvent<T extends StreamedMessage>(m: T, e: StreamEvent
       ...m,
       activity: undefined,
       toolCalls: fromPortableTools(
-        completeChatStreamTool(toPortableTools(m.toolCalls), e.call.name, e.call.result)
+        completeChatStreamTool(
+          toPortableTools(m.toolCalls),
+          e.call.name,
+          e.call.result,
+          e.call.status
+        )
       )
     }
   }
@@ -66,7 +81,14 @@ function runningToolName(step: unknown): string | null {
 function toPortableTools(tools: StreamedMessage['toolCalls']): ChatStreamTool[] {
   return (tools ?? []).map((tool) => ({
     name: tool.name,
-    status: tool.status === 'running' ? 'running' : 'completed',
+    status:
+      tool.status === 'running'
+        ? 'running'
+        : tool.status === 'failed'
+          ? 'failed'
+          : tool.status === 'pending' || tool.status === 'cancelled'
+            ? 'pending'
+            : 'completed',
     ...(tool.result ? { result: tool.result } : {})
   }))
 }

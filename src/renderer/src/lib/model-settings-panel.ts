@@ -4,6 +4,7 @@ export type ModelSettingsPanelTab =
   | 'image'
   | 'voice'
   | 'transcription'
+  | 'remote'
   | 'tools'
   | 'connectors'
 

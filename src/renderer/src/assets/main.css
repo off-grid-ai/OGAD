@@ -188,6 +188,17 @@ button:disabled,
   outline-offset: 2px;
 }
 
+/* Composite editors own one focus boundary. Do not draw a second, partial
+   outline around the textarea inside the editor. */
+:root[data-user-modality='keyboard'] [data-focus-surface]:focus-within {
+  outline: 2px solid var(--og-primary);
+  outline-offset: 2px;
+}
+
+:root[data-user-modality='keyboard'] [data-focus-surface] textarea:focus-visible {
+  outline: none;
+}
+
 code {
   font-weight: 600;
   padding: 3px 5px;
@@ -472,6 +483,42 @@ code {
   to {
     opacity: 0;
     transform: scale(0.96);
+  }
+}
+
+@keyframes offgrid-sidebar-section-open {
+  from {
+    height: 0;
+    opacity: 0;
+  }
+  to {
+    height: var(--radix-collapsible-content-height);
+    opacity: 1;
+  }
+}
+
+@keyframes offgrid-sidebar-section-close {
+  from {
+    height: var(--radix-collapsible-content-height);
+    opacity: 1;
+  }
+  to {
+    height: 0;
+    opacity: 0;
+  }
+}
+
+.offgrid-sidebar-section[data-state='open'] {
+  animation: offgrid-sidebar-section-open 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.offgrid-sidebar-section[data-state='closed'] {
+  animation: offgrid-sidebar-section-close 200ms cubic-bezier(0.4, 0, 1, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .offgrid-sidebar-section[data-state] {
+    animation: none;
   }
 }
 [data-slot='dialog-overlay'][data-state='open'] {

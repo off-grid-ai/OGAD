@@ -12,6 +12,11 @@ import { CacheCleanupControl } from './CacheCleanupControl'
 import { formatStorageBytes } from './storage-format'
 import { formatTransferSpeed } from '@offgrid/sync'
 import { projectProgress } from '@offgrid/ui'
+import { downloadTimeRemaining } from '@renderer/lib/download-progress'
+import {
+  useModelDownloadProgress,
+  type ModelDownloadProgressEvent
+} from '@renderer/hooks/useModelDownloadProgress'
 
 interface ModelDiskEntry {
   id: string
@@ -76,34 +81,27 @@ export function StoragePanel(): React.ReactElement {
   useEffect(() => {
     refresh()
     const t = setInterval(refresh, 3000)
-    const off = (
-      api as unknown as {
-        onModelProgress?: (cb: (progress: DownloadEntry) => void) => () => void
-      }
-    ).onModelProgress?.((progress) => {
-      // The live model job is authoritative. Keep its aggregate byte and rate fields instead of
-      // waiting for a reduced or stale registry poll to replace them.
-      if (progress.status === 'downloading' || progress.status === 'queued') {
-        liveProgress.current.set(progress.modelId, {
-          ...liveProgress.current.get(progress.modelId),
-          ...progress
-        })
-      } else {
-        liveProgress.current.delete(progress.modelId)
-      }
-      setDownloads((current) => {
-        const index = current.findIndex((item) => item.modelId === progress.modelId)
-        if (index < 0) return [...current, progress]
-        const next = [...current]
-        next[index] = { ...current[index], ...progress }
-        return next
-      })
-    })
     return () => {
       clearInterval(t)
-      off?.()
     }
   }, [refresh, api])
+
+  useModelDownloadProgress((event: ModelDownloadProgressEvent) => {
+    const progress = event as DownloadEntry
+    // The live model job is authoritative. Keep its aggregate byte and rate fields instead of
+    // waiting for a reduced or stale registry poll to replace them.
+    liveProgress.current.set(progress.modelId, {
+      ...liveProgress.current.get(progress.modelId),
+      ...progress
+    })
+    setDownloads((current) => {
+      const index = current.findIndex((item) => item.modelId === progress.modelId)
+      if (index < 0) return [...current, progress]
+      const next = [...current]
+      next[index] = { ...current[index], ...progress }
+      return next
+    })
+  })
 
   const del = async (id: string, name: string): Promise<void> => {
     if (!window.confirm(`Delete "${name}"? This removes its files from disk.`)) return
@@ -241,6 +239,7 @@ export function StoragePanel(): React.ReactElement {
           </div>
           {active.map((d) => {
             const progress = projectProgress(d)
+            const timeRemaining = downloadTimeRemaining(progress)
             return (
               <div key={d.modelId} className="flex items-center gap-3 py-1.5">
                 <div className="min-w-0 flex-1">
@@ -259,8 +258,8 @@ export function StoragePanel(): React.ReactElement {
                   ) : (
                     <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-neutral-800">
                       <div
-                        className="h-full rounded-full bg-green-500 transition-all"
-                        style={{ width: `${progress.percentage ?? 0}%` }}
+                        className="h-full w-full origin-left rounded-full bg-green-500 transition-transform duration-300 ease-out motion-reduce:transition-none"
+                        style={{ transform: `scaleX(${(progress.percentage ?? 0) / 100})` }}
                       />
                     </div>
                   )}
@@ -272,6 +271,7 @@ export function StoragePanel(): React.ReactElement {
                       {progress.bytesPerSecond !== undefined
                         ? ` · ${formatTransferSpeed(progress.bytesPerSecond)}`
                         : ''}
+                      {timeRemaining ? ` · ${timeRemaining}` : ''}
                     </div>
                   ) : null}
                 </div>

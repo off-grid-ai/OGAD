@@ -80,8 +80,8 @@ export function ExploreSection({
     <div className={`@container font-mono ${className}`}>
       {showIntro ? (
         <div className="mb-4">
-          <h2 className="text-sm text-white">Explore what Off Grid AI can do</h2>
-          <p className="mt-0.5 text-xs text-neutral-500">
+          <h2 className="text-sm text-foreground">Explore what Off Grid AI can do</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
             Pick one - it starts a chat and asks you the rest. Everything runs on your Mac.
           </p>
         </div>
@@ -93,17 +93,17 @@ export function ExploreSection({
           return (
             <section
               key={section.id}
-              className="flex flex-col rounded-md border border-neutral-800 bg-neutral-900/20 p-3"
+              className="flex flex-col rounded-md border border-border bg-card p-3 text-card-foreground"
             >
               <div className="mb-3 flex items-center gap-2.5">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-neutral-800 bg-neutral-950 text-green-500">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-background text-primary">
                   <Icon className="h-4 w-4" />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <h3 className="truncate text-[13px] text-white">{section.title}</h3>
-                  <p className="truncate text-[11px] text-neutral-500">{section.teaches}</p>
+                  <h3 className="truncate text-[13px] text-foreground">{section.title}</h3>
+                  <p className="truncate text-[11px] text-muted-foreground">{section.teaches}</p>
                 </div>
-                <span className="shrink-0 self-start text-[9px] uppercase tracking-wide text-neutral-600">
+                <span className="shrink-0 self-start text-[9px] uppercase tracking-wide text-muted-foreground">
                   {section.presets.length} {section.presets.length === 1 ? 'run' : 'runs'}
                 </span>
               </div>
@@ -116,27 +116,27 @@ export function ExploreSection({
                     onClick={() =>
                       preset.setup === 'proposal-deck' ? setSetupPreset(preset) : onRun(preset)
                     }
-                    className="group flex flex-col rounded-md border border-neutral-800 bg-neutral-950 p-3 text-left transition-all duration-150 hover:border-neutral-700 hover:bg-neutral-900/60 active:scale-[0.98]"
+                    className="group flex flex-col rounded-md border border-border bg-background p-3 text-left text-foreground transition-all duration-150 hover:border-primary/50 hover:bg-accent active:scale-[0.98]"
                     data-testid={`explore-preset-${preset.id}`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <preset.icon className="h-[18px] w-[18px] shrink-0 text-neutral-400 transition-colors duration-150 group-hover:text-green-500" />
-                      <ArrowRight className="h-3.5 w-3.5 shrink-0 -translate-x-0.5 text-neutral-700 transition-all duration-150 group-hover:translate-x-0 group-hover:text-green-500" />
+                      <preset.icon className="h-[18px] w-[18px] shrink-0 text-muted-foreground transition-colors duration-150 group-hover:text-primary" />
+                      <ArrowRight className="h-3.5 w-3.5 shrink-0 -translate-x-0.5 text-muted-foreground/60 transition-all duration-150 group-hover:translate-x-0 group-hover:text-primary" />
                     </div>
-                    <span className="mt-2 text-xs text-neutral-100 transition-colors duration-150 group-hover:text-white">
+                    <span className="mt-2 text-xs text-foreground transition-colors duration-150">
                       {preset.title}
                     </span>
-                    <span className="mt-1 text-[11px] leading-4 text-neutral-500">
+                    <span className="mt-1 text-[11px] leading-4 text-muted-foreground">
                       {preset.blurb}
                     </span>
                     <div className="mt-auto pt-2">
                       {preset.requires ? (
-                        <span className="inline-block rounded-sm bg-neutral-800/80 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-neutral-400">
+                        <span className="inline-block rounded-sm bg-muted px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-muted-foreground">
                           {REQUIREMENT_LABEL[preset.requires]}
                         </span>
                       ) : preset.readiness === 'robust' ? (
-                        <span className="inline-flex items-center gap-1.5 text-[9px] uppercase tracking-wide text-neutral-600">
-                          <span className="h-1 w-1 rounded-full bg-green-500" />
+                        <span className="inline-flex items-center gap-1.5 text-[9px] uppercase tracking-wide text-muted-foreground">
+                          <span className="h-1 w-1 rounded-full bg-primary" />
                           Ready to run
                         </span>
                       ) : null}
@@ -154,7 +154,7 @@ export function ExploreSection({
           href={requestUrl}
           target="_blank"
           rel="noreferrer"
-          className="mt-4 inline-flex items-center gap-1.5 text-[11px] text-neutral-500 transition-colors hover:text-green-500"
+          className="mt-4 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground transition-colors hover:text-primary"
         >
           Not seeing what you need? Request a capability
           <ArrowRight className="h-3 w-3" />

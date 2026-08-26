@@ -6,6 +6,7 @@
 export type ThemeMode = 'system' | 'light' | 'dark'
 
 const KEY = 'og-theme'
+const THEME_MODE_CHANGED = 'og:theme-mode-changed'
 
 function systemPrefersDark(): boolean {
   return window.matchMedia('(prefers-color-scheme: dark)').matches
@@ -28,6 +29,14 @@ export function applyTheme(): void {
 export function setThemeMode(mode: ThemeMode): void {
   localStorage.setItem(KEY, mode)
   applyTheme()
+  window.dispatchEvent(new CustomEvent<ThemeMode>(THEME_MODE_CHANGED, { detail: mode }))
+}
+
+/** Keep every theme control in sync when Settings or window.ogTheme changes the mode. */
+export function onThemeModeChanged(listener: (mode: ThemeMode) => void): () => void {
+  const handle = (event: Event): void => listener((event as CustomEvent<ThemeMode>).detail)
+  window.addEventListener(THEME_MODE_CHANGED, handle)
+  return () => window.removeEventListener(THEME_MODE_CHANGED, handle)
 }
 
 /** Cycle dark -> light -> system, for a quick toggle. */

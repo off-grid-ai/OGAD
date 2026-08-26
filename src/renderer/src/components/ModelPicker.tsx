@@ -14,6 +14,7 @@ interface ModelEntry {
   name: string
   kind: string
   files?: ModelFile[]
+  remoteServerId?: string
 }
 
 // The text/vision LLM is selected by catalog id (it reloads llama-server); image
@@ -52,17 +53,24 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
   const [installed, setInstalled] = useState<string[]>([])
   // The active selection per modality: id for text, filename for image/STT.
   const [active, setActive] = useState<Record<string, string | null>>({})
+  const [activeIds, setActiveIds] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState<string | null>(null)
   const [unload, setUnload] = useState<Record<string, UnloadStatus>>({})
 
   const load = useCallback(async () => {
     const cat = await api().getModelCatalog?.()
-    setModels(cat?.models ?? [])
+    const catalogModels: ModelEntry[] = cat?.models ?? []
+    setModels(catalogModels)
     setInstalled((await api().getInstalledModels?.()) ?? [])
     const text = await api().getActiveModel?.()
     const modal = (await api().getActiveModalities?.()) ?? {}
+    const nextActiveIds = new Set<string>((await api().getActiveModelIds?.()) ?? [])
+    const remoteTextActive = catalogModels.some(
+      (model) => model.remoteServerId && nextActiveIds.has(model.id)
+    )
+    setActiveIds(nextActiveIds)
     setActive({
-      text: text ?? modal.text ?? null,
+      text: remoteTextActive ? null : (text ?? modal.text ?? null),
       image: modal.image ?? null,
       speech: modal.speech ?? null,
       transcription: modal.transcription ?? null
@@ -89,8 +97,11 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     clearUnloadStatus(mode) // re-selecting reloads this modality on next use
     try {
       if (mode === 'text') {
-        await api().setActiveModel?.(m.id)
-        setActive((a) => ({ ...a, text: m.id }))
+        const result = await api().activateModel?.(m.id)
+        if (result?.success !== false) {
+          setActive((current) => ({ ...current, text: m.remoteServerId ? null : m.id }))
+          setActiveIds(new Set((await api().getActiveModelIds?.()) ?? []))
+        }
       } else {
         const fname = primaryFile(m)
         await api().setActiveModalModel?.(mode, fname)
@@ -142,7 +153,11 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
           const cur = active[mode]
           const status = unload[mode]
           const isActive = (m: ModelEntry): boolean =>
-            mode === 'text' ? cur === m.id : cur === primaryFile(m)
+            mode === 'text'
+              ? m.remoteServerId
+                ? activeIds.has(m.id)
+                : cur === m.id
+              : cur === primaryFile(m)
           return (
             <div key={mode}>
               <div className="mb-1.5 flex items-center justify-between">
@@ -190,7 +205,14 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
                           : 'border-neutral-800 text-neutral-300 hover:bg-neutral-900/60'
                       }`}
                     >
-                      <span className="truncate">{m.name}</span>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate">{m.name}</span>
+                        {m.remoteServerId ? (
+                          <span className="shrink-0 rounded-sm border border-green-500/50 px-1 py-px text-[8px] uppercase tracking-wide text-green-500">
+                            Remote
+                          </span>
+                        ) : null}
+                      </span>
                       {busy === m.id ? (
                         <IconLoader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-neutral-500" />
                       ) : isActive(m) && status === 'unloaded' ? (
@@ -210,8 +232,8 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
           )
         })}
         <p className="px-1 pt-1 text-[10px] leading-relaxed text-neutral-600">
-          Text/Vision swaps the chat model (reloads on next message). Image &amp; Transcription
-          apply on the next generation/recording. All on-device.
+          Your selected Text &amp; Vision model handles chat and supported vision work. Image, Voice,
+          and Transcription use their selected models.
         </p>
       </div>
     </SidePanel>

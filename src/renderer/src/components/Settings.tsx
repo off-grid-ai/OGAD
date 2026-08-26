@@ -5,6 +5,7 @@ import { SetupPanel } from './setup/SetupPanel'
 import { StoragePanel } from './setup/StoragePanel'
 import { DataPrivacyPanel } from './setup/DataPrivacyPanel'
 import { getRegisteredSettingsSections } from '../bootstrap/sectionRegistry'
+import { useRendererEntitlement } from '../bootstrap/useRendererEntitlement'
 import { PRO_SETTINGS_SLOTS } from './pro/proSettingsCatalog'
 // Shared card chrome, in its own light module so the pro package can reuse it without
 // importing this whole god-file (which pulls SetupPanel/etc. + their window.api types).
@@ -17,6 +18,7 @@ import { ProcessingControls } from './ProcessingControls'
 import { BackupRestoreSection } from './BackupRestoreSection'
 import { SettingsPermissionsPanel } from './PermissionsPanel'
 import { ComputerUseSettingsSection } from './ComputerUseSettingsSection'
+import { RemoteVisionSettingsTab } from './RemoteVisionSettingsTab'
 export { ModelPipelineSection } from './ProcessingControls'
 
 const SETTINGS_SECTION_TITLES: Record<string, string> = {
@@ -24,6 +26,7 @@ const SETTINGS_SECTION_TITLES: Record<string, string> = {
   permissions: 'Setup & health',
   capture: 'Capture & processing',
   'computer-use': 'Computer use',
+  remote: 'Remote model server',
   sync: 'Device sync',
   identity: 'You',
   secretary: 'What Off Grid has learned',
@@ -39,6 +42,10 @@ const SETTINGS_TITLE_IDS = Object.fromEntries(
     .filter(([id]) => id !== 'permissions')
     .map(([id, title]) => [title, id])
 ) as Record<string, string>
+
+export const SETTINGS_DESTINATIONS = Object.entries(SETTINGS_TITLE_IDS).map(
+  ([label, subroute]) => ({ label, view: 'settings', subroute })
+)
 
 export function Settings({
   initialSection,
@@ -56,8 +63,7 @@ export function Settings({
   // plan) render only when the pro package has registered them (section registry);
   // the free build shows the catalogued placeholders. isPro still drives the header
   // subtitle copy.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const isPro = !!(window as any).api?.isPro
+  const { isPro } = useRendererEntitlement()
   const proComingSoon = proComingSoonHere(currentPlatform(), isPro)
   // Pro sections registered by the pro renderer at activation (empty in free build).
   const registeredSections = getRegisteredSettingsSections()
@@ -190,6 +196,14 @@ export function Settings({
               delay={0.15}
             >
               <ComputerUseSettingsSection />
+            </SettingsCard>
+
+            <SettingsCard
+              title="Remote model server"
+              summary="Connect to a model server on your network or another trusted host."
+              delay={0.16}
+            >
+              <RemoteVisionSettingsTab />
             </SettingsCard>
 
             {/* Remaining Pro Settings sections (You / What Off Grid has learned /

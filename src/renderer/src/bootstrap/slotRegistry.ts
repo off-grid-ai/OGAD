@@ -18,6 +18,10 @@ export function getSlot(name: string): ComponentType<any> | undefined {
   return slots[name]
 }
 
+export function clearRegisteredSlots(): void {
+  for (const name of Object.keys(slots)) delete slots[name]
+}
+
 /** Known slot names, centralised so core and pro stay in sync. */
 export const SLOTS = {
   /** Extra row(s) in the chat composer tool menu (e.g. the Connectors toggle). */

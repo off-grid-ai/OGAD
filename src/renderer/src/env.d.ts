@@ -4,7 +4,7 @@ type UserProfile = import('../../shared/ipc-contracts').UserProfileContract
 
 interface ProLicenseInfo {
   isPro: boolean
-  tier: 'lifetime' | 'monthly' | null
+  tier: 'lifetime' | 'monthly' | 'annual' | 'subscription' | null
   expiry: string | null
   verifiedAt: number
 }
@@ -131,34 +131,67 @@ interface RendererAPIOverrides {
     list: (limit?: number) => Promise<
       Array<{
         taskId: string
+        journeyId?: string
+        modelId?: string
+        modelName?: string
         kind: 'web_use' | 'computer_use'
         title: string
-        status: 'running' | 'paused' | 'done' | 'failed' | 'stopped'
+        status: 'running' | 'paused' | 'waiting' | 'reconnecting' | 'done' | 'failed' | 'stopped'
         summary?: string
         steps: string[]
         startedAt: number
         finishedAt?: number
         updatedAt: number
+        executionDeviceId?: string
+        executionDeviceName?: string
+        phase?: import('./lib/task-session-store').ComputerUsePhase
+        currentStep?: number
+        currentAction?: string
+        currentReasoning?: string
+        reasoningLive?: boolean
         lastUrl?: string
         lastTitle?: string
         screenshotPath?: string
+        screenshotDeviceId?: string
         stepDetails?: import('./lib/task-session-store').ComputerUseStepDetail[]
       }>
     >
-    onChanged: (cb: (task: unknown) => void) => () => void
+    retryAvailability: (taskId: string) => Promise<{
+      available: boolean
+      reason?: string
+      executionDeviceId?: string
+      executionDeviceName?: string
+    }>
+    retry: (taskId: string) => Promise<{
+      available: boolean
+      reason?: string
+      taskId?: string
+      journeyId?: string
+      executionDeviceId?: string
+      executionDeviceName?: string
+    }>
+    guideAvailability: (taskId: string) => Promise<{ available: boolean; reason?: string }>
+    guideTask: (
+      taskId: string,
+      input: import('../../shared/task-guidance').TaskGuideInput
+    ) => Promise<{ available: boolean; accepted?: boolean; reason?: string }>
+    onChanged: (cb: (task: import('./lib/task-session-store').TaskSession) => void) => () => void
   }
   browser?: {
     resolveTakeover: (taskId: string, outcome: 'resumed' | 'cancelled') => Promise<boolean>
     setRegion: (rect: { x: number; y: number; width: number; height: number } | null) => void
     newTab: () => Promise<{ sessionId: string }>
+    openUrl: (url: string) => Promise<{ sessionId: string } | null>
     getSessions: () => Promise<{
       activeSessionId: string | null
       sessions: Array<{
         sessionId: string
         historyId?: string
         kind: 'manual' | 'task'
+        journeyId?: string
+        parentSessionId?: string
         taskId?: string
-        status: 'open' | 'running' | 'done' | 'failed'
+        status: import('../../shared/browser-session').BrowserTaskStatus | 'open'
         url: string
         title: string
         canGoBack: boolean
@@ -178,6 +211,7 @@ interface RendererAPIOverrides {
       Array<{ historyId: string; title: string; url: string; updatedAt: number }>
     >
     reopenManual: (historyId: string) => Promise<{ sessionId: string } | null>
+    stopTask: (taskId: string) => Promise<boolean>
     onSessionsState: (cb: (state: unknown) => void) => () => void
     onNavigationState: (cb: (state: unknown) => void) => () => void
     onPointer: (cb: (event: unknown) => void) => () => void
@@ -186,7 +220,10 @@ interface RendererAPIOverrides {
     onTaskState: (cb: (state: unknown) => void) => () => void
   }
   vision?: {
-    control: (command: 'stop' | 'pause' | 'resume') => Promise<boolean>
+    control: (
+      command: 'stop' | 'pause' | 'takeover' | 'resume',
+      taskId?: string
+    ) => Promise<boolean>
     getCurrent: () => Promise<{ state: unknown; steps: string[] } | null>
     onStep: (cb: (step: unknown) => void) => () => void
     onTaskState: (cb: (state: unknown) => void) => () => void
@@ -256,7 +293,7 @@ interface RendererAPIOverrides {
       type: 'content' | 'reasoning' | 'step' | 'tool_result' | 'done'
       text?: string
       step?: unknown
-      call?: { name: string; result: string }
+      call?: { name: string; result: string; status: 'completed' | 'failed' | 'pending' }
     }) => void
   ) => () => void
   getActiveRagStreams?: () => Promise<

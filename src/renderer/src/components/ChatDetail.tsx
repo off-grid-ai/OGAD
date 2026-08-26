@@ -8,6 +8,7 @@ import { parseSqliteUtc } from '@renderer/lib/time'
 import { parseSessionId } from '@renderer/lib/session-id'
 import { BorderBeam } from './ui/border-beam'
 import { ProgressiveBlur } from './ui/progressive-blur'
+import { openChatLink } from '@renderer/lib/chat-link'
 
 interface Memory {
   id: number
@@ -44,9 +45,11 @@ const markdownComponents: any = {
   a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
     <a
       href={href}
-      target="_blank"
-      rel="noreferrer"
       className="text-neutral-300 underline hover:text-white"
+      onClick={(event) => {
+        event.preventDefault()
+        openChatLink(href)
+      }}
     >
       {children}
     </a>

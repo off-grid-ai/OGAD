@@ -18,6 +18,7 @@ import {
 import { ArtifactCanvas, type Artifact } from './ArtifactCanvas'
 import { artifactKindLabel } from '@renderer/lib/artifact-labels'
 import { timeAgo } from '@renderer/lib/time'
+import { useRendererEntitlement } from '@renderer/bootstrap/useRendererEntitlement'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const api = (window as any).api
@@ -393,7 +394,7 @@ function ProjectConfig({
   const [includeMemory, setIncludeMemory] = useState(project.includeMemory)
   const [saving, setSaving] = useState(false)
   // Captured-memory retrieval is a Pro feature — core projects use uploaded docs only.
-  const isPro = !!api?.isPro
+  const { isPro } = useRendererEntitlement()
   const [savedAt, setSavedAt] = useState<string | null>(null)
 
   const dirty =

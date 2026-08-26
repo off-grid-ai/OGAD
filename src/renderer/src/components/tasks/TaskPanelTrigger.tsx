@@ -2,11 +2,21 @@ import { ListChecks } from '@phosphor-icons/react'
 import { Button } from '@renderer/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { openTaskSidePanel } from '@renderer/lib/task-side-panel'
-import { taskAttentionCount, useTaskSessions } from '@renderer/lib/task-session-store'
+import {
+  taskAttentionCount,
+  taskSessionsForJourney,
+  useTaskSessions
+} from '@renderer/lib/task-session-store'
 
-export function TaskPanelTrigger(): React.JSX.Element {
+interface TaskPanelTriggerProps {
+  conversationId?: string | null
+}
+
+export function TaskPanelTrigger({
+  conversationId = null
+}: TaskPanelTriggerProps): React.JSX.Element {
   const { tasks } = useTaskSessions()
-  const count = taskAttentionCount(tasks)
+  const count = taskAttentionCount(taskSessionsForJourney(tasks, conversationId))
 
   return (
     <Tooltip>

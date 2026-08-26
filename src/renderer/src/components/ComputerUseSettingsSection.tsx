@@ -7,15 +7,20 @@ import {
   normalizeComputerUseSettings,
   type ComputerUseCheckpointInterval,
   type ComputerUseContext,
+  type ComputerUseModelStrategy,
   type ComputerUseScreenshotQuality,
   type ComputerUseScreenshotSize,
-  type ComputerUseSettings
+  type ComputerUseSettings,
+  type ComputerUseVisualHistoryFrames
 } from '../../../shared/computer-use-settings'
 
 export function ComputerUseSettingsSection(): React.JSX.Element {
   const [settings, setSettings] = useState<ComputerUseSettings>({
     ...DEFAULT_COMPUTER_USE_SETTINGS
   })
+  const [specialists, setSpecialists] = useState<Array<{ id: string; name: string }>>([])
+  const [activeSpecialist, setActiveSpecialist] = useState('')
+  const [specialistError, setSpecialistError] = useState<string | null>(null)
 
   useEffect(() => {
     void Promise.resolve(window.api.getSettings())
@@ -27,6 +32,30 @@ export function ComputerUseSettingsSection(): React.JSX.Element {
         )
       })
       .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    void Promise.all([
+      window.api.getModelCatalog(),
+      window.api.getInstalledModels(),
+      window.api.getActiveModalities()
+    ])
+      .then(([catalog, installedIds, active]) => {
+        const installed = new Set(installedIds as string[])
+        const choices = (catalog as { models: Array<Record<string, unknown>> }).models
+          .filter(
+            (model) =>
+              model.kind === 'computer_use' &&
+              model.availability !== 'coming_soon' &&
+              typeof model.id === 'string' &&
+              installed.has(model.id)
+          )
+          .map((model) => ({ id: String(model.id), name: String(model.name ?? model.id) }))
+        setSpecialists(choices)
+        const selected = (active as Record<string, unknown>).computer_use
+        setActiveSpecialist(typeof selected === 'string' ? selected : '')
+      })
+      .catch(() => setSpecialistError('Could not load installed Computer Use models.'))
   }, [])
 
   const update = (patch: Partial<ComputerUseSettings>): void => {
@@ -41,9 +70,84 @@ export function ComputerUseSettingsSection(): React.JSX.Element {
   return (
     <div>
       <p className="mb-5 text-xs text-neutral-500">
-        Choose how much screen detail and task history Computer Use keeps while it works. Each step
-        sends only the current screenshot to your model.
+        Choose which local model controls your screen, plus how much screen detail and task history
+        it keeps while it works.
       </p>
+
+      <SettingsRow
+        label="Model strategy"
+        controlId="computer-use-model-strategy"
+        hint={
+          settings.modelStrategy === 'same_as_chat'
+            ? 'Uses the resident Chat model. Computer Use still sends a screenshot when the task needs visual grounding.'
+            : 'Loads your Computer Use specialist for the task, then restores the resident Chat model.'
+        }
+      >
+        <SettingsSelect<ComputerUseModelStrategy>
+          id="computer-use-model-strategy"
+          label="Computer Use model strategy"
+          value={settings.modelStrategy}
+          onValueChange={(modelStrategy) => update({ modelStrategy })}
+          options={[
+            { value: 'same_as_chat', label: 'Same as Chat' },
+            { value: 'separate_specialist', label: 'Separate specialist' }
+          ]}
+        />
+      </SettingsRow>
+
+      {settings.modelStrategy === 'separate_specialist' ? (
+        <SettingsRow
+          label="Specialist model"
+          controlId="computer-use-specialist-model"
+          hint={
+            specialistError ??
+            (specialists.length > 0
+              ? 'This model loads only for Computer Use, then Off Grid restores Chat.'
+              : 'Install a ready Computer Use model before choosing a specialist.')
+          }
+        >
+          {specialists.length > 0 ? (
+            <SettingsSelect<string>
+              id="computer-use-specialist-model"
+              label="Computer Use specialist model"
+              value={activeSpecialist}
+              onValueChange={(modelId) => {
+                if (!modelId) return
+                const previous = activeSpecialist
+                setActiveSpecialist(modelId)
+                setSpecialistError(null)
+                void window.api
+                  .setActiveModalModel('computer_use', modelId)
+                  .then((result) => {
+                    if (!result?.success) {
+                      setActiveSpecialist(previous)
+                      setSpecialistError(result?.error ?? 'Could not select this specialist.')
+                    }
+                  })
+                  .catch(() => {
+                    setActiveSpecialist(previous)
+                    setSpecialistError('Could not select this specialist.')
+                  })
+              }}
+              options={[
+                { value: '', label: 'Choose model' },
+                ...specialists.map((model) => ({ value: model.id, label: model.name }))
+              ]}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                window.sessionStorage.setItem('offgrid:models:initial-kind', 'computer_use')
+                window.dispatchEvent(new CustomEvent('og:navigate', { detail: 'models' }))
+              }}
+              className="border border-neutral-700 px-3 py-2 text-xs text-neutral-300 transition-colors hover:border-green-500 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-green-500"
+            >
+              Open Computer Use catalog
+            </button>
+          )}
+        </SettingsRow>
+      ) : null}
 
       <SettingsRow
         label="Task context"
@@ -95,6 +199,27 @@ export function ComputerUseSettingsSection(): React.JSX.Element {
             { value: 'efficient', label: 'Efficient' },
             { value: 'balanced', label: 'Balanced' },
             { value: 'detailed', label: 'Detailed' }
+          ]}
+        />
+      </SettingsRow>
+
+      <SettingsRow
+        label="Visual history"
+        controlId="computer-use-visual-history"
+        hint="Keep recent screenshots for visual continuity. Older steps stay as compact text."
+      >
+        <SettingsSelect<`${ComputerUseVisualHistoryFrames}`>
+          id="computer-use-visual-history"
+          label="Computer Use visual history"
+          value={String(settings.visualHistoryFrames) as `${ComputerUseVisualHistoryFrames}`}
+          onValueChange={(value) =>
+            update({ visualHistoryFrames: Number(value) as ComputerUseVisualHistoryFrames })
+          }
+          options={[
+            { value: '0', label: 'Current only' },
+            { value: '1', label: '1 prior screenshot' },
+            { value: '2', label: '2 prior screenshots' },
+            { value: '5', label: '5 prior screenshots' }
           ]}
         />
       </SettingsRow>

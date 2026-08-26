@@ -1,4 +1,5 @@
 import React from 'react'
+import { useRendererEntitlement } from '@renderer/bootstrap/useRendererEntitlement'
 
 // One reference catalog for every keyboard shortcut in the app. Each row notes where
 // the shortcut is actually registered — keep this in sync with that site. Pro rows
@@ -24,8 +25,7 @@ const SHORTCUTS: Shortcut[] = [
 ]
 
 export function KeyboardShortcuts(): React.ReactElement {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const isPro = !!(window as any).api?.isPro
+  const { isPro } = useRendererEntitlement()
   const rows = SHORTCUTS.filter((s) => !s.pro || isPro)
   return (
     <div className="flex flex-col gap-1.5">

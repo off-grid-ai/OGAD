@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useRendererEntitlement } from '@renderer/bootstrap/useRendererEntitlement'
 import { SidePanel } from './SidePanel'
 
 // Right-side panel to view, create, edit, and delete Skills — reusable
@@ -90,7 +91,7 @@ export function SkillsPanel({
   initialSkillName?: string
 }): React.JSX.Element {
   // Skill automation (triggers) is Pro; the free build shows manual packs only.
-  const isProBuild = !!window.api.isPro
+  const { isPro: isProBuild } = useRendererEntitlement()
   const [skills, setSkills] = useState<{ name: string; description: string }[]>([])
   const [draft, setDraft] = useState<Draft | null>(null)
   const [busy, setBusy] = useState(false)

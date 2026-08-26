@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { shouldQueue, enqueue, dequeue, queuedCount, clearQueue } from '@renderer/lib/chat-queue'
 import { buildSendHistory } from '@renderer/lib/chat-history'
 import { waitingLabel } from '@renderer/lib/chat-labels'
@@ -13,7 +13,7 @@ import {
 } from 'react-resizable-panels'
 import { toSpeakableText } from '@renderer/lib/speakable'
 import { isAgenticTurn } from '@renderer/lib/agentic-active'
-import { applyStreamEvent } from '@renderer/lib/stream-reducer'
+import { applyStreamEvent, hasLiveStreamActivity } from '@renderer/lib/stream-reducer'
 import { useActiveModelSummary } from '@renderer/hooks/useActiveModelSummary'
 import { shouldFollowBottom } from '@renderer/lib/scroll-follow'
 import {
@@ -37,12 +37,13 @@ import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import { getSlot, SLOTS } from '@/bootstrap/slotRegistry'
 import { callHook } from '@/bootstrap/hookRegistry'
+import { useRendererEntitlement } from '@/bootstrap/useRendererEntitlement'
 import {
   SYNC_SUBSCRIBE_INCOMING_FILES_HOOK,
   type IncomingSharedFile
 } from '@renderer/lib/sync-hooks'
 import { ChatLoadingCard } from './ChatLoadingCard'
-import { chatMarkdownComponents } from './ChatMarkdown'
+import { chatMarkdownComponents } from './chat-markdown-components'
 import { ChatThinkingBlock } from './ChatThinkingBlock'
 import { ChatToolRows } from './ChatToolRows'
 import { ArtifactCanvas, parseArtifact, type Artifact } from './ArtifactCanvas'
@@ -79,6 +80,7 @@ import {
 import type { RagConversationContract, ResponseCutoffContract } from '../../../shared/ipc-contracts'
 import type { SearchHit } from '../types'
 import { navigateSearchHit } from '@renderer/lib/search-navigation'
+import { runningToolLabel } from '@renderer/lib/tool-display'
 import {
   parseImageMemoryGuardError,
   type ImageGenerationJobContract,
@@ -88,6 +90,13 @@ import { Button } from '@renderer/components/ui/button'
 import { ActionGateDock } from '@renderer/components/actions/ActionGateDock'
 import { VisionSupervisorOverlay } from '@renderer/components/vision/VisionSupervisorOverlay'
 import { TaskPanelTrigger } from '@renderer/components/tasks/TaskPanelTrigger'
+import { TaskLiveActivity } from '@renderer/components/browser/tasks/TaskLiveActivity'
+import {
+  guidanceTaskForJourney,
+  useTaskSessions,
+  type TaskSession
+} from '@renderer/lib/task-session-store'
+import { submitTaskGuidance } from '@renderer/lib/task-guidance-client'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import {
   DropdownMenu,
@@ -150,6 +159,11 @@ type RagContext = {
   imageMetadata?: ImageGenerationMetadata
   sources?: { name: string; position: number; score: number }[]
   attachments?: { name: string; kind: string; text?: string; path?: string }[]
+  taskGuidance?: {
+    taskId: string
+    state: 'accepted' | 'applied'
+    attachmentNames?: string[]
+  }
 }
 
 type ImageGenerationMetadata = {
@@ -317,7 +331,8 @@ function activityLabel(a?: {
   name?: string
 }): string {
   if (!a) return ''
-  if (a.kind === 'running_tool') return `Running ${a.name || 'tool'}…`
+  if (a.kind === 'planning') return 'Planning next action…'
+  if (a.kind === 'running_tool') return runningToolLabel(a.name)
   if (a.kind === 'reading') return `Reading the page${(a.counts?.urls ?? 0) > 1 ? 's' : ''}…`
   if (a.kind === 'searching') return 'Searching your memory…'
   if (a.kind === 'memory') {
@@ -397,8 +412,12 @@ interface MemoryChatProps {
     openGallery?: boolean
     /** Start a fresh chat and auto-send this prompt (an Explore preset handed off from a landing surface). */
     seedPrompt?: string
+    /** Open the composer with this text. The user still confirms the send. */
+    draftPrompt?: string
   }> | null
   readonly onTargetConsumed?: () => void
+  /** Keep the surrounding task workspace scoped to the conversation shown here. */
+  readonly onActiveConversationChange?: (conversationId: string | null) => void
 }
 
 function parseRagContext(context: unknown): RagContext | undefined {
@@ -627,8 +646,9 @@ function standardMessageBubbleClass(message: ChatMessage, editing: boolean): str
   // gigantic. The same cap makes the two kinds of picture behave the same way.
   const width =
     editing || message.image || message.attachments?.length ? 'w-full max-w-2xl' : 'max-w-[85%]'
-  const color =
-    message.role === 'user'
+  const color = message.context?.taskGuidance
+    ? 'border border-green-500/50 bg-green-500/5 text-foreground'
+    : message.role === 'user'
       ? 'bg-neutral-800 text-neutral-100'
       : 'border border-neutral-800 bg-neutral-900/40 text-neutral-200'
   return `rounded-md px-3.5 py-2.5 text-sm leading-relaxed ${width} ${color}`
@@ -819,12 +839,15 @@ function MessageThinkingHeader({ message }: Readonly<{ message: ChatMessage }>):
   if (message.role !== 'assistant') return <></>
   if (message.streaming) {
     const activity = activityLabel(message.activity)
+    const showLiveActivity = hasLiveStreamActivity(message)
     return (
       <div className="mb-1.5 flex flex-col gap-1.5">
-        <LoadingDots />
+        {showLiveActivity ? <LoadingDots /> : null}
         {message.reasoning?.trim() ? <ChatThinkingBlock content={message.reasoning} live /> : null}
-        {activity ? <span className="text-[11px] text-neutral-500">{activity}</span> : null}
-        <WebTaskStepFeed />
+        {showLiveActivity && activity ? (
+          <span className="text-[11px] text-neutral-500">{activity}</span>
+        ) : null}
+        {showLiveActivity ? <WebTaskStepFeed /> : null}
       </div>
     )
   }
@@ -991,10 +1014,11 @@ function makeCiteComponents(
     a: ({ href, children }: any) => {
       const match = typeof href === 'string' ? /^cite:(\d+)$/.exec(href) : null
       if (!match || !unified) {
-        return (
-          <a href={href} target="_blank" rel="noreferrer" className="text-green-500 underline">
-            {children}
-          </a>
+        const DefaultAnchor = markdownComponents.a
+        return DefaultAnchor ? (
+          <DefaultAnchor href={href}>{children}</DefaultAnchor>
+        ) : (
+          <>{children}</>
         )
       }
       const source = unified[Number.parseInt(match[1]!, 10) - 1]
@@ -1869,6 +1893,12 @@ function MessageBubble({
   const selected = state.askSelections[message.id] ?? []
   return (
     <div className={standardMessageBubbleClass(message, editing)}>
+      {message.context?.taskGuidance ? (
+        <div className="mb-2 flex items-center justify-between gap-3 border-b border-green-500/20 pb-2 text-[9px] uppercase tracking-wide text-green-600 dark:text-green-400">
+          <span>Task guidance</span>
+          <span>{message.context.taskGuidance.state}</span>
+        </div>
+      ) : null}
       <IncomingFileRows files={state.incomingFiles} />
       {message.attachments?.length ? (
         <MessageAttachments
@@ -1932,12 +1962,18 @@ function StandardMessageRow({
       <MessageBubble message={message} state={state} actions={actions} navigation={navigation} />
       <ChatToolRows tools={message.toolCalls} />
       {message.role === 'user' ? (
-        <UserMessageActions
-          copied={copied}
-          onCopy={() => actions.copy(message.content, message.id)}
-          onEdit={() => actions.startEdit(message)}
-          onRegenerate={() => actions.regenerate(message.id)}
-        />
+        message.context?.taskGuidance ? (
+          <div className="mt-1.5 flex items-center gap-3">
+            <CopyAction copied={copied} onCopy={() => actions.copy(message.content, message.id)} />
+          </div>
+        ) : (
+          <UserMessageActions
+            copied={copied}
+            onCopy={() => actions.copy(message.content, message.id)}
+            onEdit={() => actions.startEdit(message)}
+            onRegenerate={() => actions.regenerate(message.id)}
+          />
+        )
       ) : (
         <AssistantMessageActions
           message={message}
@@ -2264,6 +2300,32 @@ function textRecordingTooltip(phase: ChatVoicePhase, transcriptionLabel: string)
   return 'Record voice'
 }
 
+async function stopLiveWebUseForConversation(conversationId: string | null): Promise<void> {
+  if (!conversationId || !window.api.tasks?.list || !window.api.browser?.stopTask) return
+  try {
+    const tasks = await window.api.tasks.list()
+    const live = new Set(['running', 'paused', 'waiting', 'reconnecting'])
+    const matching = tasks.filter(
+      (task) =>
+        task.kind === 'web_use' && task.journeyId === conversationId && live.has(task.status)
+    )
+    await Promise.all(matching.map((task) => window.api.browser!.stopTask(task.taskId)))
+  } catch (error) {
+    console.error('Failed to stop Web Use for this Chat:', error)
+  }
+}
+
+async function stopLiveTask(task: Pick<TaskSession, 'taskId' | 'kind'>): Promise<boolean> {
+  if (task.kind === 'web_use') {
+    return (await window.api.browser?.stopTask(task.taskId)) ?? false
+  }
+  return (await window.api.vision?.control('stop', task.taskId)) ?? false
+}
+
+function stopFailureMessage(kind: TaskSession['kind']): string {
+  return `${kind === 'web_use' ? 'Web Use' : 'Computer Use'} could not be stopped on this device.`
+}
+
 export function MemoryChat({
   onNavigateToMemory,
   onNavigateToChat,
@@ -2273,8 +2335,11 @@ export function MemoryChat({
   onSeekReplay,
   onOpenSkillPreset,
   openTarget,
-  onTargetConsumed
+  onTargetConsumed,
+  onActiveConversationChange
 }: MemoryChatProps) {
+  const { isPro } = useRendererEntitlement()
+  const { tasks: taskSessions } = useTaskSessions()
   // Messages are kept PER CONVERSATION so a background tab keeps its own thread and
   // an in-flight stream can't leak into whatever tab you switch to. `messages` (below,
   // after activeConversationId) is the active tab's slice; sends target their own conv.
@@ -2335,12 +2400,16 @@ export function MemoryChat({
    */
   const [incomingFiles, setIncomingFiles] = useState<IncomingSharedFile[]>([])
   useEffect(() => {
+    if (!isPro) {
+      setIncomingFiles([])
+      return
+    }
     const off = callHook<() => void>(
       SYNC_SUBSCRIBE_INCOMING_FILES_HOOK,
       (files: IncomingSharedFile[]) => setIncomingFiles(files)
     )
     return () => off?.()
-  }, [])
+  }, [isPro])
   // Matched on the message's UUID, which is what `id` carries here (`String(m.uuid ?? m.id)`) and is
   // the only identity a peer can name — the autoincrement row id is local to one device.
   const incomingFilesFor = useCallback(
@@ -2391,9 +2460,13 @@ export function MemoryChat({
     }
   }, [convSearch])
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
+  useEffect(() => {
+    onActiveConversationChange?.(activeConversationId)
+  }, [activeConversationId, onActiveConversationChange])
   // Active tab's messages (derived) + a shim so the existing active-conversation call
   // sites keep working. The send path targets its own conv via setConvMessages instead.
   const messages = messagesByConv[activeConversationId ?? NEW_CHAT] ?? EMPTY_MSGS
+  const liveJourneyTask = guidanceTaskForJourney(taskSessions, activeConversationId)
   const promptEnhancementActive = messages.some(isPromptEnhancementMessage)
   const promptEnhancementComplete = messages.some(
     (message) =>
@@ -2455,8 +2528,6 @@ export function MemoryChat({
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
   // Captured-memory context is a Pro ("remembers") feature; core chats are plain
   // (no memory) or scoped to a project. The UI never says "memory".
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const isPro = !!(window as any).api?.isPro
   const [noMemory, setNoMemory] = useState(!isPro)
   const [, setProjectMenuOpen] = useState(false)
   const [projCreating, setProjCreating] = useState(false)
@@ -2620,8 +2691,9 @@ export function MemoryChat({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   const [lightbox, setLightbox] = useState<{ url: string; path?: string } | null>(null)
-  // Rows pro appends after the message list, e.g. a peer's live reply. Empty in the free build.
-  const ChatMessagesFooter = useMemo(() => getSlot(SLOTS.chatMessagesFooter), [])
+  // Pro registers this slot after the core renderer starts. Resolve it on each render so an
+  // execution-chat approval cannot stay hidden behind a value cached before Pro activation.
+  const ChatMessagesFooter = isPro ? getSlot(SLOTS.chatMessagesFooter) : undefined
   // Esc closes the open overlay (attachment viewer / image lightbox).
   useEffect(() => {
     if (!viewer && !lightbox) return
@@ -2969,14 +3041,43 @@ export function MemoryChat({
     }
   }, [refreshConversationMessages, markGenerating])
 
-  const loadConversations = async () => {
-    try {
-      const convos = await window.api.getRagConversations()
-      setConversations(convos)
-    } catch (e) {
-      console.error('Failed to load conversations:', e)
+  const conversationListRequestRef = useRef<Promise<void> | null>(null)
+  const conversationListRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const loadConversations = useCallback(async (): Promise<void> => {
+    if (conversationListRequestRef.current) return conversationListRequestRef.current
+    const request = (async () => {
+      try {
+        const convos = await window.api.getRagConversations()
+        setConversations(convos)
+      } catch (e) {
+        console.error('Failed to load conversations:', e)
+      } finally {
+        conversationListRequestRef.current = null
+      }
+    })()
+    conversationListRequestRef.current = request
+    return request
+  }, [])
+
+  const scheduleConversationListRefresh = useCallback((): void => {
+    if (conversationListRefreshTimerRef.current) {
+      clearTimeout(conversationListRefreshTimerRef.current)
     }
-  }
+    conversationListRefreshTimerRef.current = setTimeout(() => {
+      conversationListRefreshTimerRef.current = null
+      void loadConversations()
+    }, 250)
+  }, [loadConversations])
+
+  useEffect(
+    () => () => {
+      if (conversationListRefreshTimerRef.current) {
+        clearTimeout(conversationListRefreshTimerRef.current)
+      }
+    },
+    []
+  )
 
   const switchConversation = useCallback(
     async (convId: string) => {
@@ -3035,7 +3136,7 @@ export function MemoryChat({
           ) {
             await refreshConversationMessages(conversationId)
           }
-          await loadConversations()
+          scheduleConversationListRefresh()
         } catch (error) {
           console.error('Failed to refresh a synced conversation:', error)
         }
@@ -3043,7 +3144,26 @@ export function MemoryChat({
     })
     return () => off?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeConversationId, refreshConversationMessages])
+  }, [activeConversationId, refreshConversationMessages, scheduleConversationListRefresh])
+
+  // Task guidance is written to the originating conversation by the Tasks
+  // workspace. Refresh that conversation immediately so its special guidance
+  // turn appears beside the task without waiting for a sync round trip.
+  useEffect(() => {
+    const onTaskGuidanceMessage = (event: Event): void => {
+      const conversationId = (event as CustomEvent<{ conversationId?: string }>).detail
+        ?.conversationId
+      if (!conversationId) return
+      void (async () => {
+        if (conversationId === activeConversationId) {
+          await refreshConversationMessages(conversationId)
+        }
+        scheduleConversationListRefresh()
+      })()
+    }
+    window.addEventListener('og:task-guidance-message', onTaskGuidanceMessage)
+    return () => window.removeEventListener('og:task-guidance-message', onTaskGuidanceMessage)
+  }, [activeConversationId, refreshConversationMessages, scheduleConversationListRefresh])
 
   // Open a target passed from the Projects tab (an existing chat, or a new chat
   // scoped to a project). Resolves project from the DB to avoid stale state.
@@ -3059,6 +3179,7 @@ export function MemoryChat({
           setActiveProjectId((conv as { project_id?: string | null }).project_id ?? null)
           const nextMessages = await loadLatestConversationMessages(convId)
           if (nextMessages) setConvMessages(convId, nextMessages)
+          if (openTarget.draftPrompt) setInput(openTarget.draftPrompt)
         } else if (openTarget.projectId) {
           setActiveConversationId(null)
           setConvMessages(null, [])
@@ -3070,8 +3191,14 @@ export function MemoryChat({
           setConvMessages(null, [])
           setActiveProjectId(null)
           setPendingSeed(openTarget.seedPrompt)
+        } else if (openTarget.draftPrompt) {
+          setActiveConversationId(null)
+          setConvMessages(null, [])
+          setActiveProjectId(null)
+          setInput(openTarget.draftPrompt)
         }
         if (openTarget.openGallery) setShowGallery(true)
+        if (openTarget.draftPrompt) requestAnimationFrame(() => inputRef.current?.focus())
         await loadConversations()
       } catch (e) {
         console.error('Failed to open chat target:', e)
@@ -3157,6 +3284,43 @@ export function MemoryChat({
     // Don't block the user — if a generation is in flight, queue this message and
     // let them keep typing/sending. The queue drains in order when each finishes.
     const targetConv = opts?.conversationId ?? activeConversationId
+    // A live operator task owns this journey until it finishes. New Chat input is
+    // guidance for that task, not a second memory/model turn running beside it.
+    if (!regen && targetConv && !opts?.imageRequest) {
+      const listedTasks = await window.api.tasks?.list?.(50)
+      const liveTask = guidanceTaskForJourney(listedTasks ?? taskSessions, targetConv)
+      if (liveTask) {
+        const guidanceText = [
+          typed,
+          ...atts
+            .filter((attachment) => attachment.text)
+            .map((attachment) => `Attached ${attachment.name}:\n${attachment.text}`)
+        ]
+          .filter(Boolean)
+          .join('\n\n')
+        try {
+          const result = await submitTaskGuidance({
+            taskId: liveTask.taskId,
+            journeyId: targetConv,
+            text: guidanceText
+          })
+          if (!result.accepted) {
+            setAttachWarn(result.reason || 'The running task did not accept this guidance.')
+            return
+          }
+          if (isInput) {
+            setInput('')
+            setAttachments([])
+          }
+          setAttachWarn(null)
+          return
+        } catch (error) {
+          console.error('Failed to guide the running task:', error)
+          setAttachWarn('Guidance could not be sent to the running task. Try again.')
+          return
+        }
+      }
+    }
     if (shouldQueue(targetConv, generatingRef.current)) {
       const item = { text: typed, atts }
       queuedRef.current = enqueue(queuedRef.current, targetConv as string, item)
@@ -3457,11 +3621,13 @@ export function MemoryChat({
           streamId: toolStreamId,
           thinking: thinkingEnabled
         })
-        const toolCalls = (tr?.toolCalls || []).map((c: { name: string; result: string }) => ({
-          name: c.name,
-          result: c.result,
-          status: 'completed' as const
-        }))
+        const toolCalls = (tr?.toolCalls || []).map(
+          (c: { name: string; result: string; status?: 'completed' | 'failed' | 'pending' }) => ({
+            name: c.name,
+            result: c.result,
+            status: c.status ?? ('completed' as const)
+          })
+        )
         const context = tr?.unified?.length ? { unified: tr.unified } : undefined
         // Persist the citation sources + tool calls so they survive a reload.
         const toolCtx =
@@ -3776,7 +3942,15 @@ export function MemoryChat({
         return
       }
       console.error('RAG chat failed', e)
-      const errorContent = 'Sorry, something went wrong while generating a response.'
+      const errorMessage = e instanceof Error ? e.message : ''
+      const remoteErrorStart = errorMessage.indexOf('Remote text model')
+      const errorContent =
+        remoteErrorStart >= 0
+          ? errorMessage
+              .slice(remoteErrorStart, remoteErrorStart + 800)
+              .replace(/\s+/g, ' ')
+              .trim()
+          : 'Sorry, something went wrong while generating a response.'
       // Update the streaming placeholder to show the error — never append a second bubble.
       const sid = activeStreamId
       setConvMessages(convId, (prev) => {
@@ -3939,9 +4113,26 @@ export function MemoryChat({
   )
 
   const stopGeneration = useCallback(
-    (cid: string | null): void => {
+    async (
+      cid: string | null,
+      task: Pick<TaskSession, 'taskId' | 'journeyId' | 'kind'> | null
+    ): Promise<void> => {
       const convId = cid ?? activeConversationId
       if (!convId) return
+      if (task?.journeyId === convId) {
+        try {
+          const stopped = await stopLiveTask(task)
+          if (!stopped) {
+            setAttachWarn(stopFailureMessage(task.kind))
+            return
+          }
+        } catch (error) {
+          console.error(`Failed to stop ${task.kind} task ${task.taskId}:`, error)
+          setAttachWarn(stopFailureMessage(task.kind))
+          return
+        }
+      }
+      setAttachWarn(null)
       cancelledRef.current.add(convId)
       const streamingId = (messagesByConv[convId] ?? []).find((m) => m.streaming)?.id
       if (streamingId) window.api.cancelRag(streamingId)
@@ -4256,16 +4447,20 @@ export function MemoryChat({
           // Drop everything after that user turn (the old answer) and re-run in
           // place — no new user bubble. Also prune the persisted rows so reopening
           // the chat doesn't show old answers stacked.
-          setMessages((prev) => prev.slice(0, i + 1))
-          if (activeConversationId) void window.api.truncateRagMessages(activeConversationId, i + 1)
-          // The turn's own attachments, not the composer's - the composer was cleared when this
-          // turn was first sent, so regenerating without them re-asks the question WITHOUT its image.
-          void sendMessage(content, { regen: true, atts: attachmentsOf(mi) })
+          void (async () => {
+            await stopLiveWebUseForConversation(activeConversationId)
+            setMessages((prev) => prev.slice(0, i + 1))
+            if (activeConversationId)
+              await window.api.truncateRagMessages(activeConversationId, i + 1)
+            // The turn's own attachments, not the composer's - the composer was cleared when this
+            // turn was first sent, so regenerating without them re-asks the question WITHOUT its image.
+            await sendMessage(content, { regen: true, atts: attachmentsOf(mi) })
+          })()
           return
         }
       }
     },
-    [messages]
+    [activeConversationId, messages]
   )
 
   // Edit a sent message: replace its text, drop everything after it, re-run.
@@ -4300,6 +4495,7 @@ export function MemoryChat({
         }
       : undefined
     void (async () => {
+      await stopLiveWebUseForConversation(cid)
       try {
         if (cid) {
           await window.api.truncateRagMessages(cid, idx)
@@ -4489,6 +4685,7 @@ export function MemoryChat({
       })
     },
     startEdit: (message) => {
+      void stopLiveWebUseForConversation(activeConversationId)
       setEditingId(message.id)
       setEditText(message.content)
     },
@@ -4666,7 +4863,7 @@ export function MemoryChat({
             <circle cx="9" cy="9" r="1.5" fill="currentColor" />
           </svg>
         </button>
-        <TaskPanelTrigger />
+        <TaskPanelTrigger conversationId={activeConversationId} />
       </header>
 
       {/* Body */}
@@ -4897,9 +5094,12 @@ export function MemoryChat({
               {messages.length === 0 ? (
                 <div className="flex min-h-full w-full flex-col items-center justify-center px-6 py-6 text-center">
                   <div className="mx-auto flex max-w-2xl flex-col items-center">
-                    <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-neutral-800 bg-neutral-900 shadow-sm">
+                    <div
+                      data-testid="chat-empty-hero"
+                      className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-card shadow-sm"
+                    >
                       <svg
-                        className="h-8 w-8 text-green-500"
+                        className="h-8 w-8 text-primary"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -4912,10 +5112,10 @@ export function MemoryChat({
                         />
                       </svg>
                     </div>
-                    <h2 className="text-3xl font-semibold tracking-tight text-neutral-100">
+                    <h2 className="text-3xl font-semibold tracking-tight text-foreground">
                       {mode === 'image' ? 'Create an image' : 'Start a conversation'}
                     </h2>
-                    <p className="mt-3 max-w-md text-sm text-neutral-500">
+                    <p className="mt-3 max-w-md text-sm text-muted-foreground">
                       {mode === 'image'
                         ? 'Pick a style, then describe your subject — generated on-device.'
                         : activeProjectName
@@ -4946,7 +5146,7 @@ export function MemoryChat({
                         <button
                           key={ex}
                           onClick={() => sendMessage(ex)}
-                          className="rounded-md border border-neutral-800 px-3 py-2.5 text-left text-xs text-neutral-400 transition-colors hover:border-green-500 hover:text-neutral-200"
+                          className="rounded-md border border-border bg-background px-3 py-2.5 text-left text-xs text-muted-foreground transition-colors hover:border-primary hover:bg-accent hover:text-foreground"
                         >
                           {ex}
                         </button>
@@ -5000,7 +5200,9 @@ export function MemoryChat({
                       promptEnhancementComplete={promptEnhancementComplete}
                     />
                   ) : null}
+                  {liveJourneyTask ? <TaskLiveActivity task={liveJourneyTask} /> : null}
                   {!!activeConversationId &&
+                  !liveJourneyTask &&
                   generatingConvs.has(activeConversationId) &&
                   !messages.some((m) => m.streaming) ? (
                     <div className="mb-5 flex flex-col items-start">
@@ -5074,7 +5276,7 @@ export function MemoryChat({
 
             {/* Composer */}
             <div className="border-t border-neutral-900 px-6 py-3">
-              <div className="w-full px-6">
+              <div className="w-full">
                 {/* Image options (image mode, expandable) */}
                 {mode === 'image' && showImageOptions && (
                   <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-neutral-800 px-3 py-2 text-[11px] text-neutral-500">
@@ -5325,6 +5527,8 @@ export function MemoryChat({
                   skills / tools / memory scope / thinking) serves chat and voice
                   mode; only the input surface (textarea vs. mic) differs. */}
                 <div
+                  data-testid="chat-composer"
+                  data-focus-surface="chat-composer"
                   onDragOver={(e) => {
                     e.preventDefault()
                     if (!dragOver) setDragOver(true)
@@ -5337,15 +5541,15 @@ export function MemoryChat({
                     setDragOver(false)
                     if (e.dataTransfer.files.length) void addFiles(e.dataTransfer.files)
                   }}
-                  className={`relative rounded-xl border bg-neutral-950 shadow-sm transition-colors ${dragOver ? 'border-green-500' : 'border-neutral-800 focus-within:border-neutral-600'}`}
+                  className={`relative rounded-xl border bg-card text-card-foreground shadow-sm transition-colors ${dragOver ? 'border-primary' : 'border-input focus-within:border-ring'}`}
                 >
                   {dragOver ? (
-                    <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-xl bg-neutral-950/80 text-xs text-green-500">
+                    <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-xl bg-card/80 text-xs text-primary">
                       Drop files to attach
                     </div>
                   ) : null}
                   {skillMatches.length > 0 && (
-                    <div className="absolute bottom-full left-0 z-20 mb-2 w-72 overflow-hidden rounded-md border border-neutral-800 bg-neutral-950 py-1 text-sm shadow-lg">
+                    <div className="absolute bottom-full left-0 z-20 mb-2 w-72 overflow-hidden rounded-md border border-border bg-popover py-1 text-sm text-popover-foreground shadow-lg">
                       <div className="flex items-center justify-between px-3 py-1 text-[10px] uppercase tracking-wide text-neutral-600">
                         <span>Skills</span>
                         <span className="normal-case text-neutral-700">Tab to complete</span>
@@ -5534,7 +5738,7 @@ export function MemoryChat({
                             ? `Ask about “${activeProjectName}”…`
                             : 'Ask anything…'
                       }
-                      className="max-h-52 w-full resize-none overflow-y-auto bg-transparent px-3.5 pt-3 text-sm text-neutral-200 placeholder-neutral-600 outline-none"
+                      className="max-h-52 w-full resize-none overflow-y-auto bg-transparent px-3.5 pt-3 text-sm text-foreground placeholder:text-muted-foreground outline-none"
                     />
                   )}
                   <div className="flex flex-wrap items-center justify-between gap-y-2 gap-x-2 px-2.5 pb-2.5 pt-1">
@@ -5911,7 +6115,9 @@ export function MemoryChat({
                                 variant="outline"
                                 size="icon"
                                 aria-label="Stop generating"
-                                onClick={() => stopGeneration(activeConversationId)}
+                                onClick={() =>
+                                  void stopGeneration(activeConversationId, liveJourneyTask)
+                                }
                                 className="size-8 rounded-full border-red-500/50 text-red-400 hover:bg-red-500/10"
                               >
                                 <svg
@@ -5931,7 +6137,7 @@ export function MemoryChat({
                           type="button"
                           variant="outline"
                           onClick={() => {
-                            stopGeneration(activeConversationId)
+                            void stopGeneration(activeConversationId, liveJourneyTask)
                           }}
                           className="h-8 gap-1.5 border-red-500/50 text-red-400 hover:bg-red-500/10"
                         >

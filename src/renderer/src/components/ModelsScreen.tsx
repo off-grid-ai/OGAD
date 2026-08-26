@@ -25,6 +25,7 @@ import { collectTags, matchesAllTags, toggleTag } from '@renderer/lib/model-tag-
 import { companionDownloadLabel } from '@renderer/lib/download-label'
 import { formatTransferSpeed } from '@offgrid/sync'
 import { projectProgress } from '@offgrid/ui'
+import { downloadTimeRemaining } from '@renderer/lib/download-progress'
 import {
   modelSettingsTabForKind,
   openModelSettingsPanel,
@@ -44,6 +45,10 @@ import {
   type FilterState,
   type Credibility
 } from '@offgrid/models'
+import {
+  useModelDownloadProgress,
+  type ModelDownloadProgressEvent
+} from '@renderer/hooks/useModelDownloadProgress'
 
 function Sel({
   value,
@@ -121,6 +126,7 @@ interface ModelFile {
 }
 interface ModelEntry {
   id: string
+  sourceModelId?: string
   name: string
   kind: string
   org?: string
@@ -133,6 +139,10 @@ interface ModelEntry {
   tags?: string[]
   releaseDate?: string
   quant?: string
+  availability?: 'ready' | 'coming_soon'
+  availabilityNote?: string
+  remoteServerId?: string
+  remoteModelId?: string
 }
 
 interface UseCase {
@@ -291,7 +301,11 @@ export function ModelsScreen(): React.JSX.Element {
   const refreshVision = (): void => {
     void api.getModelVisionStatus?.().then((s) => setVisionSt(s ?? {}))
   }
-  const [activeKind, setActiveKind] = useState<string>('text')
+  const [activeKind, setActiveKind] = useState<string>(() => {
+    const requested = window.sessionStorage.getItem('offgrid:models:initial-kind')
+    window.sessionStorage.removeItem('offgrid:models:initial-kind')
+    return requested || 'text'
+  })
   const [progress, setProgress] = useState<Record<string, DownloadCardProgress>>({})
   // Active model ids across ALL modalities (chat + image/voice/transcription) —
   // one truth from the backend; the UI never re-derives "active" per kind.
@@ -367,51 +381,41 @@ export function ModelsScreen(): React.JSX.Element {
     api.getModelCatalog?.().then((c: { kinds: string[]; models: ModelEntry[] }) => {
       setKinds(c.kinds)
       setModels(c.models)
-      if (c.kinds[0]) setActiveKind(c.kinds[0])
+      setActiveKind((current) => (c.kinds.includes(current) ? current : (c.kinds[0] ?? 'text')))
     })
     api.getInstalledModels?.().then(setInstalled)
     refreshVision()
     refreshActive()
-    const off = api.onModelProgress?.(
-      // Partial, because the main process sends only what changed on each tick. Typed off the
-      // card's own shape all the same, so a field the card renders cannot be dropped in transit.
-      (d: Partial<DownloadCardProgress> & { modelId: string }) => {
-        if (d.status === 'cancelled') {
-          setProgress((p) => withoutProgressEntry(p, d.modelId))
-          return
-        }
-        // Spread the payload instead of copying named fields. Listing them by hand is what
-        // silently discarded the bytes and the file count: the main process sent them, this
-        // handler never copied them, and the card had nothing to show.
-        const { modelId, ...fields } = d
-        setProgress((p) => {
-          const prev = p[modelId]
-          return {
-            ...p,
-            [modelId]: {
-              ...prev,
-              ...fields,
-              percent: fields.percent ?? prev?.percent ?? 0,
-              currentFile: fields.currentFile ?? prev?.currentFile
-            }
-          }
-        })
-        if (d.status === 'completed') {
-          api.getModelCatalog?.().then((c: { kinds: string[]; models: ModelEntry[] }) => {
-            setKinds(c.kinds)
-            setModels(c.models)
-          })
-          api.getInstalledModels?.().then(setInstalled)
-          refreshVision()
-          // Adding a projector for the active model turns its vision on in MAIN
-          // (reconcileActiveModelProjector, runs regardless of which screen is open);
-          // just refresh active state so this screen reflects it.
-          refreshActive()
+  }, [])
+
+  useModelDownloadProgress((d: ModelDownloadProgressEvent) => {
+    if (d.status === 'cancelled') {
+      setProgress((p) => withoutProgressEntry(p, d.modelId))
+      return
+    }
+    const { modelId, ...fields } = d
+    setProgress((p) => {
+      const prev = p[modelId]
+      return {
+        ...p,
+        [modelId]: {
+          ...prev,
+          ...fields,
+          percent: fields.percent ?? prev?.percent ?? 0,
+          currentFile: fields.currentFile ?? prev?.currentFile
         }
       }
-    )
-    return off
-  }, [])
+    })
+    if (d.status === 'completed') {
+      api.getModelCatalog?.().then((c: { kinds: string[]; models: ModelEntry[] }) => {
+        setKinds(c.kinds)
+        setModels(c.models)
+      })
+      api.getInstalledModels?.().then(setInstalled)
+      refreshVision()
+      refreshActive()
+    }
+  })
 
   const cancelDownload = (id: string): void => {
     void api.cancelModelDownload?.(id)
@@ -573,10 +577,12 @@ export function ModelsScreen(): React.JSX.Element {
     isHf = false
   ): React.JSX.Element => {
     const isInstalled = installed.includes(m.id)
+    const isRemote = Boolean(m.remoteServerId)
     const active = isActive(m.id)
     const prog = progress[m.id]
     const downloading = prog && prog.status !== 'completed' && prog.status !== 'failed'
     const downloadProgress = prog ? projectProgress(prog) : null
+    const timeRemaining = downloadProgress ? downloadTimeRemaining(downloadProgress) : null
     // Installed, vision-capable, but the projector isn't on disk (e.g. downloaded before
     // the model gained vision) → offer to fetch just the projector. downloadModel skips
     // files already present, so this pulls only the mmproj.
@@ -589,6 +595,7 @@ export function ModelsScreen(): React.JSX.Element {
       .join(' · ')
     const tier: FitTier = isHf ? 'easy' : ramTier(m)
     const tags = (m.tags ?? []).filter((t) => !/tight|risky|fit/i.test(t))
+    const comingSoon = m.availability === 'coming_soon'
     // The single image pick best-suited to THIS machine's RAM (Light on <=16GB,
     // full above) — a prominent filled-emerald badge, distinct from the outlined tags.
     const recommended = !isHf && !!recommendedImageId && m.id === recommendedImageId
@@ -632,8 +639,17 @@ export function ModelsScreen(): React.JSX.Element {
         </div>
 
         {/* Badges row */}
-        {(recommended || tags.length > 0 || tier === 'tight' || tier === 'wontFit') && (
+        {(comingSoon ||
+          recommended ||
+          tags.length > 0 ||
+          tier === 'tight' ||
+          tier === 'wontFit') && (
           <div className="flex flex-wrap items-center gap-1">
+            {comingSoon && (
+              <span className="shrink-0 rounded-sm border border-amber-400/60 px-1 py-px text-[8px] uppercase tracking-wide text-amber-400">
+                Coming soon
+              </span>
+            )}
             {recommended && (
               // Prominent FILLED emerald badge — the pick for this machine's RAM,
               // set apart from the outlined capability tags below.
@@ -683,9 +699,17 @@ export function ModelsScreen(): React.JSX.Element {
           </div>
         )}
 
+        {comingSoon && m.availabilityNote && (
+          <p className="text-[9px] leading-relaxed text-neutral-600">{m.availabilityNote}</p>
+        )}
+
         {/* Action row */}
         <div className="mt-auto flex items-center justify-between gap-2 pt-1">
-          {active ? (
+          {comingSoon ? (
+            <span className="text-[10px] text-neutral-500">
+              Available after support is fully tested
+            </span>
+          ) : active ? (
             <span className="flex items-center gap-1 text-[11px] text-green-500">
               <IconCircleCheck className="h-3.5 w-3.5" /> Active
             </span>
@@ -736,6 +760,9 @@ export function ModelsScreen(): React.JSX.Element {
                     · {formatTransferSpeed(downloadProgress.bytesPerSecond)}
                   </span>
                 ) : null}
+                {timeRemaining ? (
+                  <span className="whitespace-nowrap">· {timeRemaining}</span>
+                ) : null}
                 <span className="min-w-0 truncate">{downloadPartLabel(prog)}</span>
               </div>
               <button
@@ -780,7 +807,7 @@ export function ModelsScreen(): React.JSX.Element {
           )}
           {isInstalled && (
             <div className="flex shrink-0 items-center gap-1">
-              {active && supportsModelSettings(m.kind) && (
+              {active && !isRemote && supportsModelSettings(m.kind) && (
                 <button
                   onClick={() => openModelSettings(m.kind)}
                   aria-label="Open model settings"
@@ -790,25 +817,27 @@ export function ModelsScreen(): React.JSX.Element {
                   Settings
                 </button>
               )}
-              <button
-                onClick={() => removeModel(m.id, m.name)}
-                disabled={deleting === m.id || active}
-                title={active ? 'Switch to another model before deleting' : 'Delete from disk'}
-                className="rounded p-1 text-neutral-700 transition-all duration-150 hover:text-red-400 active:scale-90 disabled:opacity-30 group-hover:text-neutral-500"
-              >
-                {deleting === m.id ? (
-                  <IconLoader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <IconTrash className="h-3 w-3" />
-                )}
-              </button>
+              {!isRemote && (
+                <button
+                  onClick={() => removeModel(m.id, m.name)}
+                  disabled={deleting === m.id || active}
+                  title={active ? 'Switch to another model before deleting' : 'Delete from disk'}
+                  className="rounded p-1 text-neutral-700 transition-all duration-150 hover:text-red-400 active:scale-90 disabled:opacity-30 group-hover:text-neutral-500"
+                >
+                  {deleting === m.id ? (
+                    <IconLoader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <IconTrash className="h-3 w-3" />
+                  )}
+                </button>
+              )}
             </div>
           )}
         </div>
 
         {/* Vision-capable but projector not downloaded — offer to add it. Hidden while a
             download is in flight (the progress UI covers that). */}
-        {projectorMissing && !downloading && (
+        {!comingSoon && projectorMissing && !downloading && (
           <button
             onClick={() => download(m.id)}
             title="Download the vision projector so this model can read images"
@@ -826,8 +855,8 @@ export function ModelsScreen(): React.JSX.Element {
         {downloading && (
           <div className="h-0.5 w-full overflow-hidden rounded-full bg-neutral-800">
             <div
-              className="h-full bg-green-500 transition-all"
-              style={{ width: `${downloadProgress?.percentage ?? 0}%` }}
+              className="h-full w-full origin-left bg-green-500 transition-transform duration-300 ease-out motion-reduce:transition-none"
+              style={{ transform: `scaleX(${(downloadProgress?.percentage ?? 0) / 100})` }}
             />
           </div>
         )}
@@ -1060,8 +1089,15 @@ export function ModelsScreen(): React.JSX.Element {
                     </p>
                   )
                 }
-                const installedModels = displayedCatalog.filter((m) => installed.includes(m.id))
-                const availableModels = displayedCatalog.filter((m) => !installed.includes(m.id))
+                const installedModels = displayedCatalog.filter(
+                  (m) => installed.includes(m.id) && m.availability !== 'coming_soon'
+                )
+                const availableModels = displayedCatalog.filter(
+                  (m) => !installed.includes(m.id) && m.availability !== 'coming_soon'
+                )
+                const comingSoonModels = displayedCatalog.filter(
+                  (m) => m.availability === 'coming_soon'
+                )
                 return (
                   <>
                     {installedModels.length > 0 && (
@@ -1084,6 +1120,20 @@ export function ModelsScreen(): React.JSX.Element {
                         </div>
                       </>
                     )}
+                    {comingSoonModels.length > 0 && (
+                      <>
+                        <div className="px-6 pt-2 text-[9px] uppercase tracking-widest text-neutral-600">
+                          Coming soon
+                        </div>
+                        <div
+                          role="list"
+                          aria-label="Computer Use models coming soon"
+                          className={GRID}
+                        >
+                          {comingSoonModels.map((m) => renderCard(m))}
+                        </div>
+                      </>
+                    )}
                   </>
                 )
               })()
@@ -1098,12 +1148,15 @@ export function ModelsScreen(): React.JSX.Element {
           (() => {
             const m = detail
             const isLocal = m.id.startsWith('local:')
-            const hfUrl = !isLocal && m.id.includes('/') ? `https://huggingface.co/${m.id}` : null
+            const hfRepo = m.sourceModelId ?? m.id
+            const hfUrl =
+              !isLocal && hfRepo.includes('/') ? `https://huggingface.co/${hfRepo}` : null
             const bytes = totalBytes(m)
             const isInstalled = installed.includes(m.id)
             const active = isActive(m.id)
             const prog = progress[m.id]
             const downloading = prog && prog.status !== 'completed' && prog.status !== 'failed'
+            const comingSoon = m.availability === 'coming_soon'
             const downloadProgress = prog ? projectProgress(prog) : null
             const rows: [string, string | null][] = [
               ['Source', m.org || (isLocal ? 'Imported' : '—')],
@@ -1142,6 +1195,16 @@ export function ModelsScreen(): React.JSX.Element {
                 <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
                   {m.description && (
                     <p className="text-xs leading-relaxed text-neutral-300">{m.description}</p>
+                  )}
+                  {comingSoon && (
+                    <div className="mt-3 rounded border border-amber-400/30 bg-amber-400/5 px-3 py-2">
+                      <p className="text-[9px] uppercase tracking-wide text-amber-400">
+                        Coming soon
+                      </p>
+                      <p className="mt-1 text-[10px] leading-relaxed text-neutral-400">
+                        {m.availabilityNote ?? 'Support is still being prepared and tested.'}
+                      </p>
+                    </div>
                   )}
                   <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2">
                     {rows
@@ -1191,7 +1254,11 @@ export function ModelsScreen(): React.JSX.Element {
                 </div>
 
                 <div className="flex items-center gap-2 border-t border-neutral-800 px-5 py-3">
-                  {active ? (
+                  {comingSoon ? (
+                    <span className="text-xs text-neutral-500">
+                      Download and Use unlock after support is fully tested.
+                    </span>
+                  ) : active ? (
                     <span className="flex items-center gap-1 text-xs text-green-500">
                       <IconCircleCheck className="h-4 w-4" /> Active
                     </span>

@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import ReactMarkdown from 'react-markdown'
+import { openChatLink } from '@renderer/lib/chat-link'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import { parseSqliteUtc } from '@renderer/lib/time'
@@ -65,7 +66,14 @@ function ChatListItem({ session, index, formattedTime, onSelect, onDelete }: Cha
       <p className="mb-3 last:mb-0 text-neutral-200">{children}</p>
     ),
     a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
-      <a href={href} target="_blank" rel="noreferrer" className="text-emerald-400 underline">
+      <a
+        href={href}
+        className="text-emerald-400 underline"
+        onClick={(event) => {
+          event.preventDefault()
+          openChatLink(href)
+        }}
+      >
         {children}
       </a>
     ),

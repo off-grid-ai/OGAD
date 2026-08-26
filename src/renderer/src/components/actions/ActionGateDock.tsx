@@ -84,7 +84,11 @@ export function ActionGateDock(): React.JSX.Element | null {
   // live dock as the free-build approval surface and as the shared outcome feed,
   // but never draw a second pending card beside Pro's persistent one.
   const visiblePending = window.api.isPro ? [] : pending
-  if (visiblePending.length === 0 && outcomes.length === 0) {
+  // Pro writes every Action result into its execution chat and the shared task
+  // timeline. A second global banner above an unrelated chat composer has no
+  // stable conversation owner and can show stale, context-free outcomes.
+  const visibleOutcomes = window.api.isPro ? [] : outcomes
+  if (visiblePending.length === 0 && visibleOutcomes.length === 0) {
     return null
   }
 
@@ -182,7 +186,7 @@ export function ActionGateDock(): React.JSX.Element | null {
           </div>
         )
       })}
-      {outcomes.map((event) => (
+      {visibleOutcomes.map((event) => (
         <div
           key={event.id}
           data-testid="outcome-row"

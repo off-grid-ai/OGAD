@@ -16,6 +16,7 @@ import type { ModelSettingsPanelTab as Tab } from '@renderer/lib/model-settings-
 import { ImageSettingsTab } from './ImageSettingsTab'
 import { SidePanel } from './SidePanel'
 import { VoiceSettingsTab } from './VoiceSettingsTab'
+import { RemoteVisionSettingsTab } from './RemoteVisionSettingsTab'
 import { SettingsRow as Row } from './SettingsRow'
 import { SettingsSelect } from './SettingsSelect'
 import type { SpeechLanguage } from '@offgrid/speech'
@@ -207,7 +208,9 @@ export function SettingsPanel({
       ) : null}
 
       <div className="flex items-center gap-1 border-b border-neutral-800 px-3 py-2">
-        {(['model', 'image', 'voice', 'transcription', 'tools', 'connectors'] as const).map((t) => (
+        {(
+          ['model', 'remote', 'image', 'voice', 'transcription', 'tools', 'connectors'] as const
+        ).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -470,6 +473,8 @@ export function SettingsPanel({
         )}
 
         {tab === 'image' && <ImageSettingsTab />}
+
+        {tab === 'remote' && <RemoteVisionSettingsTab />}
 
         {tab === 'voice' && <VoiceSettingsTab />}
 
