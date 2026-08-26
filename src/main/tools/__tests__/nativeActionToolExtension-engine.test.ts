@@ -288,8 +288,10 @@ describe('the engine path', () => {
       risk: 'mutate'
     })
     expect(run).not.toHaveBeenCalled()
-    expect(reply).toContain('Done.')
-    expect(reply).toContain('Task reference: act_1.')
+    expect(reply).toMatchObject({
+      text: expect.stringContaining('Task reference: act_1.'),
+      authoritative: true
+    })
   })
 
   it('links a Web Use action to the chat journey', async () => {
@@ -326,7 +328,10 @@ describe('the engine path', () => {
       'darwin'
     )
     const reply = await extension.execute('web_task', { goal: 'x' })
-    expect(reply).toMatch(/on-device action engine/)
+    expect(reply).toMatchObject({
+      text: expect.stringMatching(/on-device action engine/),
+      authoritative: true
+    })
     expect(legacyPropose).not.toHaveBeenCalled()
   })
 
@@ -342,8 +347,10 @@ describe('the engine path', () => {
       risk: 'mutate'
     })
     expect(run).not.toHaveBeenCalled()
-    expect(reply).toContain('Done.')
-    expect(reply).toContain('Task reference: act_1.')
+    expect(reply).toMatchObject({
+      text: expect.stringContaining('Task reference: act_1.'),
+      authoritative: true
+    })
   })
 
   it('queuing a computer_task announces the grounder nudge - but a web_task or a semantic tool does not', async () => {
