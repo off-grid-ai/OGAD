@@ -23,6 +23,15 @@ on:
         type: string
         required: false
         default: ''
+      artifact_only:
+        # Internal demo build: the SAME signed + notarized DMG, but uploaded as a run
+        # artifact (repo-scoped, auto-expiring) instead of a published Release. Skips the
+        # release-create/upload, the pro-mac.yml + latest/nightly aliases, Slack, and the
+        # whole Windows job - so nothing lands on the releases page or the update feed.
+        description: 'Build the signed+notarized DMG as a run artifact only (no Release, no Windows, no Slack)'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
@@ -160,6 +169,17 @@ jobs:
           mkdir -p resources/bin
           cp scripts/dictation-hotkey/dictation-hotkey resources/bin/dictation-hotkey
           chmod +x resources/bin/dictation-hotkey
+      # Compile the native actions helper (EventKit) and stage it into resources/bin so
+      # extraResources bundles it at Contents/Resources/bin — the path runNativeAction
+      # resolves. Self-contained: no committed binary, built fresh against the pinned
+      # target. If it ever fails to ship, the calendar tools report "not available" and
+      # the rest of the app is unaffected, so it can't break a release.
+      - name: Build native actions helper (computer use, semantic rail)
+        run: |
+          bash scripts/build-actions-helper.sh
+          mkdir -p resources/bin
+          cp scripts/actions-helper/actions-helper resources/bin/actions-helper
+          chmod +x resources/bin/actions-helper
       # Stage the Parakeet STT runtime (sherpa-onnx CLI + ONNX model) into
       # resources/bin/parakeet. Additive: with SHERPA_ONNX_URL / PARAKEET_MODEL_URL
       # unset this is a no-op and transcription stays on whisper, so it can't break a
@@ -228,6 +248,10 @@ jobs:
           # drifted lock stops the release instead of resolving a graph nobody committed.
           npm --prefix ../shared ci
           npm --prefix ../shared/packages/sync run build
+          # @offgrid/use (the durable action engine) is consumed the same way as sync
+          # and needs the same explicit build - file-dep prepare alone does not emit
+          # its dist/ types before the typecheck runs.
+          npm --prefix ../shared/packages/use run build
           npm --prefix ../shared/packages/models run build
       - name: Install dependencies
         run: npm ci
@@ -278,7 +302,18 @@ jobs:
           APP="$(find dist -mindepth 2 -maxdepth 2 -type d -name 'Off Grid AI Desktop.app' -print -quit)"
           test -n "$APP"
           node scripts/probe-packaged-tts.mjs "$APP" --synthesize
+      # Internal demo build: hand the signed+notarized DMG back as a run artifact and stop
+      # (the publish steps below are all skipped). Repo-scoped, auto-expiring, no Release.
+      - name: Upload signed DMG as a build artifact
+        if: ${{ inputs.artifact_only }}
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4
+        with:
+          name: OffGrid-macOS-${{ needs.version.outputs.version }}
+          path: dist/OffGrid-*.dmg
+          if-no-files-found: error
+          retention-days: 14
       - name: Stage verified update assets and publish the release
+        if: ${{ !inputs.artifact_only }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.version.outputs.version }}
@@ -310,6 +345,7 @@ jobs:
             gh release edit "$TAG" --draft=false --prerelease
           fi
       - name: Migrate legacy Pro update channel (publish pro-mac.yml)
+        if: ${{ !inputs.artifact_only }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.version.outputs.version }}
@@ -335,7 +371,7 @@ jobs:
       # --clobber replaces the copy from the prior run. The versioned DMG + updater
       # feed (latest-mac.yml) are untouched, so auto-update is unaffected.
       - name: Publish stable latest.dmg alias
-        if: needs.version.outputs.channel == 'stable'
+        if: ${{ !inputs.artifact_only && needs.version.outputs.channel == 'stable' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.version.outputs.version }}
@@ -349,7 +385,7 @@ jobs:
       # /releases/latest or the stable OffGrid-latest.dmg:
       #   https://github.com/off-grid-ai/off-grid-ai-desktop/releases/download/nightly/OffGrid-nightly.dmg
       - name: Publish constant nightly.dmg link
-        if: needs.version.outputs.channel == 'beta'
+        if: ${{ !inputs.artifact_only && needs.version.outputs.channel == 'beta' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.version.outputs.version }}
@@ -367,7 +403,7 @@ jobs:
       # v$VERSION tag exist for beta too, so beta/nightly releases get their changelog on
       # the release page, not just stable.
       - name: Attach release notes
-        if: success()
+        if: ${{ !inputs.artifact_only && success() }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.version.outputs.version }}
@@ -378,7 +414,7 @@ jobs:
       # Slack outage never fails a release. Needs org/repo secret SLACK_WEBHOOK_URL (an
       # Incoming Webhook, channel-bound). No secret => the step is a logged no-op.
       - name: Announce release in Slack
-        if: success()
+        if: ${{ !inputs.artifact_only && success() }}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           PRODUCT: Off Grid AI Desktop
@@ -398,6 +434,8 @@ jobs:
   # (the repo's LFS binaries are macOS-only).
   build-win:
     needs: [version, build-mac]
+    # Skipped for an artifact-only demo build (macOS DMG is all the lead needs).
+    if: ${{ !inputs.artifact_only }}
     # windows-2022 = VS 2022 toolchain. windows-latest ships VS 2026, which node-gyp 11
     # can't parse, breaking native-module (better-sqlite3) compiles. Pin until it catches up.
     runs-on: windows-2022
@@ -469,6 +507,10 @@ jobs:
           # drifted lock stops the release instead of resolving a graph nobody committed.
           npm --prefix ../shared ci
           npm --prefix ../shared/packages/sync run build
+          # @offgrid/use (the durable action engine) is consumed the same way as sync
+          # and needs the same explicit build - file-dep prepare alone does not emit
+          # its dist/ types before the typecheck runs.
+          npm --prefix ../shared/packages/use run build
           npm --prefix ../shared/packages/models run build
       - name: Install dependencies
         run: npm ci

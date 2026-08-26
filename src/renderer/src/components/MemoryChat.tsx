@@ -45,6 +45,8 @@ import { chatMarkdownComponents } from './ChatMarkdown'
 import { ChatThinkingBlock } from './ChatThinkingBlock'
 import { ChatToolRows } from './ChatToolRows'
 import { ArtifactCanvas, parseArtifact, type Artifact } from './ArtifactCanvas'
+import { ExploreSection } from './explore/ExploreSection'
+import { REQUEST_FORM_URL } from './explore/presetCatalog'
 import { VoiceBubble, stopAllVoicePlayback } from './VoiceBubble'
 import { SkillsPanel } from './SkillsPanel'
 import { ModelPicker } from './ModelPicker'
@@ -69,6 +71,8 @@ import {
   type ImageGenerationRequestContract
 } from '../../../shared/image-generation-contract'
 import { Button } from '@renderer/components/ui/button'
+import { ActionGateDock } from '@renderer/components/actions/ActionGateDock'
+import { VisionSupervisorOverlay } from '@renderer/components/vision/VisionSupervisorOverlay'
 import {
   Dialog,
   DialogContent,
@@ -381,6 +385,8 @@ interface MemoryChatProps {
     conversationId?: string
     projectId?: string
     openGallery?: boolean
+    /** Start a fresh chat and auto-send this prompt (an Explore preset handed off from a landing surface). */
+    seedPrompt?: string
   }> | null
   readonly onTargetConsumed?: () => void
 }
@@ -736,6 +742,42 @@ function VoiceMessageRow({
   return <div className={`mb-4 flex flex-col ${alignment}`}>{body}</div>
 }
 
+// Live web-task step narration, surfaced in the streaming turn (not below the browser).
+// Self-contained: subscribes to the browser step feed and shows the last few notes while a
+// task runs; a new running task resets it, and it renders nothing when there are no steps.
+function WebTaskStepFeed(): React.JSX.Element | null {
+  const [steps, setSteps] = useState<string[]>([])
+  useEffect(() => {
+    const offStep = window.api.browser?.onStep?.((e) => {
+      const note = (e as { note?: string })?.note
+      if (typeof note === 'string') {
+        setSteps((prev) => [...prev, note])
+      }
+    })
+    const offState = window.api.browser?.onTaskState?.((e) => {
+      if ((e as { status?: string })?.status === 'running') {
+        setSteps([])
+      }
+    })
+    return () => {
+      offStep?.()
+      offState?.()
+    }
+  }, [])
+  if (steps.length === 0) {
+    return null
+  }
+  return (
+    <div className="max-w-[85%] space-y-0.5 border-l-2 border-neutral-800 pl-3 text-[11px] leading-4 text-neutral-500">
+      {steps.slice(-6).map((note, i) => (
+        <div key={`${steps.length}-${i}`} className="truncate">
+          {note}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function MessageThinkingHeader({ message }: Readonly<{ message: ChatMessage }>): React.JSX.Element {
   if (message.role !== 'assistant') return <></>
   if (message.streaming) {
@@ -749,6 +791,7 @@ function MessageThinkingHeader({ message }: Readonly<{ message: ChatMessage }>):
         </span>
         {message.reasoning?.trim() ? <ChatThinkingBlock content={message.reasoning} live /> : null}
         {activity ? <span className="text-[11px] text-neutral-500">{activity}</span> : null}
+        <WebTaskStepFeed />
       </div>
     )
   }
@@ -2126,6 +2169,9 @@ export function MemoryChat({
     [loadLatestConversationMessages, setConvMessages]
   )
   const [input, setInput] = useState('')
+  // A preset prompt handed in via openTarget.seedPrompt, held until the fresh-chat state has
+  // settled, then auto-sent by the effect below sendMessage.
+  const [pendingSeed, setPendingSeed] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<Attachment[]>([])
   // Whether the active chat model can read images. Gate image attachment on this and
   // re-check periodically (the user can switch models from the Models screen).
@@ -2281,6 +2327,12 @@ export function MemoryChat({
   // Surfaced when a recording can't become a message (no audio, empty transcript, or a
   // transcription-engine failure) — never fail silently (the "nothing happened" bug).
   const [transcribeError, setTranscribeError] = useState<string | null>(null)
+  // Tools default OFF for now: defaulting it on routes EVERY turn through the
+  // agentic pipeline (toolChat), silently switching thinking/image/scope
+  // behaviour away from the plain stream - measured as 20 behaviour-test
+  // failures. The product answer is R2's per-turn router (agentic only when
+  // the ask needs a tool); until then discoverability is the composer hint
+  // (R1 checklist 18b). Native actions stay under Tools (category fix).
   const [toolsOn, setToolsOn] = useState(false)
   const [connectorsOn, setConnectorsOn] = useState(false)
   const [thinkingEnabled, setThinkingEnabled] = useState(false)
@@ -2854,6 +2906,13 @@ export function MemoryChat({
           setActiveConversationId(null)
           setConvMessages(null, [])
           setActiveProjectId(openTarget.projectId)
+        } else if (openTarget.seedPrompt) {
+          // Open a fresh chat, then let the effect below sendMessage fire the preset once the
+          // reset state has settled - so the prompt lands in the new empty conversation.
+          setActiveConversationId(null)
+          setConvMessages(null, [])
+          setActiveProjectId(null)
+          setPendingSeed(openTarget.seedPrompt)
         }
         if (openTarget.openGallery) setShowGallery(true)
         await loadConversations()
@@ -3551,6 +3610,17 @@ export function MemoryChat({
       if (activeStreamId) streamConvRef.current.delete(activeStreamId)
     }
   }
+
+  // Fire a preset handed in via openTarget.seedPrompt. Runs after sendMessage is defined and
+  // after the fresh-chat reset from the openTarget effect has settled, so the prompt lands in
+  // the new empty conversation rather than whatever was open before.
+  useEffect(() => {
+    if (!pendingSeed) return
+    const prompt = pendingSeed
+    setPendingSeed(null)
+    void sendMessage(prompt)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSeed])
 
   // Pull the next queued message for THIS conversation (sent while it was generating)
   // and send it — bound to its own conversation, never the active tab.
@@ -4717,6 +4787,15 @@ export function MemoryChat({
                           ? 'Ask across your memories, chats, and entities from every source.'
                           : 'Ask anything, generate images, or build — all on-device.'}
                   </p>
+                  {mode !== 'image' ? (
+                    <ExploreSection
+                      onRun={(preset) => {
+                        void sendMessage(preset.prompt)
+                      }}
+                      requestUrl={REQUEST_FORM_URL}
+                      className="mt-6 w-full text-left"
+                    />
+                  ) : null}
                   {mode === 'image' ? (
                     <StylePresetPicker
                       activeStyle={activeStyle}
@@ -5250,6 +5329,10 @@ export function MemoryChat({
                       ))}
                     </div>
                   )}
+                  {/* Approval UX v2: pending gate cards + outcomes, in-flow above the composer */}
+                  <ActionGateDock />
+                  {/* Vision rail: the supervisor overlay slides in during a computer-use task */}
+                  <VisionSupervisorOverlay />
                   {microphoneDenied && (
                     <div
                       role="alert"
@@ -5361,6 +5444,7 @@ export function MemoryChat({
                             type="button"
                             variant="outline"
                             size="icon"
+                            aria-label="Composer options"
                             className="size-8 rounded-full"
                           >
                             <Plus className="h-4 w-4" />

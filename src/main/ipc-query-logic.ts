@@ -61,6 +61,26 @@ export function tokenizeQuery(query: string, maxTokens: number = 6): string[] {
   return Array.from(new Set(tokens)).slice(0, maxTokens)
 }
 
+/** Quote one term as an FTS5 phrase literal, doubling any embedded quote per FTS5 escaping.
+ *  A phrase literal makes retained punctuation inert - the tokeniser inside FTS re-splits it. */
+function quoteFtsPhrase(term: string): string {
+  return `"${term.replace(/"/g, '""')}"`
+}
+
+/** Build a safe FTS5 MATCH expression from free text: tokenise, then quote each token as a phrase
+ *  literal and OR-join (any-term recall). tokenizeQuery keeps `-`/`_`, so a bare token like
+ *  `best-reviewed` reaches MATCH as invalid syntax and throws `no such column: reviewed`, failing the
+ *  whole rag:chat retrieval; quoting removes that entire class of syntax error. When tokenisation
+ *  yields nothing (all stopwords / too short), fall back to the whole text as one quoted phrase so
+ *  the fallback can't throw either. */
+export function ftsMatchExpression(query: string, maxTokens: number = 6): string {
+  const tokens = tokenizeQuery(query, maxTokens)
+  if (tokens.length > 0) {
+    return tokens.map(quoteFtsPhrase).join(' OR ')
+  }
+  return quoteFtsPhrase(query.trim())
+}
+
 /** Clip text to maxLength, replacing the final char with an ellipsis when it
  *  overflows. Empty/undefined text → ''. */
 export function clipText(text: string, maxLength: number): string {

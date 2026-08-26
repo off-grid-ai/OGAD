@@ -114,10 +114,21 @@ export interface LaunchOptions {
   env?: Record<string, string | undefined>
   /** Extra Chromium/Electron flags (e.g. fake media devices). Applied to both targets. */
   extraArgs?: string[]
+  /** Working directory for the DEV target's app process. The native actions
+   *  helper resolves dev candidates relative to cwd, so a spec can plant a
+   *  fake helper in a temp dir and point the app at it. Ignored when
+   *  packaged (resolution uses resourcesPath there). */
+  cwd?: string
 }
 
 export const launchOffGrid = async (options: LaunchOptions = {}): Promise<ElectronApplication> => {
   const env = withCoverage({ ...process.env, ...options.env } as Record<string, string>)
+  // A runner that itself lives inside Electron (VS Code tasks, agent
+  // sandboxes) exports ELECTRON_RUN_AS_NODE=1; inherited, it turns the
+  // launched app into plain Node - electron.app is undefined and every spec
+  // dies with "Process failed to launch". The app under test must never
+  // run as node.
+  delete env.ELECTRON_RUN_AS_NODE
   const extraArgs = options.extraArgs ?? []
 
   if (targetIsPackaged()) {
@@ -134,5 +145,6 @@ export const launchOffGrid = async (options: LaunchOptions = {}): Promise<Electr
   // none. Seeding is a no-op when the spec asked for a free build or the fixture is absent, so specs that
   // assert free-tier UI stay unlicensed and deterministic.
   seedLicense(env)
-  return electron.launch({ args: ['.', ...extraArgs], env })
+  // The app path must stay absolute once a spec overrides cwd.
+  return electron.launch({ args: [path.resolve('.'), ...extraArgs], env, cwd: options.cwd })
 }

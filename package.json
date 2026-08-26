@@ -61,6 +61,7 @@
     "@offgrid/models": "file:../shared/packages/models",
     "@offgrid/rag": "file:./packages/rag",
     "@offgrid/sync": "file:../shared/packages/sync",
+    "@offgrid/use": "file:../shared/packages/use",
     "@phosphor-icons/react": "^2.1.10",
     "@scure/bip39": "^2.2.0",
     "@tabler/icons-react": "^3.36.1",
@@ -87,6 +88,7 @@
     "node-machine-id": "^1.1.12",
     "ollama": "^0.6.3",
     "pdf-parse": "^1.1.1",
+    "qrcode.react": "^4.2.0",
     "radix-ui": "^1.6.0",
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^2.1.9",
@@ -98,6 +100,9 @@
     "tweetnacl": "^1.0.3",
     "tweetnacl-util": "^0.15.1",
     "unified": "^11.0.5"
+  },
+  "optionalDependencies": {
+    "@nut-tree-fork/nut-js": "^4.2.6"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",

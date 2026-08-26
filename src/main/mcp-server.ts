@@ -21,6 +21,10 @@ import * as tts from './tts'
 import { embeddings } from './embeddings'
 import { desktopExtraction } from './rag/extractors'
 import { parseDataUrl } from './mcp-parse-data-url'
+import { runTool, getToolExtensions } from './tools'
+import { NATIVE_TOOL_SPECS } from './tools/nativeActionToolExtension-logic'
+import { jsonSchemaToZodShape } from './mcp-tool-schema'
+import { isActionAuthorized } from './mcp-auth'
 
 // Write a data URL / http(s) URL / file path / bare path to a temp file and
 // return its path (for tools that take an image or audio input).
@@ -60,8 +64,10 @@ const TEXT = (t: string): { content: { type: 'text'; text: string }[] } => ({
   content: [{ type: 'text', text: t }]
 })
 
-/** Build a fresh MCP server with all on-device tools registered. */
-function buildMcpServer(): McpServer {
+/** Build a fresh MCP server. Model/inference tools are always registered (open);
+ *  the ACTION tools are registered ONLY when the request is authorized with the
+ *  desktop's action token, so an unpaired LAN device can't see or run them. */
+function buildMcpServer(actionsAllowed: boolean): McpServer {
   const server = new McpServer(
     { name: 'Off Grid AI Desktop', version: '1.0.0' },
     {
@@ -235,7 +241,39 @@ function buildMcpServer(): McpServer {
     }
   )
 
+  if (actionsAllowed) {
+    registerActionTools(server)
+  }
   return server
+}
+
+/** Expose the desktop's ACTION tools (calendar, reminders, contacts, messages,
+ *  mail, open_url, web_task, computer_task) over MCP, so a paired client (the
+ *  mobile app) can LIST them and RUN them ON THIS DESKTOP. Each call goes through
+ *  the same runTool dispatch the local chat uses - so the rails run here and the
+ *  approval gate applies (computer-use asks on this machine; in-app runs
+ *  through). The NATIVE_TOOL_SPECS catalog is the single source of truth for the
+ *  names/descriptions/schemas; nothing is re-declared. */
+function registerActionTools(server: McpServer): void {
+  for (const spec of NATIVE_TOOL_SPECS) {
+    server.registerTool(
+      spec.name,
+      {
+        title: spec.name,
+        description: spec.description,
+        inputSchema: jsonSchemaToZodShape(spec.parameters)
+      },
+      async (args) => {
+        const result = await runTool(
+          spec.name,
+          args as Record<string, unknown>,
+          { conversationId: 'mcp' },
+          getToolExtensions()
+        )
+        return TEXT(result.text)
+      }
+    )
+  }
 }
 
 /** Handle a single MCP HTTP request (stateless). `body` is the parsed JSON for POST. */
@@ -244,7 +282,9 @@ export async function handleMcpRequest(
   res: http.ServerResponse,
   body: unknown
 ): Promise<void> {
-  const server = buildMcpServer()
+  // Action tools are exposed only to a request carrying the desktop's action
+  // token; unauthenticated callers still get the open model tools.
+  const server = buildMcpServer(isActionAuthorized(req))
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined, // stateless
     enableJsonResponse: true

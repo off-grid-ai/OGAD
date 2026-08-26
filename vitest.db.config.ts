@@ -45,6 +45,11 @@ export default defineConfig({
     // provider v8 to match the default run, so both express coverage against the same source positions.
     coverage: {
       provider: 'v8',
+      // Write the report even when a test fails, so one flaky db journey cannot
+      // suppress the whole report and make the new-code gate read tested files
+      // as 0%. The coverage-only variant (vitest.db.coverage.config.ts) already
+      // drops the tests with OPEN failures; this covers the intermittent ones.
+      reportOnFailure: true,
       all: false,
       include: ['src/**/*.ts', 'pro/**/*.ts'],
       exclude: [
@@ -55,9 +60,28 @@ export default defineConfig({
         '**/*.d.ts',
         '**/dist/**',
         'packages/**',
-        // V8 reports transitive imports even when they do not match `include`. Keep this DB
-        // report on its declared service surface: renderer components are exercised by the
-        // rendered-behaviour suites and Playwright, not by a Node SQLite journey.
+        // Owned by the DEFAULT run's report (unit-tested there): this suite only
+        // LOADS them through use-runtime's import graph, and with all:false a
+        // loaded-but-unmeasured file would still land in this report and halve
+        // the merged denominator for code this suite never set out to cover.
+        'src/main/index.ts',
+        'src/main/actions/semantic-rail-win.ts',
+        'src/main/tools/nativeActionToolExtension.ts',
+        'src/main/tools/nativeActionToolExtension-logic.ts',
+        // The browser + vision rails are UNIT-owned (browser-rail / vision-rail
+        // / driver / loop / guard / parser all have their own suites). This
+        // suite only LOADS them through use-runtime's import graph and never
+        // exercises them, so with all:false they land here at ~0% and the
+        // merge - which sums denominators per report - drags the branch/
+        // function ratio for code another report already covers well. One
+        // report owns each file: the unit report owns these.
+        'src/main/browser/**',
+        'src/main/vision/**',
+        // Renderer surface (.ts + .tsx) is rendered-behaviour owned by the e2e tour +
+        // targeted render tests, never by this Node SQLite journey. V8 reports transitive
+        // imports even when they do not match `include`, so exclude the whole renderer +
+        // pro renderer surface explicitly - a jsdom journey that merely MOUNTS a component
+        // would otherwise make this report own it and gate a surface it never set out to cover.
         'src/renderer/src/**/*.ts',
         'src/renderer/src/**/*.tsx',
         'pro/renderer/**/*.ts',

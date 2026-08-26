@@ -82,8 +82,19 @@ func selectPrimaryScrollArea(from areas: [AXUIElement]) -> AXUIElement? {
 }
 func runTextExtractor() {
     let args = CommandLine.arguments
+    // R5 T1c: `--elements <app>` emits the structured interactive-element list
+    // for the accessibility driving rail instead of the text blob.
+    if args.count >= 3 && args[1] == "--elements" {
+        runElementsExtractor(args[2])
+        return
+    }
+    // R5 T1d: the foreground running-app list for target resolution.
+    if args.count >= 2 && args[1] == "--apps" {
+        runAppsList()
+        return
+    }
     if args.count < 2 {
-        print("Usage: text-extractor <app-name>")
+        print("Usage: text-extractor <app-name>  |  text-extractor --elements <app-name>")
         exit(1)
     }
 
