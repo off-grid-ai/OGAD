@@ -14,8 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryChat } from '../MemoryChat'
 import { TooltipProvider } from '../ui/tooltip'
 import { resetTaskSessionStoreForTests } from '../../lib/task-session-store'
-import { clearRegisteredSlots, registerSlot, SLOTS } from '../../bootstrap/slotRegistry'
-import { TaskLiveActivity } from '../../../../../pro/renderer/components/browser/tasks/TaskLiveActivity'
+import { clearRegisteredSlots } from '../../bootstrap/slotRegistry'
 import {
   ChatBoundary,
   installBoundary,
@@ -99,18 +98,27 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy()
   })
 
-  it('shows Web Use reasoning only in the originating Chat and keeps its final state', async () => {
+  it('shows a live Web Use as one clickable sibling tool row in its originating Chat', async () => {
     const boundary = new ChatBoundary()
     boundary.api.isPro = true
-    registerSlot(SLOTS.taskLiveActivity, TaskLiveActivity)
     boundary.messages['conversation-a'] = [
       { id: 20, role: 'user', content: 'Find a one-way flight to Pune' }
     ]
     boundary.conversations[0]!.message_count = 1
     installBoundary(boundary)
+    const user = userEvent.setup()
     const view = renderChat({ conversationId: 'conversation-a' })
     await screen.findByPlaceholderText('Ask about “Project Alpha”…')
     await waitFor(() => expect(boundary.api.tasks.onChanged).toHaveBeenCalled())
+    await send('Find the available flights', user)
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+
+    boundary.emitToolStep(0, 'web_search')
+    boundary.emitToolResult(0, 'web_search', 'Search results are ready.')
+    boundary.emitToolStep(0, 'web_task')
+    expect(await screen.findByRole('button', { name: /Working/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Searched the web, complete' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Web Use, running' })).toBeTruthy()
 
     act(() => {
       boundary.emitTask({
@@ -129,8 +137,9 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
       })
     })
 
-    expect(await screen.findByRole('button', { name: 'Web Use thinking…' })).toBeTruthy()
-    expect(screen.getByText('The origin field is visible and empty.')).toBeTruthy()
+    expect(await screen.findByText('Reviewing the flight form')).toBeTruthy()
+    expect(screen.queryByText('The origin field is visible and empty.')).toBeNull()
+    expect(screen.queryByTestId('task-live-activity')).toBeNull()
 
     act(() => {
       boundary.emitTask({
@@ -148,7 +157,7 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
         updatedAt: 3
       })
     })
-    expect(screen.getByRole('button', { name: 'Web Use reasoning complete' })).toBeTruthy()
+    expect(await screen.findByText('Checking the flight form')).toBeTruthy()
 
     view.rerender(
       <TooltipProvider>
@@ -156,7 +165,7 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
       </TooltipProvider>
     )
     expect(await screen.findByText('Conversation B baseline')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /Web Use (?:thinking|reasoning)/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Web Use, running' })).toBeNull()
     expect(screen.queryByText('The origin field is visible and empty.')).toBeNull()
   })
 

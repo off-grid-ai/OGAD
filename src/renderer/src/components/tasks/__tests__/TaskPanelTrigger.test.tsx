@@ -2,13 +2,14 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TooltipProvider } from '@renderer/components/ui/tooltip'
-import { onOpenTaskSidePanel } from '@renderer/lib/task-side-panel'
+import { closeTaskWorkspace, onOpenTaskSidePanel } from '@renderer/lib/task-side-panel'
 import { resetTaskSessionStoreForTests } from '@renderer/lib/task-session-store'
 import { TaskPanelTrigger } from '../TaskPanelTrigger'
 
 let emitTask: (task: unknown) => void
 
 beforeEach(() => {
+  closeTaskWorkspace()
   resetTaskSessionStoreForTests()
   window.api = {
     tasks: {
@@ -24,7 +25,7 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('<TaskPanelTrigger/>', () => {
-  it('is always visible and reopens the unified task panel', () => {
+  it('toggles the complete task workspace from the Chat header', () => {
     const open = vi.fn()
     const off = onOpenTaskSidePanel(open)
     render(
@@ -32,8 +33,15 @@ describe('<TaskPanelTrigger/>', () => {
         <TaskPanelTrigger />
       </TooltipProvider>
     )
-    fireEvent.click(screen.getByLabelText('Tasks'))
+    const trigger = screen.getByLabelText('Tasks')
+    expect(trigger.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(trigger)
     expect(open).toHaveBeenCalledWith({})
+    const close = screen.getByLabelText('Close Tasks')
+    expect(close.getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(close)
+    expect(screen.getByLabelText('Tasks').getAttribute('aria-pressed')).toBe('false')
+    expect(open).toHaveBeenCalledTimes(1)
     off()
   })
 

@@ -35,7 +35,7 @@ afterEach(() => {
 })
 
 describe('<ChatToolRows/> work timeline', () => {
-  it('opens the exact task detail from the work card and Web Use row by keyboard', async () => {
+  it('keeps the work card generic and opens exact task detail from the Web Use row', async () => {
     const requests: OpenTaskPanelRequest[] = []
     const offOpen = onOpenTaskSidePanel((request) => requests.push(request))
     window.api.tasks!.list = vi.fn(async () => [
@@ -57,10 +57,10 @@ describe('<ChatToolRows/> work timeline', () => {
       />
     )
 
-    const card = await screen.findByRole('button', { name: 'Open task details for Work done' })
+    const card = await screen.findByRole('button', { name: /Work done/ })
     card.focus()
     await user.keyboard('{Enter}')
-    expect(requests.at(-1)).toEqual({ taskId: 'web-keyboard', kind: 'web_use', detail: true })
+    expect(requests).toEqual([])
 
     const row = screen.getByRole('button', { name: 'Web Use, complete' })
     await user.click(row)
@@ -97,7 +97,6 @@ describe('<ChatToolRows/> work timeline', () => {
       />
     )
     const row = await screen.findByRole('button', { name: 'Web Use, running' })
-    expect(screen.getByRole('button', { name: /Current operation/ })).toBeTruthy()
     expect(
       screen.getByText(
         'Judge incomplete: The destination is empty. Next: Enter Pune in the destination field.'
@@ -109,57 +108,40 @@ describe('<ChatToolRows/> work timeline', () => {
     offOpen()
   })
 
-  it('shows separated Web Use reasoning from the linked task in live and final states', async () => {
-    let changed: ((task: unknown) => void) | undefined
-    window.api.tasks!.list = vi.fn(async () => [
-      {
-        taskId: 'web-reasoning',
-        journeyId: 'conversation-a',
-        kind: 'web_use' as const,
-        title: 'Research flights',
-        status: 'running' as const,
-        currentAction: 'Preparing a click',
-        currentReasoning: 'The one-way option is visible beside the trip type control.',
-        reasoningLive: true,
-        steps: [],
-        startedAt: 1,
-        updatedAt: 2
-      }
-    ])
-    window.api.tasks!.onChanged = vi.fn((listener) => {
-      changed = listener
-      return () => undefined
-    })
-
+  it('keeps a live Web Use task as a sibling row with one short update', () => {
     render(
       <ChatToolRows
-        tools={[{ name: 'web_task', status: 'running', result: 'Task reference: web-reasoning.' }]}
+        tools={[
+          { name: 'web_search', status: 'completed', result: 'Search results are ready.' },
+          { name: 'web_task', status: 'running', result: '' }
+        ]}
+        liveTask={{
+          taskId: 'web-reasoning',
+          journeyId: 'conversation-a',
+          kind: 'web_use',
+          title: 'Research flights',
+          status: 'running',
+          currentAction: 'Reviewing the flight form',
+          currentReasoning: 'The one-way option is visible beside the trip type control.',
+          reasoningLive: true,
+          steps: [],
+          startedAt: 1,
+          updatedAt: 2
+        }}
       />
     )
 
-    expect(await screen.findByRole('button', { name: 'Web Use thinking…' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Working/ }).textContent).toContain(
+      '2 steps · running'
+    )
+    expect(screen.getAllByRole('listitem')).toHaveLength(2)
+    expect(screen.getByRole('button', { name: 'Searched the web, complete' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Web Use, running' })).toBeTruthy()
+    expect(screen.getByText('Reviewing the flight form')).toBeTruthy()
     expect(
-      screen.getByText('The one-way option is visible beside the trip type control.')
-    ).toBeTruthy()
-    expect(screen.queryByText('Preparing a click')).toBeNull()
-
-    act(() => {
-      changed?.({
-        taskId: 'web-reasoning',
-        journeyId: 'conversation-a',
-        kind: 'web_use',
-        title: 'Research flights',
-        status: 'done',
-        currentReasoning: 'The one-way option is visible beside the trip type control.',
-        reasoningLive: false,
-        steps: ['selected one-way'],
-        startedAt: 1,
-        finishedAt: 3,
-        updatedAt: 3
-      })
-    })
-
-    expect(screen.getByRole('button', { name: 'Web Use reasoning complete' })).toBeTruthy()
+      screen.queryByText('The one-way option is visible beside the trip type control.')
+    ).toBeNull()
+    expect(screen.queryByRole('button', { name: /Web Use (?:thinking|reasoning)/ })).toBeNull()
   })
 
   it('uses one customer-facing timeline for every ordered execution step', async () => {

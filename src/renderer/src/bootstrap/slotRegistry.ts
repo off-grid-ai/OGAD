@@ -36,8 +36,6 @@ export const SLOTS = {
   chatMessagesFooter: 'chat.messagesFooter',
   /** Licensed Browser Use and Computer Use task workspace. */
   taskWorkspace: 'tasks.workspace',
-  /** Evidence-based live task activity shown in the originating chat. */
-  taskLiveActivity: 'tasks.liveActivity',
   /** Optional task supervisor surface mounted above the chat composer. */
   taskSupervisorOverlay: 'tasks.supervisorOverlay'
 } as const

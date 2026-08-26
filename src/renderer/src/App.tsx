@@ -38,7 +38,7 @@ import { GridBackdrop } from './components/ui/grid-backdrop'
 import { StarfieldBackdrop } from './components/ui/starfield-backdrop'
 import { Sidebar, SidebarBody } from './components/ui/sidebar'
 import { NavThemeToggle } from './components/ThemeToggle'
-import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
+import { motion, AnimatePresence } from 'motion/react'
 import {
   IconMessageCircle,
   IconCompass,
@@ -63,13 +63,6 @@ import { cn } from './lib/utils'
 import { normalizeProNavigationIntent, type ProNavigationIntent } from './lib/pro-navigation'
 import { navigateSearchHit } from './lib/search-navigation'
 import { getSlot, SLOTS } from './bootstrap/slotRegistry'
-import {
-  Panel,
-  PanelGroup,
-  PanelResizeHandle,
-  type ImperativePanelHandle
-} from 'react-resizable-panels'
-import { useTaskWorkspaceOpen } from './lib/task-side-panel'
 import { useTaskSessions } from './lib/task-session-store'
 import { shouldConfirmChatLeave } from './lib/chat-leave-guard'
 import { SidebarNavigationMenu } from './components/navigation/SidebarNavigationMenu'
@@ -394,84 +387,11 @@ function AppContent() {
   const sidebarOpenRef = useRef(sidebarOpen)
   const sidebarOpenedByHoverRef = useRef(false)
   const sidebarBeforeTaskDetailRef = useRef<boolean | null>(null)
-  const taskWorkspaceOpen = useTaskWorkspaceOpen()
-  const taskWorkspaceRouteActive = viewMode === 'memory-chat' || viewMode === 'chats'
-  const taskWorkspaceVisible = taskWorkspaceOpen && taskWorkspaceRouteActive
-  const [mainWorkspaceCollapsed, setMainWorkspaceCollapsed] = useState(false)
-  const mainWorkspaceCollapsedRef = useRef(false)
-  const mainWorkspaceFrameRef = useRef<number | null>(null)
-  const taskWorkspaceFrameRef = useRef<number | null>(null)
-  const [taskWorkspaceSize, setTaskWorkspaceSize] = useState(48)
-  const [taskWorkspaceDragging, setTaskWorkspaceDragging] = useState(false)
-  const reduceWorkspaceMotion = useReducedMotion()
-  const mainWorkspaceRef = useRef<ImperativePanelHandle>(null)
-  const taskWorkspaceRef = useRef<ImperativePanelHandle>(null)
   const rec = useMeetingRecorder()
-  const taskWorkspaceTransition =
-    reduceWorkspaceMotion || taskWorkspaceDragging
-      ? 'none'
-      : 'flex-grow 420ms cubic-bezier(0.22, 1, 0.36, 1)'
 
   useEffect(() => {
     sidebarOpenRef.current = sidebarOpen
   }, [sidebarOpen])
-
-  useEffect(() => {
-    mainWorkspaceCollapsedRef.current = mainWorkspaceCollapsed
-  }, [mainWorkspaceCollapsed])
-
-  useEffect(
-    () => () => {
-      if (mainWorkspaceFrameRef.current !== null) {
-        cancelAnimationFrame(mainWorkspaceFrameRef.current)
-      }
-      if (taskWorkspaceFrameRef.current !== null) {
-        cancelAnimationFrame(taskWorkspaceFrameRef.current)
-      }
-    },
-    []
-  )
-
-  useEffect(() => {
-    if (taskWorkspaceFrameRef.current !== null) {
-      cancelAnimationFrame(taskWorkspaceFrameRef.current)
-    }
-    taskWorkspaceFrameRef.current = requestAnimationFrame(() => {
-      taskWorkspaceFrameRef.current = null
-      const taskPanel = taskWorkspaceRef.current
-      if (!taskPanel) return
-      try {
-        if (taskWorkspaceVisible) taskPanel.expand()
-        else taskPanel.collapse()
-      } catch {
-        // The next measured frame applies the requested visibility.
-      }
-    })
-  }, [taskWorkspaceVisible])
-
-  const setMainWorkspaceVisibility = useCallback((collapsed: boolean): void => {
-    if (mainWorkspaceCollapsedRef.current === collapsed) return
-    mainWorkspaceCollapsedRef.current = collapsed
-    setMainWorkspaceCollapsed(collapsed)
-    if (mainWorkspaceFrameRef.current !== null) {
-      cancelAnimationFrame(mainWorkspaceFrameRef.current)
-    }
-    mainWorkspaceFrameRef.current = requestAnimationFrame(() => {
-      mainWorkspaceFrameRef.current = null
-      const panel = mainWorkspaceRef.current
-      if (!panel) return
-      try {
-        if (collapsed) panel.collapse()
-        else panel.expand()
-      } catch {
-        // State is authoritative if the panel group still has not measured.
-      }
-    })
-  }, [])
-
-  const toggleMainWorkspace = (): void => {
-    setMainWorkspaceVisibility(!mainWorkspaceCollapsed)
-  }
 
   const setTaskDetailSidebarMode = useCallback((detailOpen: boolean): void => {
     if (detailOpen) {
@@ -485,25 +405,6 @@ function AppContent() {
     sidebarBeforeTaskDetailRef.current = null
     if (previous !== null) setSidebarOpen(previous)
   }, [])
-
-  const setDockedTaskDetailMode = useCallback(
-    (detailOpen: boolean): void => {
-      setTaskDetailSidebarMode(detailOpen)
-      setMainWorkspaceVisibility(detailOpen)
-    },
-    [setMainWorkspaceVisibility, setTaskDetailSidebarMode]
-  )
-
-  const resizeTaskWorkspaceFromKeyboard = (key: string): void => {
-    if (key !== 'ArrowLeft' && key !== 'ArrowRight') return
-    const next = Math.min(68, Math.max(32, taskWorkspaceSize + (key === 'ArrowLeft' ? 5 : -5)))
-    setTaskWorkspaceSize(next)
-    try {
-      taskWorkspaceRef.current?.resize(next)
-    } catch {
-      // The next measured layout applies the announced size.
-    }
-  }
 
   // The meeting recording lifecycle (detect → record → warn → stop → finalize) is
   // owned by the main-process MeetingController. This view just reflects rec.* and
@@ -1137,10 +1038,6 @@ function AppContent() {
   // drops whatever row was selected in the old one, so a stale detail pane never rides along.
   const goToView = (view: ViewMode, subroute: string | null = null): void => {
     navigateTo(view, () => {
-      // Chat, Task details, and the watched Browser are independent panes. The first
-      // Web Use reveal may focus Task by collapsing Chat, but an explicit Chat
-      // navigation always restores Chat without closing either Task or Browser.
-      if (view === 'memory-chat' || view === 'chats') setMainWorkspaceVisibility(false)
       setNavigationSubroute(view === 'devices' ? subroute : null)
       setSettingsSection(view === 'settings' ? subroute : null)
       setSelectedSessionId(null)
@@ -1424,209 +1321,146 @@ function AppContent() {
           </SidebarBody>
         </Sidebar>
 
-        <PanelGroup
-          direction="horizontal"
-          autoSaveId="offgrid-main-task-workspace"
-          className="min-w-0 flex-1"
-          data-testid="main-task-workspace"
-        >
-          {/* Main Content remains mounted and interactive while a task is open. */}
-          <Panel
-            ref={mainWorkspaceRef}
-            id="main-workspace"
-            order={1}
-            defaultSize={52}
-            minSize={28}
-            collapsible
-            collapsedSize={0}
-            style={{ transition: taskWorkspaceTransition }}
-            onCollapse={() => setMainWorkspaceCollapsed(true)}
-            onExpand={() => setMainWorkspaceCollapsed(false)}
-          >
-            <div data-testid="main-workspace" className="flex h-full flex-col overflow-hidden">
-              {/* Global reprocessing banner */}
-              <AnimatePresence>
-                <ReprocessingBanner />
-              </AnimatePresence>
-              {/* Content Area */}
-              <div className="flex-1 overflow-hidden">
-                <AnimatePresence mode="wait">
-                  {viewMode === 'chats' && selectedSessionId ? (
-                    <motion.div
-                      key={`chat-detail-${selectedSessionId}`}
-                      initial={{ opacity: 0, filter: 'blur(10px)' }}
-                      animate={{ opacity: 1, filter: 'blur(0px)' }}
-                      exit={{ opacity: 0, filter: 'blur(5px)' }}
-                      transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
-                      className="h-full"
-                    >
-                      <ChatDetail
-                        sessionId={selectedSessionId}
-                        onBack={handleBack}
-                        onSelectEntity={(entityId) => {
-                          navigateTo('entities', () => {
-                            setSelectedEntityId(entityId)
-                            setSelectedSessionId(null)
-                          })
-                        }}
-                        onSelectMemory={(memoryId) => {
-                          navigateTo('memories', () => {
-                            setSelectedMemoryId(memoryId)
-                            setSelectedSessionId(null)
-                          })
-                        }}
+        <div className="min-w-0 flex-1" data-testid="main-workspace">
+          <div className="flex h-full flex-col overflow-hidden">
+            {/* Global reprocessing banner */}
+            <AnimatePresence>
+              <ReprocessingBanner />
+            </AnimatePresence>
+            {/* Content Area */}
+            <div className="flex-1 overflow-hidden">
+              <AnimatePresence mode="wait">
+                {viewMode === 'chats' && selectedSessionId ? (
+                  <motion.div
+                    key={`chat-detail-${selectedSessionId}`}
+                    initial={{ opacity: 0, filter: 'blur(10px)' }}
+                    animate={{ opacity: 1, filter: 'blur(0px)' }}
+                    exit={{ opacity: 0, filter: 'blur(5px)' }}
+                    transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
+                    className="h-full"
+                  >
+                    <ChatDetail
+                      sessionId={selectedSessionId}
+                      onBack={handleBack}
+                      onSelectEntity={(entityId) => {
+                        navigateTo('entities', () => {
+                          setSelectedEntityId(entityId)
+                          setSelectedSessionId(null)
+                        })
+                      }}
+                      onSelectMemory={(memoryId) => {
+                        navigateTo('memories', () => {
+                          setSelectedMemoryId(memoryId)
+                          setSelectedSessionId(null)
+                        })
+                      }}
+                    />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key={viewMode}
+                    initial={{ opacity: 0, filter: 'blur(10px)' }}
+                    animate={{ opacity: 1, filter: 'blur(0px)' }}
+                    exit={{ opacity: 0, filter: 'blur(5px)' }}
+                    transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
+                    className="p-6 h-full overflow-y-auto"
+                  >
+                    {viewMode === 'explore' ? (
+                      <ExploreScreen
+                        onRunPreset={handleRunPreset}
+                        initialPresetId={explorePresetId}
+                        onTargetConsumed={handleExploreTargetConsumed}
                       />
-                    </motion.div>
-                  ) : (
-                    <motion.div
-                      key={viewMode}
-                      initial={{ opacity: 0, filter: 'blur(10px)' }}
-                      animate={{ opacity: 1, filter: 'blur(0px)' }}
-                      exit={{ opacity: 0, filter: 'blur(5px)' }}
-                      transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
-                      className="p-6 h-full overflow-y-auto"
-                    >
-                      {viewMode === 'explore' ? (
-                        <ExploreScreen
-                          onRunPreset={handleRunPreset}
-                          initialPresetId={explorePresetId}
-                          onTargetConsumed={handleExploreTargetConsumed}
-                        />
-                      ) : viewMode === 'memory-chat' ? (
-                        <MemoryChat
-                          onNavigateToMemory={handleSelectMemory}
-                          onNavigateToChat={handleSelectChat}
-                          onNavigateToMeeting={(meetingId) =>
-                            handleProNavigate({ view: 'meetings', meetingId })
-                          }
-                          onNavigateToEntity={handleSelectEntity}
-                          onOpenProject={(id) => {
-                            navigateTo('projects', () => setSelectedProjectId(id))
-                          }}
-                          onSeekReplay={(ts) => {
-                            navigateTo('replay', () => setReplayTarget(ts || Date.now()))
-                          }}
-                          onOpenSkillPreset={handleOpenSkillPreset}
-                          openTarget={chatTarget}
-                          onTargetConsumed={() => setChatTarget(null)}
-                          onActiveConversationChange={setActiveChatConversationId}
-                        />
-                      ) : viewMode === 'tasks' ? (
-                        TaskWorkspace ? (
-                          <TaskWorkspace
-                            standalone
-                            onDetailModeChange={setTaskDetailSidebarMode}
-                          />
-                        ) : (
-                          <UpgradeScreen feature={getProFeature(viewMode)} />
-                        )
-                      ) : viewMode === 'chats' ? (
-                        <ChatList onSelectSession={setSelectedSessionId} />
-                      ) : viewMode === 'models' ? (
-                        <ModelsScreen />
-                      ) : viewMode === 'projects' ? (
-                        <ProjectsScreen
-                          onOpenChat={handleOpenProjectChat}
-                          selectedProjectId={selectedProjectId}
-                          onSelectProject={setSelectedProjectId}
-                        />
-                      ) : viewMode === 'connectors' ? (
-                        <ConnectorsScreen />
-                      ) : viewMode === 'gateway' ? (
-                        <GatewayScreen />
-                      ) : viewMode === 'settings' ? (
-                        <Settings
-                          key={settingsNavigationKey}
-                          activeSection={settingsSection}
-                          onSectionChange={setSettingsSection}
-                        />
-                      ) : !isPro ? (
-                        <UpgradeScreen feature={getProFeature(viewMode)} />
-                      ) : proFeatureComingSoon(viewMode, currentPlatform(), isPro) ? (
-                        <UpgradeScreen variant="coming-soon" feature={getProFeature(viewMode)} />
+                    ) : viewMode === 'memory-chat' ? (
+                      <MemoryChat
+                        onNavigateToMemory={handleSelectMemory}
+                        onNavigateToChat={handleSelectChat}
+                        onNavigateToMeeting={(meetingId) =>
+                          handleProNavigate({ view: 'meetings', meetingId })
+                        }
+                        onNavigateToEntity={handleSelectEntity}
+                        onOpenProject={(id) => {
+                          navigateTo('projects', () => setSelectedProjectId(id))
+                        }}
+                        onSeekReplay={(ts) => {
+                          navigateTo('replay', () => setReplayTarget(ts || Date.now()))
+                        }}
+                        onOpenSkillPreset={handleOpenSkillPreset}
+                        openTarget={chatTarget}
+                        onTargetConsumed={() => setChatTarget(null)}
+                        onActiveConversationChange={setActiveChatConversationId}
+                        onTaskDetailModeChange={setTaskDetailSidebarMode}
+                      />
+                    ) : viewMode === 'tasks' ? (
+                      TaskWorkspace ? (
+                        <TaskWorkspace standalone onDetailModeChange={setTaskDetailSidebarMode} />
                       ) : (
-                        // Pro tabs: render through the pro view-router when active,
-                        // otherwise show the upgrade writeup for that feature.
-                        (renderProView(viewMode, {
-                          setView: (v) => navigateTo(v as ViewMode),
-                          onNavigate: handleProNavigate,
-                          navigationSubroute,
-                          setNavigationSubroute,
-                          navigateBack,
-                          replayTarget,
-                          meetingTarget,
-                          actionTarget,
-                          approvalTarget,
-                          calendarEventTarget,
-                          actionsMode,
-                          actionsEntity,
-                          searchQuery,
-                          onSearchQueryChange: setSearchQuery,
-                          searchSources,
-                          onSearchSourcesChange: setSearchSources,
-                          searchSort,
-                          onSearchSortChange: setSearchSort,
-                          selectedMemoryId,
-                          setSelectedMemoryId,
-                          selectedEntityId,
-                          rec,
-                          onSelectEntity: handleSelectEntity,
-                          onSelectMemory: handleSelectMemory,
-                          onOpenHit: handleOpenHit,
-                          openChatOwner: handleOpenChatOwner
-                        } satisfies ProViewContext) ?? (
-                          <UpgradeScreen feature={getProFeature(viewMode)} />
-                        ))
-                      )}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
+                        <UpgradeScreen feature={getProFeature(viewMode)} />
+                      )
+                    ) : viewMode === 'chats' ? (
+                      <ChatList onSelectSession={setSelectedSessionId} />
+                    ) : viewMode === 'models' ? (
+                      <ModelsScreen />
+                    ) : viewMode === 'projects' ? (
+                      <ProjectsScreen
+                        onOpenChat={handleOpenProjectChat}
+                        selectedProjectId={selectedProjectId}
+                        onSelectProject={setSelectedProjectId}
+                      />
+                    ) : viewMode === 'connectors' ? (
+                      <ConnectorsScreen />
+                    ) : viewMode === 'gateway' ? (
+                      <GatewayScreen />
+                    ) : viewMode === 'settings' ? (
+                      <Settings
+                        key={settingsNavigationKey}
+                        activeSection={settingsSection}
+                        onSectionChange={setSettingsSection}
+                      />
+                    ) : !isPro ? (
+                      <UpgradeScreen feature={getProFeature(viewMode)} />
+                    ) : proFeatureComingSoon(viewMode, currentPlatform(), isPro) ? (
+                      <UpgradeScreen variant="coming-soon" feature={getProFeature(viewMode)} />
+                    ) : (
+                      // Pro tabs: render through the pro view-router when active,
+                      // otherwise show the upgrade writeup for that feature.
+                      (renderProView(viewMode, {
+                        setView: (v) => navigateTo(v as ViewMode),
+                        onNavigate: handleProNavigate,
+                        navigationSubroute,
+                        setNavigationSubroute,
+                        navigateBack,
+                        replayTarget,
+                        meetingTarget,
+                        actionTarget,
+                        approvalTarget,
+                        calendarEventTarget,
+                        actionsMode,
+                        actionsEntity,
+                        searchQuery,
+                        onSearchQueryChange: setSearchQuery,
+                        searchSources,
+                        onSearchSourcesChange: setSearchSources,
+                        searchSort,
+                        onSearchSortChange: setSearchSort,
+                        selectedMemoryId,
+                        setSelectedMemoryId,
+                        selectedEntityId,
+                        rec,
+                        onSelectEntity: handleSelectEntity,
+                        onSelectMemory: handleSelectMemory,
+                        onOpenHit: handleOpenHit,
+                        openChatOwner: handleOpenChatOwner
+                      } satisfies ProViewContext) ?? (
+                        <UpgradeScreen feature={getProFeature(viewMode)} />
+                      ))
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
-          </Panel>
-          <PanelResizeHandle
-            aria-label="Resize Chat and task"
-            title="Drag to resize Chat and task"
-            className={`group relative w-2 shrink-0 cursor-col-resize border-x border-neutral-800 bg-neutral-950 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-green-500 ${
-              taskWorkspaceVisible ? '' : 'hidden'
-            }`}
-            onDragging={setTaskWorkspaceDragging}
-            onKeyDown={(event) => {
-              if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-              event.preventDefault()
-              event.stopPropagation()
-              resizeTaskWorkspaceFromKeyboard(event.key)
-            }}
-            aria-valuemin={32}
-            aria-valuemax={68}
-            aria-valuenow={Math.round(taskWorkspaceSize)}
-            aria-valuetext={`Task workspace ${Math.round(taskWorkspaceSize)} percent`}
-          >
-            <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px bg-transparent group-hover:bg-green-500/50 group-focus-visible:bg-green-500 group-data-[resize-handle-state=drag]:bg-green-500" />
-          </PanelResizeHandle>
-          <Panel
-            ref={taskWorkspaceRef}
-            id="task-workspace"
-            order={2}
-            defaultSize={48}
-            minSize={32}
-            collapsible
-            collapsedSize={0}
-            className="min-w-0"
-            style={{ transition: taskWorkspaceTransition }}
-            onResize={setTaskWorkspaceSize}
-          >
-            {TaskWorkspace ? (
-              <TaskWorkspace
-                mainWorkspaceCollapsed={mainWorkspaceCollapsed}
-                onToggleMainWorkspace={toggleMainWorkspace}
-                onDetailModeChange={setDockedTaskDetailMode}
-                routeActive={taskWorkspaceRouteActive}
-                conversationId={activeChatConversationId}
-              />
-            ) : null}
-          </Panel>
-        </PanelGroup>
+          </div>
+        </div>
       </div>
       <AnimatePresence>
         {modelSettingsOpen && (

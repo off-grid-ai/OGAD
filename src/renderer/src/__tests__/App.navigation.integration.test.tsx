@@ -406,7 +406,12 @@ describe('<App/> desktop navigation integration', () => {
     )
 
     act(() => openTaskSidePanel())
-    expect(await screen.findByTestId('task-side-panel')).toBeTruthy()
+    const taskPanel = await screen.findByTestId('task-side-panel')
+    const chatTaskWorkspace = taskPanel.closest('[data-testid="main-task-workspace"]')
+    const chatHeader = screen.getByRole('heading', { name: 'Off Grid AI' }).closest('header')
+    expect(chatTaskWorkspace).toBeTruthy()
+    expect(chatHeader?.nextElementSibling).toBe(chatTaskWorkspace)
+    expect(chatHeader?.parentElement).toBe(chatTaskWorkspace?.parentElement)
     setRegion.mockClear()
 
     act(() => {
@@ -426,7 +431,7 @@ describe('<App/> desktop navigation integration', () => {
     expect(separator.getAttribute('aria-valuetext')).toContain('Task workspace')
   })
 
-  it('gives each new local Web Use attempt one immersive detail reveal', async () => {
+  it('gives each local Web Use attempt one collapsible detail reveal', async () => {
     let emitTaskChange: ((task: unknown) => void) | undefined
     let emitSessions: ((snapshot: unknown) => void) | undefined
     window.history.replaceState(null, '', '/chat')
@@ -503,7 +508,8 @@ describe('<App/> desktop navigation integration', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeTruthy()
       expect(screen.queryByRole('button', { name: 'Collapse sidebar' })).toBeNull()
-      expect(screen.getByRole('button', { name: 'Show main workspace' })).toBeTruthy()
+      expect(screen.getByRole('heading', { name: 'Off Grid AI' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Expand Chat' })).toBeTruthy()
     })
 
     act(() =>
@@ -518,28 +524,29 @@ describe('<App/> desktop navigation integration', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeTruthy()
       expect(screen.queryByRole('button', { name: 'Expand sidebar' })).toBeNull()
-      expect(screen.getByRole('button', { name: 'Hide main workspace' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Collapse Chat' })).toBeTruthy()
     })
 
     act(() => emitTaskChange?.({ ...task, updatedAt: 3 }))
     expect(await screen.findByTestId('task-details-web-start-task')).toBeTruthy()
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeTruthy()
-      expect(screen.getByRole('button', { name: 'Show main workspace' })).toBeTruthy()
+      expect(screen.getByRole('heading', { name: 'Off Grid AI' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Expand Chat' })).toBeTruthy()
     })
 
     fireEvent.click(screen.getByRole('button', { name: 'Back to Task History' }))
     await waitFor(() => {
       expect(screen.queryByTestId('task-details-web-start-task')).toBeNull()
       expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeTruthy()
-      expect(screen.getByRole('button', { name: 'Hide main workspace' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Collapse Chat' })).toBeTruthy()
     })
 
     act(() => emitTaskChange?.({ ...task, steps: ['Opened the page'], updatedAt: 4 }))
     await waitFor(() => {
       expect(screen.queryByTestId('task-details-web-start-task')).toBeNull()
       expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeTruthy()
-      expect(screen.getByRole('button', { name: 'Hide main workspace' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Collapse Chat' })).toBeTruthy()
     })
   })
 

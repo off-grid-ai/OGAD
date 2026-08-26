@@ -1,7 +1,11 @@
 import { ListChecks } from '@phosphor-icons/react'
 import { Button } from '@renderer/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
-import { openTaskSidePanel } from '@renderer/lib/task-side-panel'
+import {
+  closeTaskWorkspace,
+  openTaskSidePanel,
+  useTaskWorkspaceOpen
+} from '@renderer/lib/task-side-panel'
 import {
   taskAttentionCount,
   taskSessionsForJourney,
@@ -16,7 +20,13 @@ export function TaskPanelTrigger({
   conversationId = null
 }: TaskPanelTriggerProps): React.JSX.Element {
   const { tasks } = useTaskSessions()
+  const workspaceOpen = useTaskWorkspaceOpen()
   const count = taskAttentionCount(taskSessionsForJourney(tasks, conversationId))
+  const label = workspaceOpen
+    ? 'Close Tasks'
+    : count > 0
+      ? `Tasks, ${count} need attention`
+      : 'Tasks'
 
   return (
     <Tooltip>
@@ -25,9 +35,17 @@ export function TaskPanelTrigger({
           type="button"
           variant="ghost"
           size="icon"
-          aria-label={count > 0 ? `Tasks, ${count} need attention` : 'Tasks'}
-          onClick={() => openTaskSidePanel()}
-          className="relative h-8 w-8 rounded-md border border-neutral-800 text-neutral-500 hover:border-green-500 hover:text-green-500"
+          aria-label={label}
+          aria-pressed={workspaceOpen}
+          onClick={() => {
+            if (workspaceOpen) closeTaskWorkspace()
+            else openTaskSidePanel()
+          }}
+          className={`relative h-8 w-8 rounded-md border hover:border-green-500 hover:text-green-500 ${
+            workspaceOpen
+              ? 'border-green-500 bg-green-500/10 text-green-500'
+              : 'border-neutral-800 text-neutral-500'
+          }`}
         >
           <ListChecks size={16} />
           {count > 0 ? (
@@ -40,7 +58,7 @@ export function TaskPanelTrigger({
           ) : null}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Tasks</TooltipContent>
+      <TooltipContent>{workspaceOpen ? 'Close Tasks' : 'Tasks'}</TooltipContent>
     </Tooltip>
   )
 }
