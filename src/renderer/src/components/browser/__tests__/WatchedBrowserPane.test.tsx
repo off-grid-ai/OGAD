@@ -1054,8 +1054,6 @@ describe('<WatchedBrowserPane/> shared task panel', () => {
     emitTaskChange(
       task('retry-old', 'computer_use', 'retry this run', 'running', { updatedAt: 200 })
     )
-    await waitFor(() =>
-      expect(screen.getByTestId('task-tab-retry-old').getAttribute('aria-current')).toBe('true')
-    )
+    await waitFor(() => expect(screen.getByTestId('task-details-retry-old')).toBeTruthy())
   })
 })
