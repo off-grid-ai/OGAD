@@ -151,7 +151,11 @@ jobs:
       # coverage regression fails CI, not just local pushes. The pro/** threshold
       # group applies only when pro was checked out above (guarded in the config).
       - name: Test + coverage thresholds
-        timeout-minutes: 10
+        # The tests finish in about four minutes. V8 then maps coverage across the
+        # complete core + Pro source set, including files no test imported. That
+        # aggregation can take another six minutes on a busy runner, so keep the
+        # thresholds unchanged and give report generation enough time to finish.
+        timeout-minutes: 20
         run: npm run test:coverage
       # The DB journeys - 74 files, 255 cases - which CI has NEVER run.
       #
