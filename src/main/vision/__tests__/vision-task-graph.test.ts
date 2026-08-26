@@ -32,6 +32,15 @@ function action(): VisionPolicyDecision {
   }
 }
 
+function done(summary = 'The task is complete.'): VisionPolicyDecision {
+  return {
+    kind: 'done',
+    actionText: 'Task complete',
+    summary,
+    decisionRationale: 'The requested result is visible.'
+  }
+}
+
 function workflow(decisions: VisionPolicyDecision[]): {
   deps: VisionTaskGraphDeps
   observations: VisionStepObservation[]
@@ -96,6 +105,30 @@ describe('runVisionTaskGraph', () => {
     ])
     expect(w.actuated).toEqual([])
     expect(w.observations.map((item) => item.result)).toEqual(['terminal', 'terminal'])
+  })
+
+  it('does not let a model-level done verdict skip remaining execution-plan milestones', async () => {
+    const w = workflow([done('Everything is complete.'), complete('Final result verified.')])
+
+    const result = await runVisionTaskGraph('Complete both milestones.', w.deps)
+
+    expect(result.ok).toBe(true)
+    expect(result.summary).toBe('Final result verified.')
+    expect(w.decisionCalls).toBe(2)
+    expect(w.phases).toEqual(['phase-1', 'phase-2'])
+    expect(result.steps).toContain('milestone complete: Navigate to the site')
+    expect(result.steps).not.toContain('done: Everything is complete.')
+  })
+
+  it('keeps model-level done as a terminal result when no execution plan exists', async () => {
+    const w = workflow([done('Unplanned task complete.')])
+    w.deps.plan = undefined
+
+    const result = await runVisionTaskGraph('Complete the task.', w.deps)
+
+    expect(result).toMatchObject({ ok: true, summary: 'Unplanned task complete.' })
+    expect(w.decisionCalls).toBe(1)
+    expect(result.steps).toContain('done: Unplanned task complete.')
   })
 
   it('uses one decision call for one approved action and preserves screenshot coordinates', async () => {

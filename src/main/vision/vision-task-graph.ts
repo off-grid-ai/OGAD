@@ -318,7 +318,7 @@ class VisionTaskGraphRuntime {
   }
 
   advanceMilestone(): { route: WorkflowRoute } {
-    if (this.decision?.kind !== 'phase_complete') {
+    if (this.decision?.kind !== 'phase_complete' && this.decision?.kind !== 'done') {
       this.finish(false, 'Only the milestone judge can advance the execution plan.')
       return { route: 'end' }
     }
@@ -402,6 +402,16 @@ class VisionTaskGraphRuntime {
       await this.deps.waitForUser(decision.reason)
       if (!this.deps.guard.isHalted) this.note('resumed by the user')
       return { route: 'gate' }
+    }
+    if (decision.kind === 'done' && this.deps.plan?.phases.length) {
+      // The execution plan is the task lifecycle SSOT. A model-level `done`
+      // verdict is stronger than completion of the current milestone, but it
+      // must not skip the remaining visible checks or release the specialist.
+      // Advance one milestone and let the next screenshot verify the next one.
+      this.discardPendingPolicyHistory()
+      this.observeDecision('terminal')
+      this.checkpoint()
+      return { route: 'advance' }
     }
     this.discardPendingPolicyHistory()
     this.observeDecision('terminal')
