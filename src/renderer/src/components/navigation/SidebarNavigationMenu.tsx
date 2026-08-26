@@ -94,7 +94,7 @@ export function SidebarNavigationMenu<Item extends { view: string; label: string
                 />
               </button>
             </CollapsibleTrigger>
-            <CollapsibleContent className="offgrid-sidebar-section flex flex-col gap-1 overflow-hidden pb-1">
+            <CollapsibleContent className="offgrid-smooth-collapsible flex flex-col gap-1 overflow-hidden pb-1">
               {group.items.map(renderItem)}
             </CollapsibleContent>
           </Collapsible>

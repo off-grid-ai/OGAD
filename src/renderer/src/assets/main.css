@@ -486,7 +486,7 @@ code {
   }
 }
 
-@keyframes offgrid-sidebar-section-open {
+@keyframes offgrid-collapsible-open {
   from {
     height: 0;
     opacity: 0;
@@ -497,7 +497,7 @@ code {
   }
 }
 
-@keyframes offgrid-sidebar-section-close {
+@keyframes offgrid-collapsible-close {
   from {
     height: var(--radix-collapsible-content-height);
     opacity: 1;
@@ -508,16 +508,16 @@ code {
   }
 }
 
-.offgrid-sidebar-section[data-state='open'] {
-  animation: offgrid-sidebar-section-open 240ms cubic-bezier(0.22, 1, 0.36, 1);
+.offgrid-smooth-collapsible[data-state='open'] {
+  animation: offgrid-collapsible-open 320ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.offgrid-sidebar-section[data-state='closed'] {
-  animation: offgrid-sidebar-section-close 200ms cubic-bezier(0.4, 0, 1, 1);
+.offgrid-smooth-collapsible[data-state='closed'] {
+  animation: offgrid-collapsible-close 260ms cubic-bezier(0.4, 0, 1, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .offgrid-sidebar-section[data-state] {
+  .offgrid-smooth-collapsible[data-state] {
     animation: none;
   }
 }

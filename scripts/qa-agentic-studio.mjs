@@ -243,7 +243,54 @@ const waitForShellLayout = async (page, layout) => {
     `SHELL sidebar=${layout.sidebarCollapsed ? 'collapsed' : 'expanded'} chat=${layout.mainCollapsed ? 'collapsed' : 'expanded'} mainWidth=${mainWidth}`
   )
 }
+const sampleTaskDisclosureMotion = async (page) => {
+  const activity = page.getByTestId('task-live-activity')
+  const selector = '[data-testid="task-live-activity"] > [data-slot="collapsible-content"]'
+  const sampleRunningAnimation = () =>
+    page.evaluate(async (contentSelector) => {
+      const heights = []
+      for (let frame = 0; frame < 60; frame += 1) {
+        await new Promise((resolve) => requestAnimationFrame(resolve))
+        const content = document.querySelector(contentSelector)
+        if (!content) break
+        heights.push(content.getBoundingClientRect().height)
+        if (!content.getAnimations().some((animation) => animation.playState === 'running')) break
+      }
+      return heights
+    }, selector)
+  const hasIntermediateHeight = (heights, maximum) =>
+    heights.some((height) => height > 1 && height < maximum - 1)
+
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  const expandedHeight = await activity
+    .locator(':scope > [data-slot="collapsible-content"]')
+    .evaluate((content) => content.getBoundingClientRect().height)
+  await activity.getByRole('button', { name: 'Collapse', exact: true }).click()
+  const closingHeights = await sampleRunningAnimation()
+  if (!hasIntermediateHeight(closingHeights, expandedHeight)) {
+    throw new Error(
+      `Task disclosure collapsed without smooth intermediate frames: ${closingHeights}`
+    )
+  }
+  await activity.getByRole('button', { name: 'Expand', exact: true }).click()
+  const openingHeights = await sampleRunningAnimation()
+  if (!hasIntermediateHeight(openingHeights, expandedHeight)) {
+    throw new Error(
+      `Task disclosure expanded without smooth intermediate frames: ${openingHeights}`
+    )
+  }
+  await activity.getByRole('button', { name: 'Collapse', exact: true }).waitFor()
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  console.log(
+    `DISCLOSURE closingFrames=${closingHeights.length} openingFrames=${openingHeights.length}`
+  )
+}
 const openSidebarDestination = async (page, group, destination) => {
+  const expandSidebar = page.getByRole('button', { name: 'Expand sidebar' })
+  if (await expandSidebar.isVisible()) {
+    await expandSidebar.click()
+    await page.getByRole('button', { name: 'Collapse sidebar' }).waitFor()
+  }
   const destinationButton = page.getByRole('button', { name: destination, exact: true })
   if (!(await destinationButton.isVisible())) {
     await page.getByRole('button', { name: group, exact: true }).click()
@@ -336,6 +383,7 @@ try {
     args: ['.'],
     env: evidenceEnvironment({
       profile,
+      pro: true,
       extra: {
         OFFGRID_E2E_HEADLESS: process.env.OFFGRID_E2E_HEADLESS ?? '1',
         OFFGRID_E2E_ISOLATED_INSTANCE: '1',
@@ -344,6 +392,9 @@ try {
     })
   })
   const page = await app.firstWindow()
+  const packaged = await app.evaluate(({ app: electronApp }) => electronApp.isPackaged)
+  const launchEntitlement = await page.evaluate(() => window.api.isPro)
+  console.log(`ENTITLEMENT packaged=${packaged} pro=${launchEntitlement}`)
   page.on('console', (message) => console.log(`[renderer:${message.type()}] ${message.text()}`))
   page.on('pageerror', (error) => console.error(`[renderer:error] ${error.stack ?? error.message}`))
   await page.waitForLoadState('domcontentloaded')
@@ -432,6 +483,7 @@ try {
   await page.getByTestId('task-details-web-failed').waitFor()
   await waitForShellLayout(page, { sidebarCollapsed: true, mainCollapsed: true })
   await shot(page, '04-web-use-start-immersive-detail')
+  await sampleTaskDisclosureMotion(page)
 
   const retryAttempt = attempts.find((task) => task.taskId === 'web-failed')
   if (!retryAttempt || attempts.length !== 1) {
@@ -545,25 +597,27 @@ try {
   await address.fill('https://example.com/')
   await address.press('Enter')
   await page.waitForFunction(() =>
-    window.api.browser
-      .getSessions()
-      .then((state) =>
-        state.sessions.some((session) => {
-          let hostname = ''
-          try {
-            hostname = new URL(session.url).hostname
-          } catch {
-            return false
-          }
-          return hostname === 'example.com' && session.title.includes('Example Domain') && !session.isLoading
-        })
-      )
+    window.api.browser.getSessions().then((state) =>
+      state.sessions.some((session) => {
+        let hostname = ''
+        try {
+          hostname = new URL(session.url).hostname
+        } catch {
+          return false
+        }
+        return (
+          hostname === 'example.com' &&
+          session.title.includes('Example Domain') &&
+          !session.isLoading
+        )
+      })
+    )
   )
   await shot(page, '05-live-browser-example')
   nativeShot('05b-live-browser-native-window')
 
   const taskPanelBeforeAway = await page.getByTestId('task-side-panel').count()
-  await page.getByRole('button', { name: 'Models', exact: true }).click()
+  await openSidebarDestination(page, 'System', 'Models')
   await page.getByTestId('task-side-panel').waitFor({ state: 'detached' })
   await page.getByRole('heading', { name: 'Models', exact: true }).waitFor()
   await page.evaluate(
@@ -571,7 +625,7 @@ try {
   )
   const browserRegionWhileAway = await page.getByTestId('watched-web-region').count()
   await shot(page, '06-models-task-hidden')
-  await page.getByRole('button', { name: 'Chat', exact: true }).click()
+  await openSidebarDestination(page, 'Work', 'Chat')
   await page.getByTestId('task-side-panel').waitFor()
   await page.getByRole('heading', { name: 'Start a conversation', exact: true }).waitFor()
   await page.getByText('Browse the web for you', { exact: true }).waitFor()
