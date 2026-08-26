@@ -759,6 +759,9 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     await waitFor(() => expect(boundary.calls).toHaveLength(1))
     expect(screen.getByRole('button', { name: 'Thinking…' })).toBeTruthy()
 
+    act(() => boundary.emitReasoning(0, 'Checking the edited route and date.'))
+    expect(await screen.findByText('Checking the edited route and date.')).toBeTruthy()
+
     act(() => {
       boundary.emitTask({
         taskId: 'web-edit-live',
