@@ -22,9 +22,17 @@ export interface ProcessedFile {
   path?: string // for images: a persisted copy so it can be sent to the vision model
 }
 
+export interface ProcessUploadOptions {
+  /** Chat attachments need a durable preview path. Ephemeral task guidance does not. */
+  persistPreview?: boolean
+  /** Task guidance needs useful image context without retaining the source image. */
+  captionImage?: boolean
+}
+
 export async function processUpload(
   name: string,
-  bytes: ArrayBuffer | Uint8Array
+  bytes: ArrayBuffer | Uint8Array,
+  options: ProcessUploadOptions = {}
 ): Promise<ProcessedFile> {
   const ext = path.extname(name).slice(1).toLowerCase()
   const safe = sanitizeUploadName(name)
@@ -42,6 +50,13 @@ export async function processUpload(
       // fault, not a statement about the user's photo.
       if ((await verifyImageDecodable(tmp)) === 'undecodable') {
         throw new Error('Unsupported or damaged image data.')
+      }
+      if (options.captionImage) {
+        if (!ex.captionImage) throw new Error('Image reading is not available for this model.')
+        return { name, kind: 'image', text: await ex.captionImage(tmp) }
+      }
+      if (options.persistPreview === false) {
+        return { name, kind: 'image', text: '' }
       }
       // Persist the image so the chat can pass the ACTUAL image to the multimodal
       // model. Return as soon as it's saved — do NOT block the attachment on a
@@ -74,10 +89,13 @@ export async function processUpload(
     if (ext === 'pdf') {
       // Persist the PDF so the chat viewer can render the ACTUAL file (Chromium's
       // built-in viewer), in addition to extracting text for the model context.
-      const dir = path.join(app.getPath('userData'), 'uploads')
-      await fs.promises.mkdir(dir, { recursive: true })
-      const dest = path.join(dir, `${Date.now()}-${safe}`)
-      await fs.promises.copyFile(tmp, dest)
+      let dest: string | undefined
+      if (options.persistPreview !== false) {
+        const dir = path.join(app.getPath('userData'), 'uploads')
+        await fs.promises.mkdir(dir, { recursive: true })
+        dest = path.join(dir, `${Date.now()}-${safe}`)
+        await fs.promises.copyFile(tmp, dest)
+      }
       // Text extraction is best-effort: the PDF is already persisted and viewable,
       // so a parse failure must NOT make the file unattachable — fall back to ''.
       let text = ''

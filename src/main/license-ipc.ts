@@ -5,11 +5,15 @@
  * to unlock, so the canonical gate lives in main and the renderer reads it two
  * ways:
  *  - `pro:is-enabled` (SYNC) — preload's `isPro`, read once at load via sendSync.
- *  - `license:changed` (push) — fired on activate/deactivate/revalidate so the UI
- *    can prompt a relaunch (main-process pro features only attach at boot).
+ *  - `license:changed` (push) — fired on activate/deactivate/revalidate and at a
+ *    cached expiry deadline so the UI and paid runtime close in this session.
  */
 import { ipcMain, BrowserWindow, app, shell } from 'electron'
-import { proEnabled, proEntitlementBootstrapEnabled } from './bootstrap/loadProFeaturesMain'
+import {
+  deactivateProFeaturesMain,
+  proEnabled,
+  proEntitlementBootstrapEnabled
+} from './bootstrap/loadProFeaturesMain'
 import { requestApplicationRelaunch } from './shutdown'
 import {
   activateProByKey,
@@ -24,10 +28,16 @@ import {
 } from './licensing/license-service'
 
 export function setupLicenseIpc(): void {
-  // Push entitlement changes to every window so the UI can react / offer restart.
+  // Push entitlement changes to every window and stop live paid services when
+  // access closes.
   setLicenseChangeNotifier((info: ProLicenseInfo) => {
     for (const win of BrowserWindow.getAllWindows()) {
       win.webContents.send('license:changed', info)
+    }
+    if (!info.isPro && !proEnabled()) {
+      void deactivateProFeaturesMain().catch((error) => {
+        console.error('[pro] entitlement-loss shutdown failed', error)
+      })
     }
   })
 

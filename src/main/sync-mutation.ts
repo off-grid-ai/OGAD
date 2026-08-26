@@ -2,7 +2,8 @@ import { callHook, HOOKS } from './bootstrap/hookRegistry'
 import {
   ACTION_APPROVAL_ENTITY,
   KNOWLEDGE_DOCUMENT_ENTITY,
-  SHARED_FILE_ENTITY
+  SHARED_FILE_ENTITY,
+  TASK_RUN_ENTITY
 } from '@offgrid/sync'
 
 /**
@@ -16,7 +17,8 @@ export const CORE_SYNC_ENTITIES = {
   knowledgeDocument: KNOWLEDGE_DOCUMENT_ENTITY,
   sharedFile: SHARED_FILE_ENTITY,
   modelSetting: 'model_setting',
-  actionApproval: ACTION_APPROVAL_ENTITY
+  actionApproval: ACTION_APPROVAL_ENTITY,
+  taskRun: TASK_RUN_ENTITY
 } as const
 
 export type CoreSyncEntity = (typeof CORE_SYNC_ENTITIES)[keyof typeof CORE_SYNC_ENTITIES]
@@ -45,6 +47,12 @@ export const SYNCABLE_LLM_SETTING_KEYS = [
   'gpuLayers',
   'threads',
   'batchSize'
+] as const
+
+/** Cross-device Computer Use preferences that do not contain device-local paths or secrets. */
+export const SYNCABLE_COMPUTER_USE_SETTING_KEYS = [
+  'computerUseSettings',
+  'computerUseModelId'
 ] as const
 
 export function emitChangedLlmSettings(

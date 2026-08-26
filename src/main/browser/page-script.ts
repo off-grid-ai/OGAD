@@ -28,6 +28,9 @@ export interface PageElement {
    *  these; they mark the identity boundary where the human takes over. */
   identity: boolean
   href: string
+  /** Control state needed to verify toggles, menus, and selected options. */
+  state?: string
+  disabled?: boolean
 }
 
 export interface PageSnapshot {
@@ -117,6 +120,25 @@ function isIdentityField(el: Element): boolean {
   return input.type === 'password' || el.getAttribute('autocomplete') === 'one-time-code'
 }
 
+function controlState(el: Element): { state: string; disabled: boolean } {
+  const input = el as HTMLInputElement
+  const parts: string[] = []
+  const add = (name: string, value: string | null | boolean | undefined): void => {
+    if (value === null || value === undefined || value === false || value === '') return
+    parts.push(value === true ? name : `${name}=${value}`)
+  }
+  add('checked', input.checked)
+  add('selected', (el as HTMLOptionElement).selected)
+  add('expanded', el.getAttribute('aria-expanded'))
+  add('pressed', el.getAttribute('aria-pressed'))
+  add('current', el.getAttribute('aria-current'))
+  add('readonly', input.readOnly || el.getAttribute('aria-readonly') === 'true')
+  return {
+    state: parts.join(','),
+    disabled: input.disabled || el.getAttribute('aria-disabled') === 'true'
+  }
+}
+
 /**
  * Walks the document (including same-origin open shadow roots) and returns the
  * snapshot the agent reasons over. Runs in-page; jsdom-compatible on purpose.
@@ -136,6 +158,7 @@ export function collectInteractiveElements(doc: Document): PageSnapshot {
       const rect = el.getBoundingClientRect()
       const identity = isIdentityField(el)
       const input = el as HTMLInputElement
+      const control = controlState(el)
       elements.push({
         index: 0,
         tag: el.tagName.toLowerCase(),
@@ -145,7 +168,9 @@ export function collectInteractiveElements(doc: Document): PageSnapshot {
         cx: Math.round(rect.left + rect.width / 2),
         cy: Math.round(rect.top + rect.height / 2),
         identity,
-        href: el.getAttribute('href') ?? ''
+        href: el.getAttribute('href') ?? '',
+        ...(control.state ? { state: control.state } : {}),
+        ...(control.disabled ? { disabled: true } : {})
       })
     }
   }
@@ -173,6 +198,7 @@ export function pageScriptSource(): string {
     isVisible.toString(),
     accessibleName.toString(),
     isIdentityField.toString(),
+    controlState.toString(),
     collectInteractiveElements.toString()
   ].join('\n')
   return `(() => {\n${helpers}\nreturn JSON.stringify(collectInteractiveElements(document))\n})()`
@@ -191,6 +217,8 @@ export function formatSnapshotForModel(snapshot: PageSnapshot, maxElements = 150
     if (el.identity) {
       parts.push('(identity field - takeover required)')
     }
+    if (el.state) parts.push(`state=${el.state}`)
+    if (el.disabled) parts.push('(disabled)')
     return parts.join(' ')
   })
   const omitted =

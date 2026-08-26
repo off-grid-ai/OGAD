@@ -1,5 +1,12 @@
 export type BrowserSessionKind = 'manual' | 'task'
 export type BrowserControl = 'back' | 'forward' | 'reload' | 'stop'
+export type BrowserTaskStatus =
+  | 'running'
+  | 'waiting'
+  | 'reconnecting'
+  | 'done'
+  | 'failed'
+  | 'stopped'
 
 export interface BrowserChromeState {
   url: string
@@ -12,8 +19,9 @@ export interface BrowserChromeState {
 
 export interface BrowserTaskPointer {
   taskId: string
+  journeyId: string
   goal: string
-  status: 'running' | 'done' | 'failed'
+  status: BrowserTaskStatus
   summary?: string
   steps: string[]
 }
@@ -22,6 +30,8 @@ export interface BrowserSessionSnapshot extends BrowserChromeState {
   sessionId: string
   historyId?: string
   kind: BrowserSessionKind
+  journeyId?: string
+  parentSessionId?: string
   taskId?: string
   status: BrowserTaskPointer['status'] | 'open'
 }
@@ -33,6 +43,53 @@ export interface BrowserSessionsSnapshot {
 
 export interface BrowserNavigationState extends BrowserChromeState {
   sessionId: string
+}
+
+/** Web Use always gives websites one stable desktop CSS viewport. The native
+ * surface is zoomed to fit its panel; responsive sites must not change layout
+ * when the Off Grid task workspace changes size. */
+export const WEB_USE_DESKTOP_VIEWPORT = { width: 1920, height: 1200 } as const
+export const WEB_USE_DESKTOP_ASPECT = WEB_USE_DESKTOP_VIEWPORT
+
+/** Electron zoom needed to fit the fixed desktop viewport into the native
+ * surface while preserving the viewport's CSS dimensions. */
+export function webUseDesktopZoomFactor(surface: { width: number; height: number }): number {
+  return Math.min(
+    surface.width / WEB_USE_DESKTOP_VIEWPORT.width,
+    surface.height / WEB_USE_DESKTOP_VIEWPORT.height
+  )
+}
+
+/** Fit the live Web Use page into its slot without changing the desktop
+ * aspect ratio. Any unused area becomes letterboxing around the page. */
+export function fitWebUseDesktopSurface(container: { width: number; height: number }): {
+  width: number
+  height: number
+} {
+  const widthFromHeight =
+    (container.height * WEB_USE_DESKTOP_ASPECT.width) / WEB_USE_DESKTOP_ASPECT.height
+  const width = Math.max(1, Math.min(container.width, widthFromHeight))
+  return {
+    width: Math.round(width),
+    height: Math.round((width * WEB_USE_DESKTOP_ASPECT.height) / WEB_USE_DESKTOP_ASPECT.width)
+  }
+}
+
+/** Center the fixed-aspect webpage surface inside the renderer-provided slot.
+ * Main applies this too, so a renderer layout race cannot change the page's
+ * desktop aspect ratio or the coordinate space used for visual actions. */
+export function fitWebUseDesktopRegion(container: {
+  x: number
+  y: number
+  width: number
+  height: number
+}): { x: number; y: number; width: number; height: number } {
+  const surface = fitWebUseDesktopSurface(container)
+  return {
+    x: Math.round(container.x + (container.width - surface.width) / 2),
+    y: Math.round(container.y + (container.height - surface.height) / 2),
+    ...surface
+  }
 }
 
 export interface BrowserPointerEvent {

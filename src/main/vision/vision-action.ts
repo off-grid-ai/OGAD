@@ -57,14 +57,16 @@ function denormalize(nx: number, ny: number, bounds: Bounds): Point {
 
 /** Pull a point out of any of the coordinate spellings UI-TARS uses:
  *  `<point>x y</point>`, `(x,y)`, `x,y`, or `start_box='(x,y)'`. */
-function extractPoint(raw: string, bounds: Bounds): Point | null {
+type CoordinateMapper = (x: number, y: number, bounds: Bounds) => Point | null
+
+function extractPoint(raw: string, bounds: Bounds, map: CoordinateMapper): Point | null {
   const pointTag = raw.match(/<point>\s*(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s*<\/point>/i)
   const paren = raw.match(/\(?\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*\)?/)
   const match = pointTag ?? paren
   if (!match) {
     return null
   }
-  return denormalize(Number(match[1]), Number(match[2]), bounds)
+  return map(Number(match[1]), Number(match[2]), bounds)
 }
 
 /** The single-quoted or double-quoted argument value for `name=`, honoring
@@ -78,7 +80,11 @@ const DIRECTIONS = new Set(['up', 'down', 'left', 'right'])
 
 /* eslint-disable complexity -- one dispatch over the fixed UI-TARS verb set;
    splitting each verb into a helper would scatter the grammar this pins. */
-export function parseVisionAction(raw: string, bounds: Bounds): VisionAction | null {
+function parseVisionActionWithMapper(
+  raw: string,
+  bounds: Bounds,
+  map: CoordinateMapper
+): VisionAction | null {
   // The model may prefix a Thought:; the action is the last `Action:` line, or
   // the whole string if it is bare.
   const actionText = raw.includes('Action:') ? raw.slice(raw.lastIndexOf('Action:') + 7) : raw
@@ -92,17 +98,17 @@ export function parseVisionAction(raw: string, bounds: Bounds): VisionAction | n
   switch (verb) {
     case 'click':
     case 'left_single': {
-      const point = extractPoint(actionText, bounds)
+      const point = extractPoint(actionText, bounds, map)
       return point ? { type: 'click', point } : null
     }
     case 'left_double':
     case 'double_click': {
-      const point = extractPoint(actionText, bounds)
+      const point = extractPoint(actionText, bounds, map)
       return point ? { type: 'double_click', point } : null
     }
     case 'right_single':
     case 'right_click': {
-      const point = extractPoint(actionText, bounds)
+      const point = extractPoint(actionText, bounds, map)
       return point ? { type: 'right_click', point } : null
     }
     case 'drag': {
@@ -111,8 +117,8 @@ export function parseVisionAction(raw: string, bounds: Bounds): VisionAction | n
       if (!start || !end) {
         return null
       }
-      const from = extractPoint(start, bounds)
-      const to = extractPoint(end, bounds)
+      const from = extractPoint(start, bounds, map)
+      const to = extractPoint(end, bounds, map)
       return from && to ? { type: 'drag', from, to } : null
     }
     case 'type': {
@@ -124,7 +130,7 @@ export function parseVisionAction(raw: string, bounds: Bounds): VisionAction | n
       return keys ? { type: 'hotkey', keys: keys.trim() } : null
     }
     case 'scroll': {
-      const point = extractPoint(actionText, bounds)
+      const point = extractPoint(actionText, bounds, map)
       const direction = (argOf(actionText, 'direction') ?? '').toLowerCase()
       return point && DIRECTIONS.has(direction)
         ? { type: 'scroll', point, direction: direction as 'up' | 'down' | 'left' | 'right' }
@@ -141,6 +147,31 @@ export function parseVisionAction(raw: string, bounds: Bounds): VisionAction | n
   }
 }
 /* eslint-enable complexity */
+
+export function parseVisionAction(raw: string, bounds: Bounds): VisionAction | null {
+  return parseVisionActionWithMapper(raw, bounds, denormalize)
+}
+
+/** General vision models report pixels in the source capture space. Convert
+ * them once into the encoded image space used by the shared actuation path. */
+export function parseVisionActionFromSourcePixels(
+  raw: string,
+  source: Bounds,
+  encoded: Bounds
+): VisionAction | null {
+  if (source.width <= 0 || source.height <= 0 || encoded.width <= 0 || encoded.height <= 0) {
+    return null
+  }
+  const sourcePixelToEncoded: CoordinateMapper = (x, y) => {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0) return null
+    if (x >= source.width || y >= source.height) return null
+    return {
+      x: Math.round((x * encoded.width) / source.width),
+      y: Math.round((y * encoded.height) / source.height)
+    }
+  }
+  return parseVisionActionWithMapper(raw, encoded, sourcePixelToEncoded)
+}
 
 /** UI-TARS escapes newlines/quotes inside content strings. */
 function unescapeContent(value: string): string {

@@ -38,6 +38,7 @@ import { postCompletionOnce } from './llm/http-post'
 import { engineSpawnEnv } from './llm/spawn-env'
 import { shouldAutoRecover } from './llm/crash-policy'
 import { streamCompletion, type StreamResult } from './llm/stream'
+import { streamRemoteChatCompletion, type RemoteTextModelConnection } from './llm/remote-chat'
 import {
   terminateEngine,
   ENGINE_TEARDOWN_GRACE_MS,
@@ -46,6 +47,7 @@ import {
 import { emitChangedLlmSettings } from './sync-mutation'
 import { loadGatedVisionModelAdapter } from './vision/model-adapters/registry'
 import type { VisionModelArtifacts } from './vision/model-adapters/types'
+import { getActiveRemoteVisionServer } from './vision/remote-vision-server'
 
 export type { KvCacheType, PerformanceMode }
 
@@ -1003,6 +1005,45 @@ export class LLMService {
     return postCompletionOnce(this.port, body, timeoutMs, signal)
   }
 
+  /** Resolve the selected text model once at request admission. Every text
+   * method uses this seam, so no caller needs local/remote branches. */
+  private activeRemoteTextModel(): RemoteTextModelConnection | null {
+    return getActiveRemoteVisionServer()
+  }
+
+  private completeRemote(
+    remote: RemoteTextModelConnection,
+    messages: unknown[],
+    onDelta: (text: string, kind: 'content' | 'reasoning') => void,
+    options: {
+      timeoutMs: number
+      maxTokens?: number
+      temperature?: number
+      topP?: number
+      thinking?: boolean
+      signal?: AbortSignal
+      responseFormat?: unknown
+      tools?: unknown[]
+      toolChoice?: string
+    }
+  ): Promise<StreamResult> {
+    return streamRemoteChatCompletion(
+      remote,
+      {
+        messages,
+        maxTokens: maxTokensForWire(resolveMaxTokens(options.maxTokens, this.maxTokens)),
+        temperature: options.temperature ?? this.temperature,
+        topP: options.topP ?? this.topP,
+        thinking: options.thinking,
+        responseFormat: options.responseFormat,
+        tools: options.tools,
+        toolChoice: options.toolChoice
+      },
+      onDelta,
+      { signal: options.signal, timeoutMs: options.timeoutMs }
+    )
+  }
+
   async chat(
     message: string,
     images: string[] = [],
@@ -1015,10 +1056,22 @@ export class LLMService {
       signal?: AbortSignal
     } = {}
   ): Promise<string> {
+    const messages = buildMessages(message, readImages(images), this.systemPrompt)
+    const remote = this.activeRemoteTextModel()
+    if (remote) {
+      return (
+        await this.completeRemote(remote, messages, () => {}, {
+          timeoutMs,
+          maxTokens,
+          temperature: opts.temperature,
+          signal: opts.signal,
+          responseFormat: opts.responseFormat
+        })
+      ).content
+    }
     await this.beginGeneration()
     try {
       this.assertImageInputSupported(images)
-      const messages = buildMessages(message, readImages(images), this.systemPrompt)
       return await this.completeMessages(messages, timeoutMs, maxTokens, opts)
     } finally {
       this.finishGeneration()
@@ -1031,12 +1084,29 @@ export class LLMService {
     timeoutMs = 300000,
     maxTokens?: number,
     opts: {
+      responseFormat?: unknown
       temperature?: number
       topP?: number
+      enableThinking?: boolean
       disableThinking?: boolean
+      separateReasoning?: boolean
       signal?: AbortSignal
     } = {}
   ): Promise<string> {
+    const remote = this.activeRemoteTextModel()
+    if (remote) {
+      return (
+        await this.completeRemote(remote, messages, () => {}, {
+          timeoutMs,
+          maxTokens,
+          temperature: opts.temperature,
+          topP: opts.topP,
+          thinking: opts.enableThinking === true && opts.disableThinking !== true,
+          signal: opts.signal,
+          responseFormat: opts.responseFormat
+        })
+      ).content
+    }
     await this.beginGeneration()
     try {
       const hasImages = messages.some(
@@ -1059,7 +1129,9 @@ export class LLMService {
       responseFormat?: unknown
       temperature?: number
       topP?: number
+      enableThinking?: boolean
       disableThinking?: boolean
+      separateReasoning?: boolean
       signal?: AbortSignal
     }
   ): Promise<string> {
@@ -1076,9 +1148,18 @@ export class LLMService {
         // Grammar-constrained output: llama.cpp converts the JSON schema to a
         // GBNF grammar so the model can ONLY emit valid matching JSON.
         if (opts.responseFormat) payload.response_format = opts.responseFormat
-        // Turn off the model's reasoning channel for fast, direct output (its
-        // chain-of-thought otherwise eats the token budget and leaves content empty).
-        if (opts.disableThinking) {
+        // Specialist adapters can require inline <think> output as part of
+        // their official protocol. General models use the separated reasoning
+        // channel so a long thought does not hide the final policy answer.
+        if (opts.enableThinking !== undefined) {
+          if (opts.separateReasoning) {
+            Object.assign(payload, thinkingPayload(opts.enableThinking, this.thinkingDialect))
+          } else {
+            payload.chat_template_kwargs = { enable_thinking: opts.enableThinking }
+          }
+        } else if (opts.disableThinking) {
+          // Turn off the model's reasoning channel for fast, direct output (its
+          // chain-of-thought otherwise eats the token budget and leaves content empty).
           Object.assign(payload, thinkingPayload(false, this.thinkingDialect))
         }
         const body = JSON.stringify(payload)
@@ -1090,7 +1171,7 @@ export class LLMService {
         const raw = await this.httpPost(body, timeoutMs, opts.signal)
         const data = JSON.parse(raw) as {
           usage?: { total_tokens?: number }
-          choices?: { message?: { content?: string } }[]
+          choices?: { message?: { content?: string; reasoning_content?: string } }[]
         }
         console.log('[LLMService] LLM request completed')
         // Best-effort fleet audit: record the local model call if enrolled in a
@@ -1103,7 +1184,13 @@ export class LLMService {
         } catch {
           /* audit is never load-bearing */
         }
-        return data.choices?.[0]?.message?.content ?? ''
+        const message = data.choices?.[0]?.message
+        const content = message?.content ?? ''
+        const reasoning = message?.reasoning_content?.trim() ?? ''
+        if (opts.enableThinking && reasoning && !/<think\b[^>]*>/i.test(content)) {
+          return `<think>${reasoning}</think>\n${content}`
+        }
+        return content
       } catch (e: unknown) {
         console.error('[LLMService] Chat error:', e instanceof Error ? e.message : e)
         throw e
@@ -1124,13 +1211,23 @@ export class LLMService {
     maxTokens?: number,
     timeoutMs: number = 300000
   ): Promise<ChatStreamResult> {
+    const messages = buildMessages(message, readImages(images), this.systemPrompt)
+    const resolvedMaxTokens = resolveMaxTokens(maxTokens, this.maxTokens)
+    const remote = this.activeRemoteTextModel()
+    if (remote) {
+      const result = await this.completeRemote(remote, messages, onDelta, {
+        timeoutMs,
+        maxTokens: resolvedMaxTokens,
+        temperature: opts.temperature,
+        thinking: opts.thinking,
+        signal: opts.signal
+      })
+      return { ...result, maxTokens: resolvedMaxTokens }
+    }
     await this.beginGeneration()
     try {
       this.assertImageInputSupported(images)
       await this.ensureReady()
-
-      const messages = buildMessages(message, readImages(images), this.systemPrompt)
-      const resolvedMaxTokens = resolveMaxTokens(maxTokens, this.maxTokens)
       const payload: Record<string, unknown> = {
         messages,
         max_tokens: maxTokensForWire(resolvedMaxTokens),
@@ -1167,14 +1264,30 @@ export class LLMService {
     onDelta: (text: string, kind: 'content' | 'reasoning') => void,
     opts: {
       temperature?: number
+      topP?: number
       thinking?: boolean
       signal?: AbortSignal
       tools?: unknown[]
       toolChoice?: string
       maxTokens?: number
+      responseFormat?: unknown
     } = {},
     timeoutMs: number = 300000
   ): Promise<StreamResult> {
+    const remote = this.activeRemoteTextModel()
+    if (remote) {
+      return this.completeRemote(remote, messages, onDelta, {
+        timeoutMs,
+        maxTokens: opts.maxTokens,
+        temperature: opts.temperature,
+        topP: opts.topP,
+        thinking: opts.thinking,
+        signal: opts.signal,
+        responseFormat: opts.responseFormat,
+        tools: opts.tools,
+        toolChoice: opts.toolChoice
+      })
+    }
     await this.beginGeneration()
     try {
       await this.ensureReady()
@@ -1183,9 +1296,11 @@ export class LLMService {
         max_tokens: maxTokensForWire(resolveMaxTokens(opts.maxTokens, this.maxTokens)),
         temperature: opts.temperature ?? this.temperature,
         ...this.samplingPayload(),
+        ...(opts.topP === undefined ? {} : { top_p: opts.topP }),
         stream: true,
         ...thinkingPayload(!!opts.thinking, this.thinkingDialect)
       }
+      if (opts.responseFormat) payload.response_format = opts.responseFormat
       if (opts.tools && opts.tools.length) {
         payload.tools = opts.tools
         payload.tool_choice = opts.toolChoice ?? 'auto'

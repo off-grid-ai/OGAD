@@ -18,8 +18,8 @@ export function registerHook(name: string, fn: HookFn): void {
 
 /** Remove a registered hook. No-op when absent. Mainly for test isolation and
  *  for retiring a legacy hook name once its replacement is registered. */
-export function unregisterHook(name: string): void {
-  delete hooks[name]
+export function unregisterHook(name: string, expected?: HookFn): void {
+  if (!expected || hooks[name] === expected) delete hooks[name]
 }
 
 /** Whether a hook is currently registered. Lets a caller distinguish "no handler"

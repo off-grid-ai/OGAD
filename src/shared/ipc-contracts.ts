@@ -65,7 +65,7 @@ export interface ActiveChatStreamContract {
     | 'generating_image'
   tools?: Array<{
     name: string
-    status: 'running' | 'completed'
+    status: 'running' | 'completed' | 'failed' | 'pending'
     result?: string
   }>
 }

@@ -188,14 +188,14 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
   {
     name: 'web_task',
     description:
-      "Do a task on a website in Off Grid's own built-in browser - playing or watching a video (YouTube, etc.), searching a site and opening a result, checking in for a flight, placing an order, filling a form, or logging in. Use this whenever the goal needs to click, type, or navigate a page, not merely open it - 'play X on YouTube' or 'search Y and open the first result' is web_task, not open_url. It runs INSIDE Off Grid's browser and never touches the user's cursor, keyboard, or their own browser, so the user keeps working while it goes; it hands control back for any sign-in, one-time code, or payment. Describe the whole goal in one call.",
+      "Do a task on a website in Off Grid's own built-in browser - playing or watching a video (YouTube, etc.), searching a site and opening a result, checking in for a flight, placing an order, filling a form, or logging in. Use this whenever the goal needs to click, type, or navigate a page, not merely open it - 'play X on YouTube' or 'search Y and open the first result' is web_task, not open_url. It runs INSIDE Off Grid's browser and never touches the user's cursor, keyboard, or their own browser, so the user keeps working while it goes; it hands control back for any sign-in, one-time code, or payment. Use the full conversation. Ask the user before calling this tool only when a material fact is missing. When you call it, describe the whole goal in one call, including all known key inputs, constraints, and the point where the task must stop.",
     parameters: {
       type: 'object',
       properties: {
         goal: {
           type: 'string',
           description:
-            'The task to complete, in one sentence (e.g. "check in for my flight tomorrow")'
+            'The complete task brief, including key inputs, constraints, and the point where Web Use must stop'
         },
         url: {
           type: 'string',
@@ -219,7 +219,7 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
   {
     name: 'computer_task',
     description:
-      "Complete a task by controlling a desktop APP directly - clicking, typing, and navigating its window - for things no other tool can do (a desktop app with no web version, sharing a file through an app UI). The user watches in a supervised overlay and can stop or take over at any time; sign-ins and payments are handed back to them. Prefer web_task for anything on a website and the direct tools (calendar/reminders/mail) whenever they fit - use this only when the task genuinely needs GUI control of an installed app.",
+      'Complete a task by controlling a desktop APP directly - clicking, typing, and navigating its window - for things no other tool can do (a desktop app with no web version, sharing a file through an app UI). The user watches in a supervised overlay and can stop or take over at any time; sign-ins and payments are handed back to them. Prefer web_task for anything on a website and the direct tools (calendar/reminders/mail) whenever they fit - use this only when the task genuinely needs GUI control of an installed app.',
     parameters: {
       type: 'object',
       properties: {

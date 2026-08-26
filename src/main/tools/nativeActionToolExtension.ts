@@ -12,7 +12,7 @@
 // Reads and navigation stay inline on both paths (architecture decision 5).
 
 import { shell } from 'electron'
-import type { ToolExtension } from '../tools'
+import type { ToolContext, ToolExtension, ToolResult } from '../tools'
 import type { ProposeOutcome, TickOutcome } from '@offgrid/use'
 import { proposeActionApproval, shouldGate, type ActionApprovalRequest } from '../actions/approval'
 import { getActionsRuntime } from '../actions/use-runtime'
@@ -126,7 +126,11 @@ export class NativeActionToolExtension implements ToolExtension {
     return systemHintForPlatform(this.platform)
   }
 
-  async execute(name: string, args: Record<string, unknown>): Promise<string> {
+  async execute(
+    name: string,
+    args: Record<string, unknown>,
+    context?: ToolContext
+  ): Promise<string | ToolResult> {
     const spec = this.canHandle(name) ? findNativeToolSpec(name) : undefined
     if (!spec) {
       return `Error: unknown action ${name}`
@@ -140,7 +144,7 @@ export class NativeActionToolExtension implements ToolExtension {
       // keep the legacy path when a pro queue owns approvals.
       const engineOnly = actionType === 'web_task' || actionType === 'computer_task'
       if (actions && actionType && (engineOnly || !actions.approvalHookActive())) {
-        return this.executeViaEngine(actions, actionType, spec, args)
+        return this.executeViaEngine(actions, actionType, spec, args, context?.conversationId)
       }
       if (engineOnly) {
         return 'Error: this task needs the on-device action engine, which is not available here.'
@@ -172,7 +176,8 @@ export class NativeActionToolExtension implements ToolExtension {
     actions: ActionsPort,
     actionType: string,
     spec: NativeToolSpec,
-    args: Record<string, unknown>
+    args: Record<string, unknown>,
+    sourceRef?: string
   ): Promise<string> {
     const proposed = await actions.propose(
       {
@@ -181,7 +186,7 @@ export class NativeActionToolExtension implements ToolExtension {
         args: spec.buildArgs(args),
         risk: spec.risk
       },
-      { source: 'chat' }
+      { source: 'chat', ...(sourceRef ? { sourceRef } : {}) }
     )
     if (!proposed.accepted) {
       return `Error: the action was refused: ${proposed.reason}`

@@ -50,6 +50,7 @@ function writeDownloaded(dir: string, list: DownloadedModel[]): void {
 
 export interface DownloadedRegistryCatalogEntry {
   id: string
+  kind?: string
   files: Array<{ name: string }>
 }
 
@@ -71,7 +72,18 @@ export function reconcileDownloadedModelRegistry(
   const migrated: DownloadedModel[] = []
   for (const model of current) {
     if (model.familyId || model.packageIdentity) {
-      migrated.push(model)
+      const family = model.familyId
+        ? catalog.find((entry) => entry.id === model.familyId)
+        : undefined
+      // A model can gain a more precise catalog role after it was downloaded or transferred.
+      // Keep the legacy package identity stable so synced references do not break, but repair the
+      // local role used by catalog grouping and activation gates.
+      if (family?.kind && model.kind !== family.kind) {
+        migrated.push({ ...model, kind: family.kind })
+        changed = true
+      } else {
+        migrated.push(model)
+      }
       continue
     }
     const family = catalog.find((entry) => entry.id === model.id)

@@ -11,8 +11,13 @@ export function persistAxObservation(
   appendComputerUseStepDetail(taskId, title, {
     stepId: String(observation.step),
     at: Date.now(),
+    phase: observation.result === 'error' ? 'failed' : 'checking',
     modelInput: observation.prompt,
     retrievedFacts: observation.retrievedFacts,
+    decisionSummary:
+      observation.parsedAction === undefined
+        ? observation.result
+        : JSON.stringify(observation.parsedAction),
     rawResponse: observation.rawResponse,
     mappedAction:
       observation.parsedAction === undefined ? undefined : JSON.stringify(observation.parsedAction),

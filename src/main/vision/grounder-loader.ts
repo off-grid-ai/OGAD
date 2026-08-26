@@ -1,9 +1,9 @@
 /**
- * On-demand grounder swap (R5 tier 3): load a GUI-grounding model (UI-TARS) for a
+ * On-demand grounder swap (R5 tier 3): load the selected Computer Use model for a
  * computer_task, then restore the chat model. There is ONE llama-server (one
- * `llm` singleton), so "load the grounder" means reload it with UI-TARS's gguf +
- * mmproj and reload gemma back after - the image-gen evict pattern, applied to
- * the model itself.
+ * `llm` singleton), so "load the grounder" means reload it with the model's GGUF
+ * and projector, then reload the chat model - the image-gen evict pattern, applied
+ * to the model itself.
  *
  * This is the EXPENSIVE tier: a multi-GB reload each way (~seconds), and the chat
  * model is unavailable while the grounder is loaded. The router only reaches here
@@ -16,19 +16,29 @@
  * coverage; the A/B run exercises it.
  */
 import { llm } from '../llm'
-import { getActiveModel, setActiveModel } from '../models-manager'
+import {
+  getActiveModel,
+  listInstalled,
+  loadComputerUseModel,
+  setActiveModel
+} from '../models-manager'
+import { getActiveModal } from '../active-models'
 import { isGrounderActive } from './vision-model-notice'
-import { installedDownloadedIds } from '../downloaded-models'
 import { resolveGrounderPlan } from './grounder-plan'
+import { runRestoredModelSwap } from './grounder-swap'
+import { getComputerUseSettings } from '../computer-use-settings'
+import { getActiveRemoteVisionServer } from './remote-vision-server'
 
-/** The grounder we swap in. Catalogued (grounder: true); its weights + mmproj
- *  must be downloaded (they are, for the A/B). */
+/** Migration default for people who used computer tasks before the Computer Use catalog existed. */
 export const GROUNDER_MODEL_ID = 'mradermacher/UI-TARS-1.5-7B-GGUF'
 
-/** True when the dedicated grounder's files are actually on disk - the app's own
- *  installed-model check (the same list the Models screen shows as installed). */
-function grounderInstalled(): boolean {
-  return installedDownloadedIds(llm.getModelsDir()).includes(GROUNDER_MODEL_ID)
+/** The saved Computer Use choice, with the established UI-TARS model as the migration default. */
+function selectedGrounderModelId(): string {
+  return getActiveModal('computer_use') ?? GROUNDER_MODEL_ID
+}
+
+async function grounderInstalled(modelId: string): Promise<boolean> {
+  return (await listInstalled()).includes(modelId)
 }
 
 export interface GrounderTiming {
@@ -44,10 +54,19 @@ export function grounderSwapOverheadMs(t: GrounderTiming): number {
   return t.swapInMs + t.swapOutMs
 }
 
-async function loadModel(id: string): Promise<void> {
-  await setActiveModel(id)
+async function loadGrounder(id: string): Promise<void> {
+  const loaded = await loadComputerUseModel(id)
+  if (!loaded.success) throw new Error(loaded.error ?? 'The Computer Use model could not load.')
   // reloadModel() (inside setActiveModel) is lazy; restart() forces the new
   // server up NOW so the load cost lands in the swap phase, not the first step.
+  await llm.restart()
+}
+
+async function restoreChatModel(previousId: string): Promise<void> {
+  const restored = await setActiveModel(previousId)
+  if (!restored.success) {
+    throw new Error(restored.error ?? 'The chat model could not be restored.')
+  }
   await llm.restart()
 }
 
@@ -60,41 +79,55 @@ export async function withGrounder<T>(
   task: () => Promise<T>,
   now: () => number = Date.now
 ): Promise<{ result: T; timing: GrounderTiming }> {
-  const alreadyGrounder = isGrounderActive(llm.activeModelInfo())
-  const plan = resolveGrounderPlan(alreadyGrounder, grounderInstalled())
+  if (
+    getActiveRemoteVisionServer() ||
+    getComputerUseSettings().modelStrategy === 'same_as_chat'
+  ) {
+    const startRun = now()
+    const result = await task()
+    return {
+      result,
+      timing: { skippedSwap: true, swapInMs: 0, runMs: now() - startRun, swapOutMs: 0 }
+    }
+  }
+  const grounderId = selectedGrounderModelId()
+  const active = llm.activeModelInfo()
+  const alreadyGrounder = active?.id === grounderId && isGrounderActive(active)
+  const plan = resolveGrounderPlan(alreadyGrounder, await grounderInstalled(grounderId))
   if (plan === 'fallback-active-model') {
     console.warn(
-      `[grounder] ${GROUNDER_MODEL_ID} is not downloaded - running computer use on the active model; grounding may be less accurate. Download the grounder for precise clicks.`
+      `[grounder] ${grounderId} is not downloaded - running computer use on the active model; grounding may be less accurate. Download the grounder for precise clicks.`
     )
   }
   const willSwap = plan === 'swap-in-grounder'
   const previousId = getActiveModel()
 
-  let swapInMs = 0
-  if (willSwap) {
-    const t0 = now()
-    await loadModel(GROUNDER_MODEL_ID)
-    swapInMs = now() - t0
-  }
-
-  const startRun = now()
-  let runMs = 0
-  let swapOutMs = 0
-  try {
+  if (!willSwap) {
+    const startRun = now()
     const result = await task()
-    runMs = now() - startRun
     return {
       result,
-      timing: { skippedSwap: !willSwap, swapInMs, runMs, swapOutMs }
-    }
-  } finally {
-    if (runMs === 0) {
-      runMs = now() - startRun // task threw - still attribute the run time
-    }
-    if (willSwap && previousId) {
-      const t2 = now()
-      await loadModel(previousId)
-      swapOutMs = now() - t2
+      timing: { skippedSwap: true, swapInMs: 0, runMs: now() - startRun, swapOutMs: 0 }
     }
   }
+
+  if (!previousId) {
+    const swapStartedAt = now()
+    await loadGrounder(grounderId)
+    const swapInMs = now() - swapStartedAt
+    const runStartedAt = now()
+    const result = await task()
+    return {
+      result,
+      timing: { skippedSwap: false, swapInMs, runMs: now() - runStartedAt, swapOutMs: 0 }
+    }
+  }
+
+  const swapped = await runRestoredModelSwap({
+    swapIn: () => loadGrounder(grounderId),
+    run: task,
+    restore: () => restoreChatModel(previousId),
+    now
+  })
+  return { result: swapped.result, timing: { skippedSwap: false, ...swapped.timing } }
 }

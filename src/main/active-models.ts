@@ -1,12 +1,12 @@
 // Per-modality active-model selection. The text/vision chat LLM is switched via
-// active-model.json (it reloads llama-server); the other modalities — image,
-// speech (TTS), transcription (STT) — are stateless per-call runtimes, so we just
-// record the chosen model id here and each runtime reads it (falling back to its
-// own heuristic when nothing is chosen). One file: active-modalities.json.
+// active-model.json (it reloads llama-server); the other modalities - computer use,
+// image, speech (TTS), transcription (STT) - record the chosen model id here. Each
+// runtime reads its selection when work starts. One file: active-modalities.json.
 import fs from 'fs'
 import path from 'path'
 import { modelsDir } from './runtime-env'
 import type { Modality } from './active-models-logic'
+import { CORE_SYNC_ENTITIES, emitSyncMutation } from './sync-mutation'
 export { isModelActive, modalityForKind, type Modality } from './active-models-logic'
 
 export class ActiveModalityStore {
@@ -42,6 +42,7 @@ export class ActiveModalityStore {
   all(): Record<Modality, string | null> {
     const all = this.readAll()
     return {
+      computer_use: all.computer_use ?? null,
       image: all.image ?? null,
       speech: all.speech ?? null,
       transcription: all.transcription ?? null
@@ -56,8 +57,20 @@ export function getActiveModal(kind: Modality): string | null {
   return activeModalStore.get(kind)
 }
 
-export function setActiveModal(kind: Modality, id: string | null): void {
+export function setActiveModal(
+  kind: Modality,
+  id: string | null,
+  options: { emitSync?: boolean } = {}
+): void {
   activeModalStore.set(kind, id)
+  if (kind === 'computer_use' && options.emitSync !== false) {
+    emitSyncMutation({
+      entity: CORE_SYNC_ENTITIES.modelSetting,
+      entityId: 'computerUseModelId',
+      kind: 'put',
+      fields: { value: id }
+    })
+  }
 }
 
 export function getAllActiveModals(): Record<Modality, string | null> {

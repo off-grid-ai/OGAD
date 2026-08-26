@@ -5,17 +5,17 @@
  *
  *  - the kill switch (Esc): halts immediately and for good. A halted session
  *    never actuates again - the run is over.
- *  - pause on user input: the moment the user touches the mouse or keyboard,
- *    the session pauses so a human and the agent are never fighting for the
- *    cursor. It resumes only when the user explicitly says so.
- *  - the step budget: a hard cap on actions, so a confused model cannot flail
- *    on the live desktop indefinitely.
+ *  - explicit Pause or Take Over: the session pauses only after a visible
+ *    command. Mouse movement does not change the task state.
+ *  - an optional policy limit: callers can inject a finite cap when a managed
+ *    environment requires one. Normal user runs have no arbitrary action cap.
  *
  * Pure state - the native input hooks and the overlay live in the host and
  * call these transitions - so the priority rules are unit-tested without a
  * screen. canActuate() is the one gate the loop checks before every action;
  * if it is false, nothing is dispatched.
  */
+import { DEFAULT_COMPUTER_USE_STEP_BUDGET } from '../../shared/computer-use-limits'
 
 export type GuardState = 'running' | 'paused' | 'halted'
 
@@ -29,17 +29,19 @@ export class VisionGuard {
   private state: GuardState = 'running'
   private steps = 0
   private reason = ''
+  private readonly waiters = new Set<(snapshot: GuardSnapshot) => void>()
 
-  constructor(private readonly maxSteps: number = 40) {}
+  constructor(private readonly maxSteps: number = DEFAULT_COMPUTER_USE_STEP_BUDGET) {}
 
   /** The kill switch. Terminal: once halted, no transition brings it back. */
   halt(reason = 'stopped with Esc'): void {
     this.state = 'halted'
     this.reason = reason
+    this.resolveWaiters()
   }
 
-  /** User touched the mouse/keyboard - stop actuating and wait for them. A
-   *  halted session stays halted (the kill switch outranks a pause). */
+  /** A visible Pause or Take Over command stops actuation. A halted session
+   *  stays halted because the kill switch outranks a pause. */
   pauseForUser(reason = 'you took over'): void {
     if (this.state !== 'halted') {
       this.state = 'paused'
@@ -53,7 +55,14 @@ export class VisionGuard {
     if (this.state === 'paused') {
       this.state = 'running'
       this.reason = ''
+      this.resolveWaiters()
     }
+  }
+
+  /** Park the task loop while the user has control. Stop also releases the wait. */
+  waitUntilRunnable(): Promise<GuardSnapshot> {
+    if (this.state !== 'paused') return Promise.resolve(this.snapshot())
+    return new Promise((resolve) => this.waiters.add(resolve))
   }
 
   /** Call before dispatching each action. Returns false (and does not count a
@@ -87,5 +96,11 @@ export class VisionGuard {
 
   snapshot(): GuardSnapshot {
     return { state: this.state, steps: this.steps, reason: this.reason }
+  }
+
+  private resolveWaiters(): void {
+    const snapshot = this.snapshot()
+    for (const resolve of this.waiters) resolve(snapshot)
+    this.waiters.clear()
   }
 }

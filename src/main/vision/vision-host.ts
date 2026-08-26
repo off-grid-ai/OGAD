@@ -33,6 +33,7 @@ import { loadActuation, actuationAvailable, type ActuationPort } from '../input/
 import { mapActionToScreen, type DisplayGeometry } from '../input/coordinate-mapping'
 import {
   appendComputerUseStepDetail,
+  getTaskExecutionDevice,
   recordTaskRun,
   taskScreenshotPath
 } from '../tasks/task-history'
@@ -50,9 +51,14 @@ import {
 } from './screenshot-geometry'
 import { recentVisualFacts } from './visual-context'
 import { resolveVisionModelAdapter } from './model-adapters'
-import type { VisionModelAdapter, VisionPolicyRequest } from './model-adapters/types'
-import { serializeVisionPolicyMessages } from './model-adapters/model-input'
-import { imageMime } from '../llm/chat-payload'
+import type { VisionModelAdapter } from './model-adapters/types'
+import { retryPlanningGoal, type TaskRetryCheckpoint } from '../tasks/task-retry'
+import { dispatchVisionAction } from './vision-actuation'
+import { encodeTaskPhase } from '../../shared/task-execution-plan'
+import { prepareTaskExecutionPlan } from '../tasks/task-execution-plan-service'
+import { registerTaskGuideHandler } from '../tasks/task-guide'
+import { createVisionGrounder } from './vision-policy-runner'
+import { resolveModelIdentity } from '../models-manager'
 
 export type { ActuationPort }
 
@@ -68,35 +74,21 @@ export function visionActuationAvailable(): boolean {
 // actuate), so reusing one path is race-free and keeps the disk clean.
 const CAPTURE_FILE = path.join(os.tmpdir(), 'offgrid-vision-capture.png')
 
-async function runPolicyRequest(request: VisionPolicyRequest): Promise<string> {
-  let lastError: unknown
-  for (let attempt = 1; attempt <= request.maxAttempts; attempt += 1) {
-    try {
-      return await llm.chatMessages(request.messages, request.timeoutMs, request.maxTokens, {
-        temperature: request.temperature,
-        topP: request.topP,
-        disableThinking: request.disableThinking
-      })
-    } catch (error) {
-      lastError = error
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error('Computer-use model request failed.')
-}
-
 function makeScreen(input: {
   actuation: ActuationPort
   taskId: string
+  journeyId: string
   goal: string
   settings: ComputerUseSettings
   screenshotResizeFactor?: number
 }): VisionScreen {
-  const { actuation, taskId, goal, settings, screenshotResizeFactor } = input
+  const { actuation, taskId, journeyId, goal, settings, screenshotResizeFactor } = input
   // The display the last screenshot was taken from. Its scaleFactor + origin move
   // the grounder's DIP coordinates into the actuation space (physical px on
   // Windows). capture() always runs before actuate() in the vision loop.
   let capturedDisplay: DisplayGeometry | null = null
   let capturedGeometry: ScreenshotGeometry | null = null
+  let captureNumber = 0
   return {
     async capture() {
       const point = screen.getCursorScreenPoint()
@@ -165,13 +157,17 @@ function makeScreen(input: {
         scale: Math.min(encodedSize.width / width, encodedSize.height / height)
       }
       fs.writeFileSync(CAPTURE_FILE, png)
-      const savedScreenshot = taskScreenshotPath(taskId)
+      captureNumber += 1
+      const savedScreenshot = taskScreenshotPath(taskId, captureNumber)
       fs.writeFileSync(savedScreenshot, png)
+      const executionDevice = getTaskExecutionDevice()
       recordTaskRun({
         taskId,
+        journeyId,
         kind: 'computer_use',
         title: goal,
-        screenshotPath: savedScreenshot
+        screenshotPath: savedScreenshot,
+        screenshotDeviceId: executionDevice.id
       })
       // Return the file path - the grounder reads it from disk.
       return {
@@ -192,68 +188,9 @@ function makeScreen(input: {
       if (!mapped) {
         throw new Error('model returned a point outside the current screenshot')
       }
-      await dispatch(actuation, mapped)
-      return { mappedAction: mapped }
+      const result = await dispatchVisionAction({ actuation, action: mapped, goal })
+      return result.handoff ? result : { mappedAction: mapped }
     }
-  }
-}
-
-async function dispatch(actuation: ActuationPort, action: VisionAction): Promise<void> {
-  switch (action.type) {
-    case 'click':
-      await actuation.moveMouse(action.point.x, action.point.y)
-      await actuation.click('left', 1)
-      return
-    case 'double_click':
-      await actuation.moveMouse(action.point.x, action.point.y)
-      await actuation.click('left', 2)
-      return
-    case 'right_click':
-      await actuation.moveMouse(action.point.x, action.point.y)
-      await actuation.click('right', 1)
-      return
-    case 'middle_click':
-      await actuation.moveMouse(action.point.x, action.point.y)
-      await actuation.click('middle', 1)
-      return
-    case 'triple_click':
-      await actuation.moveMouse(action.point.x, action.point.y)
-      await actuation.click('left', 3)
-      return
-    case 'drag':
-      await actuation.moveMouse(action.from.x, action.from.y)
-      await actuation.dragTo(action.to.x, action.to.y)
-      return
-    case 'drag_to':
-      await actuation.dragTo(action.to.x, action.to.y)
-      return
-    case 'mouse_move':
-      await actuation.moveMouse(action.point.x, action.point.y)
-      return
-    case 'type':
-      await actuation.typeText(action.content)
-      return
-    case 'hotkey':
-      await actuation.tapKeys(action.keys)
-      return
-    case 'press':
-      await actuation.pressKeys(action.keys)
-      return
-    case 'key_down':
-      await actuation.keyDown(action.keys)
-      return
-    case 'key_up':
-      await actuation.keyUp(action.keys)
-      return
-    case 'scroll':
-      await actuation.moveMouse(action.point.x, action.point.y)
-      await actuation.scroll(action.direction)
-      return
-    case 'scroll_by':
-      await actuation.scrollBy(action.axis, action.amount)
-      return
-    default:
-      return
   }
 }
 
@@ -276,7 +213,12 @@ function accessibilityBlock(): VisionTaskResult | null {
 }
 
 class VisionHost {
-  async runTask(goal: string, taskId: string): Promise<VisionTaskResult> {
+  async runTask(
+    goal: string,
+    taskId: string,
+    journeyId = taskId,
+    checkpoint?: TaskRetryCheckpoint
+  ): Promise<VisionTaskResult> {
     const actuation = loadActuation()
     if (!actuation) {
       return {
@@ -291,6 +233,7 @@ class VisionHost {
       return blocked
     }
     const guard = new VisionGuard()
+    const request = new AbortController()
     const settings = getComputerUseSettings()
     const activeArtifacts = llm.activeModelArtifacts()
     if (!activeArtifacts) {
@@ -312,65 +255,134 @@ class VisionHost {
         handoffs: 0
       }
     }
+    const modelIdentity = await resolveModelIdentity(activeArtifacts.id)
     const contextTokens = resolveComputerUseContextTokens(
       settings.context,
       llm.effectiveContextSize()
     )
-    const retrievedFacts = settings.retrieveOlderVisuals ? recentVisualFacts(taskId) : []
-    // The kill switch: Esc halts the run and consumes the keypress. The overlay's
+    const retrievedFacts = [
+      ...(checkpoint
+        ? [
+            `Resume checkpoint for task ${checkpoint.taskId}: ${checkpoint.steps.join('; ')}`,
+            ...(checkpoint.currentAction
+              ? [`Last attempted action: ${checkpoint.currentAction}`]
+              : []),
+            ...(checkpoint.summary ? [`Earlier attempt ended: ${checkpoint.summary}`] : [])
+          ]
+        : []),
+      ...(settings.retrieveOlderVisuals ? recentVisualFacts(taskId) : [])
+    ].slice(0, 5)
+    // The kill switch: Esc halts the run and consumes the keypress. The supervisor's
     // Stop routes to the SAME guard via the controller session.
-    globalShortcut.register('Escape', () => guard.halt('stopped with Esc'))
-    const releaseSession = registerVisionSession(guard)
+    const escapeRegistered = globalShortcut.register('Escape', () => {
+      guard.halt('stopped with Esc')
+      emitVisionState({
+        taskId,
+        journeyId,
+        goal,
+        status: 'stopped',
+        phase: 'stopped',
+        currentAction: 'Stopped with Esc'
+      })
+    })
+    const releaseSession = registerVisionSession(taskId, guard, request)
     const coordinator = getTakeoverCoordinator()
     // Model-agnostic, but honest: warn (do not block) when the loaded model is
     // not a grounder, so the user sees why a click may miss and what to load.
-    const notice = visionModelNotice(llm.activeModelInfo())
-    emitVisionState({ taskId, goal, status: 'running', ...(notice ? { notice } : {}) })
+    const notice = [
+      visionModelNotice(llm.activeModelInfo()),
+      escapeRegistered ? null : 'Esc is unavailable. Use Stop or Take Over in the task controls.'
+    ]
+      .filter((value): value is string => Boolean(value))
+      .join(' ')
+    emitVisionState({
+      taskId,
+      journeyId,
+      ...modelIdentity,
+      goal,
+      status: 'running',
+      phase: 'preparing',
+      currentStep: 0,
+      currentAction: 'Preparing local screen control',
+      ...(notice ? { notice } : {})
+    })
     showSupervisorWindow()
+    const queuedGuidance: string[] = [...(checkpoint?.guidance ?? [])]
+    const releaseGuidance = registerTaskGuideHandler(taskId, (text) => {
+      queuedGuidance.push(text)
+      return true
+    })
     try {
+      const plan =
+        checkpoint?.plan ??
+        (await prepareTaskExecutionPlan(
+          {
+            goal: retryPlanningGoal(goal, checkpoint),
+            surface: 'computer',
+            signal: request.signal
+          },
+          (marker) => emitVisionStep(taskId, marker)
+        ))
       const result = await runVisionTask(goal, {
         screen: makeScreen({
           actuation,
           taskId,
+          journeyId,
           goal,
           settings,
           screenshotResizeFactor: modelAdapter.screenshotResizeFactor
         }),
         guard,
-        ground: ({ goal: currentGoal, image, history, retrievedFacts: facts, policyHistory }) => {
-          const request = modelAdapter.buildRequest({
-            goal: currentGoal,
-            currentScreenshotDataUrl: `data:${imageMime(image)};base64,${fs.readFileSync(image).toString('base64')}`,
-            history: policyHistory,
-            recentSteps: history,
-            olderVisualFacts: facts
-          })
-          return runPolicyRequest(request).then((response) => ({
-            response,
-            modelInput: serializeVisionPolicyMessages(request.messages)
-          }))
-        },
+        ground: createVisionGrounder(modelAdapter),
         parseResponse: modelAdapter.parseResponse,
         waitForUser: async (why) => {
           await coordinator.waitForTakeover(taskId, why)
         },
         onStep: (note) => emitVisionStep(taskId, note),
+        plan,
+        onPhase: (phaseId) => emitVisionStep(taskId, encodeTaskPhase(phaseId)),
+        takeGuidance: () => queuedGuidance.splice(0),
+        onProgress: (progress) => {
+          emitVisionState({
+            taskId,
+            journeyId,
+            goal,
+            status:
+              progress.phase === 'paused'
+                ? 'paused'
+                : progress.phase === 'stopped'
+                  ? 'stopped'
+                  : 'running',
+            phase: progress.phase,
+            currentStep: progress.step,
+            currentAction: progress.action,
+            ...(notice ? { notice } : {})
+          })
+        },
         contextTokens,
         checkpointInterval: settings.checkpointInterval,
+        visualHistoryFrames: settings.visualHistoryFrames,
         retrievedFacts,
-        onCheckpoint: (_step, steps) => {
-          recordTaskRun({ taskId, kind: 'computer_use', title: goal, steps: [...steps] })
+        signal: request.signal,
+        onCheckpoint: () => {
+          // Action-loop checkpoints do not include plan and phase markers.
+          // Keep the canonical trace already stored by emitVisionStep.
+          recordTaskRun({ taskId, kind: 'computer_use', title: goal })
         },
         onObservation: (observation) => {
           const geometry = observation.screenshot.metadata?.geometry
           appendComputerUseStepDetail(taskId, goal, {
             stepId: String(observation.step),
             at: Date.now(),
+            phase: observation.phase,
             modelInput: observation.promptContext,
             ...(geometry
               ? {
                   screenshot: {
                     path: observation.screenshot.metadata?.path,
+                    availability: 'device_local',
+                    executionDeviceId: getTaskExecutionDevice().id,
+                    executionDeviceName: getTaskExecutionDevice().name,
                     originalWidth: geometry.sourceBounds.width,
                     originalHeight: geometry.sourceBounds.height,
                     inferenceWidth: geometry.encodedSize.width,
@@ -379,6 +391,8 @@ class VisionHost {
                 }
               : {}),
             retrievedFacts: observation.retrievedFacts,
+            decisionSummary: observation.decisionSummary,
+            decisionRationale: observation.decisionRationale,
             rawResponse: observation.rawResponse,
             mappedAction:
               observation.failedActionIndex !== undefined
@@ -407,13 +421,33 @@ class VisionHost {
       })
       emitVisionState({
         taskId,
+        journeyId,
         goal,
-        status: result.ok ? 'done' : 'failed',
+        status: guard.isHalted ? 'stopped' : result.ok ? 'done' : 'failed',
+        phase: guard.isHalted ? 'stopped' : result.ok ? 'complete' : 'failed',
+        currentAction: result.summary,
         summary: result.summary
       })
       return result
+    } catch (error) {
+      const summary = guard.isHalted
+        ? guard.snapshot().reason || 'Stopped'
+        : error instanceof Error
+          ? error.message
+          : 'Computer Use failed.'
+      emitVisionState({
+        taskId,
+        journeyId,
+        goal,
+        status: guard.isHalted ? 'stopped' : 'failed',
+        phase: guard.isHalted ? 'stopped' : 'failed',
+        currentAction: summary,
+        summary
+      })
+      return { ok: false, summary, steps: [], handoffs: 0 }
     } finally {
-      globalShortcut.unregister('Escape')
+      releaseGuidance()
+      if (escapeRegistered) globalShortcut.unregister('Escape')
       releaseSession()
       hideSupervisorWindow()
     }

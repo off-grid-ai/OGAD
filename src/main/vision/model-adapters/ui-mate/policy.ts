@@ -27,8 +27,8 @@ export const UI_MATE_ACTIONS = [
   'finished'
 ] as const
 
-export type UIMateActionName = (typeof UI_MATE_ACTIONS)[number]
-export type UIMateControl = 'WAIT' | 'DONE' | 'FAIL'
+export type UIMateActionName = (typeof UI_MATE_ACTIONS)[number] | 'subtask_complete'
+export type UIMateControl = 'WAIT' | 'USER' | 'DONE' | 'FAIL'
 
 export const UI_MATE_GENERATION_CONFIG = {
   maxTokens: 16_384,
@@ -37,6 +37,7 @@ export const UI_MATE_GENERATION_CONFIG = {
 } as const
 
 export const UI_MATE_MAX_HISTORY_STEPS = 100
+export const UI_MATE_IMAGES_TO_KEEP = 5
 
 export interface UIMateAction {
   action: UIMateActionName
@@ -51,6 +52,7 @@ export interface UIMateAction {
 
 export interface UIMateParsedResponse {
   actionText: string
+  decisionRationale?: string
   actions: UIMateAction[]
   control: UIMateControl | null
   error?: string
@@ -61,6 +63,8 @@ export interface UIMateHistoryStep {
   response: string
   /** The short action text parsed from the response. */
   actionText: string
+  /** Retain only the recent visual window, as the official UI-Mate harness does. */
+  screenshotDataUrl?: string
 }
 
 export type UIMateContentBlock =
@@ -222,6 +226,12 @@ Rules:
 - Do not output anything else outside those parts.
 - If finishing, use action=finished in the tool call. If the task is infeasible, finish with status=failure.`
 
+const UI_MATE_WORKFLOW_EXTENSION = `# Execution-plan extension
+
+When the current milestone is visibly complete, return the normal response format with this tool call:
+<tool_call><function=computer_use><parameter=action>subtask_complete</parameter></function></tool_call>
+Do not mark a milestone complete before its result is visible in the screenshot.`
+
 function instructionText(
   instruction: string,
   previousHistory: readonly UIMateHistoryStep[]
@@ -232,64 +242,73 @@ function instructionText(
   return `\nPlease generate the next move according to the UI screenshot, instruction and previous actions.\n\nInstruction: ${instruction}\n\nPrevious actions:\n${previousActions}`
 }
 
-/**
- * Build UI-Mate messages with one and only one image: the current screenshot.
- * Prior screenshots use the official collapse marker. Prior model replies keep
- * the official compact response form.
- */
+/** Build the official UI-Mate trajectory: instruction + first screenshot,
+ * assistant action, then screenshot tool responses. The newest five images stay
+ * available and older visual turns collapse to the official marker. */
 export function buildUIMateMessages(input: BuildUIMateMessagesInput): UIMateMessage[] {
   const history = input.history ?? []
   const totalSteps = history.length + 1
   const startStep = Math.max(1, totalSteps - UI_MATE_MAX_HISTORY_STEPS)
   const priorHistory = history.slice(0, startStep - 1)
   const retainedHistory = history.slice(startStep - 1)
+  const usesExecutionPlan =
+    /(?:Execution plan|Current execution plan and verified progress):/i.test(input.instruction)
   const messages: UIMateMessage[] = [
-    { role: 'system', content: [{ type: 'text', text: UI_MATE_SYSTEM_PROMPT }] }
+    {
+      role: 'system',
+      content: [
+        {
+          type: 'text',
+          text: usesExecutionPlan
+            ? `${UI_MATE_SYSTEM_PROMPT}\n\n${UI_MATE_WORKFLOW_EXTENSION}`
+            : UI_MATE_SYSTEM_PROMPT
+        }
+      ]
+    }
   ]
 
-  if (retainedHistory.length > 0) {
-    messages.push({
-      role: 'user',
-      content: [{ type: 'text', text: instructionText(input.instruction, priorHistory) }]
-    })
-    for (const [index, step] of retainedHistory.entries()) {
+  const firstRetainedImage = Math.max(0, retainedHistory.length - UI_MATE_IMAGES_TO_KEEP)
+  const turns = [
+    ...retainedHistory.map((step, index) => ({
+      screenshot: index >= firstRetainedImage ? step.screenshotDataUrl : undefined,
+      step
+    })),
+    { screenshot: input.currentScreenshotDataUrl, step: null }
+  ]
+  for (const [index, turn] of turns.entries()) {
+    const image = turn.screenshot
+      ? ({ type: 'image_url', image_url: { url: turn.screenshot } } as const)
+      : null
+    const content: UIMateContentBlock[] =
+      index === 0
+        ? [
+            ...(image ? [image] : []),
+            { type: 'text', text: instructionText(input.instruction, priorHistory) }
+          ]
+        : image
+          ? [
+              { type: 'text', text: '<tool_response>\n' },
+              image,
+              { type: 'text', text: '\n</tool_response>' }
+            ]
+          : [
+              {
+                type: 'text',
+                text: `<tool_response>\n${COLLAPSED_SCREENSHOT_TEXT}\n</tool_response>`
+              }
+            ]
+    messages.push({ role: 'user', content })
+    if (turn.step) {
       messages.push({
         role: 'assistant',
         content: [
           {
             type: 'text',
-            text: compactUIMateResponse(step.response, input.includeThinkingInHistory ?? true)
+            text: compactUIMateResponse(turn.step.response, input.includeThinkingInHistory ?? true)
           }
         ]
       })
-      if (index < retainedHistory.length - 1) {
-        messages.push({
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: `<tool_response>\n${COLLAPSED_SCREENSHOT_TEXT}\n</tool_response>`
-            }
-          ]
-        })
-      }
     }
-    messages.push({
-      role: 'user',
-      content: [
-        { type: 'text', text: '<tool_response>\n' },
-        { type: 'image_url', image_url: { url: input.currentScreenshotDataUrl } },
-        { type: 'text', text: '\n</tool_response>' }
-      ]
-    })
-  } else {
-    messages.push({
-      role: 'user',
-      content: [
-        { type: 'image_url', image_url: { url: input.currentScreenshotDataUrl } },
-        { type: 'text', text: instructionText(input.instruction, priorHistory) }
-      ]
-    })
   }
 
   return messages
@@ -303,6 +322,40 @@ export function compactUIMateResponse(response: string, includeThinking = false)
 
 function actionText(response: string): string {
   return response.match(/<action>\s*([\s\S]*?)\s*<\/action>/i)?.[1]?.trim() ?? ''
+}
+
+const MAX_DECISION_RATIONALE_LENGTH = 320
+const SENSITIVE_RATIONALE_PATTERNS: ReadonlyArray<[RegExp, string]> = [
+  [/\bsk-[A-Za-z0-9_-]{12,}\b/g, '[redacted]'],
+  [
+    /\b(api[_-]?key|access[_-]?token|authorization|password|secret)\s*[:=]\s*(?:Bearer\s+)?[^\s,;.!?]+/gi,
+    '$1=[redacted]'
+  ],
+  [/\bBearer\s+[A-Za-z0-9._~+/-]+=*\b/gi, 'Bearer [redacted]'],
+  [
+    /\b(type|enter|paste)(\s+(?:the\s+)?(?:text|value|password|code))?\s+["'][^"']+["']/gi,
+    '$1 [redacted]'
+  ]
+]
+
+/** Convert UI-Mate's explicit thought block into bounded task evidence.
+ * The full thought remains model-only; callers receive at most two redacted sentences. */
+export function summarizeUIMateThinking(response: string): string | undefined {
+  const thought = response.match(/<think\b[^>]*>\s*([\s\S]*?)\s*<\/think>/i)?.[1]
+  if (!thought) return undefined
+  const plain = thought
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!plain) return undefined
+  const redacted = SENSITIVE_RATIONALE_PATTERNS.reduce(
+    (value, [pattern, replacement]) => value.replace(pattern, replacement),
+    plain
+  )
+  const concise = redacted.match(/.*?[.!?](?:\s+.*?[.!?])?(?=\s|$)/)?.[0] ?? redacted
+  return concise.length > MAX_DECISION_RATIONALE_LENGTH
+    ? `${concise.slice(0, MAX_DECISION_RATIONALE_LENGTH - 1).trimEnd()}…`
+    : concise
 }
 
 function toolCalls(response: string): Array<Record<string, unknown>> {
@@ -333,7 +386,10 @@ function parseParameter(raw: string): unknown {
 }
 
 function isActionName(value: unknown): value is UIMateActionName {
-  return typeof value === 'string' && (UI_MATE_ACTIONS as readonly string[]).includes(value)
+  return (
+    typeof value === 'string' &&
+    (value === 'subtask_complete' || (UI_MATE_ACTIONS as readonly string[]).includes(value))
+  )
 }
 
 function normalizedCoordinate(
@@ -345,6 +401,7 @@ function normalizedCoordinate(
   const x = Number(value[0])
   const y = Number(value[1])
   if (!Number.isFinite(x) || !Number.isFinite(y)) return undefined
+  if (x < 0 || x > 999 || y < 0 || y > 999) return undefined
   return [Math.trunc((x * width) / 999), Math.trunc((y * height) / 999)]
 }
 
@@ -354,6 +411,20 @@ function parsedAction(
 ): UIMateAction | null {
   if (!isActionName(call.action)) return null
   const coordinate = normalizedCoordinate(call.coordinate, viewport.width, viewport.height)
+  if (
+    [
+      'left_click',
+      'right_click',
+      'middle_click',
+      'double_click',
+      'triple_click',
+      'drag',
+      'mouse_move'
+    ].includes(call.action) &&
+    !coordinate
+  ) {
+    return null
+  }
   const keys = parsedKeys(call.action, call.keys)
   const pixels = Number(call.pixels)
   const time = Number(call.time)
@@ -397,125 +468,59 @@ function parsedKeys(action: UIMateActionName, raw: unknown): string[] | undefine
     : undefined
 }
 
-const INFEASIBLE_LITERALS = [
-  'not possible',
-  'impossible',
-  'not feasible',
-  'cannot be completed',
-  "can't be completed",
-  'cannot be done',
-  'cannot complete',
-  "can't complete",
-  'unable to complete',
-  'cannot do this task',
-  "can't do this task",
-  'cannot complete this task as described',
-  'cannot be completed as specified',
-  "can't be completed as specified",
-  'not available in your country',
-  'not available',
-  'unavailable',
-  'not supported',
-  'does not support',
-  "doesn't support",
-  'cannot natively',
-  'does not have a built-in',
-  "doesn't have a built-in",
-  'does not include',
-  'is not among the natively built-in',
-  'will fall back to english',
-  'requires the official',
-  'no bluetooth found',
-  'plug in a dongle',
-  'folder is empty',
-  'downloads folder is empty',
-  'do not have the credentials',
-  "don't have the credentials",
-  'do not have the account credentials',
-  "don't have the account credentials",
-  "need the user's google account credentials",
-  'requires a language pack extension',
-  'requires email verification',
-  'requires a sign-up',
-  'requires sign-up',
-  'requires google account credentials',
-  'requires a google account',
-  'sign in to the google account',
-  'drm-protected',
-  'drm protection',
-  'cannot directly play',
-  'no legitimate way',
-  'requires a plugin',
-  'requires an extension',
-  'requires extension',
-  'requires plugin',
-  'requires a valid account',
-  'requires purchase',
-  'requires a purchased',
-  'no valid account',
-  'hidden audio',
-  'could you clarify'
-] as const
-
-const INFEASIBLE_REGEXES = [
-  /\bthere is no [a-z0-9 _-]+\b/i,
-  /\bno [a-z0-9 _-]+ in [a-z0-9 _-]+ list\b/i,
-  /\brequires? (?:an? )?(?:extension|plugin|account|credentials|hardware|language pack)\b/i,
-  /\bneed(?:s)? (?:an? )?(?:extension|plugin|account|credentials|hardware|language pack)\b/i,
-  /\b(?:without|no) (?:extensions?|plugins?|terminal|ffmpeg|other apps?).{0,120}\b(?:cannot|can't|not possible|not feasible)\b/i
-] as const
-
-export function looksLikeInfeasibleUIMateResponse(response: string): boolean {
-  const lowered = response.toLowerCase()
-  return (
-    lowered.includes('infeasible') ||
-    INFEASIBLE_LITERALS.some((literal) => lowered.includes(literal)) ||
-    INFEASIBLE_REGEXES.some((pattern) => pattern.test(lowered))
-  )
-}
-
 /** Parse one official UI-Mate XML response and scale its 0-999 coordinates. */
 export function parseUIMateResponse(
   response: string,
   viewport: { width: number; height: number }
 ): UIMateParsedResponse {
   const summary = actionText(response)
+  const decisionRationale = summarizeUIMateThinking(response)
   if (!summary) {
-    return { actionText: '', actions: [], control: 'FAIL' }
+    return { actionText: '', actions: [], control: 'FAIL', decisionRationale }
   }
   const rawCalls = toolCalls(response)
   if (rawCalls.length === 0) {
     return {
       actionText: summary,
+      decisionRationale,
       actions: [],
-      control: looksLikeInfeasibleUIMateResponse(response) ? 'FAIL' : 'DONE'
+      control: 'FAIL',
+      error: 'Missing computer_use tool call.'
     }
   }
   const actions = rawCalls
     .map((call) => parsedAction(call, viewport))
     .filter((action): action is UIMateAction => action !== null)
   if (actions.length !== rawCalls.length) {
-    return { actionText: summary, actions: [], control: 'FAIL', error: 'Invalid action.' }
+    return {
+      actionText: summary,
+      actions: [],
+      control: 'FAIL',
+      error: 'Invalid action.',
+      decisionRationale
+    }
   }
 
   const terminal = actions.find((action) =>
     ['wait', 'call_user', 'finished'].includes(action.action)
   )
   if (terminal?.action === 'wait')
-    return { actionText: summary, actions: [terminal], control: 'WAIT' }
+    return { actionText: summary, actions: [terminal], control: 'WAIT', decisionRationale }
   if (terminal?.action === 'call_user') {
     return {
       actionText: summary,
-      actions: [],
-      control: looksLikeInfeasibleUIMateResponse(response) ? 'FAIL' : 'DONE'
+      decisionRationale,
+      actions: [terminal],
+      control: 'USER'
     }
   }
   if (terminal?.action === 'finished') {
     return {
       actionText: summary,
+      decisionRationale,
       actions: [],
       control: terminal.status === 'success' ? 'DONE' : 'FAIL'
     }
   }
-  return { actionText: summary, actions, control: null }
+  return { actionText: summary, actions, control: null, decisionRationale }
 }

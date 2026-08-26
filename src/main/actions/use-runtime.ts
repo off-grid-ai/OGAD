@@ -35,9 +35,14 @@ import { makeBrowserRailExecutor, registerBrowserRail } from '../browser/browser
 import { getBrowserRailHost } from '../browser/browser-host'
 import { makeVisionRailExecutor, registerVisionRail } from '../vision/vision-rail'
 import { getVisionRailHost } from '../vision/vision-host'
-import { makeComputerTaskExecutor, parseForcedRail } from '../accessibility/ax-rail'
+import {
+  makeComputerTaskExecutor,
+  parseForcedRail,
+  type ComputerTaskTiers
+} from '../accessibility/ax-rail'
 import { getAxRailHost } from '../accessibility/ax-host'
 import { withGrounder } from '../vision/grounder-loader'
+import { getComputerUseSettings } from '../computer-use-settings'
 
 export interface ActionsRuntime {
   propose(
@@ -146,13 +151,21 @@ export function getActionsRuntime(): ActionsRuntime {
   // The browser rail's live host (WebContentsView + CDP + model + watched
   // pane) is created lazily on first web_task so a session that never runs one
   // pays nothing for it.
-  const browserExecute = makeBrowserRailExecutor({
-    runTask: (goal, url, taskId) => getBrowserRailHost().runTask(goal, url, taskId)
+  const rawBrowserExecute = makeBrowserRailExecutor({
+    runTask: (request) => getBrowserRailHost().runTask(request)
   })
+  const browserExecute = async (action: ActionRecord): Promise<ExecuteResult> => {
+    if (process.env.OFFGRID_GROUNDER === '0') return rawBrowserExecute(action)
+    const { result, timing } = await withGrounder(() => rawBrowserExecute(action))
+    console.log(
+      `[web-task] visual operator: skippedSwap=${timing.skippedSwap} swapInMs=${timing.swapInMs} runMs=${timing.runMs} swapOutMs=${timing.swapOutMs}`
+    )
+    return result
+  }
   // The vision rail's live host (screen capture + actuation + grounding model),
   // created lazily on first computer_task.
   const visionExecute = makeVisionRailExecutor({
-    runTask: (goal, taskId) => getVisionRailHost().runTask(goal, taskId)
+    runTask: (goal, taskId, journeyId) => getVisionRailHost().runTask(goal, taskId, journeyId)
   })
   // The grounder-vision executor: swap in UI-TARS (evict the chat model), run the
   // vision rail, restore the chat model - the tier-3 fallback. The swap/run/swap
@@ -173,14 +186,20 @@ export function getActionsRuntime(): ActionsRuntime {
   // model, most native apps), and fall through to the grounder-vision rail only
   // when AX can't see the controls. OFFGRID_COMPUTER_RAIL=ax|vision forces one
   // rail for the A/B; unset = the real tiered behaviour.
-  const computerTaskExecute = makeComputerTaskExecutor(
-    {
-      routingSnapshot: (goal) => getAxRailHost().routingSnapshot(goal),
-      runAx: (goal, taskId, app, initial) => getAxRailHost().runTask(goal, taskId, app, initial),
-      visionExecute: groundedVisionExecute
-    },
-    { forcedRail: parseForcedRail(process.env.OFFGRID_COMPUTER_RAIL) }
-  )
+  const computerTaskTiers: ComputerTaskTiers = {
+    routingSnapshot: (goal) => getAxRailHost().routingSnapshot(goal),
+    runAx: (goal, taskId, journeyId, app, initial) =>
+      getAxRailHost().runTask(goal, taskId, app, initial, journeyId),
+    visionExecute: groundedVisionExecute
+  }
+  const computerTaskExecute = (action: ActionRecord): Promise<ExecuteResult> => {
+    const selectedRail =
+      process.env.OFFGRID_COMPUTER_RAIL ??
+      (getComputerUseSettings().modelStrategy === 'separate_specialist' ? 'vision' : undefined)
+    return makeComputerTaskExecutor(computerTaskTiers, {
+      forcedRail: parseForcedRail(selectedRail)
+    })(action)
+  }
   const engine = new UseEngine({
     driver: makeUseDriver(getDB()),
     // Read-back verification reads the world back through the platform's own

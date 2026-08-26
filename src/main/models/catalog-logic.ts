@@ -31,6 +31,8 @@ export interface CatalogEntry {
   tags?: string[]
   files: CatalogFile[]
   runtime?: string
+  availability?: 'ready' | 'coming_soon'
+  availabilityNote?: string
 }
 export interface LocalModelLike {
   id: string
@@ -77,23 +79,30 @@ export function localsForCatalog(locals: LocalModelLike[], present: FilePresent)
  *  `installedIds` is the set of downloaded ids whose every file is present. */
 export function downloadedForCatalog(
   downloaded: DownloadedModelLike[],
-  installedDownloadIds: Iterable<string>
+  installedDownloadIds: Iterable<string>,
+  catalog: readonly CatalogEntry[] = []
 ): CatalogEntry[] {
   const installed = new Set(installedDownloadIds)
   return downloaded
     .filter((m) => installed.has(m.id))
-    .map((m) => ({
-      id: m.id,
-      name: m.name,
-      kind: m.kind,
-      org: 'Hugging Face',
-      tags: ['Downloaded'],
-      files: m.files.map((name) => ({
-        name,
-        url: '',
-        role: isProjectorFileName(name) ? 'mmproj' : 'primary'
-      }))
-    }))
+    .map((m) => {
+      const family = m.familyId ? catalog.find((entry) => entry.id === m.familyId) : undefined
+      return {
+        id: m.id,
+        name: family?.name ?? m.name,
+        kind: family?.kind ?? m.kind,
+        org: family?.org ?? 'Hugging Face',
+        tags: [...new Set([...(family?.tags ?? []), 'Downloaded'])],
+        ...(family?.params !== undefined ? { params: family.params } : {}),
+        ...(family?.availability ? { availability: family.availability } : {}),
+        ...(family?.availabilityNote ? { availabilityNote: family.availabilityNote } : {}),
+        files: m.files.map((name) => ({
+          name,
+          url: '',
+          role: isProjectorFileName(name) ? 'mmproj' : 'primary'
+        }))
+      }
+    })
 }
 
 /** The full merged catalog model list, in the exact live order:
@@ -114,7 +123,7 @@ export function mergeCatalog(opts: {
   )
   return [
     ...localsForCatalog(opts.locals, opts.present),
-    ...downloadedForCatalog(opts.downloaded, opts.installedDownloadedIds),
+    ...downloadedForCatalog(opts.downloaded, opts.installedDownloadedIds, opts.catalog),
     ...opts.catalog.filter((entry) => !representedFamilies.has(entry.id))
   ]
 }
@@ -326,7 +335,9 @@ export function modalityForModel(kind?: string | null): Modality | null {
 /** Whether a kind is a per-modality pick (image/speech/transcription) as opposed to
  *  the chat LLM. Mirrors the guard in setActiveModalChoice. */
 export function isModalKind(kind: string): kind is Modality {
-  return kind === 'image' || kind === 'speech' || kind === 'transcription'
+  return (
+    kind === 'computer_use' || kind === 'image' || kind === 'speech' || kind === 'transcription'
+  )
 }
 
 /** Whether a stored per-modality selection (`chosen`) refers to the model being

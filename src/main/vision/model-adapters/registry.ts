@@ -1,8 +1,13 @@
 import type { VisionModelAdapter, VisionModelArtifacts } from './types'
+import { generalVisionOperatorAdapter } from './general-vision-operator'
 import { uiMateAdapter } from './ui-mate'
 import { uiTarsAdapter } from './ui-tars'
 
-const adapters: readonly VisionModelAdapter[] = [uiMateAdapter, uiTarsAdapter]
+const adapters: readonly VisionModelAdapter[] = [
+  uiMateAdapter,
+  generalVisionOperatorAdapter,
+  uiTarsAdapter
+]
 
 /** Model-family selection is owned here; VisionHost has no parser-name branches. */
 export function resolveVisionModelAdapter(model: VisionModelArtifacts): VisionModelAdapter {

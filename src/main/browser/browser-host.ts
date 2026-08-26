@@ -18,24 +18,42 @@
  */
 import { BrowserWindow, WebContentsView, ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { llm } from '../llm'
-import { BrowserDriver, type CdpTransport } from './browser-driver'
-import { runWebTask, STEP_RESPONSE_FORMAT, type WebTaskResult } from './web-task-agent'
+import {
+  BrowserDriver,
+  DEFAULT_BROWSER_POINTER,
+  type BrowserPointerEvent,
+  type CdpTransport
+} from './browser-driver'
+import type { WebTaskResult } from './web-task-agent'
 import { getTakeoverCoordinator } from './takeover'
 import { VisionGuard } from '../vision/vision-guard'
 import { registerVisionSession } from '../vision/vision-controller'
 import { getMainWindow } from '../main-window'
-import type { BrowserRailHost } from './browser-rail'
-import { appendTaskStep, getTaskRun, recordTaskRun } from '../tasks/task-history'
+import type { BrowserRailHost, BrowserTaskRequest } from './browser-rail'
+import {
+  getTaskExecutionDevice,
+  getTaskRun,
+  recordTaskRun,
+  stopOrphanedLocalWebTask
+} from '../tasks/task-history'
 import { getDB } from '../database'
+import { registerTaskGuideHandler, TASK_GUIDANCE_TRACE } from '../tasks/task-guide'
 import { BrowserHistoryStore } from './browser-history-store'
 import { BrowserSessionStore, type BrowserSessionRecord } from './browser-session-store'
 import type {
   BrowserChromeState,
   BrowserControl,
   BrowserNavigationState,
-  BrowserTaskPointer
+  BrowserTaskPointer,
+  BrowserTaskStatus
 } from '../../shared/browser-session'
+import { fitWebUseDesktopRegion, webUseDesktopZoomFactor } from '../../shared/browser-session'
+import { encodeTaskPhase } from '../../shared/task-execution-plan'
+import { prepareTaskExecutionPlan } from '../tasks/task-execution-plan-service'
+import { retryPlanningGoal, TASK_RETRY_TRACE } from '../tasks/task-retry'
+import { resolveModelIdentity } from '../models-manager'
+import { resolveActiveBrowserVisionSelection, runBrowserVisualTask } from './browser-visual-task'
+import { BrowserJourneyRunOwners } from './browser-run-owners'
 
 function broadcast(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -80,6 +98,15 @@ export function normalizeBrowserAddress(input: string): string | null {
   return `https://www.google.com/search?q=${encodeURIComponent(value)}`
 }
 
+/** Use an address that the user wrote explicitly. This removes a full visual
+ * model round trip for simple "open example.com" tasks. */
+export function explicitBrowserAddress(goal: string): string | null {
+  const match = goal.match(
+    /\b(?:https?:\/\/)?(?:www\.)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.[a-z]{2,}(?:\/[^\s,;]*)?/i
+  )
+  return match ? normalizeBrowserAddress(match[0].replace(/[.)!?]+$/, '')) : null
+}
+
 /** Fail-closed parse of the region the renderer reports. A missing/garbage value
  *  (or a zero-size rect) means "hide" - null. */
 function parseRect(input: unknown): Rect | null {
@@ -116,6 +143,8 @@ function attachCdp(view: WebContentsView): CdpTransport {
 class BrowserHost implements BrowserRailHost {
   private readonly sessions = new BrowserSessionStore<WebContentsView>()
   private readonly history = new BrowserHistoryStore(getDB())
+  private readonly runOwners = new BrowserJourneyRunOwners()
+  private readonly taskPointers = new Map<string, BrowserPointerEvent>()
   private region: Rect | null = null
   private windowLifecycleBound = false
 
@@ -132,6 +161,22 @@ class BrowserHost implements BrowserRailHost {
       sessionId: record.sessionId,
       ...record.chrome
     } satisfies BrowserNavigationState)
+  }
+
+  private driverFor(record: BrowserSessionRecord<WebContentsView>): BrowserDriver {
+    const pointer = this.taskPointers.get(record.sessionId) ?? DEFAULT_BROWSER_POINTER
+    return new BrowserDriver(attachCdp(record.resource), undefined, {
+      onPointer: (next) => {
+        this.taskPointers.set(record.sessionId, next)
+        broadcast('browser:pointer', { sessionId: record.sessionId, ...next })
+      },
+      initialPointer: pointer
+    })
+  }
+
+  private async restoreTaskPointer(record: BrowserSessionRecord<WebContentsView>): Promise<void> {
+    if (record.kind !== 'task' || record.resource.webContents.isDestroyed()) return
+    await this.driverFor(record).ensurePointer(true)
   }
 
   private readChrome(record: BrowserSessionRecord<WebContentsView>): BrowserChromeState {
@@ -200,6 +245,8 @@ class BrowserHost implements BrowserRailHost {
 
   dispose(): void {
     this.region = null
+    this.runOwners.haltAll('browser host closed')
+    this.taskPointers.clear()
     for (const record of this.sessions.clear()) this.destroyView(record.resource)
     this.broadcastSessions()
   }
@@ -221,13 +268,17 @@ class BrowserHost implements BrowserRailHost {
       const live = this.sessions.get(record.sessionId)
       if (!live) continue
       const visible = Boolean(active && active.sessionId === live.sessionId && this.region)
-      if (visible) live.resource.setBounds(this.region ?? this.coarseBounds())
+      if (visible) {
+        const bounds = this.region ?? this.coarseBounds()
+        live.resource.setBounds(bounds)
+        live.resource.webContents.setZoomFactor(webUseDesktopZoomFactor(bounds))
+      }
       this.setViewVisible(live.resource, visible)
     }
   }
 
   setRegion(rect: Rect | null): void {
-    this.region = rect
+    this.region = rect ? fitWebUseDesktopRegion(rect) : null
     this.syncViewVisibility()
   }
 
@@ -235,6 +286,8 @@ class BrowserHost implements BrowserRailHost {
     sessionId: string
     historyId?: string
     kind: 'manual' | 'task'
+    journeyId?: string
+    parentSessionId?: string
     task?: BrowserTaskPointer
   }): BrowserSessionRecord<WebContentsView> {
     const view = new WebContentsView({
@@ -249,10 +302,16 @@ class BrowserHost implements BrowserRailHost {
     win?.contentView.addChildView(view)
     const record = this.sessions.create({ ...input, resource: view })
     const refresh = (): void => this.refreshSession(record.sessionId)
+    const refreshPointer = (): void => {
+      refresh()
+      void this.restoreTaskPointer(record)
+    }
     view.webContents.on('did-start-loading', refresh)
     view.webContents.on('did-stop-loading', refresh)
-    view.webContents.on('did-navigate', refresh)
+    view.webContents.on('did-navigate', refreshPointer)
     view.webContents.on('did-navigate-in-page', refresh)
+    view.webContents.on('dom-ready', () => void this.restoreTaskPointer(record))
+    view.webContents.on('did-finish-load', () => void this.restoreTaskPointer(record))
     view.webContents.on('page-title-updated', refresh)
     view.webContents.on('page-favicon-updated', (_event, favicons) => {
       const current = this.sessions.get(record.sessionId)
@@ -266,7 +325,7 @@ class BrowserHost implements BrowserRailHost {
     })
     view.webContents.setWindowOpenHandler(({ url }) => {
       const target = normalizeBrowserAddress(url)
-      if (target) void this.navigate(target, record.sessionId)
+      if (target) void this.openManagedPage(record, target)
       return { action: 'deny' }
     })
     if (win && !this.windowLifecycleBound) {
@@ -285,10 +344,45 @@ class BrowserHost implements BrowserRailHost {
     return record
   }
 
+  /** A site-requested page is a managed child tab. It keeps the parent's chat
+   * journey and task trace, while the + button remains the only manual-tab path. */
+  private async openManagedPage(
+    parent: BrowserSessionRecord<WebContentsView>,
+    target: string
+  ): Promise<void> {
+    const sessionId = randomUUID()
+    const child = this.createSession({
+      sessionId,
+      ...(parent.kind === 'manual' ? { historyId: sessionId } : {}),
+      kind: parent.kind,
+      journeyId: parent.journeyId,
+      parentSessionId: parent.sessionId,
+      task: parent.task
+    })
+    this.activateSession(child.sessionId)
+    try {
+      await this.loadNatively(child.resource, target)
+      this.refreshSession(child.sessionId)
+    } catch {
+      this.refreshSession(child.sessionId)
+    }
+  }
+
   newTab(): { sessionId: string } {
     const sessionId = randomUUID()
     const record = this.createSession({ sessionId, historyId: sessionId, kind: 'manual' })
     return { sessionId: record.sessionId }
+  }
+
+  /** Open a Chat link as a normal manual page. This is deliberately separate
+   * from runTask: reading a source must never start Web Use automation. */
+  async openUrl(url: string): Promise<{ sessionId: string } | null> {
+    if (!/^https?:\/\//i.test(url)) return null
+    const target = normalizeBrowserAddress(url)
+    if (!target) return null
+    const opened = this.newTab()
+    await this.navigate(target, opened.sessionId)
+    return opened
   }
 
   getSessions(): ReturnType<BrowserSessionStore<WebContentsView>['snapshot']> {
@@ -309,7 +403,7 @@ class BrowserHost implements BrowserRailHost {
     if (!record) return false
     // A running or completed agent session remains reopenable in memory. Closing
     // its tab only hides it; the durable task row remains the restart fallback.
-    if (record.kind === 'task') {
+    if (record.kind === 'task' && !record.parentSessionId) {
       this.sessions.deactivate(sessionId)
       this.syncViewVisibility()
       this.broadcastSessions()
@@ -317,6 +411,7 @@ class BrowserHost implements BrowserRailHost {
     }
     const closed = this.sessions.close(sessionId)
     if (!closed) return false
+    this.taskPointers.delete(sessionId)
     this.destroyView(closed.resource)
     this.syncViewVisibility()
     const active = this.sessions.active
@@ -377,14 +472,29 @@ class BrowserHost implements BrowserRailHost {
     if (!record && taskId) {
       const saved = getTaskRun(taskId)
       if (!saved || saved.kind !== 'web_use') return false
+      record = this.sessions.findJourney(saved.journeyId)
+      if (record?.task?.taskId === taskId) {
+        this.activateSession(record.sessionId)
+        broadcast('browser:task-state', { sessionId: record.sessionId, ...record.task })
+        return true
+      }
+      // A Chat journey can contain many tasks. Its live page belongs to the
+      // newest task pointer, so never reuse it as evidence for an older task.
+      // Historical fallback gets an isolated page keyed by task ID.
+      record = undefined
       const task: BrowserTaskPointer = {
         taskId: saved.taskId,
+        journeyId: saved.journeyId,
         goal: saved.title,
         status: saved.status === 'done' ? 'done' : 'failed',
         summary: saved.summary,
         steps: saved.steps
       }
-      record = this.createSession({ sessionId: `task:${saved.taskId}`, kind: 'task', task })
+      record = this.createSession({
+        sessionId: `history:${task.taskId}`,
+        kind: 'task',
+        task
+      })
       if (saved.lastUrl) void this.navigate(saved.lastUrl, record.sessionId)
     }
     if (!record?.task) return false
@@ -409,6 +519,11 @@ class BrowserHost implements BrowserRailHost {
     return this.history.list()
   }
 
+  stopTask(taskId: string): boolean {
+    if (this.runOwners.stop(taskId, 'stopped from the task panel')) return true
+    return stopOrphanedLocalWebTask(taskId)
+  }
+
   /** Bring the view's renderer up on the start page NATIVELY before any CDP
    *  command. A freshly-created WebContentsView has no committed frame, so the
    *  debugger has no live target and EVERY CDP command (Page.enable,
@@ -428,13 +543,16 @@ class BrowserHost implements BrowserRailHost {
     await Promise.race([load, timeout]).finally(() => clearTimeout(timer))
   }
 
-  async runTask(goal: string, url: string | undefined, taskId: string): Promise<WebTaskResult> {
-    let record = this.sessions.findTask(taskId)
+  async runTask(request: BrowserTaskRequest): Promise<WebTaskResult> {
+    const { goal, url, taskId, journeyId, checkpoint } = request
+    let record = this.sessions.findJourney(journeyId)
+    const continuingJourney = Boolean(record)
     if (!record) {
       record = this.createSession({
-        sessionId: `task:${taskId}`,
+        sessionId: `journey:${journeyId}`,
         kind: 'task',
-        task: { taskId, goal, status: 'running', steps: [] }
+        journeyId,
+        task: { taskId, journeyId, goal, status: 'running', steps: [] }
       })
     }
     this.activateSession(record.sessionId)
@@ -442,8 +560,11 @@ class BrowserHost implements BrowserRailHost {
     // A web task with no start URL would begin on a blank pane (no page to act
     // on, and snapshotting about:blank can hang) - default to a real search page
     // so the model always has somewhere to start and can navigate from there.
-    const start = url ?? 'https://www.google.com'
-    console.log(`[web-task] runTask goal="${goal}" url="${start}"`)
+    const start =
+      url ??
+      explicitBrowserAddress(goal) ??
+      (continuingJourney ? undefined : 'https://www.google.com')
+    console.log(`[web-task] runTask goal="${goal}" url="${start ?? record.chrome.url}"`)
     const coordinator = getTakeoverCoordinator()
 
     // The browser rail's surface is the in-app watched pane (browser:*), which
@@ -452,20 +573,55 @@ class BrowserHost implements BrowserRailHost {
     // app). The VisionGuard is still registered so the pane's Stop / close halts
     // the loop through the vision:control seam.
     const guard = new VisionGuard()
-    const releaseSession = registerVisionSession(guard)
-    const steps: string[] = []
-    const setState = (status: 'running' | 'done' | 'failed', summary?: string): void => {
-      const task = { taskId, goal, status, summary, steps: [...steps] }
-      this.sessions.updateTask(record.sessionId, task)
+    const ownership = this.runOwners.replace(journeyId, taskId, guard)
+    const owner = ownership.owner
+    if (ownership.replaced) {
+      coordinator.resolve(ownership.replaced.taskId, 'cancelled')
+      recordTaskRun({
+        taskId: ownership.replaced.taskId,
+        journeyId,
+        kind: 'web_use',
+        status: 'stopped',
+        summary: 'Replaced by a newer task in this journey.',
+        currentAction: 'Stopped when a newer task started'
+      })
+      record.resource.webContents.stop()
+    }
+    const releaseSession = registerVisionSession(taskId, guard, owner.controller)
+    const steps: string[] = checkpoint ? [...checkpoint.steps, TASK_RETRY_TRACE] : []
+    let currentStatus: BrowserTaskStatus = 'running'
+    let currentSummary = ''
+    const ownsRun = (): boolean => this.runOwners.isCurrent(owner)
+    const replacedResult = (): WebTaskResult => ({
+      ok: false,
+      summary: 'Replaced by a newer task in this journey.',
+      steps,
+      takeovers: 0,
+      finalUrl: ''
+    })
+    const setState = (
+      status: BrowserTaskStatus,
+      summary?: string,
+      finalPage?: { url: string; title: string }
+    ): void => {
+      if (!ownsRun()) return
+      currentStatus = status
+      currentSummary = summary ?? ''
+      const task = { taskId, journeyId, goal, status, summary, steps: [...steps] }
+      const executionDevice = getTaskExecutionDevice()
+      this.sessions.updateJourneyTask(journeyId, task)
       recordTaskRun({
         taskId,
+        journeyId,
         kind: 'web_use',
         title: goal,
         status,
         summary,
         steps,
-        lastUrl: record.chrome.url,
-        lastTitle: record.chrome.title
+        executionDeviceId: executionDevice.id,
+        executionDeviceName: executionDevice.name,
+        lastUrl: finalPage?.url ?? record.chrome.url,
+        lastTitle: finalPage?.title ?? record.chrome.title
       })
       broadcast('browser:task-state', {
         sessionId: record.sessionId,
@@ -473,55 +629,213 @@ class BrowserHost implements BrowserRailHost {
       } satisfies BrowserTaskState)
       this.broadcastSessions()
     }
-    setState('running')
+    const recordStep = (note: string): void => {
+      if (!ownsRun()) return
+      steps.push(note)
+      // The local array is the canonical trace for this run. Persist the full
+      // trace so a checkpoint or concurrent history update cannot drop the
+      // execution plan that was recorded before the first action.
+      recordTaskRun({ taskId, journeyId, kind: 'web_use', title: goal, steps: [...steps] })
+      const task = {
+        taskId,
+        journeyId,
+        goal,
+        status: currentStatus,
+        summary: currentSummary,
+        steps: [...steps]
+      }
+      this.sessions.updateJourneyTask(journeyId, task)
+      broadcast('browser:task-state', {
+        sessionId: record.sessionId,
+        ...task
+      } satisfies BrowserTaskState)
+      broadcast('browser:step', { sessionId: record.sessionId, taskId, journeyId, note })
+    }
+    setState('running', 'Preparing the execution plan.')
+    const queuedGuidance: string[] = [...(checkpoint?.guidance ?? [])]
+    const releaseGuidance = registerTaskGuideHandler(taskId, (text) => {
+      if (!ownsRun()) return false
+      queuedGuidance.push(text)
+      recordStep(TASK_GUIDANCE_TRACE)
+      return true
+    })
 
     try {
-      // Land the start page natively FIRST so the debugger has a live target,
-      // THEN attach CDP for the snapshot/input the loop drives.
-      await this.loadNatively(view, start)
-      this.refreshSession(record.sessionId)
-      const opened = `opened ${start}`
-      steps.push(opened)
-      appendTaskStep(taskId, 'web_use', goal, opened)
-      broadcast('browser:step', { sessionId: record.sessionId, taskId, note: opened })
-      const driver = new BrowserDriver(attachCdp(view), undefined, (pointer) => {
-        broadcast('browser:pointer', { sessionId: record.sessionId, ...pointer })
+      let hostname: string | undefined
+      try {
+        hostname = start ? new URL(start).hostname.replace(/^www\./, '') : undefined
+      } catch {
+        hostname = undefined
+      }
+      // Start a known page immediately. Plan generation and page loading are
+      // independent, so the user should not stare at a blank browser while the
+      // model prepares milestones.
+      const initialLoad = start
+        ? this.loadNatively(view, start).then(
+            () => ({ ok: true as const }),
+            (error: unknown) => ({ ok: false as const, error })
+          )
+        : undefined
+      const visionSelection = resolveActiveBrowserVisionSelection()
+      const modelIdentity = await resolveModelIdentity(visionSelection.modelId)
+      if (!ownsRun()) return replacedResult()
+      recordTaskRun({
+        taskId,
+        journeyId,
+        kind: 'web_use',
+        title: goal,
+        ...modelIdentity
       })
-      // startUrl is '' - the page is already loaded natively, so the loop goes
-      // straight to snapshotting it instead of re-navigating over CDP.
-      const result = await runWebTask(goal, '', {
-        driver,
-        decide: (prompt) =>
-          llm.chat(prompt, [], 60_000, 400, {
-            disableThinking: true,
-            responseFormat: STEP_RESPONSE_FORMAT
-          }),
-        waitForTakeover: async (why) => {
-          broadcast('browser:takeover', { sessionId: record.sessionId, taskId, why })
-          await coordinator.waitForTakeover(taskId, why)
-        },
-        onStep: (note) => {
-          console.log(`[web-task] step: ${note}`)
-          steps.push(note)
-          appendTaskStep(taskId, 'web_use', goal, note)
-          broadcast('browser:step', { sessionId: record.sessionId, taskId, note })
-        },
-        shouldStop: () => guard.isHalted
-      })
+      const plan =
+        checkpoint?.plan ??
+        (await prepareTaskExecutionPlan(
+          {
+            goal: retryPlanningGoal(goal, checkpoint),
+            surface: 'web',
+            targetLabel: hostname,
+            signal: owner.controller.signal
+          },
+          recordStep
+        ))
+      if (!ownsRun()) return replacedResult()
+      setState('running', '')
+      if (start) {
+        const outcome = await initialLoad!
+        if (!ownsRun()) return replacedResult()
+        if (!outcome.ok) throw outcome.error
+        this.refreshSession(record.sessionId)
+        await this.restoreTaskPointer(record)
+        if (!ownsRun()) return replacedResult()
+        recordStep(`opened ${start}`)
+      } else {
+        this.refreshSession(record.sessionId)
+        await this.restoreTaskPointer(record)
+        if (!ownsRun()) return replacedResult()
+        recordStep(`continued at ${record.chrome.url || 'the current page'}`)
+      }
+      const activeDriver = (): BrowserDriver => {
+        const page = this.sessions.findJourney(journeyId) ?? record
+        return this.driverFor(page)
+      }
+      const activeView = (): WebContentsView =>
+        (this.sessions.findJourney(journeyId) ?? record).resource
 
-      console.log(
-        `[web-task] result ok=${result.ok} steps=${result.steps.length} summary="${result.summary}"`
-      )
-      setState(result.ok ? 'done' : 'failed', result.summary)
-      return result
+      // The model publishes cumulative text for the current step, then starts the
+      // next step with an empty live event. Keep one transcript per task so a step
+      // transition can never replace reasoning that the user has already seen.
+      const reasoningByStep = new Map<number, string>()
+      const reasoningStepOrder: number[] = []
+      const reasoningTranscript = (reasoning: {
+        step: number
+        content: string
+        live: boolean
+      }): string => {
+        const content = reasoning.content.trim()
+        const previous = reasoningByStep.get(reasoning.step) ?? ''
+        if (content) {
+          if (!reasoningByStep.has(reasoning.step)) reasoningStepOrder.push(reasoning.step)
+          if (!previous || content.startsWith(previous)) {
+            reasoningByStep.set(reasoning.step, content)
+          } else if (!previous.startsWith(content) && !previous.includes(content)) {
+            reasoningByStep.set(reasoning.step, `${previous}\n\n${content}`)
+          }
+        }
+        return reasoningStepOrder
+          .map((step) => `### Step ${step}\n\n${reasoningByStep.get(step) ?? ''}`)
+          .join('\n\n')
+      }
+
+      // Web Use is vision-only: capture, judge, persist evidence, then either
+      // advance the milestone or choose one visual action. Never silently
+      // replace this contract with semantic DOM control.
+      const visual = await runBrowserVisualTask({
+        goal,
+        taskId,
+        journeyId,
+        adapter: visionSelection.adapter,
+        guard,
+        plan,
+        activeView,
+        activeDriver,
+        waitForUser: async (why) => {
+          if (!ownsRun()) return
+          broadcast('browser:takeover', { sessionId: record.sessionId, taskId, why })
+          setState('waiting', why)
+          const outcome = await coordinator.waitForTakeover(taskId, why)
+          if (!ownsRun()) return
+          setState(outcome === 'resumed' ? 'running' : 'stopped', '')
+          if (outcome !== 'resumed') guard.halt('cancelled by the user')
+        },
+        onStep: recordStep,
+        onPhase: (phaseId) => recordStep(encodeTaskPhase(phaseId)),
+        onProgress: (progress) => {
+          if (!ownsRun()) return
+          recordTaskRun({
+            taskId,
+            journeyId,
+            kind: 'web_use',
+            title: goal,
+            status:
+              progress.phase === 'paused'
+                ? 'paused'
+                : progress.phase === 'stopped'
+                  ? 'stopped'
+                  : 'running',
+            phase: progress.phase,
+            currentStep: progress.step,
+            currentAction: progress.action
+          })
+        },
+        onReasoning: (reasoning) => {
+          if (!ownsRun()) return
+          const transcript = reasoningTranscript(reasoning)
+          recordTaskRun({
+            taskId,
+            journeyId,
+            kind: 'web_use',
+            title: goal,
+            ...(transcript ? { currentReasoning: transcript } : {}),
+            reasoningLive: reasoning.live
+          })
+        },
+        takeGuidance: () => (ownsRun() ? queuedGuidance.splice(0) : []),
+        signal: owner.controller.signal
+      })
+      if (!ownsRun()) return replacedResult()
+      const finalContents = activeView().webContents
+      const finalUrl = finalContents.getURL()
+      const finalTitle = finalContents.getTitle()
+      const status = visual.ok ? 'done' : guard.isHalted ? 'stopped' : 'failed'
+      setState(status, visual.summary, { url: finalUrl, title: finalTitle })
+      return {
+        ok: visual.ok,
+        summary: visual.summary,
+        steps: visual.steps,
+        takeovers: visual.handoffs,
+        finalUrl
+      }
     } catch (error) {
+      if (!ownsRun()) return replacedResult()
+      if (guard.isHalted || owner.controller.signal.aborted) {
+        const summary = guard.snapshot().reason || 'Stopped'
+        recordStep(`stopped: ${summary}`)
+        setState('stopped', summary)
+        return {
+          ok: false,
+          summary,
+          steps,
+          takeovers: 0,
+          finalUrl: record.resource.webContents.getURL()
+        }
+      }
       // A throw in setup/snapshot/CDP was silently disappearing (no step, no
       // result line) and read as a mystery failure. Surface it and return a
       // proper failed result so the engine sees an outcome, not an exception.
       const detail = error instanceof Error ? error.message : String(error)
       console.log(`[web-task] ERROR: ${detail}`)
-      steps.push(`error: ${detail}`)
-      appendTaskStep(taskId, 'web_use', goal, `error: ${detail}`)
+      recordStep(`error: ${detail}`)
+      await this.restoreTaskPointer(this.sessions.findJourney(journeyId) ?? record)
+      if (!ownsRun()) return replacedResult()
       setState('failed', `Web Use stopped: ${detail}`)
       return {
         ok: false,
@@ -531,6 +845,8 @@ class BrowserHost implements BrowserRailHost {
         finalUrl: ''
       }
     } finally {
+      releaseGuidance()
+      this.runOwners.release(owner)
       releaseSession()
     }
   }
@@ -564,6 +880,9 @@ export function registerBrowserViewIpc(): void {
     browserHost().setRegion(parseRect(raw))
   })
   ipcMain.handle('browser:new-tab', () => browserHost().newTab())
+  ipcMain.handle('browser:open-url', (_event, url: unknown) =>
+    typeof url === 'string' ? browserHost().openUrl(url) : null
+  )
   ipcMain.handle('browser:get-sessions', () => browserHost().getSessions())
   ipcMain.handle('browser:activate-session', (_event, sessionId: unknown) =>
     typeof sessionId === 'string' ? browserHost().activateSession(sessionId) : false
@@ -589,5 +908,8 @@ export function registerBrowserViewIpc(): void {
   ipcMain.handle('browser:list-manual-history', () => browserHost().listManualHistory())
   ipcMain.handle('browser:reopen-manual', (_event, historyId: unknown) =>
     typeof historyId === 'string' ? browserHost().reopenManual(historyId) : null
+  )
+  ipcMain.handle('browser:stop-task', (_event, taskId: unknown) =>
+    typeof taskId === 'string' ? browserHost().stopTask(taskId) : false
   )
 }

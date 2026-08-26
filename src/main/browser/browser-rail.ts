@@ -15,11 +15,20 @@
 import type { ActionRecord, HandlerRegistry } from '@offgrid/use'
 import type { ExecuteResult } from '@offgrid/use'
 import type { WebTaskResult } from './web-task-agent'
+import type { TaskRetryCheckpoint } from '../tasks/task-retry'
+
+export interface BrowserTaskRequest {
+  goal: string
+  url?: string
+  taskId: string
+  journeyId: string
+  checkpoint?: TaskRetryCheckpoint
+}
 
 export interface BrowserRailHost {
-  /** Run one web task end to end in the watched pane. taskId ties the run to
-   *  the pane's step feed and any takeover parked against it. */
-  runTask(goal: string, url: string | undefined, taskId: string): Promise<WebTaskResult>
+  /** Run one web task end to end in the watched pane. journeyId owns the live
+   * browser workspace; taskId owns this action's durable trace. */
+  runTask(request: BrowserTaskRequest): Promise<WebTaskResult>
 }
 
 /** Registers the web_task handler. Kept beside the executor so the rail,
@@ -45,7 +54,12 @@ export function makeBrowserRailExecutor(
     const goal = typeof args.goal === 'string' && args.goal.trim() ? args.goal : action.intent
     const url =
       typeof args.url === 'string' && /^https?:\/\//i.test(args.url) ? args.url : undefined
-    const result = await host.runTask(goal, url, action.id)
+    const result = await host.runTask({
+      goal,
+      url,
+      taskId: action.id,
+      journeyId: action.sourceRef ?? action.id
+    })
     if (!result.ok) {
       return { ok: false, detail: result.summary }
     }

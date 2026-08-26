@@ -32,6 +32,10 @@ export interface Plan {
   steps: PlanStep[]
 }
 
+export type PlanParseResult =
+  | { valid: true; plan: Plan }
+  | { valid: false; plan: Plan; error: string }
+
 /** A tool the planner may route to (name + what it does), derived from the same
  *  schemas the reactive loop already builds - so a new tool is plannable with no
  *  planner change. */
@@ -40,13 +44,14 @@ export interface ToolCatalogEntry {
   description: string
 }
 
-/** The grammar the planner is constrained to. `args`/`bindings` are open objects
- *  (per-tool args can't be pre-typed) - llama.cpp allows a generic object; the
- *  parse below validates. */
+/** The grammar the planner is constrained to. Provider strict-schema modes do
+ * not allow an open object for per-tool arguments, so `args` is a JSON-encoded
+ * object string. The parser below owns decoding and validation. */
 export const PLAN_SCHEMA = {
   type: 'json_schema',
   json_schema: {
     name: 'task_plan',
+    strict: true,
     schema: {
       type: 'object',
       properties: {
@@ -56,7 +61,10 @@ export const PLAN_SCHEMA = {
             type: 'object',
             properties: {
               tool: { type: 'string' },
-              args: { type: 'object' },
+              args: {
+                type: 'string',
+                description: 'A JSON-encoded object containing the tool arguments.'
+              },
               why: { type: 'string' },
               bindings: {
                 type: 'array',
@@ -67,15 +75,18 @@ export const PLAN_SCHEMA = {
                     fromStep: { type: 'integer' },
                     field: { type: 'string' }
                   },
-                  required: ['arg', 'fromStep', 'field']
+                  required: ['arg', 'fromStep', 'field'],
+                  additionalProperties: false
                 }
               }
             },
-            required: ['tool', 'args']
+            required: ['tool', 'args', 'why', 'bindings'],
+            additionalProperties: false
           }
         }
       },
-      required: ['steps']
+      required: ['steps'],
+      additionalProperties: false
     }
   }
 } as const
@@ -90,7 +101,8 @@ export function shouldPlan(message: string): boolean {
   }
   // A pure question ("what is…", "how do I…", "who…") ending in '?' and with no
   // action verb is conversational.
-  const questionOpener = /^(what|why|how|who|when|where|which|is |are |can |could |do |does |did |should |would |will |tell me|explain|summar|define)/
+  const questionOpener =
+    /^(what|why|how|who|when|where|which|is |are |can |could |do |does |did |should |would |will |tell me|explain|summar|define)/
   const actionVerb =
     /\b(open|play|watch|send|message|text|email|mail|call|search|find|book|order|buy|schedule|create|add|remind|set|post|share|check in|log in|sign in|navigate|go to|download|upload)\b/
   if (!actionVerb.test(m) && (questionOpener.test(m) || m.endsWith('?'))) {
@@ -121,7 +133,8 @@ export function buildPlannerPrompt(
     'Rules:',
     "- A task on a WEBSITE - play or watch a video, search and click a result, log in, fill a form, check in, place an order, extract - is web_task; it runs inside Off Grid's own built-in browser. open_url ONLY opens a link or app scheme, no interaction, so 'play X on YouTube' or 'search Y and open the first result' is web_task, NOT open_url. A task in an installed desktop APP with no web version (a native-only app) is computer_task.",
     '- Fill EVERY required argument. For web_task always set the "url" to the site (e.g. https://youtube.com). Do not leave a required arg blank.',
-    '- If a step needs a value produced by an earlier step (e.g. a phone number from contacts_search to message someone), add a binding: {"arg":"to","fromStep":0,"field":"phone"} and leave that arg out of args.',
+    '- The args field is a JSON-encoded object string. Example: {"tool":"web_task","args":"{\\"url\\":\\"https://youtube.com\\",\\"goal\\":\\"Find the requested video\\"}","why":"The task needs website interaction","bindings":[]}.',
+    '- If a step needs a value produced by an earlier step (e.g. a phone number from contacts_search to message someone), add a binding: {"arg":"to","fromStep":0,"field":"phone"} and leave that value out of the JSON object encoded in args.',
     '- Keep the plan MINIMAL - one step when one tool does it; do not add steps that are not needed.',
     '- If the request is just conversation, a question, or something no tool can do, return {"steps":[]}.',
     'Reply with ONLY the JSON plan.'
@@ -130,54 +143,106 @@ export function buildPlannerPrompt(
     .join('\n')
 }
 
-/** Fail-closed parse: keep only well-formed steps whose tool is real; drop the
- *  rest. A malformed plan yields an empty plan (the caller falls back to the
- *  reactive loop) rather than dispatching garbage. */
-export function parsePlan(raw: string, knownToolNames: readonly string[]): Plan {
+/** Keep the full original task context on the one repair attempt, then give the
+ *  model the validator's exact failure. The model still owns the replacement
+ *  plan; application code does not infer a tool from the user's wording. */
+export function buildPlannerRetryPrompt(originalPrompt: string, validationError: string): string {
+  return [
+    originalPrompt,
+    '',
+    'Validation feedback:',
+    `Your previous response was invalid: ${validationError}.`,
+    'Return one complete plan that matches the required JSON schema. Return JSON only. Do not explain or narrate.'
+  ].join('\n')
+}
+
+function invalidPlan(error: string): PlanParseResult {
+  return { valid: false, plan: { steps: [] }, error }
+}
+
+/** Fail-closed parse with an explicit validity result. A valid conversational
+ *  escape hatch (`{"steps":[]}`) is different from malformed model output;
+ *  callers must not silently treat planner narration as a no-action decision. */
+export function parsePlanResult(raw: string, knownToolNames: readonly string[]): PlanParseResult {
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
   } catch {
-    return { steps: [] }
+    return invalidPlan('the planner response was not JSON')
   }
-  if (typeof parsed !== 'object' || parsed === null) {
-    return { steps: [] }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return invalidPlan('the planner response was not a JSON object')
   }
   const rawSteps = (parsed as { steps?: unknown }).steps
   if (!Array.isArray(rawSteps)) {
-    return { steps: [] }
+    return invalidPlan('the planner response did not contain a steps array')
   }
   const known = new Set(knownToolNames)
   const steps: PlanStep[] = []
-  for (const s of rawSteps) {
-    if (typeof s !== 'object' || s === null) {
-      continue
+  for (const [index, value] of rawSteps.entries()) {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      return invalidPlan(`planner step ${index + 1} was not an object`)
     }
-    const step = s as Record<string, unknown>
+    const step = value as Record<string, unknown>
     const tool = typeof step.tool === 'string' ? step.tool : ''
     if (!known.has(tool)) {
-      continue
+      return invalidPlan(`planner step ${index + 1} named an unavailable tool`)
     }
-    const args =
-      typeof step.args === 'object' && step.args !== null && !Array.isArray(step.args)
-        ? (step.args as Record<string, unknown>)
-        : {}
-    const bindings: PlanBinding[] = Array.isArray(step.bindings)
-      ? step.bindings
-          .filter(
-            (b): b is Record<string, unknown> =>
-              typeof b === 'object' && b !== null && !Array.isArray(b)
-          )
-          .map((b) => ({
-            arg: typeof b.arg === 'string' ? b.arg : '',
-            fromStep: typeof b.fromStep === 'number' ? b.fromStep : -1,
-            field: typeof b.field === 'string' ? b.field : ''
-          }))
-          .filter((b) => b.arg && b.field && b.fromStep >= 0)
-      : []
+    let args: Record<string, unknown>
+    if (typeof step.args === 'string') {
+      try {
+        const decoded = JSON.parse(step.args) as unknown
+        if (typeof decoded !== 'object' || decoded === null || Array.isArray(decoded)) {
+          return invalidPlan(`planner step ${index + 1} args did not decode to an object`)
+        }
+        args = decoded as Record<string, unknown>
+      } catch {
+        return invalidPlan(`planner step ${index + 1} args was not valid JSON`)
+      }
+    } else if (typeof step.args === 'object' && step.args !== null && !Array.isArray(step.args)) {
+      // Accept the legacy local-model shape while existing conversations and
+      // test fixtures migrate to the provider-compatible wire schema.
+      args = step.args as Record<string, unknown>
+    } else {
+      return invalidPlan(`planner step ${index + 1} did not contain tool arguments`)
+    }
+    if (step.why !== undefined && typeof step.why !== 'string') {
+      return invalidPlan(`planner step ${index + 1} had an invalid reason`)
+    }
+    if (step.bindings !== undefined && !Array.isArray(step.bindings)) {
+      return invalidPlan(`planner step ${index + 1} had invalid bindings`)
+    }
+    const bindings: PlanBinding[] = []
+    for (const binding of (step.bindings as unknown[] | undefined) ?? []) {
+      if (typeof binding !== 'object' || binding === null || Array.isArray(binding)) {
+        return invalidPlan(`planner step ${index + 1} had an invalid binding`)
+      }
+      const candidate = binding as Record<string, unknown>
+      if (
+        typeof candidate.arg !== 'string' ||
+        !candidate.arg.trim() ||
+        !Number.isInteger(candidate.fromStep) ||
+        (candidate.fromStep as number) < 0 ||
+        (candidate.fromStep as number) >= index ||
+        typeof candidate.field !== 'string' ||
+        !candidate.field.trim()
+      ) {
+        return invalidPlan(`planner step ${index + 1} had an invalid binding reference`)
+      }
+      bindings.push({
+        arg: candidate.arg.trim(),
+        fromStep: candidate.fromStep as number,
+        field: candidate.field.trim()
+      })
+    }
     steps.push({ tool, args, why: typeof step.why === 'string' ? step.why : '', bindings })
   }
-  return { steps }
+  return { valid: true, plan: { steps } }
+}
+
+/** Compatibility projection for pure callers that only need the safe plan. */
+export function parsePlan(raw: string, knownToolNames: readonly string[]): Plan {
+  return parsePlanResult(raw, knownToolNames).plan
 }
 
 /** Tools whose required `goal` arg IS the task and must never be blank - the
@@ -212,46 +277,6 @@ export function backfillGoals(plan: Plan, userRequest: string): Plan {
   }
 }
 
-/** Web tools that reach a site in a browser - the wrong rail when the user
- *  named an app they actually have installed. */
-const WEB_TOOLS = new Set(['web_task', 'open_url'])
-
-/** Rail-per-surface guard: if the request names a RUNNING native app (Slack,
- *  Spotify, ...), a plan that routed to the WEBSITE (web_task/open_url) is
- *  redirected to driving the app directly with computer_task. A consecutive run
- *  of web steps (open_url -> web_task) collapses into ONE computer_task carrying
- *  the user's full request. Deterministic, so it holds no matter which model
- *  planned - the fix for "send a file on Slack" opening slack.com in the browser.
- *  nativeApp null (no running app named) leaves the plan untouched. Pure. */
-export function preferNativeApp(plan: Plan, userRequest: string, nativeApp: string | null): Plan {
-  // A request that clearly names a WEBSITE stays a web_task even if a word in it
-  // matches a running app ('play drake music on youtube' - 'music' matches the
-  // Music app, but 'youtube' means the browser).
-  if (!nativeApp || namesWebsite(userRequest)) {
-    return plan
-  }
-  const steps: PlanStep[] = []
-  let lastWasRedirect = false
-  for (const s of plan.steps) {
-    if (!WEB_TOOLS.has(s.tool)) {
-      steps.push(s)
-      lastWasRedirect = false
-      continue
-    }
-    if (lastWasRedirect) {
-      continue // collapse a run of web steps into the single computer_task above
-    }
-    steps.push({
-      tool: 'computer_task',
-      args: { goal: userRequest },
-      why: `${nativeApp} is installed - drive the app directly, not its website`,
-      bindings: []
-    })
-    lastWasRedirect = true
-  }
-  return { steps }
-}
-
 /** Resolve a contact handle from contacts_search's result text (which is a
  *  JSON.stringify of the matches). Prefers the requested field, then phone, then
  *  email; null when nothing usable. Pure so the recipient-binding is tested. */
@@ -264,7 +289,9 @@ export function resolveContactHandle(resultText: string, field = 'phone'): strin
   }
   const list = Array.isArray(parsed)
     ? parsed
-    : parsed && typeof parsed === 'object' && Array.isArray((parsed as { results?: unknown }).results)
+    : parsed &&
+        typeof parsed === 'object' &&
+        Array.isArray((parsed as { results?: unknown }).results)
       ? (parsed as { results: unknown[] }).results
       : []
   for (const item of list) {

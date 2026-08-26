@@ -23,7 +23,13 @@ export interface ComputerTaskTiers {
   /** Resolve + read the target app for routing, or null to fall to vision. */
   routingSnapshot(goal: string): Promise<AxRouting | null>
   /** Drive the resolved app over the accessibility rail. */
-  runAx(goal: string, taskId: string, app: string, initial: AxRouting['snapshot']): Promise<ElementTaskResult>
+  runAx(
+    goal: string,
+    taskId: string,
+    journeyId: string,
+    app: string,
+    initial: AxRouting['snapshot']
+  ): Promise<ElementTaskResult>
   /** The vision-rail executor, used when AX can't drive this surface. */
   visionExecute(action: ActionRecord): Promise<ExecuteResult>
 }
@@ -72,7 +78,13 @@ export function makeComputerTaskExecutor(
     )
     if (useAx && routing) {
       const t0 = now()
-      const result = await tiers.runAx(goal, action.id, routing.app, routing.snapshot)
+      const result = await tiers.runAx(
+        goal,
+        action.id,
+        action.sourceRef ?? action.id,
+        routing.app,
+        routing.snapshot
+      )
       const ms = now() - t0
       const stepCount = result.steps.length
       console.log(

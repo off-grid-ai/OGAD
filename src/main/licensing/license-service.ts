@@ -5,7 +5,7 @@ export const PRO_PAY_PAGE_URL = PRO_PURCHASE_URL
 
 export type ActivateResult = PersonalMeshActivationResult
 
-export type ProTier = 'lifetime' | 'monthly'
+export type ProTier = 'lifetime' | 'monthly' | 'annual' | 'subscription'
 
 export interface ProLicenseInfo {
   isPro: boolean
@@ -30,6 +30,7 @@ export interface ProLicensedDevice {
  */
 export interface ProEntitlementProvider {
   initialize(): void
+  refreshCachedState(): void
   revalidate(reason: PersonalMeshReconciliationReason): Promise<void>
   isEntitled(): boolean
   getInfo(): ProLicenseInfo
@@ -61,6 +62,10 @@ export function registerProEntitlementProvider(next: ProEntitlementProvider): ()
 
 export function initLicensing(): void {
   provider?.initialize()
+}
+
+export function refreshCachedProEntitlement(): void {
+  provider?.refreshCachedState()
 }
 
 export function revalidateProEntitlement(reason: PersonalMeshReconciliationReason): Promise<void> {

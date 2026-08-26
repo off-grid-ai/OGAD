@@ -2,22 +2,28 @@ export type ComputerUseContext = 'auto' | '16k' | '32k'
 export type ComputerUseScreenshotSize = 'compact' | 'balanced' | 'large'
 export type ComputerUseScreenshotQuality = 'efficient' | 'balanced' | 'detailed'
 export type ComputerUseCheckpointInterval = 8 | 9 | 10
+export type ComputerUseVisualHistoryFrames = 0 | 1 | 2 | 5
+export type ComputerUseModelStrategy = 'same_as_chat' | 'separate_specialist'
 
 export interface ComputerUseSettings {
+  modelStrategy: ComputerUseModelStrategy
   context: ComputerUseContext
   screenshotSize: ComputerUseScreenshotSize
   screenshotQuality: ComputerUseScreenshotQuality
   checkpointInterval: ComputerUseCheckpointInterval
+  visualHistoryFrames: ComputerUseVisualHistoryFrames
   retrieveOlderVisuals: boolean
 }
 
 export const COMPUTER_USE_SETTINGS_KEY = 'computerUseSettings'
 
 export const DEFAULT_COMPUTER_USE_SETTINGS: Readonly<ComputerUseSettings> = {
+  modelStrategy: 'separate_specialist',
   context: 'auto',
   screenshotSize: 'balanced',
   screenshotQuality: 'balanced',
   checkpointInterval: 9,
+  visualHistoryFrames: 2,
   retrieveOlderVisuals: false
 }
 
@@ -67,12 +73,24 @@ export function normalizeComputerUseSettings(value: unknown): ComputerUseSetting
     typeof input.checkpointInterval === 'number'
       ? Math.max(8, Math.min(10, Math.round(input.checkpointInterval)))
       : DEFAULT_COMPUTER_USE_SETTINGS.checkpointInterval
+  const visualHistoryFrames =
+    input.visualHistoryFrames === 0 ||
+    input.visualHistoryFrames === 1 ||
+    input.visualHistoryFrames === 2 ||
+    input.visualHistoryFrames === 5
+      ? input.visualHistoryFrames
+      : DEFAULT_COMPUTER_USE_SETTINGS.visualHistoryFrames
 
   return {
+    modelStrategy:
+      input.modelStrategy === 'same_as_chat' || input.modelStrategy === 'separate_specialist'
+        ? input.modelStrategy
+        : DEFAULT_COMPUTER_USE_SETTINGS.modelStrategy,
     context,
     screenshotSize,
     screenshotQuality,
     checkpointInterval: checkpoint as ComputerUseCheckpointInterval,
+    visualHistoryFrames,
     retrieveOlderVisuals:
       typeof input.retrieveOlderVisuals === 'boolean'
         ? input.retrieveOlderVisuals

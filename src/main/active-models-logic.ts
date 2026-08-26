@@ -1,8 +1,10 @@
-export type Modality = 'image' | 'speech' | 'transcription'
+export type Modality = 'computer_use' | 'image' | 'speech' | 'transcription'
 
 /** Map a catalog kind to its stateless runtime modality. Chat kinds return null. */
 export function modalityForKind(kind?: string | null): Modality | null {
   switch (kind) {
+    case 'computer_use':
+      return 'computer_use'
     case 'image':
       return 'image'
     case 'voice':

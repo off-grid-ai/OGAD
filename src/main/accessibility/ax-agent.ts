@@ -18,6 +18,14 @@ import {
   computerUseHistoryTokenBudget,
   tailWithinTokenBudget
 } from '../../shared/computer-use-settings'
+import { DEFAULT_COMPUTER_USE_STEP_BUDGET } from '../../shared/computer-use-limits'
+import type { TaskExecutionPlan } from '../../shared/task-execution-plan'
+import {
+  createTaskPhaseReporter,
+  formatTaskExecutionPlanContext
+} from '../tasks/task-execution-plan-service'
+import { TASK_GUIDANCE_TRACE } from '../tasks/task-guide'
+import { CurrentTaskBrief } from '../tasks/current-task-brief'
 
 export interface ElementActuator {
   /** Click at the element's center. */
@@ -45,6 +53,9 @@ export interface ElementTaskDeps {
   checkpointInterval?: number
   retrievedFacts?: string[]
   now?: () => number
+  plan?: TaskExecutionPlan
+  onPhase?: (phaseId: string) => void
+  takeGuidance?: () => readonly string[]
 }
 
 export interface ElementTaskResult {
@@ -159,6 +170,8 @@ export function buildElementPrompt(input: {
   history: string[]
   retrievedFacts?: readonly string[]
   contextTokens?: number
+  plan?: TaskExecutionPlan
+  guidance?: readonly string[]
 }): string {
   const { goal, snapshot, history } = input
   const retrievedFacts = input.retrievedFacts ?? []
@@ -170,6 +183,10 @@ export function buildElementPrompt(input: {
   return [
     'You are completing a task by operating an app one step at a time.',
     `Task: ${goal}`,
+    input.plan ? formatTaskExecutionPlanContext(input.plan) : '',
+    input.guidance?.length
+      ? `Authoritative user guidance for the next decision:\n${input.guidance.map((item) => `- ${item}`).join('\n')}`
+      : '',
     '',
     formatAxElementsForModel(snapshot),
     '',
@@ -199,7 +216,7 @@ export function buildElementPrompt(input: {
     .join('\n')
 }
 
-const DEFAULT_MAX_STEPS = 14
+const DEFAULT_MAX_STEPS = DEFAULT_COMPUTER_USE_STEP_BUDGET
 
 /** A stable signature of an actuating step, used to detect a runaway loop. Two
  *  consecutive identical signatures mean the model is repeating itself (it sent
@@ -232,6 +249,8 @@ export async function runElementTask(
   const retrievedFacts = deps.retrievedFacts ?? []
   const now = deps.now ?? Date.now
   const steps: string[] = []
+  const reportPhase = createTaskPhaseReporter(deps.plan, deps.onPhase)
+  reportPhase(0)
   const note = (line: string): void => {
     steps.push(line)
     onStep?.(line)
@@ -243,11 +262,14 @@ export async function runElementTask(
   // send (type[74]->Enter->type[71]->Enter...), an A-B-A-B loop the consecutive
   // check can't see.
   const typedTexts = new Set<string>()
+  const taskBrief = new CurrentTaskBrief(goal)
 
   for (let step = 0; step < maxSteps; step += 1) {
     const planningStep = step + 1
+    reportPhase(step)
     const startedAt = now()
     let prompt = ''
+    let modelPrompt = ''
     let rawResponse: string | undefined
     let decision: ElementStep | null | undefined
     let observed = false
@@ -272,14 +294,20 @@ export async function runElementTask(
     }
     try {
       const snapshot = await read()
-      prompt = buildElementPrompt({
-        goal,
+      taskBrief.accept(deps.takeGuidance?.() ?? [])
+      modelPrompt = buildElementPrompt({
+        goal: taskBrief.objective,
         snapshot,
         history: steps,
         retrievedFacts,
-        contextTokens: deps.contextTokens
+        contextTokens: deps.contextTokens,
+        plan: deps.plan
       })
-      rawResponse = await decide(prompt)
+      prompt = taskBrief.guidance.reduce(
+        (safePrompt, privateText) => safePrompt.split(privateText).join(TASK_GUIDANCE_TRACE),
+        modelPrompt
+      )
+      rawResponse = await decide(modelPrompt)
       const parsedDecision = parseElementStep(rawResponse)
       decision = parsedDecision
       if (!parsedDecision) {
@@ -290,12 +318,14 @@ export async function runElementTask(
       }
       const action = parsedDecision
       if (action.action === 'done') {
+        reportPhase((deps.plan?.phases.length ?? 1) - 1)
         observe('terminal')
         note(`done: ${action.summary}`)
         checkpoint()
         return { ok: true, summary: action.summary, steps }
       }
       if (action.action === 'give_up') {
+        reportPhase((deps.plan?.phases.length ?? 1) - 1)
         observe('terminal')
         note(`gave up: ${action.why}`)
         checkpoint()
@@ -307,8 +337,8 @@ export async function runElementTask(
       const sig = actionSignature(action)
       if (sig !== null && sig === lastActionSig) {
         // Repeat of the last action: SKIP re-firing it (so a live action never
-        // fires twice) but keep going - a repeat should not kill the task; the
-        // step budget still bounds a genuinely stuck run.
+        // fires twice) but keep going - a repeat should not kill the task. The
+        // user can stop a run that does not make useful progress.
         observe('skipped')
         note('skipped a repeated action; moving on')
         checkpoint()
@@ -355,7 +385,7 @@ export async function runElementTask(
         note(
           target
             ? `typed into [${target.index}] ${target.name || target.role}`
-            : `typed "${action.text}" into the focused field`
+            : 'typed text into the focused field'
         )
         // A trailing submit key ("Enter") sends the message in the same step.
         if (action.submitKeys) {

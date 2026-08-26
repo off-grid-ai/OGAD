@@ -31,6 +31,8 @@ import {
   getSetting
 } from './database'
 import { deleteEntityById, resolveEntityCandidate } from './entity-domain'
+import { setComputerUseSettings } from './computer-use-settings'
+import { COMPUTER_USE_SETTINGS_KEY } from '../shared/computer-use-settings'
 import { embeddings } from './embeddings'
 import {
   getResidency,
@@ -62,6 +64,7 @@ import {
 } from './ipc-query-logic'
 import { requestApplicationRelaunch } from './shutdown'
 import { sampleProgressRate, type ProgressRateSample } from '@offgrid/ui'
+import { notifyRagConversationChanged } from './rag-conversation-events'
 // import { llm } from './llm'; // Moved to dynamic import to support ESM
 
 // Incrementally update master memory with a new conversation summary
@@ -1175,9 +1178,7 @@ export function setupIPC() {
     async (_, id: string, projectId: string | null) => {
       const { setRagConversationProject } = await import('./database')
       setRagConversationProject(id, projectId)
-      for (const window of BrowserWindow.getAllWindows()) {
-        window.webContents.send('rag:conversations-changed', { conversationId: id, projectId })
-      }
+      notifyRagConversationChanged({ conversationId: id, projectId })
       return true
     }
   )
@@ -1228,7 +1229,8 @@ export function setupIPC() {
   ipcMain.handle('app:version', () => app.getVersion())
 
   ipcMain.handle('settings:save', (_, key: string, value: any) => {
-    saveSetting(key, value)
+    if (key === COMPUTER_USE_SETTINGS_KEY) setComputerUseSettings(value)
+    else saveSetting(key, value)
     console.log(`[IPC] Setting saved: ${key} =`, value)
     return true
   })
@@ -1922,8 +1924,15 @@ export function setupIPC() {
                 /* window gone */
               }
             },
+            onActivity: (activity) => {
+              try {
+                sender.send('rag:stream', { streamId, type: 'step', step: activity })
+              } catch {
+                /* window gone */
+              }
+            },
             onToolResult: (call) => {
-              noteChatStreamToolCompleted(streamId, call.name, call.result)
+              noteChatStreamToolCompleted(streamId, call.name, call.result, call.status)
               try {
                 sender.send('rag:stream', { streamId, type: 'tool_result', call })
               } catch {
@@ -1959,6 +1968,28 @@ export function setupIPC() {
     const { llm } = await import('./llm')
     await llm.setSettings(s)
     return llm.getSettings()
+  })
+  ipcMain.handle('vision:remote-server:get', async () => {
+    const { getRemoteVisionServerSettings } = await import('./vision/remote-vision-server')
+    return getRemoteVisionServerSettings()
+  })
+  ipcMain.handle(
+    'vision:remote-server:set',
+    async (_e, update: import('../shared/remote-vision-server').RemoteVisionServerUpdate) => {
+      const { setRemoteVisionServerSettings } = await import('./vision/remote-vision-server')
+      return setRemoteVisionServerSettings(update)
+    }
+  )
+  ipcMain.handle(
+    'vision:remote-server:test',
+    async (_e, update: import('../shared/remote-vision-server').RemoteVisionServerUpdate) => {
+      const { testRemoteVisionServer } = await import('./vision/remote-vision-server')
+      return testRemoteVisionServer(update)
+    }
+  )
+  ipcMain.handle('vision:remote-server:remove', async (_e, serverId: string) => {
+    const { removeRemoteVisionServer } = await import('./vision/remote-vision-server')
+    return removeRemoteVisionServer(serverId)
   })
   // Cleanly unload the chat engine so it stops holding the model port (frees it for LM Studio /
   // another tool without force-quitting the app). Returns whether the port was actually freed.

@@ -25,10 +25,15 @@ import type {
   BrowserTaskPointer,
   ManualBrowserHistoryEntry
 } from '../shared/browser-session'
+import type { TaskGuideInput } from '../shared/task-guidance'
+import type { RemoteVisionServerUpdate } from '../shared/remote-vision-server'
+import type { TaskRunSnapshot } from '../main/tasks/task-history-store'
 
 console.log('PRELOAD SCRIPT LOADED')
 
 type IpcListener = Parameters<typeof ipcRenderer.removeListener>[1]
+
+let liveProEntitled = ipcRenderer.sendSync('pro:is-enabled') === true
 
 function unsubscribe(channel: string, listener: IpcListener): () => void {
   return () => {
@@ -42,7 +47,7 @@ const offGridApi = {
   // and we read it synchronously at preload time so the renderer can lock/unlock
   // pro tabs without an async round-trip. See main/license-ipc.ts (`pro:is-enabled`).
   // Falls back to false if the handler isn't registered (should never happen).
-  isPro: ipcRenderer.sendSync('pro:is-enabled') === true,
+  isPro: liveProEntitled,
   proEntitlementBootstrapEnabled:
     ipcRenderer.sendSync('pro:entitlement-bootstrap-enabled') === true,
   // Host OS, bridged once so renderer copy and availability rules use the same value.
@@ -82,9 +87,14 @@ const offGridApi = {
   },
   // One durable projection for Web Use and Computer Use tabs/history.
   tasks: {
-    list: (limit?: number) => ipcRenderer.invoke('tasks:list', limit),
-    onChanged: (cb: (task: unknown) => void) => {
-      const sub = (_e: unknown, task: unknown): void => cb(task)
+    list: (limit?: number): Promise<TaskRunSnapshot[]> => ipcRenderer.invoke('tasks:list', limit),
+    retryAvailability: (taskId: string) => ipcRenderer.invoke('tasks:retry-availability', taskId),
+    retry: (taskId: string) => ipcRenderer.invoke('tasks:retry', taskId),
+    guideAvailability: (taskId: string) => ipcRenderer.invoke('tasks:guide-availability', taskId),
+    guideTask: (taskId: string, input: TaskGuideInput) =>
+      ipcRenderer.invoke('tasks:guide', taskId, input),
+    onChanged: (cb: (task: TaskRunSnapshot) => void) => {
+      const sub = (_e: unknown, task: TaskRunSnapshot): void => cb(task)
       ipcRenderer.on('tasks:changed', sub)
       return unsubscribe('tasks:changed', sub)
     }
@@ -98,6 +108,8 @@ const offGridApi = {
     setRegion: (rect: { x: number; y: number; width: number; height: number } | null) =>
       ipcRenderer.send('browser:set-region', rect),
     newTab: (): Promise<{ sessionId: string }> => ipcRenderer.invoke('browser:new-tab'),
+    openUrl: (url: string): Promise<{ sessionId: string } | null> =>
+      ipcRenderer.invoke('browser:open-url', url),
     getSessions: (): Promise<BrowserSessionsSnapshot> => ipcRenderer.invoke('browser:get-sessions'),
     activateSession: (sessionId: string): Promise<boolean> =>
       ipcRenderer.invoke('browser:activate-session', sessionId),
@@ -112,6 +124,7 @@ const offGridApi = {
       ipcRenderer.invoke('browser:list-manual-history'),
     reopenManual: (historyId: string): Promise<{ sessionId: string } | null> =>
       ipcRenderer.invoke('browser:reopen-manual', historyId),
+    stopTask: (taskId: string): Promise<boolean> => ipcRenderer.invoke('browser:stop-task', taskId),
     onSessionsState: (cb: (state: BrowserSessionsSnapshot) => void) => {
       const sub = (_e: unknown, state: BrowserSessionsSnapshot): void => cb(state)
       ipcRenderer.on('browser:sessions-state', sub)
@@ -146,8 +159,8 @@ const offGridApi = {
   },
   // Vision rail (R2-D): the supervised overlay's Stop/Pause/Resume + its feed.
   vision: {
-    control: (command: 'stop' | 'pause' | 'resume') =>
-      ipcRenderer.invoke('vision:control', command),
+    control: (command: 'stop' | 'pause' | 'takeover' | 'resume', taskId?: string) =>
+      ipcRenderer.invoke('vision:control', command, taskId),
     // The current run's state + step history, for a surface that mounts mid-task.
     getCurrent: () => ipcRenderer.invoke('vision:current'),
     onStep: (cb: (step: unknown) => void) => {
@@ -168,7 +181,10 @@ const offGridApi = {
   },
   // Generic passthrough so pro renderer code can reach pro IPC channels without
   // the core preload bundle enumerating them.
-  proInvoke: (channel: string, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args),
+  proInvoke: (channel: string, ...args: unknown[]) => {
+    if (!liveProEntitled) return Promise.reject(new Error('Pro license required.'))
+    return ipcRenderer.invoke(channel, ...args)
+  },
   proOn: (channel: string, cb: (...a: unknown[]) => void) => {
     const sub = (_e: unknown, ...a: unknown[]): void => cb(...a)
     ipcRenderer.on(channel, sub)
@@ -235,7 +251,7 @@ const offGridApi = {
       type: 'content' | 'reasoning' | 'step' | 'tool_result' | 'done'
       text?: string
       step?: unknown
-      call?: { name: string; result: string }
+      call?: { name: string; result: string; status: 'completed' | 'failed' | 'pending' }
     }) => void
   ) => {
     const sub = (
@@ -245,7 +261,7 @@ const offGridApi = {
         type: 'content' | 'reasoning' | 'step' | 'tool_result' | 'done'
         text?: string
         step?: unknown
-        call?: { name: string; result: string }
+        call?: { name: string; result: string; status: 'completed' | 'failed' | 'pending' }
       }
     ): void => callback(data)
     ipcRenderer.on('rag:stream', sub)
@@ -597,6 +613,13 @@ const offGridApi = {
     batchSize?: number
     performanceMode?: 'conservative' | 'balanced' | 'extreme'
   }) => ipcRenderer.invoke('llm:set-settings', s),
+  getRemoteVisionServer: () => ipcRenderer.invoke('vision:remote-server:get'),
+  setRemoteVisionServer: (update: RemoteVisionServerUpdate) =>
+    ipcRenderer.invoke('vision:remote-server:set', update),
+  testRemoteVisionServer: (update: RemoteVisionServerUpdate) =>
+    ipcRenderer.invoke('vision:remote-server:test', update),
+  removeRemoteVisionServer: (serverId: string) =>
+    ipcRenderer.invoke('vision:remote-server:remove', serverId),
   // Cleanly unload the chat engine so it releases the model port (for LM Studio / another tool)
   // without force-quitting. Resolves once the port is freed (or reports it couldn't be).
   unloadLlmEngine: (): Promise<{ outcome: string; portFree: boolean }> =>
@@ -931,6 +954,14 @@ const offGridApi = {
 }
 
 export type OffGridAPI = typeof offGridApi
+
+// Keep the privileged Pro passthrough closed as soon as main publishes an
+// entitlement loss. The renderer also subscribes for navigation and display.
+ipcRenderer.on('license:changed', (_event, info: unknown) => {
+  if (!info || typeof info !== 'object' || !('isPro' in info)) return
+  liveProEntitled = (info as { isPro: unknown }).isPro === true
+  offGridApi.isPro = liveProEntitled
+})
 
 try {
   contextBridge.exposeInMainWorld('api', offGridApi)

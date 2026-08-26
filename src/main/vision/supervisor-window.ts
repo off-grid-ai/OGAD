@@ -51,7 +51,7 @@ function create(): BrowserWindow {
     // demoting this app to accessory (same reason as the clipboard popup).
     type: process.platform === 'darwin' ? 'panel' : undefined,
     alwaysOnTop: true,
-    title: 'Off Grid - Computer use',
+    title: 'Off Grid AI Desktop - Computer Use',
     webPreferences: {
       preload: preloadPath(),
       sandbox: false, // REQUIRED for the IPC bridge (window.api.vision.*)

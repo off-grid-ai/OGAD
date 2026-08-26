@@ -1,17 +1,13 @@
 /**
- * The vision rail's supervisor bridge (R2-D2b UX half): lets the renderer watch
- * a running vision task and stop or pause it, and broadcasts the task's state +
- * step feed to the overlay. The kill switch also lives in the host as a global
- * Esc, but a user watching the overlay needs a visible Stop too - this is that
- * control, routed to the SAME guard so both paths halt one session.
- *
- * The guard is created per task inside the host; the host registers it here for
- * the task's lifetime. Thin wiring over the tested VisionGuard, kept out of the
- * host shell so the stop/pause/resume routing is testable with electron mocked.
+ * The Computer Use supervisor bridge. One controller owns the active guard,
+ * live state, and buffered step feed. The task-history port owns durable and
+ * synced projections; renderers only receive read-only events.
  */
 import { BrowserWindow, ipcMain } from 'electron'
+import { appendTaskStep, getTaskExecutionDevice, recordTaskRun } from '../tasks/task-history'
+import type { TaskRunUpdate } from '../tasks/task-history-store'
+import type { ComputerUsePhase } from '../tasks/task-step-details'
 import type { VisionGuard } from './vision-guard'
-import { appendTaskStep, recordTaskRun } from '../tasks/task-history'
 
 function broadcast(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -19,89 +15,185 @@ function broadcast(channel: string, payload: unknown): void {
   }
 }
 
-let activeGuard: VisionGuard | null = null
-
-interface TaskState {
+export interface VisionTaskState {
   taskId: string
+  journeyId?: string
+  modelId?: string
+  modelName?: string
   goal: string
-  status: 'running' | 'paused' | 'done' | 'failed'
+  status: 'running' | 'paused' | 'done' | 'failed' | 'stopped'
+  phase?: ComputerUsePhase
+  currentStep?: number
+  currentAction?: string
+  executionDeviceId?: string
+  executionDeviceName?: string
   summary?: string
   notice?: string
 }
 
-// The current run's state + step history, buffered so a supervisor surface that
-// opens AFTER the task started (the floating window is created at task start but
-// its renderer subscribes a beat later) can fetch what it missed on mount and
-// then follow live - broadcasts are fire-and-forget and are otherwise lost.
-let currentState: TaskState | null = null
-let currentSteps: string[] = []
+export interface VisionControllerPersistence {
+  appendStep(taskId: string, title: string, step: string): void
+  record(update: TaskRunUpdate): void
+  executionDevice(): Readonly<{ id: string; name: string }>
+}
 
-/** The host calls this at task start with the task's guard, and calls the
- *  returned disposer at task end so a stale Stop cannot reach the next task. */
-export function registerVisionSession(guard: VisionGuard): () => void {
-  activeGuard = guard
-  return () => {
-    if (activeGuard === guard) {
-      activeGuard = null
+const taskHistoryPersistence: VisionControllerPersistence = {
+  appendStep: (taskId, title, step) => {
+    appendTaskStep(taskId, 'computer_use', title, step)
+  },
+  record: (update) => {
+    recordTaskRun(update)
+  },
+  executionDevice: getTaskExecutionDevice
+}
+
+export class VisionController {
+  private readonly sessions = new Map<string, { guard: VisionGuard; request: AbortController }>()
+  private readonly runs = new Map<string, { state: VisionTaskState; steps: string[] }>()
+  private currentTaskId: string | null = null
+
+  constructor(private readonly persistence: VisionControllerPersistence) {}
+
+  registerSession(taskId: string, guard: VisionGuard, request: AbortController): () => void {
+    const previous = this.sessions.get(taskId)
+    if (previous) {
+      previous.guard.halt('replaced by a newer run for this task')
+      previous.request.abort('replaced by a newer run for this task')
     }
+    const session = { guard, request }
+    this.sessions.set(taskId, session)
+    return () => {
+      if (this.sessions.get(taskId) === session) this.sessions.delete(taskId)
+    }
+  }
+
+  emitStep(taskId: string, note: string): void {
+    const current = this.runs.get(taskId)
+    const steps = [...(current?.steps ?? []), note]
+    if (current) this.runs.set(taskId, { ...current, steps })
+    this.persistence.appendStep(taskId, current?.state.goal ?? 'Computer Use', note)
+    broadcast('vision:step', { taskId, note })
+  }
+
+  emitState(state: VisionTaskState): void {
+    const current = this.runs.get(state.taskId)
+    const previous = current?.state
+    const steps = current?.steps ?? []
+    const device = this.persistence.executionDevice()
+    const next: VisionTaskState = {
+      ...state,
+      journeyId: state.journeyId ?? previous?.journeyId ?? state.taskId,
+      modelId: state.modelId ?? previous?.modelId,
+      modelName: state.modelName ?? previous?.modelName,
+      executionDeviceId: state.executionDeviceId ?? previous?.executionDeviceId ?? device.id,
+      executionDeviceName:
+        state.executionDeviceName ?? previous?.executionDeviceName ?? device.name,
+      ...(state.notice === undefined && previous?.notice ? { notice: previous.notice } : {})
+    }
+    this.runs.set(state.taskId, { state: next, steps })
+    this.currentTaskId = state.taskId
+    this.persistence.record({
+      taskId: next.taskId,
+      journeyId: next.journeyId,
+      modelId: next.modelId,
+      modelName: next.modelName,
+      kind: 'computer_use',
+      title: next.goal,
+      status: next.status,
+      summary: next.summary,
+      steps: [...steps],
+      executionDeviceId: next.executionDeviceId,
+      executionDeviceName: next.executionDeviceName,
+      phase: next.phase,
+      currentStep: next.currentStep,
+      currentAction: next.currentAction
+    })
+    broadcast('vision:task-state', next)
+  }
+
+  current(): { state: VisionTaskState | null; steps: string[] } {
+    const current = this.currentTaskId ? this.runs.get(this.currentTaskId) : undefined
+    return {
+      state: current?.state ?? null,
+      steps: [...(current?.steps ?? [])]
+    }
+  }
+
+  control(input: unknown, taskIdInput?: unknown): boolean {
+    const command = parseVisionCommand(input)
+    const taskId = typeof taskIdInput === 'string' ? taskIdInput : this.currentTaskId
+    const session = taskId ? this.sessions.get(taskId) : undefined
+    if (!command || !taskId || !session) return false
+    const { guard, request } = session
+    if (command === 'stop') {
+      guard.halt('stopped from the supervisor')
+      request.abort('stopped from the supervisor')
+      this.transition(taskId, 'stopped', 'stopped', 'Stopped from the supervisor')
+      return true
+    }
+    if (command === 'pause' || command === 'takeover') {
+      guard.pauseForUser(
+        command === 'takeover' ? 'you took over from the supervisor' : 'paused from the supervisor'
+      )
+      this.transition(
+        taskId,
+        'paused',
+        'paused',
+        command === 'takeover' ? 'You have control of this computer' : 'Paused by you'
+      )
+      return true
+    }
+    if (!guard.isPaused) return false
+    guard.resume()
+    this.transition(taskId, 'running', 'observing', 'Reading the current screen')
+    return true
+  }
+
+  private transition(
+    taskId: string,
+    status: VisionTaskState['status'],
+    phase: ComputerUsePhase,
+    currentAction: string
+  ): void {
+    const current = this.runs.get(taskId)?.state
+    if (!current) return
+    this.emitState({ ...current, status, phase, currentAction })
   }
 }
 
-/** Push a step-feed line to the overlay (and buffer it for a late subscriber). */
-export function emitVisionStep(taskId: string, note: string): void {
-  currentSteps.push(note)
-  appendTaskStep(taskId, 'computer_use', currentState?.goal ?? 'Computer Use', note)
-  broadcast('vision:step', { taskId, note })
+const controller = new VisionController(taskHistoryPersistence)
+
+export function registerVisionSession(
+  taskId: string,
+  guard: VisionGuard,
+  request: AbortController
+): () => void {
+  return controller.registerSession(taskId, guard, request)
 }
 
-/** Warn the chat, at QUEUE time, that a computer-use task was queued on a
- *  non-grounder - so the user sees it before approving, not only once the rail
- *  runs. The chat's grounder nudge subscribes to this. */
+export function emitVisionStep(taskId: string, note: string): void {
+  controller.emitStep(taskId, note)
+}
+
 export function emitVisionNotice(notice: string): void {
   broadcast('vision:notice', { notice })
 }
 
-/** Push the task lifecycle state to the overlay. `notice` warns (never blocks)
- *  when the loaded model is not a grounder - the rail stays model-agnostic. */
-export function emitVisionState(state: TaskState): void {
-  // A NEW task starting clears the step buffer; a status change on the same task
-  // keeps the history so a window opening at the end still sees every step.
-  if (currentState?.taskId !== state.taskId) {
-    currentSteps = []
-  }
-  currentState = state
-  recordTaskRun({
-    taskId: state.taskId,
-    kind: 'computer_use',
-    title: state.goal,
-    status: state.status,
-    summary: state.summary,
-    steps: currentSteps
-  })
-  broadcast('vision:task-state', state)
+export function emitVisionState(state: VisionTaskState): void {
+  controller.emitState(state)
 }
 
-/** Fail-closed parse of a renderer supervisor command. */
-export function parseVisionCommand(input: unknown): 'stop' | 'pause' | 'resume' | null {
-  return input === 'stop' || input === 'pause' || input === 'resume' ? input : null
+export function parseVisionCommand(
+  input: unknown
+): 'stop' | 'pause' | 'takeover' | 'resume' | null {
+  return input === 'stop' || input === 'pause' || input === 'takeover' || input === 'resume'
+    ? input
+    : null
 }
 
-export function registerVisionIpc(): void {
-  // A supervisor surface fetches the current run's state + steps on mount, so it
-  // catches up on anything broadcast before its renderer was listening.
-  ipcMain.handle('vision:current', () => ({ state: currentState, steps: currentSteps }))
-  ipcMain.handle('vision:control', (_e, command: unknown) => {
-    const parsed = parseVisionCommand(command)
-    if (!parsed || !activeGuard) {
-      return false
-    }
-    if (parsed === 'stop') {
-      activeGuard.halt('stopped from the overlay')
-    } else if (parsed === 'pause') {
-      activeGuard.pauseForUser('paused from the overlay')
-    } else {
-      activeGuard.resume()
-    }
-    return true
-  })
+export function registerVisionIpc(owner: VisionController = controller): void {
+  ipcMain.handle('vision:current', () => owner.current())
+  ipcMain.handle('vision:control', (_event, command: unknown, taskId: unknown) =>
+    owner.control(command, taskId)
+  )
 }

@@ -17,10 +17,6 @@ import { stripTags, htmlToText, decodeDdgHref } from './tools-parsers'
 import { evaluateArithmetic } from './calculator'
 import type { SearchKind, SearchResult } from '../shared/search-contract'
 import { selectToolExtensions } from './tools/extension-select'
-import { planTask } from './tools/planner'
-import { makePlanExecutor } from './tools/plan-executor'
-import { shouldPlan, backfillGoals, preferNativeApp } from './tools/planner-logic'
-import { resolveNativeApp } from './accessibility/ax-host'
 import {
   PROPOSAL_DECK_TOOL,
   PROPOSAL_DECK_TOOL_NAME,
@@ -48,14 +44,27 @@ export function setToolEnabled(name: string, enabled: boolean): void {
 // Per-turn context a tool may need beyond its args. Injected by the loop so a tool
 // owns its full behavior instead of the loop special-casing it (e.g. search_memory
 // excludes the current conversation so it can't cite itself).
-interface ToolContext {
+export interface ToolContext {
   conversationId?: string
   /** The exact user message. Approval-gated tools use this instead of trusting model-made args. */
   userQuery?: string
+  /** Bounded prior user/assistant turns. Intake tools combine these facts with
+   *  the current query instead of treating a follow-up as a new task. */
+  history?: ToolConversationTurn[]
+  onActivity?: (activity: ToolActivity) => void
   /** The active project (if the chat is in one), so search_knowledge_base can query
    *  that project's uploaded docs + captured memory. */
   projectId?: string
 }
+
+export interface ToolConversationTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export type ToolCallStatus = 'completed' | 'failed' | 'pending'
+
+export type ToolActivity = { kind: 'planning'; label: 'Planning next action…' }
 
 // A tool's structured result. Most tools just return text (a bare string, which the
 // loop normalizes to { text }); a tool may ALSO emit side channels — `sources`
@@ -64,6 +73,10 @@ interface ToolContext {
 // and no longer branches on the tool's name.
 export interface ToolResult {
   text: string
+  /** Structured execution state. `pending` means the tool needs user input. */
+  status?: ToolCallStatus
+  /** When true, `text` is the final user-facing answer and no model may rewrite it. */
+  authoritative?: boolean
   sources?: UnifiedSource[]
   imageRequest?: { prompt: string }
   imageRequests?: ProposalDeferredImageRequest[]
@@ -411,12 +424,16 @@ export async function runTool(
 ): Promise<ToolResult> {
   try {
     const ext = exts.find((e) => e.canHandle(name))
-    if (ext) return asToolResult(await ext.execute(name, args))
+    if (ext) return asToolResult(await ext.execute(name, args, ctx))
     const tool = TOOLS.find((t) => t.name === name)
-    if (!tool) return { text: `Error: unknown tool ${name}` }
+    if (!tool) return { text: `Error: unknown tool ${name}`, status: 'failed', authoritative: true }
     return asToolResult(await tool.run(args, ctx))
   } catch (e) {
-    return { text: `Error: ${(e as Error).message}` }
+    return {
+      text: `Error: ${(e as Error).message}`,
+      status: 'failed',
+      authoritative: true
+    }
   }
 }
 
@@ -444,7 +461,8 @@ export interface ToolExtension {
   /** Execute a call this extension owns. Structured results can also carry citations. */
   execute(
     name: string,
-    args: Record<string, unknown>
+    args: Record<string, unknown>,
+    context?: ToolContext
   ): Promise<string | ToolResult> | string | ToolResult
   /** Optional system-prompt addition when this extension contributes tools. */
   systemHint?(): string
@@ -454,11 +472,22 @@ const toolExtensions: ToolExtension[] = []
 export function registerToolExtension(ext: ToolExtension): void {
   if (!toolExtensions.some((e) => e.id === ext.id)) toolExtensions.push(ext)
 }
+export function unregisterToolExtension(id: string, expected?: ToolExtension): void {
+  const index = toolExtensions.findIndex(
+    (extension) => extension.id === id && (!expected || extension === expected)
+  )
+  if (index >= 0) toolExtensions.splice(index, 1)
+}
 export function getToolExtensions(): ToolExtension[] {
   return toolExtensions
 }
 
-export type ToolCall = { name: string; args: Record<string, unknown>; result: string }
+export type ToolCall = {
+  name: string
+  args: Record<string, unknown>
+  result: string
+  status: ToolCallStatus
+}
 // Structured sources surfaced by search_memory so the chat can render them as
 // interactive citation cards (thumbnail + open-in-Replay), same as the RAG path.
 export type UnifiedSource = SearchResult
@@ -470,51 +499,6 @@ export type UnifiedSource = SearchResult
  * callbacks (e.g. the pro skills-engine caller) and it just buffers - the final answer is
  * always the return value either way. Returns the final answer + the calls made.
  */
-/** Compose the closing reply after the orchestrator ran a plan: seed the model
- *  with the plan's tool calls + results and stream one natural summary (the same
- *  shape as the reactive loop's forced-final-answer). */
-async function composePlanAnswer(
-  sys: string,
-  query: string,
-  history: { role: string; content: string }[],
-  res: { toolCalls: ToolCall[]; stopped?: string },
-  signal: AbortSignal | undefined,
-  onDelta: (text: string, kind: 'content' | 'reasoning') => void
-): Promise<string> {
-  if (signal?.aborted) {
-    return ''
-  }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const messages: any[] = [
-    { role: 'system', content: sys },
-    ...history.slice(-10).map((m) => ({ role: m.role, content: m.content })),
-    { role: 'user', content: query }
-  ]
-  res.toolCalls.forEach((c, i) => {
-    const id = `plan-${String(i)}`
-    messages.push({
-      role: 'assistant',
-      content: null,
-      tool_calls: [
-        { id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.args) } }
-      ]
-    })
-    messages.push({ role: 'tool', tool_call_id: id, content: c.result })
-  })
-  if (res.stopped) {
-    messages.push({
-      role: 'user',
-      content: `Note: the task stopped early - ${res.stopped}. Tell the user plainly what happened.`
-    })
-  }
-  const final = await llm.streamChat(messages, onDelta, {
-    temperature: 0.3,
-    thinking: false,
-    signal
-  })
-  return final.content.trim() || res.stopped || 'Done.'
-}
-
 export async function toolChat(
   query: string,
   history: { role: string; content: string }[] = [],
@@ -531,7 +515,8 @@ export async function toolChat(
     signal?: AbortSignal
     onDelta?: (text: string, kind: 'content' | 'reasoning') => void
     onStep?: (call: { name: string; args: Record<string, unknown> }) => void
-    onToolResult?: (call: { name: string; result: string }) => void
+    onToolResult?: (call: { name: string; result: string; status: ToolCallStatus }) => void
+    onActivity?: (activity: ToolActivity) => void
     /** The orchestrator's plan for this turn, emitted once before its steps run. */
     onPlan?: (steps: { tool: string; why: string }[]) => void
   } = {}
@@ -559,6 +544,13 @@ export async function toolChat(
   }
   await llm.init() // respects pause; ensures the server is up
   const onDelta = opts.onDelta ?? ((): void => {})
+  const toolContext: ToolContext = {
+    conversationId: opts.conversationId,
+    projectId: opts.projectId,
+    userQuery: query,
+    history: boundedToolHistory(history),
+    onActivity: opts.onActivity
+  }
 
   // Offer generate_image only when an image model is available. The renderer passes
   // this; fall back to the main-process check so a caller that omits it still gates
@@ -650,65 +642,9 @@ export async function toolChat(
   }
   const tools = budgeted.tools
   const sys =
-    'You are Off Grid, a private on-device assistant. Use the provided tools when they help answer precisely. Keep answers concise.' +
+    'You are Off Grid, a private on-device assistant. Use the provided tools when they help answer precisely. Before calling web_task, use the full conversation and ask the user one concise set of questions only when a material fact is missing. If the task is actionable, call web_task immediately. Keep answers concise.' +
     (hints.length ? ' ' + hints.join(' ') : '') +
     (proposalDeckActive ? ` ${proposalDeckSystemHint(opts.conversationId)}` : '')
-
-  // --- Orchestrator: plan-and-execute for action requests --------------------
-  // Before the reactive loop, run ONE focused planning pass. It routes to the
-  // right tool and fills its args - the judgment a small model fumbles inline
-  // (open_url vs web_task, the missing url, sequencing contacts -> message). An
-  // empty/absent plan (a question, chit-chat, a request no tool fits) falls
-  // straight through to the reactive loop below, so normal chat is untouched.
-  if (shouldPlan(query) && !proposalDeckActive) {
-    try {
-      const catalog = tools
-        .map((t) => {
-          const fn = (t as { function?: { name?: unknown; description?: unknown } }).function
-          return { name: String(fn?.name ?? ''), description: String(fn?.description ?? '') }
-        })
-        .filter((c) => c.name.length > 0)
-      // Backfill an empty web_task/computer_task goal with the user's request,
-      // then apply rail-per-surface: a task naming a RUNNING native app drives
-      // the app (computer_task), not its website (web_task/open_url).
-      const nativeApp = await resolveNativeApp(query)
-      const plan = preferNativeApp(
-        backfillGoals(await planTask(query, history, catalog), query),
-        query,
-        nativeApp
-      )
-      console.log(
-        `[orchestrator] goal="${query}" plan=[${plan.steps.map((s) => s.tool).join(' -> ') || 'none'}]`
-      )
-      if (plan.steps.length > 0) {
-        opts.onPlan?.(plan.steps.map((s) => ({ tool: s.tool, why: s.why })))
-        const execute = makePlanExecutor((name, args) =>
-          runTool(
-            name,
-            args,
-            { conversationId: opts.conversationId, projectId: opts.projectId, userQuery: query },
-            exts
-          )
-        )
-        const res = await execute(plan, { onStep: opts.onStep, onToolResult: opts.onToolResult })
-        const answer = await composePlanAnswer(sys, query, history, res, opts.signal, onDelta)
-        // The plan executor yields at most one image request; widen it to the plural
-        // contract (main's orchestrator return) and keep the singular compat alias.
-        return {
-          answer,
-          toolCalls: res.toolCalls,
-          unified: res.unified,
-          imageRequests: res.imageRequest ? [res.imageRequest] : [],
-          ...(res.imageRequest ? { imageRequest: res.imageRequest } : {})
-        }
-      }
-    } catch (e) {
-      console.warn(
-        '[orchestrator] planning failed; falling back to the reactive loop:',
-        (e as Error).message
-      )
-    }
-  }
 
   // Attached images ride on the current user turn so the vision model can read
   // them even in tools/connectors mode (otherwise they were silently dropped).
@@ -815,12 +751,7 @@ export async function toolChat(
         // Uniform dispatch — every tool owns its own result. Merge any structured
         // side channels: sources are deduped into `unified` across rounds; image requests retain
         // call order for deferred generation after the turn.
-        const res = await runTool(
-          c.name,
-          c.args,
-          { conversationId: opts.conversationId, projectId: opts.projectId, userQuery: query },
-          exts
-        )
+        const res = await runTool(c.name, c.args, toolContext, exts)
         for (const s of res.sources ?? []) {
           if (unifiedKeys.has(s.key)) continue
           unifiedKeys.add(s.key)
@@ -828,11 +759,16 @@ export async function toolChat(
         }
         if (res.imageRequests?.length) imageRequests.push(...res.imageRequests)
         else if (res.imageRequest) imageRequests.push(res.imageRequest)
-        toolCalls.push({ name: c.name, args: c.args, result: res.text })
+        const status = res.status ?? 'completed'
+        toolCalls.push({ name: c.name, args: c.args, result: res.text, status })
         // Surface the COMPLETED call (with its result) live, so the UI can show each
         // tool call + result as it lands, not only in the final batch.
-        opts.onToolResult?.({ name: c.name, result: res.text })
+        opts.onToolResult?.({ name: c.name, result: res.text, status })
         messages.push({ role: 'tool', tool_call_id: c.id, content: res.text })
+        if (res.authoritative) {
+          onDelta(res.text, 'content')
+          return resultWithImages({ answer: res.text, toolCalls, unified })
+        }
       }
       continue // let the model use the results
     }
@@ -857,6 +793,22 @@ export async function toolChat(
     toolCalls,
     unified
   })
+}
+
+const TOOL_HISTORY_TURNS = 8
+const TOOL_HISTORY_CHARS_PER_TURN = 1_500
+
+function boundedToolHistory(history: { role: string; content: string }[]): ToolConversationTurn[] {
+  return history
+    .filter(
+      (turn): turn is { role: 'user' | 'assistant'; content: string } =>
+        (turn.role === 'user' || turn.role === 'assistant') && typeof turn.content === 'string'
+    )
+    .slice(-TOOL_HISTORY_TURNS)
+    .map((turn) => ({
+      role: turn.role,
+      content: turn.content.slice(0, TOOL_HISTORY_CHARS_PER_TURN)
+    }))
 }
 
 /** Parse a tool-call arguments JSON string to an object; empty object on failure. */

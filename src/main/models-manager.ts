@@ -43,6 +43,16 @@ import {
 import { writeDiagnosticLog } from './diagnostics-log'
 import { modelPackageIdentity, type TransferredModelManifest } from '@offgrid/sync'
 import { sampleProgressRate, type ProgressRateSample } from '@offgrid/ui'
+import {
+  parseRemoteVisionModelId,
+  remoteVisionInventoryModels,
+  remoteVisionModelId
+} from '../shared/remote-vision-server'
+import {
+  activateRemoteVisionModel,
+  deactivateRemoteVisionModel,
+  getRemoteVisionServerSettings
+} from './vision/remote-vision-server'
 
 export interface DownloadProgress {
   modelId: string
@@ -113,7 +123,27 @@ export async function getCatalog(): Promise<{ kinds: readonly string[]; models: 
     catalog: CATALOG as unknown as CatalogEntry[],
     present
   })
-  return { kinds: MODEL_KINDS, models }
+  const remoteModels = remoteVisionInventoryModels(getRemoteVisionServerSettings().servers)
+  return { kinds: MODEL_KINDS, models: [...models, ...remoteModels] }
+}
+
+export interface ModelIdentity {
+  modelId: string
+  modelName: string
+}
+
+/** Resolve a captured model ID to its display name without consulting which
+ * model is active now. Task runs use this once, then persist the result. */
+export async function resolveModelIdentity(modelId: string): Promise<ModelIdentity> {
+  try {
+    const catalog = (await getCatalog()).models as Array<{ id: string; name?: string }>
+    return {
+      modelId,
+      modelName: catalog.find((model) => model.id === modelId)?.name?.trim() || modelId
+    }
+  } catch {
+    return { modelId, modelName: modelId }
+  }
 }
 
 /** Per-model vision status for every vision-CAPABLE model, keyed by id. supportsVision
@@ -149,7 +179,7 @@ export async function listInstalled(): Promise<string[]> {
   const { isMfluxModelCached } = await import('./mflux')
   const dir = llm.getModelsDir()
   const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG as unknown as CatalogEntry[])
-  return installedIds({
+  const localInstalled = installedIds({
     locals: getLocalModels(),
     installedDownloadedIds: installedDownloadedIds(dir),
     downloaded,
@@ -157,6 +187,10 @@ export async function listInstalled(): Promise<string[]> {
     present: (name) => fileSizeOf(dir, name) > 0,
     mfluxCached: (id) => isMfluxModelCached(id)
   })
+  const remoteInstalled = getRemoteVisionServerSettings().servers.map((server) =>
+    remoteVisionModelId(server.id, server.model)
+  )
+  return [...localInstalled, ...remoteInstalled]
 }
 
 export async function searchModels(query: string, kind?: string): Promise<unknown[]> {
@@ -214,6 +248,14 @@ export async function downloadModel(
   if (!entry) {
     writeDiagnosticLog('models.download', 'request.rejected', { modelId, reason: 'unknown_model' })
     return publishRefusal(modelId, 'unknown model', onProgress)
+  }
+  if (inCatalog?.availability === 'coming_soon') {
+    const error = inCatalog.availabilityNote ?? 'This model is coming soon.'
+    writeDiagnosticLog('models.download', 'request.rejected', {
+      modelId,
+      reason: 'runtime_adapter_unavailable'
+    })
+    return publishRefusal(modelId, error, onProgress)
   }
   writeDiagnosticLog('models.download', 'request.accepted', {
     modelId,
@@ -617,14 +659,20 @@ export async function deleteModel(modelId: string): Promise<DeleteModelResult> {
   return { success: true, freedFiles: freed }
 }
 
-/** Set the chat LLM (text/vision). Writes active-model.json + reloads llama-server. */
-export async function setActiveModel(
-  modelId: string
+type LlamaModelKindGate = (kind: string) => boolean
+
+async function setActiveLlamaModel(
+  modelId: string,
+  acceptsKind: LlamaModelKindGate,
+  expectedKind: string
 ): Promise<{ success: boolean; error?: string }> {
   // Imported local model: resolve from the local registry (not the catalog).
   if (modelId.startsWith('local:')) {
     const lm = getLocalModels().find((m) => m.id === modelId)
     if (!lm) return { success: false, error: 'unknown local model' }
+    if (!acceptsKind(lm.kind)) {
+      return { success: false, error: `${lm.kind} models are not loadable as ${expectedKind}` }
+    }
     fs.writeFileSync(
       activeModelFile(),
       JSON.stringify({ id: modelId, primary: lm.primary, mmproj: lm.mmproj ?? null }, null, 2)
@@ -633,14 +681,21 @@ export async function setActiveModel(
     return { success: true }
   }
   const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models')
+  const catalogEntry = CATALOG.find((model) => model.id === modelId)
+  if (catalogEntry?.availability === 'coming_soon') {
+    return {
+      success: false,
+      error: catalogEntry.availabilityNote ?? 'This model is coming soon.'
+    }
+  }
   const dir = llm.getModelsDir()
   const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG as unknown as CatalogEntry[])
   const transferred = downloadedVariant(downloaded, modelId)
   if (transferred) {
-    if (!isChatLoadable(transferred.kind)) {
+    if (!acceptsKind(transferred.kind)) {
       return {
         success: false,
-        error: `${transferred.kind} models are not loadable as the chat LLM`
+        error: `${transferred.kind} models are not loadable as ${expectedKind}`
       }
     }
     const primary = downloadedPrimary(transferred)
@@ -653,16 +708,28 @@ export async function setActiveModel(
     llm.reloadModel()
     return { success: true }
   }
-  const entry = CATALOG.find((m) => m.id === modelId) ?? (await resolveHuggingFaceModel(modelId))
+  const entry = catalogEntry ?? (await resolveHuggingFaceModel(modelId))
   if (!entry) return { success: false, error: 'unknown model' }
-  if (!isChatLoadable(entry.kind)) {
-    return { success: false, error: `${entry.kind} models are not loadable as the chat LLM` }
+  if (!acceptsKind(entry.kind)) {
+    return { success: false, error: `${entry.kind} models are not loadable as ${expectedKind}` }
   }
   const primary = primaryFileName(entry as unknown as CatalogEntry)
   const mmproj = entry.files.find((f) => f.role === 'mmproj')?.name ?? null
   fs.writeFileSync(activeModelFile(), JSON.stringify({ id: modelId, primary, mmproj }, null, 2))
   llm.reloadModel()
   return { success: true }
+}
+
+/** Set the chat LLM (text/vision). Writes active-model.json + reloads llama-server. */
+export function setActiveModel(modelId: string): Promise<{ success: boolean; error?: string }> {
+  return setActiveLlamaModel(modelId, isChatLoadable, 'the chat LLM')
+}
+
+/** Load the selected Computer Use policy into the shared llama.cpp runtime for one supervised run. */
+export function loadComputerUseModel(
+  modelId: string
+): Promise<{ success: boolean; error?: string }> {
+  return setActiveLlamaModel(modelId, (kind) => kind === 'computer_use', 'Computer Use')
 }
 
 export function getActiveModel(): string | null {
@@ -729,7 +796,13 @@ export async function reconcileActiveModelProjector(): Promise<boolean> {
  */
 export async function getActiveModelIds(): Promise<string[]> {
   const info = await getStorageInfo()
-  return info.models.filter((m) => m.active).map((m) => m.id)
+  const settings = getRemoteVisionServerSettings()
+  const remote = settings.servers.find((server) => server.id === settings.activeServerId)
+  const activeChatId = getActiveModel()
+  const localIds = info.models
+    .filter((model) => model.active && (!remote || model.id !== activeChatId))
+    .map((model) => model.id)
+  return remote ? [...localIds, remoteVisionModelId(remote.id, remote.model)] : localIds
 }
 
 /**
@@ -741,6 +814,12 @@ export async function getActiveModelIds(): Promise<string[]> {
 export async function activateModel(
   modelId: string
 ): Promise<{ success: boolean; error?: string }> {
+  const remote = parseRemoteVisionModelId(modelId)
+  if (remote) {
+    return activateRemoteVisionModel(remote.serverId, remote.modelId)
+      ? { success: true }
+      : { success: false, error: 'Remote model is no longer available.' }
+  }
   let kind: string | undefined
   if (modelId.startsWith('local:')) {
     kind = getLocalModels().find((m) => m.id === modelId)?.kind
@@ -755,7 +834,9 @@ export async function activateModel(
       (CATALOG.find((m) => m.id === modelId) ?? (await resolveHuggingFaceModel(modelId)))?.kind
   }
   const modal = modalityForModel(kind)
-  return modal ? setActiveModalChoice(modal, modelId) : setActiveModel(modelId)
+  const result = modal ? await setActiveModalChoice(modal, modelId) : await setActiveModel(modelId)
+  if (result.success && kind && isChatLoadable(kind)) deactivateRemoteVisionModel()
+  return result
 }
 
 export async function setActiveModalChoice(
@@ -966,16 +1047,18 @@ export async function registerTransferredModel(
 
   // Projector presence is the package capability SSOT. A caller can still label an older catalog
   // entry as text, but the installed package and its deterministic identity must be vision.
-  const normalizedManifest: TransferredModelManifest = manifest.files.some(
+  const projectorPresent = manifest.files.some(
     (file) => file.role === 'projector' || isProjectorFileName(file.name)
   )
-    ? { ...manifest, kind: 'vision' }
-    : manifest
+  const normalizedManifest: TransferredModelManifest =
+    projectorPresent && (manifest.kind === 'text' || manifest.kind === 'vision')
+      ? { ...manifest, kind: 'vision' }
+      : manifest
 
   const { CATALOG } = await import('@offgrid/models')
   const catalog = CATALOG.find((model) => model.id === normalizedManifest.id)
   if (catalog) {
-    const expected = new Set(catalog.files.map((file) => file.name))
+    const expected = new Set<string>(catalog.files.map((file) => file.name))
     const received = new Set(normalizedManifest.files.map((file) => file.name))
     if (expected.size === received.size && [...expected].every((name) => received.has(name))) {
       return { success: true, id: normalizedManifest.id }
@@ -1156,7 +1239,7 @@ export async function getStorageInfo(): Promise<StorageInfo> {
   // active and image models can't be activated from the UI.
   const modals = getAllActiveModals()
   const locals = getLocalModels()
-  const installed = await listInstalled()
+  const installed = (await listInstalled()).filter((id) => !parseRemoteVisionModelId(id))
   const sizeOf = (name: string): number => fileSizeOf(dir, name)
   const downloaded = reconciledDownloaded
   const catalogIds = new Set(catalog.map((m) => m.id))

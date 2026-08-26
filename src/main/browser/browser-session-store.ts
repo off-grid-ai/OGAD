@@ -9,6 +9,8 @@ export interface BrowserSessionRecord<Resource> {
   sessionId: string
   historyId?: string
   kind: BrowserSessionKind
+  journeyId?: string
+  parentSessionId?: string
   resource: Resource
   chrome: BrowserChromeState
   task?: BrowserTaskPointer
@@ -34,6 +36,8 @@ export class BrowserSessionStore<Resource> {
     sessionId: string
     historyId?: string
     kind: BrowserSessionKind
+    journeyId?: string
+    parentSessionId?: string
     resource: Resource
     task?: BrowserTaskPointer
   }): BrowserSessionRecord<Resource> {
@@ -42,6 +46,7 @@ export class BrowserSessionStore<Resource> {
     }
     const record: BrowserSessionRecord<Resource> = {
       ...input,
+      task: input.task ? { ...input.task, steps: [...input.task.steps] } : undefined,
       chrome: { ...EMPTY_CHROME }
     }
     this.records.set(record.sessionId, record)
@@ -62,6 +67,27 @@ export class BrowserSessionStore<Resource> {
       if (record.task?.taskId === taskId) return record
     }
     return undefined
+  }
+
+  /** A chat journey owns one browser workspace. Prefer its active page, then
+   * its root page. Child pages remain available without changing identity. */
+  findJourney(journeyId: string): BrowserSessionRecord<Resource> | undefined {
+    const active = this.active
+    if (active?.journeyId === journeyId) return active
+    for (const record of this.records.values()) {
+      if (record.journeyId === journeyId && !record.parentSessionId) return record
+    }
+    return undefined
+  }
+
+  updateJourneyTask(journeyId: string, task: BrowserTaskPointer): number {
+    let updated = 0
+    for (const record of this.records.values()) {
+      if (record.kind !== 'task' || record.journeyId !== journeyId) continue
+      record.task = { ...task, steps: [...task.steps] }
+      updated += 1
+    }
+    return updated
   }
 
   activate(sessionId: string): boolean {
@@ -114,6 +140,8 @@ export class BrowserSessionStore<Resource> {
         sessionId: record.sessionId,
         historyId: record.historyId,
         kind: record.kind,
+        journeyId: record.journeyId,
+        parentSessionId: record.parentSessionId,
         taskId: record.task?.taskId,
         status: record.task?.status ?? 'open',
         ...record.chrome

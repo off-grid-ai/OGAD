@@ -1,23 +1,13 @@
-export interface ComputerUseStepDetail {
-  stepId: string
-  at: number
-  modelInput?: string
-  screenshot?: {
-    path?: string
-    originalWidth: number
-    originalHeight: number
-    inferenceWidth: number
-    inferenceHeight: number
-  }
-  retrievedFacts?: string[]
-  tokenUsage?: { input?: number; output?: number; context?: number }
-  rawResponse?: string
-  mappedAction?: string
-  execution?: { status: 'complete' | 'failed'; durationMs?: number; result?: string; error?: string }
-}
+import {
+  MAX_COMPUTER_USE_REASONING_CHARS,
+  MAX_COMPUTER_USE_TRACE_STEPS
+} from '../../shared/computer-use-limits'
+import type { ComputerUsePhase, ComputerUseStepDetail } from '../../shared/computer-use-step-detail'
 
-export const MAX_TASK_STEP_DETAILS = 50
-const MAX_TEXT_LENGTH = 12_000
+export type { ComputerUsePhase, ComputerUseStepDetail } from '../../shared/computer-use-step-detail'
+
+export const MAX_TASK_STEP_DETAILS = MAX_COMPUTER_USE_TRACE_STEPS
+const MAX_TEXT_LENGTH = MAX_COMPUTER_USE_REASONING_CHARS
 const MAX_FACTS = 12
 const SECRET_PATTERNS: ReadonlyArray<[RegExp, string]> = [
   [/\bsk-[A-Za-z0-9_-]{12,}\b/g, '[redacted]'],
@@ -25,7 +15,7 @@ const SECRET_PATTERNS: ReadonlyArray<[RegExp, string]> = [
     /(["']?)(api[_-]?key|access[_-]?token|authorization|password|secret)\1\s*[:=]\s*(["']?)(?:Bearer\s+)?[^\s,"'}]+\3/gi,
     '$2=[redacted]'
   ],
-  [/\bBearer\s+[A-Za-z0-9._~+\/-]+=*\b/gi, 'Bearer [redacted]']
+  [/\bBearer\s+[A-Za-z0-9._~+/-]+=*\b/gi, 'Bearer [redacted]']
 ]
 
 function safeText(value: unknown): string | undefined {
@@ -39,8 +29,73 @@ function safeText(value: unknown): string | undefined {
     : redacted
 }
 
+/** Typed values can contain passwords, one-time codes, or other private text. */
+function redactTypedActionContent(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined
+  let redacted = value
+    .replace(/(\btype\s*\(\s*(?:content|text|value)\s*=\s*')[^']*'/gi, "$1[redacted]'")
+    .replace(/(\btype\s*\(\s*(?:content|text|value)\s*=\s*")[^"]*"/gi, '$1[redacted]"')
+    .replace(/\btype\s+"(?:\\.|[^"\\])*"/gi, 'type "[redacted]"')
+
+  if (/"(?:action|type)"\s*:\s*"type"/i.test(redacted)) {
+    redacted = redacted.replace(
+      /("(?:content|text|value)"\s*:\s*")(?:(?:\\.)|[^"\\])*"/gi,
+      '$1[redacted]"'
+    )
+  }
+  return redacted
+}
+
+/** Keep live reasoning separate from the generic trace, bounded, and safe to persist. */
+export function sanitizeComputerUseReasoning(value: unknown): string | undefined {
+  const typedRedacted = redactTypedActionContent(value)
+  if (!typedRedacted) return undefined
+  const secretRedacted = SECRET_PATTERNS.reduce(
+    (result, [pattern, replacement]) => result.replace(pattern, replacement),
+    typedRedacted
+  )
+  return secretRedacted.slice(-MAX_COMPUTER_USE_REASONING_CHARS)
+}
+
 function finite(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+}
+
+function phase(value: unknown): ComputerUsePhase | undefined {
+  switch (value) {
+    case 'preparing':
+    case 'observing':
+    case 'thinking':
+    case 'acting':
+    case 'checking':
+    case 'waiting':
+    case 'paused':
+    case 'complete':
+    case 'failed':
+    case 'stopped':
+      return value
+    default:
+      return undefined
+  }
+}
+
+/** Remove model-only reasoning while retaining the action and tool-call output users can audit. */
+export function visibleComputerUseModelOutput(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const withoutClosedReasoning = value.replace(
+    /<(?:think|analysis|reasoning)\b[^>]*>[\s\S]*?<\/(?:think|analysis|reasoning)>/gi,
+    ''
+  )
+  const withoutOpenReasoning = withoutClosedReasoning.replace(
+    /<(?:think|analysis|reasoning)\b[^>]*>[\s\S]*$/gi,
+    ''
+  )
+  // UI-TARS can emit an untagged `Thought:` preface before its auditable
+  // `Action:` line. It is the same hidden reasoning in a different envelope.
+  const withoutThoughtPreface = withoutOpenReasoning
+    .replace(/^\s*Thought:\s*[\s\S]*?(?=^\s*Action:)/gim, '')
+    .replace(/^\s*Thought:\s*[\s\S]*$/gim, '')
+  return safeText(redactTypedActionContent(withoutThoughtPreface))
 }
 
 /** Redact and bound observability before it reaches SQLite or a renderer. */
@@ -50,19 +105,45 @@ export function sanitizeComputerUseStepDetail(input: ComputerUseStepDetail): Com
   const originalHeight = finite(screenshot?.originalHeight)
   const inferenceWidth = finite(screenshot?.inferenceWidth)
   const inferenceHeight = finite(screenshot?.inferenceHeight)
+  const viewportWidth = finite(screenshot?.viewportWidth)
+  const viewportHeight = finite(screenshot?.viewportHeight)
   const executionStatus = input.execution?.status === 'failed' ? 'failed' : 'complete'
+  const modelOutput = visibleComputerUseModelOutput(input.modelOutput ?? input.rawResponse)
+  const modelInput = visibleComputerUseModelOutput(input.modelInput)
+  const decisionSummary = safeText(redactTypedActionContent(input.decisionSummary))
+  const reasoning = safeText(redactTypedActionContent(input.reasoning))
+  const decisionRationale = safeText(redactTypedActionContent(input.decisionRationale))
+  const mappedAction = safeText(redactTypedActionContent(input.mappedAction))
+  const actionCoordinateSpace =
+    input.actionCoordinateSpace === 'viewport' ||
+    (!input.actionCoordinateSpace && input.execution?.result === 'actuated')
+      ? 'viewport'
+      : 'inference'
+  const screenshotAvailability =
+    screenshot?.availability === 'unavailable' ? 'unavailable' : 'device_local'
   return {
     stepId: safeText(input.stepId)?.slice(0, 200) || 'step',
     at: finite(input.at) ?? Date.now(),
-    ...(safeText(input.modelInput) ? { modelInput: safeText(input.modelInput) } : {}),
+    ...(phase(input.phase) ? { phase: phase(input.phase) } : {}),
+    ...(modelInput ? { modelInput } : {}),
     ...(screenshot && originalWidth && originalHeight && inferenceWidth && inferenceHeight
       ? {
           screenshot: {
-            ...(safeText(screenshot.path) ? { path: safeText(screenshot.path) } : {}),
+            ...(screenshotAvailability === 'device_local' && safeText(screenshot.path)
+              ? { path: safeText(screenshot.path) }
+              : {}),
+            availability: screenshotAvailability,
+            ...(safeText(screenshot.executionDeviceId)
+              ? { executionDeviceId: safeText(screenshot.executionDeviceId)?.slice(0, 300) }
+              : {}),
+            ...(safeText(screenshot.executionDeviceName)
+              ? { executionDeviceName: safeText(screenshot.executionDeviceName)?.slice(0, 200) }
+              : {}),
             originalWidth,
             originalHeight,
             inferenceWidth,
-            inferenceHeight
+            inferenceHeight,
+            ...(viewportWidth && viewportHeight ? { viewportWidth, viewportHeight } : {})
           }
         }
       : {}),
@@ -89,8 +170,12 @@ export function sanitizeComputerUseStepDetail(input: ComputerUseStepDetail): Com
           }
         }
       : {}),
-    ...(safeText(input.rawResponse) ? { rawResponse: safeText(input.rawResponse) } : {}),
-    ...(safeText(input.mappedAction) ? { mappedAction: safeText(input.mappedAction) } : {}),
+    ...(decisionSummary ? { decisionSummary } : {}),
+    ...(reasoning ? { reasoning } : {}),
+    ...(decisionRationale ? { decisionRationale } : {}),
+    ...(modelOutput ? { modelOutput } : {}),
+    ...(mappedAction ? { mappedAction } : {}),
+    ...(mappedAction ? { actionCoordinateSpace } : {}),
     ...(input.execution
       ? {
           execution: {
@@ -98,7 +183,9 @@ export function sanitizeComputerUseStepDetail(input: ComputerUseStepDetail): Com
             ...(finite(input.execution.durationMs) !== undefined
               ? { durationMs: finite(input.execution.durationMs) }
               : {}),
-            ...(safeText(input.execution.result) ? { result: safeText(input.execution.result) } : {}),
+            ...(safeText(input.execution.result)
+              ? { result: safeText(input.execution.result) }
+              : {}),
             ...(safeText(input.execution.error) ? { error: safeText(input.execution.error) } : {})
           }
         }

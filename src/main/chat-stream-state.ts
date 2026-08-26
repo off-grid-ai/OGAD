@@ -17,7 +17,8 @@ import {
   type ChatStreamCompletion,
   type ChatStreamPhase,
   type ChatStreamProgress,
-  type ChatStreamTool
+  type ChatStreamTool,
+  type ChatStreamToolResultStatus
 } from '@offgrid/sync'
 import type { ActiveChatStreamContract } from '../shared/ipc-contracts'
 
@@ -149,12 +150,13 @@ export function noteChatStreamToolStarted(streamId: string | undefined, name: st
 export function noteChatStreamToolCompleted(
   streamId: string | undefined,
   name: string,
-  result: string
+  result: string,
+  status: ChatStreamToolResultStatus = 'completed'
 ): void {
   if (!streamId || !name) return
   const stream = active.get(streamId)
   if (!stream) return
-  stream.tools = completeChatStreamTool(stream.tools, name, result)
+  stream.tools = completeChatStreamTool(stream.tools, name, result, status)
   publish(streamId)
 }
 

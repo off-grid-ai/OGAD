@@ -16,11 +16,8 @@
  * real machine with the Accessibility grant.
  */
 import { execFile } from 'node:child_process'
-import fs from 'node:fs'
-import path from 'node:path'
 import { promisify } from 'node:util'
 import { globalShortcut, systemPreferences } from 'electron'
-import { binRoots, exe } from '../runtime-env'
 import { llm } from '../llm'
 import { loadActuation, type ActuationPort } from '../input/actuation'
 import { parseAxElements, type AxElement, type AxSnapshot } from './ax-elements'
@@ -41,6 +38,11 @@ import { resolveComputerUseContextTokens } from '../../shared/computer-use-setti
 import { recentVisualFacts } from '../vision/visual-context'
 import { recordTaskRun } from '../tasks/task-history'
 import { persistAxObservation } from './ax-observation'
+import { accessibilityHelperPath } from './ax-helper'
+import { encodeTaskPhase } from '../../shared/task-execution-plan'
+import { prepareTaskExecutionPlan } from '../tasks/task-execution-plan-service'
+import { registerTaskGuideHandler } from '../tasks/task-guide'
+import { resolveModelIdentity } from '../models-manager'
 
 const execFileAsync = promisify(execFile)
 
@@ -51,20 +53,6 @@ const SELF_APP_NAME = 'Off Grid AI Desktop'
 /** Thrown when the kill switch (Esc / overlay Stop) halts a run mid-action so
  *  the loop unwinds instead of actuating again. */
 class HaltError extends Error {}
-
-function helperPath(): string | null {
-  for (const root of binRoots()) {
-    const candidate = path.join(root, exe('text-extractor'))
-    try {
-      if (fs.existsSync(candidate)) {
-        return candidate
-      }
-    } catch {
-      /* keep looking */
-    }
-  }
-  return null
-}
 
 /** The foreground (.regular) running apps, from the helper's NSWorkspace list.
  *  This needs no Screen-Recording grant (get-windows under-reports without it),
@@ -85,9 +73,9 @@ async function runningAppNames(helper: string): Promise<string[]> {
  *  AX element tree) and `open -a` to foreground. Available only when the helper
  *  is present on macOS. */
 const macAxBackend: AxBackend = {
-  available: () => process.platform === 'darwin' && helperPath() !== null,
+  available: () => process.platform === 'darwin' && accessibilityHelperPath() !== null,
   async listApps() {
-    const helper = helperPath()
+    const helper = accessibilityHelperPath()
     return helper ? runningAppNames(helper) : []
   },
   activate: activateApp,
@@ -131,7 +119,7 @@ async function snapshotApp(appName: string): Promise<AxSnapshot | null> {
   if (process.platform !== 'darwin') {
     return null
   }
-  const helper = helperPath()
+  const helper = accessibilityHelperPath()
   if (!helper) {
     return null
   }
@@ -146,9 +134,14 @@ async function snapshotApp(appName: string): Promise<AxSnapshot | null> {
   }
 }
 
-function makeElementActuator(actuation: ActuationPort, guard: VisionGuard): ElementActuator {
-  const ensureLive = (): void => {
-    if (guard.isHalted) {
+function makeElementActuator(
+  actuation: ActuationPort,
+  guard: VisionGuard,
+  onAction: (action: string) => void
+): ElementActuator {
+  const ensureLive = async (): Promise<void> => {
+    if (guard.isPaused) await guard.waitUntilRunnable()
+    if (!guard.canActuate()) {
       throw new HaltError(guard.snapshot().reason || 'stopped')
     }
     guard.countStep()
@@ -159,17 +152,20 @@ function makeElementActuator(actuation: ActuationPort, guard: VisionGuard): Elem
   }
   return {
     async click(el) {
-      ensureLive()
+      await ensureLive()
+      onAction(`Click ${el.name || el.role}`)
       await clickCenter(el)
     },
     async press(el) {
       // nut.js has no portable AXPress; a click at the element's center is the
       // reliable actuation and is what its coordinates are for.
-      ensureLive()
+      await ensureLive()
+      onAction(`Press ${el.name || el.role}`)
       await clickCenter(el)
     },
     async type(el, text) {
-      ensureLive()
+      await ensureLive()
+      onAction(el ? `Type in ${el.name || el.role}` : 'Type in the focused field')
       // With a target, focus it first; without one, type into the focused field.
       if (el) {
         await clickCenter(el)
@@ -177,7 +173,8 @@ function makeElementActuator(actuation: ActuationPort, guard: VisionGuard): Elem
       await actuation.typeText(text)
     },
     async keys(combo) {
-      ensureLive()
+      await ensureLive()
+      onAction(`Press ${combo}`)
       await actuation.tapKeys(combo)
     }
   }
@@ -220,7 +217,8 @@ class AxRailHost {
     goal: string,
     taskId: string,
     app: string,
-    initial?: AxSnapshot
+    initial?: AxSnapshot,
+    journeyId = taskId
   ): Promise<ElementTaskResult> {
     console.log(`[ax-rail] runTask app="${app}" goal="${goal}"`)
     const actuation = loadActuation()
@@ -239,7 +237,10 @@ class AxRailHost {
     }
     await axBackend().activate(app)
     const guard = new VisionGuard()
+    const request = new AbortController()
     const settings = getComputerUseSettings()
+    const activeModel = llm.activeModelInfo()
+    const modelIdentity = activeModel ? await resolveModelIdentity(activeModel.id) : undefined
     const contextTokens = resolveComputerUseContextTokens(
       settings.context,
       llm.effectiveContextSize()
@@ -247,18 +248,59 @@ class AxRailHost {
     const retrievedFacts = settings.retrieveOlderVisuals ? recentVisualFacts(taskId) : []
     // The kill switch: Esc halts for good. The overlay's Stop routes to the SAME
     // guard through the controller session, so both paths end one run.
-    globalShortcut.register('Escape', () => guard.halt('stopped with Esc'))
-    const releaseSession = registerVisionSession(guard)
+    const escapeRegistered = globalShortcut.register('Escape', () => {
+      guard.halt('stopped with Esc')
+      emitVisionState({
+        taskId,
+        journeyId,
+        goal,
+        status: 'stopped',
+        phase: 'stopped',
+        currentAction: 'Stopped with Esc'
+      })
+    })
+    const releaseSession = registerVisionSession(taskId, guard, request)
     // The AX rail is model-agnostic and needs no grounder, so there is no
     // grounder notice here (unlike the vision rail).
-    emitVisionState({ taskId, goal, status: 'running' })
+    emitVisionState({
+      taskId,
+      journeyId,
+      ...modelIdentity,
+      goal,
+      status: 'running',
+      phase: 'preparing',
+      currentStep: 0,
+      currentAction: `Preparing to control ${app}`,
+      ...(escapeRegistered
+        ? {}
+        : { notice: 'Esc is unavailable. Use Stop or Take Over in the task controls.' })
+    })
     // Float the supervisor window over the app we are about to drive, so the
     // user sees the step feed even though the driven app takes the foreground.
     showSupervisorWindow()
     let usedInitial = false
+    let liveStep = 0
+    const queuedGuidance: string[] = []
+    const releaseGuidance = registerTaskGuideHandler(taskId, (text) => {
+      queuedGuidance.push(text)
+      return true
+    })
     try {
+      const plan = await prepareTaskExecutionPlan(
+        { goal, surface: 'computer', targetLabel: app, signal: request.signal },
+        (marker) => emitVisionStep(taskId, marker)
+      )
       const result = await runElementTask(goal, {
         read: async () => {
+          emitVisionState({
+            taskId,
+            journeyId,
+            goal,
+            status: 'running',
+            phase: 'observing',
+            currentStep: liveStep + 1,
+            currentAction: `Reading ${app}`
+          })
           if (!usedInitial && initial) {
             usedInitial = true
             return initial
@@ -267,11 +309,32 @@ class AxRailHost {
           // (or the overlay) may hold system focus.
           return (await axBackend().snapshot(app)) ?? { windowTitle: '', elements: [] }
         },
-        actuator: makeElementActuator(actuation, guard),
+        actuator: makeElementActuator(actuation, guard, (action) => {
+          emitVisionState({
+            taskId,
+            journeyId,
+            goal,
+            status: 'running',
+            phase: 'acting',
+            currentStep: liveStep,
+            currentAction: action
+          })
+        }),
         decide: async (prompt) => {
+          liveStep += 1
+          emitVisionState({
+            taskId,
+            journeyId,
+            goal,
+            status: 'running',
+            phase: 'thinking',
+            currentStep: liveStep,
+            currentAction: 'Choosing the next action'
+          })
           const raw = await llm.chat(prompt, [], 60_000, 400, {
             responseFormat: ELEMENT_STEP_FORMAT,
-            disableThinking: true
+            disableThinking: true,
+            signal: request.signal
           })
           console.log(`[ax-rail] model reply: ${JSON.stringify(raw.slice(0, 400))}`)
           return raw
@@ -279,12 +342,26 @@ class AxRailHost {
         onStep: (note) => {
           console.log(`[ax-rail] step: ${note}`)
           emitVisionStep(taskId, note)
+          emitVisionState({
+            taskId,
+            journeyId,
+            goal,
+            status: 'running',
+            phase: 'checking',
+            currentStep: liveStep,
+            currentAction: note
+          })
         },
+        plan,
+        onPhase: (phaseId) => emitVisionStep(taskId, encodeTaskPhase(phaseId)),
+        takeGuidance: () => queuedGuidance.splice(0),
         contextTokens,
         checkpointInterval: settings.checkpointInterval,
         retrievedFacts,
-        onCheckpoint: (_step, steps) => {
-          recordTaskRun({ taskId, kind: 'computer_use', title: goal, steps: [...steps] })
+        onCheckpoint: () => {
+          // Action-loop checkpoints do not include plan and phase markers.
+          // Keep the canonical trace already stored by emitVisionStep.
+          recordTaskRun({ taskId, kind: 'computer_use', title: goal })
         },
         onObservation: (observation) => {
           persistAxObservation(taskId, goal, observation)
@@ -292,22 +369,37 @@ class AxRailHost {
       })
       emitVisionState({
         taskId,
+        journeyId,
         goal,
-        status: result.ok ? 'done' : 'failed',
+        status: guard.isHalted ? 'stopped' : result.ok ? 'done' : 'failed',
+        phase: guard.isHalted ? 'stopped' : result.ok ? 'complete' : 'failed',
+        currentStep: liveStep,
+        currentAction: result.summary,
         summary: result.summary
       })
       return result
     } catch (error) {
-      const summary =
-        error instanceof HaltError
+      const summary = guard.isHalted
+        ? guard.snapshot().reason || 'stopped'
+        : error instanceof HaltError
           ? error.message || 'stopped'
           : error instanceof Error
             ? error.message
             : 'accessibility run failed'
-      emitVisionState({ taskId, goal, status: 'failed', summary })
+      emitVisionState({
+        taskId,
+        journeyId,
+        goal,
+        status: guard.isHalted ? 'stopped' : 'failed',
+        phase: guard.isHalted ? 'stopped' : 'failed',
+        currentStep: liveStep,
+        currentAction: summary,
+        summary
+      })
       return { ok: false, summary, steps: [] }
     } finally {
-      globalShortcut.unregister('Escape')
+      releaseGuidance()
+      if (escapeRegistered) globalShortcut.unregister('Escape')
       releaseSession()
       hideSupervisorWindow()
     }

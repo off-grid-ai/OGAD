@@ -1,5 +1,6 @@
 import { app, shell, BrowserWindow, protocol, session, desktopCapturer, screen } from 'electron'
 import { join } from 'path'
+import { tmpdir } from 'os'
 import fs from 'fs'
 
 // Custom scheme to serve local capture screenshots to the renderer (file:// is
@@ -32,6 +33,7 @@ import { serveArtifactPreview } from './artifact-preview'
 import { ipcMain } from 'electron'
 import { loadProEntitlementProvider, loadProFeaturesMain } from './bootstrap/loadProFeaturesMain'
 import { resolveWindowPresentation } from './bootstrap/window-presentation'
+import { mayUseIsolatedEvidenceInstance } from './bootstrap/isolated-evidence-instance'
 
 /**
  * Whether this launch may put itself on screen or take the keyboard. Resolved ONCE: the main window, the Dock
@@ -39,7 +41,12 @@ import { resolveWindowPresentation } from './bootstrap/window-presentation'
  * is only partly headless - which is exactly the bug this fixes.
  */
 const windowPresentation = resolveWindowPresentation(process.env)
-import { initLicensing, revalidateProEntitlement } from './licensing/license-service'
+import {
+  initLicensing,
+  refreshCachedProEntitlement,
+  revalidateProEntitlement
+} from './licensing/license-service'
+import { PERSONAL_MESH_ENTITLEMENT_REVALIDATION_INTERVAL_MS } from '@offgrid/sync'
 import { setupLicenseIpc } from './license-ipc'
 import { nativeImage } from 'electron'
 import { purgeLegacyChatImports, getSetting } from './database'
@@ -222,7 +229,8 @@ function createWindow(): void {
 // meetings DB, so its orphan-recovery could adopt/kill the first instance's LIVE
 // recorder. Bail before whenReady if we can't get the lock; focus the existing
 // window instead.
-if (!app.requestSingleInstanceLock()) {
+const isolatedEvidenceInstance = mayUseIsolatedEvidenceInstance(process.env, tmpdir())
+if (!isolatedEvidenceInstance && !app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   app.on('second-instance', () => {
@@ -404,6 +412,15 @@ app.whenReady().then(async () => {
     initLicensing()
     await revalidateProEntitlement('launch')
     setupLicenseIpc()
+    const entitlementRefresh = setInterval(() => {
+      refreshCachedProEntitlement()
+      void revalidateProEntitlement('foreground')
+    }, PERSONAL_MESH_ENTITLEMENT_REVALIDATION_INTERVAL_MS)
+    entitlementRefresh.unref()
+    applicationShutdown.register({
+      name: 'pro:entitlement-refresh',
+      shutdown: () => clearInterval(entitlementRefresh)
+    })
     setupIPC()
     setupRagIPC()
     setupMcpIpc() // basic MCP connectors (management + chat tool extension)
@@ -481,6 +498,7 @@ app.whenReady().then(async () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
   app.on('browser-window-focus', () => {
+    refreshCachedProEntitlement()
     void revalidateProEntitlement('foreground')
   })
 })
