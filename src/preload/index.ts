@@ -14,8 +14,12 @@ import type {
 import {
   BACKUP_EXPORT_ALL_CHANNEL,
   BACKUP_IMPORT_CHANNEL,
+  RETENTION_ARCHIVE_CLEAR_CHANNEL,
+  type AutoCleanupRunContract,
+  type AutoCleanupStatusContract,
   type BackupDeliveryContract,
-  type BackupRestoreSummaryContract
+  type BackupRestoreSummaryContract,
+  type RetentionArchiveClearContract
 } from '../shared/backup-contracts'
 
 console.log('PRELOAD SCRIPT LOADED')
@@ -406,6 +410,17 @@ const offGridApi = {
   getDataSummary: () => ipcRenderer.invoke('data:summary'),
   clearDataCategory: (id: string, olderThanDays?: number) =>
     ipcRenderer.invoke('data:clear', id, olderThanDays),
+  archiveDataCategory: (id: string, olderThanDays?: number) =>
+    ipcRenderer.invoke(
+      RETENTION_ARCHIVE_CLEAR_CHANNEL,
+      id,
+      olderThanDays
+    ) as Promise<RetentionArchiveClearContract>,
+  getAutoCleanupStatus: () =>
+    ipcRenderer.invoke('data:auto-cleanup-status') as Promise<AutoCleanupStatusContract>,
+  runAutoCleanupNow: () =>
+    ipcRenderer.invoke('data:auto-cleanup-run') as Promise<AutoCleanupRunContract>,
+  pickArchiveDir: () => ipcRenderer.invoke('data:pick-archive-dir') as Promise<string | null>,
   deleteAllData: () => ipcRenderer.invoke('data:delete-all'),
   exportBackup: () =>
     ipcRenderer.invoke(BACKUP_EXPORT_ALL_CHANNEL) as Promise<BackupDeliveryContract | null>,

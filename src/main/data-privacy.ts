@@ -7,9 +7,10 @@ import path from 'path'
 import { app } from 'electron'
 import { getDB } from './database'
 import { deleteByKinds, deleteByKindsOlderThan, resetVectors } from './vectors'
+import { CATEGORY_DIRS, type DataCategoryId } from './data-categories'
 
 export interface DataCategory {
-  id: 'chats' | 'memories' | 'captures' | 'meetings' | 'images'
+  id: DataCategoryId
   label: string
   detail: string
   count?: number
@@ -17,6 +18,9 @@ export interface DataCategory {
 }
 
 const ud = (...p: string[]): string => path.join(app.getPath('userData'), ...p)
+
+/** The category's userData dirs, absolute - resolved from the shared SSOT map. */
+const categoryDirs = (id: DataCategoryId): string[] => CATEGORY_DIRS[id].map((d) => ud(d))
 
 function dirSize(p: string): { bytes: number; files: number } {
   let bytes = 0,
@@ -279,14 +283,17 @@ function clearFiles(...files: string[]): void {
 
 /** Summary of what's stored, per category, for the Delete-my-data screen. */
 export function getDataSummary(): DataCategory[] {
-  const captures = dirSize(ud('captures'))
-  const meetings = dirSize(ud('meetings'))
-  const images = (() => {
-    const a = dirSize(ud('generated-images')),
-      b = dirSize(ud('artifacts-library')),
-      c = dirSize(ud('style-thumbs'))
-    return { bytes: a.bytes + b.bytes + c.bytes, files: a.files + b.files + c.files }
-  })()
+  const sumDirs = (id: DataCategoryId): { bytes: number; files: number } =>
+    categoryDirs(id).reduce(
+      (acc, dir) => {
+        const s = dirSize(dir)
+        return { bytes: acc.bytes + s.bytes, files: acc.files + s.files }
+      },
+      { bytes: 0, files: 0 }
+    )
+  const captures = sumDirs('captures')
+  const meetings = sumDirs('meetings')
+  const images = sumDirs('images')
   return [
     {
       id: 'chats',
@@ -335,21 +342,21 @@ export async function clearCategory(
       switch (id) {
         case 'chats':
           clearTables(...CHAT_TABLES)
-          clearDirs(ud('uploads'))
+          clearDirs(...categoryDirs('chats'))
           break
         case 'memories':
           clearTables(...MEMORY_TABLES)
-          clearDirs(ud('entity-photos'))
+          clearDirs(...categoryDirs('memories'))
           // Delete ONLY the memory-side vectors (not the shared lancedb dir — that
           // would wipe capture/meeting/chat vectors and dangle the live handle).
           await deleteByKinds(['memory', 'entity', 'fact'])
           break
         case 'captures':
           if (olderThanDays && olderThanDays > 0) {
-            clearDirsOlderThan(olderThanDays, ud('captures'))
+            clearDirsOlderThan(olderThanDays, ...categoryDirs('captures'))
             await deleteByKindsOlderThan(['screen'], Date.now() - olderThanDays * 86_400_000) // prune stale capture vectors too
           } else {
-            clearDirs(ud('captures'))
+            clearDirs(...categoryDirs('captures'))
             await deleteByKinds(['screen']) // full clear → drop capture vectors too
             // Registered cleaners below remove the semantic source rows. Drop their indexing
             // receipts here as well so a future capture can never inherit a stale marker.
@@ -364,16 +371,16 @@ export async function clearCategory(
           break
         case 'meetings':
           if (olderThanDays && olderThanDays > 0) {
-            clearDirsOlderThan(olderThanDays, ud('meetings'))
+            clearDirsOlderThan(olderThanDays, ...categoryDirs('meetings'))
             await deleteByKindsOlderThan(['meeting'], Date.now() - olderThanDays * 86_400_000) // prune stale meeting vectors too
           } else {
-            clearDirs(ud('meetings'))
+            clearDirs(...categoryDirs('meetings'))
             await deleteByKinds(['meeting']) // full clear → drop meeting vectors too
           }
           pruneDanglingMeetings() // drop rows whose media we just deleted (no ghosts)
           break
         case 'images':
-          clearDirs(ud('generated-images'), ud('artifacts-library'), ud('style-thumbs'))
+          clearDirs(...categoryDirs('images'))
           break
       }
       for (const cleaner of categoryCleaners.get(id)?.values() ?? []) {

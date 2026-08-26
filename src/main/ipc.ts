@@ -1706,6 +1706,9 @@ export function setupIPC() {
     )
   )
   ipcMain.handle('data:delete-all', () => import('./data-privacy').then((m) => m.deleteAllData()))
+  // Archive-before-delete + automatic history cleanup - the channel map lives with
+  // its handlers (backup/retention-archive-ipc.ts) behind an injectable boundary.
+  void import('./backup/retention-archive-ipc').then((m) => m.registerRetentionIpc(ipcMain))
 
   // --- Image generation (stable-diffusion.cpp) ----------------------------
   ipcMain.handle('imagegen:status', async () => {

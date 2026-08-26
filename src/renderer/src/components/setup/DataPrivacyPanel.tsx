@@ -1,8 +1,22 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Trash, Warning } from '@phosphor-icons/react'
+import { Archive, ArrowsClockwise, FolderOpen, Trash, Warning, X } from '@phosphor-icons/react'
+import {
+  ARCHIVABLE_CATEGORIES,
+  AUTO_CLEANUP_SETTING_KEY,
+  type AutoCleanupConfigContract,
+  type AutoCleanupStatusContract,
+  type DataCategoryId
+} from '../../../../shared/backup-contracts'
+
+const RETENTION_CHOICES = [
+  { days: 0, label: 'Off' },
+  { days: 30, label: '30 days' },
+  { days: 60, label: '60 days' },
+  { days: 90, label: '90 days' }
+]
 
 interface DataCategory {
-  id: 'chats' | 'memories' | 'captures' | 'meetings' | 'images'
+  id: DataCategoryId
   label: string
   detail: string
   count?: number
@@ -22,6 +36,20 @@ export function DataPrivacyPanel(): React.ReactElement {
   const api = window.api
   const [cats, setCats] = useState<DataCategory[]>([])
   const [busy, setBusy] = useState<string | null>(null)
+  // Per-category "Back up first": when on, the delete buttons archive to a
+  // user-picked ZIP before clearing (fail closed - cancel deletes nothing).
+  const [backupFirst, setBackupFirst] = useState<Set<DataCategoryId>>(new Set())
+  // Automatic history cleanup (Phase 2): config + last run, owned by the main process.
+  const [auto, setAuto] = useState<AutoCleanupStatusContract | null>(null)
+
+  const toggleBackupFirst = (id: DataCategoryId): void => {
+    setBackupFirst((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   const refresh = useCallback(async () => {
     try {
@@ -32,9 +60,35 @@ export function DataPrivacyPanel(): React.ReactElement {
     }
   }, [api])
 
+  const refreshAuto = useCallback(async () => {
+    try {
+      setAuto(await api.getAutoCleanupStatus())
+    } catch {
+      /* keep last */
+    }
+  }, [api])
+
   useEffect(() => {
     refresh()
-  }, [refresh])
+    refreshAuto()
+  }, [refresh, refreshAuto])
+
+  // Save, then re-read from main - it sanitizes the config, so main stays the SSOT.
+  const saveAutoCleanup = async (config: AutoCleanupConfigContract): Promise<void> => {
+    await api.saveSetting(AUTO_CLEANUP_SETTING_KEY, config)
+    await refreshAuto()
+  }
+
+  const runCleanupNow = async (): Promise<void> => {
+    setBusy('auto-cleanup')
+    try {
+      await api.runAutoCleanupNow()
+      await refresh()
+      await refreshAuto()
+    } finally {
+      setBusy(null)
+    }
+  }
 
   // Time-based retention is offered for captures + meetings (they accumulate).
   const RETENTION: Record<string, { label: string; days: number }[]> = {
@@ -54,6 +108,24 @@ export function DataPrivacyPanel(): React.ReactElement {
     const what = olderThanDays
       ? `${c.label.toLowerCase()} older than ${olderThanDays} days`
       : `all ${c.label.toLowerCase()}`
+    if (backupFirst.has(c.id)) {
+      if (
+        !window.confirm(
+          `Back up ${what} to a ZIP, then delete? You'll pick where the backup is saved - canceling that deletes nothing.`
+        )
+      )
+        return
+      setBusy(c.id)
+      try {
+        const result = await api.archiveDataCategory(c.id, olderThanDays)
+        if (result.status === 'failed')
+          window.alert(`Backup failed - nothing was deleted. ${result.error}`)
+        await refresh()
+      } finally {
+        setBusy(null)
+      }
+      return
+    }
     if (
       !window.confirm(
         `Delete ${what}? This permanently removes it from this device and can't be undone.`
@@ -118,6 +190,22 @@ export function DataPrivacyPanel(): React.ReactElement {
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
+                {ARCHIVABLE_CATEGORIES.includes(c.id) ? (
+                  <button
+                    onClick={() => toggleBackupFirst(c.id)}
+                    disabled={busy === c.id}
+                    aria-pressed={backupFirst.has(c.id)}
+                    aria-label={`Back up ${c.label} before deleting`}
+                    title="Save a ZIP backup to a location you pick before anything is deleted"
+                    className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] transition-colors disabled:opacity-30 ${
+                      backupFirst.has(c.id)
+                        ? 'border-green-500/60 text-green-500'
+                        : 'border-neutral-800 text-neutral-500 hover:border-neutral-600 hover:text-neutral-300'
+                    }`}
+                  >
+                    <Archive className="h-3 w-3" /> Back up first
+                  </button>
+                ) : null}
                 {RETENTION[c.id]?.map((r) => (
                   <button
                     key={r.days}
@@ -135,7 +223,13 @@ export function DataPrivacyPanel(): React.ReactElement {
                   className="flex items-center gap-1.5 rounded-md border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-300 transition-colors hover:border-red-500/60 hover:text-red-400 disabled:opacity-30"
                 >
                   <Trash className="h-3 w-3" />{' '}
-                  {busy === c.id ? 'Clearing…' : RETENTION[c.id] ? 'All' : 'Clear'}
+                  {busy === c.id
+                    ? backupFirst.has(c.id)
+                      ? 'Backing up…'
+                      : 'Clearing…'
+                    : RETENTION[c.id]
+                      ? 'All'
+                      : 'Clear'}
                 </button>
               </div>
             </div>
@@ -145,6 +239,89 @@ export function DataPrivacyPanel(): React.ReactElement {
           <div className="px-4 py-6 text-center text-xs text-neutral-600">Reading…</div>
         )}
       </div>
+
+      {/* Automatic history cleanup */}
+      {auto ? (
+        <div className="border-t border-neutral-800/60 px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-xs text-neutral-200">Automatic cleanup</div>
+              <div className="text-[11px] text-neutral-500">
+                Keep screen captures for a window - older ones are archived to a folder you pick
+                (optional), then removed. Runs daily.
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              {RETENTION_CHOICES.map((choice) => (
+                <button
+                  key={choice.days}
+                  onClick={() => saveAutoCleanup({ ...auto.config, retentionDays: choice.days })}
+                  disabled={busy === 'auto-cleanup'}
+                  aria-pressed={auto.config.retentionDays === choice.days}
+                  className={`rounded-md border px-2 py-1 text-[10px] transition-colors disabled:opacity-30 ${
+                    auto.config.retentionDays === choice.days
+                      ? 'border-green-500/60 text-green-500'
+                      : 'border-neutral-800 text-neutral-400 hover:border-neutral-600 hover:text-neutral-200'
+                  }`}
+                >
+                  {choice.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {auto.config.retentionDays > 0 ? (
+            <div className="mt-2 flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <button
+                  onClick={async () => {
+                    const dir = await api.pickArchiveDir()
+                    if (dir) await saveAutoCleanup({ ...auto.config, archiveDir: dir })
+                  }}
+                  disabled={busy === 'auto-cleanup'}
+                  title={auto.config.archiveDir ?? 'Choose where archives are saved'}
+                  className="flex min-w-0 items-center gap-1.5 rounded-md border border-neutral-800 px-2 py-1 text-[10px] text-neutral-400 transition-colors hover:border-neutral-600 hover:text-neutral-200 disabled:opacity-30"
+                >
+                  <FolderOpen className="h-3 w-3 shrink-0" />
+                  <span className="truncate">
+                    {auto.config.archiveDir
+                      ? `Back up to ${auto.config.archiveDir.split('/').pop()}`
+                      : 'No backup - choose a folder'}
+                  </span>
+                </button>
+                {auto.config.archiveDir ? (
+                  <button
+                    onClick={() => saveAutoCleanup({ ...auto.config, archiveDir: null })}
+                    disabled={busy === 'auto-cleanup'}
+                    aria-label="Stop backing up before cleanup"
+                    className="rounded-md border border-neutral-800 p-1 text-neutral-500 transition-colors hover:border-neutral-600 hover:text-neutral-300 disabled:opacity-30"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                ) : null}
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                {auto.lastRun ? (
+                  <span
+                    className={`text-[10px] ${auto.lastRun.status === 'failed' ? 'text-red-400' : 'text-neutral-600'}`}
+                  >
+                    {auto.lastRun.status === 'failed'
+                      ? `Last run failed - nothing was deleted. ${auto.lastRun.error ?? ''}`
+                      : `Last run ${new Date(auto.lastRun.ranAt).toLocaleString()} - ${auto.lastRun.archivedFiles ?? 0} file${(auto.lastRun.archivedFiles ?? 0) === 1 ? '' : 's'} archived`}
+                  </span>
+                ) : null}
+                <button
+                  onClick={runCleanupNow}
+                  disabled={busy === 'auto-cleanup'}
+                  className="flex items-center gap-1.5 rounded-md border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-300 transition-colors hover:border-green-500/60 hover:text-green-500 disabled:opacity-30"
+                >
+                  <ArrowsClockwise className="h-3 w-3" />
+                  {busy === 'auto-cleanup' ? 'Running…' : 'Run now'}
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* Full reset */}
       <div className="flex items-center justify-between gap-3 border-t border-neutral-800/60 px-4 py-3">
