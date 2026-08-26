@@ -5,6 +5,93 @@
 
 ---
 
+## Current operator experience
+
+Computer Use and Web Use now run as supervised tasks in Off Grid AI Desktop.
+
+1. Start the task from Chat and approve it.
+2. When a local Web Use attempt first starts, its task details open once. Off Grid closes the left
+   navigation drawer and the Chat workspace so the browser task has the full app window. Back, or a
+   terminal task state, restores the earlier layout. Later progress updates do not reopen details
+   after you close them.
+3. Open **Tasks** to see the durable history on the left.
+4. Select a task record to inspect its execution plan and ordered trace. Plan stages group the work
+   into outcomes and show the current, completed, and failed stage. The **Live task** pane remains
+   clearly labelled and keeps the current run visible.
+5. Use **Pause**, **Stop**, or **Take Over** for Computer Use. Escape stops the active task when the
+   global shortcut is available.
+6. While Web Use or Computer Use is running, use the guidance box to change its next decision.
+   Enter sends and Shift+Enter adds a line. Attach a local document or image when it gives useful
+   context. The trace shows when guidance is accepted and when the next decision uses it.
+7. Use **Return to originating Chat** in task details to reopen the Chat that started the run.
+
+Web Use controls an embedded browser surface. A link clicked in Chat opens as a normal manual browser
+tab and does not start automation. Computer Use controls the execution device's current screen and
+shows a separate always-on-top supervisor while it runs. Mouse movement does not pause or stop a
+task.
+
+Stopping Chat first sends the Stop command to the active Web Use or Computer Use owner. Off Grid
+cancels the Chat turn only after that owner accepts Stop. A stop failure stays visible, and Chat does
+not pretend the task ended.
+
+Computer Use checks the focused macOS Accessibility element before it types. A secure or unknown
+private field stops before actuation and asks you to enter the value, then resume. The helper returns
+only `safe`, `secure`, or `unknown`; it does not read the field value. Typed action content is also
+redacted before task history, SQLite, or sync. Exact live guidance and attachment content stay in
+the active task's memory. History and sync keep only safe accepted/applied markers.
+
+Task records and text traces sync through the Personal Mesh. Screen images and their filesystem paths
+stay on the execution device. Another device shows which Mac owns the missing image.
+
+Every Computer Use, Web Use, and accessibility run stops at 200 planning steps. The durable detailed
+trace keeps the newest 250 steps. These limits are shared constants, not separate UI defaults.
+
+The real Electron QA journey lives in `scripts/qa-agentic-studio.mjs`, with light/dark evidence in
+`e2e/screenshots/agentic-studio`. The August 25 run proved the docked task history, execution-plan
+detail, retry, native browser ownership, route hide/restore, keyboard resize, settings, and
+device-local evidence copy. It used the earlier semantic Web Use decision fixture. It is not proof
+of the current strict visual decision contract. The current vision-first Web Use rerun and a real
+Computer Use control run remain open as CU-004.
+
+The Computer Use catalog follows the same filters, model cards, download state, and active-model
+rules as the other model tabs. It lists only model packages with a shipped policy adapter, pinned
+GGUF, and matching projector.
+
+In Task settings, **Same as Chat** keeps the resident Chat model. **Separate specialist** loads the
+selected ready Computer Use model for the task and restores Chat after it ends. The strategy and the
+selected specialist sync through the Personal Mesh. The task screen size, detail, checkpoint, and
+panel layout remain device-local where hardware or screen geometry makes a shared value unsafe.
+
+### Vision-first pipeline status - August 26, 2026
+
+| Requirement | Code and wiring | Verification state |
+| --- | --- | --- |
+| Fixed Web Use evidence | Web Use captures only the page viewport from its main-owned `WebContentsView`. App chrome, Chat, and task controls are not in the model image. | Focused capture tests pass. Current real Electron proof is open in CU-004. |
+| One model decision | UI-Mate, UI-TARS, and general vision models use one strict direction, milestone, and zero-or-one-action response for each screenshot. The request includes the current Task brief, accepted guidance, milestone, verified actions, recent events, older facts, coordinate bounds, and the screenshot. | Adapter and graph tests pass. Remote paths still have a thinking and privacy gap in CU-015. |
+| Response validation | The model boundary rejects missing or extra fields, invalid enum values, malformed JSON, a mismatched verdict, and more than one action. The request has one attempt. | Focused adapter tests pass. |
+| Model authority | After a valid model decision approves an action, Web Use does not use DOM text, element counts, labels, or UI phrases to reject it. The browser boundary checks only document freshness, screenshot pixels, coordinate structure, safety policy, and execution results. | A canvas-only page regression proves the approved visual click executes without DOM target resolution. |
+| Coordinates and action | Web Use maps inference pixels to the current page viewport by proportion, executes the one approved action through CDP, then returns to a fresh capture. | Mapping, resize, browser-driver, and graph tests pass. |
+| Milestones | The Web Use graph advances only on the model's validated `milestone_complete` signal and advances one milestone once. | Focused graph tests pass. Desktop Computer Use still has a separate loop owner; see CU-013. |
+| Evidence and model identity | Live details show the run-bound model name, current phase, milestone, operation, final decision, visible evidence, updates, screenshots, mapped actions, and errors. The model identity is stored with the task, so a later global model change cannot relabel it. | Focused main and renderer tests pass. Live visual proof is open in CU-004. |
+| Stop and immersive start | Stop in Chat reaches the task owner before Chat cancellation. The first running local Web Use attempt opens its details and closes the left navigation and Chat workspace once. | Focused lifecycle and App navigation tests pass. Live visual proof is open in CU-004. |
+
+The August 26 pipeline sweep passed 15 files and 200 tests, and its node typecheck passed. The later
+CU-014 gate passes four files and 58 tests. Its changed browser files have zero scoped lint errors.
+The current node typecheck passes. The expanded run has 202 passing tests and one unrelated Chat UI
+failure. The standalone desktop `vision-agent.test.ts` run still does not finish. These remaining
+test items are not CU-014 regressions. A green focused gate is code evidence, not live Electron or
+real-device proof.
+
+Web Use treats an empty or single-colour compositor frame as failed evidence. One capture waits for
+up to six seconds and asks Chromium to repaint every 250 ms. The graph then allows two fresh
+recoverable observations before it shows the clear blank- or empty-screenshot error. A renderer
+reload does not replace the main-owned browser view. An SPA route change, visibility change, or
+native-view resize can still leave that view without a painted compositor frame for a short time. A
+main-process restart is different: it disposes the browser host, stops the run, and destroys the
+view; it cannot continue the same capture.
+
+---
+
 ## 1. What we are building
 
 An assistant that **notices what you need and acts on it**, grounded in what OGAD already remembers about your day. Not a chatbot you command, and not a pixel-clicking robot - an assistant that:
@@ -72,9 +159,9 @@ The router picks the cheapest rail that will reliably do the step. Vision is the
 | --- | --- | --- | --- |
 | 0. Perception | Replay OCR + the accessibility tree - structured "sight", no ML grounding model | n/a | capture ships; AX reader exists |
 | 1. Semantic | deep links / URL schemes, AppleScript / Apple Events, EventKit, Shortcuts, MCP connectors | ~100%, deterministic | **built** (calendar, reminders, contacts, messages, mail, open_url) |
-| 2. Agent browser | embedded browser pane driven in-process, for novel web tasks (check-in, ordering) | good; no OS permissions | designed, not built |
-| 3. AX-tree GUI | structured native control (AXPress / set-value) + replay of a demonstrated trace | good on well-behaved apps | AX read exists; act primitives not built |
-| 4. Vision grounding | a downloadable model (GUI-Owl / Qwen3-VL) mapping pixels -> coordinates | the frontier ceiling (~35-45% novel, local) | fallback, last to build |
+| 2. Agent browser | embedded browser pane driven in-process, for novel web tasks (check-in, ordering) | good; no OS permissions | built; live device proof remains open |
+| 3. AX-tree GUI | structured native control (AXPress / set-value) + replay of a demonstrated trace | good on well-behaved apps | supervised task rail built; recorder remains open |
+| 4. Vision grounding | a downloadable model mapping pixels -> coordinates | the frontier ceiling (~35-45% novel, local) | UI-TARS and UI-Mate adapters built; live device proof remains open |
 
 **Three different things get called "seeing", and only rail 4 is the heavy one:** Replay OCR (rail 0, ships) powers detection and context; the AX tree (rail 0/3, exists) powers precise recording and reliable replay with no ML model; the grounding vision model (rail 4) only earns its place when the AX tree is dead (WhatsApp-class apps) or a recorded step drifted. So the assistant can do a great deal - and ship real value - before rail 4 exists.
 
@@ -169,7 +256,8 @@ iOS stays intents-only for driving other apps (App Intents / Shortcuts) - Apple 
 - **Screen content is untrusted input** - published studies show 86% attack success from adversarial pop-ups against GUI agents; prompt-level defenses fail, so the gate and an app allowlist are system-level.
 - **Never see or type credentials** - secure-input detection hands password fields to the user; the recorder hard-skips them.
 - **Takeover with a guarantee** - at logins and payments the agent pauses and frame capture stops while the user controls the surface.
-- **Kill switch** - user input / Esc halts execution with the keypress consumed; the existing abort guard already guarantees a cancelled turn fires no side effects.
+- **Kill switch** - visible Stop and Escape halt execution. Pause and Take Over park it until an
+  explicit Resume. Mouse movement does not change task state.
 - **Everything executed lands in the approvals audit log.**
 - **Trust graduates** - suggest -> approve-each -> auto-run; never jump to autonomous (the OpenClaw MoltMatch lesson).
 

@@ -7,6 +7,69 @@ how to reproduce, and the fix direction. Close with evidence; never hide.
 
 ## OPEN
 
+### CU-004 (P1) - The current vision-first paths lack complete live control proof
+
+**Earlier Web Use evidence (2026-08-25):** `scripts/qa-agentic-studio.mjs` ran a deterministic Web
+Use task through production Electron, SQLite, IPC, CDP, and `WebContentsView`. Inspected captures
+proved task history, the execution plan, route ownership, resize, settings, local evidence, pointer
+display, takeover, resume, failure, and dark-page composition. That run used the earlier semantic
+decision fixture. It does not close the current strict screenshot, judge, and action pipeline.
+
+**Current code evidence (2026-08-26):** the pipeline sweep passed 15 focused files and 200 tests.
+They cover the strict model contract, Web Use graph, page-only capture, proportional mapping, browser
+actuation, task ownership, live evidence, run-bound model identity, Chat Stop, and the immersive
+first-start layout. Its node typecheck passed. The later CU-014 gate passes four files and 58 tests.
+The current expanded run has 202 passing tests and one unrelated Chat-planner UI failure. This is not
+live Electron or real-device evidence.
+
+**Remaining evidence:** run the current strict visual-decision fixture through the real Electron
+Web Use journey and inspect its light/dark screenshots. Also run one safe Computer Use task on a real
+Mac. Prove that screenshots, mapped pointer, fresh evidence, milestone progress, and the active model
+are factual. For Computer Use, prove that Pause, Resume, Take Over, Stop, Chat Stop, and Esc stop or
+park the real native actuator as shown.
+
+### CU-013 (P1) - Computer Use and Web Use have different visual workflow owners
+
+**Evidence (2026-08-26):** Web Use runs `runVisionTaskGraph` through `browser-visual-task.ts`.
+Desktop Computer Use still runs the older `runVisionTask` loop through `vision-host.ts`. The old loop
+adds a model answer to `policyHistory` before it knows whether actuation succeeds. A rejected action,
+handoff, rethink, or terminal decision can therefore remain in the next model request as a prior
+validated decision. The graph commits that history only after successful actuation and discards it
+for rejected or non-action decisions.
+
+The standalone `vision-agent.test.ts` command does not finish and had to be stopped after 30 seconds.
+Scoped ESLint also reports a hard error in `vision-policy-runner.ts`, plus size and complexity
+warnings in both workflow owners. The earlier `web-task-agent.ts` maintainability finding is no
+longer the active production owner.
+
+**Impact:** the same valid model response can produce different history and recovery behavior on the
+desktop and browser surfaces. Two owners can drift on Stop, evidence, milestone, and action-commit
+rules.
+
+**Fix direction:** route both surfaces through one workflow owner with injected capture and action
+boundaries. Commit model history only after successful action execution. Remove superseded runtime
+loops when the shared path is wired. Make the focused desktop test finish, then clear the scoped lint
+gate and rerun both surface journeys.
+
+### CU-015 (P0) - Selectable remote vision paths violate the local-only contract
+
+**Evidence (2026-08-26):** the standing product constraint says local models only and nothing leaves
+the device. The current model UI can select OpenRouter or a custom remote server.
+`vision-policy-runner.ts` then sends the base64 screenshot and full task context to that server.
+Only OpenRouter receives an explicit `reasoning_effort`; Ollama, LM Studio, OGAD, and custom
+OpenAI-compatible endpoints do not get a transport-level thinking control. The application does not
+prove that every selectable remote model is thinking-enabled.
+
+**Impact:** a cloud endpoint can receive private screen evidence and task context without a product
+exception to the local-only rule. Other remote paths can also run the required contract without a
+verified thinking mode.
+
+**Fix direction:** remove network model-server selection from Computer Use and Web Use, or make a
+documented product decision that changes the local-only constraint. Any approved exception needs an
+explicit per-server privacy boundary, clear local-network versus cloud disclosure, user opt-in, and
+a capability gate that rejects a model unless the required visual, structured-output, and thinking
+features are verified.
+
 ### SYN-004 (P1) - Late-pair full graph is not verified between the real Desktop and Mobile apps
 
 **Evidence (2026-08-13):** the production send paths now backfill state records, generated images,
@@ -537,6 +600,96 @@ knowledge-document sync, and the service under test builds no orchestrator.
 ---
 
 ## RESOLVED
+
+### CU-014 (P1) - A DOM heuristic could reject a valid visual model action - RESOLVED 2026-08-26
+
+`BrowserDriver.pageState()` now reads only the committed URL and document lifecycle state. It no
+longer scans body text or visible DOM elements. `browser-vision-screen.ts` no longer uses text or
+element counts to override an approved visual action. It asks for a fresh screenshot only when the
+URL changed or the document started loading after capture. Pixel evidence, coordinate validation,
+credential safety, and actual execution errors remain at their owning boundaries.
+
+The canvas-only regression passes a committed page through readiness, executes the exact approved
+click through the real `BrowserDriver`, and proves that the readiness probe contains no
+`querySelectorAll` or `innerText` rule. Four focused files and 58 tests pass. Scoped lint for the
+changed browser files has zero errors, the node typecheck passes, and the diff check passes.
+
+### CU-012 (P0) - Live guidance can sync private text without redaction
+
+**Resolved (2026-08-25):** exact guidance and attachment content now stay in the active task's
+memory-only queue. Task history and Personal Mesh receive only safe `GUIDANCE ACCEPTED` and
+`GUIDANCE APPLIED` lifecycle markers. The task-history write boundary also replaces legacy
+`USER GUIDANCE` rows, and startup migration removes old private values from SQLite. Focused unit,
+real SQLite migration, Web Use, Vision, AX, and renderer tests prove the original value is absent.
+
+### CU-005 (P1) - The Tasks surface had no maintainable component boundary - RESOLVED 2026-08-25
+
+`WatchedBrowserPane.tsx` is now a 240-line composition owner. History, selected-record detail, live
+task state, execution plans, guidance, browser chrome, controls, layout, and selection each have a
+focused component or hook under `components/browser/tasks`. The largest file in that surface is 286
+lines. Scoped ESLint reports no issue in the task-workspace files. The 70-test focused journey,
+typecheck, production build, and real Electron harness passed after the split.
+
+### CU-011 (P1) - Keyboard resizing was announced but did not resize - RESOLVED 2026-08-25
+
+Both task separators now support bounded Arrow Left and Arrow Right changes, announce current values,
+and keep their device-local layout. The real Electron harness focuses `Resize Chat and task`, sends
+eight Arrow Left events, and asserts a visible width change. The production run changed the Chat width
+from 651.56 px to 400.96 px and captured `08-task-keyboard-resized.png`. Focused renderer tests also
+cover both directions and bounds.
+
+### CU-006 (P0) - Vision typing had no structural credential boundary - RESOLVED 2026-08-25
+
+The screenshot-only vision executor now checks the focused macOS Accessibility element before any
+`typeText` call. The native helper reports only `safe`, `secure`, or `unknown`; it never reads or
+returns the field value. A secure target, or content identified from password, PIN, OTP, token, API
+key, payment-card, or credential goal context, stops before actuation and asks: `Enter the private
+value, then resume`. The handoff does not include the value. Normal text remains available when the
+focused editable element is verified safe.
+
+The handoff observation clears the parsed action and does not write the typed value to progress,
+task details, SQLite, or sync. The state-sync outbound projector now applies the same step-detail
+sanitizer again before encryption. Focused actuation and agent integration tests prove that private
+typing never reaches the actuator or durable task projection, while verified ordinary typing still
+works. The real SQLite typed-secret test and state-sync wire test cover both durable exits. The
+shipped macOS helper was rebuilt with the focused-element inspector.
+
+### CU-001 (P1) - Web Use history collapsed runs by Chat - RESOLVED 2026-08-25
+
+The task projection now keeps one history row per `taskId` while `journeyId` owns the shared browser
+workspace. The rendered same-Chat journey test proves both runs remain present and selectable.
+
+### CU-003 (P1) - Esc availability copy contradicted the host - RESOLVED 2026-08-25
+
+The host notice now owns Esc availability on both the floating supervisor and docked task surface.
+When registration fails, both surfaces say to use the visible task controls and do not claim Esc
+works. Rendered registration-success and registration-failure tests passed in the focused run.
+
+### CU-007 (P1) - Remote synced tasks exposed dead local controls - RESOLVED 2026-08-25
+
+The dock now derives local Computer Use ownership from the live vision task and local Web Use
+ownership from its browser session. Remote rows identify the execution device and expose no local
+Stop, Pause, or Take Over buttons. Local control failures produce a visible alert. The remote/local
+renderer contracts and the 15-test real state-sync suite passed.
+
+### CU-008 (P1) - Task record, live task, and Chat context were ambiguous - RESOLVED 2026-08-25
+
+The two panes now identify `Task record` and `Live task` explicitly, so inspecting historical
+evidence cannot be mistaken for controlling that run. Task details include `Return to originating
+Chat` from `journeyId`. The renderer contract proves the navigation intent, and the real Electron
+harness proves Tasks and the native browser region hide outside Chat and restore when Chat returns.
+
+### CU-010 (P1) - Structured and legacy traces rendered twice - RESOLVED 2026-08-25
+
+Structured Computer Use details now replace the legacy step list. Legacy text renders only when no
+structured detail exists. The rendered acceptance case proves the legacy duplicate is absent while
+the safe decision, model evidence, mapped action, result, and return-to-Chat action remain available.
+
+### CU-002 (P1) - Hidden model reasoning reached task traces - RESOLVED 2026-08-25
+
+The task-detail sanitizer now removes tagged reasoning and UI-TARS `Thought:` prefaces from both
+model output and persisted model input. The focused sanitizer tests include both forms and passed on
+2026-08-25. User-visible decision summaries remain separate from the hidden model reasoning.
 
 ### DEF-007 (P0) - Secure notes are masked until deliberate reveal/copy - CLOSED 2026-08-09
 
