@@ -10,4 +10,5 @@ if ELECTRON_RUN_AS_NODE=1 "$electron_binary" \
   echo "$prefix Electron ABI restored (app can load sqlite)."
 else
   echo "$prefix WARNING: Electron cannot load sqlite - run 'npx electron-rebuild -f -w better-sqlite3-multiple-ciphers' before launching the app."
+  exit 1
 fi
