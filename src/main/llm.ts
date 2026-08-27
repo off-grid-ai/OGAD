@@ -1043,6 +1043,9 @@ export class LLMService {
         temperature: options.temperature ?? this.temperature,
         topP: options.topP ?? this.topP,
         thinking: options.thinking,
+        // Same setting the local engine gets — one remote seam, so every remote caller
+        // (chat, Web Use, Computer Use) honours the configured thinking cap.
+        reasoningBudget: this.reasoningBudget,
         responseFormat: options.responseFormat,
         tools: options.tools,
         toolChoice: options.toolChoice

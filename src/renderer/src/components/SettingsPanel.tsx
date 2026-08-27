@@ -8,7 +8,9 @@ import {
 import {
   REASONING_BUDGET_AUTO,
   REASONING_BUDGET_OPTIONS,
-  reasoningBudgetLabel
+  reasoningBudgetLabel,
+  optionsWithinCeiling,
+  reconcileBudgets
 } from '@offgrid/models'
 import { gpuLayersHint, type EngineAccelerator } from '@offgrid/core/shared/engine-accelerator'
 import {
@@ -27,7 +29,43 @@ import { SettingsSelect } from './SettingsSelect'
 import type { SpeechLanguage } from '@offgrid/speech'
 
 const MAX_OUTPUT_AUTO = MAX_TOKENS_AUTO
+// The values THIS picker offers. The nesting rule they obey is shared (@offgrid/models); which
+// discrete steps to show is a desktop rendering choice, and OGAM uses sliders instead.
 const MAX_OUTPUT_OPTIONS = [2048, 4096, 8192, 16384, 32768]
+
+/** The ceiling on thinking: the response length it must fit inside, which for an auto output cap
+ *  is the context window. Mirrors reconcileBudgets so the options offered match what is kept. */
+function thinkingCeiling(s: LlmSettings): number {
+  const maxOutput = s.maxTokens ?? MAX_OUTPUT_AUTO
+  const ctx = s.ctxSize ?? DEFAULT_CTX_SIZE
+  return maxOutput === MAX_OUTPUT_AUTO ? ctx : maxOutput
+}
+
+/**
+ * Apply one budget edit and pull the inner budgets back under it.
+ *
+ * Filtering the option lists stops a user PICKING an impossible combination; this stops an already
+ * stored one surviving a change to an outer limit. Both read the same rule from @offgrid/models,
+ * so the picker and the persisted value cannot disagree. Only genuinely changed fields are
+ * returned, so an unrelated edit does not rewrite the other two.
+ */
+function budgetChange(s: LlmSettings, patch: LlmSettings): LlmSettings {
+  const next = { ...s, ...patch }
+  const reconciled = reconcileBudgets({
+    contextWindow: next.ctxSize ?? DEFAULT_CTX_SIZE,
+    maxOutput: next.maxTokens ?? MAX_OUTPUT_AUTO,
+    thinkingBudget: next.reasoningBudget ?? REASONING_BUDGET_AUTO
+  })
+  return {
+    ...patch,
+    ...(reconciled.maxOutput !== (next.maxTokens ?? MAX_OUTPUT_AUTO)
+      ? { maxTokens: reconciled.maxOutput }
+      : {}),
+    ...(reconciled.thinkingBudget !== (next.reasoningBudget ?? REASONING_BUDGET_AUTO)
+      ? { reasoningBudget: reconciled.thinkingBudget }
+      : {})
+  }
+}
 
 // Right-side Settings panel (same pattern as SkillsPanel/ArtifactCanvas).
 // Tabs: Model (inference params), Image, Voice (Kokoro TTS), Tools (built-in, read-only),
@@ -328,55 +366,14 @@ export function SettingsPanel({
                 className="w-full accent-green-500"
               />
             </Row>
-            <Row
-              label="Max output"
-              controlId="max-output"
-              hint={
-                (s.maxTokens ?? MAX_OUTPUT_AUTO) === MAX_OUTPUT_AUTO
-                  ? 'Auto: the reply runs until the model stops or the context window fills — no fixed cap.'
-                  : 'Hard cap on the response length (must fit within the context window).'
-              }
-            >
-              <SettingsSelect
-                id="max-output"
-                label="Max output"
-                value={String(s.maxTokens ?? MAX_OUTPUT_AUTO)}
-                onValueChange={(value) => set({ maxTokens: Number(value) })}
-                options={[
-                  { value: String(MAX_OUTPUT_AUTO), label: 'Auto (until the model stops)' },
-                  ...MAX_OUTPUT_OPTIONS.map((value) => ({
-                    value: String(value),
-                    label: `${value / 1024}K tokens`
-                  }))
-                ]}
-              />
-            </Row>
-            <Row
-              label="Thinking budget"
-              controlId="thinking-budget"
-              hint={
-                (s.reasoningBudget ?? REASONING_BUDGET_AUTO) === REASONING_BUDGET_AUTO
-                  ? 'Auto: when Thinking is on, the model reasons for as long as it wants.'
-                  : 'Cap on the tokens spent thinking. At the cap the model stops reasoning and answers. Applies when Thinking is on in the composer.'
-              }
-            >
-              <SettingsSelect
-                id="thinking-budget"
-                label="Thinking budget"
-                value={String(s.reasoningBudget ?? REASONING_BUDGET_AUTO)}
-                onValueChange={(value) => set({ reasoningBudget: Number(value) })}
-                options={[REASONING_BUDGET_AUTO, ...REASONING_BUDGET_OPTIONS].map((value) => ({
-                  value: String(value),
-                  label: reasoningBudgetLabel(value)
-                }))}
-              />
-            </Row>
+            {/* Order matters: the OUTER budget first, because each inner one is bounded by it.
+                thinking budget within max output within context window (rule in @offgrid/models). */}
             <Row label="Context window" controlId="context-window" hint={contextWindowHint(s)}>
               <SettingsSelect
                 id="context-window"
                 label="Context window"
                 value={String(s.ctxSize ?? DEFAULT_CTX_SIZE)}
-                onValueChange={(value) => set({ ctxSize: Number(value) })}
+                onValueChange={(value) => set(budgetChange(s, { ctxSize: Number(value) }))}
                 options={contextWindowOptions(
                   CTX_OPTIONS,
                   s.modelMaxCtx,
@@ -393,6 +390,48 @@ export function SettingsPanel({
                           : ''
                   }`
                 }))}
+              />
+            </Row>
+            <Row
+              label="Max output"
+              controlId="max-output"
+              hint={
+                (s.maxTokens ?? MAX_OUTPUT_AUTO) === MAX_OUTPUT_AUTO
+                  ? 'Auto: the reply runs until the model stops or the context window fills - no fixed cap.'
+                  : 'Hard cap on the response length. Cannot exceed the context window.'
+              }
+            >
+              <SettingsSelect
+                id="max-output"
+                label="Max output"
+                value={String(s.maxTokens ?? MAX_OUTPUT_AUTO)}
+                onValueChange={(value) => set(budgetChange(s, { maxTokens: Number(value) }))}
+                options={[
+                  { value: String(MAX_OUTPUT_AUTO), label: 'Auto (until the model stops)' },
+                  ...optionsWithinCeiling(MAX_OUTPUT_OPTIONS, s.ctxSize ?? DEFAULT_CTX_SIZE).map(
+                    (value) => ({ value: String(value), label: `${value / 1024}K tokens` })
+                  )
+                ]}
+              />
+            </Row>
+            <Row
+              label="Thinking budget"
+              controlId="thinking-budget"
+              hint={
+                (s.reasoningBudget ?? REASONING_BUDGET_AUTO) === REASONING_BUDGET_AUTO
+                  ? 'Auto: when Thinking is on, the model reasons for as long as it wants - it can spend the whole response reasoning and never answer.'
+                  : 'Cap on the tokens spent thinking. At the cap the model stops reasoning and answers. Cannot exceed Max output.'
+              }
+            >
+              <SettingsSelect
+                id="thinking-budget"
+                label="Thinking budget"
+                value={String(s.reasoningBudget ?? REASONING_BUDGET_AUTO)}
+                onValueChange={(value) => set(budgetChange(s, { reasoningBudget: Number(value) }))}
+                options={[
+                  REASONING_BUDGET_AUTO,
+                  ...optionsWithinCeiling(REASONING_BUDGET_OPTIONS, thinkingCeiling(s))
+                ].map((value) => ({ value: String(value), label: reasoningBudgetLabel(value) }))}
               />
             </Row>
             <Row

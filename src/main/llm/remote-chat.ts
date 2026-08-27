@@ -1,3 +1,4 @@
+import { REASONING_BUDGET_AUTO, openRouterReasoningPayload } from '@offgrid/models'
 import type { RemoteVisionProvider } from '../../shared/remote-vision-server'
 import { createCompletionStreamAccumulator, type StreamResult } from './stream'
 
@@ -16,6 +17,8 @@ export interface RemoteChatRequest {
   temperature: number
   topP?: number
   thinking?: boolean
+  /** The user's thinking cap in tokens (REASONING_BUDGET_AUTO for unrestricted). */
+  reasoningBudget?: number
   responseFormat?: unknown
   tools?: unknown[]
   toolChoice?: string
@@ -109,8 +112,13 @@ export async function streamRemoteChatCompletion(
         ...(request.tools?.length
           ? { tools: request.tools, tool_choice: request.toolChoice ?? 'auto' }
           : {}),
-        ...(remote.provider === 'openrouter' && request.thinking
-          ? { reasoning_effort: 'medium' }
+        // Carry the user's configured thinking cap, not just a coarse effort hint. Without this
+        // the cap was dropped for every remote model and the budget setting did nothing.
+        ...(remote.provider === 'openrouter'
+          ? openRouterReasoningPayload(
+              request.thinking === true,
+              request.reasoningBudget ?? REASONING_BUDGET_AUTO
+            )
           : {}),
         stream: true
       }),
