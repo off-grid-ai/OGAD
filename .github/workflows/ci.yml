@@ -107,6 +107,12 @@ jobs:
           npm --prefix ../shared ci
           npm --prefix ../shared/packages/sync run build
           npm --prefix ../shared/packages/models run build
+      # uiohook-napi (the rails' pause-on-user-input hook, an optional dep) has no
+      # Linux prebuild for Electron's ABI, so install-app-deps compiles libuiohook
+      # from source - which needs the X11 dev headers. The app never ships Linux;
+      # these packages exist only so `npm ci` completes on this runner.
+      - name: X11 headers for uiohook-napi
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxtst-dev libxkbcommon-dev libxkbcommon-x11-dev
       - run: npm ci
       # Hard gates: types + the full test suite.
       - name: Typecheck (core)
