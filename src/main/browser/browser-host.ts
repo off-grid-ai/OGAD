@@ -146,6 +146,13 @@ class BrowserHost implements BrowserRailHost {
   private readonly taskPointers = new Map<string, BrowserPointerEvent>()
   private region: Rect | null = null
   private windowLifecycleBound = false
+  /** Last presentation state applied to each view. setRegion runs per drag
+   * frame (ResizeObserver-driven), so unchanged bounds/zoom are skipped and a
+   * repaint is forced only on the hidden-to-visible transition. */
+  private readonly appliedPresentation = new WeakMap<
+    WebContentsView,
+    { bounds?: Rect; zoom?: number; visible?: boolean }
+  >()
 
   constructor() {
     this.history.migrate()
@@ -218,18 +225,38 @@ class BrowserHost implements BrowserRailHost {
     this.broadcastSessions()
   }
 
+  private presentationFor(view: WebContentsView): {
+    bounds?: Rect
+    zoom?: number
+    visible?: boolean
+  } {
+    let state = this.appliedPresentation.get(view)
+    if (!state) {
+      state = {}
+      this.appliedPresentation.set(view, state)
+    }
+    return state
+  }
+
   private setViewVisible(view: WebContentsView, visible: boolean): void {
     try {
       view.webContents.setAudioMuted(!visible)
     } catch {
       return
     }
+    const state = this.presentationFor(view)
     const setVisible = (view as unknown as { setVisible?: (value: boolean) => void }).setVisible
     if (typeof setVisible === 'function') setVisible.call(view, visible)
-    else if (!visible) view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
-    if (visible) {
+    else if (!visible) {
+      view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+      state.bounds = undefined
+    }
+    // Repaint only when the pane transitions from hidden to visible; Chromium
+    // keeps an already-visible view fresh on its own.
+    if (visible && state.visible !== true) {
       ;(view.webContents as unknown as { invalidate?: () => void }).invalidate?.()
     }
+    state.visible = visible
   }
 
   private destroyView(view: WebContentsView): void {
@@ -274,8 +301,23 @@ class BrowserHost implements BrowserRailHost {
       // hidden. Visibility is presentation only; it must not collapse the page
       // viewport that CDP captures for Web Use.
       const bounds = this.region ?? this.coarseBounds()
-      live.resource.setBounds(bounds)
-      live.resource.webContents.setZoomFactor(webUseDesktopZoomFactor(bounds))
+      const zoom = webUseDesktopZoomFactor(bounds)
+      const state = this.presentationFor(live.resource)
+      const applied = state.bounds
+      if (
+        !applied ||
+        applied.x !== bounds.x ||
+        applied.y !== bounds.y ||
+        applied.width !== bounds.width ||
+        applied.height !== bounds.height
+      ) {
+        live.resource.setBounds(bounds)
+        state.bounds = { ...bounds }
+      }
+      if (state.zoom !== zoom) {
+        live.resource.webContents.setZoomFactor(zoom)
+        state.zoom = zoom
+      }
       this.setViewVisible(live.resource, visible)
     }
   }
