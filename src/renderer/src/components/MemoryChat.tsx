@@ -2503,7 +2503,7 @@ export function MemoryChat({
     historyPanelRef,
     taskWorkspaceRef,
     chatCollapsed: chatBodyCollapsed,
-    conversationsVisible: showHistory,
+    conversationsToggleWillShow,
     taskWorkspaceSize,
     toggleChat: toggleChatBodyVisibility,
     toggleConversations: toggleConversationList,
@@ -2512,6 +2512,9 @@ export function MemoryChat({
     reportTaskSize,
     resizeTaskFromKeyboard: resizeTaskWorkspaceFromKeyboard
   } = useWorkspacePaneController(taskWorkspaceVisible)
+  const conversationsToggleLabel = conversationsToggleWillShow
+    ? 'Show conversations'
+    : 'Collapse conversation list'
   const taskWorkspaceTransition =
     reduceWorkspaceMotion || taskWorkspaceDragging
       ? 'none'
@@ -4803,16 +4806,8 @@ export function MemoryChat({
         <button
           onClick={toggleConversationList}
           className="rounded-md border border-neutral-800 p-1.5 text-neutral-500 transition-colors hover:border-green-500 hover:text-green-500"
-          title={
-            chatBodyCollapsed || !showHistory
-              ? 'Show conversations'
-              : 'Collapse conversation list'
-          }
-          aria-label={
-            chatBodyCollapsed || !showHistory
-              ? 'Show conversations'
-              : 'Collapse conversation list'
-          }
+          title={conversationsToggleLabel}
+          aria-label={conversationsToggleLabel}
         >
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <rect x="3" y="4" width="18" height="16" rx="2" strokeWidth={2} />
