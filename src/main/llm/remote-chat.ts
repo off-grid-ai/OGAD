@@ -84,12 +84,16 @@ export async function streamRemoteChatCompletion(
   const signal = options.signal
     ? AbortSignal.any([options.signal, idleController.signal])
     : idleController.signal
-  let idleTimedOut = false
+  // Held on an object, not in a local: the write happens inside the timer callback, which the
+  // compiler cannot order against the read in the catch below. As a bare `let` it narrowed to
+  // `false` at the read, so the timeout branch looked statically dead — the type system reporting,
+  // correctly, that it could not see how this flag is actually set.
+  const idle = { timedOut: false }
   let idleTimer: ReturnType<typeof setTimeout> | undefined
   const armIdleTimer = (): void => {
     if (idleTimer) clearTimeout(idleTimer)
     idleTimer = setTimeout(() => {
-      idleTimedOut = true
+      idle.timedOut = true
       idleController.abort()
     }, options.timeoutMs)
   }
@@ -133,7 +137,9 @@ export async function streamRemoteChatCompletion(
 
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
-    while (true) {
+    // for (;;) rather than while (true): the loop ends on the reader, not on a condition, and a
+    // literal condition reads as one the type system should be checking.
+    for (;;) {
       const chunk = await reader.read()
       if (chunk.done) break
       armIdleTimer()
@@ -143,7 +149,7 @@ export async function streamRemoteChatCompletion(
     return accumulator.finish()
   } catch (error) {
     if (options.signal?.aborted) return accumulator.finish()
-    if (idleTimedOut) throw new Error('Remote text model request timed out.')
+    if (idle.timedOut) throw new Error('Remote text model request timed out.')
     if (error instanceof Error && error.message.startsWith('Remote text model returned HTTP ')) {
       throw error
     }
