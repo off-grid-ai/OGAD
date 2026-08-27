@@ -34,6 +34,7 @@ import {
   getTaskExecutionDevice,
   getTaskRun,
   recordTaskRun,
+  reportTaskProgress,
   stopOrphanedLocalWebTask
 } from '../tasks/task-history'
 import { getDB } from '../database'
@@ -813,7 +814,9 @@ class BrowserHost implements BrowserRailHost {
           onPhase: (phaseId) => recordStep(encodeTaskPhase(phaseId)),
           onProgress: (progress) => {
             if (!ownsRun()) return
-            recordTaskRun({
+            // reportTaskProgress persists only if this changes a durable fact (a pause, a stop);
+            // the running steady state is coalesced display state.
+            reportTaskProgress({
               taskId,
               journeyId,
               kind: 'web_use',
@@ -832,7 +835,8 @@ class BrowserHost implements BrowserRailHost {
           onReasoning: (reasoning) => {
             if (!ownsRun()) return
             const transcript = reasoningTranscript(reasoning)
-            recordTaskRun({
+            // The hot one: ~30 of these a second, each on screen for a frame.
+            reportTaskProgress({
               taskId,
               journeyId,
               kind: 'web_use',

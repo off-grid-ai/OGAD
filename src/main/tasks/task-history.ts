@@ -100,8 +100,100 @@ export function recordTaskRun(update: TaskRunUpdate): TaskRunSnapshot {
   if (persistTaskResultInChat(getDB(), snapshot) && snapshot.journeyId) {
     notifyRagConversationChanged({ conversationId: snapshot.journeyId })
   }
+  // A durable write is the authority again: drop any live overlay it supersedes.
+  live.delete(snapshot.taskId)
+  latest.set(snapshot.taskId, snapshot)
   publishTaskRun(snapshot)
   return snapshot
+}
+
+/**
+ * The DISPLAY-ONLY fields a streaming task may change many times per second. Anything outside this
+ * set is a durable fact and belongs in recordTaskRun, so the split cannot quietly widen into
+ * "sometimes we persist status".
+ */
+const LIVE_FIELDS = [
+  'phase',
+  'currentStep',
+  'currentAction',
+  'currentReasoning',
+  'reasoningLive'
+] as const
+type LiveField = (typeof LIVE_FIELDS)[number]
+
+/** Last snapshot known for a task, durable or live — so the live path never reads the DB. */
+const latest = new Map<string, TaskRunSnapshot>()
+/** Tasks whose live fields changed since the last broadcast. */
+const live = new Map<string, TaskRunSnapshot>()
+let liveFlush: ReturnType<typeof setTimeout> | null = null
+
+/** ~10 broadcasts/sec. Fast enough to read as live, slow enough to leave the thread alone. */
+const LIVE_BROADCAST_MS = 100
+
+function flushLive(): void {
+  liveFlush = null
+  for (const [taskId, snapshot] of live) {
+    latest.set(taskId, snapshot)
+    broadcast(snapshot)
+  }
+  live.clear()
+}
+
+/**
+ * Publish streaming progress WITHOUT touching the database.
+ *
+ * Reasoning tokens and pointer moves arrive ~30x/sec and are on screen for a frame. Routing them
+ * through recordTaskRun made each one a durable full-row write plus two full-snapshot broadcasts:
+ * a SELECT *, a step-trace JSON.parse, a rewrite of all 24 columns, a broadcast, then a sync op
+ * whose rematerialize scanned the whole op log — 2,568 times in a single task from onReasoning
+ * alone. Profiled during a live web_use run the main thread was fully saturated, 35% of it in that
+ * one parse.
+ *
+ * So live state is held in memory by this one owner and broadcast on a coalesced timer. The
+ * database keeps only durable transitions (step boundaries, status changes, completion), which is
+ * what it is for: nothing here is a fact worth surviving a crash, and the next durable write
+ * carries the current values with it.
+ */
+export function reportTaskProgress(
+  update: TaskRunUpdate & Partial<Pick<TaskRunSnapshot, LiveField>>
+): void {
+  const current = latest.get(update.taskId) ?? live.get(update.taskId) ?? getTaskRun(update.taskId)
+  // No row yet, or the update carries a fact worth surviving a crash: persist it.
+  if (!current || changesDurableFact(update, current)) {
+    recordTaskRun(update)
+    return
+  }
+  const next: TaskRunSnapshot = { ...current }
+  for (const field of LIVE_FIELDS) {
+    const value = (update as unknown as Record<string, unknown>)[field]
+    if (value !== undefined) (next as unknown as Record<string, unknown>)[field] = value
+  }
+  live.set(update.taskId, next)
+  liveFlush ??= setTimeout(flushLive, LIVE_BROADCAST_MS)
+  // Never hold the process open for a display refresh.
+  ;(liveFlush as { unref?: () => void }).unref?.()
+}
+
+/**
+ * Does this update change anything that is not display state?
+ *
+ * The decision lives HERE, not at the call sites. A caller reports what it observed; whether that
+ * is worth a disk write is this owner's business. Putting it in the callers is how "status" would
+ * eventually get streamed 30x/sec again by whoever adds the next progress hook.
+ *
+ * Identity fields are excluded because every update repeats them unchanged.
+ */
+const IDENTITY_FIELDS = new Set(['taskId', 'journeyId', 'kind', 'at'])
+function changesDurableFact(update: TaskRunUpdate, current: TaskRunSnapshot): boolean {
+  const liveFields = new Set<string>(LIVE_FIELDS)
+  for (const [key, value] of Object.entries(update)) {
+    if (value === undefined || liveFields.has(key) || IDENTITY_FIELDS.has(key)) continue
+    // Arrays/objects (steps, stepDetails) are always treated as a change — comparing them deeply
+    // here would cost more than the write it saves, and they only arrive on real transitions.
+    if (typeof value === 'object') return true
+    if ((current as unknown as Record<string, unknown>)[key] !== value) return true
+  }
+  return false
 }
 
 function publishTaskRun(snapshot: TaskRunSnapshot): void {
@@ -194,7 +286,11 @@ export function registerTaskHistoryIpc(): void {
   })
 }
 
-/** Test seam for a simulated process restart. */
+/** Test seam for a simulated process restart. Live state is memory-only, so it goes too. */
 export function resetTaskHistoryForTests(): void {
   store = null
+  latest.clear()
+  live.clear()
+  if (liveFlush) clearTimeout(liveFlush)
+  liveFlush = null
 }
