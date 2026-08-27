@@ -29,6 +29,7 @@ import {
   actionTypeForTool,
   buildNativeToolSchemas,
   findNativeToolSpec,
+  isTaskAction,
   specsForPlatform,
   systemHintForPlatform,
   type NativeToolSpec
@@ -61,10 +62,6 @@ export interface NativeActionToolBoundary {
 /** How long the tool waits for a free-build action to finish before calling
  *  it pending (the helper's own timeout is 20s). */
 const OUTCOME_WAIT_MS = 30_000
-
-function isTaskAction(actionType: string): boolean {
-  return actionType === 'web_task' || actionType === 'computer_task'
-}
 
 function engineResult(actionType: string, text: string): string | ToolResult {
   return isTaskAction(actionType) ? { text, authoritative: true } : text
@@ -145,7 +142,7 @@ export class NativeActionToolExtension implements ToolExtension {
     args: Record<string, unknown>,
     context?: ToolContext
   ): Promise<string | ToolResult> {
-    if ((name === 'web_task' || name === 'computer_task') && !this.boundary.isProEntitled()) {
+    if (isTaskAction(name) && !this.boundary.isProEntitled()) {
       return {
         text: 'Error: Browser Use and Computer Use require Off Grid AI Pro.',
         authoritative: true
@@ -162,7 +159,7 @@ export class NativeActionToolExtension implements ToolExtension {
       // they must not fall to the legacy queue even when a pro hook is listening
       // (with B4 the pro queue resolves the engine gate anyway). Other actions
       // keep the legacy path when a pro queue owns approvals.
-      const engineOnly = actionType === 'web_task' || actionType === 'computer_task'
+      const engineOnly = actionType !== undefined && isTaskAction(actionType)
       if (actions && actionType && (engineOnly || !actions.approvalHookActive())) {
         return this.executeViaEngine(actions, actionType, spec, args, context?.conversationId)
       }
@@ -202,6 +199,7 @@ export class NativeActionToolExtension implements ToolExtension {
     args: Record<string, unknown>,
     sourceRef?: string
   ): Promise<string | ToolResult> {
+    const reply = (text: string): string | ToolResult => engineResult(actionType, text)
     const proposed = await actions.propose(
       {
         type: actionType,
@@ -212,15 +210,11 @@ export class NativeActionToolExtension implements ToolExtension {
       { source: 'chat', ...(sourceRef ? { sourceRef } : {}) }
     )
     if (!proposed.accepted) {
-      return engineResult(actionType, `Error: the action was refused: ${proposed.reason}`)
+      return reply(`Error: the action was refused: ${proposed.reason}`)
     }
-    const taskReference =
-      actionType === 'web_task' || actionType === 'computer_task'
-        ? ` Task reference: ${proposed.id}.`
-        : ''
+    const taskReference = isTaskAction(actionType) ? ` Task reference: ${proposed.id}.` : ''
     if (proposed.deduped) {
-      return engineResult(
-        actionType,
+      return reply(
         `That exact action is already queued — not queuing a duplicate. Tell the user it is already in flight.${taskReference}`
       )
     }
@@ -240,43 +234,36 @@ export class NativeActionToolExtension implements ToolExtension {
       actions.whenParked(proposed.id).then(() => ({ kind: 'parked' as const }))
     ])
     if (raced.kind === 'parked') {
-      return engineResult(
-        actionType,
+      return reply(
         `Queued for the user's approval — ${spec.title(args)} will run only after they approve it. Do not assume it has happened; tell the user it's pending approval.${taskReference}`
       )
     }
     if (!raced.outcome) {
       // Approved and still running past the wait window - NOT queued. Say so, or
       // the model wrongly tells the user to approve something already in flight.
-      return engineResult(
-        actionType,
+      return reply(
         `"${spec.title(args)}" is running now and will finish shortly. It does NOT need approval - do not tell the user to approve it.${taskReference}`
       )
     }
     const outcome = raced.outcome
     switch (outcome.outcome) {
       case 'done':
-        return engineResult(actionType, `${spec.formatResult(undefined)}${taskReference}`)
+        return reply(`${spec.formatResult(undefined)}${taskReference}`)
       case 'rejected':
-        return engineResult(
-          actionType,
-          `The user declined — ${spec.title(args)} was not run.${taskReference}`
-        )
+        return reply(`The user declined — ${spec.title(args)} was not run.${taskReference}`)
       case 'needs_help': {
         const lastAttempt = outcome.record.attemptLog.at(-1)
         const detail = lastAttempt?.detail ? ` (${lastAttempt.detail})` : ''
-        return engineResult(
-          actionType,
+        return reply(
           `It ran but could not be confirmed${detail}. Tell the user it needs their attention.${taskReference}`
         )
       }
       case 'edited':
-        return engineResult(
-          actionType,
+        return reply(
           `The user is editing this action before approving it. Tell them it is pending.${taskReference}`
         )
       case 'poisoned':
-        return engineResult(actionType, `Error: ${outcome.error}${taskReference}`)
+        return reply(`Error: ${outcome.error}${taskReference}`)
     }
   }
 }
