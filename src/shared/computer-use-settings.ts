@@ -47,6 +47,17 @@ export const SCREENSHOT_RESIZE_QUALITY: Record<
   detailed: 'best'
 }
 
+/** The sharp resize kernel for each screenshot quality - the same setting
+ * SCREENSHOT_RESIZE_QUALITY maps for Electron's NativeImage.resize. */
+export const SCREENSHOT_RESIZE_KERNEL: Record<
+  ComputerUseScreenshotQuality,
+  'nearest' | 'cubic' | 'lanczos3'
+> = {
+  efficient: 'nearest',
+  balanced: 'cubic',
+  detailed: 'lanczos3'
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }

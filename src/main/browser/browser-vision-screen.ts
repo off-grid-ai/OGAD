@@ -2,7 +2,11 @@ import fs from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import type { NativeImage, WebContentsView } from 'electron'
-import { SCREENSHOT_MAX_EDGE, type ComputerUseSettings } from '../../shared/computer-use-settings'
+import {
+  SCREENSHOT_MAX_EDGE,
+  SCREENSHOT_RESIZE_KERNEL,
+  type ComputerUseSettings
+} from '../../shared/computer-use-settings'
 import { WEB_USE_DESKTOP_VIEWPORT } from '../../shared/browser-session'
 import { getTaskExecutionDevice, recordTaskRun, taskScreenshotPath } from '../tasks/task-history'
 import type { VisionAction } from '../vision/vision-action'
@@ -12,6 +16,20 @@ import { createBrowserCoordinateTransform } from '../../shared/browser-coordinat
 import { browserPageHasVisualContent } from './browser-page-evidence'
 import { alignPixelSize, planAspectPreservingResize } from '../vision/screenshot-geometry'
 
+/** Where each capture's evidence lands (task-history disk + DB). Injectable so
+ *  tests fake the sink at this seam instead of module-mocking our own code. */
+export interface BrowserVisionEvidenceSink {
+  getTaskExecutionDevice: typeof getTaskExecutionDevice
+  recordTaskRun: typeof recordTaskRun
+  taskScreenshotPath: typeof taskScreenshotPath
+}
+
+const DEFAULT_EVIDENCE_SINK: BrowserVisionEvidenceSink = {
+  getTaskExecutionDevice,
+  recordTaskRun,
+  taskScreenshotPath
+}
+
 interface BrowserVisionScreenInput {
   activePage: () => { view: WebContentsView; driver: BrowserDriver }
   taskId: string
@@ -20,6 +38,7 @@ interface BrowserVisionScreenInput {
   settings: ComputerUseSettings
   screenshotResizeFactor?: number
   platform?: NodeJS.Platform
+  evidence?: BrowserVisionEvidenceSink
 }
 
 const MAX_TRANSIENT_RECOVERIES = 2
@@ -49,14 +68,8 @@ export async function normalizeBrowserModelFrame(
   target: { width: number; height: number },
   quality: ComputerUseSettings['screenshotQuality']
 ): Promise<Buffer> {
-  const kernel =
-    quality === 'efficient'
-      ? sharp.kernel.nearest
-      : quality === 'detailed'
-        ? sharp.kernel.lanczos3
-        : sharp.kernel.cubic
   return sharp(sourcePng)
-    .resize({ ...target, fit: 'fill', kernel })
+    .resize({ ...target, fit: 'fill', kernel: SCREENSHOT_RESIZE_KERNEL[quality] })
     .png()
     .toBuffer()
 }
@@ -67,22 +80,28 @@ export async function normalizeBrowserModelFrame(
  * model steps or create false rejected observations. */
 interface CapturedBrowserFrame {
   image: NativeImage
+  /** The frame encoded once; capture() must reuse it instead of re-encoding. */
+  png: Buffer
   viewport: { width: number; height: number }
 }
 
-function stableWebUseViewport(
-  left: { width: number; height: number },
-  right: { width: number; height: number }
-): boolean {
+function isFixedWebUseViewport(viewport: { width: number; height: number }): boolean {
   const tolerance = 2
-  const closeToFixedFrame = (viewport: { width: number; height: number }): boolean =>
+  return (
     Math.abs(viewport.width - WEB_USE_DESKTOP_VIEWPORT.width) <= tolerance &&
     Math.abs(viewport.height - WEB_USE_DESKTOP_VIEWPORT.height) <= tolerance
+  )
+}
+
+function stableWebUseViewport(
+  before: { width: number; height: number },
+  after: { width: number; height: number }
+): boolean {
   return (
-    closeToFixedFrame(left) &&
-    closeToFixedFrame(right) &&
-    Math.abs(left.width - right.width) <= 1 &&
-    Math.abs(left.height - right.height) <= 1
+    isFixedWebUseViewport(before) &&
+    isFixedWebUseViewport(after) &&
+    Math.abs(before.width - after.width) <= 1 &&
+    Math.abs(before.height - after.height) <= 1
   )
 }
 
@@ -95,9 +114,11 @@ async function capturePaintedBrowserFrame(
   for (;;) {
     // The injected pointer is part of the page. Put it in the compositor frame
     // before capture so Task history and the model receive the same pixels.
-    await driver.ensurePointer(true)
-    const viewportBefore = await driver.viewportSize()
-    if (!stableWebUseViewport(viewportBefore, viewportBefore)) {
+    const [, viewportBefore] = await Promise.all([
+      driver.ensurePointer(true),
+      driver.viewportSize()
+    ])
+    if (!isFixedWebUseViewport(viewportBefore)) {
       if (Date.now() >= deadline) break
       await waitForPaintRetry()
       continue
@@ -112,7 +133,7 @@ async function capturePaintedBrowserFrame(
       sawPixels = true
       const png = image.toPNG()
       if (await browserPageHasVisualContent(png)) {
-        return { image, viewport: viewportBefore }
+        return { image, png, viewport: viewportBefore }
       }
     }
     if (Date.now() >= deadline) break
@@ -199,7 +220,6 @@ export function createBrowserVisionScreen(input: BrowserVisionScreenInput): Visi
   // Freeze the selected model frame for the full task. Settings and pane bounds
   // cannot change the coordinate space between an observation and its action.
   const modelViewport = resolveBrowserModelViewport(input.settings, input.screenshotResizeFactor)
-  let encoded = { width: 1, height: 1 }
   let viewport = { width: 1, height: 1 }
   let captureNumber = 0
   const captureSeriesId = randomUUID()
@@ -214,24 +234,26 @@ export function createBrowserVisionScreen(input: BrowserVisionScreenInput): Visi
         const { view, driver } = page
         const ready = await driver.ensurePageReady()
         const captured = await capturePaintedBrowserFrame(view, driver)
-        const sourcePng = captured.image.toPNG()
         capturedDocumentId = ready.documentId
         capturedPage = page
         viewport = captured.viewport
-        encoded = modelViewport
         // Normalize the complete rendered surface once. This exact PNG is both
         // the model input and the Task-history image.
         const png = await normalizeBrowserModelFrame(
-          sourcePng,
+          captured.png,
           modelViewport,
           input.settings.screenshotQuality
         )
         if (!png.length) throw new Error('The browser returned an invalid screenshot.')
         captureNumber += 1
-        const savedPath = taskScreenshotPath(input.taskId, `${captureSeriesId}-${captureNumber}`)
+        const evidence = input.evidence ?? DEFAULT_EVIDENCE_SINK
+        const savedPath = evidence.taskScreenshotPath(
+          input.taskId,
+          `${captureSeriesId}-${captureNumber}`
+        )
         fs.writeFileSync(savedPath, png)
-        const device = getTaskExecutionDevice()
-        recordTaskRun({
+        const device = evidence.getTaskExecutionDevice()
+        evidence.recordTaskRun({
           taskId: input.taskId,
           journeyId: input.journeyId,
           kind: 'web_use',
@@ -245,13 +267,13 @@ export function createBrowserVisionScreen(input: BrowserVisionScreenInput): Visi
         transientActuationFailures = 0
         return {
           image: savedPath,
-          bounds: encoded,
+          bounds: modelViewport,
           metadata: {
             path: savedPath,
             viewport,
             geometry: {
               sourceBounds: { x: 0, y: 0, ...captured.image.getSize() },
-              encodedSize: encoded,
+              encodedSize: modelViewport,
               scale: modelViewport.width / captured.image.getSize().width
             }
           }
@@ -266,7 +288,7 @@ export function createBrowserVisionScreen(input: BrowserVisionScreenInput): Visi
     async actuate(action) {
       try {
         const mapped = normalizeBrowserShortcut(
-          mapBrowserVisionAction(action, encoded, viewport),
+          mapBrowserVisionAction(action, modelViewport, viewport),
           input.platform ?? process.platform
         )
         const driver = capturedPage?.driver

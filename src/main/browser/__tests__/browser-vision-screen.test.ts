@@ -24,12 +24,14 @@ vi.mock('node:fs', () => ({
   default: { writeFileSync: browserEvidenceMocks.writeFileSync }
 }))
 
-vi.mock('../../tasks/task-history', () => ({
+// Evidence lands through the injected sink seam (BrowserVisionEvidenceSink) -
+// no module mock of our own code; only node:fs (the device boundary) is faked.
+const evidenceSink = {
   getTaskExecutionDevice: () => ({ id: 'test-device', name: 'Test device' }),
   recordTaskRun: browserEvidenceMocks.recordTaskRun,
-  taskScreenshotPath: (taskId: string, captureNumber: number) =>
+  taskScreenshotPath: (taskId: string, captureNumber: string | number) =>
     `/tmp/${taskId}-${captureNumber}.png`
-}))
+} as unknown as import('../browser-vision-screen').BrowserVisionEvidenceSink
 
 afterEach(() => {
   vi.useRealTimers()
@@ -241,6 +243,7 @@ describe('browser screenshot evidence', () => {
       getSize: () => ({ width: 0, height: 0 })
     }))
     const screen = createBrowserVisionScreen({
+      evidence: evidenceSink,
       activePage: () => ({
         view: {
           webContents: {
@@ -327,6 +330,7 @@ describe('browser screenshot evidence', () => {
       }
     } as unknown as WebContentsView
     const screen = createBrowserVisionScreen({
+      evidence: evidenceSink,
       activePage: () => ({ view, driver }),
       taskId: 'resize-journey',
       journeyId: 'resize-journey-chat',
