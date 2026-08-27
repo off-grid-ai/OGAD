@@ -47,7 +47,12 @@ export function visionPolicyMessagesForAttempt(
       ? [{ role: 'assistant' as const, content: priorInvalidAnswer.slice(0, 4_000) }]
       : []),
     {
-      role: 'system',
+      // A USER turn, not a system one. Several chat templates (Holo 3.1 among them) require the
+      // system message to be FIRST and raise on a later one - appending a trailing system message
+      // made every retry fail with "Jinja Exception: System message must be at the beginning",
+      // turning a recoverable step into a hard 500. A late correction is a user turn anyway: it is
+      // feedback about the last answer, not a change to the model's standing instructions.
+      role: 'user',
       content: [
         priorValidationError
           ? `The prior final answer failed validation: ${priorValidationError}.`

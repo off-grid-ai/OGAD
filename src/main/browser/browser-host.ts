@@ -173,6 +173,9 @@ class BrowserHost implements BrowserRailHost {
   private driverFor(record: BrowserSessionRecord<WebContentsView>): BrowserDriver {
     const pointer = this.taskPointers.get(record.sessionId) ?? DEFAULT_BROWSER_POINTER
     return new BrowserDriver(attachCdp(record.resource), undefined, {
+      // Read fresh: the pane is resizable, so the zoom changes under a running task and the
+      // injected cursor must stay the same on-screen size.
+      zoomFactor: () => webUseDesktopZoomFactor(this.region ?? this.coarseBounds()),
       onPointer: (next) => {
         this.taskPointers.set(record.sessionId, next)
         broadcast('browser:pointer', { sessionId: record.sessionId, ...next })

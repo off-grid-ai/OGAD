@@ -53,6 +53,14 @@ interface BrowserDriverOptions {
   onPointer?: (event: BrowserPointerEvent) => void
   initialPointer?: BrowserPointerEvent
   pageReadyTimeoutMs?: number
+  /**
+   * The page's current Electron zoom factor, read fresh each time the cursor is drawn.
+   *
+   * The cursor lives INSIDE the zoomed page, so a 20px cursor drawn at zoom 0.5 appears 10px on
+   * screen. Counter-scaling by 1/zoom keeps it the size the design specifies no matter how small
+   * the pane is - which is why the old renderer overlay looked right and this one looked shrunken.
+   */
+  zoomFactor?: () => number
 }
 
 export interface BrowserPointerMotion {
@@ -163,6 +171,7 @@ export class BrowserDriver {
   private pointer: BrowserPointerEvent
   private lastClick: { x: number; y: number } | null = null
   private readonly documentIdentityProperty = `__offgrid_document_${Math.random().toString(36).slice(2)}`
+  private readonly zoomFactor: () => number
   private readonly onPointer?: (event: BrowserPointerEvent) => void
   private readonly pageReadyTimeoutMs: number
 
@@ -174,6 +183,7 @@ export class BrowserDriver {
     this.onPointer = options.onPointer
     this.pointer = options.initialPointer ?? DEFAULT_BROWSER_POINTER
     this.pageReadyTimeoutMs = options.pageReadyTimeoutMs ?? 10_000
+    this.zoomFactor = options.zoomFactor ?? (() => 1)
   }
 
   /** The ONE choke point every CDP command goes through: race the transport
@@ -202,6 +212,9 @@ export class BrowserDriver {
     transitionMs = 0
   ): Promise<boolean> {
     const pointerMarkup = browserPointerSvgMarkup()
+    // Guard the divide: a zero or missing zoom must not produce an invisible or infinite cursor.
+    const zoom = this.zoomFactor()
+    const counterScale = zoom > 0 ? 1 / zoom : 1
     const expression = `(() => {
       const id = '__offgrid_agent_pointer__';
       const markerId = '__offgrid_agent_click_marker__';
@@ -212,7 +225,7 @@ export class BrowserDriver {
         cursor = document.createElement('div');
         cursor.id = id;
         cursor.setAttribute('aria-hidden', 'true');
-        cursor.style.cssText = 'position:fixed;left:0;top:0;width:${BROWSER_POINTER_VISUAL.width}px;height:${BROWSER_POINTER_VISUAL.height}px;pointer-events:none;z-index:2147483647;will-change:transform;filter:drop-shadow(0 0 5px ${BROWSER_POINTER_VISUAL.glow}) drop-shadow(0 1px 1px rgba(0,0,0,.5));';
+        cursor.style.cssText = 'position:fixed;left:0;top:0;width:${BROWSER_POINTER_VISUAL.width * counterScale}px;height:${BROWSER_POINTER_VISUAL.height * counterScale}px;pointer-events:none;z-index:2147483647;will-change:transform;filter:drop-shadow(0 0 ${5 * counterScale}px ${BROWSER_POINTER_VISUAL.glow}) drop-shadow(0 ${counterScale}px ${counterScale}px rgba(0,0,0,.5));';
         cursor.innerHTML = ${JSON.stringify(pointerMarkup)};
       }
       const lastClick = ${JSON.stringify(this.lastClick)};

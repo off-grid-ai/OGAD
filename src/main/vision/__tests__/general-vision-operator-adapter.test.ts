@@ -313,7 +313,9 @@ describe('general vision native tool policy', () => {
     expect(visionPolicyMessagesForAttempt(messages, 2, 'bad', 'missing tool')).toEqual([
       ...messages,
       { role: 'assistant', content: 'bad' },
-      expect.objectContaining({ role: 'system', content: expect.stringContaining('missing tool') })
+      // A USER turn: templates that require system-first (Holo 3.1) raise on a later system
+      // message, which made every retry 500 instead of recovering.
+      expect.objectContaining({ role: 'user', content: expect.stringContaining('missing tool') })
     ])
   })
 
