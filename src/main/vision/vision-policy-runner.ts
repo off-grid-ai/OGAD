@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import sharp from 'sharp'
+import { COLORS_DARK, COLORS_LIGHT } from '@offgrid/design'
 import { llm } from '../llm'
 import { TASK_GUIDANCE_APPLIED_TRACE } from '../tasks/task-guide'
 import type { VisionGroundingInput, VisionGroundingResult } from './vision-agent'
@@ -182,11 +183,7 @@ export function serializeVisionPolicyResponse(response: VisionPolicyResponse): s
   if (response.toolCalls.length === 0) return response.content
   return JSON.stringify({
     ...(response.content ? { content: response.content } : {}),
-    tool_calls: response.toolCalls.map(({ id, name, arguments: rawArguments }) => ({
-      id,
-      name,
-      arguments: rawArguments
-    }))
+    tool_calls: response.toolCalls
   })
 }
 
@@ -197,36 +194,44 @@ interface PreviousClickMarker {
 
 const COORDINATE_GRID_MAX = 1_000
 const COORDINATE_GRID_INTERVAL = 20
-const COORDINATE_GRID_LABEL_INTERVAL = 20
 
 /** Draw one stable 0-1000 reference grid without changing image dimensions.
  * The grid is evidence, so it is persisted with the exact model bytes. */
 function normalizedCoordinateGrid(width: number, height: number): Buffer {
   const lineCount = COORDINATE_GRID_MAX / COORDINATE_GRID_INTERVAL + 1
-  const labelCount = COORDINATE_GRID_MAX / COORDINATE_GRID_LABEL_INTERVAL + 1
-  const verticalLines = Array.from({ length: lineCount }, (_, index) => {
-    const x = Math.round((index * COORDINATE_GRID_INTERVAL * (width - 1)) / COORDINATE_GRID_MAX)
-    return `<line x1="${x}" y1="0" x2="${x}" y2="${height}"/>`
-  }).join('')
-  const horizontalLines = Array.from({ length: lineCount }, (_, index) => {
-    const y = Math.round((index * COORDINATE_GRID_INTERVAL * (height - 1)) / COORDINATE_GRID_MAX)
-    return `<line x1="0" y1="${y}" x2="${width}" y2="${y}"/>`
-  }).join('')
-  const xLabels = Array.from({ length: labelCount }, (_, index) => {
-    const value = index * COORDINATE_GRID_LABEL_INTERVAL
+  const verticalLines: string[] = []
+  const xLabels: string[] = []
+  const horizontalLines: string[] = []
+  const yLabels: string[] = []
+  for (let index = 0; index < lineCount; index += 1) {
+    const value = index * COORDINATE_GRID_INTERVAL
     const x = Math.round((value * (width - 1)) / COORDINATE_GRID_MAX)
+    verticalLines.push(`<line x1="${x}" y1="0" x2="${x}" y2="${height}"/>`)
     const labelX = Math.min(Math.max(3, x + 3), Math.max(3, width - 48))
-    return `<text x="${labelX}" y="15">${value}</text>`
-  }).join('')
-  const yLabels = Array.from({ length: labelCount }, (_, index) => {
-    const value = index * COORDINATE_GRID_LABEL_INTERVAL
+    xLabels.push(`<text x="${labelX}" y="15">${value}</text>`)
     const y = Math.round((value * (height - 1)) / COORDINATE_GRID_MAX)
+    horizontalLines.push(`<line x1="0" y1="${y}" x2="${width}" y2="${y}"/>`)
     const labelY = Math.min(Math.max(30, y + 14), Math.max(30, height - 4))
-    return `<text x="3" y="${labelY}">${value}</text>`
-  }).join('')
+    yLabels.push(`<text x="3" y="${labelY}">${value}</text>`)
+  }
   return Buffer.from(
-    `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"><g stroke="#059669" stroke-width="1" stroke-dasharray="4 6" opacity="0.22">${verticalLines}${horizontalLines}</g><g fill="#064E3B" stroke="#FFFFFF" stroke-width="2" paint-order="stroke" font-family="Menlo,monospace" font-size="11" font-weight="700" opacity="0.8">${xLabels}${yLabels}</g></svg>`
+    `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"><g stroke="${COLORS_LIGHT.primary}" stroke-width="1" stroke-dasharray="4 6" opacity="0.22">${verticalLines.join('')}${horizontalLines.join('')}</g><g fill="${COLORS_LIGHT.primaryDark}" stroke="${COLORS_LIGHT.background}" stroke-width="2" paint-order="stroke" font-family="Menlo,monospace" font-size="11" font-weight="700" opacity="0.8">${xLabels.join('')}${yLabels.join('')}</g></svg>`
   )
+}
+
+/** The grid overlay is byte-identical for a given frame size, so rasterize it
+ * once per (width, height) and reuse the PNG across every model step. */
+const rasterizedGridCache = new Map<string, Promise<Buffer>>()
+
+function rasterizedCoordinateGrid(width: number, height: number): Promise<Buffer> {
+  const key = `${width}x${height}`
+  let cached = rasterizedGridCache.get(key)
+  if (!cached) {
+    cached = sharp(normalizedCoordinateGrid(width, height)).png().toBuffer()
+    cached.catch(() => rasterizedGridCache.delete(key))
+    rasterizedGridCache.set(key, cached)
+  }
+  return cached
 }
 
 function clickPoint(action: VisionAction): { x: number; y: number } | undefined {
@@ -296,7 +301,7 @@ export async function modelScreenshot(input: VisionGroundingInput): Promise<{
   }
   const marker = previousClickMarker(input)
   const overlays: Array<{ input: Buffer; left: number; top: number }> = [
-    { input: normalizedCoordinateGrid(expected.width, expected.height), left: 0, top: 0 }
+    { input: await rasterizedCoordinateGrid(expected.width, expected.height), left: 0, top: 0 }
   ]
   if (marker) {
     const markerSize = Math.max(
@@ -306,7 +311,7 @@ export async function modelScreenshot(input: VisionGroundingInput): Promise<{
     const radius = markerSize / 2
     overlays.push({
       input: Buffer.from(
-        `<svg width="${markerSize}" height="${markerSize}" xmlns="http://www.w3.org/2000/svg"><circle cx="${radius}" cy="${radius}" r="${Math.max(2, radius - 2)}" fill="#34D399" stroke="#FFFFFF" stroke-width="2"/></svg>`
+        `<svg width="${markerSize}" height="${markerSize}" xmlns="http://www.w3.org/2000/svg"><circle cx="${radius}" cy="${radius}" r="${Math.max(2, radius - 2)}" fill="${COLORS_DARK.primary}" stroke="${COLORS_LIGHT.background}" stroke-width="2"/></svg>`
       ),
       left: Math.max(0, Math.min(expected.width - markerSize, Math.round(marker.x - radius))),
       top: Math.max(0, Math.min(expected.height - markerSize, Math.round(marker.y - radius)))
