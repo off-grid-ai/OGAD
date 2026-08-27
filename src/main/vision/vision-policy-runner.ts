@@ -109,9 +109,9 @@ export async function runVisionPolicyRequest(
         priorInvalidAnswer,
         priorValidationError
       )
-      // Counted per attempt so the empty-response branch below can tell a model that DECLINED to
-      // act (reasoned, called nothing) from a genuinely empty response.
-      let reasoningChars = 0
+      // Kept per attempt for two reasons: to tell a model that DECLINED to act (reasoned, called
+      // nothing) from a genuinely empty response, and to hand its own reasoning back on the retry.
+      let reasoningText = ''
       const useStream = Boolean(
         request.tools?.length || (onReasoningDelta && request.separateReasoning)
       )
@@ -120,7 +120,7 @@ export async function runVisionPolicyRequest(
             messages,
             (text, kind) => {
               if (kind !== 'reasoning') return
-              reasoningChars += text.length
+              reasoningText += text
               onReasoningDelta?.(text)
             },
             {
@@ -157,12 +157,15 @@ export async function runVisionPolicyRequest(
         // and no validation error recorded, attempt 2 re-sent a byte-identical request and failed
         // identically. Feeding the existing nudge seam is the fix - the mechanism was already
         // here, this path just never used it.
-        priorInvalidAnswer = undefined
-        priorValidationError = reasoningChars
-          ? 'you produced reasoning but called no tool. Call exactly one tool now, using only what the screenshot shows. If the goal cannot be met from this page, say so through a tool call rather than answering with nothing'
+        // Hand the model its OWN reasoning back. It reached a conclusion in prose and then failed
+        // only to express it as a tool call, so replaying that conclusion asks it to finish the
+        // job rather than re-derive it from the screenshot with no memory of what it just decided.
+        priorInvalidAnswer = reasoningText.trim() || undefined
+        priorValidationError = reasoningText.trim()
+          ? 'you reasoned to a conclusion but called no tool, so the decision was lost. Restate that same conclusion as exactly one tool call. Every outcome has a tool: complete_milestone when the phase is done, perform_action to act, rethink when the plan is wrong, call_user when the page cannot satisfy the goal. Answering with nothing is never correct'
           : 'the response was empty. Call exactly one tool'
         throw new Error(
-          reasoningChars
+          reasoningText.trim()
             ? 'Computer-use model reasoned but called no tool.'
             : 'Computer-use model returned no response.'
         )

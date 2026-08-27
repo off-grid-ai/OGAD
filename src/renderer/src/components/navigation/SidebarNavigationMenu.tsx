@@ -27,8 +27,13 @@ export function SidebarNavigationMenu<Item extends { view: string; label: string
       groups.find((group) => group.items.some((item) => item.view === activeView))?.label ?? null,
     [activeView, groups]
   )
+  // Every group starts OPEN, so the expanded sidebar shows exactly what the collapsed rail shows.
+  // Seeding only the active group meant an icon you could see and hover in the rail vanished the
+  // moment the sidebar expanded, because the rail has no group headers and therefore always
+  // renders every item. Collapsing a group is now something the user chose, not a default that
+  // silently hides navigation.
   const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(
-    () => new Set(activeGroup ? [activeGroup] : [])
+    () => new Set(groups.map((group) => group.label))
   )
 
   useEffect(() => {

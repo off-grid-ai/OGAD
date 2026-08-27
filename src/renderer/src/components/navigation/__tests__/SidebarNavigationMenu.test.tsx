@@ -28,17 +28,21 @@ const renderItem = (item: { label: string; view: string }): React.ReactElement =
 afterEach(cleanup)
 
 describe('SidebarNavigationMenu', () => {
-  it('opens only the section that owns the active route by default', () => {
+  // Every section starts open so the expanded sidebar shows exactly what the collapsed rail shows.
+  // The rail has no section headers and therefore always renders every item, so seeding only the
+  // active section made an icon you could hover in the rail vanish when the sidebar expanded.
+  it('opens every section by default so the rail and the expanded sidebar agree', () => {
     render(
       <SidebarNavigationMenu activeView="chat" expanded groups={groups} renderItem={renderItem} />
     )
 
     expect(screen.getByRole('button', { name: 'Work' }).getAttribute('aria-expanded')).toBe('true')
     expect(screen.getByRole('button', { name: 'Discover' }).getAttribute('aria-expanded')).toBe(
-      'false'
+      'true'
     )
+    // An item from EACH section is reachable, which is the property that was broken.
     expect(screen.getByRole('button', { name: 'Chat' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Explore' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Explore' })).toBeTruthy()
   })
 
   it('keeps other sections open and lets each section close independently', async () => {
@@ -47,15 +51,16 @@ describe('SidebarNavigationMenu', () => {
       <SidebarNavigationMenu activeView="chat" expanded groups={groups} renderItem={renderItem} />
     )
 
+    // Starts open now, so the first click CLOSES it - and must not disturb its neighbour.
     await user.click(screen.getByRole('button', { name: 'Discover' }))
     expect(screen.getByRole('button', { name: 'Discover' }).getAttribute('aria-expanded')).toBe(
-      'true'
+      'false'
     )
     expect(screen.getByRole('button', { name: 'Work' }).getAttribute('aria-expanded')).toBe('true')
 
     await user.click(screen.getByRole('button', { name: 'Discover' }))
     expect(screen.getByRole('button', { name: 'Discover' }).getAttribute('aria-expanded')).toBe(
-      'false'
+      'true'
     )
     expect(screen.getByRole('button', { name: 'Work' }).getAttribute('aria-expanded')).toBe('true')
   })

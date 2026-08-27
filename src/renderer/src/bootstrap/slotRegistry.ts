@@ -37,5 +37,9 @@ export const SLOTS = {
   /** Licensed Browser Use and Computer Use task workspace. */
   taskWorkspace: 'tasks.workspace',
   /** Optional task supervisor surface mounted above the chat composer. */
-  taskSupervisorOverlay: 'tasks.supervisorOverlay'
+  taskSupervisorOverlay: 'tasks.supervisorOverlay',
+  /** A running task, kept visible in a floating card after its workspace is left. Mounted at the
+   *  app root, OUTSIDE the route switch: the whole point is to survive navigation, so anything
+   *  route-scoped unmounts it exactly when it is needed. */
+  taskFloatingView: 'tasks.floatingView'
 } as const

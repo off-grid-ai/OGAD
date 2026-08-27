@@ -61,18 +61,7 @@ import { cn } from './lib/utils'
 import { normalizeProNavigationIntent, type ProNavigationIntent } from './lib/pro-navigation'
 import { navigateSearchHit } from './lib/search-navigation'
 import { getSlot, SLOTS } from './bootstrap/slotRegistry'
-import { useTaskSessions } from './lib/task-session-store'
-import { shouldConfirmChatLeave } from './lib/chat-leave-guard'
 import { SidebarNavigationMenu } from './components/navigation/SidebarNavigationMenu'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle
-} from './components/ui/dialog'
-import { Button } from './components/ui/button'
 import {
   OPEN_MODEL_SETTINGS_PANEL_EVENT,
   type ModelSettingsPanelTab
@@ -273,6 +262,9 @@ function AppContent() {
   const [proReady, setProReady] = useState(false)
   const [proActivation, setProActivation] = useState<ProRendererActivation>('none')
   const TaskWorkspace = isPro && proReady ? getSlot(SLOTS.taskWorkspace) : undefined
+  // Rendered at the app root, NOT inside the route switch: a running task follows the user across
+  // navigation, so a route-scoped mount would unmount it exactly when it is wanted.
+  const TaskFloatingView = isPro && proReady ? getSlot(SLOTS.taskFloatingView) : undefined
   const [externalUnreadCount, setExternalUnreadCount] = useState(0)
   useEffect(() => {
     let mounted = true
@@ -348,39 +340,13 @@ function AppContent() {
     seedPrompt?: string
     draftPrompt?: string
   } | null>(null)
-  const [activeChatConversationId, setActiveChatConversationId] = useState<string | null>(null)
-  const { tasks: taskSessions } = useTaskSessions()
-  const [pendingNavigation, setPendingNavigation] = useState<{
-    destination: ViewMode
-    proceed: () => void
-  } | null>(null)
-  const navigateTo = useCallback(
-    (destination: ViewMode, prepare?: () => void): void => {
-      const proceed = (): void => {
-        prepare?.()
-        commitViewMode(destination)
-      }
-      if (
-        shouldConfirmChatLeave({
-          currentView: viewMode,
-          nextView: destination,
-          conversationId: activeChatConversationId,
-          tasks: taskSessions
-        })
-      ) {
-        setPendingNavigation({ destination, proceed })
-        return
-      }
-      setPendingNavigation(null)
-      proceed()
-    },
-    [activeChatConversationId, taskSessions, viewMode]
-  )
-  const confirmPendingNavigation = useCallback((): void => {
-    const navigation = pendingNavigation
-    setPendingNavigation(null)
-    navigation?.proceed()
-  }, [pendingNavigation])
+  // Navigation is unconditional. Leaving a chat with a task running used to prompt, because the
+  // live view was lost on the way out; a running task now follows you in a floating card
+  // (tasks.floatingView), so there is nothing left to warn about.
+  const navigateTo = useCallback((destination: ViewMode, prepare?: () => void): void => {
+    prepare?.()
+    commitViewMode(destination)
+  }, [])
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const rec = useMeetingRecorder()
 
@@ -1346,7 +1312,6 @@ function AppContent() {
                         onOpenSkillPreset={handleOpenSkillPreset}
                         openTarget={chatTarget}
                         onTargetConsumed={() => setChatTarget(null)}
-                        onActiveConversationChange={setActiveChatConversationId}
                         onTaskDetailModeChange={setTaskDetailSidebarMode}
                       />
                     ) : viewMode === 'tasks' ? (
@@ -1429,28 +1394,7 @@ function AppContent() {
           />
         )}
       </AnimatePresence>
-      <Dialog
-        open={pendingNavigation !== null}
-        onOpenChange={(open) => {
-          if (!open) setPendingNavigation(null)
-        }}
-      >
-        <DialogContent className="rounded-none border-neutral-700 bg-neutral-950 sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Leave this chat while the task is running?</DialogTitle>
-            <DialogDescription className="leading-relaxed">
-              Web Use or Computer Use can keep running, but leaving this chat can reduce task
-              performance. Stay here for the best result.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={confirmPendingNavigation}>
-              Leave chat
-            </Button>
-            <Button onClick={() => setPendingNavigation(null)}>Stay in chat</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {TaskFloatingView ? <TaskFloatingView /> : null}
     </div>
   )
 }
