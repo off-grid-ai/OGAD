@@ -193,8 +193,37 @@ export function sanitizeComputerUseStepDetail(input: ComputerUseStepDetail): Com
   }
 }
 
+/**
+ * Redact and cap step details ON THE WAY IN. This is the single boundary where untrusted model
+ * output and typed content are sanitized, so everything persisted is already safe to read back.
+ */
 export function boundComputerUseStepDetails(
   details: readonly ComputerUseStepDetail[]
 ): ComputerUseStepDetail[] {
   return details.slice(-MAX_TASK_STEP_DETAILS).map(sanitizeComputerUseStepDetail)
+}
+
+/**
+ * Read back what boundComputerUseStepDetails already sanitized: enforce the cap, do NOT redact
+ * again.
+ *
+ * Re-redacting on every hydration was the main thread's largest cost once embeddings moved off it —
+ * a profile under load put ~24% of main-thread time in visibleComputerUseModelOutput (8.6%),
+ * redactTypedActionContent (5.3%) and this parse (3.6%). The reason is the call pattern: upsert()
+ * reads the row before every write, so each recordTaskRun — meaning each streamed reasoning token —
+ * re-parsed and re-redacted every field of every step in a list that grows all task long, then
+ * wrote it straight back unchanged. tasks:list paid it again per row on every poll.
+ *
+ * Sanitizing once at the write boundary is both cheaper and the honest single source of truth:
+ * doing it twice invited the two copies to disagree about what "redacted" means.
+ */
+export function storedComputerUseStepDetails(raw: string): ComputerUseStepDetail[] {
+  try {
+    const value = JSON.parse(raw) as unknown
+    return Array.isArray(value)
+      ? (value as ComputerUseStepDetail[]).slice(-MAX_TASK_STEP_DETAILS)
+      : []
+  } catch {
+    return []
+  }
 }

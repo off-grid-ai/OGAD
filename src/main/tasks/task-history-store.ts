@@ -9,6 +9,7 @@
  */
 import {
   boundComputerUseStepDetails,
+  storedComputerUseStepDetails,
   sanitizeComputerUseReasoning,
   type ComputerUsePhase,
   type ComputerUseStepDetail
@@ -179,17 +180,8 @@ function rowToSnapshot(row: TaskRunRow): TaskRunSnapshot {
     ...(row.screenshot_path ? { screenshotPath: row.screenshot_path } : {}),
     ...(row.screenshot_device_id ? { screenshotDeviceId: row.screenshot_device_id } : {}),
     ...(row.step_details_json
-      ? { stepDetails: boundComputerUseStepDetails(safeStepDetails(row.step_details_json)) }
+      ? { stepDetails: storedComputerUseStepDetails(row.step_details_json) }
       : {})
-  }
-}
-
-function safeStepDetails(raw: string): ComputerUseStepDetail[] {
-  try {
-    const value = JSON.parse(raw) as unknown
-    return Array.isArray(value) ? (value as ComputerUseStepDetail[]) : []
-  } catch {
-    return []
   }
 }
 
