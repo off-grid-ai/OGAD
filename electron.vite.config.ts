@@ -41,7 +41,15 @@ export default defineConfig({
     define: proDefine,
     build: {
       sourcemap: coverageSourcemap,
-      rollupOptions: { input: { index: resolve('src/main/index.ts') } }
+      // The embedding worker is a SECOND main-process entry, bundled beside index.js so
+      // embeddings.ts can spawn it by path. It must not be folded into the main chunk: the point
+      // is that its ONNX/WASM inference runs off the thread that owns the window.
+      rollupOptions: {
+        input: {
+          index: resolve('src/main/index.ts'),
+          'embeddings-worker': resolve('src/main/embeddings-worker.ts')
+        }
+      }
     },
     // Deps are externalized by default (resolved from node_modules at runtime).
     // @scure/bip39 + @noble/hashes are ESM-only ("type":"module"); a CJS main
