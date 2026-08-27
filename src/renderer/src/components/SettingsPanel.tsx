@@ -213,14 +213,14 @@ export function SettingsPanel({
         </div>
       ) : null}
 
-      <div className="flex items-center gap-1 border-b border-neutral-800 px-3 py-2">
+      <div className="flex flex-wrap items-center gap-1 border-b border-neutral-800 px-3 py-2">
         {(
           ['model', 'remote', 'image', 'voice', 'transcription', 'tools', 'connectors'] as const
         ).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`rounded-md px-3 py-1 text-xs capitalize transition-colors ${tab === t ? 'bg-neutral-800 text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
+            className={`shrink-0 rounded-md px-3 py-1 text-xs capitalize transition-colors ${tab === t ? 'bg-neutral-800 text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
           >
             {t}
           </button>
@@ -670,7 +670,11 @@ export function SettingsPanel({
   }
 
   return (
-    <SidePanel ariaLabel="Model settings" onClose={onClose} className="w-[30vw] min-w-[420px]">
+    <SidePanel
+      ariaLabel="Model settings"
+      onClose={onClose}
+      className="w-[calc(30vw+50px)] min-w-[470px]"
+    >
       {content}
     </SidePanel>
   )
