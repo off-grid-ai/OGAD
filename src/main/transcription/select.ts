@@ -103,20 +103,29 @@ export function engineForActiveModel(
   return catalogEngine(entry)
 }
 
+/** Reads one persisted user preference. The app supplies the real settings table; a caller
+ *  that has no database (and no preference to honor) supplies its own reader instead of
+ *  dragging the native DB module into a path that only turns audio into text. */
+export type TranscriptionSettingReader = (key: string, fallback: string) => string
+
 /**
  * Resolve the transcription service implied by the active model choice, honoring the
  * whisper fallback when Parakeet isn't installed. This is what core, engine-agnostic
  * paths (generic mic transcription, file/RAG ingestion) call so a Parakeet selection is
  * actually used instead of always running whisper.
+ *
+ * The language preference arrives through `readSetting` rather than a hardwired import: the
+ * active engine comes from the filesystem and the catalog, so this seam otherwise needs no
+ * database at all, and coupling it to one made every caller — including a runner that cannot
+ * load the native DB module — pay for a single string lookup.
  */
-export function getActiveTranscription(): TranscriptionService {
+export function getActiveTranscription(
+  readSetting: TranscriptionSettingReader = getSetting
+): TranscriptionService {
   const active = getActiveModal('transcription')
-  const engine = engineForActiveModel(
-    active,
-    modelsByKind('transcription')
-  )
+  const engine = engineForActiveModel(active, modelsByKind('transcription'))
   const language = resolveConfiguredTranscriptionLanguage(
-    getSetting('sttLanguage', 'auto'),
+    readSetting('sttLanguage', 'auto'),
     transcriptionLanguages(engine, active)
   )
   return withConfiguredTranscriptionLanguage(

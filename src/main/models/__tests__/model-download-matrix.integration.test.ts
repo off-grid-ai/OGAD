@@ -213,11 +213,15 @@ describe('model download release matrix', () => {
 
   it('makes a complete Parakeet download selectable by the real dictation service (#19)', async () => {
     const { getActiveTranscription } = await import('../../transcription/select')
-    expect(getActiveTranscription().isAvailable()).toBe(false)
+    // No app database in this runner (it cannot load the native DB module — see
+    // vitest.config.ts), and this journey has no language preference to honor: the reader
+    // is the boundary, so it answers with the same default a fresh profile would.
+    const noStoredPreferences = <T,>(_key: string, fallback: T): T => fallback
+    expect(getActiveTranscription(noStoredPreferences).isAvailable()).toBe(false)
 
     await downloadEveryRequiredFile(speechModel)
     expect(await manager.activateModel(speechModel.id)).toEqual({ success: true })
-    const dictation = getActiveTranscription()
+    const dictation = getActiveTranscription(noStoredPreferences)
 
     expect(dictation.isAvailable()).toBe(true)
     await expect(
