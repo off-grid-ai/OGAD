@@ -1035,9 +1035,9 @@ export class LLMService {
       toolChoice?: string
     }
   ): Promise<StreamResult> {
-    return streamRemoteChatCompletion(
+    return streamRemoteChatCompletion({
       remote,
-      {
+      request: {
         messages,
         maxTokens: maxTokensForWire(resolveMaxTokens(options.maxTokens, this.maxTokens)),
         temperature: options.temperature ?? this.temperature,
@@ -1051,8 +1051,8 @@ export class LLMService {
         toolChoice: options.toolChoice
       },
       onDelta,
-      { signal: options.signal, timeoutMs: options.timeoutMs }
-    )
+      options: { signal: options.signal, timeoutMs: options.timeoutMs }
+    })
   }
 
   async chat(
