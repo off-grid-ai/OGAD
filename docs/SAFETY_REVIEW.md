@@ -8,11 +8,19 @@ and where that defense is tested - so a later change that weakens a defense
 fails a test instead of shipping.
 
 The governing principle: **the model only proposes; the pipeline guarantees.**
-Every mutation is a durable Action that gates for approval, binds its payload
-by hash, executes once, and verifies. Injection cannot manufacture an approved
-action out of nothing - it can only try to steer a task the user already
-approved. So the defenses below are about bounding that steering, and about
-never letting the agent cross an identity or payment boundary on its own.
+Every mutation is a durable Action that binds its payload by hash, executes
+once, and verifies. The approval policy is risk-tiered (one rule, in
+`gate-host.ts needsApproval`): **sends (message, email) and computer-use tasks
+(the accessibility/vision rails) gate for human approval every time** - a send
+is irreversible with no reliable read-back, and computer use takes over the
+cursor. Undoable mutations (calendar, reminders) auto-run with an Undo chip;
+reads run free; web_task runs unprompted because it acts inside Off Grid's own
+watched browser pane - supervised by design, hands back at any sign-in or
+payment. The pro "auto-approve" toggle covers computer-use tasks ONLY; sends
+ask every time regardless. Injection cannot manufacture an approved action out
+of nothing - it can only try to steer a task the user already approved. So the
+defenses below are about bounding that steering, and about never letting the
+agent cross an identity or payment boundary on its own.
 
 ## The threats and the defenses, per rail
 
@@ -20,8 +28,9 @@ never letting the agent cross an identity or payment boundary on its own.
 
 - **Threat:** low. The arguments come from the user's chat turn, not from
   scraped content. The model fills a typed tool schema.
-- **Defense:** the payload-hash gate - what the user approves is byte-for-byte
-  what runs; an edit re-binds and re-gates. Sends are `none_fuzzy` and single-
+- **Defense:** sends (message, email) gate for approval every time, and the
+  payload-hash binding means what the user approves is byte-for-byte what
+  runs; an edit re-binds and re-gates. Sends are `none_fuzzy` and single-
   attempt, so a wrong verify can never double-send.
 - **Tested:** `shared/packages/use` retry + machine tests (never-double-fire),
   `use-runtime.integration.dbtest.ts` (real propose -> verify -> undo).

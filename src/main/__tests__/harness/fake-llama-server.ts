@@ -51,8 +51,10 @@ export interface FakeLlamaServer {
   /** Clear any queued-but-unconsumed turns + the recorded requests — call between tests
    *  so a case that over-enqueues (e.g. the step-budget cap) can't leak into the next. */
   reset(): void
-  /** The request bodies received, parsed — for asserting what the REAL llm actually sent. */
+  /** The request bodies received, parsed — for asserting what the REAL llm actually sent.
+   *  Planner (PLAN_SCHEMA) calls are answered out-of-band and recorded separately. */
   readonly requests: Array<Record<string, unknown>>
+  readonly plannerRequests: Array<Record<string, unknown>>
   close(): Promise<void>
 }
 
@@ -101,6 +103,7 @@ function sseFramesFor(turn: FakeTurn): string[] {
 export async function startFakeLlamaServer(): Promise<FakeLlamaServer> {
   const queue: FakeTurn[] = []
   const requests: Array<Record<string, unknown>> = []
+  const plannerRequests: Array<Record<string, unknown>> = []
 
   const server = http.createServer((req, res) => {
     if (req.method === 'GET' && (req.url === '/health' || req.url === '/v1/models')) {
@@ -119,6 +122,21 @@ export async function startFakeLlamaServer(): Promise<FakeLlamaServer> {
           parsed = JSON.parse(body)
         } catch {
           /* keep {} */
+        }
+        // The orchestrator's PLANNING pass (tools.ts shouldPlan -> planTask) fires
+        // before the reactive loop on action-shaped queries, grammar-constrained to
+        // PLAN_SCHEMA. Answer it with an EMPTY plan out-of-band - it never consumes
+        // a queued turn and never lands in `requests` - so every test keeps driving
+        // the reactive loop it scripts, exactly as before the orchestrator existed.
+        // (A test that wants to exercise planning itself can assert plannerRequests.)
+        const responseFormat = JSON.stringify(parsed.response_format ?? '')
+        if (responseFormat.includes('"steps"') && responseFormat.includes('"bindings"')) {
+          plannerRequests.push(parsed)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(
+            JSON.stringify({ choices: [{ message: { content: '{"steps":[]}' } }] })
+          )
+          return
         }
         requests.push(parsed)
         const turn = queue.shift() ?? { content: '' }
@@ -189,12 +207,14 @@ export async function startFakeLlamaServer(): Promise<FakeLlamaServer> {
   return {
     port,
     requests,
+    plannerRequests,
     enqueue: (...turns: FakeTurn[]) => {
       queue.push(...turns)
     },
     reset: () => {
       queue.length = 0
       requests.length = 0
+      plannerRequests.length = 0
     },
     close: () => new Promise<void>((r) => server.close(() => r()))
   }

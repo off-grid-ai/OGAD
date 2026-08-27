@@ -23,6 +23,7 @@ import { globalShortcut, systemPreferences } from 'electron'
 import { binRoots, exe } from '../runtime-env'
 import { llm } from '../llm'
 import { loadActuation, type ActuationPort } from '../input/actuation'
+import { startUserInputWatch } from '../input/user-input-watch'
 import { parseAxElements, type AxElement, type AxSnapshot } from './ax-elements'
 import { windowsAxBackend, type AxBackend } from './ax-win'
 import { pickTargetApp } from './ax-target'
@@ -237,6 +238,8 @@ class AxRailHost {
     // The kill switch: Esc halts for good. The overlay's Stop routes to the SAME
     // guard through the controller session, so both paths end one run.
     globalShortcut.register('Escape', () => guard.halt('stopped with Esc'))
+    // Pause on user input - same defense as the vision rail, same watchdog.
+    const stopInputWatch = startUserInputWatch((why) => guard.pauseForUser(why))
     const releaseSession = registerVisionSession(guard)
     // The AX rail is model-agnostic and needs no grounder, so there is no
     // grounder notice here (unlike the vision rail).
@@ -288,6 +291,7 @@ class AxRailHost {
       return { ok: false, summary, steps: [] }
     } finally {
       globalShortcut.unregister('Escape')
+      stopInputWatch()
       releaseSession()
       hideSupervisorWindow()
     }
