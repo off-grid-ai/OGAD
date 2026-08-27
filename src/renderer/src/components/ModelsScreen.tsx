@@ -943,7 +943,10 @@ export function ModelsScreen(): React.JSX.Element {
           {/* Filter bar */}
           <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-neutral-800/60 px-6 py-2">
             {searchEnabled && (
-              <div className="flex items-center gap-1.5 rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 focus-within:border-neutral-600">
+              <div
+                data-focus-surface="models-search"
+                className="flex items-center gap-1.5 rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 focus-within:border-neutral-600"
+              >
                 <IconSearch className="h-3 w-3 shrink-0 text-neutral-600" />
                 <input
                   value={query}

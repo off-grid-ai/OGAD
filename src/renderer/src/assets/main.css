@@ -195,7 +195,10 @@ button:disabled,
   outline-offset: 2px;
 }
 
-:root[data-user-modality='keyboard'] [data-focus-surface] textarea:focus-visible {
+/* The surface drew the boundary; the field inside it must not draw a second, partial one.
+   Inputs need this as much as textareas: a search field is an icon + input + spinner in one
+   bordered box, so ringing the bare input leaves the icon outside the ring. */
+:root[data-user-modality='keyboard'] [data-focus-surface] :is(input, textarea):focus-visible {
   outline: none;
 }
 
