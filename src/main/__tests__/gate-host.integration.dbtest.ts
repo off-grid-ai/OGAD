@@ -39,8 +39,12 @@ function makeWorld() {
   db.exec(`CREATE TABLE test_reminders (title TEXT NOT NULL)`)
 
   const registry = new HandlerRegistry()
+  // The fixture is a SEND ('email'): under the current approval policy the gate
+  // covers sends + the computer-use rails, so the seam these tests exercise -
+  // park, approve, reject, edit-rebind - only fires for those types. (It was a
+  // 'reminder' when every mutation gated; reminders now auto-run with Undo.)
   registry.register({
-    type: 'reminder',
+    type: 'email',
     rail: 'semantic',
     defaultRisk: 'mutate',
     verification: 'read_back',
@@ -102,8 +106,8 @@ function requestAt(requests: Record<string, unknown>[], index: number): Record<s
 }
 
 const proposal = {
-  type: 'reminder',
-  intent: 'remind me to send the deck',
+  type: 'email',
+  intent: 'email the deck to Sam',
   args: { title: 'Send the deck' },
   risk: 'mutate'
 }
@@ -126,7 +130,7 @@ describe('the engine gated through the real approval seam', () => {
     expect(request).toMatchObject({
       kind: 'native',
       risk: 'mutate',
-      actionType: 'reminder',
+      actionType: 'email',
       args: { title: 'Send the deck' }
     })
     resolveActionGate(String(request.actionId), { kind: 'approve' })
