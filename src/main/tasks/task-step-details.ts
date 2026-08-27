@@ -217,13 +217,38 @@ export function boundComputerUseStepDetails(
  * Sanitizing once at the write boundary is both cheaper and the honest single source of truth:
  * doing it twice invited the two copies to disagree about what "redacted" means.
  */
+/**
+ * Parsed results, keyed by the exact stored JSON.
+ *
+ * The same blob is re-parsed thousands of times per task: upsert() reads the row before every
+ * write (so once per streamed reasoning token) and tasks:list re-reads every row on every poll,
+ * while the JSON itself only changes when a step is actually appended. A profile taken DURING a
+ * live web_use run put 35% of main-thread time in this parse alone, with the thread fully
+ * saturated. The string is immutable and is its own cache key, so an unchanged blob is parsed once.
+ *
+ * Bounded, and each entry is replaced as soon as that task's details change, so this holds at most
+ * one array per recent task rather than growing with the run.
+ */
+const parsedDetails = new Map<string, ComputerUseStepDetail[]>()
+const MAX_PARSED_DETAIL_BLOBS = 64
+
 export function storedComputerUseStepDetails(raw: string): ComputerUseStepDetail[] {
+  const hit = parsedDetails.get(raw)
+  if (hit) return hit
+  let parsed: ComputerUseStepDetail[]
   try {
     const value = JSON.parse(raw) as unknown
-    return Array.isArray(value)
+    parsed = Array.isArray(value)
       ? (value as ComputerUseStepDetail[]).slice(-MAX_TASK_STEP_DETAILS)
       : []
   } catch {
-    return []
+    parsed = []
   }
+  // Oldest-first eviction: Map preserves insertion order, so the first key is the stalest blob.
+  if (parsedDetails.size >= MAX_PARSED_DETAIL_BLOBS) {
+    const oldest = parsedDetails.keys().next().value
+    if (oldest !== undefined) parsedDetails.delete(oldest)
+  }
+  parsedDetails.set(raw, parsed)
+  return parsed
 }
