@@ -62,6 +62,7 @@ import { normalizeProNavigationIntent, type ProNavigationIntent } from './lib/pr
 import { navigateSearchHit } from './lib/search-navigation'
 import { getSlot, SLOTS } from './bootstrap/slotRegistry'
 import { SidebarNavigationMenu } from './components/navigation/SidebarNavigationMenu'
+import { setCurrentView } from './lib/current-view'
 import {
   OPEN_MODEL_SETTINGS_PANEL_EVENT,
   type ModelSettingsPanelTab
@@ -576,6 +577,9 @@ function AppContent() {
     if (window.location.pathname !== newPath) {
       window.history.replaceState(null, '', newPath)
     }
+    // Publish the view for anything that needs to reason about the current screen. replaceState
+    // fires no event, so the URL alone is not observable.
+    setCurrentView(viewMode)
   }, [navigationSubroute, settingsSection, viewMode])
 
   // Record the committed destination before paint so an immediate keyboard/back-button action
