@@ -39,7 +39,7 @@ async function checkLocalNetworkPermission(): Promise<boolean> {
  * Check if the app has Accessibility permission on macOS.
  * This permission is required for global dictation input and text insertion.
  */
-function checkAccessibilityPermission(prompt: boolean = false): boolean {
+export function checkAccessibilityPermission(prompt: boolean = false): boolean {
   if (process.platform !== 'darwin') {
     return true // Not applicable on other platforms
   }
@@ -50,7 +50,7 @@ function checkAccessibilityPermission(prompt: boolean = false): boolean {
  * Check if the app has Screen Recording permission on macOS.
  * This permission is required for desktopCapturer to capture window screenshots.
  */
-function checkScreenRecordingPermission(): boolean {
+export function checkScreenRecordingPermission(): boolean {
   if (process.platform !== 'darwin') {
     return true // Not applicable on other platforms
   }

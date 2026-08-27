@@ -18,7 +18,7 @@
  * Accessibility grant), which no headless runner has.
  */
 import fs from 'fs'
-import { desktopCapturer, globalShortcut, screen, systemPreferences } from 'electron'
+import { desktopCapturer, globalShortcut, screen } from 'electron'
 import { llm } from '../llm'
 import type { VisionAction, Bounds } from './vision-action'
 import { type VisionScreen, type VisionTaskResult } from './vision-agent'
@@ -28,6 +28,7 @@ import { showSupervisorWindow, hideSupervisorWindow } from './supervisor-window'
 import { visionModelNotice } from './vision-model-notice'
 import { getTakeoverCoordinator } from '../browser/takeover'
 import { loadActuation, actuationAvailable, type ActuationPort } from '../input/actuation'
+import { checkAccessibilityPermission, checkScreenRecordingPermission } from '../permissions'
 import { mapActionToScreen, type DisplayGeometry } from '../input/coordinate-mapping'
 import {
   appendComputerUseStepDetail,
@@ -139,7 +140,7 @@ function makeScreen(input: {
       }
       if (png === null || png.length === 0) {
         throw new Error(
-          'screen capture returned an empty image - check Screen Recording permission for Off Grid'
+          'screen capture returned an empty image - check Screen Recording permission for Off Grid AI'
         )
       }
       if (!encodedSize) {
@@ -191,10 +192,9 @@ function makeScreen(input: {
 function permissionBlock(): VisionTaskResult | null {
   const summary = computerUsePermissionBlock({
     platform: process.platform,
-    accessibilityGranted:
-      process.platform !== 'darwin' || systemPreferences.isTrustedAccessibilityClient(true),
-    screenRecordingGranted:
-      process.platform !== 'darwin' || systemPreferences.getMediaAccessStatus('screen') === 'granted'
+    // Prompt for the Accessibility grant so the block message is actionable.
+    accessibilityGranted: checkAccessibilityPermission(true),
+    screenRecordingGranted: checkScreenRecordingPermission()
   })
   if (!summary) return null
   return {
