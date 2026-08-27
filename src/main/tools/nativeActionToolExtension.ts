@@ -127,6 +127,18 @@ export class NativeActionToolExtension implements ToolExtension {
     return buildNativeToolSchemas(specsForPlatform(this.platform, this.boundary.isProEntitled()))
   }
 
+  /** What the Tools settings tab lists and toggles. A getter, not a field: the set depends on the
+   *  platform and the live pro entitlement, so a value captured at construction would keep showing
+   *  a stale list after an upgrade. Without this the extension contributed nothing to listTools(),
+   *  which is why every native action - web_task and computer_task included - was invisible and
+   *  untoggleable in Settings even while the model could call it. */
+  get settings(): readonly { name: string; description: string }[] {
+    return specsForPlatform(this.platform, this.boundary.isProEntitled()).map((spec) => ({
+      name: spec.name,
+      description: spec.description
+    }))
+  }
+
   canHandle(name: string): boolean {
     return specsForPlatform(this.platform, this.boundary.isProEntitled()).some(
       (spec) => spec.name === name
