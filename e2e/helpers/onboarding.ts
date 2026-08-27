@@ -12,13 +12,13 @@ import { expect, type Page } from '@playwright/test'
  *
  * 2. A CTA regex that misses the last step. meeting-transcription.spec.ts matched
  *    /Continue|Start using Off Grid AI Desktop/, but the final button renders
- *    'Start using Off Grid' (src/renderer/src/components/Onboarding.tsx), so the last step
+ *    'Start using Off Grid AI' (src/renderer/src/components/Onboarding.tsx), so the last step
  *    never got clicked. One shared matcher means one place to keep in sync.
  *
- * NOTE: the button copy is 'Start using Off Grid' while the product name is 'Off Grid AI
+ * NOTE: the button copy is 'Start using Off Grid AI' while the product name is 'Off Grid AI
  * Desktop'. Matched as-is here rather than changing user-facing copy from a test fix.
  */
-const ONBOARDING_CTA = /^(Continue|Start using Off Grid)/i
+const ONBOARDING_CTA = /^(Continue|Start using Off Grid AI)/i
 
 export const completeOnboarding = async (page: Page, maxSteps = 10): Promise<void> => {
   const cta = page.getByRole('button', { name: ONBOARDING_CTA }).first()

@@ -2,7 +2,7 @@
  * Fresh-install release journey through the production setup planner, catalog,
  * model manager, persisted selections, and every supported modality runtime.
  *
- * Only boundaries outside Off Grid are controlled: HTTP serves deterministic
+ * Only boundaries outside Off Grid AI are controlled: HTTP serves deterministic
  * model bytes and tiny executables stand in for llama.cpp, stable-diffusion.cpp,
  * whisper.cpp, and Kokoro. The interrupted-download registry, Range resume,
  * filesystem promotion, generic activation, runtime selection, first use, and

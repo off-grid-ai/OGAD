@@ -374,10 +374,10 @@ function SetupNudge({
       : issue === 'choose-vision-model'
         ? `${modelName ?? 'The active model'} cannot analyze Replay frames. Choose a vision-capable chat model.`
         : missingModel
-          ? `Pick a model yourself, or let Off Grid configure one for your ${deviceNoun()}.`
+          ? `Pick a model yourself, or let Off Grid AI configure one for your ${deviceNoun()}.`
           : missingLocalNetwork
             ? 'Allow this Mac to find and sync directly with your devices.'
-            : 'Grant screen and accessibility access so Off Grid can see and remember.'
+            : 'Grant screen and accessibility access so Off Grid AI can see and remember.'
   const presentedProgress = progress ? projectProgress(progress) : null
   const cta =
     progress != null

@@ -294,7 +294,7 @@ app.whenReady().then(async () => {
     console.warn('[startup] legacy purge failed', e)
   }
 
-  // Dock icon = the Off Grid green chip logo (in dev macOS otherwise shows the
+  // Dock icon = the Off Grid AI green chip logo (in dev macOS otherwise shows the
   // default Electron icon; the packaged build uses build/icon from electron-builder).
   if (process.platform === 'darwin' && app.dock) {
     try {

@@ -8,7 +8,7 @@
  *
  * This launches the real Electron app, uses the real sidebar and Settings UI,
  * and probes only the public preload/IPC boundary plus durable profile output.
- * No Off Grid module or store is mocked.
+ * No Off Grid AI module or store is mocked.
  */
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
 import fs from 'node:fs'
@@ -50,10 +50,10 @@ const SETTINGS_PLACEHOLDERS = [
   },
   {
     title: 'You',
-    description: 'Tell Off Grid who you are'
+    description: 'Tell Off Grid AI who you are'
   },
   {
-    title: 'What Off Grid has learned',
+    title: 'What Off Grid AI has learned',
     description: 'Preferences distilled from the suggestions you dismiss'
   }
 ] as const

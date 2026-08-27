@@ -77,7 +77,7 @@ export async function getRenderedSystemHealth(): Promise<SystemHealthContract> {
 
 /** Narrow registration seam shared by Electron and the in-process integration
  * harness. The injectable value is ipcMain itself, an uncontrollable native
- * transport boundary; every Off Grid status owner above remains real. */
+ * transport boundary; every Off Grid AI status owner above remains real. */
 export function setupSystemStatusIpc(target: IpcStatusRegistrar): void {
   target.handle('system:health', () => getRenderedSystemHealth())
   target.handle('permissions:get-status', () => getPermissionStatus())

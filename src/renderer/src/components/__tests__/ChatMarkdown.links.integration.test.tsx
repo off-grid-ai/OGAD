@@ -24,7 +24,7 @@ describe('ChatMarkdown links', () => {
     vi.restoreAllMocks()
   })
 
-  it('opens a web link in the Off Grid browser and refuses unsafe links', () => {
+  it('opens a web link in the Off Grid AI browser and refuses unsafe links', () => {
     const openExternal = vi.fn()
     const openUrl = vi.fn(async () => ({ sessionId: 'manual-1' }))
     Object.defineProperty(window, 'api', {

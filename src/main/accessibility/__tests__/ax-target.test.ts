@@ -1,6 +1,6 @@
 /**
  * The accessibility rail drives one NAMED app, so it picks the app the goal
- * names among those running - never the frontmost (which is Off Grid the moment
+ * names among those running - never the frontmost (which is Off Grid AI the moment
  * the user approves), never itself.
  */
 import { describe, expect, it } from 'vitest'
@@ -18,7 +18,7 @@ describe('pickTargetApp', () => {
     expect(pickTargetApp('send it in slack', ['slack'], SELF)).toBe('slack')
   })
 
-  it('never targets Off Grid itself even when the goal says the name', () => {
+  it('never targets Off Grid AI itself even when the goal says the name', () => {
     expect(pickTargetApp('type this into Off Grid AI Desktop', [SELF], SELF)).toBeNull()
   })
 

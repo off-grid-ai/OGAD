@@ -1,5 +1,5 @@
 // Release journeys #17-#19, #21, and #23 through the production desktop model manager.
-// Only boundaries outside Off Grid are controlled: HTTP serves small deterministic
+// Only boundaries outside Off Grid AI are controlled: HTTP serves small deterministic
 // model bytes, while tiny executable fixtures stand in for the native image, STT,
 // and TTS runtimes. Download sequencing, integrity checks, filesystem promotion,
 // installed/readiness decisions, activation, and runtime selection all stay real.

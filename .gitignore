@@ -14,7 +14,7 @@ component-library-animations/
 # Bundled MLX (mflux) Python env — large, rebuilt via scripts/build-mflux-env.sh
 resources/bin/mflux/
 
-# Off Grid SD-GGUF conversion build dir
+# Off Grid AI SD-GGUF conversion build dir
 build-sd-gguf/
 
 # Swift build artifacts (embedded repos)

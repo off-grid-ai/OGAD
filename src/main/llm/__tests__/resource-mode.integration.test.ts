@@ -8,7 +8,7 @@
  * when choosing models and capabilities.
  *
  * Host RAM is the only fake because it is an uncontrollable machine boundary. All
- * Off Grid services, filesystem persistence, catalog decisions, and plan assembly
+ * Off Grid AI services, filesystem persistence, catalog decisions, and plan assembly
  * stay real.
  */
 

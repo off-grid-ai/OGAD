@@ -334,7 +334,7 @@ describe('macOS artifact integrity', () => {
     expect(Array.isArray(extendInfo)).toBe(false)
     expect(extendInfo).toMatchObject({
       NSLocalNetworkUsageDescription:
-        'Off Grid AI Desktop uses your local network to find and sync directly with your devices. Sync traffic is encrypted and no Off Grid server receives it.',
+        'Off Grid AI Desktop uses your local network to find and sync directly with your devices. Sync traffic is encrypted and no Off Grid AI server receives it.',
       NSBonjourServices: ['_offgrid._tcp', '_offgrid-sync._tcp', '_offgrid-sync._udp']
     })
   })

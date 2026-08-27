@@ -17,7 +17,7 @@ let spokenTextPath: string
 
 async function finishOnboarding(): Promise<void> {
   for (let step = 0; step < 8; step += 1) {
-    const button = page.getByRole('button', { name: /Continue|Start using Off Grid/i })
+    const button = page.getByRole('button', { name: /Continue|Start using Off Grid AI/i })
     if (!(await button.isVisible().catch(() => false))) return
     await button.click()
   }

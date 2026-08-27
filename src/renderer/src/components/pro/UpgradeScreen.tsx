@@ -204,7 +204,7 @@ export function UpgradeScreen({
                 {deviceNoun()} yet, and the ones that are work here today.
               </p>
               <p className="text-[11px] leading-relaxed text-neutral-600">
-                Everything else in Off Grid works on your {deviceNoun()} today.
+                Everything else in Off Grid AI works on your {deviceNoun()} today.
               </p>
               <div className="border-t border-neutral-800" />
               <button

@@ -1,7 +1,7 @@
 /**
  * The computer-use supervisor's floating window (the `#cu-supervisor` surface).
  *
- * While the rail drives another app, that app is frontmost and Off Grid's main
+ * While the rail drives another app, that app is frontmost and Off Grid AI's main
  * window is behind it - so the in-app overlay is hidden. This is a separate
  * always-on-top NSPanel that stays visible OVER whatever is being driven, the
  * same window kind the clipboard/dictation overlays use (a macOS panel is the

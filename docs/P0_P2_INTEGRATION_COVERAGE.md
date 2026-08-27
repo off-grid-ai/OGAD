@@ -10,7 +10,7 @@ manual claim does not count as complete integration coverage.
 - Counting rule:
   - Complete means the decisive production collaborators run through the real application seam.
   - A packaged or native-sensitive behavior needs an exact packaged/native proof.
-  - A test that replaces Off Grid code, preload/IPC ownership, persistence, or the decisive runtime
+  - A test that replaces Off Grid AI code, preload/IPC ownership, persistence, or the decisive runtime
     is partial. Partial does not count as done.
   - A fake at a genuinely uncontrollable remote or OS boundary may support a seam test, but it does
     not by itself prove the complete release journey.
@@ -128,7 +128,7 @@ manual claim does not count as complete integration coverage.
   - The journey closes and reopens its disposable SQLite profile, reloads all modules, consumes all
     five modalities again without another remote request, and verifies their persisted selections.
   - Only HTTP delivery and the native llama.cpp, stable-diffusion.cpp, whisper.cpp, and Kokoro
-    processes are controlled boundaries. No Off Grid service, store, router, or runtime owner is
+    processes are controlled boundaries. No Off Grid AI service, store, router, or runtime owner is
     mocked.
 - Complete - active-service privacy deletion with no late-write resurrection:
   - `capture-deletion-race.integration.dbtest.ts` starts the real focus scheduler, native capture
@@ -139,7 +139,7 @@ manual claim does not count as complete integration coverage.
     the admitted tick, erases its late output, restores only its own pause, and stays empty after
     profile relaunch.
   - Electron/TCC, focused-window discovery, LanceDB, and llama-server are the only controlled
-    boundaries. No Off Grid module is mocked.
+    boundaries. No Off Grid AI module is mocked.
 - Complete - concurrent workload ownership, cancellation, crash recovery, and clean relaunch:
   - `concurrent-workload-recovery.integration.dbtest.ts` starts four production catalog downloads
     against controlled HTTP streams: three active transfers and one queued transfer.
@@ -155,7 +155,7 @@ manual claim does not count as complete integration coverage.
     dropped with actionable production health state and no additional native work.
   - Restoring only the TCC boundary lets the same interval and real SQLite `SettingsStore` capture
     again without restarting the app or scheduler.
-  - Electron/TCC and `get-windows` are the only controlled boundaries. No Off Grid module is mocked.
+  - Electron/TCC and `get-windows` are the only controlled boundaries. No Off Grid AI module is mocked.
 - Complete - atomic cross-store recovery from disk and database failures:
   - `meeting-atomic-recovery.integration.dbtest.ts` exercises production meeting persistence and
     recovery over real SQLite, files, CRM observations/actions, and the local-model HTTP client.
@@ -163,7 +163,7 @@ manual claim does not count as complete integration coverage.
     followed by SQLite insert failure remains recoverable, is adopted and enriched exactly once on
     relaunch, and stays idempotent across a second relaunch.
   - Electron, native media executables, the local model process, and the injected filesystem
-    capacity failure are the only controlled boundaries. No Off Grid service is mocked.
+    capacity failure are the only controlled boundaries. No Off Grid AI service is mocked.
 - Verification:
   - All five commissioned journey cases passed in focused runs.
   - Download queue and application-shutdown checks: 9 tests passed.
@@ -326,7 +326,7 @@ historical labels, not strict completion claims. Use the strict snapshot above f
 - #32 - First local message replies. `MemoryChat.chat-lifecycle.test.tsx` sends through the real
   rendered composer, routes a streamed token through production ownership, resolves the local-model
   boundary, and proves one assistant bubble with the exact answer is persisted once.
-  `workspace-production-bridge.ui.integration.dbtest.tsx` removes the substituted Off Grid preload
+  `workspace-production-bridge.ui.integration.dbtest.tsx` removes the substituted Off Grid AI preload
   API: the rendered composer uses the production preload mapping and IPC registrations, streams from
   only a controlled native-model socket, and persists the exact visible user and assistant turns in
   real SQLite.
@@ -488,7 +488,7 @@ historical labels, not strict completion claims. Use the strict snapshot above f
 - #132 - Settings survive relaunch. Existing journeys 129 and 131 cover model residency and
   resource settings across relaunch. Core and Pro `settings-persistence.dbtest.ts` tests add the
   other owning stores: they change software-update, capture-privacy, identity, and proactive
-  delivery settings over real encrypted SQLite, close the database, reload every Off Grid module,
+  delivery settings over real encrypted SQLite, close the database, reload every Off Grid AI module,
   rehydrate each owner, and verify every value restores.
 - #134 - Clear cache preserves user data. `cache-cleanup.integration.test.ts` and the rendered
   Storage journey exercise the production control through IPC and prove its allowlist can reach
@@ -767,7 +767,7 @@ historical labels, not strict completion claims. Use the strict snapshot above f
   Checking, preserve the stable channel, and never call install without approval.
 - #143 - Update channel persists. `src/main/__tests__/settings-persistence.dbtest.ts` changes the
   channel through the production update IPC handler, closes the encrypted database, reloads every
-  Off Grid module, and verifies the fresh update-preferences handler restores the beta channel.
+  Off Grid AI module, and verifies the fresh update-preferences handler restores the beta channel.
 - #146 - Model ports are single-owner. `model-port-ownership.integration.test.ts` starts a real
   foreign parent with the only fake native llama process on production port 8439, then proves the
   production contender preserves that live owner, starts no second engine, reports its own Chat

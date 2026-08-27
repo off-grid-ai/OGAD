@@ -10,7 +10,7 @@
 Computer Use and Web Use now run as supervised tasks in Off Grid AI Desktop.
 
 1. Start the task from Chat and approve it.
-2. When a local Web Use attempt first starts, its task details open once. Off Grid closes the left
+2. When a local Web Use attempt first starts, its task details open once. Off Grid AI closes the left
    navigation drawer and the Chat workspace so the browser task has the full app window. Back, or a
    terminal task state, restores the earlier layout. Later progress updates do not reopen details
    after you close them.
@@ -30,7 +30,7 @@ tab and does not start automation. Computer Use controls the execution device's 
 shows a separate always-on-top supervisor while it runs. Mouse movement does not pause or stop a
 task.
 
-Stopping Chat first sends the Stop command to the active Web Use or Computer Use owner. Off Grid
+Stopping Chat first sends the Stop command to the active Web Use or Computer Use owner. Off Grid AI
 cancels the Chat turn only after that owner accepts Stop. A stop failure stays visible, and Chat does
 not pretend the task ended.
 

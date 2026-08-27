@@ -43,7 +43,7 @@ async function launchApp(): Promise<void> {
 
 async function finishOnboarding(): Promise<void> {
   for (let step = 0; step < 6; step += 1) {
-    const button = page.getByRole('button', { name: /Continue|Start using Off Grid/i })
+    const button = page.getByRole('button', { name: /Continue|Start using Off Grid AI/i })
     if (!(await button.isVisible().catch(() => false))) return
     await button.click()
   }
@@ -126,7 +126,7 @@ test('relaunch resumes onboarding progress and one interrupted transfer (#12)', 
   await launchApp()
 
   await expect(page.getByRole('heading', { name: 'Models' })).toBeVisible()
-  await expect(page.getByRole('button', { name: /Continue|Start using Off Grid/i })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Continue|Start using Off Grid AI/i })).toHaveCount(0)
 
   const downloads = await page.evaluate(async () => window.api.listDownloads())
   expect(downloads).toEqual([

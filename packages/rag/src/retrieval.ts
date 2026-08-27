@@ -1,6 +1,6 @@
 // Retrieval: rank candidate chunks against a query embedding, optionally trim to
 // a context-window budget, and format the survivors for prompt injection. Ported
-// from Off Grid Mobile (rag/retrieval.ts). Pure: scoring only — fetching is the
+// from Off Grid AI Mobile (rag/retrieval.ts). Pure: scoring only — fetching is the
 // VectorStore's job.
 
 import { cosineSimilarity } from './vectorMath'

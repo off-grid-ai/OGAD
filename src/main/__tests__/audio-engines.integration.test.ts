@@ -14,7 +14,7 @@ import { describe, it, expect } from 'vitest'
 // guard runs exactly when audio is available and skips cleanly when it is not. Point it
 // elsewhere with OFFGRID_GATEWAY_URL.
 const GW = process.env.OFFGRID_GATEWAY_URL ?? 'http://127.0.0.1:7878'
-const PHRASE = 'off grid'
+const PHRASE = 'Off Grid AI'
 
 // A valid WAV: RIFF/WAVE header + non-trivial payload. null = audio engine not serving.
 function isRealWav(buf: Buffer): boolean {

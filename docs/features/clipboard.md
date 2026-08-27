@@ -16,4 +16,4 @@ lives **on your device** - nothing is synced or uploaded.
 - **Retention controls** - cap the history size and auto-expire old clips.
 - **On-device** - the history is stored locally; capture can be paused any time.
 
-→ Part of [Off Grid Pro](pro.md).
+→ Part of [Off Grid AI Pro](pro.md).

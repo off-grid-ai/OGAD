@@ -1,4 +1,4 @@
-// The user-facing name for the machine Off Grid runs on. macOS keeps the brand
+// The user-facing name for the machine Off Grid AI runs on. macOS keeps the brand
 // name "Mac"; every other platform (Windows, Linux, anything else) gets the
 // neutral "device". Single source of truth so copy never drifts between the
 // main process and the renderer — both call this instead of hardcoding "Mac".

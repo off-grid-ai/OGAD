@@ -15,7 +15,7 @@ Use [Model Context Protocol](https://modelcontextprotocol.io) servers right insi
 
 ## Connect Gmail and Google Calendar with your own Google client
 
-Your own Google OAuth client lets Off Grid connect directly to Gmail and Google Calendar. Off Grid
+Your own Google OAuth client lets Off Grid AI connect directly to Gmail and Google Calendar. Off Grid AI
 stores the client credentials with the operating system protected credential store. Google data moves
 between this device and Google.
 
@@ -25,7 +25,7 @@ between this device and Google.
 - You need permission to enable the Gmail API and Google Calendar API.
 - If the consent screen is in test mode, add the Google account that you will connect as a test user.
 - Create an OAuth client with the **Web application** type. A Desktop application client does not use
-  the callback that Off Grid requires.
+  the callback that Off Grid AI requires.
 
 ### Configure Google Cloud
 
@@ -42,18 +42,18 @@ between this device and Google.
 
    `http://127.0.0.1:33418/callback`
 
-   This is the callback shown in the Off Grid setup panel. The release source is
+   This is the callback shown in the Off Grid AI setup panel. The release source is
    `src/shared/mcp-oauth-callback.ts`. Do not select another port or change the path.
 8. Create the client. Copy its Client ID and Client secret. The Project ID is optional.
 
 ### Save and connect
 
-1. Open **Settings > Connectors** in Off Grid.
+1. Open **Settings > Connectors** in Off Grid AI.
 2. Open the Google client setup panel.
 3. Enter the Client ID and Client secret. Enter the Project ID if you use it for project records.
 4. Select **Save client**.
 5. Select Gmail or Google Calendar, then select **Connect**.
-6. Sign in in the browser and approve the requested access. Return to Off Grid after Google sends the
+6. Sign in in the browser and approve the requested access. Return to Off Grid AI after Google sends the
    browser to the local callback.
 
 When setup succeeds, the setup card says **Your Google client**. The connector moves to

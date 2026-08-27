@@ -5,7 +5,7 @@
 // These tests mount the real MemoryChat and drive its real composer, queue, stop,
 // conversation switching, project selection, stream routing, and persistence paths.
 // Electron IPC and the local model runtime cannot run in jsdom, so one stateful preload
-// boundary stands in for them. No Off Grid component, hook, store, or orchestration code
+// boundary stands in for them. No Off Grid AI component, hook, store, or orchestration code
 // is mocked.
 
 import { act, cleanup, screen, waitFor } from '@testing-library/react'

@@ -1,4 +1,4 @@
-// Off Grid as an MCP *server*: exposes the on-device models as MCP tools so any
+// Off Grid AI as an MCP *server*: exposes the on-device models as MCP tools so any
 // MCP client (Claude Desktop, IDEs, other local apps) can route inference through
 // this machine. Mounted at POST /mcp on the :7878 gateway via the MCP SDK's
 // Streamable HTTP transport in stateless JSON mode (one server+transport per
@@ -83,7 +83,7 @@ function buildMcpServer(actionsAllowed: boolean): McpServer {
     {
       title: 'Generate text',
       description:
-        'Generate text with the local LLM (Off Grid). Supports an optional system prompt.',
+        'Generate text with the local LLM (Off Grid AI). Supports an optional system prompt.',
       inputSchema: {
         prompt: z.string().describe('The user prompt.'),
         system: z.string().optional().describe('Optional system instruction.'),

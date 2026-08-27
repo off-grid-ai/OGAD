@@ -36,7 +36,7 @@ interface FakeTurn {
   errorStatus?: number
   errorBody?: string
   /** Delay the native-engine response after the request is admitted. Lifecycle tests use
-   *  this to exercise cancellation/drain ownership without replacing any Off Grid service. */
+   *  this to exercise cancellation/drain ownership without replacing any Off Grid AI service. */
   delayMs?: number
   /** Stream the frames then HANG (never send [DONE] / close) — so a client abort fires
    *  mid-turn. The real engine's socket stays open until the client cancels; this lets a

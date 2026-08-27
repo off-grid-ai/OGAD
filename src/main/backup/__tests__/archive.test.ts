@@ -144,9 +144,9 @@ describe('the backup archive, against a real filesystem', () => {
       await archive.writeText(path.join(stage, 'backup.json'), '{"surface":"offgrid-desktop"}')
       await archive.writeText(path.join(stage, 'files', 'documents', 'p1', '0-a.txt'), 'alpha')
 
-      const output = await archive.pack(stage, 'Off Grid Backup.zip')
+      const output = await archive.pack(stage, 'Off Grid AI Backup.zip')
 
-      expect(path.basename(output)).toBe('Off Grid Backup.zip')
+      expect(path.basename(output)).toBe('Off Grid AI Backup.zip')
       const zip = await JSZip.loadAsync(await fs.promises.readFile(output))
       // Forward slashes regardless of platform - a zip written with backslashes is unreadable as a tree
       // on anything but Windows.

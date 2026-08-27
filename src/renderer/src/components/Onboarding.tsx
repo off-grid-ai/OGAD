@@ -257,7 +257,7 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                 className="relative flex h-[424px] w-full max-w-[500px] items-center justify-center overflow-hidden"
               >
                 <div className="absolute z-10 flex h-24 w-24 items-center justify-center rounded-2xl border border-green-500/30 bg-neutral-900">
-                  <img src={logo} alt="Off Grid" className="h-12 w-12 rounded-lg" />
+                  <img src={logo} alt="Off Grid AI" className="h-12 w-12 rounded-lg" />
                 </div>
                 <OrbitingCircles radius={110} duration={26} iconSize={56}>
                   {ORBIT.slice(0, 3).map(({ icon: Icon, label }) => (
@@ -324,7 +324,7 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                 transition={{ delay: 0.5 }}
                 className="mx-auto mb-10 max-w-2xl text-center text-sm text-neutral-400"
               >
-                The free app runs models. Pro adds the always-on layer: turn on capture and Off Grid
+                The free app runs models. Pro adds the always-on layer: turn on capture and Off Grid AI
                 keeps a private record of what you see and do, then acts on it with your approval.
                 Every one runs on-device. Nothing is uploaded.
               </motion.p>
@@ -392,8 +392,8 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                   className="mt-5 max-w-2xl text-sm leading-6 text-neutral-400"
                 >
                   Sync your workspace directly between up to five total devices, including this one.
-                  Off Grid uses LAN first and Nearby when needed. Traffic is encrypted between
-                  paired devices. No Off Grid server receives it.
+                  Off Grid AI uses LAN first and Nearby when needed. Traffic is encrypted between
+                  paired devices. No Off Grid AI server receives it.
                 </motion.p>
                 <motion.p
                   initial={{ opacity: 0 }}
@@ -513,7 +513,7 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
           className="group flex items-center gap-2 rounded-full border border-green-500/40 bg-green-600/90 px-8 py-3 text-white transition-all duration-200 hover:bg-green-500"
         >
           <span className="text-sm font-medium">
-            {currentStep === steps.length - 1 ? 'Start using Off Grid' : 'Continue'}
+            {currentStep === steps.length - 1 ? 'Start using Off Grid AI' : 'Continue'}
           </span>
           {currentStep === steps.length - 1 ? (
             <Check className="h-4 w-4" weight="bold" />

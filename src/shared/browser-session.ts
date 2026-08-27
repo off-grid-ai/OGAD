@@ -47,7 +47,7 @@ export interface BrowserNavigationState extends BrowserChromeState {
 
 /** Web Use always gives websites one stable desktop CSS viewport. The native
  * surface is zoomed to fit its panel; responsive sites must not change layout
- * when the Off Grid task workspace changes size. */
+ * when the Off Grid AI task workspace changes size. */
 export const WEB_USE_DESKTOP_VIEWPORT = { width: 1920, height: 1200 } as const
 export const WEB_USE_DESKTOP_ASPECT = WEB_USE_DESKTOP_VIEWPORT
 

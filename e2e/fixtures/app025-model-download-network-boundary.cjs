@@ -2,7 +2,7 @@
  * Hugging Face delivery boundary for APP-025.
  *
  * The first response is a complete-but-corrupt staged payload. The retry receives a real GGUF
- * from the host's verified local fixture. Off Grid still owns catalog resolution, download queue,
+ * from the host's verified local fixture. Off Grid AI still owns catalog resolution, download queue,
  * progress, Range retry, integrity checks, filesystem promotion, activation, and the model runtime.
  */
 /* eslint-disable @typescript-eslint/no-require-imports, @typescript-eslint/explicit-function-return-type -- Electron loads this CommonJS bootstrap before the production bundle. */

@@ -60,7 +60,7 @@ mac:
     NSCameraUsageDescription: Off Grid AI may use the camera for on-device vision features. Frames are processed locally and never leave your device.
     NSDocumentsFolderUsageDescription: Off Grid AI reads documents you add to a project so it can answer questions about them — locally, on your device.
     NSDownloadsFolderUsageDescription: Off Grid AI reads files you add to a project so it can answer questions about them — locally, on your device.
-    NSLocalNetworkUsageDescription: Off Grid AI Desktop uses your local network to find and sync directly with your devices. Sync traffic is encrypted and no Off Grid server receives it.
+    NSLocalNetworkUsageDescription: Off Grid AI Desktop uses your local network to find and sync directly with your devices. Sync traffic is encrypted and no Off Grid AI server receives it.
     NSBonjourServices:
       - _offgrid._tcp
       - _offgrid-sync._tcp

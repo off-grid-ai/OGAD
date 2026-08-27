@@ -12,7 +12,7 @@
   --animate-orbit: offgrid-orbit-circles calc(var(--duration) * 1s) linear infinite;
 
   /*
-   * Remap the Tailwind palette the components already use onto the Off Grid
+   * Remap the Tailwind palette the components already use onto the Off Grid AI
    * tokens (--og-*), which flip between dark and light via data-theme. This
    * recolors every neutral/white/black/accent class to the brutalist/terminal
    * palette and makes the whole app theme-aware, with no component edits.
@@ -57,7 +57,7 @@
   --color-red-500: var(--og-error);
 
   /*
-   * shadcn/ui semantic tokens mapped onto Off Grid tokens, so every approved
+   * shadcn/ui semantic tokens mapped onto Off Grid AI tokens, so every approved
    * library component (shadcn, Aceternity, Magic UI) inherits the brutalist /
    * emerald brand with zero per-component styling. Theme-aware via --og-*.
    */
@@ -82,7 +82,7 @@
   --color-ring: var(--og-primary);
 
   /*
-   * Brutalist/terminal radius scale — Off Grid is flat, sharp, dense. Remapping
+   * Brutalist/terminal radius scale — Off Grid AI is flat, sharp, dense. Remapping
    * the radius tokens globally makes EVERY approved-library component (shadcn,
    * Aceternity, Magic UI) sharp and on-brand with no per-component overrides.
    */

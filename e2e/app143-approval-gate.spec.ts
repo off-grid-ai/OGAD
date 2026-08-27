@@ -115,7 +115,7 @@ test('holds a connector write until approval, then executes it once with visible
         connectorId: id,
         tool: 'create_external_task',
         args: { title: externalTitle, project: externalProject },
-        entityName: 'Off Grid Desktop',
+        entityName: 'Off Grid AI Desktop',
         source: 'APP-143 rendered E2E'
       }) as Promise<number>
     },

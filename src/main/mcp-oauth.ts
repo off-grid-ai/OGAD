@@ -16,7 +16,7 @@ import { MCP_OAUTH_REDIRECT_PORT } from '../shared/mcp-oauth-callback'
 import { beginOAuthAuthorization } from './mcp-oauth-cancellation'
 import { OAuthPkceVerifier, type OAuthCredentialScope } from './mcp-oauth-pkce'
 
-// The Off Grid brand mark, served by the loopback at /oglogo.png so the consent
+// The Off Grid AI brand mark, served by the loopback at /oglogo.png so the consent
 // success page (and its favicon) show the real logo instead of a generic glyph.
 let logoCache: Buffer | null = null
 function logoBytes(): Buffer | null {
@@ -169,7 +169,7 @@ export function hasOAuthTokens(connectorId: number): boolean {
 }
 
 const SUCCESS_HTML = (err: string | null): string =>
-  `<!doctype html><html><head><meta charset="utf-8"><title>Off Grid AI Desktop</title><link rel="icon" type="image/png" href="/oglogo.png"></head><body style="font-family:Menlo,ui-monospace,monospace;background:#0a0a0a;color:#e5e5e5;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center"><img src="/oglogo.png" alt="Off Grid" width="80" height="80" style="border-radius:18px;margin:0 auto 20px;display:block"><h2 style="color:#34D399;font-weight:500">${err ? 'Authorization failed' : 'Connected to Off Grid'}</h2><p style="color:#737373">You can close this tab and return to the app.</p></div></body></html>`
+  `<!doctype html><html><head><meta charset="utf-8"><title>Off Grid AI Desktop</title><link rel="icon" type="image/png" href="/oglogo.png"></head><body style="font-family:Menlo,ui-monospace,monospace;background:#0a0a0a;color:#e5e5e5;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center"><img src="/oglogo.png" alt="Off Grid AI" width="80" height="80" style="border-radius:18px;margin:0 auto 20px;display:block"><h2 style="color:#34D399;font-weight:500">${err ? 'Authorization failed' : 'Connected to Off Grid AI'}</h2><p style="color:#737373">You can close this tab and return to the app.</p></div></body></html>`
 
 // ONE persistent loopback server for the whole app lifetime. The server owns
 // exact state admission, expiry, one-time consumption, and concurrent routing.

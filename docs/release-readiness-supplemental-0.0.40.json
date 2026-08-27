@@ -570,7 +570,7 @@
     "status": "PARTIAL",
     "layer": "Production composition + real SQLite integration",
     "evidence": "pro/main/__tests__/service-activation.integration.dbtest.ts; src/main/__tests__/release-packaging.integration.test.ts",
-    "proof": "A fresh packaged-mode profile starts no Pro service. A real Keygen-boundary activation persists an encrypted entitlement; after every Off Grid module reloads, the production Core loader invokes actual Pro activateMain, migrates real SQLite, starts the owned focus/shortcut/tray services, and application shutdown tears them down. Clearing entitlement and reloading stays locked with no service start.",
+    "proof": "A fresh packaged-mode profile starts no Pro service. A real Keygen-boundary activation persists an encrypted entitlement; after every Off Grid AI module reloads, the production Core loader invokes actual Pro activateMain, migrates real SQLite, starts the owned focus/shortcut/tray services, and application shutdown tears them down. Clearing entitlement and reloading stays locked with no service start.",
     "remaining": "Observe the exact installed locked and entitled artifact against real OS services.",
     "confidence": "MEDIUM",
     "notes": "Privacy and open-core release blocker."

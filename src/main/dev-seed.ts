@@ -2,7 +2,7 @@
 // surface (text, image, markdown/HTML/React artifacts, voice/speech, skills,
 // connectors). When OFFGRID_SEED=force it generates LIVE via the local models
 // (LLM for artifacts, image-gen for the picture); otherwise it falls back to
-// curated content so it always completes. Idempotent. On-brand, Off Grid only.
+// curated content so it always completes. Idempotent. On-brand, Off Grid AI only.
 
 import { app } from 'electron'
 import path from 'path'
@@ -31,7 +31,7 @@ const MD = `# Off Grid AI — overview
 **Run open models entirely on your device.** One local, OpenAI-compatible gateway
 serves text, vision, image, voice, and speech — no cloud, no accounts, no API keys.
 
-## Why Off Grid
+## Why Off Grid AI
 - **Private by default** — nothing leaves your machine.
 - **Every modality, one endpoint** — \`http://127.0.0.1:7878/v1\`.
 - **Bring any GGUF** — download from the catalog or Hugging Face.
@@ -205,7 +205,7 @@ export async function seedDemo(live = false): Promise<void> {
 
     await artifactChat(
       'overview',
-      'Off Grid overview',
+      'Off Grid AI overview',
       'Write a short overview doc for Off Grid AI.',
       'Write a concise Markdown overview of "Off Grid AI" — a private, on-device AI that runs open models (text, vision, image, voice) via one local OpenAI-compatible gateway, no cloud. Return ONLY a ```markdown code block.',
       'text',
@@ -237,16 +237,16 @@ export async function seedDemo(live = false): Promise<void> {
     chatTurn(
       'voice',
       'Voice & speech',
-      'Say one line about Off Grid I can listen to.',
+      'Say one line about Off Grid AI I can listen to.',
       'Off Grid AI is private, on-device AI — your models and your data never leave your machine. Tap the speaker to hear this, or hold the mic to talk back.'
     )
 
     // Skills — a manual /skill pack + a chat using it.
     saveSkill({
       name: 'offgrid-pitch',
-      description: 'Rewrite text as a crisp Off Grid one-liner.',
+      description: 'Rewrite text as a crisp Off Grid AI one-liner.',
       instructions:
-        'Rewrite the input as a single confident sentence in the Off Grid voice: private, on-device, no cloud. No hype, no emojis.'
+        'Rewrite the input as a single confident sentence in the Off Grid AI voice: private, on-device, no cloud. No hype, no emojis.'
     })
     {
       const u = 'we run AI models on your computer without the internet'
@@ -254,7 +254,7 @@ export async function seedDemo(live = false): Promise<void> {
         'Off Grid AI runs open models entirely on your device — no cloud, no accounts, nothing ever leaves your machine.'
       if (live) {
         const out = await gen(
-          `Rewrite as one confident Off Grid sentence (private, on-device, no cloud; no hype, no emojis): "${u}"`
+          `Rewrite as one confident Off Grid AI sentence (private, on-device, no cloud; no hype, no emojis): "${u}"`
         )
         if (out) a = out.replace(/^["']|["']$/g, '')
       }
@@ -305,7 +305,7 @@ export async function seedDemo(live = false): Promise<void> {
         const id = chatTurn(
           `image-${slugify(model)}`,
           `Image · ${pretty(model)}`,
-          `Generate an Off Grid scene with ${pretty(model)}.`,
+          `Generate an Off Grid AI scene with ${pretty(model)}.`,
           `Generated for: ${prompt}\n\nModel: ${model}`,
           { image: out.path }
         )

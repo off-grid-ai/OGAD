@@ -227,11 +227,11 @@ class AxRailHost {
       return { ok: false, summary: 'input actuation is not available in this build', steps: [] }
     }
     if (process.platform === 'darwin' && !systemPreferences.isTrustedAccessibilityClient(true)) {
-      console.log('[ax-rail] BLOCKED: Accessibility grant missing for Off Grid')
+      console.log('[ax-rail] BLOCKED: Accessibility grant missing for Off Grid AI')
       return {
         ok: false,
         summary:
-          'Off Grid needs Accessibility access to control the screen. Grant it in System Settings > Privacy & Security > Accessibility, then run this again.',
+          'Off Grid AI needs Accessibility access to control the screen. Grant it in System Settings > Privacy & Security > Accessibility, then run this again.',
         steps: []
       }
     }
@@ -305,7 +305,7 @@ class AxRailHost {
             usedInitial = true
             return initial
           }
-          // Read the target app BY NAME each step - stable even though Off Grid
+          // Read the target app BY NAME each step - stable even though Off Grid AI
           // (or the overlay) may hold system focus.
           return (await axBackend().snapshot(app)) ?? { windowTitle: '', elements: [] }
         },

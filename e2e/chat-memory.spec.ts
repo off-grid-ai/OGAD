@@ -55,7 +55,7 @@ const forceCloseApp = async (): Promise<void> => {
 
 const enterChat = async (): Promise<void> => {
   for (let i = 0; i < 8; i++) {
-    const btn = page.getByRole('button', { name: /Continue|Start using Off Grid/i })
+    const btn = page.getByRole('button', { name: /Continue|Start using Off Grid AI/i })
     if (!(await btn.isVisible().catch(() => false))) break
     await btn.click()
     await page.waitForTimeout(300)
@@ -205,7 +205,7 @@ test('streaming placeholder appears immediately after send', async () => {
   const assistantBubble = page
     .locator('div')
     .filter({
-      hasText: /searching|working|sorry|error|off grid/i
+      hasText: /searching|working|sorry|error|Off Grid AI/i
     })
     .first()
   await expect(assistantBubble)
@@ -319,7 +319,7 @@ test('cancelling a tool-owned image keeps its text answer after a full relaunch'
   // Re-launch against faithful native-process boundaries. The production LLMService
   // spawns the fake llama executable and speaks real HTTP/SSE; imagegen spawns the
   // fake sd-cli and must kill it through the rendered Stop control. SQLite, IPC,
-  // toolChat, MemoryChat, and the process relaunch are all real Off Grid code.
+  // toolChat, MemoryChat, and the process relaunch are all real Off Grid AI code.
   await closeApp()
 
   const modelsDir = path.join(userDataDir, 'models')

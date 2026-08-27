@@ -148,7 +148,7 @@ test.beforeAll(async () => {
   await page.waitForLoadState('domcontentloaded')
   // Click through onboarding into the app shell.
   for (let i = 0; i < 8; i++) {
-    const btn = page.getByRole('button', { name: /Continue|Start using Off Grid/i })
+    const btn = page.getByRole('button', { name: /Continue|Start using Off Grid AI/i })
     if (!(await btn.isVisible().catch(() => false))) break
     await btn.click()
     await page.waitForTimeout(400)
@@ -174,7 +174,7 @@ test.afterAll(async () => {
 
 test('Replay is unlocked in the pro build (renders the manager, not the upgrade screen)', async () => {
   await nav('Replay')
-  await expect(page.getByText('Off Grid Pro · Available now')).toHaveCount(0)
+  await expect(page.getByText('Off Grid AI Pro · Available now')).toHaveCount(0)
   // The seeded day has frames, so the film + scrubber render.
   await expect(page.getByText(/frames?$/).first()).toBeVisible()
 })
@@ -365,7 +365,7 @@ test('Search opens Replay at the selected captured moment instead of a timeline 
   expect(expected.hit.imagePath).toBe(expected.selected.path)
 
   await page.keyboard.press('Meta+K')
-  const search = page.getByRole('dialog', { name: 'Search Off Grid' })
+  const search = page.getByRole('dialog', { name: 'Search Off Grid AI' })
   await expect(search).toBeVisible()
   await search.getByPlaceholder('Search everything…').fill(expected.query)
   const result = search.getByText(expected.hit.snippet, { exact: true })
@@ -406,7 +406,7 @@ test('Capture and processing share one actionable Settings detail with keyboard 
 
 test('Clipboard is unlocked in the pro build', async () => {
   await nav('Clipboard')
-  await expect(page.getByText('Off Grid Pro · Available now')).toHaveCount(0)
+  await expect(page.getByText('Off Grid AI Pro · Available now')).toHaveCount(0)
   await expect(page.getByPlaceholder('Search content or tags…')).toBeVisible()
 })
 
@@ -456,7 +456,7 @@ test('Clipboard quick-open renders populated content on the first native hotkey 
 
 test('Voice is unlocked in the pro build (renders the dictation library)', async () => {
   await nav('Voice')
-  await expect(page.getByText('Off Grid Pro · Available now')).toHaveCount(0)
+  await expect(page.getByText('Off Grid AI Pro · Available now')).toHaveCount(0)
   // The real screen: a search box, the dictation CTA, and the file-transcribe entry.
   await expect(page.getByPlaceholder('Search transcripts')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Start dictation' })).toBeVisible()

@@ -1,4 +1,4 @@
-// Universal search — the single front door over everything Off Grid has seen.
+// Universal search — the single front door over everything Off Grid AI has seen.
 // Hybrid: FTS5 keyword (exact words you saw) + LanceDB semantic (NLP recall),
 // fused with reciprocal-rank fusion. Plus a background backfill that embeds the
 // observation/frame/transcript backlog (using the in-app MiniLM model) so the

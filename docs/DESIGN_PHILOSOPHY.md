@@ -27,7 +27,7 @@ on-device, and fast — the UI should feel that way too: calm, dense, immediate.
   (the repo's component files are demo stubs — pull the real one from the registry).
 - `components.json` is configured with the `@aceternity` + `@magicui` registries + shadcn.
 
-## 3. Brand — Off Grid identity (binding)
+## 3. Brand — Off Grid AI identity (binding)
 
 - **Typeface:** Menlo (monospace), everywhere. Terminal/brutalist.
 - **Accent:** emerald — `#34D399` (dark) / `#059669` (light). The only accent.

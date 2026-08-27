@@ -25,7 +25,7 @@ function describeNativeResult(value: unknown): KeychainRepairResult | null {
     case 1:
       return {
         status: 'repaired',
-        detail: 'The existing login Keychain was restored for Off Grid secure storage.',
+        detail: 'The existing login Keychain was restored for Off Grid AI secure storage.',
         osStatus
       }
     case 2:
@@ -52,7 +52,7 @@ function describeNativeResult(value: unknown): KeychainRepairResult | null {
  *
  * This must run before app.ready and before any safeStorage consumer. Electron's
  * macOS safeStorage bootstrap otherwise opens SecurityAgent's generic "Keychain
- * Not Found" dialog before Off Grid can explain or recover the problem.
+ * Not Found" dialog before Off Grid AI can explain or recover the problem.
  */
 export function repairMissingDefaultKeychainAtBootstrap(
   platform: NodeJS.Platform,

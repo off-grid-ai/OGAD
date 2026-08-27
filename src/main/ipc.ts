@@ -688,7 +688,7 @@ export function setupIPC() {
           referenceBlock = `REFERENCE — the user pointed you at these page(s); BUILD using this content (e.g. if it's API docs, build a UI that actually calls those endpoints):\n${parts.join('\n\n')}`
         }
         const prompt = [
-          'You are Off Grid, an on-device assistant with a LIVE, sandboxed code canvas built in.',
+          'You are Off Grid AI, an on-device assistant with a LIVE, sandboxed code canvas built in.',
           'The user wants you to BUILD something. Output the FINISHED, self-contained code as ONE fenced block — it runs immediately in the canvas beside the chat:',
           '- React app/component -> ```jsx — write idiomatic React (you may `import React, { useState } from "react"` and `export default function App() {…}`; the sandbox handles imports/exports). Define the main component as `App` or a default export.',
           '- a plain web page / interactive UI (no React) -> ```html — one complete document, inline all CSS and JS.',
@@ -713,7 +713,7 @@ export function setupIPC() {
           .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${m.content}`)
           .join('\n')
         const prompt = [
-          'You are Off Grid, a private, on-device assistant.',
+          'You are Off Grid AI, a private, on-device assistant.',
           'You can generate images on-device. If (and only if) the user is asking for a picture/image/logo/art to be CREATED, respond with ONLY a fenced block ```image\\n<a detailed image prompt>\\n``` and nothing else. For everything else, answer normally in text.',
           hist ? `Conversation so far:\n${hist}` : '',
           `User: ${query}`,
@@ -1549,7 +1549,7 @@ export function setupIPC() {
     }
   })
 
-  // === OFF GRID MODEL CATALOG (text, vision, image, voice, transcription) ===
+  // === Off Grid AI MODEL CATALOG (text, vision, image, voice, transcription) ===
 
   // Model management lives in ./models-manager (one source of truth, shared with
   // the headless gateway HTTP admin endpoints). These IPC handlers are thin

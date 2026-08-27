@@ -2,7 +2,7 @@
   "name": "@offgrid/rag",
   "version": "0.0.1",
   "private": true,
-  "description": "Off Grid projects + RAG engine: pure-TS chunking, vector retrieval, and prompt assembly over injectable embedding / vector-store / content-extraction bridges. Content extraction routes text/PDF/DOCX directly, audio through a transcription model, and video through frame sampling + a vision model. Shared by desktop and mobile.",
+  "description": "Off Grid AI projects + RAG engine: pure-TS chunking, vector retrieval, and prompt assembly over injectable embedding / vector-store / content-extraction bridges. Content extraction routes text/PDF/DOCX directly, audio through a transcription model, and video through frame sampling + a vision model. Shared by desktop and mobile.",
   "license": "AGPL-3.0-only",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",

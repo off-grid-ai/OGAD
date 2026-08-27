@@ -2,7 +2,7 @@ import { COLORS_DARK, COLORS_LIGHT } from '@offgrid/design'
 
 /** One Codex-style automation pointer for both the injected BrowserView DOM and
  * the renderer fallback. Geometry follows the local Codex MousePointer asset;
- * Off Grid tokens own its contrast and action accent. */
+ * Off Grid AI tokens own its contrast and action accent. */
 export const BROWSER_POINTER_VISUAL = {
   viewBox: '0 0 24 24',
   width: 20,

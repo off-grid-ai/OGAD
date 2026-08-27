@@ -486,7 +486,7 @@ function ProjectConfig({
                 Include captured memory
                 <span className="block text-[11px] text-neutral-600">
                   Retrieval spans uploaded documents
-                  {includeMemory ? ' + everything Off Grid has captured' : ' only'}.
+                  {includeMemory ? ' + everything Off Grid AI has captured' : ' only'}.
                 </span>
               </span>
             </button>

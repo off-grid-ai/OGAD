@@ -3,7 +3,7 @@
 // job, and a refusal that reaches the channel rather than only the caller.
 //
 // Real models-manager, real filesystem under a temp data dir, real queue. Only HTTP is controlled —
-// the one boundary outside Off Grid.
+// the one boundary outside Off Grid AI.
 //
 // Grounded in the macOS session of 2026-08-09: a refused download told nobody, so the card kept a
 // spinner at 0% for hours; and the percent was per-FILE, so a two-file model ran 0→100 twice and

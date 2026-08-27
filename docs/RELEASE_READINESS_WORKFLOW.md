@@ -97,7 +97,7 @@ date, evidence, and the exact artifact/profile/device identity.
 3. Record the exact test path and what it proves. Do not write only "tests pass".
 4. Keep the remaining manual boundary specific enough that a tester can reproduce it.
 5. Never promote a row to `COMPLETE` because a unit test, source assertion, rendered shell, fake
-   Off Grid service, or separate package probe exists.
+   Off Grid AI service, or separate package probe exists.
 6. Regenerate the CSV and run the validation test in the same commit.
 7. Update the relevant Core, Pro, or native audit when a finding is closed or a new gap is found.
 

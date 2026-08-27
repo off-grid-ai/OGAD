@@ -1,4 +1,4 @@
-// The search_knowledge_base tool, ported from Off Grid Mobile. Exposed to the
+// The search_knowledge_base tool, ported from Off Grid AI Mobile. Exposed to the
 // model during project chats so it can pull from the KB on demand (in addition
 // to the always-on retrieval that injects context up front). The OpenAI-style
 // schema works with our local llama-server tool calling and remote providers.

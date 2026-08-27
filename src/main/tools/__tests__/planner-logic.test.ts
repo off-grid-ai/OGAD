@@ -50,7 +50,7 @@ describe('buildPlannerPrompt', () => {
     expect(p).toContain('- web_task:')
     expect(p).toContain('play X on YouTube')
     // Post-pivot rule: any website task (incl play/watch) -> web_task, which runs
-    // in Off Grid's built-in browser; open_url only opens a link.
+    // in Off Grid AI's built-in browser; open_url only opens a link.
     expect(p).toMatch(/is web_task/i)
     expect(p).toMatch(/built-in browser/i)
     expect(p).toMatch(/NOT open_url/i)

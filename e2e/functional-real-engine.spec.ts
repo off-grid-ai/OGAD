@@ -3,7 +3,7 @@
  * "does it actually work" smoke: real llama-server generates chat, real kokoro synthesizes
  * speech, real whisper transcribes it back, real sd generates an image. No fakes.
  *
- * Local-only by design: it needs the real model files (~/Library/Application Support/Off Grid
+ * Local-only by design: it needs the real model files (~/Library/Application Support/Off Grid AI
  * AI Desktop/models) and the real engine binaries (resources/bin). It SKIPS anywhere those are
  * absent (CI, a fresh checkout) so it never turns the suite red where the models can't exist.
  * Profile stays synthetic (seeded temp dir); only the model files are the real, shared ones.
@@ -80,7 +80,7 @@ test.beforeAll(async () => {
   page = await app.firstWindow()
   await page.waitForLoadState('domcontentloaded')
   for (let i = 0; i < 8; i++) {
-    const btn = page.getByRole('button', { name: /Continue|Start using Off Grid/i })
+    const btn = page.getByRole('button', { name: /Continue|Start using Off Grid AI/i })
     if (!(await btn.isVisible().catch(() => false))) break
     await btn.click().catch(() => {})
     await page.waitForTimeout(300)

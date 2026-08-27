@@ -1,7 +1,7 @@
 /**
  * Multimodal knowledge journey through the production IPC, extraction router, native adapters,
  * RAG engine, SQLite store, scoped chat prompt, deletion, and profile reopen. The local embedding,
- * vision, and speech executables are controlled at their process boundaries; Off Grid code stays real.
+ * vision, and speech executables are controlled at their process boundaries; Off Grid AI code stays real.
  */
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'

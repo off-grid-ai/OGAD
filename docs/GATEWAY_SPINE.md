@@ -1,4 +1,4 @@
-# Off Grid Gateway — the spine
+# Off Grid AI Gateway — the spine
 
 How the 5-layer agentic stack (`wednesdayai/knowledge-base/architecture.md`) maps onto
 the local-first desktop gateway at `127.0.0.1:7878` (`src/main/model-server.ts`), and the
@@ -91,7 +91,7 @@ of the multi-tenant/regulatory machinery **collapses** — but a surprising amou
 **load-bearing**, often in a new guise. The privacy stakes are _higher_, not lower:
 capture sees everything on screen.
 
-| BFSI layer                               | In Off Grid                                                       | Verdict                                                                 | Where it lives                                                                      |
+| BFSI layer                               | In Off Grid AI                                                       | Verdict                                                                 | Where it lives                                                                      |
 | ---------------------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | **A · Data plane** (CDC, lake, PII mask) | capture → OCR → entities → SQLite                                 | Exists                                                                  | `watcher.ts`, `vision.ts`, `database.ts`, `crm/*` — gateway _consumes_, doesn't own |
 | **A · PII masking**                      | redact before anything leaves the device                          | **Survives, critical**                                                  | post-hook egress DLP (see C16)                                                      |

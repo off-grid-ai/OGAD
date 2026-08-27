@@ -57,7 +57,7 @@ export const PRO_FEATURES: ProFeature[] = [
     icon: CalendarBlank,
     tagline: 'Your day, planned for you.',
     description:
-      'Off Grid reads your calendar and what you’ve been working on and lays out your day — what’s next, who you’re meeting, and what’s still open — so you start every morning oriented instead of scrambling.',
+      'Off Grid AI reads your calendar and what you’ve been working on and lays out your day — what’s next, who you’re meeting, and what’s still open — so you start every morning oriented instead of scrambling.',
     highlights: [
       'A morning briefing built from your real activity',
       'Per-meeting prep: who’s in it and your open items',
@@ -118,7 +118,7 @@ export const PRO_FEATURES: ProFeature[] = [
     icon: CheckSquare,
     tagline: 'To-dos and actions, handled.',
     description:
-      'Off Grid extracts the commitments out of your day and your secretary proposes the next step — every action waits in an approval queue, so nothing happens without your say-so.',
+      'Off Grid AI extracts the commitments out of your day and your secretary proposes the next step — every action waits in an approval queue, so nothing happens without your say-so.',
     highlights: [
       'Auto-extracted to-dos',
       'Secretary-proposed actions',
@@ -156,7 +156,7 @@ export const PRO_FEATURES: ProFeature[] = [
     icon: Broadcast,
     tagline: 'Approvals & to-dos, surfaced.',
     description:
-      'Off Grid reaches out first — a morning briefing, a heads-up before meetings, approvals waiting on your decision, and to-dos it pulled from your day — even when the window is closed.',
+      'Off Grid AI reaches out first — a morning briefing, a heads-up before meetings, approvals waiting on your decision, and to-dos it pulled from your day — even when the window is closed.',
     highlights: [
       'Proactive briefings & meeting prep',
       'Approval queue for actions',
@@ -183,7 +183,7 @@ export const PRO_FEATURES: ProFeature[] = [
     icon: ShieldCheck,
     tagline: 'Passwords and secrets, encrypted on this device.',
     description:
-      'An encrypted KDBX4 vault for web logins, app passwords, API keys, secure notes, and secret files (.env and the like). Your master password and a device-specific key together lock the vault - the file alone is unreadable. Back up the file anywhere; it stays opaque without both factors. Sync to other devices in your Off Grid mesh via EasyShare when you are ready.',
+      'An encrypted KDBX4 vault for web logins, app passwords, API keys, secure notes, and secret files (.env and the like). Your master password and a device-specific key together lock the vault - the file alone is unreadable. Back up the file anywhere; it stays opaque without both factors. Sync to other devices in your Off Grid AI mesh via EasyShare when you are ready.',
     highlights: [
       'AES-256 + Argon2id, device-key bound',
       'Logins, app passwords, API keys, notes, and files',
@@ -216,7 +216,7 @@ export const PRO_FEATURES: ProFeature[] = [
     icon: DevicesIcon,
     tagline: 'Your chats and settings, on every device.',
     description:
-      'Pair your Mac and phone over your local network to keep chats, projects and model settings in step. Data moves through a direct encrypted connection between your devices. Nothing is uploaded to an Off Grid server.',
+      'Pair your Mac and phone over your local network to keep chats, projects and model settings in step. Data moves through a direct encrypted connection between your devices. Nothing is uploaded to an Off Grid AI server.',
     highlights: [
       'Chats, projects and model settings stay in step across devices',
       'Known devices reconnect when they return to the network',

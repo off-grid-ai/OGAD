@@ -202,7 +202,7 @@ export function computerApprovalMode(): ComputerApprovalMode {
 /** Only COMPUTER-USE tasks ask for approval. The accessibility / vision rails
  *  drive the real desktop - they take over the user's cursor and keyboard - so
  *  the user confirms before that happens. Every other action runs IN-APP without
- *  taking over the machine (the browser rail acts in Off Grid's own page; native
+ *  taking over the machine (the browser rail acts in Off Grid AI's own page; native
  *  actions call an API), so it runs without a prompt. */
 export function needsApproval(rail: Rail | undefined): boolean {
   return rail === 'accessibility' || rail === 'vision'

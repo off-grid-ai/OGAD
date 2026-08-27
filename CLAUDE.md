@@ -1,8 +1,8 @@
 # Off Grid AI Desktop — agent guide
 
-This is **Off Grid AI Desktop** — an Electron (macOS) desktop app. The product name is always **"Off Grid AI Desktop"** (never "Off Grid Desktop", "My Memories", etc.) — in window titles, OAuth client names, about screens, everywhere.
+This is **Off Grid AI Desktop** — an Electron (macOS) desktop app. The product name is always **"Off Grid AI Desktop"** (never "Off Grid AI Desktop", "My Memories", etc.) — in window titles, OAuth client names, about screens, everywhere.
 
-## Design — DESKTOP-FIRST, Off Grid brand
+## Design — DESKTOP-FIRST, Off Grid AI brand
 
 Full design doc: **`docs/DESIGN.md`**. The essentials, which OVERRIDE any mobile-first or monochrome assumptions:
 

@@ -2,9 +2,9 @@
  * Which app does a computer_task target? (R5 T1d, pure half.)
  *
  * The accessibility rail reads and drives ONE named app, so before it can run it
- * has to decide which. The Off Grid window is frontmost the instant the user
+ * has to decide which. The Off Grid AI window is frontmost the instant the user
  * approves the task, so "the frontmost app" is the wrong answer - it would read
- * Off Grid's own controls. Instead the target is the app the goal NAMES that is
+ * Off Grid AI's own controls. Instead the target is the app the goal NAMES that is
  * actually running: "message sidd on Slack" while Slack is open -> Slack.
  *
  * Pure and injected (the goal text + the running app names) so the match rule is
@@ -15,7 +15,7 @@
 
 /** The app the goal targets, or null when the goal names no running app. Picks
  *  the LONGEST-named match so "Slack" beats a stray substring, and never targets
- *  Off Grid itself. */
+ *  Off Grid AI itself. */
 export function pickTargetApp(
   goal: string,
   runningApps: readonly string[],

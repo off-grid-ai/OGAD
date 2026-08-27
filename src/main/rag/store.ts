@@ -2,7 +2,7 @@
 // `memories.db`. Adds project/document/chunk/embedding/thread tables and a
 // getChunkCandidates that UNIONS a project's uploaded-document chunks with the
 // app's captured memories — so a project's knowledge base spans both uploaded
-// files and what Off Grid has seen (the KB-sources decision).
+// files and what Off Grid AI has seen (the KB-sources decision).
 
 import { getDB } from '../database'
 import { deleteArtifactsForProject } from '../artifacts'

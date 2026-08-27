@@ -1169,7 +1169,7 @@ function AppContent() {
           </button>
         </div>
       )}
-      {/* Background — flat Off Grid terminal grid (theme-aware), with a dark-mode
+      {/* Background — flat Off Grid AI terminal grid (theme-aware), with a dark-mode
           starfield + periodic shooting star layered on top. */}
       <GridBackdrop className="z-0" />
       <StarfieldBackdrop className="z-0" />

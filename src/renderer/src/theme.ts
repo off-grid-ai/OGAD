@@ -1,4 +1,4 @@
-// Theme controller (dark default, like Off Grid Mobile). Resolves a stored
+// Theme controller (dark default, like Off Grid AI Mobile). Resolves a stored
 // system/light/dark preference against the OS scheme and applies it as
 // data-theme on <html>, which flips the --og-* tokens. Mirrors @offgrid/ui's
 // resolveTheme; kept inline here so the renderer has no extra dep.

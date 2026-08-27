@@ -1,7 +1,7 @@
 /**
  * Release journey #20 across real model download, activation, SQLite residency,
  * and TTS output validation. HTTP and the heavyweight ONNX worker are the only
- * controlled boundaries; every Off Grid owner between them stays production.
+ * controlled boundaries; every Off Grid AI owner between them stays production.
  */
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs'

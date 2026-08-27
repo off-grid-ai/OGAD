@@ -1,4 +1,4 @@
-// MCP connectors — Off Grid acts as an MCP *client*. Each connector is an MCP
+// MCP connectors — Off Grid AI acts as an MCP *client*. Each connector is an MCP
 // server the user authorizes (stdio command or HTTP/SSE endpoint, e.g. a Gmail
 // or Google Calendar MCP). We discover its tools, and skills propose tool calls
 // that run ONLY after approval (see crm/approvals.ts). Secrets (tokens) live in

@@ -491,7 +491,7 @@ const offGridApi = {
     return unsubscribe('model:download-progress', subscription)
   },
 
-  // Off Grid model catalog (text, vision, image, voice, transcription)
+  // Off Grid AI model catalog (text, vision, image, voice, transcription)
   getModelCatalog: () => ipcRenderer.invoke('models:catalog'),
   getInstalledModels: () => ipcRenderer.invoke('models:installed'),
   getModelVisionStatus: () => ipcRenderer.invoke('models:vision-status'),

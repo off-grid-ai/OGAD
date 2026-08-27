@@ -10,7 +10,7 @@ let userDataDir: string
 
 async function finishOnboarding(): Promise<void> {
   for (let step = 0; step < 6; step += 1) {
-    const button = page.getByRole('button', { name: /Continue|Start using Off Grid/i })
+    const button = page.getByRole('button', { name: /Continue|Start using Off Grid AI/i })
     if (!(await button.isVisible().catch(() => false))) return
     await button.click()
   }
@@ -190,7 +190,7 @@ test('keyboard focus follows navigation, form, dialog, and primary-action order 
   // The production command palette is the app's real modal dialog. It must move
   // focus into its form, keep keyboard focus inside, and retain the visible ring.
   await page.keyboard.press('Meta+K')
-  const dialog = page.getByRole('dialog', { name: 'Search Off Grid' })
+  const dialog = page.getByRole('dialog', { name: 'Search Off Grid AI' })
   await expect(dialog).toBeVisible()
   // The REAL placeholder. This said 'Search everything…', which is not a substring of what the palette
   // renders ('Search everything, or jump to a screen…'), so the locator matched nothing and the focus

@@ -2,7 +2,7 @@
  * APP-025: a rendered model download is staged, verified, activated, used, and restored.
  *
  * Only Hugging Face delivery is controlled. The retry payload is a real Qwen GGUF and the app uses
- * its actual llama-server; all Off Grid UI, IPC, integrity, filesystem, runtime selection, chat,
+ * its actual llama-server; all Off Grid AI UI, IPC, integrity, filesystem, runtime selection, chat,
  * persistence, and relaunch behavior stay production.
  */
 import {

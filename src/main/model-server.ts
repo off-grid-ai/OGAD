@@ -1,6 +1,6 @@
-// Off Grid local inference gateway — ONE OpenAI-compatible endpoint for every
+// Off Grid AI local inference gateway — ONE OpenAI-compatible endpoint for every
 // modality, on :7878. Any local tool (IDE, app, script) points here and gets the
-// on-device models, and so does a phone on the same LAN - Off Grid Mobile scans the
+// on-device models, and so does a phone on the same LAN - Off Grid AI Mobile scans the
 // subnet for this port. No cloud, no keys. It listens on every interface and does NOT
 // authenticate, so treat the machine's network as the trust boundary; the routes that
 // must stay private (settings mutations) check the peer address themselves.

@@ -3,7 +3,7 @@
  * Release checklist #105 through the real rendered assistant action, TTS IPC handler,
  * persisted voice setting, synthesis service, subprocess protocol, and WAV validation.
  * The fake subprocess replaces only the heavyweight Kokoro/ONNX worker; Audio replaces
- * Chromium's media boundary. All Off Grid code between those boundaries stays production.
+ * Chromium's media boundary. All Off Grid AI code between those boundaries stays production.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'

@@ -15,7 +15,7 @@ if (!outputPath) {
 }
 
 // A real, checksum-valid PNG. The native diffusion executable is the sole controlled
-// boundary in this test; all Off Grid ownership, persistence and rendering remains real.
+// boundary in this test; all Off Grid AI ownership, persistence and rendering remains real.
 const png = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAIAAABqVuVZAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAv0lEQVR4nO3ZsQnDQADFUDc3rBbKvOkDcRPCd/HgJhD68tm+zivnfIdwoXNuFQEogPplJQwKoBjU/x41JhZAMSgTa3Wh1aAAikGZWBrUM78riHQAxaBMLA1q3mORDqAYlIk1746LYgDFoEyseYC8rAZQDMrE0qDmMRbpAIpBmVjz6LgoBlAMysR6yPFnNYBiUCaWBjXvsUgHUAzKxJp3x0UxgGJQJtY8QF5WAygGZWJpUPMYi3QAxaBMrHl0Ps4bguphafFRYPAAAAAASUVORK5CYII=',
   'base64'

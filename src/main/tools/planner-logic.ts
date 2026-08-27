@@ -131,7 +131,7 @@ export function buildPlannerPrompt(
     `User request: ${goal}`,
     '',
     'Rules:',
-    "- A task on a WEBSITE - play or watch a video, search and click a result, log in, fill a form, check in, place an order, extract - is web_task; it runs inside Off Grid's own built-in browser. open_url ONLY opens a link or app scheme, no interaction, so 'play X on YouTube' or 'search Y and open the first result' is web_task, NOT open_url. A task in an installed desktop APP with no web version (a native-only app) is computer_task.",
+    "- A task on a WEBSITE - play or watch a video, search and click a result, log in, fill a form, check in, place an order, extract - is web_task; it runs inside Off Grid AI's own built-in browser. open_url ONLY opens a link or app scheme, no interaction, so 'play X on YouTube' or 'search Y and open the first result' is web_task, NOT open_url. A task in an installed desktop APP with no web version (a native-only app) is computer_task.",
     '- Fill EVERY required argument. For web_task always set the "url" to the site (e.g. https://youtube.com). Do not leave a required arg blank.',
     '- The args field is a JSON-encoded object string. Example: {"tool":"web_task","args":"{\\"url\\":\\"https://youtube.com\\",\\"goal\\":\\"Find the requested video\\"}","why":"The task needs website interaction","bindings":[]}.',
     '- If a step needs a value produced by an earlier step (e.g. a phone number from contacts_search to message someone), add a binding: {"arg":"to","fromStep":0,"field":"phone"} and leave that value out of the JSON object encoded in args.',

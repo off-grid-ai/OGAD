@@ -106,7 +106,7 @@ export function CommandPalette({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent showCloseButton={false} className="overflow-hidden p-0">
-        <DialogTitle className="sr-only">Search Off Grid</DialogTitle>
+        <DialogTitle className="sr-only">Search Off Grid AI</DialogTitle>
         <Command shouldFilter={false} className="font-mono">
           <CommandInput
             value={query}

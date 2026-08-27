@@ -1,4 +1,4 @@
-// Vector math for retrieval, ported from Off Grid Mobile (rag/vectorMath.ts).
+// Vector math for retrieval, ported from Off Grid AI Mobile (rag/vectorMath.ts).
 // Plain-JS cosine similarity over number[] embeddings — no SIMD, no deps. Fine
 // for the brute-force search the RAG store does over a project's chunks.
 

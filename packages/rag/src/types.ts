@@ -1,4 +1,4 @@
-// Core data model for Off Grid projects + RAG, mirrored from Off Grid Mobile so
+// Core data model for Off Grid AI projects + RAG, mirrored from Off Grid AI Mobile so
 // desktop and mobile share one shape. The DB-level representation lives in each
 // platform's VectorStore implementation; these are the engine-facing types.
 

@@ -1,4 +1,4 @@
-# Off Grid — close the gaps in `desktop/docs/GAPS_BACKLOG.md`
+# Off Grid AI — close the gaps in `desktop/docs/GAPS_BACKLOG.md`
 
 ## Branch rule — read first, do not get this wrong
 

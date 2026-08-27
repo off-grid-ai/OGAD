@@ -28,7 +28,7 @@ const SETTINGS_SECTION_TITLES: Record<string, string> = {
   remote: 'Remote model server',
   sync: 'Device sync',
   identity: 'You',
-  secretary: 'What Off Grid has learned',
+  secretary: 'What Off Grid AI has learned',
   'pro-plan': 'Your Pro plan',
   privacy: 'Data & privacy',
   backup: 'Backup & restore',
@@ -121,7 +121,7 @@ export function Settings({
           <h2 className="text-lg font-semibold text-white">Settings</h2>
           <p className="text-sm text-neutral-500">
             {isPro
-              ? 'Who you are, what Off Grid has learned, and your devices'
+              ? 'Who you are, what Off Grid AI has learned, and your devices'
               : 'Personalization & automation unlock with Pro'}
           </p>
         </div>
@@ -197,7 +197,7 @@ export function Settings({
               <RemoteVisionSettingsTab />
             </SettingsCard>
 
-            {/* Remaining Pro Settings sections (You / What Off Grid has learned /
+            {/* Remaining Pro Settings sections (You / What Off Grid AI has learned /
               Your Pro plan). The pro package registers the real section
               components via the section registry; the free build shows the catalogued
               placeholders. Slot list, order, and placeholder copy live in

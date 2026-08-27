@@ -1,6 +1,6 @@
 // RagService: ties the bridges together. indexDocument extracts -> chunks ->
 // embeds -> stores; searchProject embeds the query and ranks stored chunks.
-// Mirrors Off Grid Mobile's RagService surface so the apps wire it the same way.
+// Mirrors Off Grid AI Mobile's RagService surface so the apps wire it the same way.
 
 import { chunkText, type ChunkOptions } from './chunking'
 import { extractContent, type ExtractOptions } from './extract'

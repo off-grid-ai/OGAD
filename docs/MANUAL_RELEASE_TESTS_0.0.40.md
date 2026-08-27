@@ -113,7 +113,7 @@ Stop and mark the build failed if any of these occurs:
     `/usr/bin/xcrun stapler validate <app>`, and
     `/usr/sbin/spctl --assess --type execute --verbose=4 <app>`.
   - Confirm version `0.0.40`, bundle identifier `co.getoffgridai.desktop.pro`, hardened runtime,
-    Off Grid Apple Team ID `84V6KCAC49`, and both ASAR fuses:
+    Off Grid AI Apple Team ID `84V6KCAC49`, and both ASAR fuses:
     `EnableEmbeddedAsarIntegrityValidation` and `OnlyLoadAppFromAsar`.
   - Confirm the only ASAR roots are `/node_modules`, `/out`, and `/package.json`; the only `/out`
     children are `main`, `preload`, and `renderer`; and there is no nested `.app` or case-normalized

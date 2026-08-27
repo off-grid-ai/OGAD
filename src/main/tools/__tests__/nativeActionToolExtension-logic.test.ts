@@ -8,7 +8,7 @@ import { shouldGate } from '../../actions/approval'
 
 describe('native tool specs', () => {
   it('routes every website task (incl play/watch) to web_task in the built-in browser; open_url only opens', () => {
-    // Post-pivot: browser tasks run INSIDE Off Grid's built-in browser via
+    // Post-pivot: browser tasks run INSIDE Off Grid AI's built-in browser via
     // web_task (play/watch included). open_url only opens a link and must point
     // at web_task; web_task must own play/watch and name the built-in browser.
     const openUrl = findNativeToolSpec('open_url')?.description ?? ''

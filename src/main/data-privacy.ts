@@ -297,7 +297,7 @@ export function getDataSummary(): DataCategory[] {
     {
       id: 'memories',
       label: 'Memory & entities',
-      detail: 'Observations, entities, and what Off Grid has learned',
+      detail: 'Observations, entities, and what Off Grid AI has learned',
       count: tableCount('memories') + tableCount('entities')
     },
     {

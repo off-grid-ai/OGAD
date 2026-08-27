@@ -1,4 +1,4 @@
-// Paragraph-aware text chunking, ported from Off Grid Mobile (rag/chunking.ts).
+// Paragraph-aware text chunking, ported from Off Grid AI Mobile (rag/chunking.ts).
 // Splits on blank lines to respect paragraph boundaries; long paragraphs fall
 // back to a fixed-size sliding window with overlap so context isn't lost across
 // chunk edges. Pure: no platform dependencies.

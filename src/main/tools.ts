@@ -1,4 +1,4 @@
-// Agentic tool-calling loop for the Off Grid chat. Kept ISOLATED from the
+// Agentic tool-calling loop for the Off Grid AI chat. Kept ISOLATED from the
 // default rag:chat path (opt-in) so a tool run can never break normal chat.
 //
 // The local model (llama-server, OpenAI-compatible /v1/chat/completions) is given
@@ -282,7 +282,7 @@ const TOOLS: ToolDef[] = [
         const rows = db
           .prepare(
             `SELECT summary, surface, surface_app, ts FROM observations
-           WHERE COALESCE(surface_app,'') NOT LIKE '%Off Grid%' AND COALESCE(surface_app,'') NOT LIKE '%Electron%'
+           WHERE COALESCE(surface_app,'') NOT LIKE '%Off Grid AI%' AND COALESCE(surface_app,'') NOT LIKE '%Electron%'
            ORDER BY ts DESC LIMIT ?`
           )
           .all(n) as {
@@ -642,7 +642,7 @@ export async function toolChat(
   }
   const tools = budgeted.tools
   const sys =
-    'You are Off Grid, a private on-device assistant. Use the provided tools when they help answer precisely. Before calling web_task, use the full conversation and ask the user one concise set of questions only when a material fact is missing. If the task is actionable, call web_task immediately. Keep answers concise.' +
+    'You are Off Grid AI, a private on-device assistant. Use the provided tools when they help answer precisely. Before calling web_task, use the full conversation and ask the user one concise set of questions only when a material fact is missing. If the task is actionable, call web_task immediately. Keep answers concise.' +
     (hints.length ? ' ' + hints.join(' ') : '') +
     (proposalDeckActive ? ` ${proposalDeckSystemHint(opts.conversationId)}` : '')
 

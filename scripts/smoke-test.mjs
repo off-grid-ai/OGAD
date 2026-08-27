@@ -37,7 +37,7 @@ const smoke = {
     )
   },
   async clickContinue() {
-    const btn = win.getByRole('button', { name: /Continue|Start using Off Grid/i }).first()
+    const btn = win.getByRole('button', { name: /Continue|Start using Off Grid AI/i }).first()
     if (await btn.isVisible().catch(() => false)) {
       await btn.click().catch(() => {})
       await smoke.wait(1400)
@@ -76,7 +76,7 @@ try {
   // 1) Onboarding shows on a fresh profile (step 1)
   smoke.record(
     'onboarding screen appears',
-    /Continue|Every model|Private AI|Off Grid/i.test(await smoke.pageText())
+    /Continue|Every model|Private AI|Off Grid AI/i.test(await smoke.pageText())
   )
 
   // 2) Advance to the orbit step + assert the modality cards aren't collapsed.
