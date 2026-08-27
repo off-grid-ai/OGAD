@@ -50,6 +50,12 @@ export class BrowserJourneyRunOwners {
     if (this.isCurrent(owner)) this.owners.delete(owner.journeyId)
   }
 
+  /** Is any Web Use run in flight? Asked by the live view to decide whether a page the user has
+   *  navigated away from is still worth showing — an idle page is not. */
+  hasActiveRun(): boolean {
+    return this.owners.size > 0
+  }
+
   haltAll(reason: string): void {
     for (const owner of this.owners.values()) {
       owner.guard.halt(reason)

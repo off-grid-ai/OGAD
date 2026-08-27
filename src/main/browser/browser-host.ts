@@ -54,6 +54,11 @@ import { prepareTaskExecutionPlan } from '../tasks/task-execution-plan-service'
 import { retryPlanningGoal, TASK_RETRY_TRACE } from '../tasks/task-retry'
 import { runBrowserVisualTask, withActiveBrowserVision } from './browser-visual-task'
 import { BrowserJourneyRunOwners } from './browser-run-owners'
+import {
+  browserPipContentBounds,
+  closeBrowserPipWindow,
+  showBrowserPipWindow
+} from './browser-pip-window'
 
 function broadcast(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -152,7 +157,7 @@ class BrowserHost implements BrowserRailHost {
    * repaint is forced only on the hidden-to-visible transition. */
   private readonly appliedPresentation = new WeakMap<
     WebContentsView,
-    { bounds?: Rect; zoom?: number; visible?: boolean }
+    { bounds?: Rect; zoom?: number; visible?: boolean; host?: BrowserWindow }
   >()
 
   constructor() {
@@ -230,6 +235,8 @@ class BrowserHost implements BrowserRailHost {
     bounds?: Rect
     zoom?: number
     visible?: boolean
+    /** The window currently hosting this view. A view has exactly one host at a time. */
+    host?: BrowserWindow
   } {
     let state = this.appliedPresentation.get(view)
     if (!state) {
@@ -262,7 +269,9 @@ class BrowserHost implements BrowserRailHost {
 
   private destroyView(view: WebContentsView): void {
     try {
-      getMainWindow()?.contentView.removeChildView(view)
+      // Whichever window is hosting it, not just the main one - a floating view detaches from
+      // the floating window.
+      ;(this.presentationFor(view).host ?? getMainWindow())?.contentView.removeChildView(view)
     } catch {
       /* window already gone */
     }
@@ -292,16 +301,69 @@ class BrowserHost implements BrowserRailHost {
     })
   }
 
+  /**
+   * Should the active page float in its own window right now?
+   *
+   * True when the docked pane is gone (the renderer reports no region because the user navigated
+   * away) AND a run is still in flight. An idle page nobody is looking at is not worth floating —
+   * only work in progress is.
+   */
+  private shouldFloat(): boolean {
+    return this.region === null && this.runOwners.hasActiveRun()
+  }
+
+  /**
+   * Move a view to its host window, if that is not where it already is.
+   *
+   * A view has exactly ONE host at a time. This used to be implicit — always the main window — and
+   * PiP is not a second code path but a second possible answer to the same question, which is why
+   * everything below still flows through syncViewVisibility.
+   */
+  private rehost(view: WebContentsView, target: BrowserWindow | null): void {
+    const state = this.presentationFor(view)
+    if (!target || state.host === target) return
+    try {
+      state.host?.contentView.removeChildView(view)
+    } catch {
+      // Previous host already gone; adding to the new one is what matters.
+    }
+    try {
+      target.contentView.addChildView(view)
+      state.host = target
+      // Bounds are per-host coordinates, so the applied rect no longer means anything.
+      state.bounds = undefined
+    } catch {
+      // Target window is closing; the next sync retries against a live one.
+    }
+  }
+
   private syncViewVisibility(): void {
     const active = this.sessions.active
+    const floating = this.shouldFloat()
+    const pip = floating ? showBrowserPipWindow(() => this.syncViewVisibility()) : null
+    if (!floating) {
+      // Re-home the view BEFORE the window goes: a hosted view is destroyed with its parent.
+      for (const record of this.sessions.snapshot().sessions) {
+        const live = this.sessions.get(record.sessionId)
+        if (live) this.rehost(live.resource, getMainWindow())
+      }
+      closeBrowserPipWindow()
+    }
     for (const record of this.sessions.snapshot().sessions) {
       const live = this.sessions.get(record.sessionId)
       if (!live) continue
-      const visible = Boolean(active && active.sessionId === live.sessionId && this.region)
+      const isActive = Boolean(active && active.sessionId === live.sessionId)
+      // Only the active page floats; the rest stay parked in the main window.
+      const host = isActive && pip ? pip : getMainWindow()
+      this.rehost(live.resource, host)
+      // A floating window exists solely to show this page, so it fills the window and is visible
+      // by definition. Docked, visibility is the pane's business.
+      const visible = host === pip ? true : Boolean(isActive && this.region)
       // Keep every page at a real desktop render size even while its pane is
       // hidden. Visibility is presentation only; it must not collapse the page
       // viewport that CDP captures for Web Use.
-      const bounds = this.region ?? this.coarseBounds()
+      const bounds =
+        host === pip && pip ? browserPipContentBounds(pip) : (this.region ?? this.coarseBounds())
       const zoom = webUseDesktopZoomFactor(bounds)
       const state = this.presentationFor(live.resource)
       const applied = state.bounds
@@ -344,8 +406,7 @@ class BrowserHost implements BrowserRailHost {
         backgroundThrottling: false
       }
     })
-    const win = getMainWindow()
-    win?.contentView.addChildView(view)
+    this.rehost(view, getMainWindow())
     const record = this.sessions.create({ ...input, resource: view })
     const refresh = (): void => this.refreshSession(record.sessionId)
     const refreshPointer = (): void => {
@@ -374,12 +435,18 @@ class BrowserHost implements BrowserRailHost {
       if (target) void this.openManagedPage(record, target)
       return { action: 'deny' }
     })
+    const win = getMainWindow()
     if (win && !this.windowLifecycleBound) {
       this.windowLifecycleBound = true
       win.on('hide', () => {
+        // Only pages docked in THIS window follow it out of sight. A floating page is in a
+        // different window, and hiding the app is the very moment it earns its keep.
         for (const session of this.sessions.snapshot().sessions) {
           const live = this.sessions.get(session.sessionId)
-          if (live) this.setViewVisible(live.resource, false)
+          if (!live) continue
+          if (this.presentationFor(live.resource).host === win) {
+            this.setViewVisible(live.resource, false)
+          }
         }
       })
       win.on('show', () => this.syncViewVisibility())
@@ -802,7 +869,7 @@ class BrowserHost implements BrowserRailHost {
           plan,
           // A retry must resume at the phase the failed attempt reached. Without this the runtime
           // restarted at phase 1 and redid the first milestone on every retry.
-          ...(checkpoint?.steps?.length ? { resumedSteps: checkpoint.steps } : {}),
+          ...(checkpoint?.steps.length ? { resumedSteps: checkpoint.steps } : {}),
           activePage,
           waitForUser: async (why) => {
             if (!ownsRun()) return
