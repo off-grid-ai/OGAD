@@ -109,6 +109,9 @@ export async function runVisionPolicyRequest(
         priorInvalidAnswer,
         priorValidationError
       )
+      // Counted per attempt so the empty-response branch below can tell a model that DECLINED to
+      // act (reasoned, called nothing) from a genuinely empty response.
+      let reasoningChars = 0
       const useStream = Boolean(
         request.tools?.length || (onReasoningDelta && request.separateReasoning)
       )
@@ -116,7 +119,9 @@ export async function runVisionPolicyRequest(
         ? await llm.streamChat(
             messages,
             (text, kind) => {
-              if (kind === 'reasoning') onReasoningDelta?.(text)
+              if (kind !== 'reasoning') return
+              reasoningChars += text.length
+              onReasoningDelta?.(text)
             },
             {
               temperature: request.temperature,
@@ -143,7 +148,24 @@ export async function runVisionPolicyRequest(
             toolCalls: []
           }
       if (!rawResponse.content.trim() && rawResponse.toolCalls.length === 0) {
-        throw new Error('Computer-use model returned no response.')
+        // Reasoning but no action is the model DECLINING to act, not a dead connection - a real
+        // run reasoned 1,249 tokens to a full stop ("...all the visible information about this
+        // single flight option.") and then called nothing, on a page where it could not satisfy
+        // the goal. tool_choice: 'required' is already sent; a provider is free to ignore it.
+        //
+        // The retry loop above can correct this, but only if it is TOLD to: with no prior answer
+        // and no validation error recorded, attempt 2 re-sent a byte-identical request and failed
+        // identically. Feeding the existing nudge seam is the fix - the mechanism was already
+        // here, this path just never used it.
+        priorInvalidAnswer = undefined
+        priorValidationError = reasoningChars
+          ? 'you produced reasoning but called no tool. Call exactly one tool now, using only what the screenshot shows. If the goal cannot be met from this page, say so through a tool call rather than answering with nothing'
+          : 'the response was empty. Call exactly one tool'
+        throw new Error(
+          reasoningChars
+            ? 'Computer-use model reasoned but called no tool.'
+            : 'Computer-use model returned no response.'
+        )
       }
       const response: VisionPolicyResponse = {
         content: normalizedPolicyAnswer(rawResponse.content),
