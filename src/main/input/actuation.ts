@@ -9,6 +9,7 @@
  * second synthetic-input surface.
  */
 import { hotkeyToKeyNames } from '../vision/vision-keys'
+import { beginSynthetic, endSynthetic } from './synthetic-tracker'
 
 export interface ActuationPort {
   moveMouse(x: number, y: number): Promise<void>
@@ -57,22 +58,40 @@ export function loadActuation(): ActuationPort | null {
     return null
   }
   const { mouse, keyboard, Point, Button, Key } = nut
+  // Every action is bracketed by the synthetic tracker, so the user-input
+  // watchdog can tell the rail's own output from a human takeover.
+  const tracked = async (work: () => Promise<void>, target?: { x: number; y: number }) => {
+    beginSynthetic(target)
+    try {
+      await work()
+    } finally {
+      endSynthetic()
+    }
+  }
   return {
     async moveMouse(x, y) {
-      await mouse.setPosition(new Point(x, y))
+      await tracked(async () => {
+        await mouse.setPosition(new Point(x, y))
+      }, { x, y })
     },
     async click(button, double) {
-      if (double) {
-        await mouse.doubleClick(Button.LEFT)
-        return
-      }
-      await (button === 'right' ? mouse.rightClick() : mouse.leftClick())
+      await tracked(async () => {
+        if (double) {
+          await mouse.doubleClick(Button.LEFT)
+          return
+        }
+        await (button === 'right' ? mouse.rightClick() : mouse.leftClick())
+      })
     },
     async dragTo(x, y) {
-      await mouse.drag([new Point(x, y)])
+      await tracked(async () => {
+        await mouse.drag([new Point(x, y)])
+      }, { x, y })
     },
     async typeText(text) {
-      await keyboard.type(text)
+      await tracked(async () => {
+        await keyboard.type(text)
+      })
     },
     async tapKeys(keys) {
       const names = hotkeyToKeyNames(keys)
@@ -83,20 +102,24 @@ export function loadActuation(): ActuationPort | null {
       if (codes.length !== names.length) {
         return // an unmapped key - refuse the partial combo
       }
-      await keyboard.pressKey(...codes)
-      await keyboard.releaseKey(...codes)
+      await tracked(async () => {
+        await keyboard.pressKey(...codes)
+        await keyboard.releaseKey(...codes)
+      })
     },
     async scroll(direction) {
-      const steps = 3
-      if (direction === 'up') {
-        await mouse.scrollUp(steps)
-      } else if (direction === 'down') {
-        await mouse.scrollDown(steps)
-      } else if (direction === 'left') {
-        await mouse.scrollLeft(steps)
-      } else {
-        await mouse.scrollRight(steps)
-      }
+      await tracked(async () => {
+        const steps = 3
+        if (direction === 'up') {
+          await mouse.scrollUp(steps)
+        } else if (direction === 'down') {
+          await mouse.scrollDown(steps)
+        } else if (direction === 'left') {
+          await mouse.scrollLeft(steps)
+        } else {
+          await mouse.scrollRight(steps)
+        }
+      })
     }
   }
 }

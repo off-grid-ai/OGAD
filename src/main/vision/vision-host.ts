@@ -31,6 +31,7 @@ import { showSupervisorWindow, hideSupervisorWindow } from './supervisor-window'
 import { visionModelNotice } from './vision-model-notice'
 import { getTakeoverCoordinator } from '../browser/takeover'
 import { loadActuation, actuationAvailable, type ActuationPort } from '../input/actuation'
+import { startUserInputWatch } from '../input/user-input-watch'
 import { mapActionToScreen, type DisplayGeometry } from '../input/coordinate-mapping'
 
 export type { ActuationPort }
@@ -165,6 +166,9 @@ class VisionHost {
     // The kill switch: Esc halts the run and consumes the keypress. The overlay's
     // Stop routes to the SAME guard via the controller session.
     globalShortcut.register('Escape', () => guard.halt('stopped with Esc'))
+    // Pause on user input: any human mouse/keyboard touch (outside our own
+    // windows, and not the rail's own synthetic output) pauses the run.
+    const stopInputWatch = startUserInputWatch((why) => guard.pauseForUser(why))
     const releaseSession = registerVisionSession(guard)
     const coordinator = getTakeoverCoordinator()
     // Model-agnostic, but honest: warn (do not block) when the loaded model is
@@ -194,6 +198,7 @@ class VisionHost {
       return result
     } finally {
       globalShortcut.unregister('Escape')
+      stopInputWatch()
       releaseSession()
       hideSupervisorWindow()
     }
