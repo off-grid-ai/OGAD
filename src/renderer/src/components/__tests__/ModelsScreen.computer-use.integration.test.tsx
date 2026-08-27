@@ -13,6 +13,10 @@ const uiMate = computerUseModels.find((model) => model.id === 'bartowski/tencent
 const uiTars = computerUseModels.find((model) => model.id === 'mradermacher/UI-TARS-1.5-7B-GGUF')
 if (!uiMate || !uiTars) throw new Error('Computer Use catalog fixtures are missing')
 
+const comingSoonNames = computerUseModels
+  .filter((model) => model.availability === 'coming_soon')
+  .map((model) => model.name)
+
 let activeIds: string[] = []
 
 ;(globalThis as unknown as { window: { api: unknown } }).window.api = {
@@ -54,19 +58,14 @@ describe('<ModelsScreen/> Computer Use catalog journey', () => {
     expect(within(installed).getByText('UI-Mate-9B')).toBeTruthy()
     expect(within(available).getByText('UI-TARS-1.5-7B')).toBeTruthy()
     expect(within(available).getByText('UI-Mate-27B')).toBeTruthy()
-    expect(within(comingSoon).getAllByText('Coming soon')).toHaveLength(7)
-    for (const name of [
-      'Holo3.1-0.8B',
-      'Holo3.1-4B',
-      'Fara1.5-4B',
-      'Holo3.1-9B',
-      'Fara1.5-9B',
-      'Qwen3.8-27B',
-      'Holo3.1-35B-A3B'
-    ]) {
+    // Counts come FROM the catalog, never re-hardcoded here: an entry moving rails
+    // is a catalog decision, and a literal copied into the test would just move the
+    // duplication instead of tracking it.
+    expect(within(comingSoon).getAllByText('Coming soon')).toHaveLength(comingSoonNames.length)
+    for (const name of comingSoonNames) {
       expect(within(comingSoon).getByText(name)).toBeTruthy()
     }
-    expect(screen.getByText('10 models')).toBeTruthy()
+    expect(screen.getByText(`${computerUseModels.length} models`)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'All sources' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Any size' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Sort: Recommended' })).toBeTruthy()
@@ -80,7 +79,7 @@ describe('<ModelsScreen/> Computer Use catalog journey', () => {
     await user.click(screen.getByRole('button', { name: 'Clear' }))
     expect(await screen.findByText('UI-Mate-9B')).toBeTruthy()
     expect(screen.getByText('UI-TARS-1.5-7B')).toBeTruthy()
-    expect(screen.getByText('10 models')).toBeTruthy()
+    expect(screen.getByText(`${computerUseModels.length} models`)).toBeTruthy()
 
     const holoCard = screen.getByText('Holo3.1-0.8B').closest('[role="listitem"]')
     expect(holoCard).toBeTruthy()
