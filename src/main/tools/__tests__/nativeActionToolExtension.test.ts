@@ -66,9 +66,12 @@ describe('NativeActionToolExtension', () => {
       ])
     )
     expect(ext.systemHint()).not.toContain('web_task')
-    await expect(ext.execute('web_task', { goal: 'Buy something' })).resolves.toBe(
-      'Error: Browser Use and Computer Use require Off Grid AI Pro.'
-    )
+    // Authoritative, like every other task-action outcome: the refusal is the final word the
+    // model reports, not a note it can paraphrase into "I ran it" or talk the user past.
+    await expect(ext.execute('web_task', { goal: 'Buy something' })).resolves.toEqual({
+      text: 'Error: Browser Use and Computer Use require Off Grid AI Pro.',
+      authoritative: true
+    })
     expect(boundary.commands).toEqual([])
     expect(boundary.approvals).toEqual([])
   })
