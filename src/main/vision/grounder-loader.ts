@@ -156,26 +156,14 @@ export function createGrounderRunner(
 
     if (!loadSelected && !suspendRemote) return directRun(task, now)
 
-    // With no prior resident model there is nothing to restore. Keep the
-    // selected specialist resident after the run, matching the old behavior.
-    if (loadSelected && !previousLocalId && !previousRemote) {
-      const swapStartedAt = now()
-      await dependencies.load(grounderId)
-      const swapInMs = now() - swapStartedAt
-      const runStartedAt = now()
-      const result = await task()
-      return {
-        result,
-        timing: { skippedSwap: false, swapInMs, runMs: now() - runStartedAt, swapOutMs: 0 }
-      }
-    }
-
     const swapped = await runRestoredModelSwap({
       swapIn: async () => {
         if (suspendRemote) dependencies.suspendRemote()
         if (loadSelected) await dependencies.load(grounderId)
       },
       run: task,
+      // With no prior resident model there is nothing to restore: the callback
+      // no-ops and the selected specialist stays resident after the run.
       restore: async () => {
         if (loadSelected && previousLocalId) await dependencies.restoreLocal(previousLocalId)
         if (previousRemote) dependencies.restoreRemote(previousRemote)
