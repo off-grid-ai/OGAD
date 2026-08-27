@@ -14,6 +14,12 @@ import {
   BROWSER_POINTER_VISUAL,
   browserPointerSvgMarkup
 } from '../../shared/browser-pointer-visual'
+import {
+  WEB_USE_BLOCKED_CHROME_CHORDS,
+  WEB_USE_BLOCKED_CHROME_HINT,
+  WEB_USE_SHORTCUTS,
+  type WebUseChromeCommand
+} from '../../shared/web-use-control'
 import type { VisionAction } from '../vision/vision-action'
 
 export interface CdpTransport {
@@ -116,20 +122,7 @@ export function browserHotkeyTokens(keys: string): string[] {
     .filter(Boolean)
 }
 
-/** Browser chrome is not part of the captured page. Convert its portable
- * back/forward shortcuts into history movement instead of page key events. */
-export function browserHistoryDelta(keys: readonly string[]): -1 | 0 | 1 {
-  const command = browserShortcutCommand(keys)
-  return command === 'back' ? -1 : command === 'forward' ? 1 : 0
-}
-
-export type BrowserShortcutCommand =
-  | 'back'
-  | 'forward'
-  | 'reload'
-  | 'hard_reload'
-  | 'blocked_chrome'
-  | 'page'
+export type BrowserShortcutCommand = WebUseChromeCommand | 'blocked_chrome' | 'page'
 
 function canonicalShortcutTokens(keys: readonly string[]): Set<string> {
   const aliases: Record<string, string> = {
@@ -148,49 +141,17 @@ function shortcutSignature(keys: readonly string[]): string {
   return [...canonicalShortcutTokens(keys)].sort().join('+')
 }
 
+// The chord registry lives in the shared Web Use control contract, so the
+// intercepted chords and the phrasing shown to the model cannot drift apart.
 const browserShortcutCommands = new Map<string, BrowserShortcutCommand>()
-const registerBrowserShortcuts = (
-  command: BrowserShortcutCommand,
-  shortcuts: readonly (readonly string[])[]
-): void => {
-  for (const shortcut of shortcuts)
-    browserShortcutCommands.set(shortcutSignature(shortcut), command)
+for (const [command, entry] of Object.entries(WEB_USE_SHORTCUTS)) {
+  for (const chord of entry.chords) {
+    browserShortcutCommands.set(shortcutSignature(chord), command as WebUseChromeCommand)
+  }
 }
-
-registerBrowserShortcuts('back', [
-  ['alt', 'left'],
-  ['cmd', '[']
-])
-registerBrowserShortcuts('forward', [
-  ['alt', 'right'],
-  ['cmd', ']']
-])
-registerBrowserShortcuts('reload', [['f5'], ['ctrl', 'r'], ['cmd', 'r']])
-registerBrowserShortcuts('hard_reload', [
-  ['ctrl', 'shift', 'r'],
-  ['cmd', 'shift', 'r'],
-  ['ctrl', 'f5'],
-  ['shift', 'f5']
-])
-registerBrowserShortcuts('blocked_chrome', [
-  ['f11'],
-  ['f12'],
-  ['shift', 'escape'],
-  ...['ctrl', 'cmd'].flatMap((primary) =>
-    ['l', 'w', 't', 'n', 'p', 's', 'o', 'u', 'j', 'h', 'd', 'f', '+', '-', '=', '0'].map((key) => [
-      primary,
-      key
-    ])
-  ),
-  ...['ctrl', 'cmd'].flatMap((primary) =>
-    ['i', 'j', 'c', 'b', 'n', 't'].map((key) => [primary, 'shift', key])
-  ),
-  ...Array.from({ length: 9 }, (_, index) => ['cmd', String(index + 1)]),
-  ['ctrl', 'tab'],
-  ['ctrl', 'shift', 'tab'],
-  ['ctrl', 'pageup'],
-  ['ctrl', 'pagedown']
-])
+for (const chord of WEB_USE_BLOCKED_CHROME_CHORDS) {
+  browserShortcutCommands.set(shortcutSignature(chord), 'blocked_chrome')
+}
 
 /** Resolve shortcuts that belong to browser chrome. Page-level keys remain
  * ordinary CDP input. Invisible or unsafe chrome commands fail explicitly. */
@@ -269,7 +230,7 @@ export class BrowserDriver {
       mount();
       if (!window[observerKey]) {
         const observer = new MutationObserver(mount);
-        observer.observe(document.documentElement, { childList: true, subtree: true });
+        observer.observe(document.body || document.documentElement, { childList: true });
         window[observerKey] = observer;
       }
       cursor.style.transition = reduceMotion || ${transitionMs} <= 0
@@ -336,7 +297,7 @@ export class BrowserDriver {
     }
   }
 
-  /** Keep one semantic Off Grid pointer visible for the full Web Use session.
+  /** Keep one semantic Off Grid AI pointer visible for the full Web Use session.
    * Native navigation replaces the page DOM, so the host calls this again at
    * every document boundary and before it publishes a terminal task state. */
   async ensurePointer(onlyIfMissing = true): Promise<void> {
@@ -606,12 +567,7 @@ export class BrowserDriver {
       return { ok: true }
     }
     if (command === 'blocked_chrome') {
-      return {
-        ok: false,
-        reason: 'recoverable',
-        detail:
-          'That browser-chrome shortcut is not available in Web Use. Use Navigate, Alt+Left, Alt+Right, Ctrl+R, Ctrl+Shift+R, or visual page controls.'
-      }
+      return { ok: false, reason: 'recoverable', detail: WEB_USE_BLOCKED_CHROME_HINT }
     }
     return this.dispatchKeys(keys, chord)
   }

@@ -8,7 +8,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   BrowserDriver,
-  browserHistoryDelta,
   browserHotkeyTokens,
   browserPointerMotion,
   browserShortcutCommand,
@@ -148,9 +147,9 @@ describe('browser hotkeys', () => {
   it('accepts plus-delimited and space-delimited chord spellings', () => {
     expect(browserHotkeyTokens('ALT+LEFT')).toEqual(['ALT', 'LEFT'])
     expect(browserHotkeyTokens('cmd l')).toEqual(['cmd', 'l'])
-    expect(browserHistoryDelta(['ALT', 'LEFT'])).toBe(-1)
-    expect(browserHistoryDelta(['Option', 'Right'])).toBe(1)
-    expect(browserHistoryDelta(['Meta', '['])).toBe(-1)
+    expect(browserShortcutCommand(['ALT', 'LEFT'])).toBe('back')
+    expect(browserShortcutCommand(['Option', 'Right'])).toBe('forward')
+    expect(browserShortcutCommand(['Meta', '['])).toBe('back')
     expect(browserShortcutCommand(['CTRL', 'SHIFT', 'R'])).toBe('hard_reload')
     expect(browserShortcutCommand(['F12'])).toBe('blocked_chrome')
     expect(browserShortcutCommand(['Tab'])).toBe('page')
