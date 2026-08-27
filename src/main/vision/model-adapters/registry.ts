@@ -3,25 +3,20 @@ import { generalVisionOperatorAdapter } from './general-vision-operator'
 import { uiMateAdapter } from './ui-mate'
 import { uiTarsAdapter } from './ui-tars'
 
+// Specialists FIRST, each claiming only the models it can actually parse; the general operator
+// last because it is the fallback, not a family. Order is the whole contract here.
 const adapters: readonly VisionModelAdapter[] = [
   uiMateAdapter,
-  generalVisionOperatorAdapter,
-  uiTarsAdapter
+  uiTarsAdapter,
+  generalVisionOperatorAdapter
 ]
 
 /**
  * The adapter for a run, honouring the user's model strategy.
  *
  * "Same as Chat" means the resident chat model is driving, and a chat model is a general
- * tool-calling VLM — so the general operator is right for it whatever it happens to be called.
- * Family matching cannot answer this: the general adapter recognises models by name
- * (gemma-4, qwen3.x), so selecting any OTHER chat model fell through to the ui-tars adapter, which
- * declares `matches: () => true` and is also the fallback. Holo3.1-4B was then driven with the
- * UI-TARS prompt and parser, and since it does not emit that DSL, EVERY step failed with
- * "UI-TARS action did not parse.; re-observing" until the step budget ran out - 32 identical lines
- * and no progress.
- *
- * Strategy is a user decision, so it outranks a guess based on the model's name.
+ * tool-calling VLM — so the general operator is right for it even if a specialist's name pattern
+ * happens to match. A user's explicit strategy outranks family matching.
  */
 export function resolveVisionModelAdapterForStrategy(
   model: VisionModelArtifacts,
@@ -36,7 +31,11 @@ export function resolveVisionModelAdapterForStrategy(
 
 /** Model-family selection is owned here; VisionHost has no parser-name branches. */
 export function resolveVisionModelAdapter(model: VisionModelArtifacts): VisionModelAdapter {
-  const adapter = adapters.find((candidate) => candidate.matches(model)) ?? uiTarsAdapter
+  // Falls back to the GENERAL operator: an unknown model is far more likely to speak native tool
+  // calling than a specialist's text DSL, and guessing UI-TARS made unknown models fail on every
+  // step instead of merely performing less well.
+  const adapter =
+    adapters.find((candidate) => candidate.matches(model)) ?? generalVisionOperatorAdapter
   adapter.assertCapabilities(model)
   return adapter
 }

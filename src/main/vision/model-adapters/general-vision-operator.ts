@@ -88,9 +88,13 @@ export function buildCanonicalVisionOperatorRequest(
 
 export const generalVisionOperatorAdapter: VisionModelAdapter = {
   id: 'general-vision-operator',
-  matches(model) {
-    return /(?:gemma[-_]?4|qwen3(?:[._-]?(?:5|8|vl))?)/i.test(`${model.id} ${model.primaryFile}`)
-  },
+  /**
+   * The DEFAULT operator, not a family. Any vision model with a projector can be driven by native
+   * tool calling on the shared 0-1000 coordinate protocol, so listing names (gemma-4, qwen3.x) only
+   * decided which models got sent down a text-DSL path they could not speak. Specialists above this
+   * one in the registry claim their own models first; everything else belongs here.
+   */
+  matches: () => true,
   assertCapabilities(model) {
     if (!model.projectorFile || !model.availableFiles.includes(model.projectorFile)) {
       throw new Error('The active general vision model has no installed vision projector.')

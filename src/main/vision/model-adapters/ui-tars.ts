@@ -28,7 +28,16 @@ export function parseUiTarsPolicyResponse(
 
 export const uiTarsAdapter: VisionModelAdapter = {
   id: 'ui-tars',
-  matches: () => true,
+  /**
+   * Only ACTUAL UI-TARS models. This used to be `() => true`, which - combined with being the
+   * registry's fallback - meant every unrecognised model was driven with the UI-TARS prompt and
+   * text DSL. Selecting Holo3.1-4B then failed to parse on every single step
+   * ("UI-TARS action did not parse.; re-observing", 32 times, no progress), because Holo does not
+   * emit that DSL. A specialist parser must claim only what it can actually parse.
+   */
+  matches(model) {
+    return /ui[-_]?tars/i.test(`${model.id} ${model.primaryFile}`)
+  },
   assertCapabilities(model) {
     if (!model.projectorFile || !model.availableFiles.includes(model.projectorFile)) {
       throw new Error('The active computer-use model has no installed vision projector.')
