@@ -284,13 +284,19 @@ describe('parseGateDecision', () => {
   })
 })
 
-describe('needsApproval (only computer use is gated)', () => {
-  it('gates the computer-use rails, runs in-app actions straight through', () => {
-    expect(needsApproval('accessibility')).toBe(true)
-    expect(needsApproval('vision')).toBe(true)
-    expect(needsApproval('browser')).toBe(false) // web_task runs in-app
-    expect(needsApproval('semantic')).toBe(false) // native actions
-    expect(needsApproval(undefined)).toBe(false)
+describe('needsApproval (computer use AND sends are gated)', () => {
+  it('gates the computer-use rails and send actions; everything else runs through', () => {
+    expect(needsApproval({ rail: 'accessibility', type: 'computer' })).toBe(true)
+    expect(needsApproval({ rail: 'vision', type: 'computer' })).toBe(true)
+    // Sends are irreversible with no reliable read-back - always confirmed.
+    expect(needsApproval({ rail: 'semantic', type: 'message' })).toBe(true)
+    expect(needsApproval({ rail: 'semantic', type: 'email' })).toBe(true)
+    // web_task acts in Off Grid's own watched pane - supervised, not gated.
+    expect(needsApproval({ rail: 'browser', type: 'web' })).toBe(false)
+    // Undoable mutations and reads run through (calendar/reminders auto-run + Undo).
+    expect(needsApproval({ rail: 'semantic', type: 'calendar' })).toBe(false)
+    expect(needsApproval({ rail: 'semantic', type: 'lookup' })).toBe(false)
+    expect(needsApproval({ type: 'calendar' })).toBe(false)
   })
 
   it('gateHost auto-approves a browser (web_task) action even with a surface listening', async () => {
@@ -301,6 +307,37 @@ describe('needsApproval (only computer use is gated)', () => {
     expect(decision).toEqual({ kind: 'approve' })
     expect(pendingActionGateCount()).toBe(0)
     dispose()
+  })
+})
+
+describe('send gating (mail_send / messages_send confirm every time)', () => {
+  it('parks an email send for approval when a surface is listening', async () => {
+    const seen: InlineGateRequest[] = []
+    const dispose = registerInlineGateSurface((request) => void seen.push(request))
+    const parked = gateHost({
+      action: record({ rail: 'semantic', type: 'email', intent: 'email the deck to Sam' })
+    })
+    expect(pendingActionGateCount()).toBe(1)
+    expect(seen[0]).toMatchObject({ actionType: 'email' })
+    resolveActionGate('act_1', { kind: 'approve' })
+    expect(await parked).toEqual({ kind: 'approve' })
+    dispose()
+  })
+
+  it('the auto toggle covers computer use only - a send still parks in auto mode', async () => {
+    const unregister = registerApprovalModeProvider(() => 'auto')
+    const dispose = registerInlineGateSurface(() => {})
+    try {
+      const parked = gateHost({
+        action: record({ rail: 'semantic', type: 'message', intent: 'text Sam' })
+      })
+      expect(pendingActionGateCount()).toBe(1) // parked despite auto mode
+      resolveActionGate('act_1', { kind: 'reject' })
+      expect(await parked).toMatchObject({ kind: 'reject' })
+    } finally {
+      dispose()
+      unregister()
+    }
   })
 })
 

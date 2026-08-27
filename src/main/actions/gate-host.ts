@@ -199,26 +199,36 @@ export function computerApprovalMode(): ComputerApprovalMode {
   return approvalModeProvider?.() ?? 'ask'
 }
 
-/** Only COMPUTER-USE tasks ask for approval. The accessibility / vision rails
- *  drive the real desktop - they take over the user's cursor and keyboard - so
- *  the user confirms before that happens. Every other action runs IN-APP without
- *  taking over the machine (the browser rail acts in Off Grid's own page; native
- *  actions call an API), so it runs without a prompt. */
-export function needsApproval(rail: Rail | undefined): boolean {
+/** The rails that take over the user's cursor and keyboard. */
+function isComputerRail(rail: Rail | undefined): boolean {
   return rail === 'accessibility' || rail === 'vision'
+}
+
+/** The action types that SEND on the user's behalf (iMessage, email). A send is
+ *  irreversible and has no reliable read-back, so a wrong one cannot be undone
+ *  or even verified - the user confirms before it leaves. */
+const SEND_ACTION_TYPES: ReadonlySet<string> = new Set(['message', 'email'])
+
+/** The approval policy, in one place: COMPUTER-USE tasks gate (the
+ *  accessibility / vision rails take over the user's cursor and keyboard) and
+ *  SENDS gate (irreversible, invisible until too late). Everything else runs
+ *  without a prompt: reads are safe, undoable mutations (calendar, reminders)
+ *  auto-run with the Undo chip, and web_task acts inside Off Grid's own watched
+ *  browser pane - supervised by design, never touching the user's cursor. */
+export function needsApproval(action: { rail?: Rail; type: string }): boolean {
+  return isComputerRail(action.rail) || SEND_ACTION_TYPES.has(action.type)
 }
 
 /** The GateCallback the engine host is constructed with. */
 export async function gateHost({ action }: { action: ActionRecord }): Promise<GateDecision> {
-  // In-app actions run straight through; only computer use is gated. The env
-  // flag bypasses even that, for headless testing.
-  if (approvalBypassed() || !needsApproval(action.rail)) {
+  // The env flag bypasses the gate entirely, for headless testing.
+  if (approvalBypassed() || !needsApproval(action)) {
     return { kind: 'approve' }
   }
-  // The user's Sync-sharing policy: "Auto-approve" runs computer-use tasks with no
-  // prompt (they still journal, and the outcome shows in chat); "Ask every time"
-  // (the default) falls through to park for approval below.
-  if (computerApprovalMode() === 'auto') {
+  // The user's Sync-sharing policy: "Auto-approve" runs COMPUTER-USE tasks with
+  // no prompt (they still journal, and the outcome shows in chat). It never
+  // covers sends - those ask every time; the toggle's scope is computer use.
+  if (isComputerRail(action.rail) && computerApprovalMode() === 'auto') {
     return { kind: 'approve' }
   }
   const queued = proposeActionApproval({
