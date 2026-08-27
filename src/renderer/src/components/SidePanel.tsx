@@ -80,12 +80,9 @@ export function SidePanel({
   }, [restoreFocusRef])
 
   return createPortal(
-    <div
-      className="pointer-events-none fixed inset-0 z-[2147483647] overflow-hidden"
-      data-testid="side-panel-layer"
-    >
+    <div className="pointer-events-none" data-testid="side-panel-layer">
       <motion.div
-        className="pointer-events-auto absolute inset-0 bg-black/30"
+        className="pointer-events-auto fixed inset-0 z-[2147483646] bg-black/30"
         onClick={onClose}
         aria-hidden="true"
         data-testid="side-panel-backdrop"
@@ -100,7 +97,7 @@ export function SidePanel({
         role="dialog"
         aria-modal="true"
         aria-label={ariaLabel}
-        className={`pointer-events-auto absolute bottom-0 right-0 top-0 flex h-dvh max-w-full flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl ${className}`}
+        className={`pointer-events-auto fixed inset-y-0 right-0 z-[2147483647] flex max-w-full flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl ${className}`}
         style={style}
         initial={reduceMotion ? false : { x: '100%', opacity: 0.7 }}
         animate={{ x: '0%', opacity: 1 }}
