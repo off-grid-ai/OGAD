@@ -5,6 +5,11 @@ import {
   MAX_TOKENS_AUTO,
   MIN_CAPTURE_CTX_SIZE
 } from '@offgrid/core/shared/llm-defaults'
+import {
+  REASONING_BUDGET_AUTO,
+  REASONING_BUDGET_OPTIONS,
+  reasoningBudgetLabel
+} from '@offgrid/models'
 import { gpuLayersHint, type EngineAccelerator } from '@offgrid/core/shared/engine-accelerator'
 import {
   contextWindowOptions,
@@ -36,6 +41,7 @@ type LlmSettings = {
   minP?: number
   repeatPenalty?: number
   maxTokens?: number
+  reasoningBudget?: number
   systemPrompt?: string
   kvCacheType?: KvCacheType
   flashAttn?: boolean
@@ -343,6 +349,26 @@ export function SettingsPanel({
                     label: `${value / 1024}K tokens`
                   }))
                 ]}
+              />
+            </Row>
+            <Row
+              label="Thinking budget"
+              controlId="thinking-budget"
+              hint={
+                (s.reasoningBudget ?? REASONING_BUDGET_AUTO) === REASONING_BUDGET_AUTO
+                  ? 'Auto: when Thinking is on, the model reasons for as long as it wants.'
+                  : 'Cap on the tokens spent thinking. At the cap the model stops reasoning and answers. Applies when Thinking is on in the composer.'
+              }
+            >
+              <SettingsSelect
+                id="thinking-budget"
+                label="Thinking budget"
+                value={String(s.reasoningBudget ?? REASONING_BUDGET_AUTO)}
+                onValueChange={(value) => set({ reasoningBudget: Number(value) })}
+                options={[REASONING_BUDGET_AUTO, ...REASONING_BUDGET_OPTIONS].map((value) => ({
+                  value: String(value),
+                  label: reasoningBudgetLabel(value)
+                }))}
               />
             </Row>
             <Row label="Context window" controlId="context-window" hint={contextWindowHint(s)}>

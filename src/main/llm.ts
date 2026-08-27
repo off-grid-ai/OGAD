@@ -19,6 +19,7 @@ import { classifyLlamaError, modelPortConflictReason } from './llama-error'
 import type { ManagedRuntime } from './runtime-manager'
 import { LLAMA_SERVER_PORT } from '../shared/ports'
 import { DEFAULT_CTX_SIZE } from '../shared/llm-defaults'
+import { REASONING_BUDGET_AUTO, reasoningBudgetPayload } from '@offgrid/models'
 import { acceleratorForEngine, type EngineAccelerator } from '../shared/engine-accelerator'
 import {
   applyModePreset,
@@ -60,6 +61,7 @@ export interface LlmSettings {
   minP?: number
   repeatPenalty?: number
   maxTokens?: number
+  reasoningBudget?: number
   systemPrompt?: string
   // Launch-time (require a server respawn to take effect):
   kvCacheType?: KvCacheType // quantize the KV cache to cut memory (needs flash-attn)
@@ -136,6 +138,9 @@ export class LLMService {
   // Auto by default: a reply runs until the model stops (EOS) or the window fills, instead of a
   // fixed 2048-token cap that truncated long answers regardless of the (large) context window.
   private maxTokens = MAX_TOKENS_AUTO
+  // Thinking budget: caps the tokens a reasoning model spends thinking before it answers.
+  // Auto (0) = unrestricted. Applied per request; no reload needed.
+  private reasoningBudget = REASONING_BUDGET_AUTO
   private systemPrompt = ''
   // Resource-usage preset. Governs the RAM budget the context clamp targets and
   // the default ctx/KV preset. 'balanced' preserves prior behavior.
@@ -179,6 +184,7 @@ export class LLMService {
       if (typeof s.minP === 'number') this.minP = s.minP
       if (typeof s.repeatPenalty === 'number') this.repeatPenalty = s.repeatPenalty
       if (typeof s.maxTokens === 'number') this.maxTokens = s.maxTokens
+      if (typeof s.reasoningBudget === 'number') this.reasoningBudget = s.reasoningBudget
       if (typeof s.systemPrompt === 'string') this.systemPrompt = s.systemPrompt
       if (s.kvCacheType === 'f16' || s.kvCacheType === 'q8_0' || s.kvCacheType === 'q4_0')
         this.kvCacheType = s.kvCacheType
@@ -300,6 +306,7 @@ export class LLMService {
       minP: this.minP,
       repeatPenalty: this.repeatPenalty,
       maxTokens: this.maxTokens,
+      reasoningBudget: this.reasoningBudget,
       systemPrompt: this.systemPrompt,
       kvCacheType: this.kvCacheType,
       flashAttn: this.flashAttn,
@@ -434,6 +441,7 @@ export class LLMService {
     if (typeof s.minP === 'number') this.minP = s.minP
     if (typeof s.repeatPenalty === 'number') this.repeatPenalty = s.repeatPenalty
     if (typeof s.maxTokens === 'number') this.maxTokens = s.maxTokens
+    if (typeof s.reasoningBudget === 'number') this.reasoningBudget = s.reasoningBudget
     if (typeof s.systemPrompt === 'string') this.systemPrompt = s.systemPrompt
     if (s.kvCacheType === 'f16' || s.kvCacheType === 'q8_0' || s.kvCacheType === 'q4_0')
       this.kvCacheType = s.kvCacheType
@@ -886,7 +894,7 @@ export class LLMService {
       await new Promise((resolve) => setTimeout(resolve, 400))
     }
     // If the port is now free (nothing held it, or we reclaimed our own orphan) keep it. Otherwise
-    // it's held by SOMETHING we must not kill — another live Off Grid engine, LM Studio, or any
+    // it's held by SOMETHING we must not kill — another live Off Grid AI engine, LM Studio, or any
     // unrelated app — so don't fight it or dead-end: scan upward for the next free port and move
     // there. The gateway proxies to llm.getPort() (live) and the app talks to this.port directly, so
     // both follow. (Keying on "is the port free?" rather than "is the holder a live llama?" is what
@@ -1153,7 +1161,11 @@ export class LLMService {
         // channel so a long thought does not hide the final policy answer.
         if (opts.enableThinking !== undefined) {
           if (opts.separateReasoning) {
-            Object.assign(payload, thinkingPayload(opts.enableThinking, this.thinkingDialect))
+            Object.assign(
+              payload,
+              thinkingPayload(opts.enableThinking, this.thinkingDialect),
+              reasoningBudgetPayload(opts.enableThinking, this.reasoningBudget)
+            )
           } else {
             payload.chat_template_kwargs = { enable_thinking: opts.enableThinking }
           }
@@ -1237,7 +1249,8 @@ export class LLMService {
         // Thinking control: when on, ask the template to emit reasoning and have
         // llama.cpp split it into reasoning_content (deepseek-style); when off,
         // suppress it so the token budget goes to the answer.
-        ...thinkingPayload(!!opts.thinking, this.thinkingDialect)
+        ...thinkingPayload(!!opts.thinking, this.thinkingDialect),
+        ...reasoningBudgetPayload(!!opts.thinking, this.reasoningBudget)
       }
       const body = JSON.stringify(payload)
 
@@ -1298,7 +1311,8 @@ export class LLMService {
         ...this.samplingPayload(),
         ...(opts.topP === undefined ? {} : { top_p: opts.topP }),
         stream: true,
-        ...thinkingPayload(!!opts.thinking, this.thinkingDialect)
+        ...thinkingPayload(!!opts.thinking, this.thinkingDialect),
+        ...reasoningBudgetPayload(!!opts.thinking, this.reasoningBudget)
       }
       if (opts.responseFormat) payload.response_format = opts.responseFormat
       if (opts.tools && opts.tools.length) {
