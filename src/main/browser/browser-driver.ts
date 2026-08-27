@@ -12,7 +12,7 @@
 import { pageScriptSource, type PageElement, type PageSnapshot } from './page-script'
 import {
   BROWSER_POINTER_VISUAL,
-  browserPointerSvgMarkup
+  browserPointerBackgroundImage
 } from '../../shared/browser-pointer-visual'
 import {
   WEB_USE_BLOCKED_CHROME_CHORDS,
@@ -211,7 +211,7 @@ export class BrowserDriver {
     onlyIfMissing = false,
     transitionMs = 0
   ): Promise<boolean> {
-    const pointerMarkup = browserPointerSvgMarkup()
+    const pointerImage = browserPointerBackgroundImage()
     // Guard the divide: a zero or missing zoom must not produce an invisible or infinite cursor.
     const zoom = this.zoomFactor()
     const counterScale = zoom > 0 ? 1 / zoom : 1
@@ -225,8 +225,7 @@ export class BrowserDriver {
         cursor = document.createElement('div');
         cursor.id = id;
         cursor.setAttribute('aria-hidden', 'true');
-        cursor.style.cssText = 'position:fixed;left:0;top:0;width:${BROWSER_POINTER_VISUAL.width * counterScale}px;height:${BROWSER_POINTER_VISUAL.height * counterScale}px;pointer-events:none;z-index:2147483647;will-change:transform;filter:drop-shadow(0 0 ${5 * counterScale}px ${BROWSER_POINTER_VISUAL.glow}) drop-shadow(0 ${counterScale}px ${counterScale}px rgba(0,0,0,.5));';
-        cursor.innerHTML = ${JSON.stringify(pointerMarkup)};
+        cursor.style.cssText = 'position:fixed;left:0;top:0;width:${BROWSER_POINTER_VISUAL.width * counterScale}px;height:${BROWSER_POINTER_VISUAL.height * counterScale}px;pointer-events:none;z-index:2147483647;will-change:transform;background-repeat:no-repeat;background-size:100% 100%;background-image:${pointerImage};filter:drop-shadow(0 0 ${5 * counterScale}px ${BROWSER_POINTER_VISUAL.glow}) drop-shadow(0 ${counterScale}px ${counterScale}px rgba(0,0,0,.5));';
       }
       const lastClick = ${JSON.stringify(this.lastClick)};
       let marker = document.getElementById(markerId);
@@ -275,14 +274,21 @@ export class BrowserDriver {
       }
       return reduceMotion;
     })()`
-    const response = await this.send<{ result?: { value?: boolean } }>('Runtime.evaluate', {
-      expression,
-      returnByValue: true
-    }).catch(() => {
-      // Pointer feedback is best-effort. A page that blocks evaluation must not
-      // prevent the actual, already-authorized browser action.
+    // Report BOTH failure paths. Pointer feedback stays best-effort - a page that blocks evaluation
+    // must not prevent the already-authorized action - but silence is what hid a total failure of
+    // the cursor for days: Runtime.evaluate RESOLVES on a page exception, returning
+    // exceptionDetails, so swallowing the rejection and ignoring that field left no trace anywhere.
+    const response = await this.send<{
+      result?: { value?: boolean }
+      exceptionDetails?: { exception?: { description?: string }; text?: string }
+    }>('Runtime.evaluate', { expression, returnByValue: true }).catch((error: unknown) => {
+      console.warn('[browser] pointer evaluation failed', error)
       return undefined
     })
+    const thrown = response?.exceptionDetails
+    if (thrown) {
+      console.warn('[browser] pointer injection threw', thrown.exception?.description ?? thrown.text)
+    }
     return response?.result?.value === true
   }
 

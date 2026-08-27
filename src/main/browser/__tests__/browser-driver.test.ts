@@ -14,6 +14,10 @@ import {
   type CdpTransport
 } from '../browser-driver'
 import type { PageElement } from '../page-script'
+import {
+  BROWSER_POINTER_VISUAL,
+  browserPointerBackgroundImage
+} from '../../../shared/browser-pointer-visual'
 
 interface Sent {
   method: string
@@ -66,10 +70,16 @@ describe('snapshot', () => {
 
     const expression = String(t.sent[0]?.params?.expression)
     expect(expression).toContain('__offgrid_agent_pointer__')
-    expect(expression).toContain('viewBox=\\"0 0 24 24\\"')
-    expect(expression).toContain('fill=\\"#0A0A0A\\"')
-    expect(expression).toContain('stroke=\\"#FFFFFF\\"')
-    expect(expression).toContain('drop-shadow(0 0 5px #059669)')
+    // The cursor is painted with CSS, never parsed as HTML: `innerHTML` is a Trusted Types sink, so
+    // on any page that requires Trusted Types (every Google property) assigning it threw and the
+    // cursor never appeared at all - not in the live view, not in captured screenshots. Assert the
+    // sink is gone, and assert against the shared visual rather than re-hardcoding its geometry.
+    expect(expression).not.toContain('innerHTML')
+    expect(expression).toContain(`background-image:${browserPointerBackgroundImage()}`)
+    expect(browserPointerBackgroundImage()).toContain(
+      encodeURIComponent(`viewBox="${BROWSER_POINTER_VISUAL.viewBox}"`)
+    )
+    expect(expression).toContain(`drop-shadow(0 0 5px ${BROWSER_POINTER_VISUAL.glow})`)
     expect(expression).toContain("const observerKey = '__offgrid_agent_pointer_observer__'")
     expect(expression).toContain('new MutationObserver(mount)')
     expect(expression).toContain('(document.body || document.documentElement).appendChild(cursor)')
