@@ -11,7 +11,7 @@ import {
   type VisionTaskProgress,
   type VisionTaskResult
 } from '../vision/vision-agent'
-import { resolveVisionModelAdapter } from '../vision/model-adapters'
+import { resolveVisionModelAdapterForStrategy } from '../vision/model-adapters'
 import { generalVisionOperatorAdapter } from '../vision/model-adapters/general-vision-operator'
 import type { VisionModelAdapter } from '../vision/model-adapters/types'
 import { getActiveRemoteVisionServer } from '../vision/remote-vision-server'
@@ -55,7 +55,15 @@ export function resolveActiveBrowserVisionSelection(): BrowserVisionSelection {
     throw new Error('Web Use requires an active model with installed vision support.')
   }
   try {
-    return { adapter: resolveVisionModelAdapter(artifacts), modelId: artifacts.id }
+    return {
+      // The user's strategy decides the adapter: "Same as Chat" means a general tool-calling VLM
+      // is driving, whatever it is named.
+      adapter: resolveVisionModelAdapterForStrategy(
+        artifacts,
+        getComputerUseSettings().modelStrategy
+      ),
+      modelId: artifacts.id
+    }
   } catch (error) {
     const detail = error instanceof Error ? error.message : 'Vision support is unavailable.'
     throw new Error(`Web Use requires an active vision model. ${detail}`)

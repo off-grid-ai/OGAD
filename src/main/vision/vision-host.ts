@@ -49,7 +49,7 @@ import {
   type ScreenshotGeometry
 } from './screenshot-geometry'
 import { recentVisualFacts } from './visual-context'
-import { resolveVisionModelAdapter } from './model-adapters'
+import { resolveVisionModelAdapterForStrategy } from './model-adapters'
 import type { VisionModelAdapter } from './model-adapters/types'
 import { retryPlanningGoal, type TaskRetryCheckpoint } from '../tasks/task-retry'
 import { dispatchVisionAction } from './vision-actuation'
@@ -239,7 +239,8 @@ class VisionHost {
     }
     let modelAdapter: VisionModelAdapter
     try {
-      modelAdapter = resolveVisionModelAdapter(activeArtifacts)
+      // Same rule as Web Use: the user's strategy decides the adapter, not the model's name.
+      modelAdapter = resolveVisionModelAdapterForStrategy(activeArtifacts, settings.modelStrategy)
     } catch (error) {
       return {
         ok: false,
