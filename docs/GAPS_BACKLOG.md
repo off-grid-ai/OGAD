@@ -285,7 +285,7 @@ sidebar destinations and verified that each reaches its matching upgrade screen.
 provide the same journey. `ProPlaceholder` deliberately renders a non-interactive `motion.div`
 with no button, link, navigation intent, or keyboard affordance
 (`src/renderer/src/components/SettingsCard.tsx:147-193`). The visible `Device sync`, `You`, and
-`What Off Grid has learned` cards therefore show a Pro badge and description but cannot explain how
+`What Off Grid AI has learned` cards therefore show a Pro badge and description but cannot explain how
 to unlock the feature or take the user to the existing purchase/activation journey. The same run
 also found that `Proactive delivery` has canonical placeholder copy in
 `proSettingsCatalog.ts:61-70`, but Settings filters that slot out unconditionally at
@@ -350,7 +350,7 @@ position while `SettingsCard` animates from zero to auto height (`SettingsCard.t
 `visible` result therefore does not guarantee that the recovery action is in the user's viewport.
 
 **Impact:** Screen Recording is required for Replay and local vision capture. At the exact point a
-denied user returns from macOS and must relaunch to apply the grant, Off Grid appears empty and hides
+denied user returns from macOS and must relaunch to apply the grant, Off Grid AI appears empty and hides
 the only next action off-screen. This makes a recoverable permission state look like an application
 failure and can leave capture permanently blocked for a user who does not discover the stale scroll
 position.
@@ -365,7 +365,7 @@ layout-aware reveal/focus contract instead of adding another timeout or per-butt
 
 - `Review permissions` opens `/settings/permissions`, expands Setup & health, and places the Screen
   Recording card fully inside the Settings viewport after the accordion layout has settled.
-- After `Enable Screen Recording` opens System Settings and Off Grid becomes active again, every
+- After `Enable Screen Recording` opens System Settings and Off Grid AI becomes active again, every
   status transition (permission needed, checking, restart required, granted, or error) preserves a
   useful anchored viewport. `Relaunch Off Grid AI Desktop` is immediately visible, focused or
   predictably reachable, and clickable without manual scrolling; the canvas never becomes blank.
@@ -554,10 +554,10 @@ though that was argued from the failure mechanism rather than proved against the
 2,246 of the delivery rows on this Mac point at a `device_id` that is not in `sync_paired_devices`
 at all. They can never succeed, and they are counted:
 
-| device_id | in paired table | rows |
-|---|---|---|
-| `6e1c3b7150fb1f088b52a4c2e99eda78` | no | 2,077 (1,559 skipped · 367 failed · 150 queued · 95 sent · 2 rejected) |
-| `8Lj2tUzzpBQ1zJEPHGfrSw` | no | 119 (78 sent · 18 dismissed · 16 rejected · 5 skipped · 2 queued) |
+| device_id                          | in paired table | rows                                                                   |
+| ---------------------------------- | --------------- | ---------------------------------------------------------------------- |
+| `6e1c3b7150fb1f088b52a4c2e99eda78` | no              | 2,077 (1,559 skipped · 367 failed · 150 queued · 95 sent · 2 rejected) |
+| `8Lj2tUzzpBQ1zJEPHGfrSw`           | no              | 119 (78 sent · 18 dismissed · 16 rejected · 5 skipped · 2 queued)      |
 
 A device is forgotten and its deliveries stay. So "158 queued" and the failure total describe work
 aimed at machines this Mac no longer has any relationship with, and no retry can ever clear them.
@@ -597,6 +597,26 @@ for the service to expose a settled point to wait on.
 
 Found while landing the peer-link adoption. Not caused by it: nothing in that change touches
 knowledge-document sync, and the service under test builds no orchestrator.
+
+---
+
+### DEF-009 (P2) - ModelPicker re-implements the Computer Use model-resolution rule in the renderer
+
+**Evidence (2026-08-27):** `src/renderer/src/components/ModelPicker.tsx` (~lines 175-179) re-derives
+which model Computer Use will run: it checks `computerUseStrategy === 'same_as_chat'` and matches
+models by `id` / `primaryFile` itself. The main process already owns that rule - the grounder loader's
+`modelStrategy`, `selectedGrounderModelId`, and `resolveActiveBrowserVisionSelection` are the source
+of truth. Two layers now answer "which model grounds Computer Use", kept in step by hand; any change
+to the main-process rule (a new strategy, a different identity key) silently strands the renderer copy
+and the picker labels the wrong model.
+
+**Fix direction:** collapse to one source. Add a main-process IPC (e.g.
+`getComputerUseModelSelection()`) that returns the resolved model identity, expose it through the
+preload, and have ModelPicker render that answer instead of re-deriving it.
+
+**Why deferred:** needs a new IPC channel plus a preload surface change, out of scope for a
+quality-only pass. Filed during the 2026-08-27 code-quality sweep.
+
 ---
 
 ## RESOLVED
@@ -834,7 +854,7 @@ two specs that should run. Neither needed a model. They had stale selectors that
   the `Capture & processing` section that contains the residency controls; 2 of its 4 switch names
   were also stale (`Chat model residency` vs the rendered `Chat and capture model residency`).
 - `meeting-transcription` matched an onboarding CTA of `Start using Off Grid AI Desktop` while the
-  button renders `Start using Off Grid`, so it never left onboarding, then looked for `Meetings`
+  button renders `Start using Off Grid AI`, so it never left onboarding, then looked for `Meetings`
   exact where a locked-Pro item computes `Meetings Pro`.
 - Both Settings tests in `tour.spec.ts` clicked a second section while the first was open —
   sections are single-open, so the target was exit-animating out ("element detached").

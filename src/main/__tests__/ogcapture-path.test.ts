@@ -25,8 +25,8 @@ describe('capturePathFromUrl', () => {
   })
 
   it('decodes the escaping a real path needs', () => {
-    expect(capturePathFromUrl('ogcapture:///Users/user/Off%20Grid/a%20b.png')).toBe(
-      '/Users/user/Off Grid/a b.png'
+    expect(capturePathFromUrl('ogcapture:///Users/user/Off%20Grid%20AI/a%20b.png')).toBe(
+      '/Users/user/Off Grid AI/a b.png'
     )
     expect(capturePathFromUrl('ogcapture://C%3A/Users/oga/a%20b.png')).toBe(
       'C:/Users/oga/a b.png'
