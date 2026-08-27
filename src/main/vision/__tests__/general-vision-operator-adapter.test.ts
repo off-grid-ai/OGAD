@@ -7,9 +7,9 @@ import type { TaskExecutionPlan } from '../../../shared/task-execution-plan'
 import { llm } from '../../llm'
 import {
   generalVisionOperatorAdapter,
-  generalVisionPolicyFailure,
-  parseGeneralVisionOperatorResponse
+  generalVisionPolicyFailure
 } from '../model-adapters/general-vision-operator'
+import { parseGeneralVisionToolResponse } from '../model-adapters/general-vision-tools'
 import { resolveVisionModelAdapter } from '../model-adapters/registry'
 import type { VisionPolicyResponse } from '../model-adapters/types'
 import {
@@ -112,18 +112,18 @@ describe('general vision native tool policy', () => {
   })
 
   it('maps a typed normalized point to encoded pixels without an action-text parser', () => {
-    expect(parseGeneralVisionOperatorResponse(perform(), bounds)).toMatchObject({
+    expect(parseGeneralVisionToolResponse(perform(), bounds)).toMatchObject({
       kind: 'actions',
       actions: [{ type: 'click', point: { x: 287, y: 227 } }]
     })
   })
 
   it('routes milestone, rethink, and user handoff from their top-level tools', () => {
-    expect(parseGeneralVisionOperatorResponse(complete(), bounds)).toMatchObject({
+    expect(parseGeneralVisionToolResponse(complete(), bounds)).toMatchObject({
       kind: 'phase_complete'
     })
     expect(
-      parseGeneralVisionOperatorResponse(
+      parseGeneralVisionToolResponse(
         response('rethink', {
           direction: 'off_course',
           summary: 'The visible page is on the wrong path.',
@@ -133,7 +133,7 @@ describe('general vision native tool policy', () => {
       )
     ).toMatchObject({ kind: 'rethink', direction: 'off_course' })
     expect(
-      parseGeneralVisionOperatorResponse(
+      parseGeneralVisionToolResponse(
         response('call_user', {
           reason: 'Enter the one-time code.',
           visible_evidence: 'A one-time-code field is visible.'

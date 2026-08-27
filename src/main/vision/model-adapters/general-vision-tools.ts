@@ -1,4 +1,4 @@
-import type { Bounds, Point, VisionAction } from '../vision-action'
+import { denormalize, type Bounds, type Point, type VisionAction } from '../vision-action'
 import type { VisionPolicyDecision, VisionPolicyResponse, VisionPolicyToolCall } from './types'
 
 export const GENERAL_VISION_TOOL_NAMES = [
@@ -60,10 +60,7 @@ function normalizedPoint(value: unknown, bounds: Bounds): Point | null {
   ) {
     return null
   }
-  return {
-    x: Math.min(bounds.width - 1, Math.max(0, Math.round((x / 1000) * bounds.width))),
-    y: Math.min(bounds.height - 1, Math.max(0, Math.round((y / 1000) * bounds.height)))
-  }
+  return denormalize(x, y, bounds)
 }
 
 type ActionDecoder = (value: ObjectValue, bounds: Bounds) => VisionAction | null

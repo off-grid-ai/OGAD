@@ -1,4 +1,4 @@
-import type { VisionAction } from '../vision-action'
+import { WHEEL_STEP_PIXELS, type VisionAction } from '../vision-action'
 import { visionKeysSupported } from '../vision-keys'
 import { WEB_USE_CONTROL_INSTRUCTIONS } from '../../../shared/web-use-control'
 import { NORMALIZED_COORDINATE_GRID_INSTRUCTION } from '../../../shared/vision-coordinate-grid'
@@ -12,44 +12,43 @@ import {
 import type { VisionModelAdapter, VisionPolicyDecision } from './types'
 
 const MAX_WAIT_MS = 30_000
-const UI_MATE_SCROLL_STEP_PIXELS = 120
 
 /** UI-Mate commonly returns small signed wheel steps despite naming the field
  * `pixels`. Convert those native step values once at the model boundary so the
  * shared VisionAction carries a real pixel distance on every surface. */
 function uiMateScrollPixels(amount: number): number {
-  return Math.abs(amount) <= 10 ? amount * UI_MATE_SCROLL_STEP_PIXELS : amount
+  return Math.abs(amount) <= 10 ? amount * WHEEL_STEP_PIXELS : amount
+}
+
+type PointActionType =
+  | 'click'
+  | 'double_click'
+  | 'right_click'
+  | 'middle_click'
+  | 'triple_click'
+  | 'mouse_move'
+
+/** UI-Mate verbs that map 1:1 onto a shared point action. */
+const POINT_ACTION_TYPES: Partial<Record<UIMateAction['action'], PointActionType>> = {
+  left_click: 'click',
+  right_click: 'right_click',
+  middle_click: 'middle_click',
+  double_click: 'double_click',
+  triple_click: 'triple_click',
+  mouse_move: 'mouse_move'
 }
 
 function toVisionAction(action: UIMateAction): VisionAction | null {
+  const pointType = POINT_ACTION_TYPES[action.action]
+  if (pointType) {
+    return action.coordinate
+      ? { type: pointType, point: { x: action.coordinate[0], y: action.coordinate[1] } }
+      : null
+  }
   switch (action.action) {
-    case 'left_click':
-      return action.coordinate
-        ? { type: 'click', point: { x: action.coordinate[0], y: action.coordinate[1] } }
-        : null
-    case 'right_click':
-      return action.coordinate
-        ? { type: 'right_click', point: { x: action.coordinate[0], y: action.coordinate[1] } }
-        : null
-    case 'middle_click':
-      return action.coordinate
-        ? { type: 'middle_click', point: { x: action.coordinate[0], y: action.coordinate[1] } }
-        : null
-    case 'double_click':
-      return action.coordinate
-        ? { type: 'double_click', point: { x: action.coordinate[0], y: action.coordinate[1] } }
-        : null
-    case 'triple_click':
-      return action.coordinate
-        ? { type: 'triple_click', point: { x: action.coordinate[0], y: action.coordinate[1] } }
-        : null
     case 'drag':
       return action.coordinate
         ? { type: 'drag_to', to: { x: action.coordinate[0], y: action.coordinate[1] } }
-        : null
-    case 'mouse_move':
-      return action.coordinate
-        ? { type: 'mouse_move', point: { x: action.coordinate[0], y: action.coordinate[1] } }
         : null
     case 'type':
       return action.text === undefined ? null : { type: 'type', content: action.text }

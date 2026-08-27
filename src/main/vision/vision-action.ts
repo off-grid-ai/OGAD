@@ -45,10 +45,14 @@ export interface Bounds {
   height: number
 }
 
-/** UI-TARS normalizes coordinates to 0-1000 over the input image. Denormalize
- *  to real pixels within the target bounds; clamp so a slightly out-of-range
- *  prediction still lands on-screen rather than off it. */
-function denormalize(nx: number, ny: number, bounds: Bounds): Point {
+/** One synthetic wheel step is 120 pixels - the native convention nut.js and
+ *  the UI-Mate adapter both convert against. */
+export const WHEEL_STEP_PIXELS = 120
+
+/** The vision models normalize coordinates to 0-1000 over the input image.
+ *  Denormalize to real pixels within the target bounds; clamp so a slightly
+ *  out-of-range prediction still lands on-screen rather than off it. */
+export function denormalize(nx: number, ny: number, bounds: Bounds): Point {
   const clamp = (v: number, max: number): number => Math.min(Math.max(Math.round(v), 0), max)
   return {
     x: clamp((nx / 1000) * bounds.width, bounds.width - 1),

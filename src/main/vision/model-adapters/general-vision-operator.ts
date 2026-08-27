@@ -6,22 +6,9 @@ import {
   generalVisionPolicyFailure,
   parseGeneralVisionToolResponse
 } from './general-vision-tools'
-import type {
-  VisionModelAdapter,
-  VisionPolicyDecision,
-  VisionPolicyInput,
-  VisionPolicyResponse
-} from './types'
+import type { VisionModelAdapter, VisionPolicyInput } from './types'
 
 export { generalVisionPolicyFailure } from './general-vision-tools'
-
-export function parseGeneralVisionOperatorResponse(
-  response: VisionPolicyResponse,
-  bounds: Parameters<VisionModelAdapter['parseResponse']>[1],
-  coordinateFrame?: Parameters<VisionModelAdapter['parseResponse']>[2]
-): VisionPolicyDecision {
-  return parseGeneralVisionToolResponse(response, coordinateFrame?.encoded ?? bounds)
-}
 
 function browserControlContext(input: VisionPolicyInput): string {
   if (input.operatorEnvironment !== 'embedded_browser') return ''
@@ -117,5 +104,6 @@ export const generalVisionOperatorAdapter: VisionModelAdapter = {
       error: 'The general vision model did not return a native tool decision.'
     }
   },
-  parsePolicyResponse: parseGeneralVisionOperatorResponse
+  // The policy runner already passes the encoded coordinate frame as bounds.
+  parsePolicyResponse: parseGeneralVisionToolResponse
 }

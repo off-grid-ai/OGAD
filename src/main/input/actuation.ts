@@ -8,6 +8,7 @@
  * actuation (one adapter, one place the addon is required) rather than forking a
  * second synthetic-input surface.
  */
+import { WHEEL_STEP_PIXELS } from '../vision/vision-action'
 import { hotkeyToKeyNames } from '../vision/vision-keys'
 
 export interface ActuationPort {
@@ -138,7 +139,7 @@ export function adaptNutActuation(nut: NutApi): ActuationPort {
       // VisionAction scroll_by uses pixels on every surface. nut.js accepts
       // wheel steps, so convert at this native boundary instead of allowing
       // browser and desktop behavior to drift.
-      const magnitude = Math.ceil(Math.abs(amount) / 120)
+      const magnitude = Math.ceil(Math.abs(amount) / WHEEL_STEP_PIXELS)
       if (magnitude === 0) return
       if (axis === 'horizontal') {
         await (amount > 0 ? mouse.scrollRight(magnitude) : mouse.scrollLeft(magnitude))
