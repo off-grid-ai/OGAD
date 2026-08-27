@@ -17,6 +17,8 @@ import { stripTags, htmlToText, decodeDdgHref } from './tools-parsers'
 import { evaluateArithmetic } from './calculator'
 import { selectToolExtensions } from './tools/extension-select'
 import { planTask } from './tools/planner'
+import type { ToolCall, UnifiedSource } from './tools/tool-types'
+export type { ToolCall, UnifiedSource } from './tools/tool-types'
 import { makePlanExecutor } from './tools/plan-executor'
 import { shouldPlan, backfillGoals, preferNativeApp } from './tools/planner-logic'
 import { resolveNativeApp } from './accessibility/ax-host'
@@ -415,19 +417,6 @@ export function getToolExtensions(): ToolExtension[] {
   return toolExtensions
 }
 
-export type ToolCall = { name: string; args: Record<string, unknown>; result: string }
-// Structured sources surfaced by search_memory so the chat can render them as
-// interactive citation cards (thumbnail + open-in-Replay), same as the RAG path.
-export type UnifiedSource = {
-  key: string
-  kind: string
-  refId: number
-  title: string
-  snippet: string
-  surface: string
-  ts: number
-  imagePath: string | null
-}
 
 /**
  * Run a chat turn with tool-calling. STREAMS by default (thinking -> tool-call activity

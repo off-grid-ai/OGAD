@@ -11,7 +11,7 @@
  * asserted with a fake dispatch.
  */
 import { resolveContactHandle, type Plan, type PlanStep } from './planner-logic'
-import type { ToolCall, UnifiedSource } from '../tools'
+import type { ToolCall, UnifiedSource } from './tool-types'
 
 /** What a dispatched tool returns - structurally the ToolResult of runTool. */
 export interface DispatchResult {
