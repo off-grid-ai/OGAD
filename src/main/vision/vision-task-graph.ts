@@ -12,6 +12,10 @@ import {
   createTaskPhaseReporter,
   formatTaskExecutionPlanContext
 } from '../tasks/task-execution-plan-service'
+import {
+  taskExecutionPlanProgress,
+  type TaskExecutionPlan
+} from '../../shared/task-execution-plan'
 import { TASK_GUIDANCE_APPLIED_TRACE } from '../tasks/task-guide'
 import type { ComputerUsePhase } from '../tasks/task-step-details'
 import type { VisionAction } from './vision-action'
@@ -112,6 +116,22 @@ function route(state: typeof WorkflowState.State): WorkflowRoute {
   return state.route
 }
 
+/**
+ * Which plan phase a resumed run should start on.
+ *
+ * Delegates to the shared progress rule rather than re-deriving one here, so the runtime and the
+ * task UI cannot disagree about the active phase. A fresh run (no resumed trace) starts at 0.
+ */
+function resumedPhaseIndex(
+  plan: TaskExecutionPlan | undefined,
+  resumedSteps: readonly string[] | undefined
+): number {
+  if (!plan?.phases.length || !resumedSteps?.length) return 0
+  const progress = taskExecutionPlanProgress(resumedSteps)
+  if (!progress) return 0
+  return Math.max(0, Math.min(progress.activePhaseIndex, plan.phases.length - 1))
+}
+
 class VisionTaskGraphRuntime {
   readonly maxPlanningSteps: number
   private readonly now: () => number
@@ -131,7 +151,18 @@ class VisionTaskGraphRuntime {
   }
   private handoffs = 0
   private modelStep = 0
-  private phaseIndex = 0
+  /**
+   * The plan phase this run is working on.
+   *
+   * Seeded from the resumed trace, NOT always 0. A retry constructs a fresh runtime, so starting at
+   * 0 made it re-announce phase 1 and redo the first milestone while the trace claimed "Resumed
+   * from the failed checkpoint" — then fail at the same later phase and loop. Observed on a real
+   * run: milestone 1 completed and phase 2 entered three times over 66 steps.
+   *
+   * taskExecutionPlanProgress is the same rule the task UI uses to decide the active phase, so
+   * "which phase are we in" has one answer rather than one per layer.
+   */
+  private phaseIndex: number
   private captured?: CapturedStep
   private decision?: VisionPolicyDecision
   private actionResponse?: string
@@ -148,6 +179,7 @@ class VisionTaskGraphRuntime {
     this.taskBrief = new CurrentTaskBrief(goal)
     this.retrievedFacts = deps.retrievedFacts ?? []
     this.parseResponse = deps.parseResponse ?? uiTarsAdapter.parseResponse
+    this.phaseIndex = resumedPhaseIndex(deps.plan, deps.resumedSteps)
     this.reportPhase = createTaskPhaseReporter(deps.plan, deps.onPhase)
     this.basePlanContext = deps.plan ? formatTaskExecutionPlanContext(deps.plan) : ''
     this.checkpointInterval = Math.max(1, Math.floor(deps.checkpointInterval ?? 9))
@@ -159,7 +191,7 @@ class VisionTaskGraphRuntime {
   }
 
   start(): void {
-    this.reportPhase(0)
+    this.reportPhase(this.phaseIndex)
   }
 
   stopAfterAbort(): void {

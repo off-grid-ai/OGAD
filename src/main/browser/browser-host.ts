@@ -800,6 +800,9 @@ class BrowserHost implements BrowserRailHost {
           adapter: selection.adapter,
           guard,
           plan,
+          // A retry must resume at the phase the failed attempt reached. Without this the runtime
+          // restarted at phase 1 and redid the first milestone on every retry.
+          ...(checkpoint?.steps?.length ? { resumedSteps: checkpoint.steps } : {}),
           activePage,
           waitForUser: async (why) => {
             if (!ownsRun()) return

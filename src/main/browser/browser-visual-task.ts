@@ -94,6 +94,8 @@ interface BrowserVisualTaskInput {
   adapter: VisionModelAdapter
   guard: VisionGuard
   plan: TaskExecutionPlan
+  /** Trace of the attempt being resumed, so a retry restarts at the phase it reached. */
+  resumedSteps?: readonly string[]
   activePage: () => { view: WebContentsView; driver: BrowserDriver }
   takeGuidance: () => readonly string[]
   waitForUser: (why: string) => Promise<void>
@@ -124,6 +126,7 @@ export function runBrowserVisualTask(input: BrowserVisualTaskInput): Promise<Vis
     waitForUser: input.waitForUser,
     onStep: input.onStep,
     plan: input.plan,
+    ...(input.resumedSteps?.length ? { resumedSteps: input.resumedSteps } : {}),
     onPhase: input.onPhase,
     onProgress: input.onProgress,
     onReasoning: input.onReasoning,

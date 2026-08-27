@@ -151,6 +151,9 @@ export interface VisionTaskDeps {
   maxPlanningSteps?: number
   plan?: TaskExecutionPlan
   onPhase?: (phaseId: string) => void
+  /** The trace this run is resuming from, so a retry restarts at the phase it reached instead of
+   *  the first one. Absent for a fresh run. */
+  resumedSteps?: readonly string[]
   takeGuidance?: () => readonly string[]
   signal?: AbortSignal
 }
