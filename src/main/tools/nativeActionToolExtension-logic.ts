@@ -297,6 +297,13 @@ export function isTaskAction(nameOrActionType: string): boolean {
   return TASK_ACTION_TYPES.has(nameOrActionType)
 }
 
+/** Canonical portable task kind for an engine action type. */
+export function taskKindForActionType(actionType: string): 'web_use' | 'computer_use' | undefined {
+  const canonical = canonicalNativeToolName(actionType)
+  if (canonical === WEB_USE_TOOL_NAME) return 'web_use'
+  return canonical === 'computer_task' ? 'computer_use' : undefined
+}
+
 /**
  * Which tools each platform exposes to the model. macOS ships the full set
  * (the Swift helper). Windows ships the engine-routed set the local Outlook
