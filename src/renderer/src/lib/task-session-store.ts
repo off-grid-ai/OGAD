@@ -83,6 +83,9 @@ export function latestTaskSession(current: TaskSession, incoming: TaskSession): 
 function upsert(task: TaskSession): void {
   const current = state.tasks.find((item) => item.taskId === task.taskId)
   const nextTask = current ? latestTaskSession(current, task) : task
+  // A stale event changes nothing. In particular, it must not publish this task as the latest
+  // changed task, because task selection treats that signal as a request for user attention.
+  if (current && nextTask === current) return
   emit({
     tasks: sortTasks(
       current

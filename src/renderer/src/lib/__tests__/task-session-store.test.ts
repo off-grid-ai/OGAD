@@ -15,7 +15,8 @@ function task(status: TaskSession['status'], updatedAt: number): TaskSession {
 
 describe('latestTaskSession', () => {
   it('does not replace a newer durable failure with an older running event', () => {
-    expect(latestTaskSession(task('failed', 20), task('running', 10)).status).toBe('failed')
+    const current = task('failed', 20)
+    expect(latestTaskSession(current, task('running', 10))).toBe(current)
   })
 
   it('keeps a terminal status when an equal-time running session is stale', () => {
