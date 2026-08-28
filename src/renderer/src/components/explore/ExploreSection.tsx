@@ -77,15 +77,10 @@ export function ExploreSection({
     }
     return ok
   }
-  // The primary action can't be a dead click: mailto silently no-ops when the OS
-  // has no mail client, so it also copies the address and confirms - the click
-  // always does something useful whether or not a mail app opens.
-  const requestWorkflow =
-    onRequestWorkflow ??
-    (() => {
-      openExternal(buildWorkflowRequestMailto())
-      void copyEmail()
-    })
+  // Open the user's mail composer, pre-filled with the support address, subject and
+  // a short template. On a machine with no mail client this silently no-ops - the
+  // visible address + Copy row below is the fallback for that case.
+  const requestWorkflow = onRequestWorkflow ?? (() => openExternal(buildWorkflowRequestMailto()))
   return (
     <div className={`@container font-mono ${className}`}>
       {showIntro ? (
@@ -174,19 +169,10 @@ export function ExploreSection({
             type="button"
             onClick={requestWorkflow}
             data-testid="explore-request-workflow"
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] transition-all duration-150 active:scale-95 border-neutral-700 text-neutral-300 hover:border-green-500 hover:text-green-500"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-neutral-700 px-2.5 py-1.5 text-[11px] text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-green-500 active:scale-95"
           >
-            {copiedEmail ? (
-              <>
-                <Check className="h-3.5 w-3.5 text-green-500" weight="bold" />
-                Email address copied
-              </>
-            ) : (
-              <>
-                <PaperPlaneTilt className="h-3.5 w-3.5" />
-                Request a workflow
-              </>
-            )}
+            <PaperPlaneTilt className="h-3.5 w-3.5" />
+            Request a workflow
           </button>
         </div>
         <div className="mt-2.5 flex items-center gap-2 border-t border-neutral-800/60 pt-2.5">
