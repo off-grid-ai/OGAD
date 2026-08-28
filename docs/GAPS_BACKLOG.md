@@ -1510,3 +1510,33 @@ reconnect, and confirm that the protected credentials still work.
 Close this gap only with the device names, OS versions, exact build commits, Google project test
 status, redacted provider evidence, and completed checklist rows. Do not put client secrets, tokens,
 mail, calendar records, or other private data in release evidence.
+
+---
+
+## Remote task approval and live-frame sync need lifecycle closure
+
+**Status:** code resolved 2026-08-28; physical cross-device verification pending.
+
+The Release 107 implementation now has one Desktop-owned task state machine for Web Use and Computer
+Use. Commits `4fe7f3a4`, `78658e16`, `f2a13c2`, `aefe8fe`, `922eb382`, `62c350a`, and `d69e3ff4`
+provide the following closure:
+
+1. `takeover` is canonical at the shared and Desktop runtime ports. Pause, Resume, Stop, and Take Over
+   are covered for both task kinds.
+2. Chat tasks start directly. Task approvals no longer enter the general synced ActionApproval path.
+   Desktop Actions keep their Desktop-owned approval, then create one execution chat.
+3. Each control intent has a correlation id. The Desktop runtime publishes the authoritative applied
+   or rejected result. Subscriber UIs do not infer state transitions.
+4. Live-frame persistence keeps one current winner instead of appending every frame. Terminal tasks
+   evict their cached frame.
+5. An inbound task must match authenticated execution-device provenance before it is rendered or
+   controlled.
+6. Each paired Mobile has a persisted, default-on remote-task permission on this Desktop. An explicit
+   off value rejects execution. Both task schemas expose the optional `execution_device` routing field,
+   and the Desktop strips that field before the task extension runs.
+
+Local evidence: Desktop and Desktop Pro typecheck pass; permission and routing tests pass 107/107;
+the public MCP client/server integration passes 3/3; remote-task DB journeys pass 9/9; the production
+Electron build passes. Keep this entry open only for the final two-Desktop physical journey on the
+release build: default routing, exact named routing, permission off, live frame, all four controls,
+offline recovery, and terminal cleanup.
