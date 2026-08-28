@@ -340,6 +340,31 @@ describe('<MemoryChat/> Desktop voice turn modes', () => {
     expect(screen.queryByText('Check the calendar before answering.')).toBeNull()
   })
 
+  it('shows when a remote voice turn returns no readable thinking details', async () => {
+    installMicrophone()
+    const boundary = new ChatBoundary()
+    Object.assign(boundary.api, {
+      getSettings: vi.fn(async () => ({ composerVoiceMode: true })),
+      transcribeAudio: vi.fn(async () => 'Hello. How are you?'),
+      getTranscriptionInfo: vi.fn(transcriptionInfo)
+    })
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+
+    await user.click(await screen.findByRole('button', { name: 'Thinking' }))
+    await user.click(screen.getByRole('button', { name: 'Start voice recording' }))
+    await user.click(screen.getByRole('button', { name: 'Stop voice recording' }))
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+
+    boundary.resolve(0, 'I am doing well. How can I help?')
+    const unavailable = await screen.findByRole('button', { name: /Thinking unavailable/i })
+    await user.click(unavailable)
+    expect(
+      await screen.findByText('This model did not return readable thinking details for this turn.')
+    ).toBeTruthy()
+  })
+
   it('keeps historical voice reasoning collapsed until the user opens it', async () => {
     const boundary = new ChatBoundary()
     boundary.messages['conversation-a'] = [

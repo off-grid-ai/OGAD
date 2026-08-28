@@ -763,13 +763,7 @@ function VoiceMessageRow({
   } else if (message.image) {
     body = (
       <>
-        {message.reasoning?.trim() ? (
-          <ChatThinkingBlock
-            content={message.reasoning}
-            live={Boolean(message.streaming)}
-            label={message.reasoningLabel}
-          />
-        ) : null}
+        <MessageThinkingHeader message={message} />
         <ChatImagePreview
           src={message.image}
           path={message.imagePath}
@@ -782,13 +776,7 @@ function VoiceMessageRow({
   } else {
     body = (
       <>
-        {message.reasoning?.trim() ? (
-          <ChatThinkingBlock
-            content={message.reasoning}
-            live={Boolean(message.streaming)}
-            label={message.reasoningLabel}
-          />
-        ) : null}
+        <MessageThinkingHeader message={message} />
         <VoiceBubble
           messageId={message.id}
           transcript={messageToSpeakable(selectedMessageContent(message))}
@@ -862,7 +850,10 @@ function MessageThinkingHeader({ message }: Readonly<{ message: ChatMessage }>):
       </div>
     )
   }
-  if (!message.reasoning?.trim()) return <></>
+  const reasoning = message.reasoning?.trim()
+  if (!reasoning && !message.reasoningRequested) return <></>
+  const readableContent =
+    reasoning || 'This model did not return readable thinking details for this turn.'
   const supporting = isSupportingMessage(message)
   return (
     <div
@@ -876,7 +867,10 @@ function MessageThinkingHeader({ message }: Readonly<{ message: ChatMessage }>):
       }
       data-testid={supporting ? 'supporting-context-bubble' : undefined}
     >
-      <ChatThinkingBlock content={message.reasoning} label={message.reasoningLabel} />
+      <ChatThinkingBlock
+        content={readableContent}
+        label={reasoning ? message.reasoningLabel : 'Thinking unavailable'}
+      />
     </div>
   )
 }
