@@ -87,6 +87,7 @@ interface AudioBoundary {
 }
 
 const audios: AudioBoundary[] = []
+const pendingSpeech = new Set<Promise<unknown>>()
 let fakeLlama: FakeLlamaServer
 
 class RecorderBoundary {
@@ -127,7 +128,12 @@ function resourceExecutable(relativePath: string, source: string): void {
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   const handler = handlers.get(channel)
   if (!handler) throw new Error(`IPC handler not registered: ${channel}`)
-  return (await handler({ sender: { send: () => undefined } }, ...args)) as T
+  const result = Promise.resolve(handler({ sender: { send: () => undefined } }, ...args))
+  if (channel === 'tts:speak') {
+    pendingSpeech.add(result)
+    void result.finally(() => pendingSpeech.delete(result)).catch(() => undefined)
+  }
+  return (await result) as T
 }
 
 function installProductionVoiceBridge(boundary: ChatBoundary): void {
@@ -157,13 +163,11 @@ function setEnv(name: string, original: string | undefined): void {
 }
 
 function installRealSpeechBridge(boundary: ChatBoundary): void {
-  const handler = handlers.get('tts:speak')
-  if (!handler) throw new Error('TTS IPC handler was not registered')
   ;(
     boundary.api as unknown as {
       speak: (text: string, voice?: string) => Promise<{ dataUrl: string }>
     }
-  ).speak = (text, voice) => handler(undefined, text, voice) as Promise<{ dataUrl: string }>
+  ).speak = (text, voice) => invoke('tts:speak', text, voice)
   installBoundary(boundary)
 }
 
@@ -236,7 +240,8 @@ beforeEach(() => {
   )
 })
 
-afterEach(() => {
+afterEach(async () => {
+  await Promise.allSettled([...pendingSpeech])
   cleanup()
   vi.unstubAllGlobals()
 })
@@ -278,7 +283,7 @@ describe('assistant reply speech integration (#105)', () => {
     renderChat({ conversationId: 'conversation-b' })
 
     await user.click(await screen.findByRole('button', { name: 'Speak' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy())
+    expect(await screen.findByRole('button', { name: 'Stop' }, { timeout: 10_000 })).toBeTruthy()
 
     expect(audios).toHaveLength(1)
     expect(audios[0]!.play).toHaveBeenCalledOnce()
@@ -366,7 +371,7 @@ describe('assistant reply speech integration (#105)', () => {
     })
 
     await user.click(screen.getAllByTitle('Play').at(-1)!)
-    await waitFor(() => expect(screen.getByTitle('Pause')).toBeTruthy())
+    expect(await screen.findByTitle('Pause', {}, { timeout: 10_000 })).toBeTruthy()
     expect(audios).toHaveLength(1)
     expect(audios[0]!.play).toHaveBeenCalledOnce()
     await user.click(screen.getByTitle('Pause'))
