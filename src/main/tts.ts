@@ -22,6 +22,7 @@ const LANGUAGE_TAGS: Readonly<Record<string, string>> = {
   'en-us': 'en-US',
   'en-gb': 'en-GB'
 }
+const SUPPORTED_VOICES = new Set(speechCapabilities.voices.map(({ id }) => id))
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -49,11 +50,7 @@ function bundledCacheDirectory(): string | undefined {
 }
 
 function runtime(): ExecutorchSpeechRuntime {
-  return new ExecutorchSpeechRuntime(
-    cacheDirectory(),
-    executablePath(),
-    bundledCacheDirectory()
-  )
+  return new ExecutorchSpeechRuntime(cacheDirectory(), executablePath(), bundledCacheDirectory())
 }
 
 let busy = false
@@ -99,7 +96,10 @@ export async function synthesize(
   onProgress?: (progress: DownloadProgress) => void
 ): Promise<{ dataUrl: string }> {
   const selected = getActiveModal('speech')
-  const chosenVoice = chooseVoice(voice, selected) || DEFAULT_VOICE
+  const requestedVoice = chooseVoice(voice, selected) || DEFAULT_VOICE
+  // Older releases persisted Kokoro voices that the ExecuTorch catalogue does not contain.
+  // Keep those profiles able to speak after upgrade; the runtime manifest remains the voice SSOT.
+  const chosenVoice = SUPPORTED_VOICES.has(requestedVoice) ? requestedVoice : DEFAULT_VOICE
   const input = (text || '').trim()
   if (!input) throw new Error('Nothing to speak.')
   if (busy) throw new Error('Already generating speech. Please wait.')

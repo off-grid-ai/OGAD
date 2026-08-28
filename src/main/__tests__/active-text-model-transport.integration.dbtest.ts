@@ -212,10 +212,10 @@ describe('active text model transport', () => {
         }
       }
     })
-    expect(requests[0]?.body.reasoning_effort).toBe('medium')
-    expect(requests[1]?.body.reasoning_effort).toBe('medium')
+    expect(requests[0]?.body.reasoning).toEqual({ effort: 'medium' })
+    expect(requests[1]?.body.reasoning).toEqual({ effort: 'medium' })
     expect(requests[2]?.body).toMatchObject({
-      reasoning_effort: 'medium',
+      reasoning: { effort: 'medium' },
       top_p: 0.8,
       tool_choice: 'auto'
     })

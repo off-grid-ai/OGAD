@@ -197,8 +197,8 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
 
       expect(steps).toEqual(['web_task'])
       expect(result.toolCalls.map(({ name }) => name)).toEqual(['web_task'])
-      expect(result.answer).toBe('Web Use is ready.')
-      expect(fake.requests).toHaveLength(2)
+      expect(result.answer).toBe('Done. Task reference: web-skyscanner-1.')
+      expect(fake.requests).toHaveLength(1)
       expect(proposals).toEqual([
         {
           input: {
@@ -271,7 +271,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
         onActivity: ({ label }) => activities.push(label)
       })
 
-      expect(second.answer).toBe('Web Use is ready.')
+      expect(second.answer).toBe('Done. Task reference: web-flight-follow-up.')
       expect(second.toolCalls).toEqual([
         expect.objectContaining({ name: 'web_task', status: 'completed' })
       ])
@@ -333,10 +333,10 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
 
     try {
       const result = await toolChat('do it', [], { conversationId: 'chat-reactive-intake' })
-      expect(result.answer).toBe('I have initiated Web Use.')
+      expect(result.answer).toBe('Done. Task reference: reactive-web-task.')
       expect(result.toolCalls[0]?.status).toBe('completed')
       expect(proposals).toHaveLength(1)
-      expect(fake.requests).toHaveLength(2)
+      expect(fake.requests).toHaveLength(1)
     } finally {
       unregisterToolExtension(extension.id, extension)
     }

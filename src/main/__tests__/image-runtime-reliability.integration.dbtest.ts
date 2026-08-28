@@ -121,25 +121,29 @@ fs.writeFileSync(value('-o'), Buffer.from('${PNG_BASE64}', 'base64'))
 }
 
 function installFakeTtsBoundary(): void {
-  fs.mkdirSync(fixture.resourceDir, { recursive: true })
+  const executable = path.join(fixture.resourceDir, 'bin', 'executorch-speech')
+  fs.mkdirSync(path.dirname(executable), { recursive: true })
   fs.writeFileSync(
-    path.join(fixture.resourceDir, 'tts-worker.mjs'),
-    `import fs from 'node:fs'
-const [, , command, output] = process.argv
+    executable,
+    `#!/usr/bin/env node
+const fs = require('node:fs')
+const args = process.argv.slice(2)
+const value = flag => args[args.indexOf(flag) + 1]
 let input = ''
 process.stdin.setEncoding('utf8')
 process.stdin.on('data', chunk => { input += chunk })
 process.stdin.on('end', () => {
-  if (command !== 'speak' || !output) return
   if (fs.existsSync(process.env.OFFGRID_TEST_TTS_FAILURE_MARKER || '')) {
     fs.rmSync(process.env.OFFGRID_TEST_TTS_FAILURE_MARKER, { force: true })
     process.stderr.write('synthetic native TTS failure')
+    process.exitCode = 23
     return
   }
   fs.appendFileSync(process.env.OFFGRID_TEST_TTS_INPUT_LOG, input + '\\n')
-  fs.writeFileSync(output, Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(60, 1)]))
+  fs.writeFileSync(value('--output'), Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(60, 1)]))
 })
-`
+`,
+    { mode: 0o755 }
   )
 }
 

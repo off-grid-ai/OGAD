@@ -118,6 +118,12 @@ function executable(relativePath: string, source: string): void {
   fs.writeFileSync(target, source, { mode: 0o755 })
 }
 
+function resourceExecutable(relativePath: string, source: string): void {
+  const target = path.join(resourceDir, 'bin', relativePath)
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  fs.writeFileSync(target, source, { mode: 0o755 })
+}
+
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   const handler = handlers.get(channel)
   if (!handler) throw new Error(`IPC handler not registered: ${channel}`)
@@ -168,11 +174,13 @@ beforeAll(async () => {
   fs.writeFileSync(path.join(dataDir, 'models', 'ggml-base.bin'), 'synthetic whisper model')
   executable('ffmpeg', ['#!/bin/sh', 'for last; do :; done', 'printf RIFF > "$last"'].join('\n'))
   executable('whisper/whisper-cli', '#!/bin/sh\nprintf "Schedule the stable release review\\n"')
-  fs.writeFileSync(
-    path.join(resourceDir, 'tts-worker.mjs'),
+  resourceExecutable(
+    'executorch-speech',
     [
-      "import fs from 'node:fs'",
-      'const [, , command, output, voice] = process.argv',
+      '#!/usr/bin/env node',
+      "const fs = require('node:fs')",
+      'const args = process.argv.slice(2)',
+      'const value = flag => args[args.indexOf(flag) + 1]',
       "let input = ''",
       "process.stdin.setEncoding('utf8')",
       "process.stdin.on('data', chunk => { input += chunk })",
@@ -180,15 +188,14 @@ beforeAll(async () => {
       "  if (fs.existsSync(process.env.OFFGRID_TTS_TEST_FAILURE_MARKER || '')) {",
       '    fs.rmSync(process.env.OFFGRID_TTS_TEST_FAILURE_MARKER, { force: true })',
       "    process.stderr.write('local speech model is unavailable')",
+      '    process.exitCode = 23',
       '    return',
       '  }',
-      "  if (command !== 'speak' || !output) return",
       '  fs.writeFileSync(process.env.OFFGRID_TTS_TEST_INPUT_RECORD, input)',
-      "  fs.writeFileSync(process.env.OFFGRID_TTS_TEST_VOICE_RECORD, voice || '')",
-      "  fs.writeFileSync(output, Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(60, 1)]))",
+      "  fs.writeFileSync(process.env.OFFGRID_TTS_TEST_VOICE_RECORD, value('--voice') || '')",
+      "  fs.writeFileSync(value('--output'), Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(60, 1)]))",
       '})'
-    ].join('\n'),
-    { mode: 0o755 }
+    ].join('\n')
   )
   setupIPC()
   saveSetting('ttsVoice', 'af_bella')
@@ -201,6 +208,10 @@ beforeAll(async () => {
 })
 
 beforeEach(() => {
+  // The DB suite reuses one process across files. Recreate this file's explicit profile boundary
+  // before every journey so another file's teardown cannot leave a closed database with no parent.
+  fs.mkdirSync(dataDir, { recursive: true })
+  saveSetting('ttsVoice', 'af_bella')
   audios.length = 0
   RecorderBoundary.instances = []
   fs.rmSync(failureMarker, { force: true })
@@ -275,7 +286,7 @@ describe('assistant reply speech integration (#105)', () => {
     expect(metadata).toBe('data:audio/wav;base64')
     expect(Buffer.from(encoded!, 'base64').subarray(0, 4).toString('ascii')).toBe('RIFF')
     expect(fs.readFileSync(inputRecord, 'utf8')).toBe('Conversation B baseline')
-    expect(fs.readFileSync(voiceRecord, 'utf8')).toBe('af_bella')
+    expect(path.basename(fs.readFileSync(voiceRecord, 'utf8'))).toContain('af_heart.bin')
   })
 
   it('surfaces a real synthesis failure as an actionable rendered error', async () => {
@@ -326,18 +337,18 @@ describe('assistant reply speech integration (#105)', () => {
     const user = userEvent.setup()
     const view = renderChat({ conversationId })
 
-    await user.click(await screen.findByTitle('Voice mode off'))
+    await user.click(await screen.findByRole('button', { name: 'Voice', pressed: false }))
     await waitFor(() => expect(database.getSetting('composerVoiceMode', false)).toBe(true))
 
-    await user.click(screen.getByText('Click to record a voice note'))
+    await user.click(screen.getByRole('button', { name: 'Start voice recording' }))
     expect(RecorderBoundary.instances).toHaveLength(1)
     expect(RecorderBoundary.instances[0]!.state).toBe('recording')
-    await user.click(screen.getByText('Recording - click to send'))
+    await user.click(screen.getByRole('button', { name: 'Stop voice recording' }))
 
-    await waitFor(() => expect(screen.getAllByText('Show transcript')).toHaveLength(2), {
+    await waitFor(() => expect(screen.getAllByText('Show transcript')).toHaveLength(1), {
       timeout: 10_000
     })
-    for (const toggle of screen.getAllByText('Show transcript')) await user.click(toggle)
+    await user.click(screen.getByText('Show transcript'))
     expect(screen.getByText('Schedule the stable release review')).toBeTruthy()
     expect(inTranscript('The release review is scheduled locally.')).toBeTruthy()
     expect((await screen.findByRole('alert')).textContent).toMatch(
@@ -365,18 +376,20 @@ describe('assistant reply speech integration (#105)', () => {
     installProductionVoiceBridge(new ChatBoundary())
     renderChat({ conversationId })
 
-    expect(await screen.findByTitle('Voice mode on — speak and listen in voice notes')).toBeTruthy()
+    expect(await screen.findByRole('button', { name: 'Voice', pressed: true })).toBeTruthy()
     const reopenedTranscripts = await screen.findAllByText('Show transcript')
-    expect(reopenedTranscripts).toHaveLength(2)
-    await user.click(reopenedTranscripts[1]!)
+    expect(reopenedTranscripts).toHaveLength(1)
+    await user.click(reopenedTranscripts[0]!)
     expect(inTranscript('The release review is scheduled locally.')).toBeTruthy()
     expect(database.getSetting('ttsVoice', '')).toBe('af_bella')
     expect(database.getRagMessages(conversationId)).toHaveLength(2)
 
-    await user.click(screen.getByTitle('Voice mode on — speak and listen in voice notes'))
+    await user.click(screen.getByRole('button', { name: 'Voice', pressed: true }))
     await waitFor(() => expect(database.getSetting('composerVoiceMode', true)).toBe(false))
     const composer = await screen.findByPlaceholderText(/^ask /i)
-    fireEvent.change(composer, { target: { value: 'Typed chat remains usable after voice recovery' } })
+    fireEvent.change(composer, {
+      target: { value: 'Typed chat remains usable after voice recovery' }
+    })
     expect((screen.getByPlaceholderText(/^ask /i) as HTMLTextAreaElement).value).toBe(
       'Typed chat remains usable after voice recovery'
     )
