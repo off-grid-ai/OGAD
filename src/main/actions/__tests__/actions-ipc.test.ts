@@ -50,6 +50,7 @@ const record = (): ActionRecord => {
     risk: 'irreversible',
     id: 'act_ipc',
     source: 'chat',
+    sourceRef: 'conversation-ipc',
     payloadHash: computePayloadHash({ ...payload, triggerAt: undefined }),
     // Only computer-use gates now, so this parked-gate test uses that rail.
     rail: 'accessibility',
