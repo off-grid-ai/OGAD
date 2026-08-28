@@ -17,6 +17,19 @@ import type { PageElement, PageSnapshot } from './page-script'
 import { formatSnapshotForModel } from './page-script'
 import type { DriverResult } from './browser-driver'
 import { extractJsonObject } from '../json-extract'
+import {
+  DEFAULT_TERMINATION,
+  LoopTerminator,
+  type TerminationConfig
+} from '../actions/loop-termination'
+
+/** A stable projection of the observable page - url + the identity of every
+ *  interactive element - so an unchanged signature across steps means the last
+ *  actions accomplished nothing (no-progress termination). */
+export function webStateSignature(snapshot: PageSnapshot): string {
+  return `${snapshot.url}
+${snapshot.elements.map((e) => `${e.index}:${e.tag}:${e.name}`).join('|')}`
+}
 
 export interface AgentDriver {
   snapshot(): Promise<PageSnapshot>
@@ -34,6 +47,9 @@ export interface WebTaskDeps {
   waitForTakeover: (why: string) => Promise<void>
   /** Step-by-step narration for the watched surface. */
   onStep?: (note: string) => void
+  /** Override the termination policy (tests / power users). Omit for the safe
+   *  default: no-progress + repeat detection + a high runaway seatbelt. */
+  termination?: Partial<TerminationConfig>
   /** Checked before each step (and before the first navigate) so the overlay's
    *  Stop / Esc halts the loop between actions, like the AX rail's guard. */
   shouldStop?: () => boolean
@@ -191,7 +207,8 @@ export function buildStepPrompt(goal: string, snapshot: PageSnapshot, history: s
     .join('\n')
 }
 
-const DEFAULT_MAX_STEPS = 16
+// Web pages change fast; the shared defaults fit as-is.
+const DEFAULT_TERMINATION_FOR_WEB = DEFAULT_TERMINATION
 
 /* eslint-disable complexity -- the loop is one state machine on purpose:
    splitting the per-action arms into callbacks would hide the control flow
@@ -206,11 +223,22 @@ export async function runWebTask(
     note('stopped')
     return { ok: false, summary: 'stopped', steps, takeovers, finalUrl: lastUrl }
   }
-  const maxSteps = deps.maxSteps ?? DEFAULT_MAX_STEPS
   const steps: string[] = []
   let takeovers = 0
   let lastUrl = ''
-  // Loop guards, mirroring the AX rail: stop a runaway before it actuates.
+  // Termination: no-progress + repeated-action + a high runaway seatbelt. The
+  // maxSteps dep, when set, caps the seatbelt (tests / an explicit short run).
+  const terminator = new LoopTerminator({
+    ...DEFAULT_TERMINATION_FOR_WEB,
+    ...(deps.maxSteps !== undefined ? { hardCap: deps.maxSteps } : {}),
+    ...deps.termination
+  })
+  const finishedBy = (reason: string): WebTaskResult => {
+    note(`stopped: ${reason}`)
+    return { ok: false, summary: `stopped: ${reason}`, steps, takeovers, finalUrl: lastUrl }
+  }
+  // Consecutive-repeat skip (never fire the SAME live action twice in a row);
+  // the terminator's total-count guard catches the alternating A-B-A-B loop.
   let lastActionSig: string | null = null
   const typedTexts = new Set<string>()
 
@@ -237,12 +265,16 @@ export async function runWebTask(
     }
   }
 
-  for (let step = 0; step < maxSteps; step += 1) {
+  for (;;) {
     if (shouldStop?.()) {
       return stopped()
     }
     const snapshot = await driver.snapshot()
     lastUrl = snapshot.url
+    const progress = terminator.step(webStateSignature(snapshot))
+    if (progress.stop) {
+      return finishedBy(progress.reason)
+    }
     const raw = await decide(buildStepPrompt(goal, snapshot, steps))
     const decision = parseStepDecision(raw)
     if (!decision) {
@@ -268,6 +300,12 @@ export async function runWebTask(
     // twice) but keep going - a repeat should not kill the task; the step budget
     // still bounds a genuinely stuck run.
     const sig = webActionSignature(decision)
+    if (sig !== null) {
+      const repeated = terminator.action(sig)
+      if (repeated.stop) {
+        return finishedBy(repeated.reason)
+      }
+    }
     if (sig !== null && sig === lastActionSig) {
       note('skipped a repeated action; moving on')
       continue
@@ -319,21 +357,16 @@ export async function runWebTask(
       continue
     }
     const where = el ? `[${el.index}] ${el.name || el.tag}` : 'the focused field'
-    note(typed.ok ? `typed "${decision.text}" into ${where}` : `could not type into ${where}: ${typed.detail}`)
+    note(
+      typed.ok
+        ? `typed "${decision.text}" into ${where}`
+        : `could not type into ${where}: ${typed.detail}`
+    )
     // A trailing submit key (Enter) sends the search right after typing.
     if (typed.ok && decision.key) {
       await driver.pressKey(decision.key)
       note(`pressed ${decision.key}`)
     }
-  }
-
-  note('ran out of steps')
-  return {
-    ok: false,
-    summary: `stopped after ${maxSteps} steps without finishing`,
-    steps,
-    takeovers,
-    finalUrl: lastUrl
   }
 }
 /* eslint-enable complexity */

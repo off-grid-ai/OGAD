@@ -49,12 +49,16 @@ agent cross an identity or payment boundary on its own.
      with a takeover signal - no prompt injection can talk the agent past code
      that refuses to run. Clicking a login field is allowed (that is how the
      human takes over); credentials never enter the snapshot the model sees.
-  3. **The step budget** bounds how far a fully-fooled model could be steered
-     before the task stops.
+  3. **Termination guards** bound how far a fully-fooled model could be steered:
+     the loop stops on no observable progress, on a repeated (incl. alternating
+     A-B-A-B) action, and at a high absolute runaway seatbelt - so a legitimately
+     long task runs to completion while a hijacked/stuck one is halted
+     (`loop-termination.ts`).
   4. **The watched pane** - the user sees every step and can take over or cancel.
 - **Tested:** `browser-driver.test.ts` (the driver refuses identity fields,
-  dispatches nothing), `web-task-agent.test.ts` (budget stops the loop, takeover
-  parks), `rail-injection-stance.test.ts` (the prompt contract), and the
+  dispatches nothing), `web-task-agent.test.ts` + `loop-termination.test.ts`
+  (no-progress / repeated-action / seatbelt stop the loop, takeover parks),
+  `rail-injection-stance.test.ts` (the prompt contract), and the
   collector never puts a credential value in the snapshot
   (`page-script.test.ts`).
 
@@ -66,7 +70,8 @@ agent cross an identity or payment boundary on its own.
 - **Defenses (layered; the structural ones are load-bearing):**
   1. **The user is watching and the guard is the override.** The kill switch
      (Esc) is terminal and outranks everything; any user touch pauses until they
-     resume; a step budget halts a flailing model. `canActuate()` is re-checked
+     resume; the termination guards (no-progress / repeated-action / runaway
+     seatbelt) halt a flailing model. `canActuate()` is re-checked
      immediately before every dispatch, so an Esc mid-decision actuates nothing
      more.
   2. **Credentials are a handoff, never typed.** The prompt makes any sign-in /

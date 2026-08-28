@@ -14,6 +14,18 @@
 import type { AxElement, AxSnapshot } from './ax-elements'
 import { formatAxElementsForModel } from './ax-elements'
 import { extractJsonObject } from '../json-extract'
+import {
+  DEFAULT_TERMINATION,
+  LoopTerminator,
+  type TerminationConfig
+} from '../actions/loop-termination'
+
+/** A stable projection of the driven app - window title + the identity of every
+ *  element - so an unchanged signature across steps means no progress. */
+export function axStateSignature(snapshot: AxSnapshot): string {
+  return `${snapshot.windowTitle}
+${snapshot.elements.map((e) => `${e.index}:${e.role}:${e.name}`).join('|')}`
+}
 
 export interface ElementActuator {
   /** Click at the element's center. */
@@ -35,6 +47,8 @@ export interface ElementTaskDeps {
   decide: (prompt: string) => Promise<string>
   onStep?: (note: string) => void
   maxSteps?: number
+  /** Override termination (tests / power users); omit for the safe default. */
+  termination?: Partial<TerminationConfig>
 }
 
 export interface ElementTaskResult {
@@ -75,7 +89,6 @@ export const ELEMENT_STEP_FORMAT = {
     }
   }
 } as const
-
 
 /** Fail-closed parse: unknown shapes are null; the loop re-observes rather than
  *  acting on a guess. Tolerant of a reasoning/fence wrapper (see
@@ -163,8 +176,6 @@ export function buildElementPrompt(goal: string, snapshot: AxSnapshot, history: 
     .join('\n')
 }
 
-const DEFAULT_MAX_STEPS = 14
-
 /** A stable signature of an actuating step, used to detect a runaway loop. Two
  *  consecutive identical signatures mean the model is repeating itself (it sent
  *  the message, did not notice, and is sending it again) - the rail halts rather
@@ -191,11 +202,19 @@ export async function runElementTask(
   deps: ElementTaskDeps
 ): Promise<ElementTaskResult> {
   const { read, actuator, decide, onStep } = deps
-  const maxSteps = deps.maxSteps ?? DEFAULT_MAX_STEPS
   const steps: string[] = []
   const note = (line: string): void => {
     steps.push(line)
     onStep?.(line)
+  }
+  const terminator = new LoopTerminator({
+    ...DEFAULT_TERMINATION,
+    ...(deps.maxSteps !== undefined ? { hardCap: deps.maxSteps } : {}),
+    ...deps.termination
+  })
+  const finishedBy = (reason: string): ElementTaskResult => {
+    note(`stopped: ${reason}`)
+    return { ok: false, summary: `stopped: ${reason}`, steps }
   }
   let lastActionSig: string | null = null
   // Texts already typed this run. Re-typing the SAME text - even into a
@@ -205,8 +224,12 @@ export async function runElementTask(
   // check can't see.
   const typedTexts = new Set<string>()
 
-  for (let step = 0; step < maxSteps; step += 1) {
+  for (;;) {
     const snapshot = await read()
+    const progress = terminator.step(axStateSignature(snapshot))
+    if (progress.stop) {
+      return finishedBy(progress.reason)
+    }
     const decision = parseElementStep(await decide(buildElementPrompt(goal, snapshot, steps)))
     if (!decision) {
       note('model reply did not parse; re-observing')
@@ -224,10 +247,16 @@ export async function runElementTask(
     // did (e.g. send "hi" again). Stop before actuating the duplicate - a live
     // action like a message must never fire twice because the model looped.
     const sig = actionSignature(decision)
+    if (sig !== null) {
+      const repeated = terminator.action(sig)
+      if (repeated.stop) {
+        return finishedBy(repeated.reason)
+      }
+    }
     if (sig !== null && sig === lastActionSig) {
       // Repeat of the last action: SKIP re-firing it (so a live action never
-      // fires twice) but keep going - a repeat should not kill the task; the
-      // step budget still bounds a genuinely stuck run.
+      // fires twice) but keep going. The terminator's total-count guard above
+      // stops the alternating A-B-A-B loop the consecutive check misses.
       note('skipped a repeated action; moving on')
       continue
     }
@@ -288,8 +317,5 @@ export async function runElementTask(
       note(`clicked [${el.index}] ${el.name || el.role}`)
     }
   }
-
-  note('ran out of steps')
-  return { ok: false, summary: `stopped after ${maxSteps} steps without finishing`, steps }
 }
 /* eslint-enable complexity */

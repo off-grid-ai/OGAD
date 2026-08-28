@@ -118,12 +118,21 @@ describe('runElementTask', () => {
     })
   })
 
-  it('stops at the step budget', async () => {
-    // Distinct keys each step so the runaway guard does not fire first.
+  it('stops on NO PROGRESS when the screen never changes (not a step count)', async () => {
+    // Distinct keys each step so the consecutive-repeat skip never fires; the
+    // fake read() returns a constant snapshot, so nothing changes -> no-progress
+    // ends the run. A task that WAS changing the screen would keep going.
+    const w = world(Array.from({ length: 40 }, (_, i) => `{"action":"key","keys":"cmd ${i}"}`))
+    const result = await runElementTask('t', { ...w.deps, termination: { noProgressLimit: 5 } })
+    expect(result.ok).toBe(false)
+    expect(result.summary).toMatch(/no progress/i)
+  })
+
+  it('the hard backstop bounds a run the other guards would let continue', async () => {
     const w = world(Array.from({ length: 20 }, (_, i) => `{"action":"key","keys":"cmd ${i}"}`))
     const result = await runElementTask('t', { ...w.deps, maxSteps: 3 })
     expect(result.ok).toBe(false)
-    expect(result.summary).toMatch(/stopped after 3 steps/)
+    expect(result.summary).toMatch(/runaway backstop/i)
     expect(w.acted).toHaveLength(3)
   })
 

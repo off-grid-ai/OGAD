@@ -145,19 +145,36 @@ describe('runWebTask', () => {
     expect(result).toMatchObject({ ok: false, summary: 'the site requires a phone app' })
   })
 
-  it('stops at the step budget instead of looping forever', async () => {
-    // Cycle distinct keys so the runaway guard (which halts a REPEATED action)
-    // does not fire before the budget is reached.
+  it('stops on NO PROGRESS when the page never changes (not a step count)', async () => {
+    // Cycle distinct keys so the consecutive-repeat skip never fires; the fake
+    // driver returns a constant snapshot, so the page never changes -> the
+    // no-progress guard ends the run. This is the real replacement for the old
+    // low step cap: a long task that IS making progress would keep going.
     const keys = ['Tab', 'Escape', 'Enter']
     const replies = Array.from(
-      { length: 20 },
+      { length: 40 },
       (_, i) => `{"action":"press_key","key":"${keys[i % keys.length]}"}`
     )
     const w = world(replies)
-    const result = await runWebTask('t', undefined, { ...w.deps, maxSteps: 3 })
+    const result = await runWebTask('t', undefined, {
+      ...w.deps,
+      termination: { noProgressLimit: 5 }
+    })
     expect(result.ok).toBe(false)
-    expect(result.summary).toMatch(/stopped after 3 steps/)
-    expect(w.calls.filter((c) => c.startsWith('key'))).toHaveLength(3)
+    expect(result.summary).toMatch(/no progress/i)
+  })
+
+  it('the hard backstop stops a pathological run even if state keeps changing', async () => {
+    // A never-repeating, always-"progressing" loop (each reply distinct) can only
+    // be stopped by the absolute seatbelt.
+    const replies = Array.from(
+      { length: 50 },
+      (_, i) => `{"action":"navigate","url":"https://x.test/${i}"}`
+    )
+    const w = world(replies)
+    const result = await runWebTask('t', undefined, { ...w.deps, maxSteps: 4 })
+    expect(result.ok).toBe(false)
+    expect(result.summary).toMatch(/runaway backstop/i)
   })
 
   it('skips a repeated action (fires once) instead of killing the task', async () => {
@@ -230,9 +247,13 @@ describe('parseStepDecision', () => {
     // A reasoning model emits its thinking before the JSON - a raw JSON.parse
     // rejected it and every reply read as "did not parse".
     expect(
-      parseStepDecision('<think>I should click the search result now.</think>\n{"action":"click","index":7}')
+      parseStepDecision(
+        '<think>I should click the search result now.</think>\n{"action":"click","index":7}'
+      )
     ).toEqual({ action: 'click', index: 7 })
-    expect(parseStepDecision('Okay, here is my step: {"action":"press_key","key":"Enter"}')).toEqual({
+    expect(
+      parseStepDecision('Okay, here is my step: {"action":"press_key","key":"Enter"}')
+    ).toEqual({
       action: 'press_key',
       key: 'Enter'
     })
