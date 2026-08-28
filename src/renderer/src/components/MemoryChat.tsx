@@ -754,6 +754,7 @@ function VoiceMessageRow({
         onPlaybackStateChange={reportPlayback}
         copied={copied}
         onCopy={(text) => onCopy(text, message.id)}
+        onRetry={() => onRegenerate(message.id)}
         defaultSpeed={playbackSpeed}
       />
     )

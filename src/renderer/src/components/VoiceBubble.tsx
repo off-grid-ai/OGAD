@@ -388,10 +388,12 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
             <button
               type="button"
               onClick={onRetry}
-              className="cursor-pointer text-neutral-600 transition-colors hover:text-green-500"
-              title="Regenerate"
+              className="flex cursor-pointer items-center gap-1 text-[11px] text-neutral-600 transition-colors hover:text-green-500"
+              title={isUser ? 'Resend' : 'Regenerate'}
+              aria-label={isUser ? 'Resend' : 'Regenerate'}
             >
               <ArrowsClockwise size={13} />
+              {isUser ? 'Resend' : null}
             </button>
           ) : null}
         </div>

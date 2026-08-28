@@ -362,6 +362,45 @@ describe('<MemoryChat/> Desktop voice turn modes', () => {
     expect(await screen.findByText('Historical reasoning stays private.')).toBeTruthy()
   })
 
+  it('resends a voice turn without adding a duplicate user message', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-a'] = [
+      {
+        id: 1,
+        role: 'user',
+        content: 'Schedule the planning review'
+      },
+      { id: 2, role: 'assistant', content: 'The review is scheduled.' }
+    ]
+    boundary.conversations[0]!.message_count = 2
+    Object.assign(boundary.api, {
+      getSettings: vi.fn(async () => ({ composerVoiceMode: true }))
+    })
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+
+    await user.click(await screen.findByRole('button', { name: 'Resend' }))
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+
+    expect(boundary.calls[0]?.query).toBe('Schedule the planning review')
+    expect(boundary.truncateRagMessages).toHaveBeenCalledWith('conversation-a', 1)
+    expect(screen.getAllByRole('button', { name: 'Resend' })).toHaveLength(1)
+
+    boundary.resolve(0, 'The review is scheduled again.')
+    expect(await screen.findByText('The review is scheduled again.')).toBeTruthy()
+    expect(screen.queryByText('The review is scheduled.')).toBeNull()
+    expect(screen.getAllByRole('button', { name: 'Resend' })).toHaveLength(1)
+    await waitFor(() =>
+      expect(
+        boundary.messages['conversation-a']!.map(({ role, content }) => [role, content])
+      ).toEqual([
+        ['user', 'Schedule the planning review'],
+        ['assistant', 'The review is scheduled again.']
+      ])
+    )
+  })
+
   it('shows Copied on a voice note, then returns to the copy action', async () => {
     const boundary = new ChatBoundary()
     boundary.messages['conversation-a'] = [
