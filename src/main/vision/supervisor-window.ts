@@ -19,6 +19,8 @@ import { rendererHtmlPath } from '../renderer-path'
 
 const WIN_WIDTH = 520
 const WIN_HEIGHT = 680
+const MIN_WIN_WIDTH = 360
+const MIN_WIN_HEIGHT = 480
 const MARGIN = 24
 
 let supervisor: BrowserWindow | null = null
@@ -37,11 +39,13 @@ function create(): BrowserWindow {
   const win = new BrowserWindow({
     width: WIN_WIDTH,
     height: WIN_HEIGHT,
+    minWidth: MIN_WIN_WIDTH,
+    minHeight: MIN_WIN_HEIGHT,
     x: pos.x,
     y: pos.y,
     show: false,
     frame: false,
-    resizable: false,
+    resizable: true,
     movable: true,
     minimizable: false,
     maximizable: false,
