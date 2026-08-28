@@ -98,7 +98,7 @@ function axBackend(): AxBackend {
 
 /** The running native app a request targets, or null. Lets the orchestrator
  *  route "do X in Slack" (Slack running) to the app via computer_task instead of
- *  a website via web_task - rail-per-surface, independent of the model's guess.
+ *  a website via web_use - rail-per-surface, independent of the model's guess.
  *  Only sees RUNNING apps; [] when no accessibility backend is available. */
 export async function resolveNativeApp(goal: string): Promise<string | null> {
   const backend = axBackend()
