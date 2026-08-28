@@ -31,7 +31,12 @@ import {
   type ElementTaskResult
 } from './ax-agent'
 import { VisionGuard } from '../vision/vision-guard'
-import { emitVisionState, emitVisionStep, registerVisionSession } from '../vision/vision-controller'
+import {
+  emitVisionState,
+  emitVisionStep,
+  registerVisionSession,
+  stopVisionTask
+} from '../vision/vision-controller'
 import { showSupervisorWindow, hideSupervisorWindow } from '../vision/supervisor-window'
 import { getComputerUseSettings } from '../computer-use-settings'
 import { resolveComputerUseContextTokens } from '../../shared/computer-use-settings'
@@ -249,15 +254,7 @@ class AxRailHost {
     // The kill switch: Esc halts for good. The overlay's Stop routes to the SAME
     // guard through the controller session, so both paths end one run.
     const escapeRegistered = globalShortcut.register('Escape', () => {
-      guard.halt('stopped with Esc')
-      emitVisionState({
-        taskId,
-        journeyId,
-        goal,
-        status: 'stopped',
-        phase: 'stopped',
-        currentAction: 'Stopped with Esc'
-      })
+      stopVisionTask(taskId, 'stopped with Esc', 'Stopped with Esc')
     })
     const releaseSession = registerVisionSession(taskId, guard, request)
     // The AX rail is model-agnostic and needs no grounder, so there is no
@@ -355,6 +352,7 @@ class AxRailHost {
         plan,
         onPhase: (phaseId) => emitVisionStep(taskId, encodeTaskPhase(phaseId)),
         takeGuidance: () => queuedGuidance.splice(0),
+        control: guard,
         contextTokens,
         checkpointInterval: settings.checkpointInterval,
         retrievedFacts,

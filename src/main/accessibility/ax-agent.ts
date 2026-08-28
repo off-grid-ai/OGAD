@@ -56,6 +56,15 @@ export interface ElementTaskDeps {
   plan?: TaskExecutionPlan
   onPhase?: (phaseId: string) => void
   takeGuidance?: () => readonly string[]
+  /** The Computer Use task owner. The loop checks it after every external wait,
+   *  so Pause parks before another action and Stop cannot be overwritten by a
+   *  late observation or model reply. */
+  control?: ElementTaskControl
+}
+
+export interface ElementTaskControl {
+  snapshot(): { state: 'running' | 'paused' | 'halted'; reason: string }
+  waitUntilRunnable(): Promise<{ state: 'running' | 'paused' | 'halted'; reason: string }>
 }
 
 export interface ElementTaskResult {
@@ -217,6 +226,7 @@ export function buildElementPrompt(input: {
 }
 
 const DEFAULT_MAX_STEPS = DEFAULT_COMPUTER_USE_STEP_BUDGET
+const MAX_CONSECUTIVE_PARSE_FAILURES = 3
 
 /** A stable signature of an actuating step, used to detect a runaway loop. Two
  *  consecutive identical signatures mean the model is repeating itself (it sent
@@ -263,8 +273,19 @@ export async function runElementTask(
   // check can't see.
   const typedTexts = new Set<string>()
   const taskBrief = new CurrentTaskBrief(goal)
+  let consecutiveParseFailures = 0
+
+  const waitForControl = async (): Promise<ElementTaskResult | null> => {
+    const before = deps.control?.snapshot()
+    const after = before?.state === 'paused' ? await deps.control?.waitUntilRunnable() : before
+    if (after?.state !== 'halted') return null
+    const summary = after.reason || 'stopped'
+    return { ok: false, summary, steps }
+  }
 
   for (let step = 0; step < maxSteps; step += 1) {
+    const stoppedBeforeStep = await waitForControl()
+    if (stoppedBeforeStep) return stoppedBeforeStep
     const planningStep = step + 1
     reportPhase(step)
     const startedAt = now()
@@ -294,6 +315,8 @@ export async function runElementTask(
     }
     try {
       const snapshot = await read()
+      const stoppedAfterRead = await waitForControl()
+      if (stoppedAfterRead) return stoppedAfterRead
       taskBrief.accept(deps.takeGuidance?.() ?? [])
       modelPrompt = buildElementPrompt({
         goal: taskBrief.objective,
@@ -308,14 +331,23 @@ export async function runElementTask(
         modelPrompt
       )
       rawResponse = await decide(modelPrompt)
+      const stoppedAfterDecision = await waitForControl()
+      if (stoppedAfterDecision) return stoppedAfterDecision
       const parsedDecision = parseElementStep(rawResponse)
       decision = parsedDecision
       if (!parsedDecision) {
+        consecutiveParseFailures += 1
         observe('parse_failed')
         note('model reply did not parse; re-observing')
         checkpoint()
+        if (consecutiveParseFailures >= MAX_CONSECUTIVE_PARSE_FAILURES) {
+          const summary = `The action model returned an invalid reply ${MAX_CONSECUTIVE_PARSE_FAILURES} times in a row.`
+          note(summary)
+          return { ok: false, summary, steps }
+        }
         continue
       }
+      consecutiveParseFailures = 0
       const action = parsedDecision
       if (action.action === 'done') {
         reportPhase((deps.plan?.phases.length ?? 1) - 1)

@@ -79,6 +79,48 @@ describe('registerVisionIpc', () => {
     dispose()
   })
 
+  it('keeps Stop terminal when late loop progress arrives', async () => {
+    const guard = new VisionGuard()
+    const request = new AbortController()
+    owner.registerSession('terminal-task', guard, request)
+    owner.emitState({ taskId: 'terminal-task', goal: 'Send a message', status: 'running' })
+    const handler = world.handlers.get('vision:control')
+
+    expect(await handler?.({}, 'stop', 'terminal-task')).toBe(true)
+    owner.emitState({
+      taskId: 'terminal-task',
+      goal: 'Send a message',
+      status: 'running',
+      phase: 'checking',
+      currentAction: 'late model reply did not parse'
+    })
+
+    expect(owner.current().state).toMatchObject({
+      taskId: 'terminal-task',
+      status: 'stopped',
+      phase: 'stopped',
+      currentAction: 'Stopped from the supervisor'
+    })
+    expect(records.at(-1)).toMatchObject({ taskId: 'terminal-task', status: 'stopped' })
+  })
+
+  it('routes Esc through the same stop owner and aborts in-flight work', () => {
+    const guard = new VisionGuard()
+    const request = new AbortController()
+    owner.registerSession('escape-task', guard, request)
+    owner.emitState({ taskId: 'escape-task', goal: 'Send a message', status: 'running' })
+
+    expect(owner.stop('escape-task', 'stopped with Esc', 'Stopped with Esc')).toBe(true)
+
+    expect(guard.isHalted).toBe(true)
+    expect(request.signal.aborted).toBe(true)
+    expect(owner.current().state).toMatchObject({
+      status: 'stopped',
+      phase: 'stopped',
+      currentAction: 'Stopped with Esc'
+    })
+  })
+
   it('Stop targets one task without halting a concurrent session', async () => {
     const firstGuard = new VisionGuard()
     const firstRequest = new AbortController()

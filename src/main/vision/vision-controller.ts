@@ -50,6 +50,7 @@ const taskHistoryPersistence: VisionControllerPersistence = {
 export class VisionController {
   private readonly sessions = new Map<string, { guard: VisionGuard; request: AbortController }>()
   private readonly runs = new Map<string, { state: VisionTaskState; steps: string[] }>()
+  private readonly terminalTaskIds = new Set<string>()
   private currentTaskId: string | null = null
 
   constructor(private readonly persistence: VisionControllerPersistence) {}
@@ -62,6 +63,9 @@ export class VisionController {
     }
     const session = { guard, request }
     this.sessions.set(taskId, session)
+    // A deliberate new session is the only event that may reopen a task ID.
+    // Late progress from the prior session remains blocked until this point.
+    this.terminalTaskIds.delete(taskId)
     return () => {
       if (this.sessions.get(taskId) === session) this.sessions.delete(taskId)
     }
@@ -76,6 +80,9 @@ export class VisionController {
   }
 
   emitState(state: VisionTaskState): void {
+    const isLiveUpdate = state.status === 'running' || state.status === 'paused'
+    if (isLiveUpdate && this.terminalTaskIds.has(state.taskId)) return
+    if (!isLiveUpdate) this.terminalTaskIds.add(state.taskId)
     const current = this.runs.get(state.taskId)
     const previous = current?.state
     const steps = current?.steps ?? []
@@ -124,12 +131,9 @@ export class VisionController {
     const taskId = typeof taskIdInput === 'string' ? taskIdInput : this.currentTaskId
     const session = taskId ? this.sessions.get(taskId) : undefined
     if (!command || !taskId || !session) return false
-    const { guard, request } = session
+    const { guard } = session
     if (command === 'stop') {
-      guard.halt('stopped from the supervisor')
-      request.abort('stopped from the supervisor')
-      this.transition(taskId, 'stopped', 'stopped', 'Stopped from the supervisor')
-      return true
+      return this.stop(taskId, 'stopped from the supervisor', 'Stopped from the supervisor')
     }
     if (command === 'pause' || command === 'takeover') {
       guard.pauseForUser(
@@ -146,6 +150,15 @@ export class VisionController {
     if (!guard.isPaused) return false
     guard.resume()
     this.transition(taskId, 'running', 'observing', 'Reading the current screen')
+    return true
+  }
+
+  stop(taskId: string, reason: string, currentAction: string): boolean {
+    const session = this.sessions.get(taskId)
+    if (!session) return false
+    session.guard.halt(reason)
+    session.request.abort(reason)
+    this.transition(taskId, 'stopped', 'stopped', currentAction)
     return true
   }
 
@@ -181,6 +194,11 @@ export function emitVisionNotice(notice: string): void {
 
 export function emitVisionState(state: VisionTaskState): void {
   controller.emitState(state)
+}
+
+/** Native kill switches route through the same owner as the renderer Stop button. */
+export function stopVisionTask(taskId: string, reason: string, currentAction: string): boolean {
+  return controller.stop(taskId, reason, currentAction)
 }
 
 export function parseVisionCommand(

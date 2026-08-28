@@ -23,7 +23,12 @@ import { llm } from '../llm'
 import type { VisionAction, Bounds } from './vision-action'
 import { type VisionScreen, type VisionTaskResult } from './vision-agent'
 import { VisionGuard } from './vision-guard'
-import { emitVisionState, emitVisionStep, registerVisionSession } from './vision-controller'
+import {
+  emitVisionState,
+  emitVisionStep,
+  registerVisionSession,
+  stopVisionTask
+} from './vision-controller'
 import { showSupervisorWindow, hideSupervisorWindow } from './supervisor-window'
 import { visionModelNotice } from './vision-model-notice'
 import { getTakeoverCoordinator } from '../browser/takeover'
@@ -269,15 +274,7 @@ class VisionHost {
     // The kill switch: Esc halts the run and consumes the keypress. The supervisor's
     // Stop routes to the SAME guard via the controller session.
     const escapeRegistered = globalShortcut.register('Escape', () => {
-      guard.halt('stopped with Esc')
-      emitVisionState({
-        taskId,
-        journeyId,
-        goal,
-        status: 'stopped',
-        phase: 'stopped',
-        currentAction: 'Stopped with Esc'
-      })
+      stopVisionTask(taskId, 'stopped with Esc', 'Stopped with Esc')
     })
     const releaseSession = registerVisionSession(taskId, guard, request)
     const coordinator = getTakeoverCoordinator()

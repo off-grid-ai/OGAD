@@ -16,6 +16,7 @@ import {
 import type { AxElement, AxSnapshot } from '../ax-elements'
 import { fallbackTaskExecutionPlan } from '../../../shared/task-execution-plan'
 import { TASK_GUIDANCE_TRACE } from '../../tasks/task-guide'
+import { VisionGuard } from '../../vision/vision-guard'
 
 const el = (index: number, over: Partial<AxElement> = {}): AxElement => ({
   index,
@@ -142,6 +143,72 @@ describe('runElementTask', () => {
     expect(w.acted).toEqual([])
     expect(result.steps.join('\n')).toMatch(/did not parse/)
     expect(result.steps.join('\n')).toMatch(/no element \[99\]/)
+  })
+
+  it('stops after three consecutive invalid model replies instead of looping', async () => {
+    const w = world(['not json', 'still not json', 'also not json', 'unused'])
+
+    const result = await runElementTask('send a message', w.deps)
+
+    expect(result).toMatchObject({
+      ok: false,
+      summary: 'The action model returned an invalid reply 3 times in a row.'
+    })
+    expect(result.steps.filter((step) => step.includes('did not parse'))).toHaveLength(3)
+    expect(w.acted).toEqual([])
+  })
+
+  it('Stop during model work prevents later steps and actions', async () => {
+    const w = world([])
+    const guard = new VisionGuard()
+    let finishDecision: ((reply: string) => void) | undefined
+    let markDecisionStarted: (() => void) | undefined
+    const decisionStarted = new Promise<void>((resolve) => {
+      markDecisionStarted = resolve
+    })
+    w.deps.decide = () =>
+      new Promise<string>((resolve) => {
+        finishDecision = resolve
+        markDecisionStarted?.()
+      })
+    const run = runElementTask('send a message', { ...w.deps, control: guard })
+    await decisionStarted
+    guard.halt('stopped from the supervisor')
+    finishDecision?.('{"action":"press","index":1}')
+
+    const result = await run
+
+    expect(result).toMatchObject({ ok: false, summary: 'stopped from the supervisor' })
+    expect(result.steps).toEqual([])
+    expect(w.acted).toEqual([])
+  })
+
+  it('Pause parks a completed model decision before any action until Resume', async () => {
+    const w = world([])
+    const guard = new VisionGuard()
+    let markPaused: (() => void) | undefined
+    const paused = new Promise<void>((resolve) => {
+      markPaused = resolve
+    })
+    let first = true
+    w.deps.decide = async () => {
+      if (!first) return '{"action":"done","summary":"sent"}'
+      first = false
+      guard.pauseForUser('you took over')
+      markPaused?.()
+      return '{"action":"press","index":1}'
+    }
+    const run = runElementTask('send a message', { ...w.deps, control: guard })
+    await paused
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(w.acted).toEqual([])
+
+    guard.resume()
+    const result = await run
+
+    expect(result.ok).toBe(true)
+    expect(w.acted).toEqual(['press:1'])
   })
 
   it('give_up is an honest failure with the reason', async () => {
