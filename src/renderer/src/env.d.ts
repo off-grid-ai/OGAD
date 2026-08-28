@@ -423,15 +423,6 @@ interface RendererAPIOverrides {
   saveUserProfile: (profile: UserProfile) => Promise<boolean>
 
   // Events
-  onNewApproval: (
-    callback: (data: {
-      approvalId: number
-      title: string
-      detail: string
-      entityName: string | null
-      executionChatId: string
-    }) => void
-  ) => () => void
   onNewAction: (
     callback: (data: {
       actionId: number

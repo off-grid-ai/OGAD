@@ -125,7 +125,7 @@ describe('<App/> live Pro entitlement integration', () => {
       expect(getRegisteredSettingsSections().length).toBeGreaterThan(0)
       expect(getSlot(SLOTS.connectorSetup)).toBeDefined()
       expect(renderProView('day', proViewContext())).not.toBeNull()
-      expect(callHook(NOTIFICATION_METADATA_HOOK, { source: 'approval', recordId: 1 })).toBeTruthy()
+      expect(callHook(NOTIFICATION_METADATA_HOOK, { source: 'action', recordId: 1 })).toBeTruthy()
     })
     expect(window.location.pathname).toBe('/chat')
 
@@ -145,9 +145,7 @@ describe('<App/> live Pro entitlement integration', () => {
     expect(getRegisteredSettingsSections()).toEqual([])
     expect(getSlot(SLOTS.connectorSetup)).toBeUndefined()
     expect(renderProView('day', proViewContext())).toBeNull()
-    expect(
-      callHook(NOTIFICATION_METADATA_HOOK, { source: 'approval', recordId: 1 })
-    ).toBeUndefined()
+    expect(callHook(NOTIFICATION_METADATA_HOOK, { source: 'action', recordId: 1 })).toBeUndefined()
 
     expect(await screen.findByRole('heading', { name: 'Day', level: 1 })).not.toBeNull()
     expect(screen.getAllByRole('button', { name: /Get Pro/ })).toHaveLength(1)

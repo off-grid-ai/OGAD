@@ -404,28 +404,7 @@ const offGridApi = {
     ipcRenderer.invoke('update:download-version', version),
   checkForUpdates: () => ipcRenderer.invoke('update:check'),
 
-  // Notification Events — only the things that need the user's attention:
-  // proactive approvals queued, and new to-dos extracted.
-  onNewApproval: (
-    callback: (data: {
-      approvalId: number
-      title: string
-      detail: string
-      entityName: string | null
-    }) => void
-  ) => {
-    const subscription = (
-      _event: unknown,
-      data: {
-        approvalId: number
-        title: string
-        detail: string
-        entityName: string | null
-      }
-    ): void => callback(data)
-    ipcRenderer.on('notification:new-approval', subscription)
-    return unsubscribe('notification:new-approval', subscription)
-  },
+  // Notification Events — only unrelated informational items such as new to-dos.
   onNewAction: (
     callback: (data: {
       actionId: number

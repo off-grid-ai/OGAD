@@ -22,9 +22,9 @@ import {
 
 const stored = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
   id: 'n1',
-  type: 'approval',
-  title: 'Approval needed',
-  message: 'Send the follow-up email?',
+  type: 'info',
+  title: 'File received',
+  message: 'The report arrived.',
   timestamp: '2026-01-01T09:00:00.000Z',
   read: false,
   ...overrides
@@ -32,9 +32,9 @@ const stored = (overrides: Record<string, unknown> = {}): Record<string, unknown
 
 const input = (overrides: Partial<NotificationInput> = {}): NotificationInput =>
   ({
-    type: 'approval',
-    title: 'Approval needed',
-    message: 'Send the follow-up email?',
+    type: 'info',
+    title: 'File received',
+    message: 'The report arrived.',
     ...overrides
   }) as NotificationInput
 
@@ -42,7 +42,7 @@ describe('restoring what the bell had before the app closed', () => {
   it('keeps a well-formed record, with its timestamp as a Date', () => {
     const [restored] = restoreNotifications([stored()])
 
-    expect(restored).toMatchObject({ id: 'n1', type: 'approval', read: false })
+    expect(restored).toMatchObject({ id: 'n1', type: 'info', read: false })
     // A Date, not the string it was stored as: everything downstream sorts and formats with it, and a string
     // sorts lexically - which happens to work until the year rolls over or a timezone offset appears.
     expect(restored!.timestamp).toBeInstanceOf(Date)
@@ -79,8 +79,12 @@ describe('restoring what the bell had before the app closed', () => {
     expect(restored.map(({ id }) => id)).toEqual(['first', 'last'])
   })
 
-  it('never restores a to-do, because it already has a home', () => {
-    const restored = restoreNotifications([stored({ type: 'todo' }), stored({ id: 'keep-me' })])
+  it('never restores a to-do or approval, because each already has a home', () => {
+    const restored = restoreNotifications([
+      stored({ type: 'todo' }),
+      stored({ type: 'approval' }),
+      stored({ id: 'keep-me' })
+    ])
 
     // A to-do lives in the to-do list; mirroring it into the bell tells the user the same thing twice and
     // makes the unread count mean "things", not "things waiting on you".
@@ -184,10 +188,10 @@ describe('adding a notification', () => {
     expect(existing).toEqual(before)
   })
 
-  it('refuses a to-do, and says so by changing nothing', () => {
+  it.each(['todo', 'approval'] as const)('refuses a %s, because it has its own surface', (type) => {
     const existing = restoreNotifications([stored({ id: 'keep' })])
 
-    const next = addNotificationToState(existing, input({ type: 'todo' }))
+    const next = addNotificationToState(existing, input({ type }))
 
     expect(next.map(({ id }) => id)).toEqual(['keep'])
   })

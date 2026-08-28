@@ -45,14 +45,12 @@ describe('<App/> locked Pro navigation integration', () => {
   it('keeps every Pro route visible-but-locked and sends it through the one upgrade journey', async () => {
     const user = userEvent.setup()
     const openExternal = vi.fn()
-    const onNewApproval = vi.fn(() => () => {})
     const onNewAction = vi.fn(() => () => {})
     const proOn = vi.fn(() => () => {})
     const proInvoke = vi.fn()
     installAppBoundary({
       isPro: false,
       openExternal,
-      onNewApproval,
       onNewAction,
       proOn,
       proInvoke
@@ -104,7 +102,6 @@ describe('<App/> locked Pro navigation integration', () => {
       expect(getSlot(SLOTS.appRoot)).toBeUndefined()
       expect(getSlot(SLOTS.composerToolMenu)).toBeUndefined()
     })
-    expect(onNewApproval).not.toHaveBeenCalled()
     expect(onNewAction).not.toHaveBeenCalled()
     expect(proOn).not.toHaveBeenCalled()
     expect(proInvoke).not.toHaveBeenCalled()

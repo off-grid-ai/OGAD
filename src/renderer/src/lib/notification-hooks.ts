@@ -7,7 +7,7 @@ export const NOTIFICATION_SUBSCRIBE_EXTERNAL_ITEMS_HOOK = 'notifications:subscri
 export const NOTIFICATION_OPEN_TARGET_CHANNEL = 'notification:open-target'
 
 export interface NotificationSourceRecord {
-  source: 'approval' | 'action'
+  source: 'action'
   recordId: number
 }
 

@@ -187,7 +187,7 @@ describe('<App/> desktop navigation integration', () => {
     expect(navigation.getAttribute('aria-expanded')).toBe('false')
   })
 
-  it('subscribes to notification routes only after Pro target hooks finish activating (#114)', async () => {
+  it('activates Pro notification routes without subscribing to action events', async () => {
     let finishActivation: (() => void) | undefined
     rendererActivation.load.mockImplementationOnce(
       () =>
@@ -195,42 +195,28 @@ describe('<App/> desktop navigation integration', () => {
           finishActivation = resolve
         })
     )
-    const onNewApproval = vi.fn(() => () => {})
     const onNewAction = vi.fn(() => () => {})
     const proOn = vi.fn(() => () => {})
-    installAppBoundary({ isPro: true, onNewApproval, onNewAction, proOn })
+    installAppBoundary({ isPro: true, onNewAction, proOn })
 
     render(<App />)
     await waitFor(() => expect(rendererActivation.load).toHaveBeenCalledTimes(1))
-    expect(onNewApproval).not.toHaveBeenCalled()
     expect(onNewAction).not.toHaveBeenCalled()
     expect(proOn).toHaveBeenCalledWith('capture:changed', expect.any(Function))
     expect(proOn).not.toHaveBeenCalledWith('notification:open-target', expect.any(Function))
 
     act(() => finishActivation?.())
 
-    await waitFor(() => expect(onNewApproval).toHaveBeenCalledTimes(1))
-    // Approvals reach the bell; action candidates deliberately do NOT. 57a3e7d removed this
-    // subscription and excluded type 'todo' from notification state in the same change, so the unread
-    // count means "something is waiting on your decision" rather than counting suggestions the app
-    // made for itself. A to-do already has a home - DayView lists it, and opening one routes to
-    // { view: 'actions', mode: 'todo' } - so mirroring it into the bell would say the same thing twice.
-    //
-    // Asserted as an absence, because that is the behaviour worth protecting: re-adding the
-    // subscription would quietly restore the double-notification that commit set out to remove.
+    await waitFor(() =>
+      expect(proOn).toHaveBeenCalledWith('notification:open-target', expect.any(Function))
+    )
     expect(onNewAction).not.toHaveBeenCalled()
-    expect(proOn).toHaveBeenCalledWith('notification:open-target', expect.any(Function))
   })
 
-  it('opens the exact Action execution chat from its notification', async () => {
+  it('opens an existing execution Chat notification without an approval target', async () => {
     const listeners = new Map<string, (payload: unknown) => void>()
-    const executionChat = vi.fn(async (approvalId: number) => {
-      expect(approvalId).toBe(17)
-      return 'execution-chat-17'
-    })
     installAppBoundary({
       isPro: true,
-      approvalsExecutionChat: executionChat,
       actions: { onGatePending: () => () => {}, onOutcome: () => () => {} },
       vision: { onTaskState: () => () => {}, onStep: () => () => {} },
       proOn: (channel: string, listener: (payload: unknown) => void) => {
@@ -247,10 +233,11 @@ describe('<App/> desktop navigation integration', () => {
     await waitFor(() => expect(listeners.has('notification:open-target')).toBe(true))
 
     act(() => {
-      listeners.get('notification:open-target')?.(createProNotificationTarget('approval', 17))
+      listeners.get('notification:open-target')?.(
+        createProNotificationTarget('execution-chat', 'execution-chat-17')
+      )
     })
 
-    await waitFor(() => expect(executionChat).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(window.location.pathname).toBe('/chat'))
   })
 

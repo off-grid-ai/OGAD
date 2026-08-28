@@ -40,7 +40,6 @@ export function installAppBoundary(overrides: Record<string, unknown> = {}): voi
     listProjects: async () => APP_PROJECTS.map((project) => ({ ...project })),
     getRagConversations: async () => [],
     getSettings: async () => ({}),
-    onNewApproval: eventSubscription,
     onNewAction: eventSubscription,
     onUpdateDownloaded: eventSubscription,
     onReprocessProgress: eventSubscription,

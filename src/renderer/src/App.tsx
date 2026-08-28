@@ -70,15 +70,12 @@ import {
 import { callHook } from './bootstrap/hookRegistry'
 import { internalTabLocation, internalTabPath, isInternalTabView } from './lib/internal-tab-route'
 import {
-  NOTIFICATION_METADATA_HOOK,
   NOTIFICATION_OPEN_TARGET_CHANNEL,
   NOTIFICATION_RESOLVE_TARGET_HOOK,
   NOTIFICATION_SUBSCRIBE_EXTERNAL_ITEMS_HOOK,
   NOTIFICATION_SUBSCRIBE_EXTERNAL_UNREAD_HOOK,
   type NotificationExternalItemSubscriber,
-  type NotificationExternalUnreadSubscriber,
-  type NotificationRoutingMetadata,
-  type NotificationSourceRecord
+  type NotificationExternalUnreadSubscriber
 } from './lib/notification-hooks'
 
 type ViewMode =
@@ -633,27 +630,11 @@ function AppContent() {
     syncNavFlags
   ])
 
-  // Subscribe to notification events from the main process
+  // Subscribe to informational notification events from the main process. Action
+  // approvals live only in Actions and never create a notification copy.
   useEffect(() => {
     if (!proReady || !isPro) return
     const unsubscribers: (() => void)[] = []
-
-    // Proactive approval queued — needs the user's decision
-    unsubscribers.push(
-      window.api.onNewApproval((data) => {
-        const routing = callHook<NotificationRoutingMetadata>(NOTIFICATION_METADATA_HOOK, {
-          source: 'approval',
-          recordId: data.approvalId
-        } satisfies NotificationSourceRecord)
-        addNotification({
-          type: 'approval',
-          title: data.entityName ? `Approval — ${data.entityName}` : 'Approval needed',
-          message: data.detail ? `${data.title} — ${data.detail}` : data.title,
-          approvalId: data.approvalId,
-          ...routing
-        })
-      })
-    )
 
     // A new version finished downloading and is staged — show the restart banner.
     // Seed from main too: on macOS the app can keep running with no windows, so a
@@ -674,7 +655,7 @@ function AppContent() {
     return () => {
       unsubscribers.forEach((unsub) => unsub())
     }
-  }, [addNotification, isPro, proReady])
+  }, [isPro, proReady])
 
   // Navigate back using history stack
   const navigateBack = useCallback(() => {
