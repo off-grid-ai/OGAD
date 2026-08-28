@@ -1312,17 +1312,20 @@ function CopyAction({
 function RegenerateAction({
   label,
   title,
+  disabled,
   onRegenerate
 }: Readonly<{
   label: string
   title: string
+  disabled?: boolean
   onRegenerate: () => void
 }>): React.JSX.Element {
   return (
     <button
       type="button"
+      disabled={disabled}
       onClick={onRegenerate}
-      className="flex items-center gap-1 text-[11px] text-neutral-600 transition-colors hover:text-green-500"
+      className="flex items-center gap-1 text-[11px] text-neutral-600 transition-colors enabled:hover:text-green-500 disabled:cursor-not-allowed disabled:opacity-40"
       title={title}
     >
       <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1340,11 +1343,13 @@ function RegenerateAction({
 
 function UserMessageActions({
   copied,
+  regenerationDisabled,
   onCopy,
   onEdit,
   onRegenerate
 }: Readonly<{
   copied: boolean
+  regenerationDisabled: boolean
   onCopy: () => void
   onEdit: () => void
   onRegenerate: () => void
@@ -1354,7 +1359,12 @@ function UserMessageActions({
       <CopyAction copied={copied} onCopy={onCopy} />
       <RegenerateAction
         label="Resend"
-        title="Regenerate the reply to this message"
+        title={
+          regenerationDisabled
+            ? 'Wait for the current reply to finish'
+            : 'Regenerate the reply to this message'
+        }
+        disabled={regenerationDisabled}
         onRegenerate={onRegenerate}
       />
       <button
@@ -1870,6 +1880,7 @@ type MessageRowState = Readonly<{
   askSelections: Readonly<Record<string, readonly string[]>>
   incomingFiles: readonly IncomingSharedFile[]
   showGenerationDetails: boolean
+  regenerationDisabled: boolean
 }>
 
 type AskOptionSelection = Readonly<{
@@ -2002,6 +2013,7 @@ function StandardMessageRow({
         ) : (
           <UserMessageActions
             copied={copied}
+            regenerationDisabled={state.regenerationDisabled}
             onCopy={() => actions.copy(message.content, message.id)}
             onEdit={() => actions.startEdit(message)}
             onRegenerate={() => actions.regenerate(message.id)}
@@ -4532,6 +4544,9 @@ export function MemoryChat({
   // Re-run the user prompt that produced (or precedes) a given message.
   const regenerate = useCallback(
     (messageId: string) => {
+      // A regeneration replaces the current answer. Do not let a stale click race an active
+      // stream and truncate the turn that still owns the conversation.
+      if (activeConversationId && generatingRef.current.has(activeConversationId)) return
       const idx = messages.findIndex((m) => m.id === messageId)
       if (idx < 0) return
       // Regenerating an assistant answer keeps prior answers as navigable variants.
@@ -5314,7 +5329,9 @@ export function MemoryChat({
                               latestVoiceAssistantId,
                               askSelections: askSel,
                               incomingFiles: incomingFilesFor(message.id),
-                              showGenerationDetails
+                              showGenerationDetails,
+                              regenerationDisabled:
+                                !!activeConversationId && generatingConvs.has(activeConversationId)
                             }}
                             actions={messageActions}
                             navigation={messageNavigation}

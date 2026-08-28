@@ -704,6 +704,44 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     )
   })
 
+  it('keeps Resend disabled until the active reply finishes, then regenerates one turn', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-a'] = [
+      { id: 20, role: 'user', content: 'Explain the release gate' }
+    ]
+    boundary.conversations[0]!.message_count = 1
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+
+    await send('Add the missing release detail', user)
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+
+    const inFlightResends = await screen.findAllByRole('button', { name: 'Resend' })
+    expect(inFlightResends.every((button) => button.hasAttribute('disabled'))).toBe(true)
+    await user.click(inFlightResends.at(-1)!)
+    expect(boundary.calls).toHaveLength(1)
+    expect(screen.getAllByText('Add the missing release detail')).toHaveLength(1)
+
+    boundary.resolve(0, 'The release detail is ready.')
+    expect(await screen.findByText('The release detail is ready.')).toBeTruthy()
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByRole('button', { name: 'Resend' })
+          .every((button) => !button.hasAttribute('disabled'))
+      ).toBe(true)
+    )
+    await user.click(screen.getAllByRole('button', { name: 'Resend' }).at(-1)!)
+    await waitFor(() => expect(boundary.calls).toHaveLength(2))
+
+    expect(boundary.calls[1]).toMatchObject({
+      query: 'Add the missing release detail',
+      conversationId: 'conversation-a'
+    })
+    expect(screen.getAllByText('Add the missing release detail')).toHaveLength(1)
+  })
+
   it('stops the originating live Web Use task before resending or editing its instruction', async () => {
     const boundary = new ChatBoundary()
     boundary.messages['conversation-a'] = [
