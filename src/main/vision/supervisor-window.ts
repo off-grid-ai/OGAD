@@ -17,8 +17,8 @@ import { BrowserWindow, screen } from 'electron'
 import { preloadPath } from '../preload-path'
 import { rendererHtmlPath } from '../renderer-path'
 
-const WIN_WIDTH = 380
-const WIN_HEIGHT = 460
+const WIN_WIDTH = 520
+const WIN_HEIGHT = 680
 const MARGIN = 24
 
 let supervisor: BrowserWindow | null = null

@@ -6,10 +6,10 @@
  * the model picking elements by LABEL, so a normal chat model runs it with NO
  * grounder loaded.
  *
- * This is the cheapest tier: the app already publishes its controls over
- * Accessibility, so there is no screenshot, no vision model, no per-pixel
- * grounding. The router (ax-router) decides whether the tree is rich enough;
- * when it is not, the caller falls through to vision.
+ * This is the cheapest tier: the app publishes controls over Accessibility, so
+ * there is no vision-model or per-pixel grounding. A display frame is still
+ * recorded for user supervision and evidence. The router (ax-router) decides
+ * whether the tree is rich enough; when it is not, the caller falls through to vision.
  *
  * Native/Electron glue over the tested spine (parser, router, loop, target
  * picker), so it is excluded from in-process coverage; it is exercised on a
@@ -42,7 +42,8 @@ import { getComputerUseSettings } from '../computer-use-settings'
 import { resolveComputerUseContextTokens } from '../../shared/computer-use-settings'
 import { recentVisualFacts } from '../vision/visual-context'
 import { recordTaskRun } from '../tasks/task-history'
-import { persistAxObservation } from './ax-observation'
+import { persistAxObservation, type AxObservationFrame } from './ax-observation'
+import { captureAxObservationFrame } from './ax-frame'
 import { accessibilityHelperPath } from './ax-helper'
 import { encodeTaskPhase } from '../../shared/task-execution-plan'
 import { prepareTaskExecutionPlan } from '../tasks/task-execution-plan-service'
@@ -277,6 +278,8 @@ class AxRailHost {
     showSupervisorWindow()
     let usedInitial = false
     let liveStep = 0
+    let captureNumber = 0
+    let observationFrame: AxObservationFrame | undefined
     const queuedGuidance: string[] = []
     const releaseGuidance = registerTaskGuideHandler(taskId, (text) => {
       queuedGuidance.push(text)
@@ -298,13 +301,18 @@ class AxRailHost {
             currentStep: liveStep + 1,
             currentAction: `Reading ${app}`
           })
+          let snapshot: AxSnapshot
           if (!usedInitial && initial) {
             usedInitial = true
-            return initial
+            snapshot = initial
+          } else {
+            // Read the target app BY NAME each step - stable even though Off Grid AI
+            // (or the overlay) may hold system focus.
+            snapshot = (await axBackend().snapshot(app)) ?? { windowTitle: '', elements: [] }
           }
-          // Read the target app BY NAME each step - stable even though Off Grid AI
-          // (or the overlay) may hold system focus.
-          return (await axBackend().snapshot(app)) ?? { windowTitle: '', elements: [] }
+          captureNumber += 1
+          observationFrame = await captureAxObservationFrame(taskId, captureNumber, snapshot)
+          return snapshot
         },
         actuator: makeElementActuator(actuation, guard, (action) => {
           emitVisionState({
@@ -362,7 +370,7 @@ class AxRailHost {
           recordTaskRun({ taskId, kind: 'computer_use', title: goal })
         },
         onObservation: (observation) => {
-          persistAxObservation(taskId, goal, observation)
+          persistAxObservation(taskId, goal, { ...observation, frame: observationFrame })
         }
       })
       emitVisionState({

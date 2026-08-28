@@ -2,6 +2,13 @@ import { desktopCapturer, app, screen } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'
 
+export interface CapturedDisplayFrame {
+  path: string
+  width: number
+  height: number
+  displayBounds: { x: number; y: number; width: number; height: number }
+}
+
 class VisionService {
   private capturesDir: string
 
@@ -42,46 +49,53 @@ class VisionService {
       // cursor / where the focused app lives). This is the ground truth of what
       // the user is actually looking at — no window guessing, and it's the
       // direction we want anyway (record what's on screen).
-      const screens = await desktopCapturer.getSources({
-        types: ['screen'],
-        thumbnailSize: { width: 1920, height: 1080 }
-      })
-      if (!screens.length) {
-        console.log('Vision: No screen sources available')
-        return null
-      }
-      let target = screens[0]! // screens.length checked above
-      try {
-        // Pick the display the FOCUSED WINDOW is on (its center), NOT the
-        // cursor — on multi-monitor the cursor is often on a different screen
-        // than the focused app, which captured the wrong monitor (e.g. the
-        // Claude window) while you were actually in the terminal/browser.
-        const point =
-          bounds && Number.isFinite(bounds.x)
-            ? {
-                x: Math.round(bounds.x + bounds.width / 2),
-                y: Math.round(bounds.y + bounds.height / 2)
-              }
-            : screen.getCursorScreenPoint()
-        const display = screen.getDisplayNearestPoint(point)
-        const match = screens.find((s) => s.display_id === String(display.id))
-        if (match) target = match
-      } catch {
-        /* single display — first screen is fine */
-      }
-      if (target.thumbnail.isEmpty()) {
-        console.log('Vision: Active screen thumbnail empty (screen may be locked)')
-        return null
-      }
-      return await this.writeThumb(target.thumbnail.toPNG())
+      return (await this.captureDisplayFrame(bounds))?.path ?? null
     } catch (e) {
       console.error('Vision Capture Failed:', e)
       return null
     }
   }
 
-  private async writeThumb(png: Buffer): Promise<string> {
-    const filePath = path.join(this.capturesDir, `capture-${Date.now()}.png`)
+  /** Capture the full display that owns the target app. Computer Use reuses this frame for its
+   * live supervisor, so the model/action loop and the user never observe different screens. */
+  async captureDisplayFrame(
+    bounds?: { x: number; y: number; width: number; height: number },
+    outputPath?: string
+  ): Promise<CapturedDisplayFrame | null> {
+    try {
+      const sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: { width: 1920, height: 1080 }
+      })
+      if (!sources.length) {
+        console.log('Vision: No screen sources available')
+        return null
+      }
+      const point =
+        bounds && Number.isFinite(bounds.x)
+          ? {
+              x: Math.round(bounds.x + bounds.width / 2),
+              y: Math.round(bounds.y + bounds.height / 2)
+            }
+          : screen.getCursorScreenPoint()
+      const display = screen.getDisplayNearestPoint(point)
+      const target =
+        sources.find((source) => String(source.display_id) === String(display.id)) ?? sources[0]!
+      if (target.thumbnail.isEmpty()) {
+        console.log('Vision: Active screen thumbnail empty (screen may be locked)')
+        return null
+      }
+      const size = target.thumbnail.getSize()
+      const framePath = await this.writeThumb(target.thumbnail.toPNG(), outputPath)
+      return { path: framePath, ...size, displayBounds: display.bounds }
+    } catch (error) {
+      console.error('Vision Capture Failed:', error)
+      return null
+    }
+  }
+
+  private async writeThumb(png: Buffer, outputPath?: string): Promise<string> {
+    const filePath = outputPath ?? path.join(this.capturesDir, `capture-${Date.now()}.png`)
     await fs.promises.writeFile(filePath, png)
     console.log(`Vision: Captured ${filePath}`)
     return filePath
