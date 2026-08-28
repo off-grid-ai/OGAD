@@ -2,14 +2,11 @@ import { stopBrowserTask } from '../browser/browser-host'
 import { controlVisionTask } from '../vision/vision-controller'
 import type { TaskRunKind } from './task-history-store'
 
-export type RemoteTaskControlKind = 'pause' | 'resume' | 'stop' | 'take_over'
+export type RemoteTaskControlKind = 'pause' | 'resume' | 'stop' | 'takeover'
 
 export interface TaskControlRuntime {
   stopWebTask(taskId: string): boolean
-  controlVisionTask(
-    command: 'stop' | 'pause' | 'takeover' | 'resume',
-    taskId: string
-  ): boolean
+  controlVisionTask(command: 'stop' | 'pause' | 'takeover' | 'resume', taskId: string): boolean
 }
 
 const productionRuntime: TaskControlRuntime = {
@@ -29,7 +26,6 @@ export function applyRemoteTaskControl(
   control: RemoteTaskControlKind,
   runtime: TaskControlRuntime = productionRuntime
 ): boolean {
-  if (taskKind === 'web_use' && control === 'stop') return runtime.stopWebTask(taskId)
-  const command = control === 'take_over' ? 'takeover' : control
-  return runtime.controlVisionTask(command, taskId)
+  if (taskKind === 'web_use' && control === 'stop' && runtime.stopWebTask(taskId)) return true
+  return runtime.controlVisionTask(control, taskId)
 }

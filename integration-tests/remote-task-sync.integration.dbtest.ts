@@ -27,8 +27,12 @@ vi.mock('electron', () => ({
 const taskHistory = await import('../src/main/tasks/task-history')
 const { VisionGuard } = await import('../src/main/vision/vision-guard')
 const { registerVisionSession } = await import('../src/main/vision/vision-controller')
-const { observeTaskRunFrame, disposeTaskRunFrameProjection } =
-  await import('../pro/main/sync/task-run-projection')
+const {
+  observeTaskRunFrame,
+  disposeTaskRunFrameProjection,
+  evictTerminalTaskRunFrame,
+  syncedTaskRunFromSnapshot
+} = await import('../pro/main/sync/task-run-projection')
 const { applySyncedTaskControl, configureTaskControlSync, disposeTaskControlSync } =
   await import('../pro/main/sync/task-control-sync')
 
@@ -65,6 +69,7 @@ describe('a task controlled from its synced Mobile chat', () => {
       const request = new AbortController()
       const release = registerVisionSession(taskId, guard, request)
       const consumed: string[] = []
+      const settled: Array<Record<string, unknown>> = []
       const fields = {
         version: 1 as const,
         controlId: `control-${kind}`,
@@ -82,14 +87,135 @@ describe('a task controlled from its synced Mobile chat', () => {
       }
 
       expect(
-        applySyncedTaskControl(fields.controlId, fields, provenance, (id) => consumed.push(id))
+        applySyncedTaskControl(
+          fields.controlId,
+          fields,
+          provenance,
+          (_taskId, result) => settled.push(result),
+          (id) => consumed.push(id)
+        )
       ).toBe(true)
       expect(guard.isPaused).toBe(true)
       expect(consumed).toEqual([fields.controlId])
+      expect(settled).toEqual([
+        expect.objectContaining({
+          controlId: fields.controlId,
+          kind: 'pause',
+          outcome: 'applied'
+        })
+      ])
       expect(
-        applySyncedTaskControl(fields.controlId, fields, provenance, (id) => consumed.push(id))
+        applySyncedTaskControl(
+          fields.controlId,
+          fields,
+          provenance,
+          (_taskId, result) => settled.push(result),
+          (id) => consumed.push(id)
+        )
       ).toBe(false)
       expect(consumed).toEqual([fields.controlId])
+      expect(settled).toHaveLength(1)
+      release()
+    }
+  )
+
+  it.each(['web_use', 'computer_use'] as const)(
+    'resumes and then stops the existing %s runtime with correlated receipts',
+    (kind) => {
+      const taskId = `resume-stop-${kind}`
+      const conversationId = `resume-stop-chat-${kind}`
+      taskHistory.recordTaskRun({
+        taskId,
+        journeyId: conversationId,
+        kind,
+        title: `Resume and stop ${kind}`,
+        status: 'paused',
+        executionDeviceId: DEVICE_ID,
+        executionDeviceName: 'Studio Mac'
+      })
+      const guard = new VisionGuard()
+      guard.pauseForUser('paused for the integration journey')
+      const request = new AbortController()
+      const release = registerVisionSession(taskId, guard, request)
+      const receipts: Array<Record<string, unknown>> = []
+      const control = (controlKind: 'resume' | 'stop', sequence: number): boolean =>
+        applySyncedTaskControl(
+          `${controlKind}-${kind}`,
+          {
+            version: 1,
+            controlId: `${controlKind}-${kind}`,
+            taskId,
+            conversationId,
+            executionDeviceId: DEVICE_ID,
+            requestingDeviceId: 'mobile-release-107',
+            sequence,
+            kind: controlKind,
+            requestedAt: Date.now()
+          },
+          { originDeviceId: 'mobile-release-107', originDeviceName: 'Release phone' },
+          (_settledTaskId, result) => receipts.push(result),
+          () => undefined
+        )
+
+      expect(control('resume', 1)).toBe(true)
+      expect(guard.snapshot().state).toBe('running')
+      expect(control('stop', 2)).toBe(true)
+      if (kind === 'web_use') {
+        expect(taskHistory.getTaskRun(taskId)?.status).toBe('stopped')
+      } else {
+        expect(guard.snapshot().state).toBe('halted')
+        expect(request.signal.aborted).toBe(true)
+      }
+      expect(receipts).toEqual([
+        expect.objectContaining({ controlId: `resume-${kind}`, outcome: 'applied' }),
+        expect.objectContaining({ controlId: `stop-${kind}`, outcome: 'applied' })
+      ])
+      release()
+    }
+  )
+
+  it.each(['web_use', 'computer_use'] as const)(
+    'hands the existing %s guard to the Mobile user with Take Over',
+    (kind) => {
+      const taskId = `takeover-${kind}`
+      const conversationId = `takeover-chat-${kind}`
+      taskHistory.recordTaskRun({
+        taskId,
+        journeyId: conversationId,
+        kind,
+        title: `Take over ${kind}`,
+        status: 'running',
+        executionDeviceId: DEVICE_ID,
+        executionDeviceName: 'Studio Mac'
+      })
+      const guard = new VisionGuard()
+      const request = new AbortController()
+      const release = registerVisionSession(taskId, guard, request)
+      const fields = {
+        version: 1 as const,
+        controlId: `takeover-control-${kind}`,
+        taskId,
+        conversationId,
+        executionDeviceId: DEVICE_ID,
+        requestingDeviceId: 'mobile-release-107',
+        sequence: 1,
+        kind: 'takeover' as const,
+        requestedAt: Date.now()
+      }
+
+      expect(
+        applySyncedTaskControl(
+          fields.controlId,
+          fields,
+          { originDeviceId: 'mobile-release-107', originDeviceName: 'Release phone' },
+          () => undefined,
+          () => undefined
+        )
+      ).toBe(true)
+      expect(guard.snapshot()).toMatchObject({
+        state: 'paused',
+        reason: 'you took over from the supervisor'
+      })
       release()
     }
   )
@@ -111,10 +237,56 @@ describe('a task controlled from its synced Mobile chat', () => {
           requestedAt: Date.now()
         },
         { originDeviceId: 'mobile-release-107', originDeviceName: 'Release phone' },
+        () => undefined,
         (id) => consumed.push(id)
       )
     ).toBe(false)
     expect(consumed).toEqual([])
+  })
+
+  it('answers a valid late control once instead of letting the UI infer success', () => {
+    taskHistory.recordTaskRun({
+      taskId: 'finished-task',
+      journeyId: 'finished-chat',
+      kind: 'computer_use',
+      title: 'Finished task',
+      status: 'done',
+      executionDeviceId: DEVICE_ID,
+      executionDeviceName: 'Studio Mac'
+    })
+    const results: Array<Record<string, unknown>> = []
+    const consumed: string[] = []
+    const fields = {
+      version: 1 as const,
+      controlId: 'late-pause',
+      taskId: 'finished-task',
+      conversationId: 'finished-chat',
+      executionDeviceId: DEVICE_ID,
+      requestingDeviceId: 'mobile-release-107',
+      sequence: 1,
+      kind: 'pause' as const,
+      requestedAt: Date.now()
+    }
+    const apply = (): boolean =>
+      applySyncedTaskControl(
+        fields.controlId,
+        fields,
+        { originDeviceId: 'mobile-release-107', originDeviceName: 'Release phone' },
+        (_taskId, result) => results.push(result),
+        (controlId) => consumed.push(controlId)
+      )
+
+    expect(apply()).toBe(true)
+    expect(results).toEqual([
+      expect.objectContaining({
+        controlId: fields.controlId,
+        outcome: 'rejected',
+        message: 'The task cannot apply this control in its current state.'
+      })
+    ])
+    expect(consumed).toEqual([fields.controlId])
+    expect(apply()).toBe(false)
+    expect(results).toHaveLength(1)
   })
 })
 
@@ -175,5 +347,17 @@ describe('the live Mobile frame projection', () => {
       512 * 1024
     )
     expect(portable!.frame).toMatchObject({ width: 960, height: 600 })
+
+    const finished = taskHistory.recordTaskRun({
+      taskId,
+      journeyId: 'mobile-chat-live-frame',
+      kind: 'computer_use',
+      title: 'Send the release message',
+      status: 'done',
+      executionDeviceId: DEVICE_ID,
+      executionDeviceName: 'Studio Mac'
+    })
+    expect(evictTerminalTaskRunFrame(taskId)).toBe(true)
+    expect(syncedTaskRunFromSnapshot(finished).frame).toBeUndefined()
   })
 })
