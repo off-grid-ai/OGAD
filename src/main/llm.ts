@@ -1249,6 +1249,9 @@ export class LLMService {
         temperature: opts.temperature ?? this.temperature,
         ...this.samplingPayload(),
         stream: true,
+        // Ask for the token counts. Without this the final chunk carries no usage, so the app can
+        // report how long a generation took but never how many tokens it produced.
+        stream_options: { include_usage: true },
         // Thinking control: when on, ask the template to emit reasoning and have
         // llama.cpp split it into reasoning_content (deepseek-style); when off,
         // suppress it so the token budget goes to the answer.
@@ -1314,6 +1317,9 @@ export class LLMService {
         ...this.samplingPayload(),
         ...(opts.topP === undefined ? {} : { top_p: opts.topP }),
         stream: true,
+        // Ask for the token counts. Without this the final chunk carries no usage, so the app can
+        // report how long a generation took but never how many tokens it produced.
+        stream_options: { include_usage: true },
         ...thinkingPayload(!!opts.thinking, this.thinkingDialect),
         ...reasoningBudgetPayload(!!opts.thinking, this.reasoningBudget)
       }

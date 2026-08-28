@@ -12,15 +12,27 @@ import {
   createThinkSplitter,
   createToolCallAccumulator,
   createToolMarkupFilter,
-  type AssembledToolCall
+  type AssembledToolCall,
+  type SseTimings,
+  type SseUsage
 } from './sse-stream'
 import { modelRequestOptions, serverResponseError } from './http-post'
+import { generationMetrics, type GenerationMetrics } from './generation-metrics'
+
+/** Injectable clock so the accumulator's timing is testable without waiting in real time. */
+const now = (): number => Date.now()
 
 export interface StreamResult {
   content: string
   toolCalls: AssembledToolCall[]
   /** Raw OpenAI-compatible stop reason. Product layers normalize this value. */
   finishReason: string | null
+  /**
+   * What the generation cost. Present when the stream was measured; absent where a StreamResult is
+   * constructed directly (a vision adapter assembling one from a non-streamed reply), because an
+   * unmeasured run has no metrics rather than zero ones.
+   */
+  metrics?: GenerationMetrics
 }
 
 export interface StreamOptions {
@@ -41,6 +53,12 @@ export function createCompletionStreamAccumulator(
 ): CompletionStreamAccumulator {
   let buffer = ''
   let finishReason: string | null = null
+  // Timed from the moment the accumulator is created - which is the moment the request goes out -
+  // so time to first token includes queueing and prefill, the part the user actually waits through.
+  const startedAtMs = now()
+  let firstTokenAtMs: number | undefined
+  let usage: SseUsage | undefined
+  let timings: SseTimings | undefined
   const markup = createToolMarkupFilter((text) => onDelta(text, 'content'))
   const reasoningMarkup = createToolMarkupFilter((text) => onDelta(text, 'reasoning'))
   const splitter = createThinkSplitter((event) => {
@@ -58,7 +76,12 @@ export function createCompletionStreamAccumulator(
       const frame = parseSseLine(line)
       if (!frame) continue
       if (frame.finishReason) finishReason = frame.finishReason
+      if (frame.usage) usage = frame.usage
+      if (frame.timings) timings = frame.timings
       const reasoning = displayableReasoningDelta(frame.delta)
+      // Reasoning counts: it is the first thing the model produces and the first thing the user
+      // sees move, so a thinking model's TTFT would otherwise read as the whole thinking pass.
+      if ((reasoning || frame.delta.content) && firstTokenAtMs === undefined) firstTokenAtMs = now()
       if (reasoning) reasoningMarkup.push(reasoning)
       if (frame.delta.content) splitter.push(frame.delta.content)
       if (frame.delta.tool_calls) tools.push(frame.delta.tool_calls)
@@ -78,7 +101,14 @@ export function createCompletionStreamAccumulator(
       return {
         content: splitter.answer(),
         toolCalls: tools.list(),
-        finishReason
+        finishReason,
+        metrics: generationMetrics({
+          startedAtMs,
+          ...(firstTokenAtMs === undefined ? {} : { firstTokenAtMs }),
+          finishedAtMs: now(),
+          ...(usage ? { usage } : {}),
+          ...(timings ? { timings } : {})
+        })
       }
     }
   }

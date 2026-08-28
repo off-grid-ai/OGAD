@@ -53,9 +53,31 @@ export function displayableReasoningDelta(delta: SseDelta): string {
 
 /** One parsed OpenAI-compatible SSE choice. Finish metadata lives beside the
  * delta on the wire, so keep it beside (not inside) the streamed token shape. */
+/** OpenAI's token accounting, sent on the final chunk when the server reports usage. */
+export interface SseUsage {
+  prompt_tokens?: number
+  completion_tokens?: number
+}
+
+/**
+ * llama.cpp's per-request measurements, sent alongside usage on the final chunk. Kept as its own
+ * shape rather than folded into usage: these are the server's OWN measurements of its prefill and
+ * decode rates, which we cannot compute from the outside, and only llama.cpp sends them.
+ */
+export interface SseTimings {
+  prompt_n?: number
+  prompt_ms?: number
+  prompt_per_second?: number
+  predicted_n?: number
+  predicted_ms?: number
+  predicted_per_second?: number
+}
+
 export interface SseFrame {
   delta: SseDelta
   finishReason: string | null
+  usage?: SseUsage
+  timings?: SseTimings
 }
 
 /** A fully-assembled tool call (after accumulating its streamed fragments). */
@@ -109,14 +131,22 @@ export function parseSseLine(rawLine: string): SseFrame | null {
   const data = line.slice(5).trim()
   if (data === '[DONE]') return null
   try {
-    const choice = JSON.parse(data)?.choices?.[0]
-    if (!choice || typeof choice !== 'object') return null
+    const parsed = JSON.parse(data)
+    // Usage and timings arrive on a FINAL chunk that carries no choices at all, so they have to be
+    // read before the choice check - that check used to drop this frame, which is why the app had
+    // no idea how fast anything generated.
+    const usage = (parsed?.usage ?? undefined) as SseUsage | undefined
+    const timings = (parsed?.timings ?? undefined) as SseTimings | undefined
+    const choice = parsed?.choices?.[0]
+    if (!choice || typeof choice !== 'object') {
+      return usage || timings ? { delta: {}, finishReason: null, usage, timings } : null
+    }
     const delta = choice.delta
     const finishReason = typeof choice.finish_reason === 'string' ? choice.finish_reason : null
     if (delta && typeof delta === 'object') {
-      return { delta: delta as SseDelta, finishReason }
+      return { delta: delta as SseDelta, finishReason, usage, timings }
     }
-    if (finishReason) return { delta: {}, finishReason }
+    if (finishReason) return { delta: {}, finishReason, usage, timings }
     return null
   } catch {
     // partial / ignorable line

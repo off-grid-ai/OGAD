@@ -56,7 +56,10 @@ describe('persisted response limit over the production local stream', () => {
       expect(result.content).toMatch(/LIMIT-END$/)
       expect(result.finishReason).toBe('length')
       expect(result.maxTokens).toBe(RAISED_MAX_TOKENS)
-      expect(toResponseGenerationResult(result)).toEqual({
+      // toMatchObject, not toEqual: the result also carries measured generation metrics whose
+      // values are wall-clock and therefore not assertable here. The metrics themselves are tested
+      // in generation-metrics, against fixed inputs.
+      expect(toResponseGenerationResult(result)).toMatchObject({
         answer: result.content,
         cutoff: { reason: 'max_tokens', maxTokens: RAISED_MAX_TOKENS }
       })
