@@ -75,3 +75,12 @@ vi.mock('motion/react', async () => {
     useReducedMotion: () => true
   }
 })
+
+/**
+ * jsdom implements no scrolling at all, so Element.scrollIntoView is simply absent - calling it
+ * throws. Real browsers always have it. Stub it here rather than guarding each call site, so
+ * product code is not shaped around a gap in the test environment.
+ */
+if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = function scrollIntoView(): void {}
+}
