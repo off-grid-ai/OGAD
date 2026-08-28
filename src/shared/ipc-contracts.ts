@@ -60,6 +60,8 @@ export interface ActiveChatStreamContract {
   messageId?: string
   content: string
   reasoning: string
+  /** The caller asked the remote/local model for thinking, even if no readable token arrived yet. */
+  reasoningRequested: boolean
   phase:
     | 'waiting'
     | 'thinking'

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { registerHook, HOOKS } from '../bootstrap/hookRegistry'
 import {
+  activeChatStreamSnapshots,
   beginChatImageStream,
   bindChatStream,
   continueChatStreamWithImage,
@@ -88,7 +89,7 @@ describe('the reply being generated, as published to anything that follows it', 
   })
 
   it('keeps thinking apart from the answer', () => {
-    bindChatStream('stream-a', 'conversation-1')
+    bindChatStream('stream-a', 'conversation-1', 'thinking')
     noteChatStreamDelta('stream-a', 'let me think', 'reasoning')
     noteChatStreamDelta('stream-a', 'the answer', 'content')
     noteChatStreamDelta('stream-a', ' — more thought', 'reasoning')
@@ -102,6 +103,13 @@ describe('the reply being generated, as published to anything that follows it', 
       phase: 'thinking',
       messageId: expect.any(String)
     })
+    expect(activeChatStreamSnapshots()).toEqual([
+      expect.objectContaining({
+        streamId: 'stream-a',
+        reasoningRequested: true,
+        phase: 'thinking'
+      })
+    ])
   })
 
   it('ends with an explicit record-pending terminal rather than falling silent', () => {

@@ -27,7 +27,8 @@ interface ChatVoiceTurnOptions {
   speakerDrainMs: number
   isGenerating: boolean
   isPlaybackActive: boolean
-  transcribeAudio: (audio: Uint8Array, extension: string) => Promise<string>
+  transcribeAudio: (audio: Uint8Array, extension: string, requestId: string) => Promise<string>
+  cancelTranscription?: (requestId: string) => Promise<boolean>
   getTranscriptionLabel?: () => Promise<{ label: string }>
   onTranscript: (text: string, clip: ChatVoiceClip | null) => void
 }
@@ -146,6 +147,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
   const sawPlaybackRef = useRef(false)
   const previousPlaybackRef = useRef(false)
   const rearmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const transcriptionRequestRef = useRef<string | null>(null)
 
   const updatePhase = useCallback((next: ChatVoicePhase): void => {
     phaseRef.current = next
@@ -178,6 +180,11 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
   const discardCapture = useCallback(
     (notify = true): void => {
       sequenceRef.current += 1
+      const transcriptionRequest = transcriptionRequestRef.current
+      transcriptionRequestRef.current = null
+      if (transcriptionRequest) {
+        void optionsRef.current.cancelTranscription?.(transcriptionRequest).catch(() => {})
+      }
       const resources = resourcesRef.current
       resourcesRef.current = null
       chunksRef.current = []
@@ -213,7 +220,9 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
       try {
         const extension = audioFilename(mime).split('.').pop() ?? 'webm'
         const bytes = new Uint8Array(await blob.arrayBuffer())
-        const text = (await optionsRef.current.transcribeAudio(bytes, extension)).trim()
+        const requestId = crypto.randomUUID()
+        transcriptionRequestRef.current = requestId
+        const text = (await optionsRef.current.transcribeAudio(bytes, extension, requestId)).trim()
         if (!mountedRef.current || sequence !== sequenceRef.current) return
         if (!text) {
           setError("Didn't catch that. Tap the microphone and try again.")
@@ -241,6 +250,8 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
         )
         updateSuspended(optionsRef.current.mode === 'handsfree')
         updatePhase('idle')
+      } finally {
+        if (sequence === sequenceRef.current) transcriptionRequestRef.current = null
       }
     },
     [updatePhase, updateSuspended]

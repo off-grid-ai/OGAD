@@ -558,6 +558,15 @@ function mapRagMessages(raw: RawRagMessage[]): ChatMessage[] {
   return raw.flatMap<ChatMessage>(mapRagMessage)
 }
 
+/** Durable reloads replace durable rows but cannot erase a main-owned active stream. */
+function mergeDurableAndStreaming(durable: ChatMessage[], current: ChatMessage[]): ChatMessage[] {
+  const durableIds = new Set(durable.map((message) => message.id))
+  const active = current.filter(
+    (message) => message.streaming === true && !durableIds.has(message.id)
+  )
+  return [...durable, ...active]
+}
+
 function ImageMetadata({
   metadata
 }: Readonly<{
@@ -2408,6 +2417,12 @@ export function MemoryChat({
     },
     []
   )
+  const replaceDurableMessages = useCallback(
+    (conversationId: string, durable: ChatMessage[]): void => {
+      setConvMessages(conversationId, (current) => mergeDurableAndStreaming(durable, current))
+    },
+    [setConvMessages]
+  )
   // A peer can update one durable message twice in quick succession (the prompt-enhancement
   // placeholder, then its final disclosure). SQLite reads started for both broadcasts may finish
   // out of order; only the newest read is allowed to replace the rendered conversation.
@@ -2426,9 +2441,9 @@ export function MemoryChat({
     async (conversationId: string): Promise<void> => {
       const nextMessages = await loadLatestConversationMessages(conversationId)
       if (!nextMessages) return
-      setConvMessages(conversationId, nextMessages)
+      replaceDurableMessages(conversationId, nextMessages)
     },
-    [loadLatestConversationMessages, setConvMessages]
+    [loadLatestConversationMessages, replaceDurableMessages]
   )
   const [input, setInput] = useState('')
   // A preset prompt handed in via openTarget.seedPrompt, held until the fresh-chat state has
@@ -2945,9 +2960,9 @@ export function MemoryChat({
         setOpenTabs([first.id])
         try {
           const nextMessages = await loadLatestConversationMessages(first.id)
-          if (nextMessages) setConvMessages(first.id, nextMessages)
+          if (nextMessages) replaceDurableMessages(first.id, nextMessages)
         } catch {
-          setConvMessages(first.id, [])
+          replaceDurableMessages(first.id, [])
         }
       }
     })()
@@ -3272,7 +3287,7 @@ export function MemoryChat({
           const conv = await window.api.getRagConversation(convId)
           setActiveProjectId((conv as { project_id?: string | null }).project_id ?? null)
           const nextMessages = await loadLatestConversationMessages(convId)
-          if (nextMessages) setConvMessages(convId, nextMessages)
+          if (nextMessages) replaceDurableMessages(convId, nextMessages)
           if (openTarget.draftPrompt) setInput(openTarget.draftPrompt)
         } else if (openTarget.projectId) {
           setActiveConversationId(null)
@@ -4125,7 +4140,9 @@ export function MemoryChat({
     speakerDrainMs: voiceSpeakerDrainMs,
     isGenerating: Boolean(activeConversationId && generatingConvs.has(activeConversationId)),
     isPlaybackActive: voicePlaybackOwner !== null,
-    transcribeAudio: (audio, extension) => window.api.transcribeAudio(audio, extension),
+    transcribeAudio: (audio, extension, requestId) =>
+      window.api.transcribeAudio(audio, extension, requestId),
+    cancelTranscription: (requestId) => window.api.cancelTranscription(requestId),
     getTranscriptionLabel: () => window.api.getTranscriptionInfo(),
     onTranscript: (text, clip) => {
       if (voiceMode && clip) {
@@ -4504,6 +4521,7 @@ export function MemoryChat({
               role: 'assistant',
               content: stream.content,
               reasoning: stream.reasoning,
+              reasoningRequested: stream.reasoningRequested,
               streaming: true,
               toolCalls: stream.tools?.map((tool) => ({
                 name: tool.name,

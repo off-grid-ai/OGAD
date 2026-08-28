@@ -3,7 +3,10 @@ import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
 import { MemoryChat } from '../../MemoryChat'
 import { TooltipProvider } from '../../ui/tooltip'
-import type { RagChatResultContract } from '../../../../../shared/ipc-contracts'
+import type {
+  ActiveChatStreamContract,
+  RagChatResultContract
+} from '../../../../../shared/ipc-contracts'
 
 export type StreamEvent = {
   streamId: string
@@ -119,6 +122,7 @@ export class ChatBoundary {
   }[] = []
 
   readonly speechTurns: ReturnType<typeof deferred<{ dataUrl: string }>>[] = []
+  readonly activeRagStreams: ActiveChatStreamContract[] = []
 
   private streamCallback: ((event: StreamEvent) => void) | null = null
   private taskChangedCallback: ((task: TaskSnapshot) => void) | null = null
@@ -203,6 +207,7 @@ export class ChatBoundary {
         this.streamCallback = null
       }
     }),
+    getActiveRagStreams: vi.fn(async () => this.activeRagStreams.map((stream) => ({ ...stream }))),
     getRagConversations: vi.fn(async () => this.conversations.map((item) => ({ ...item }))),
     getRagConversation: vi.fn(async (id: string) => {
       const found = this.conversations.find((item) => item.id === id)

@@ -4,8 +4,6 @@
 // ffmpeg 16 kHz-mono re-encode are defined once and reused by dictation interim
 // ticks, final passes, file ingest, and meeting transcription alike.
 
-import { execFile } from 'child_process'
-import { promisify } from 'util'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -16,8 +14,7 @@ import { existing } from './bin-resolution'
 import { catalogEngine } from './classify'
 import { decodeToWavArgs, DECODE_TIMEOUT_MS } from './ffmpeg-decode'
 import type { TranscriptionService, Transcript, TranscribeOptions, Seg } from './types'
-
-const execFileAsync = promisify(execFile)
+import { runNativeTranscriptionProcess } from './native-process'
 
 /** Resolve the bundled whisper-cli across dev / packaged layouts. System Health
  * reuses this exact runtime resolver so its Installed claim cannot drift from
@@ -199,7 +196,10 @@ class WhisperCliTranscription implements TranscriptionService {
       // 16 kHz mono PCM WAV; -vn drops any video track so A/V files work too.
       // Cap the decode so a malformed/streaming input can't hang the process forever.
       try {
-        await execFileAsync(ff, decodeToWavArgs(input.path, tmp), { timeout: DECODE_TIMEOUT_MS })
+        await runNativeTranscriptionProcess(ff, decodeToWavArgs(input.path, tmp), {
+          timeout: DECODE_TIMEOUT_MS,
+          signal: opts.signal
+        })
       } catch (e) {
         fs.promises.unlink(tmp).catch(() => {})
         throw e
@@ -225,9 +225,10 @@ class WhisperCliTranscription implements TranscriptionService {
         run: async (modelPath) => {
           const runArgs = [...args]
           runArgs[1] = modelPath
-          const result = await execFileAsync(bin, runArgs, {
+          const result = await runNativeTranscriptionProcess(bin, runArgs, {
             maxBuffer: 64 * 1024 * 1024,
-            timeout: 30 * 60_000
+            timeout: 30 * 60_000,
+            signal: opts.signal
           })
           return result.stdout
         }

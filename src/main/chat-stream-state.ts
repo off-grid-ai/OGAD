@@ -26,6 +26,7 @@ interface ActiveStream {
   conversationId: string
   content: string
   reasoning: string
+  reasoningRequested: boolean
   phase: ChatStreamPhase
   progress?: ChatStreamProgress
   tools?: ChatStreamTool[]
@@ -49,6 +50,7 @@ export function activeChatStreamSnapshots(): ActiveChatStreamContract[] {
     messageId: stream.messageId,
     content: stream.content,
     reasoning: stream.reasoning,
+    reasoningRequested: stream.reasoningRequested,
     phase: stream.phase,
     ...(stream.tools?.length ? { tools: stream.tools.map((tool) => ({ ...tool })) } : {})
   }))
@@ -86,7 +88,14 @@ export function bindChatStream(
   // cancelled or failed before it ever became a record, so nothing is going to claim it.
   const messageId = crypto.randomUUID()
   pendingMessageIds.set(conversationId, messageId)
-  active.set(streamId, { conversationId, content: '', reasoning: '', phase, messageId })
+  active.set(streamId, {
+    conversationId,
+    content: '',
+    reasoning: '',
+    reasoningRequested: phase === 'thinking',
+    phase,
+    messageId
+  })
   publish(streamId)
 }
 
@@ -200,6 +209,7 @@ export function beginChatImageStream(conversationId: string | null | undefined):
     conversationId,
     content: '',
     reasoning: '',
+    reasoningRequested: false,
     phase: 'loading_image_model',
     messageId
   })

@@ -54,6 +54,7 @@ import { toResponseGenerationResult, type ResponseGenerationResult } from './llm
 import { getAllPromptDefs } from './prompts'
 import { getPrompt, getPromptTemplate, resetPrompt } from './prompt-store'
 import { setupTtsIpc } from './tts-ipc'
+import { setupVoiceTranscriptionIpc } from './voice-transcription-ipc'
 import {
   safeParseJson,
   ftsMatchExpression,
@@ -486,6 +487,7 @@ export async function summarizeSession(sessionId: string): Promise<string | null
 }
 
 export function setupIPC() {
+  setupVoiceTranscriptionIpc()
   const db = getDB()
   setupTtsIpc()
   setupSystemStatusIpc(ipcMain)
@@ -2143,32 +2145,6 @@ export function setupIPC() {
       })),
       getSetting('sttLanguage', 'auto')
     )
-  })
-
-  // --- Voice input (STT via the active engine: whisper default / Parakeet opt-in) ---
-  ipcMain.handle('voice:transcribe', async (_e, audio: ArrayBuffer | Uint8Array, ext = 'webm') => {
-    const fs = await import('fs')
-    const path = await import('path')
-    const os = await import('os')
-    // Route through the active-model-implied engine so a Parakeet selection is honored
-    // (falls back to whisper when Parakeet isn't installed).
-    const { getActiveTranscription } = await import('./transcription/select')
-    const transcriptionService = getActiveTranscription()
-    // Respect a Uint8Array's view bounds (byteOffset/length) — Buffer.from on the
-    // backing ArrayBuffer would copy the WHOLE buffer, corrupting a sliced view.
-    const buf = ArrayBuffer.isView(audio)
-      ? Buffer.from(audio.buffer, audio.byteOffset, audio.byteLength)
-      : Buffer.from(audio as ArrayBuffer)
-    // ext is renderer-controlled — strip anything but alphanumerics so it can't
-    // contain path separators / traversal sequences in the temp filename.
-    const safeExt = (ext || 'webm').replace(/[^a-zA-Z0-9]/g, '').slice(0, 10) || 'webm'
-    const tmp = path.join(os.tmpdir(), `offgrid-mic-${Date.now()}.${safeExt}`)
-    await fs.promises.writeFile(tmp, buf)
-    try {
-      return (await transcriptionService.transcribe({ path: tmp })).text
-    } finally {
-      fs.promises.unlink(tmp).catch(() => {})
-    }
   })
 
   /**

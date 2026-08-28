@@ -20,16 +20,13 @@ import { spawn, type ChildProcess, execSync } from 'child_process'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
-import { promisify } from 'util'
-import { execFile } from 'child_process'
 import { binRoots, isPackaged, exe } from '../runtime-env'
 import { existing } from './bin-resolution'
 import { whisperModel, ffmpegBin } from './whisper-cli'
 import { decodeToWavArgs, DECODE_TIMEOUT_MS } from './ffmpeg-decode'
 import type { TranscriptionService, Transcript, TranscribeOptions } from './types'
 import { killOrphansOnPort as reapOrphansOnPort } from '../kill-orphan-port'
-
-const execFileAsync = promisify(execFile)
+import { runNativeTranscriptionProcess } from './native-process'
 
 // Off the LLM (8439) and image (8440) ports so the resident STT engine can bind
 // alongside them - they may all be warm at once (chat + dictation together).
@@ -53,6 +50,8 @@ export interface WhisperInferenceRequest {
   language?: string
   /** Initial prompt biasing recognition toward custom vocabulary. */
   prompt?: string
+  /** Aborts the request and response body. The shared server has no per-job native cancel API. */
+  signal?: AbortSignal
 }
 
 /** Build the whisper-server launch argv (context/model args only; per-request
@@ -246,12 +245,16 @@ class WhisperServerService {
     try {
       const fields = buildInferenceFields(req)
       const form = new FormData()
-      const bytes = await fs.promises.readFile(req.wavPath)
+      const bytes = await fs.promises.readFile(req.wavPath, { signal: req.signal })
       // FormData wants a Blob; the audio part is named `file` (whisper-server's field).
       form.append('file', new Blob([bytes], { type: 'audio/wav' }), path.basename(req.wavPath))
       for (const [k, v] of Object.entries(fields)) form.append(k, v)
 
-      const res = await fetch(`${this.base()}/inference`, { method: 'POST', body: form })
+      const res = await fetch(`${this.base()}/inference`, {
+        method: 'POST',
+        body: form,
+        signal: req.signal
+      })
       if (!res.ok) throw new Error(`whisper-server rejected the request (HTTP ${res.status}).`)
       // Prefer JSON; fall back to raw text so a plain-text build still parses.
       const ctype = res.headers.get('content-type') ?? ''
@@ -333,6 +336,7 @@ class WhisperServerTranscription implements TranscriptionService {
   }
 
   async transcribe(input: { path: string }, opts: TranscribeOptions = {}): Promise<Transcript> {
+    opts.signal?.throwIfAborted()
     const model =
       opts.model && path.isAbsolute(opts.model) && fs.existsSync(opts.model)
         ? opts.model
@@ -343,6 +347,7 @@ class WhisperServerTranscription implements TranscriptionService {
     // Ensure the resident server is warm on the intended model (loads once; a
     // subsequent call with the same model is a no-op).
     await this.svc.ensureUp({ modelPath: model })
+    opts.signal?.throwIfAborted()
 
     // The server expects a decoded 16 kHz mono WAV. Reuse the exact ffmpeg re-encode
     // whisper-cli.ts uses; skip it when the caller pre-converted (dictation interim ticks).
@@ -353,7 +358,10 @@ class WhisperServerTranscription implements TranscriptionService {
       if (!ff) throw new Error('ffmpeg is required to decode audio and was not found.')
       tmp = path.join(os.tmpdir(), `offgrid-stt-srv-${Date.now()}-${process.pid}.wav`)
       try {
-        await execFileAsync(ff, decodeToWavArgs(input.path, tmp), { timeout: DECODE_TIMEOUT_MS })
+        await runNativeTranscriptionProcess(ff, decodeToWavArgs(input.path, tmp), {
+          timeout: DECODE_TIMEOUT_MS,
+          signal: opts.signal
+        })
       } catch (e) {
         fs.promises.unlink(tmp).catch(() => {})
         throw e
@@ -365,7 +373,8 @@ class WhisperServerTranscription implements TranscriptionService {
       return await this.svc.inference({
         wavPath: wav,
         language: opts.language,
-        prompt: opts.prompt
+        prompt: opts.prompt,
+        signal: opts.signal
       })
     } finally {
       if (tmp) fs.promises.unlink(tmp).catch(() => {})

@@ -164,8 +164,9 @@ describe('<MemoryChat/> Desktop voice turn modes', () => {
       .fn()
       .mockImplementationOnce(() => transcript)
       .mockResolvedValueOnce('This text came from the selected speech model')
+    const cancelTranscription = vi.fn(async () => true)
     const getTranscriptionInfo = vi.fn(transcriptionInfo)
-    Object.assign(boundary.api, { transcribeAudio, getTranscriptionInfo })
+    Object.assign(boundary.api, { transcribeAudio, cancelTranscription, getTranscriptionInfo })
     installBoundary(boundary)
     const user = userEvent.setup()
     renderChat({ conversationId: 'conversation-a' })
@@ -179,6 +180,10 @@ describe('<MemoryChat/> Desktop voice turn modes', () => {
     expect(boundary.calls).toHaveLength(0)
 
     await user.click(screen.getByRole('button', { name: 'Cancel transcription' }))
+    const firstRequestId = transcribeAudio.mock.calls[0]?.[2]
+    expect(firstRequestId).toEqual(expect.any(String))
+    expect(cancelTranscription).toHaveBeenCalledOnce()
+    expect(cancelTranscription).toHaveBeenCalledWith(firstRequestId)
     resolveTranscript('This cancelled result must not appear')
     await flush()
     expect((screen.getByPlaceholderText(/Ask about/) as HTMLTextAreaElement).value).toBe('')

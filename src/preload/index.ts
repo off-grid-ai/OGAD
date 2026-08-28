@@ -661,8 +661,10 @@ const offGridApi = {
     ipcRenderer.invoke('filesystem:pick-folder', input),
 
   // --- Voice input (speech-to-text via whisper) ---
-  transcribeAudio: (audio: ArrayBuffer | Uint8Array, ext?: string) =>
-    ipcRenderer.invoke('voice:transcribe', audio, ext),
+  transcribeAudio: (audio: ArrayBuffer | Uint8Array, ext: string, requestId: string) =>
+    ipcRenderer.invoke('voice:transcribe', audio, ext, requestId),
+  cancelTranscription: (requestId: string): Promise<boolean> =>
+    ipcRenderer.invoke('voice:cancel-transcription', requestId),
   // Provenance + picker options: which STT engine + model would run right now, and the installed
   // transcription models a picker can switch to (switch via setActiveModalModel('transcription')).
   getTranscriptionInfo: (): Promise<{

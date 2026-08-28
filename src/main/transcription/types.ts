@@ -18,6 +18,8 @@ export interface Transcript {
 }
 
 export interface TranscribeOptions {
+  /** Cancel this one transcription. Native adapters must pass it to their process/request boundary. */
+  signal?: AbortSignal
   /** Model file: absolute path, or a filename resolved in the models dir.
    *  Defaults to the user's configured/auto-picked transcription model. */
   model?: string

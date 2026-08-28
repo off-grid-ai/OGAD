@@ -223,6 +223,30 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     expect(screen.queryByText(/<\/?think>/i)).toBeNull()
   })
 
+  it('reattaches an OpenRouter thinking stream after navigation without losing its phase', async () => {
+    const boundary = new ChatBoundary()
+    boundary.activeRagStreams.push({
+      streamId: 'remote-openrouter-stream',
+      conversationId: 'conversation-a',
+      content: '',
+      reasoning: 'Comparing the current release evidence.',
+      reasoningRequested: true,
+      phase: 'thinking'
+    })
+    installBoundary(boundary)
+
+    const firstMount = renderChat({ conversationId: 'conversation-a' })
+    expect(await screen.findByText('Comparing the current release evidence.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Thinking…' })).toBeTruthy()
+
+    firstMount.unmount()
+    renderChat({ conversationId: 'conversation-a' })
+
+    expect(await screen.findByText('Comparing the current release evidence.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Thinking…' })).toBeTruthy()
+    expect(boundary.api.getActiveRagStreams.mock.calls.length).toBeGreaterThanOrEqual(2)
+  })
+
   it('keeps actions off supporting context and below the real assistant reply', async () => {
     const boundary = new ChatBoundary()
     boundary.messages['conversation-a'] = [
