@@ -143,6 +143,8 @@ export function SettingsPanel({
   const [connectors, setConnectors] = useState<Connector[]>([])
   const [newConn, setNewConn] = useState({ name: '', url: '' })
   const [activeModelName, setActiveModelName] = useState<string | null>(null)
+  // Default hidden, like mobile: the numbers are for when you go looking, not a permanent fixture.
+  const [showGenerationDetails, setShowGenerationDetails] = useState(false)
 
   const refreshConnectors = useCallback((): void => {
     window.api
@@ -171,6 +173,10 @@ export function SettingsPanel({
       .then((info: TranscriptionInfo) => setTranscriptionInfo(info))
       .catch(() => setTranscriptionInfo(null))
     window.api
+      .getSettings?.()
+      .then((settings) => setShowGenerationDetails(settings.showGenerationDetails === true))
+      .catch(() => {})
+    window.api
       .listTools?.()
       .then((t: { name: string; description: string }[]) => setTools(t))
       .catch(() => {})
@@ -196,6 +202,20 @@ export function SettingsPanel({
   const resetDefaults = (): void => {
     setS((prev) => ({ ...prev, ...DEFAULTS }))
     window.api.setLlmSettings?.(DEFAULTS)
+  }
+
+  /**
+   * A DISPLAY preference, so it rides saveSetting rather than LlmSettings - nothing here reaches
+   * the engine, and putting a UI toggle in the engine's parameter block would send a pointless
+   * reconfigure on every flip.
+   */
+  const toggleGenerationDetails = (): void => {
+    const next = !showGenerationDetails
+    setShowGenerationDetails(next)
+    void Promise.resolve(window.api.saveSetting('showGenerationDetails', next)).catch(() => {
+      // The switch is only a mirror of what was stored, so a failed write puts it back.
+      setShowGenerationDetails(!next)
+    })
   }
 
   const pickTranscriptionLanguage = (language: string): void => {
@@ -309,6 +329,27 @@ export function SettingsPanel({
                 onChange={(e) => set({ temperature: Number(e.target.value) })}
                 className="w-full accent-green-500"
               />
+            </Row>
+            <Row
+              label="Generation details"
+              controlId="generation-details-toggle"
+              value={showGenerationDetails ? 'Shown' : 'Hidden'}
+              hint="Print the speed, token count, and time to first token under each answer."
+            >
+              <button
+                id="generation-details-toggle"
+                type="button"
+                role="switch"
+                aria-checked={showGenerationDetails}
+                onClick={toggleGenerationDetails}
+                className={`w-full border px-3 py-1.5 text-left text-xs transition-colors ${
+                  showGenerationDetails
+                    ? 'border-green-500/40 text-green-500'
+                    : 'border-neutral-800 text-neutral-400 hover:text-neutral-200'
+                }`}
+              >
+                {showGenerationDetails ? 'Showing under each answer' : 'Hidden'}
+              </button>
             </Row>
             <Row label="Top-P" value={(s.topP ?? 0.95).toFixed(2)} hint="Nucleus sampling cutoff.">
               <input

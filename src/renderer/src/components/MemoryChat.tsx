@@ -1873,6 +1873,7 @@ type MessageRowState = Readonly<{
   latestVoiceAssistantId: string | null
   askSelections: Readonly<Record<string, readonly string[]>>
   incomingFiles: readonly IncomingSharedFile[]
+  showGenerationDetails: boolean
 }>
 
 type AskOptionSelection = Readonly<{
@@ -1962,7 +1963,7 @@ function MessageBubble({
         <MessageMarkdown message={message} navigation={navigation} />
       )}
       <ResponseCutoffNotice cutoff={message.cutoff} />
-      <GenerationMetricsRow metrics={message.metrics} />
+      {state.showGenerationDetails ? <GenerationMetricsRow metrics={message.metrics} /> : null}
       <ImageMemoryRetryAction
         message={message}
         loading={state.loading}
@@ -2438,6 +2439,8 @@ export function MemoryChat({
    * process sends the whole set on every change, so this replaces rather than merges.
    */
   const [incomingFiles, setIncomingFiles] = useState<IncomingSharedFile[]>([])
+  // Off unless asked for (Settings -> Model -> Generation details), matching mobile.
+  const [showGenerationDetails, setShowGenerationDetails] = useState(false)
   useEffect(() => {
     if (!isPro) {
       setIncomingFiles([])
@@ -2647,6 +2650,7 @@ export function MemoryChat({
         if (typeof s.composerToolsOn === 'boolean') setToolsOn(s.composerToolsOn)
         if (typeof s.composerConnectorsOn === 'boolean') setConnectorsOn(s.composerConnectorsOn)
         if (typeof s.composerThinking === 'boolean') setThinkingEnabled(s.composerThinking)
+        setShowGenerationDetails(s.showGenerationDetails === true)
         const voicePreferences = readVoicePreferences(s)
         setVoiceMode(voicePreferences.voiceMode)
         setVoiceTurnMode(voicePreferences.turnMode)
@@ -3974,6 +3978,10 @@ export function MemoryChat({
                   content: assistantContent,
                   context: resultContext,
                   cutoff: result.cutoff,
+                  // On the LIVE message too, not only in the persisted context: the numbers are
+                  // about the turn that just finished, so waiting for a reload to show them defeats
+                  // the point.
+                  metrics: result.metrics,
                   streaming: false,
                   variants: allVariants,
                   variantIndex: allVariants ? allVariants.length - 1 : undefined
@@ -5299,7 +5307,8 @@ export function MemoryChat({
                               ttsSpeed,
                               latestVoiceAssistantId,
                               askSelections: askSel,
-                              incomingFiles: incomingFilesFor(message.id)
+                              incomingFiles: incomingFilesFor(message.id),
+                              showGenerationDetails
                             }}
                             actions={messageActions}
                             navigation={messageNavigation}
