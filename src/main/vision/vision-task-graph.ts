@@ -52,6 +52,10 @@ export interface VisionTaskGraphDeps extends Omit<VisionTaskDeps, 'ground'> {
 interface CapturedStep {
   shot: Awaited<ReturnType<VisionScreen['capture']>>
   startedAt: number
+  /** How long the screen capture itself took, measured around the capture call. */
+  captureMs: number
+  /** How long the model call took. Filled in by the decide node, which runs after capture. */
+  decisionMs?: number
   guidance: readonly string[]
   history: string[]
   promptContext: string
@@ -277,6 +281,7 @@ class VisionTaskGraphRuntime {
       this.captured = {
         shot,
         startedAt,
+        captureMs: this.now() - startedAt,
         guidance,
         history,
         promptContext,
@@ -313,7 +318,9 @@ class VisionTaskGraphRuntime {
     this.progress('thinking', 'Reviewing direction, milestone, and next action')
     this.beginReasoning()
     try {
+      const decisionStartedAt = this.now()
       const grounding = await this.deps.decide(this.groundingInput(captured))
+      captured.decisionMs = this.now() - decisionStartedAt
       this.actionResponse = grounding.response
       this.actionModelInput = grounding.modelInput
       this.decision =
@@ -338,6 +345,10 @@ class VisionTaskGraphRuntime {
         rawResponse: this.actionResponse,
         reasoning: this.currentReasoning,
         durationMs: this.now() - captured.startedAt,
+      timings: {
+        captureMs: captured.captureMs,
+        ...(captured.decisionMs === undefined ? {} : { decisionMs: captured.decisionMs })
+      },
         result: 'error',
         error: message
       })
@@ -527,6 +538,10 @@ class VisionTaskGraphRuntime {
         ...(mappedActions[0] ? { mappedAction: mappedActions[0] } : {}),
         ...(mappedActions.length ? { mappedActions } : {}),
         durationMs: this.now() - captured.startedAt,
+      timings: {
+        captureMs: captured.captureMs,
+        ...(captured.decisionMs === undefined ? {} : { decisionMs: captured.decisionMs })
+      },
         result: 'error',
         error: message
       })
@@ -568,6 +583,10 @@ class VisionTaskGraphRuntime {
       ...(mappedActions[0] ? { mappedAction: mappedActions[0] } : {}),
       ...(mappedActions.length ? { mappedActions } : {}),
       durationMs: this.now() - captured.startedAt,
+      timings: {
+        captureMs: captured.captureMs,
+        ...(captured.decisionMs === undefined ? {} : { decisionMs: captured.decisionMs })
+      },
       result: blocked ? 'blocked' : 'actuated'
     })
     this.progress(
@@ -638,6 +657,10 @@ class VisionTaskGraphRuntime {
       parsedAction: decision?.kind === 'actions' ? decision.actions[0] : null,
       parsedActions: decision?.kind === 'actions' ? decision.actions : undefined,
       durationMs: this.now() - captured.startedAt,
+      timings: {
+        captureMs: captured.captureMs,
+        ...(captured.decisionMs === undefined ? {} : { decisionMs: captured.decisionMs })
+      },
       result,
       error
     })

@@ -208,6 +208,7 @@ export function browserVisionStepDetail(
               : ('inference' as const)
         }
       : {}),
+    ...(observation.timings ? { timings: observation.timings } : {}),
     execution: {
       status: observation.result === 'error' ? 'failed' : 'complete',
       durationMs: observation.durationMs,

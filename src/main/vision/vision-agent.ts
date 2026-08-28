@@ -91,6 +91,13 @@ export interface VisionStepObservation {
   mappedAction?: VisionAction
   mappedActions?: readonly VisionAction[]
   durationMs: number
+  /**
+   * Where a step's time actually went, split at the only boundary that matters for diagnosis:
+   * screen capture versus the model call. "The task feels slow" is unanswerable without it - the
+   * same total can be a slow model or a capture loop retrying against a page that will not settle,
+   * and those have opposite fixes.
+   */
+  timings?: { captureMs?: number; decisionMs?: number }
   result:
     | 'reviewed'
     | 'parse_failed'
