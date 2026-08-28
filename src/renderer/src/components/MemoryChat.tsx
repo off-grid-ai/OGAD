@@ -5810,7 +5810,7 @@ export function MemoryChat({
                         </div>
                       )}
                       {/* Approval UX v2: pending gate cards + outcomes, in-flow above the composer */}
-                      <ActionGateDock />
+                      <ActionGateDock conversationId={activeConversationId} />
                       {/* Vision rail: the supervisor overlay slides in during a computer-use task */}
                       {TaskSupervisorOverlay ? <TaskSupervisorOverlay /> : null}
                       {voiceTurns.microphoneDenied && (

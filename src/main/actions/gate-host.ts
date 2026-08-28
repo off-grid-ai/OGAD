@@ -31,6 +31,8 @@ export interface InlineGateRequest {
   risk: string
   payloadHash: string
   source: string
+  /** The chat that owns this approval. Other open chats must not render it. */
+  sourceRef?: string
 }
 
 /** The engine's rails, translated to the approval UI's executor kinds. */
@@ -184,9 +186,7 @@ export function approvalBypassed(): boolean {
 export type ComputerApprovalMode = 'auto' | 'ask'
 let approvalModeProvider: (() => ComputerApprovalMode) | null = null
 
-export function registerApprovalModeProvider(
-  provider: () => ComputerApprovalMode
-): () => void {
+export function registerApprovalModeProvider(provider: () => ComputerApprovalMode): () => void {
   approvalModeProvider = provider
   return () => {
     if (approvalModeProvider === provider) {
@@ -199,63 +199,77 @@ export function computerApprovalMode(): ComputerApprovalMode {
   return approvalModeProvider?.() ?? 'ask'
 }
 
-/** Only COMPUTER-USE tasks ask for approval. The accessibility / vision rails
- *  drive the real desktop - they take over the user's cursor and keyboard - so
- *  the user confirms before that happens. Every other action runs IN-APP without
- *  taking over the machine (the browser rail acts in Off Grid AI's own page; native
- *  actions call an API), so it runs without a prompt. */
-export function needsApproval(rail: Rail | undefined): boolean {
+/** Web Use and Computer Use ask before a task starts. Semantic actions keep their
+ *  own risk-specific approval path. */
+export function needsApproval(action: Pick<ActionRecord, 'rail'>): boolean {
+  return action.rail === 'browser' || action.rail === 'accessibility' || action.rail === 'vision'
+}
+
+function isComputerRail(rail: Rail | undefined): boolean {
   return rail === 'accessibility' || rail === 'vision'
+}
+
+/** The existing Chat that owns a task approval, or null for Action Approval.
+ *  This is the routing SSOT for inline approval and notification suppression. */
+export function approvalConversation(
+  action: Pick<ActionRecord, 'source' | 'sourceRef'>
+): string | null {
+  const sourceRef = action.sourceRef?.trim()
+  return action.source === 'chat' && sourceRef ? sourceRef : null
 }
 
 /** The GateCallback the engine host is constructed with. */
 export async function gateHost({ action }: { action: ActionRecord }): Promise<GateDecision> {
-  // In-app actions run straight through; only computer use is gated. The env
-  // flag bypasses even that, for headless testing.
-  if (approvalBypassed() || !needsApproval(action.rail)) {
+  // Non-task actions run straight through this gate. The env flag bypasses task
+  // approval for headless testing.
+  if (approvalBypassed() || !needsApproval(action)) {
     return { kind: 'approve' }
   }
   // The user's Sync-sharing policy: "Auto-approve" runs computer-use tasks with no
   // prompt (they still journal, and the outcome shows in chat); "Ask every time"
   // (the default) falls through to park for approval below.
-  if (computerApprovalMode() === 'auto') {
+  if (isComputerRail(action.rail) && computerApprovalMode() === 'auto') {
     return { kind: 'approve' }
   }
-  const queued = proposeActionApproval({
-    kind: railToKind(action.rail),
-    title: action.intent,
-    detail: JSON.stringify(action.args, null, 2),
-    risk: action.risk,
-    args: action.args,
-    source: action.source,
-    // Engine-specific fields the approval card needs to resolve the gate
-    // and to show exactly what was bound.
-    actionId: action.id,
-    actionType: action.type,
-    payloadHash: action.payloadHash
-  })
-  // Park (and render the inline chat card) whenever a human is needed - which is
-  // either when the pro queue accepted the gate (queued === true) OR when nobody
-  // queued but an inline surface is registered. The pro-queue notification and the
-  // in-chat card are two VIEWS of the ONE engine gate: whichever the user acts on
-  // calls resolveActionGate for the same actionId (idempotent), and the other view
-  // settles on the outcome broadcast. This is the "migration" the surface was built
-  // for - a chat-initiated computer-use task is approvable right where it was asked.
+  const conversationId = approvalConversation(action)
+  // A Chat-owned task stays in that Chat. Sending it through Pro's queue would
+  // create a second execution chat and two notification surfaces for one task.
+  // Non-Chat tasks still enter Action Approval, which owns their decision.
+  const queued = conversationId
+    ? undefined
+    : proposeActionApproval({
+        kind: railToKind(action.rail),
+        title: action.intent,
+        detail: JSON.stringify(action.args, null, 2),
+        risk: action.risk,
+        args: action.args,
+        source: action.source,
+        // Engine-specific fields the approval card needs to resolve the gate
+        // and to show exactly what was bound.
+        actionId: action.id,
+        actionType: action.type,
+        payloadHash: action.payloadHash
+      })
+  // A non-Chat task parks when Action Approval accepts it. A Chat task parks only
+  // when its inline surface exists. Both paths resolve the same engine gate.
   // Park BEFORE emitting so a same-tick resolve always finds the pending entry.
-  if (queued === true || hasInlineSurface()) {
+  if (queued === true || (conversationId !== null && hasInlineSurface())) {
     return new Promise<GateDecision>((resolve) => {
       pending.set(action.id, resolve)
       notifyParked(action.id)
-      emitInline({
-        actionId: action.id,
-        actionType: action.type,
-        kind: railToKind(action.rail),
-        title: action.intent,
-        args: action.args,
-        risk: action.risk,
-        payloadHash: action.payloadHash,
-        source: action.source
-      })
+      if (conversationId) {
+        emitInline({
+          actionId: action.id,
+          actionType: action.type,
+          kind: railToKind(action.rail),
+          title: action.intent,
+          args: action.args,
+          risk: action.risk,
+          payloadHash: action.payloadHash,
+          source: action.source,
+          sourceRef: conversationId
+        })
+      }
     })
   }
   // Nothing queued and no inline surface (tests, headless): the unchanged

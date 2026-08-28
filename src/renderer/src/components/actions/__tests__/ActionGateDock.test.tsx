@@ -7,7 +7,15 @@
  */
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ActionGateDock } from '../ActionGateDock'
+import { ActionGateDock as ProductActionGateDock } from '../ActionGateDock'
+
+function ActionGateDock({
+  conversationId = 'chat-1'
+}: {
+  conversationId?: string
+}): React.JSX.Element | null {
+  return <ProductActionGateDock conversationId={conversationId} />
+}
 
 type Listener = (payload: unknown) => void
 
@@ -42,7 +50,8 @@ const request = {
   actionType: 'message',
   title: 'Send a message to Ali',
   args: { to: 'ali@x.test', text: 'the deck is ready' },
-  risk: 'irreversible'
+  risk: 'irreversible',
+  sourceRef: 'chat-1'
 }
 
 describe('<ActionGateDock/>', () => {
@@ -62,9 +71,15 @@ describe('<ActionGateDock/>', () => {
     expect(screen.queryByText('irreversible')).toBeNull()
   })
 
-  it('does not duplicate Pro’s persistent execution-chat approval card', async () => {
+  it('shows the approval in its matching Chat in Pro', async () => {
     window.api = { ...window.api, isPro: true } as never
     render(<ActionGateDock />)
+    emitPending(request)
+    await waitFor(() => expect(screen.getByTestId('gate-card')).toBeTruthy())
+  })
+
+  it('does not show the approval in another open Chat', async () => {
+    render(<ActionGateDock conversationId="chat-2" />)
     emitPending(request)
     await waitFor(() => expect(screen.queryByTestId('gate-card')).toBeNull())
   })

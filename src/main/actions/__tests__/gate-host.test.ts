@@ -10,6 +10,7 @@ import type { ActionRecord } from '@offgrid/use'
 import { HOOKS, registerHook, unregisterHook } from '../../bootstrap/hookRegistry'
 import {
   abandonActionGate,
+  approvalConversation,
   approvalBypassed,
   computerApprovalMode,
   gateHost,
@@ -33,9 +34,10 @@ const record = (overrides: Partial<ActionRecord> = {}): ActionRecord =>
     risk: 'mutate',
     id: 'act_1',
     source: 'chat',
+    sourceRef: 'chat-1',
     payloadHash: 'a'.repeat(64),
-    // Default to a COMPUTER-USE rail: only those gate now, so the parking tests
-    // need one. Non-computer-use rails (browser/semantic) auto-approve.
+    // Default to a COMPUTER-USE rail. Browser and computer tasks gate; semantic
+    // actions use their own risk-specific path.
     rail: 'accessibility',
     idempotencyKey: 'k',
     attempts: 0,
@@ -72,15 +74,17 @@ describe('gateHost', () => {
 
   it('a handler that declines to queue also lets the action run', async () => {
     registerHook(HOOKS.actionsProposeApproval, () => false)
-    const decision = await gateHost({ action: record() })
+    const decision = await gateHost({
+      action: record({ source: 'routine', sourceRef: undefined })
+    })
     expect(decision).toEqual({ kind: 'approve' })
   })
 
-  it('a queued action parks until the approval surface resolves it', async () => {
+  it('a non-chat queued action parks until Action Approval resolves it', async () => {
     const seen = vi.fn(() => true)
     registerHook(HOOKS.actionsProposeApproval, seen)
 
-    const parked = gateHost({ action: record() })
+    const parked = gateHost({ action: record({ source: 'routine', sourceRef: undefined }) })
     expect(pendingActionGateCount()).toBe(1)
 
     expect(resolveActionGate('act_1', { kind: 'approve' })).toBe(true)
@@ -94,7 +98,14 @@ describe('gateHost', () => {
       request = req
       return true
     })
-    const parked = gateHost({ action: record({ rail: 'vision', risk: 'irreversible' }) })
+    const parked = gateHost({
+      action: record({
+        rail: 'vision',
+        risk: 'irreversible',
+        source: 'routine',
+        sourceRef: undefined
+      })
+    })
     expect(request).toMatchObject({
       kind: 'computer',
       risk: 'irreversible',
@@ -103,7 +114,7 @@ describe('gateHost', () => {
       payloadHash: 'a'.repeat(64),
       title: 'remind me to send the deck',
       args: { title: 'Send the deck' },
-      source: 'chat'
+      source: 'routine'
     })
     resolveActionGate('act_1', { kind: 'reject', reason: 'no' })
     await expect(parked).resolves.toEqual({ kind: 'reject', reason: 'no' })
@@ -111,7 +122,7 @@ describe('gateHost', () => {
 
   it('reject and edit decisions pass through untouched', async () => {
     registerHook(HOOKS.actionsProposeApproval, () => true)
-    const first = gateHost({ action: record() })
+    const first = gateHost({ action: record({ source: 'routine', sourceRef: undefined }) })
     resolveActionGate('act_1', { kind: 'edit', args: { title: 'Send the v2 deck' } })
     await expect(first).resolves.toEqual({ kind: 'edit', args: { title: 'Send the v2 deck' } })
   })
@@ -123,7 +134,7 @@ describe('gateHost', () => {
   it('falls back to the legacy mcp hook when the new one is unregistered', async () => {
     const legacy = vi.fn(() => true)
     registerHook(HOOKS.legacyMcpProposeApproval, legacy)
-    const parked = gateHost({ action: record() })
+    const parked = gateHost({ action: record({ source: 'routine', sourceRef: undefined }) })
     expect(legacy).toHaveBeenCalled()
     resolveActionGate('act_1', { kind: 'approve' })
     await parked
@@ -133,7 +144,7 @@ describe('gateHost', () => {
 describe('the park signals', () => {
   it('whenActionParked resolves immediately for an already-parked action', async () => {
     registerHook(HOOKS.actionsProposeApproval, () => true)
-    const parked = gateHost({ action: record() })
+    const parked = gateHost({ action: record({ source: 'routine', sourceRef: undefined }) })
     await whenActionParked('act_1') // already pending: resolves now
     resolveActionGate('act_1', { kind: 'approve' })
     await parked
@@ -142,7 +153,7 @@ describe('the park signals', () => {
   it('whenActionParked resolves when the park happens later', async () => {
     registerHook(HOOKS.actionsProposeApproval, () => true)
     const waiting = whenActionParked('act_1')
-    const parked = gateHost({ action: record() })
+    const parked = gateHost({ action: record({ source: 'routine', sourceRef: undefined }) })
     await waiting
     resolveActionGate('act_1', { kind: 'approve' })
     await parked
@@ -154,13 +165,15 @@ describe('the park signals', () => {
     const unsubscribe = onGateParked(() => {
       fired += 1
     })
-    const first = gateHost({ action: record() })
+    const first = gateHost({ action: record({ source: 'routine', sourceRef: undefined }) })
     expect(fired).toBe(1)
     resolveActionGate('act_1', { kind: 'approve' })
     await first
 
     unsubscribe()
-    const second = gateHost({ action: record({ id: 'act_2' }) })
+    const second = gateHost({
+      action: record({ id: 'act_2', source: 'routine', sourceRef: undefined })
+    })
     expect(fired).toBe(1)
     resolveActionGate('act_2', { kind: 'approve' })
     await second
@@ -168,7 +181,7 @@ describe('the park signals', () => {
 
   it('pendingActionGateCount tracks parks and abandonActionGate drops one', () => {
     registerHook(HOOKS.actionsProposeApproval, () => true)
-    void gateHost({ action: record() })
+    void gateHost({ action: record({ source: 'routine', sourceRef: undefined }) })
     expect(pendingActionGateCount()).toBe(1)
     expect(abandonActionGate('act_1')).toBe(true)
     expect(abandonActionGate('act_1')).toBe(false)
@@ -189,7 +202,8 @@ describe('the inline gate surface (Approval UX v2)', () => {
         kind: 'computer',
         risk: 'irreversible',
         title: 'remind me to send the deck',
-        payloadHash: 'a'.repeat(64)
+        payloadHash: 'a'.repeat(64),
+        sourceRef: 'chat-1'
       })
       expect(pendingActionGateCount()).toBe(1)
       resolveActionGate('act_1', { kind: 'approve' })
@@ -242,15 +256,14 @@ describe('the inline gate surface (Approval UX v2)', () => {
     }
   })
 
-  it('surfaces a queued gate in BOTH the pro queue and the inline card - one gate, two views', async () => {
+  it('keeps a Chat task inline and bypasses the Pro proposal hook', async () => {
     const requests: InlineGateRequest[] = []
     const unregister = registerInlineGateSurface((request) => requests.push(request))
     try {
       const proSaw = vi.fn(() => true)
       registerHook(HOOKS.actionsProposeApproval, proSaw)
       const parked = gateHost({ action: record() })
-      // The pro queue was offered the gate AND the in-chat card was emitted for it.
-      expect(proSaw).toHaveBeenCalledTimes(1)
+      expect(proSaw).not.toHaveBeenCalled()
       expect(requests).toHaveLength(1)
       expect(requests[0]).toMatchObject({ actionId: 'act_1', kind: 'computer' })
       expect(pendingActionGateCount()).toBe(1)
@@ -284,23 +297,34 @@ describe('parseGateDecision', () => {
   })
 })
 
-describe('needsApproval (only computer use is gated)', () => {
-  it('gates the computer-use rails, runs in-app actions straight through', () => {
-    expect(needsApproval('accessibility')).toBe(true)
-    expect(needsApproval('vision')).toBe(true)
-    expect(needsApproval('browser')).toBe(false) // web_task runs in-app
-    expect(needsApproval('semantic')).toBe(false) // native actions
-    expect(needsApproval(undefined)).toBe(false)
+describe('needsApproval', () => {
+  it('gates both task rails and leaves semantic actions to their own policy', () => {
+    expect(needsApproval(record({ rail: 'accessibility' }))).toBe(true)
+    expect(needsApproval(record({ rail: 'vision' }))).toBe(true)
+    expect(needsApproval(record({ rail: 'browser' }))).toBe(true)
+    expect(needsApproval(record({ rail: 'semantic' }))).toBe(false)
+    expect(needsApproval(record({ rail: undefined }))).toBe(false)
   })
 
-  it('gateHost auto-approves a browser (web_task) action even with a surface listening', async () => {
-    const dispose = registerInlineGateSurface(() => {
-      throw new Error('a web_task must NOT park for approval')
-    })
-    const decision = await gateHost({ action: record({ rail: 'browser' }) })
-    expect(decision).toEqual({ kind: 'approve' })
-    expect(pendingActionGateCount()).toBe(0)
+  it('parks a Chat-owned browser task inline without proposing a notification', async () => {
+    const requests: InlineGateRequest[] = []
+    const proSaw = vi.fn(() => true)
+    registerHook(HOOKS.actionsProposeApproval, proSaw)
+    const dispose = registerInlineGateSurface((request) => requests.push(request))
+    const parked = gateHost({ action: record({ rail: 'browser', type: 'web_use' }) })
+    expect(proSaw).not.toHaveBeenCalled()
+    expect(requests).toEqual([expect.objectContaining({ sourceRef: 'chat-1', kind: 'browser' })])
+    resolveActionGate('act_1', { kind: 'approve' })
+    await expect(parked).resolves.toEqual({ kind: 'approve' })
     dispose()
+  })
+})
+
+describe('approvalConversation', () => {
+  it('uses only a valid Chat sourceRef as the inline approval owner', () => {
+    expect(approvalConversation(record())).toBe('chat-1')
+    expect(approvalConversation(record({ source: 'routine' }))).toBeNull()
+    expect(approvalConversation(record({ sourceRef: '  ' }))).toBeNull()
   })
 })
 
@@ -342,12 +366,27 @@ describe('computerApprovalMode (the Sync-sharing auto/ask setting)', () => {
     registerHook(HOOKS.actionsProposeApproval, () => true)
     const unregister = registerApprovalModeProvider(() => 'ask')
     try {
-      const parked = gateHost({ action: record() })
+      const parked = gateHost({ action: record({ source: 'routine', sourceRef: undefined }) })
       expect(pendingActionGateCount()).toBe(1)
       resolveActionGate('act_1', { kind: 'approve' })
       await expect(parked).resolves.toEqual({ kind: 'approve' })
     } finally {
       unregister()
+    }
+  })
+
+  it('does not apply the Computer Use auto setting to a Web Use task', async () => {
+    const requests: InlineGateRequest[] = []
+    const offSurface = registerInlineGateSurface((request) => requests.push(request))
+    const unregister = registerApprovalModeProvider(() => 'auto')
+    try {
+      const parked = gateHost({ action: record({ rail: 'browser', type: 'web_use' }) })
+      expect(requests).toHaveLength(1)
+      resolveActionGate('act_1', { kind: 'approve' })
+      await expect(parked).resolves.toEqual({ kind: 'approve' })
+    } finally {
+      unregister()
+      offSurface()
     }
   })
 })

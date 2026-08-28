@@ -22,6 +22,7 @@ interface GateRequest {
   title: string
   args: Record<string, unknown>
   risk: string
+  sourceRef?: string
 }
 
 interface OutcomeEvent {
@@ -39,7 +40,9 @@ const OUTCOME_LABEL: Record<string, string> = {
   poisoned: 'Failed'
 }
 
-export function ActionGateDock(): React.JSX.Element | null {
+export function ActionGateDock({
+  conversationId
+}: Readonly<{ conversationId: string | null }>): React.JSX.Element | null {
   const [pending, setPending] = useState<GateRequest[]>([])
   const [outcomes, setOutcomes] = useState<OutcomeEvent[]>([])
   const [edits, setEdits] = useState<Record<string, Record<string, string>>>({})
@@ -80,10 +83,11 @@ export function ActionGateDock(): React.JSX.Element | null {
     }))
   }
 
-  // Pro owns one durable approval card in the Action's execution chat. Keep this
-  // live dock as the free-build approval surface and as the shared outcome feed,
-  // but never draw a second pending card beside Pro's persistent one.
-  const visiblePending = window.api.isPro ? [] : pending
+  // sourceRef is the task's existing Chat owner. The same rule applies in free
+  // and Pro builds, and a different open Chat cannot display or decide this gate.
+  const visiblePending = pending.filter(
+    (request) => conversationId !== null && request.sourceRef === conversationId
+  )
   // Pro writes every Action result into its execution chat and the shared task
   // timeline. A second global banner above an unrelated chat composer has no
   // stable conversation owner and can show stale, context-free outcomes.
