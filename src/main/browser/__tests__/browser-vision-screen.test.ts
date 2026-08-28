@@ -246,6 +246,9 @@ describe('browser screenshot evidence', () => {
       evidence: evidenceSink,
       activePage: () => ({
         view: {
+          // The real WebContentsView reports its bounds, and capture derives the page zoom from
+          // them - the viewport tolerance is a device-pixel budget, so it needs the real geometry.
+          getBounds: () => ({ x: 0, y: 0, width: 1920, height: 1200 }),
           webContents: {
             invalidate: vi.fn(),
             capturePage,
@@ -322,6 +325,7 @@ describe('browser screenshot evidence', () => {
       actuate
     } as unknown as BrowserDriver
     const view = {
+      getBounds: () => ({ x: 0, y: 0, width: 1920, height: 1200 }),
       webContents: {
         invalidate: vi.fn(),
         capturePage,
