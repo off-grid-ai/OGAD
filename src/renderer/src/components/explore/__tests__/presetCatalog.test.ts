@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { PRESET_SECTIONS, ALL_PRESETS, HEADLINE_PRESETS } from '../presetCatalog'
+import {
+  PRESET_SECTIONS,
+  ALL_PRESETS,
+  HEADLINE_PRESETS,
+  SUPPORT_EMAIL,
+  buildWorkflowRequestMailto
+} from '../presetCatalog'
 
 describe('the Explore preset catalog', () => {
   it('gives every section at least one preset', () => {
@@ -65,5 +71,13 @@ describe('the Explore preset catalog', () => {
   it('keeps the flight hero present with a non-empty starter prompt', () => {
     const flight = ALL_PRESETS.find((preset) => preset.id === 'find-flight')
     expect(flight?.prompt.trim().length).toBeGreaterThan(0)
+  })
+
+  it('builds a pre-filled workflow-request mailto to the support address', () => {
+    const url = buildWorkflowRequestMailto()
+    expect(url.startsWith(`mailto:${SUPPORT_EMAIL}?`)).toBe(true)
+    expect(url).toContain('subject=')
+    // The body is a fill-in template, url-encoded, prompting for the workflow.
+    expect(decodeURIComponent(url)).toMatch(/What would you like Off Grid AI to do/)
   })
 })

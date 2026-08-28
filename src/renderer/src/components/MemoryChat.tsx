@@ -46,7 +46,6 @@ import { ChatThinkingBlock } from './ChatThinkingBlock'
 import { ChatToolRows } from './ChatToolRows'
 import { ArtifactCanvas, parseArtifact, type Artifact } from './ArtifactCanvas'
 import { ExploreSection } from './explore/ExploreSection'
-import { REQUEST_FORM_URL } from './explore/presetCatalog'
 import { VoiceBubble, stopAllVoicePlayback } from './VoiceBubble'
 import { SkillsPanel } from './SkillsPanel'
 import { ModelPicker } from './ModelPicker'
@@ -4792,7 +4791,6 @@ export function MemoryChat({
                       onRun={(preset) => {
                         void sendMessage(preset.prompt)
                       }}
-                      requestUrl={REQUEST_FORM_URL}
                       className="mt-6 w-full text-left"
                     />
                   ) : null}

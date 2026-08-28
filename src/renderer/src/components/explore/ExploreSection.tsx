@@ -1,10 +1,20 @@
-import { Globe, Desktop, Brain, DeviceMobile, ArrowRight } from '@phosphor-icons/react'
+import {
+  Globe,
+  Desktop,
+  Brain,
+  DeviceMobile,
+  ArrowRight,
+  Lightbulb,
+  PaperPlaneTilt
+} from '@phosphor-icons/react'
 import {
   PRESET_SECTIONS,
+  buildWorkflowRequestMailto,
   type DemoPreset,
   type PresetCapability,
   type PresetRequirement
 } from './presetCatalog'
+import { openExternal } from '../../constants/links'
 
 /**
  * The Explore surface: the demo-preset catalog rendered as capability panels, each holding a
@@ -34,8 +44,9 @@ const REQUIREMENT_LABEL: Record<PresetRequirement, string> = {
 interface ExploreSectionProps {
   /** Run a preset: the host seeds a new chat with `preset.prompt`. */
   onRun: (preset: DemoPreset) => void
-  /** Where "Request a capability" points (a Google Form for now). Omit to hide the link. */
-  requestUrl?: string
+  /** Ask for a workflow we don't have yet. Defaults to opening a pre-filled email
+   *  to support; injectable so tests don't hit the mail client. */
+  onRequestWorkflow?: () => void
   /** Hide the built-in intro when the host renders its own header (the Explore screen). */
   showIntro?: boolean
   className?: string
@@ -43,10 +54,11 @@ interface ExploreSectionProps {
 
 export function ExploreSection({
   onRun,
-  requestUrl,
+  onRequestWorkflow,
   showIntro = true,
   className = ''
 }: ExploreSectionProps): React.ReactElement {
+  const requestWorkflow = onRequestWorkflow ?? (() => openExternal(buildWorkflowRequestMailto()))
   return (
     <div className={`@container font-mono ${className}`}>
       {showIntro ? (
@@ -118,17 +130,28 @@ export function ExploreSection({
         })}
       </div>
 
-      {requestUrl ? (
-        <a
-          href={requestUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-4 inline-flex items-center gap-1.5 text-[11px] text-neutral-500 transition-colors hover:text-green-500"
+      <div className="mt-4 flex items-center justify-between gap-3 rounded-md border border-neutral-800 bg-neutral-900/20 p-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-neutral-800 bg-neutral-950 text-green-500">
+            <Lightbulb className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <div className="text-[13px] text-white">Want a workflow we don&apos;t have yet?</div>
+            <p className="text-[11px] text-neutral-500">
+              Tell us what you&apos;d automate - it goes straight to the team.
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={requestWorkflow}
+          data-testid="explore-request-workflow"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-neutral-700 px-2.5 py-1.5 text-[11px] text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-green-500 active:scale-95"
         >
-          Not seeing what you need? Request a capability
-          <ArrowRight className="h-3 w-3" />
-        </a>
-      ) : null}
+          <PaperPlaneTilt className="h-3.5 w-3.5" />
+          Request a workflow
+        </button>
+      </div>
     </div>
   )
 }

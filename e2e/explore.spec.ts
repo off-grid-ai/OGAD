@@ -67,6 +67,9 @@ test('the Explore screen renders capability panels with labels, never the prompt
   // A gated card says why it cannot just run.
   await expect(page.getByTestId('explore-preset-phone-summarize')).toContainText(/paired phone/i)
 
+  // The workflow-request CTA (opens a pre-filled email to support).
+  await expect(page.getByTestId('explore-request-workflow')).toBeVisible()
+  await expect(page.getByText(/want a workflow we don't have yet/i)).toBeVisible()
   await page.screenshot({ path: 'e2e/screenshots/explore-screen.png' })
 })
 

@@ -74,12 +74,14 @@ describe('<ExploreSection/>', () => {
     expect(screen.queryByText(/explore what off grid ai can do/i)).toBeNull()
   })
 
-  it('shows the request link only when a url is given, pointing where told', () => {
-    const { rerender } = render(<ExploreSection onRun={() => {}} />)
-    expect(screen.queryByText(/request a capability/i)).toBeNull()
+  it('always offers a workflow request, and invokes the handler on click', async () => {
+    const onRequestWorkflow = vi.fn()
+    const user = userEvent.setup()
+    render(<ExploreSection onRun={() => {}} onRequestWorkflow={onRequestWorkflow} />)
 
-    rerender(<ExploreSection onRun={() => {}} requestUrl="https://forms.example/demo" />)
-    const link = screen.getByText(/request a capability/i).closest('a')
-    expect(link?.getAttribute('href')).toBe('https://forms.example/demo')
+    const button = screen.getByTestId('explore-request-workflow')
+    expect(button.textContent).toMatch(/request a workflow/i)
+    await user.click(button)
+    expect(onRequestWorkflow).toHaveBeenCalledTimes(1)
   })
 })

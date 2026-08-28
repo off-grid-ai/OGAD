@@ -192,8 +192,25 @@ export const HEADLINE_PRESETS: readonly DemoPreset[] = ALL_PRESETS.filter(
   (preset) => preset.readiness === 'robust'
 )
 
+/** Where workflow requests go - the single source of truth for the address. */
+export const SUPPORT_EMAIL = 'support@offgridmobileai.co'
+
 /**
- * Where "Request a capability" points. Set this to the Google Form once it exists; until
- * then it stays undefined and the surface simply hides the link (no broken link ships).
+ * A pre-filled email so a workflow request arrives structured, not blank. The body
+ * is a short template the user fills in; opened in their mail client via mailto so
+ * nothing is sent without them pressing send.
  */
-export const REQUEST_FORM_URL: string | undefined = undefined
+export function buildWorkflowRequestMailto(): string {
+  const subject = 'Workflow request'
+  const body = [
+    'What would you like Off Grid AI to do for you?',
+    '',
+    'The task or workflow:',
+    '',
+    'The apps or sites it touches:',
+    '',
+    'How often you would run it:',
+    ''
+  ].join('\n')
+  return `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+}

@@ -1,5 +1,5 @@
 import { ExploreSection } from './ExploreSection'
-import { ALL_PRESETS, PRESET_SECTIONS, REQUEST_FORM_URL, type DemoPreset } from './presetCatalog'
+import { ALL_PRESETS, PRESET_SECTIONS, type DemoPreset } from './presetCatalog'
 
 /**
  * The Explore landing view: the demo-preset catalog as a first-class screen, so the presets are
@@ -28,7 +28,7 @@ export function ExploreScreen({
           {ALL_PRESETS.length} runs / {PRESET_SECTIONS.length} capabilities
         </span>
       </div>
-      <ExploreSection showIntro={false} onRun={onRunPreset} requestUrl={REQUEST_FORM_URL} />
+      <ExploreSection showIntro={false} onRun={onRunPreset} />
     </div>
   )
 }
