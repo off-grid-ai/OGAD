@@ -1,4 +1,5 @@
 import { ipcMain, BrowserWindow, app, clipboard } from 'electron'
+import { isAllowedExternalUrl } from './open-external-logic'
 import { setupArtifactPreviewIpc } from './artifact-preview-ipc'
 import {
   getDB,
@@ -1689,9 +1690,12 @@ export function setupIPC() {
     import('./setup').then((m) => m.estimateModelFit(modelId))
   )
 
-  // Open an https link in the user's default browser (e.g. a model's HF page).
+  // Open an external target in the user's default handler: an https link in the
+  // browser (e.g. a model's HF page) or a mailto: in the mail client (the
+  // workflow-request CTA). Only these two schemes - never file:, never a raw
+  // shell target - so a crafted string can't reach the OS opener.
   ipcMain.handle('app:open-external', async (_e, url: string) => {
-    if (!/^https:\/\//.test(url)) return { success: false }
+    if (!isAllowedExternalUrl(url)) return { success: false }
     const { shell } = await import('electron')
     await shell.openExternal(url)
     return { success: true }
