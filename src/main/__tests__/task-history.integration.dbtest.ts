@@ -35,6 +35,41 @@ afterEach(() => {
 })
 
 describe('task history persistence', () => {
+  it('materializes and removes a synced visual step without changing task ownership timestamps', () => {
+    const { db, store } = openStore(4_000)
+    store.upsert({
+      taskId: 'remote-visual-task',
+      journeyId: 'chat-remote',
+      kind: 'computer_use',
+      title: 'Review the saved desktop task',
+      status: 'done',
+      at: 3_000
+    })
+
+    const materialized = store.materializeVisualStep('remote-visual-task', {
+      stepId: 'sync:4',
+      at: 2_000,
+      decisionSummary: 'Opened the saved app',
+      screenshot: {
+        path: '/tmp/remote-visual-step.jpg',
+        availability: 'device_local',
+        originalWidth: 960,
+        originalHeight: 540,
+        inferenceWidth: 960,
+        inferenceHeight: 540
+      }
+    })
+
+    expect(materialized?.updatedAt).toBe(3_000)
+    expect(materialized?.stepDetails?.[0]).toMatchObject({
+      stepId: 'sync:4',
+      decisionSummary: 'Opened the saved app',
+      screenshot: { path: '/tmp/remote-visual-step.jpg' }
+    })
+    expect(store.removeVisualStep('remote-visual-task', 'sync:4')?.stepDetails).toEqual([])
+    db.close()
+  })
+
   it('keeps the execution plan when a Computer Use checkpoint updates the run', () => {
     const { db, store } = openStore(4_000)
     const plan = encodeTaskExecutionPlan({

@@ -67,13 +67,45 @@ function snapshotsDir(): string {
   return path.join(app.getPath('userData'), 'task-run-snapshots')
 }
 
-export function taskScreenshotPath(taskId: string, stepId?: string | number): string {
+export function taskScreenshotPath(
+  taskId: string,
+  stepId?: string | number,
+  extension: 'png' | 'jpg' = 'png'
+): string {
   const dir = snapshotsDir()
   fs.mkdirSync(dir, { recursive: true })
   const safeTaskId = taskId.replace(/[^a-zA-Z0-9_-]/g, '_')
   const safeStepId =
     stepId === undefined ? '' : `-${String(stepId).replace(/[^a-zA-Z0-9_-]/g, '_')}`
-  return path.join(dir, `${safeTaskId}${safeStepId}.png`)
+  return path.join(dir, `${safeTaskId}${safeStepId}.${extension}`)
+}
+
+/** Apply a remote execution owner's immutable visual step to the existing task read model. */
+export function materializeSyncedTaskVisualStep(
+  taskId: string,
+  detail: ComputerUseStepDetail
+): TaskRunSnapshot | undefined {
+  const snapshot = taskHistoryStore().materializeVisualStep(taskId, detail)
+  if (!snapshot) return undefined
+  latest.set(taskId, snapshot)
+  broadcast(snapshot)
+  return snapshot
+}
+
+/** Remove remote visual evidence after its immutable sync entity is tombstoned. */
+export function removeSyncedTaskVisualStep(
+  taskId: string,
+  stepId: string
+): TaskRunSnapshot | undefined {
+  const current = taskHistoryStore().get(taskId)
+  const removedPath = current?.stepDetails?.find((detail) => detail.stepId === stepId)?.screenshot
+    ?.path
+  const snapshot = taskHistoryStore().removeVisualStep(taskId, stepId)
+  if (removedPath) fs.rmSync(removedPath, { force: true })
+  if (!snapshot) return undefined
+  latest.set(taskId, snapshot)
+  broadcast(snapshot)
+  return snapshot
 }
 
 function pruneSnapshots(): void {

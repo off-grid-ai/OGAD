@@ -490,6 +490,36 @@ export class TaskHistoryStore {
     ).map(rowToSnapshot)
   }
 
+  /** Add one remote visual audit step without changing the execution owner's task timestamps. */
+  materializeVisualStep(
+    taskId: string,
+    detail: ComputerUseStepDetail
+  ): TaskRunSnapshot | undefined {
+    const current = this.get(taskId)
+    if (!current) return undefined
+    const stepDetails = boundComputerUseStepDetails([
+      ...(current.stepDetails ?? []).filter((candidate) => candidate.stepId !== detail.stepId),
+      detail
+    ]).sort((left, right) => left.at - right.at || left.stepId.localeCompare(right.stepId))
+    this.db
+      .prepare('UPDATE task_run_history SET step_details_json = ? WHERE task_id = ?')
+      .run(JSON.stringify(stepDetails), taskId)
+    return this.get(taskId)
+  }
+
+  /** Remove one remote visual step after the execution owner publishes its tombstone. */
+  removeVisualStep(taskId: string, stepId: string): TaskRunSnapshot | undefined {
+    const current = this.get(taskId)
+    if (!current) return undefined
+    const stepDetails = (current.stepDetails ?? []).filter(
+      (candidate) => candidate.stepId !== stepId
+    )
+    this.db
+      .prepare('UPDATE task_run_history SET step_details_json = ? WHERE task_id = ?')
+      .run(JSON.stringify(stepDetails), taskId)
+    return this.get(taskId)
+  }
+
   /** Reconcile one task after a renderer or main-process restart lost its live
    * owner. A remote task and a native Computer Use task belong to other owners
    * and must not be changed by the browser host. */
