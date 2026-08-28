@@ -2,14 +2,10 @@
 // chat tool loop via registerToolExtension. Exposes calendar / reminders / contacts /
 // messages / mail / open_url as model tools that run through the native actions helper.
 //
-// Two paths for a mutating tool (R1 box 13):
-// - Engine path (free build, no approval hook listening): the mutation becomes a
-//   durable Action through the @offgrid/use engine - validated, journaled, executed on
-//   the semantic rail, verified - and the tool reports the real outcome.
-// - Legacy path (a pro approval queue is listening, or no engine port is wired): the
-//   write is offered to the approval seam exactly as before; pro queues it and pro's
-//   executor runs it on approve. An unmigrated pro build keeps its behaviour untouched.
-// Reads and navigation stay inline on both paths (architecture decision 5).
+// Chat is the source-policy owner for these tools: every mutation becomes a durable
+// Action through the @offgrid/use engine and runs without creating a second approval
+// owner. Outside-Chat proposals enter the engine through the Actions surface, whose gate
+// remains responsible for approval. Reads and navigation stay inline.
 
 import { shell } from 'electron'
 import type { ToolContext, ToolExtension, ToolResult } from '../tools'
@@ -170,33 +166,13 @@ export class NativeActionToolExtension implements ToolExtension {
     if (shouldGate(spec.risk)) {
       const actionType = actionTypeForTool(canonicalName)
       const actions = this.boundary.actions
-      // web_use and computer_task are engine-only: no connector runs them, so
-      // they must not fall to the legacy queue even when a pro hook is listening
-      // (with B4 the pro queue resolves the engine gate anyway). Other actions
-      // keep the legacy path when a pro queue owns approvals.
-      const engineOnly = actionType !== undefined && isTaskAction(actionType)
-      if (actions && actionType && (engineOnly || !actions.approvalHookActive())) {
+      // This extension is a Chat surface. Every mapped mutation goes through the
+      // durable engine even when Pro has registered its outside-Chat approval hook.
+      if (actions && actionType) {
         return this.executeViaEngine(actions, actionType, spec, args, context?.conversationId)
       }
-      if (engineOnly) {
-        return {
-          text: 'Error: this task needs the on-device action engine, which is not available here.',
-          authoritative: true
-        }
-      }
-      // Legacy path: offer to the approval seam; pro queues and executes.
-      const queued = this.boundary.proposeApproval({
-        kind: 'native',
-        title: spec.title(args),
-        detail: `Requested from chat. Arguments: ${JSON.stringify(args)}`,
-        risk: spec.risk,
-        command: spec.command,
-        args,
-        source: 'chat'
-      })
-      if (queued) {
-        return `Queued for the user's approval — ${spec.title(args)} will run only after they approve it. Do not assume it has happened; tell the user it's pending approval.`
-      }
+      const text = 'Error: this action needs the on-device action engine, which is not available.'
+      return isTaskAction(actionType ?? '') ? { text, authoritative: true } : text
     }
     const res = await this.boundary.run({ command: spec.command, args: spec.buildArgs(args) })
     if (!res.ok) {
@@ -230,7 +206,7 @@ export class NativeActionToolExtension implements ToolExtension {
     const taskReference = isTaskAction(actionType) ? ` Task reference: ${proposed.id}.` : ''
     if (proposed.deduped) {
       return reply(
-        `That exact action is already queued — not queuing a duplicate. Tell the user it is already in flight.${taskReference}`
+        `That exact action is already in flight — not starting a duplicate.${taskReference}`
       )
     }
     // A computer_task is now queued: warn the chat at queue time only if the
@@ -238,7 +214,6 @@ export class NativeActionToolExtension implements ToolExtension {
     // app needs no grounder). Pass the goal so AX viability can be checked.
     if (actionType === 'computer_task') {
       const goal = typeof args.goal === 'string' && args.goal.trim() ? args.goal : spec.title(args)
-      console.log(`[computer-task] queued (awaiting approval) goal="${goal}"`)
       this.boundary.announceComputerTask?.(goal)
     }
     actions.kick()
@@ -250,7 +225,7 @@ export class NativeActionToolExtension implements ToolExtension {
     ])
     if (raced.kind === 'parked') {
       return reply(
-        `Queued for the user's approval — ${spec.title(args)} will run only after they approve it. Do not assume it has happened; tell the user it's pending approval.${taskReference}`
+        `Error: the action engine held this Chat action instead of starting it. No approval was created.${taskReference}`
       )
     }
     if (!raced.outcome) {

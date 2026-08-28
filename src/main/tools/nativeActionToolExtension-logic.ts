@@ -56,7 +56,7 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
   {
     name: 'calendar_create_event',
     description:
-      "Create an event in the user's macOS Calendar. Times are ISO 8601 (e.g. 2026-08-13T15:00:00). Needs the user to approve before it is written.",
+      "Create an event in the user's macOS Calendar. Times are ISO 8601 (e.g. 2026-08-13T15:00:00). A Chat request runs directly.",
     parameters: {
       type: 'object',
       properties: {
@@ -99,7 +99,7 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
   {
     name: 'reminders_create',
     description:
-      "Create a reminder in the user's macOS Reminders. Optional due time is ISO 8601. Needs the user to approve before it is written.",
+      "Create a reminder in the user's macOS Reminders. Optional due time is ISO 8601. A Chat request runs directly.",
     parameters: {
       type: 'object',
       properties: {
@@ -145,7 +145,7 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
   {
     name: 'messages_send',
     description:
-      "Send an iMessage from the user's Mac. 'to' is a phone number or email handle - use contacts_search first if you only have a name. Needs the user to approve before it is sent.",
+      "Send an iMessage from the user's Mac. 'to' is a phone number or email handle - use contacts_search first if you only have a name. A Chat request runs directly.",
     parameters: {
       type: 'object',
       properties: {
@@ -162,8 +162,7 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
   },
   {
     name: 'mail_send',
-    description:
-      "Send an email from the user's Mac Mail. Needs the user to approve before it is sent.",
+    description: "Send an email from the user's Mac Mail. A Chat request runs directly.",
     parameters: {
       type: 'object',
       properties: {
@@ -344,15 +343,15 @@ export function specsForPlatform(
 export function systemHintForPlatform(platform: NodeJS.Platform, includeProUse = true): string {
   if (platform === 'darwin') {
     if (!includeProUse) {
-      return "You can act on the user's Mac: manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme with open_url; it opens the target without interacting with it. Use ISO 8601 for all times. Anything that creates or sends needs the user's approval; tell them it is pending until they approve."
+      return "You can act on the user's Mac: manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme with open_url; it opens the target without interacting with it. Use ISO 8601 for all times. Actions requested in this Chat run directly; report the real result and never tell the user to approve them."
     }
-    return "You can act on the user's Mac: manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme (like whatsapp://send) with open_url - it ONLY opens, no interaction. To actually DO something on a website - play or watch a video, search and click a result, check in, order, fill a form, log in - use web_use (NOT open_url); it runs the task inside Off Grid AI's own built-in browser without touching the user's cursor or their own browser, so they keep working, and hands back for any sign-in or payment. For a task that needs to control a desktop app with no web version, use computer_task - the user watches and can take over. Prefer the direct tools and web_use when they fit. Use ISO 8601 for all times. Anything that creates, sends, or runs a task needs the user's approval; tell them it is pending until they approve."
+    return "You can act on the user's Mac: manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme (like whatsapp://send) with open_url - it ONLY opens, no interaction. To actually DO something on a website - play or watch a video, search and click a result, check in, order, fill a form, log in - use web_use (NOT open_url); it runs the task inside Off Grid AI's own built-in browser without touching the user's cursor or their own browser, so they keep working, and hands back for any sign-in or payment. For a task that needs to control a desktop app with no web version, use computer_task - the user watches and can take over. Prefer the direct tools and web_use when they fit. Use ISO 8601 for all times. Actions and tasks requested in this Chat run directly; report the real result and never tell the user to approve them."
   }
   if (platform === 'win32') {
     if (!includeProUse) {
-      return "You can act on the user's PC through Outlook: create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url; it opens the target without interacting with it. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Anything that creates or sends needs the user's approval; tell them it is pending until they approve."
+      return "You can act on the user's PC through Outlook: create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url; it opens the target without interacting with it. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Actions requested in this Chat run directly; report the real result and never tell the user to approve them."
     }
-    return "You can act on the user's PC through Outlook: create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url - it ONLY opens, no interaction. To DO something on a website - play or watch a video, search and click a result, check in, order, fill a form, log in - use web_use (NOT open_url); it runs the task inside Off Grid AI's own built-in browser without touching the user's cursor or their own browser, so they keep working, and hands back for any sign-in or payment. For a task that needs to control a desktop app with no web version, use computer_task - the user watches and can take over. Prefer the direct tools and web_use when they fit. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Anything that creates, sends, or runs a task needs the user's approval; tell them it is pending until they approve."
+    return "You can act on the user's PC through Outlook: create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url - it ONLY opens, no interaction. To DO something on a website - play or watch a video, search and click a result, check in, order, fill a form, log in - use web_use (NOT open_url); it runs the task inside Off Grid AI's own built-in browser without touching the user's cursor or their own browser, so they keep working, and hands back for any sign-in or payment. For a task that needs to control a desktop app with no web version, use computer_task - the user watches and can take over. Prefer the direct tools and web_use when they fit. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Actions and tasks requested in this Chat run directly; report the real result and never tell the user to approve them."
   }
   return ''
 }

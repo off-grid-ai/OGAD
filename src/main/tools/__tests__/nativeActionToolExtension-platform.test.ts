@@ -28,9 +28,11 @@ describe('specsForPlatform', () => {
   })
 
   it('win32 exposes exactly the Outlook-routed subset', () => {
-    expect(specsForPlatform('win32').map((s) => s.name).sort()).toEqual(
-      [...WINDOWS_TOOL_NAMES].sort()
-    )
+    expect(
+      specsForPlatform('win32')
+        .map((s) => s.name)
+        .sort()
+    ).toEqual([...WINDOWS_TOOL_NAMES].sort())
   })
 
   it('any other platform exposes nothing', () => {
@@ -46,7 +48,10 @@ describe('systemHintForPlatform', () => {
   })
 
   it('the mac hint keeps the full vocabulary; unknown platforms get none', () => {
-    expect(systemHintForPlatform('darwin')).toMatch(/messages_send/)
+    const hint = systemHintForPlatform('darwin')
+    expect(hint).toMatch(/messages_send/)
+    expect(hint).toMatch(/requested in this Chat run directly/)
+    expect(hint).not.toMatch(/pending until.*approve/i)
     expect(systemHintForPlatform('linux')).toBe('')
   })
 })

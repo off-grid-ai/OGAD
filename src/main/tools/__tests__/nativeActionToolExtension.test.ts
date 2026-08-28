@@ -1,9 +1,8 @@
 /**
  * Execute-path tests for the native-action tool extension against a fake boundary
  * (the same injection seam the MCP extension uses). Pins the gate-then-run contract:
- * a mutating tool queues for approval and does NOT run when queued, runs directly when
- * nothing gates it (free build), and a read tool never gates. Platform registration is
- * asserted so the tools stay out of the grammar budget off macOS.
+ * a Chat mutation requires the durable action engine and never falls back to an approval
+ * copy or an inline write. Read tools still run inline.
  */
 import { describe, expect, it, beforeEach } from 'vitest'
 import {
@@ -76,52 +75,36 @@ describe('NativeActionToolExtension', () => {
     expect(boundary.approvals).toEqual([])
   })
 
-  it('queues a create for approval and does not run the helper when queued', async () => {
+  it('does not create an approval copy when the Chat action engine is unavailable', async () => {
     boundary.queueApprovals = true
     const out = await ext.execute('calendar_create_event', {
       title: 'Sync',
       start: '2026-08-13T15:00:00'
     })
 
-    expect(out).toContain('Queued for the user')
-    expect(boundary.approvals).toEqual([
-      expect.objectContaining({
-        kind: 'native',
-        risk: 'mutate',
-        command: 'calendar.createEvent',
-        args: { title: 'Sync', start: '2026-08-13T15:00:00' }
-      })
-    ])
+    expect(out).toContain('on-device action engine')
+    expect(boundary.approvals).toEqual([])
     expect(boundary.commands).toEqual([])
   })
 
-  it('runs a create directly when nothing gates it (free build)', async () => {
+  it('does not bypass the missing durable engine with an inline Chat write', async () => {
     boundary.queueApprovals = false
     const out = await ext.execute('calendar_create_event', {
       title: 'Sync',
       start: '2026-08-13T15:00:00'
     })
 
-    expect(out).toBe('Created the calendar event (id E1).')
-    expect(boundary.approvals).toHaveLength(1) // it was offered
-    expect(boundary.commands).toEqual([
-      { command: 'calendar.createEvent', args: { title: 'Sync', start: '2026-08-13T15:00:00' } }
-    ])
+    expect(out).toContain('on-device action engine')
+    expect(boundary.approvals).toEqual([])
+    expect(boundary.commands).toEqual([])
   })
 
-  it('gates a message send and does not run the helper when queued', async () => {
+  it('never sends a Chat message through the legacy approval path', async () => {
     boundary.queueApprovals = true
     const out = await ext.execute('messages_send', { to: '+15551234567', text: 'on my way' })
 
-    expect(out).toContain('Queued for the user')
-    expect(boundary.approvals).toEqual([
-      expect.objectContaining({
-        kind: 'native',
-        risk: 'mutate',
-        command: 'messages.send',
-        args: { to: '+15551234567', text: 'on my way' }
-      })
-    ])
+    expect(out).toContain('on-device action engine')
+    expect(boundary.approvals).toEqual([])
     expect(boundary.commands).toEqual([])
   })
 

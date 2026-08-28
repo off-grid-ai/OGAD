@@ -152,6 +152,74 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     expect(round2.messages?.some((m) => m.role === 'assistant')).toBe(true)
   })
 
+  it('resolves a contact and sends the Chat message directly with the Pro approval hook active', async () => {
+    const approvalCopies: unknown[] = []
+    registerHook(HOOKS.actionsProposeApproval, (request) => {
+      approvalCopies.push(request)
+      return true
+    })
+    const proposals: Array<{ input: unknown; meta: unknown }> = []
+    const actions: ActionsPort = {
+      approvalHookActive: () => true,
+      propose: async (input, meta) => {
+        proposals.push({ input, meta })
+        return { accepted: true, id: 'message-ali-1', deduped: false }
+      },
+      waitForOutcome: async () =>
+        ({
+          id: 'message-ali-1',
+          outcome: 'done',
+          record: { attemptLog: [] }
+        }) as unknown as TickOutcome,
+      whenParked: () => new Promise<void>(() => {}),
+      kick: () => {}
+    }
+    const extension = new NativeActionToolExtension(
+      {
+        run: async ({ command }) =>
+          command === 'contacts.search'
+            ? { ok: true, result: [{ name: 'Ali', phone: '+15551111' }] }
+            : { ok: false, error: `Unexpected inline command: ${command}` },
+        proposeApproval: () => true,
+        isProEntitled: () => true,
+        actions
+      },
+      'darwin'
+    )
+    registerToolExtension(extension)
+    fake.enqueue(
+      { toolCalls: [{ name: 'contacts_search', args: { query: 'Ali' } }] },
+      {
+        toolCalls: [{ name: 'messages_send', args: { to: '+15551111', text: 'I am on my way' } }]
+      },
+      { content: 'Your message was sent.' }
+    )
+
+    try {
+      const result = await toolChat('Tell Ali I am on my way', [], {
+        conversationId: 'chat-ali'
+      })
+
+      expect(result.toolCalls.map(({ name }) => name)).toEqual(['contacts_search', 'messages_send'])
+      expect(result.toolCalls.at(-1)?.result).toBe('Sent the message.')
+      expect(result.answer).toBe('Your message was sent.')
+      expect(proposals).toEqual([
+        {
+          input: expect.objectContaining({
+            type: 'message',
+            args: { to: '+15551111', text: 'I am on my way' }
+          }),
+          meta: { source: 'chat', sourceRef: 'chat-ali' }
+        }
+      ])
+      expect(approvalCopies).toEqual([])
+      expect(JSON.stringify(result)).not.toMatch(/queued for.*approval/i)
+    } finally {
+      unregisterToolExtension(extension.id, extension)
+      unregisterHook(HOOKS.actionsProposeApproval)
+    }
+  })
+
   it('proposes the explicit Skyscanner Web Use tool call selected by the model', async () => {
     const query =
       'Go to skyscanner.com and help me find the cheapest flight to book for a one way trip from San Francisco 2026 to Pune on 1st September 2026 with a budget range of $500 - $3000'

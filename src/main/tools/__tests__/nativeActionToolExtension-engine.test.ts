@@ -1,7 +1,7 @@
 /**
  * The chat tool's engine path (R1 box 13): a gated mutation becomes a
  * durable Action through the injected actions port, reads stay inline, and
- * a listening pro approval queue keeps the legacy path exactly as before.
+ * Chat remains the single source owner even while Pro's approval hook is active.
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { TickOutcome } from '@offgrid/use'
@@ -41,13 +41,16 @@ function makePort(
 
 const run = vi.fn(async () => ({ ok: true as const, result: { id: 'r1' } }))
 const proposeApproval = vi.fn(() => undefined)
-const proEntitled = () => true
+const proEntitled = (): boolean => true
 
 // Pin darwin: these assert the full macOS tool set (messages_send, the inline
 // reads, etc.). Without it the extension defaults to process.platform, and on
 // a Linux CI runner specsForPlatform('linux') is empty - every tool unknown.
 const makeExtension = (actions?: ActionsPort): NativeActionToolExtension =>
-  new NativeActionToolExtension({ run, proposeApproval, isProEntitled: proEntitled, actions }, 'darwin')
+  new NativeActionToolExtension(
+    { run, proposeApproval, isProEntitled: proEntitled, actions },
+    'darwin'
+  )
 
 describe('the tool-to-action-type map', () => {
   it('covers exactly the mutating tools', () => {
@@ -95,9 +98,9 @@ describe('the spec table', () => {
   it('the extension exposes its schemas and system hint', () => {
     const extension = makeExtension(makePort())
     expect(extension.schemas()).toHaveLength(NATIVE_TOOL_SPECS.length)
-    const names = extension.schemas().map(
-      (schema) => (schema as { function: { name: string } }).function.name
-    )
+    const names = extension
+      .schemas()
+      .map((schema) => (schema as { function: { name: string } }).function.name)
     expect(names).toContain('web_use')
     expect(names).not.toContain('web_task')
     expect(extension.systemHint()).toMatch(/act on the user's Mac/)
@@ -156,6 +159,48 @@ describe('the engine path', () => {
     expect(proposeApproval).not.toHaveBeenCalled()
   })
 
+  it('runs contacts_search then messages_send from Chat without a Pro approval copy', async () => {
+    const activeProApprovalHook = vi.fn(() => true)
+    const nativeRun = vi.fn(async (command) =>
+      command.command === 'contacts.search'
+        ? { ok: true as const, result: [{ name: 'Ali', phone: '+15551111' }] }
+        : { ok: true as const, result: undefined }
+    )
+    const port = makePort({ approvalHookActive: () => true })
+    const extension = new NativeActionToolExtension(
+      {
+        run: nativeRun,
+        proposeApproval: activeProApprovalHook,
+        isProEntitled: proEntitled,
+        actions: port
+      },
+      'darwin'
+    )
+
+    const contact = await extension.execute(
+      'contacts_search',
+      { query: 'Ali' },
+      { conversationId: 'chat-ali', userQuery: 'Tell Ali I am on my way' }
+    )
+    expect(contact).toContain('+15551111')
+    const sent = await extension.execute(
+      'messages_send',
+      { to: '+15551111', text: 'I am on my way' },
+      { conversationId: 'chat-ali', userQuery: 'Tell Ali I am on my way' }
+    )
+
+    expect(port.proposed).toEqual([
+      expect.objectContaining({
+        type: 'message',
+        args: { to: '+15551111', text: 'I am on my way' }
+      })
+    ])
+    expect(port.proposalMeta).toEqual([{ source: 'chat', sourceRef: 'chat-ali' }])
+    expect(activeProApprovalHook).not.toHaveBeenCalled()
+    expect(sent).toBe('Sent the message.')
+    expect(sent).not.toMatch(/queued|approval/i)
+  })
+
   it('a read runs inline and never touches the engine', async () => {
     run.mockClear()
     const port = makePort()
@@ -174,23 +219,23 @@ describe('the engine path', () => {
     expect(run).toHaveBeenCalled()
   })
 
-  it('an action parked at the gate reports pending approval', async () => {
+  it('does not claim a Chat action needs approval if the engine parks unexpectedly', async () => {
     const port = makePort({
       waitForOutcome: () => new Promise(() => {}),
       whenParked: async () => {}
     })
     const extension = makeExtension(port)
     const reply = await extension.execute('messages_send', { to: 'x@y.z', text: 'hi' })
-    expect(reply).toMatch(/pending approval/)
+    expect(reply).toMatch(/No approval was created/)
   })
 
-  it('a deduped proposal says it is already queued', async () => {
+  it('a deduped proposal says it is already in flight', async () => {
     const port = makePort({
       propose: async () => ({ accepted: true, id: 'act_1', deduped: true })
     })
     const extension = makeExtension(port)
     const reply = await extension.execute('reminders_create', { title: 'x' })
-    expect(reply).toMatch(/already queued/)
+    expect(reply).toMatch(/already in flight/)
   })
 
   it('a refused proposal surfaces the reason', async () => {
@@ -262,7 +307,7 @@ describe('the engine path', () => {
     )
   })
 
-  it('a listening pro approval queue keeps the legacy path untouched', async () => {
+  it('a listening Pro approval hook cannot divert a Chat mutation from the engine', async () => {
     run.mockClear()
     const legacyPropose = vi.fn(() => true)
     const port = makePort({ approvalHookActive: () => true })
@@ -271,21 +316,22 @@ describe('the engine path', () => {
       'darwin'
     )
     const reply = await extension.execute('reminders_create', { title: 'x' })
-    expect(port.proposed).toEqual([])
-    expect(legacyPropose).toHaveBeenCalled()
-    expect(reply).toMatch(/pending approval/)
+    expect(port.proposed).toHaveLength(1)
+    expect(legacyPropose).not.toHaveBeenCalled()
+    expect(reply).toBe('Created the reminder.')
   })
 
-  it('no actions port at all means the legacy path (existing behaviour)', async () => {
+  it('fails honestly without an engine and never creates a Chat approval copy', async () => {
     run.mockClear()
     const legacyPropose = vi.fn(() => undefined)
     const extension = new NativeActionToolExtension(
       { run, proposeApproval: legacyPropose, isProEntitled: proEntitled },
       'darwin'
     )
-    await extension.execute('reminders_create', { title: 'x' })
-    expect(legacyPropose).toHaveBeenCalled()
-    expect(run).toHaveBeenCalled()
+    const reply = await extension.execute('reminders_create', { title: 'x' })
+    expect(reply).toMatch(/on-device action engine/)
+    expect(legacyPropose).not.toHaveBeenCalled()
+    expect(run).not.toHaveBeenCalled()
   })
 
   it('web_use becomes a browser-rail Action with the goal as its intent', async () => {
