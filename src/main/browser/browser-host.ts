@@ -949,6 +949,11 @@ export function getBrowserRailHost(): BrowserRailHost {
   return browserHost()
 }
 
+/** Task controls outside Electron IPC use the same BrowserHost owner as the watched pane. */
+export function stopBrowserTask(taskId: string): boolean {
+  return browserHost().stopTask(taskId)
+}
+
 /** Stop + drop the agent browser (halts any playing media). Called on app quit so a
  *  running task's browser never lingers audibly after the app is gone. No-op if the
  *  view was never created. */

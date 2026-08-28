@@ -201,6 +201,14 @@ export function stopVisionTask(taskId: string, reason: string, currentAction: st
   return controller.stop(taskId, reason, currentAction)
 }
 
+/** Remote and renderer controls converge on the same active VisionController session. */
+export function controlVisionTask(
+  command: 'stop' | 'pause' | 'takeover' | 'resume',
+  taskId: string
+): boolean {
+  return controller.control(command, taskId)
+}
+
 export function parseVisionCommand(
   input: unknown
 ): 'stop' | 'pause' | 'takeover' | 'resume' | null {
