@@ -74,6 +74,19 @@ describe('<ExploreSection/>', () => {
     expect(screen.queryByText(/explore what off grid ai can do/i)).toBeNull()
   })
 
+  it('shows the support email as a copyable fallback for users without a mail client', async () => {
+    const writeClipboardText = vi.fn(async () => true)
+    ;(window as unknown as { api: unknown }).api = { writeClipboardText }
+    const user = userEvent.setup()
+    render(<ExploreSection onRun={() => {}} onRequestWorkflow={() => {}} />)
+
+    expect(screen.getByTestId('explore-support-email').textContent).toBe(
+      'support@offgridmobileai.co'
+    )
+    await user.click(screen.getByTestId('explore-copy-email'))
+    expect(writeClipboardText).toHaveBeenCalledWith('support@offgridmobileai.co')
+  })
+
   it('always offers a workflow request, and invokes the handler on click', async () => {
     const onRequestWorkflow = vi.fn()
     const user = userEvent.setup()

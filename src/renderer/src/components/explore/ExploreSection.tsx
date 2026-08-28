@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   Globe,
   Desktop,
@@ -5,16 +6,20 @@ import {
   DeviceMobile,
   ArrowRight,
   Lightbulb,
-  PaperPlaneTilt
+  PaperPlaneTilt,
+  Copy,
+  Check
 } from '@phosphor-icons/react'
 import {
   PRESET_SECTIONS,
+  SUPPORT_EMAIL,
   buildWorkflowRequestMailto,
   type DemoPreset,
   type PresetCapability,
   type PresetRequirement
 } from './presetCatalog'
 import { openExternal } from '../../constants/links'
+import { writeClipboardWithFallback } from '../../lib/clipboard-write'
 
 /**
  * The Explore surface: the demo-preset catalog rendered as capability panels, each holding a
@@ -59,6 +64,18 @@ export function ExploreSection({
   className = ''
 }: ExploreSectionProps): React.ReactElement {
   const requestWorkflow = onRequestWorkflow ?? (() => openExternal(buildWorkflowRequestMailto()))
+  const [copiedEmail, setCopiedEmail] = useState(false)
+  // Not everyone has a default mail client (webmail users, no handler set), so the
+  // address is always shown and copyable as a fallback to the mailto button.
+  const copyEmail = async (): Promise<void> => {
+    const api = window.api as { writeClipboardText?: (s: string) => Promise<boolean> }
+    const ok = await writeClipboardWithFallback(SUPPORT_EMAIL, api.writeClipboardText, (t) =>
+      navigator.clipboard.writeText(t)
+    )
+    if (!ok) return
+    setCopiedEmail(true)
+    setTimeout(() => setCopiedEmail(false), 1500)
+  }
   return (
     <div className={`@container font-mono ${className}`}>
       {showIntro ? (
@@ -130,27 +147,52 @@ export function ExploreSection({
         })}
       </div>
 
-      <div className="mt-4 flex items-center justify-between gap-3 rounded-md border border-neutral-800 bg-neutral-900/20 p-3">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-neutral-800 bg-neutral-950 text-green-500">
-            <Lightbulb className="h-4 w-4" />
-          </span>
-          <div className="min-w-0">
-            <div className="text-[13px] text-white">Want a workflow we don&apos;t have yet?</div>
-            <p className="text-[11px] text-neutral-500">
-              Tell us what you&apos;d automate - it goes straight to the team.
-            </p>
+      <div className="mt-4 rounded-md border border-neutral-800 bg-neutral-900/20 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-neutral-800 bg-neutral-950 text-green-500">
+              <Lightbulb className="h-4 w-4" />
+            </span>
+            <div className="min-w-0">
+              <div className="text-[13px] text-white">Want a workflow we don&apos;t have yet?</div>
+              <p className="text-[11px] text-neutral-500">
+                Tell us what you&apos;d automate - it goes straight to the team.
+              </p>
+            </div>
           </div>
+          <button
+            type="button"
+            onClick={requestWorkflow}
+            data-testid="explore-request-workflow"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-neutral-700 px-2.5 py-1.5 text-[11px] text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-green-500 active:scale-95"
+          >
+            <PaperPlaneTilt className="h-3.5 w-3.5" />
+            Request a workflow
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={requestWorkflow}
-          data-testid="explore-request-workflow"
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-neutral-700 px-2.5 py-1.5 text-[11px] text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-green-500 active:scale-95"
-        >
-          <PaperPlaneTilt className="h-3.5 w-3.5" />
-          Request a workflow
-        </button>
+        <div className="mt-2.5 flex items-center gap-2 border-t border-neutral-800/60 pt-2.5">
+          <span className="text-[11px] text-neutral-500">Or email us at</span>
+          <span
+            className="select-text text-[11px] text-neutral-200"
+            data-testid="explore-support-email"
+          >
+            {SUPPORT_EMAIL}
+          </span>
+          <button
+            type="button"
+            onClick={copyEmail}
+            data-testid="explore-copy-email"
+            aria-label="Copy the support email address"
+            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-400 transition-colors hover:border-neutral-600 hover:text-neutral-200"
+          >
+            {copiedEmail ? (
+              <Check className="h-3 w-3 text-green-500" weight="bold" />
+            ) : (
+              <Copy className="h-3 w-3" />
+            )}
+            {copiedEmail ? 'Copied' : 'Copy'}
+          </button>
+        </div>
       </div>
     </div>
   )
