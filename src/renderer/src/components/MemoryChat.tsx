@@ -67,8 +67,13 @@ import { shouldAutoRouteImage, cleanImagePrompt } from '@renderer/lib/image-inte
 import {
   buildAssistantContext,
   readReasoning,
-  readResponseCutoff
-} from '@renderer/lib/message-persistence'
+  readResponseCutoff,
+  readGenerationMetrics
+} from '../lib/message-persistence'
+import {
+  formatGenerationMetrics,
+  type GenerationMetrics
+} from '../../../shared/generation-metrics'
 import {
   readGeneratedImageReference,
   withGeneratedImageReference
@@ -188,6 +193,8 @@ type ChatMessage = {
   /** What this turn's reasoning block is called, when it named itself ("Enhanced prompt"). */
   reasoningLabel?: string
   generationTimeMs?: number
+  /** How the generation performed. Shown under the answer when the user asks to see details. */
+  metrics?: GenerationMetrics
   provenance?: RecordProvenance
   reasoning?: string
   /** Keep the live Thinking row visible before the first reasoning token arrives. */
@@ -506,6 +513,7 @@ function projectChatMessage(turn: ProjectedTurn, context?: RagContext): ChatMess
     context,
     reasoning: turn.reasoning ?? readReasoning(context),
     cutoff: readResponseCutoff(context),
+    metrics: readGenerationMetrics(context),
     ...projectedTurnTools(turn),
     turnStatus: turn.status,
     notice: turn.notice,
@@ -1125,6 +1133,29 @@ function MessageMarkdown({
     <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>
       {content}
     </ReactMarkdown>
+  )
+}
+
+/**
+ * What the generation cost, under the answer that cost it.
+ *
+ * Only the fields the run actually produced: a server that reports no token counts shows a time and
+ * nothing else, because "0 tok/s" would be a lie. Rendered whenever the numbers exist rather than
+ * behind a preference - unlike mobile, the desktop chat has no display-settings surface to hang a
+ * toggle on, and inventing one for a single muted line is not worth the drift.
+ */
+function GenerationMetricsRow({
+  metrics
+}: Readonly<{ metrics?: GenerationMetrics }>): React.JSX.Element | null {
+  const parts = metrics ? formatGenerationMetrics(metrics) : []
+  if (!parts.length) return null
+  return (
+    <p
+      className="mt-2 font-mono text-[10px] tabular-nums text-neutral-500"
+      data-testid="generation-metrics"
+    >
+      {parts.join(' · ')}
+    </p>
   )
 }
 
@@ -1931,6 +1962,7 @@ function MessageBubble({
         <MessageMarkdown message={message} navigation={navigation} />
       )}
       <ResponseCutoffNotice cutoff={message.cutoff} />
+      <GenerationMetricsRow metrics={message.metrics} />
       <ImageMemoryRetryAction
         message={message}
         loading={state.loading}
@@ -3972,7 +4004,8 @@ export function MemoryChat({
             assistantContent,
             buildAssistantContext(resultContext, {
               reasoning: ragReasoning,
-              cutoff: result.cutoff
+              cutoff: result.cutoff,
+              metrics: result.metrics
             })
           )
           setConvMessages(convId, (previous) =>

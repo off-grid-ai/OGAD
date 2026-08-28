@@ -1,5 +1,5 @@
 import type { ResponseCutoffContract } from '../../shared/ipc-contracts'
-import type { GenerationMetrics } from './generation-metrics'
+import type { GenerationMetrics } from '../../shared/generation-metrics'
 
 export interface ResponseGenerationResult {
   answer: string

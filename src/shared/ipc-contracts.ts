@@ -1,4 +1,6 @@
 /** Electron IPC payloads shared by main, preload, and renderer type-checks. */
+import type { GenerationMetrics } from './generation-metrics'
+
 export interface UserProfileContract {
   role?: string
   companySize?: string
@@ -47,6 +49,8 @@ export interface RagChatResultContract {
   answer: string
   context?: Record<string, unknown>
   cutoff?: ResponseCutoffContract
+  /** How the generation performed, when the run was measured. */
+  metrics?: GenerationMetrics
 }
 
 /** One reply still owned by the main process, used to reattach chat UI after navigation. */

@@ -10,7 +10,7 @@
 //   buildAssistantContext(baseCtx, { reasoning }) → ctx   (write path)
 //   readReasoning(ctx) → string | undefined              (read path)
 import type { ResponseCutoffContract } from '../../../shared/ipc-contracts'
-import type { GenerationMetrics } from '../../../main/llm/generation-metrics'
+import type { GenerationMetrics } from '../../../shared/generation-metrics'
 
 /** Extra assistant-turn fields that ride in the persisted `context` blob. */
 export interface AssistantContextExtras {

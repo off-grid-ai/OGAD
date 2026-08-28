@@ -17,7 +17,7 @@ import {
   type SseUsage
 } from './sse-stream'
 import { modelRequestOptions, serverResponseError } from './http-post'
-import { generationMetrics, type GenerationMetrics } from './generation-metrics'
+import { generationMetrics, type GenerationMetrics } from '../../shared/generation-metrics'
 
 /** Injectable clock so the accumulator's timing is testable without waiting in real time. */
 const now = (): number => Date.now()

@@ -1,4 +1,20 @@
-import type { SseTimings, SseUsage } from './sse-stream'
+/**
+ * Structural, not imported from the SSE layer: this module lives in shared so the renderer can read
+ * the same shape it renders, and shared must not depend on main. The wire types satisfy these.
+ */
+interface UsageCounts {
+  prompt_tokens?: number
+  completion_tokens?: number
+}
+
+interface ServerTimings {
+  prompt_n?: number
+  prompt_ms?: number
+  prompt_per_second?: number
+  predicted_n?: number
+  predicted_ms?: number
+  predicted_per_second?: number
+}
 
 /**
  * What a generation cost, as shown under an assistant message.
@@ -39,8 +55,8 @@ export function generationMetrics(input: {
   startedAtMs: number
   firstTokenAtMs?: number
   finishedAtMs: number
-  usage?: SseUsage
-  timings?: SseTimings
+  usage?: UsageCounts
+  timings?: ServerTimings
 }): GenerationMetrics {
   const { startedAtMs, firstTokenAtMs, finishedAtMs, usage, timings } = input
   const totalSeconds = positive((finishedAtMs - startedAtMs) / 1000)
