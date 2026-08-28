@@ -130,6 +130,55 @@ export function browserHotkeyTokens(keys: string): string[] {
     .filter(Boolean)
 }
 
+/**
+ * Every named key the agent may press, in ONE table.
+ *
+ * Chromium needs a virtual key code to treat a key as that key: `key: 'Enter'` with no keyCode
+ * reaches the page as an unrecognised keydown and submits nothing. The two dispatch paths had
+ * drifted apart - `pressKey` carried a three-entry map with proper codes, while a vision `press`
+ * went through `dispatchKeyPhase`, which merely capitalized whatever it was given and sent no code
+ * at all. So the model saying "press return" produced `key: 'Return'` with no keyCode: a keystroke
+ * the page could not act on, reported as a success.
+ *
+ * Aliases are part of the table because the model's vocabulary is not ours - it says return, esc,
+ * up, del - and a name we do not recognise must fail loudly rather than be title-cased into a key
+ * that does not exist.
+ */
+const NAMED_BROWSER_KEYS: Record<string, { key: string; code: string; keyCode: number }> = {
+  enter: { key: 'Enter', code: 'Enter', keyCode: 13 },
+  tab: { key: 'Tab', code: 'Tab', keyCode: 9 },
+  escape: { key: 'Escape', code: 'Escape', keyCode: 27 },
+  backspace: { key: 'Backspace', code: 'Backspace', keyCode: 8 },
+  delete: { key: 'Delete', code: 'Delete', keyCode: 46 },
+  space: { key: ' ', code: 'Space', keyCode: 32 },
+  arrowup: { key: 'ArrowUp', code: 'ArrowUp', keyCode: 38 },
+  arrowdown: { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40 },
+  arrowleft: { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37 },
+  arrowright: { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 },
+  home: { key: 'Home', code: 'Home', keyCode: 36 },
+  end: { key: 'End', code: 'End', keyCode: 35 },
+  pageup: { key: 'PageUp', code: 'PageUp', keyCode: 33 },
+  pagedown: { key: 'PageDown', code: 'PageDown', keyCode: 34 }
+}
+
+const NAMED_BROWSER_KEY_ALIASES: Record<string, string> = {
+  return: 'enter',
+  esc: 'escape',
+  del: 'delete',
+  spacebar: 'space',
+  up: 'arrowup',
+  down: 'arrowdown',
+  left: 'arrowleft',
+  right: 'arrowright'
+}
+
+export function namedBrowserKey(
+  raw: string
+): { key: string; code: string; keyCode: number } | undefined {
+  const lower = raw.trim().toLowerCase()
+  return NAMED_BROWSER_KEYS[NAMED_BROWSER_KEY_ALIASES[lower] ?? lower]
+}
+
 export type BrowserShortcutCommand = WebUseChromeCommand | 'blocked_chrome' | 'page'
 
 function canonicalShortcutTokens(keys: readonly string[]): Set<string> {
@@ -555,19 +604,14 @@ export class BrowserDriver {
 
   /** A named key (Enter, Escape, Tab) to the focused element. */
   async pressKey(key: string): Promise<DriverResult> {
-    const keyed: Record<string, { code: string; keyCode: number }> = {
-      Enter: { code: 'Enter', keyCode: 13 },
-      Escape: { code: 'Escape', keyCode: 27 },
-      Tab: { code: 'Tab', keyCode: 9 }
-    }
-    const spec = keyed[key]
+    const spec = namedBrowserKey(key)
     if (!spec) {
       return { ok: false, reason: 'error', detail: `unsupported key "${key}"` }
     }
     for (const type of ['rawKeyDown', 'keyUp'] as const) {
       await this.send('Input.dispatchKeyEvent', {
         type,
-        key,
+        key: spec.key,
         code: spec.code,
         windowsVirtualKeyCode: spec.keyCode,
         nativeVirtualKeyCode: spec.keyCode
@@ -701,7 +745,7 @@ export class BrowserDriver {
                 ? 8
                 : 0
       if (type === 'rawKeyDown') modifiers |= modifier
-      const normalized =
+      const modifierName =
         modifier === 1
           ? 'Alt'
           : modifier === 2
@@ -710,13 +754,22 @@ export class BrowserDriver {
               ? 'Meta'
               : modifier === 8
                 ? 'Shift'
-                : rawKey.length === 1
-                  ? rawKey
-                  : rawKey[0]?.toUpperCase() + rawKey.slice(1)
+                : null
+      // A named key carries its code and virtual key code, or the page cannot act on it. Only a
+      // single character falls back to being sent as itself.
+      const named = modifierName ? undefined : namedBrowserKey(rawKey)
       await this.send('Input.dispatchKeyEvent', {
         type,
-        key: normalized,
-        ...(rawKey.length === 1 ? { code: `Key${rawKey.toUpperCase()}` } : {}),
+        key: modifierName ?? named?.key ?? rawKey,
+        ...(named
+          ? {
+              code: named.code,
+              windowsVirtualKeyCode: named.keyCode,
+              nativeVirtualKeyCode: named.keyCode
+            }
+          : rawKey.length === 1
+            ? { code: `Key${rawKey.toUpperCase()}` }
+            : {}),
         modifiers
       })
       if (type === 'keyUp') modifiers &= ~modifier

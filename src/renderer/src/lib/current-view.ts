@@ -14,6 +14,14 @@ import { useSyncExternalStore } from 'react'
  * conversation too.
  */
 
+/**
+ * The chat screen's view id, exported because other surfaces have to ASK whether we are on it and
+ * the id is not guessable: the route is `/chat` but the view is `memory-chat`. A hand-written
+ * 'chat' in a comparison silently never matches, which is exactly how the task chat control kept
+ * appearing on the chat screen it was meant to hide from.
+ */
+export const CHAT_VIEW = 'memory-chat'
+
 let currentView = ''
 const listeners = new Set<() => void>()
 

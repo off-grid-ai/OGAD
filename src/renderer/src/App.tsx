@@ -62,7 +62,7 @@ import { normalizeProNavigationIntent, type ProNavigationIntent } from './lib/pr
 import { navigateSearchHit } from './lib/search-navigation'
 import { getSlot, SLOTS } from './bootstrap/slotRegistry'
 import { SidebarNavigationMenu } from './components/navigation/SidebarNavigationMenu'
-import { setCurrentView } from './lib/current-view'
+import { CHAT_VIEW, setCurrentView } from './lib/current-view'
 import {
   OPEN_MODEL_SETTINGS_PANEL_EVENT,
   type ModelSettingsPanelTab
@@ -445,7 +445,7 @@ function AppContent() {
       '/actions': 'actions',
       '/connectors': 'connectors',
       '/meetings': 'meetings',
-      '/chat': 'memory-chat',
+      '/chat': CHAT_VIEW,
       '/chats': 'chats',
       '/memories': 'memories',
       '/entities': 'entities',
