@@ -358,6 +358,91 @@ describe('<App/> desktop navigation integration', () => {
     await waitFor(() => expect(window.location.pathname).toBe('/devices'))
   })
 
+  it.each([
+    {
+      name: 'Sync',
+      startPath: '/devices/sharing',
+      startTab: 'Sync sharing',
+      nextPath: '/devices/activity',
+      nextTab: 'Activity'
+    },
+    {
+      name: 'Entities',
+      startPath: '/entities/people',
+      startTab: 'People',
+      nextPath: '/entities/companies',
+      nextTab: 'Companies'
+    },
+    {
+      name: 'Models',
+      startPath: '/models/storage',
+      startTab: 'Storage',
+      nextPath: '/models',
+      nextTab: 'Text'
+    },
+    {
+      name: 'Notifications',
+      startPath: '/notifications/sharing',
+      startTab: 'Sharing',
+      nextPath: '/notifications/approvals',
+      nextTab: 'Approvals'
+    }
+  ])(
+    'keeps $name tabs in direct URLs and app Back/Forward history',
+    async ({ startPath, startTab, nextPath, nextTab }) => {
+      const { registerProView } = await import('../bootstrap/proView')
+      const { proView } = await import('../../../../pro/renderer/proView')
+      registerProView(proView)
+      installAppBoundary({
+        isPro: true,
+        getModelCatalog: async () => ({
+          kinds: ['text', 'image', 'computer_use', 'voice', 'transcription'],
+          models: []
+        }),
+        crmListEntities: async () => [],
+        proInvoke: async (channel: string) => {
+          if (channel === 'pro:sync:status') return undefined
+          if (channel === 'pro:sync:prefs') return { prefs: null, categories: [] }
+          if (channel === 'pro:sync:model-transfer-jobs') return []
+          return undefined
+        }
+      })
+      window.history.replaceState(null, '', startPath)
+      const user = userEvent.setup()
+
+      render(<App />)
+
+      const initial = await screen.findByRole('button', { name: new RegExp(`^${startTab}`) })
+      expect(initial.getAttribute('aria-current')).toBe('page')
+      expect(window.location.pathname).toBe(startPath)
+
+      await user.click(screen.getByRole('button', { name: new RegExp(`^${nextTab}`) }))
+      await waitFor(() => expect(window.location.pathname).toBe(nextPath))
+
+      act(() => {
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', { key: '[', metaKey: true, bubbles: true })
+        )
+      })
+      await waitFor(() => expect(window.location.pathname).toBe(startPath))
+      expect(
+        screen
+          .getByRole('button', { name: new RegExp(`^${startTab}`) })
+          .getAttribute('aria-current')
+      ).toBe('page')
+
+      act(() => {
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', { key: ']', metaKey: true, bubbles: true })
+        )
+      })
+      await waitFor(() => expect(window.location.pathname).toBe(nextPath))
+      expect(
+        screen.getByRole('button', { name: new RegExp(`^${nextTab}`) }).getAttribute('aria-current')
+      ).toBe('page')
+    }
+  )
+
   it('falls back to the Settings root for a malformed encoded section', async () => {
     window.history.replaceState(null, '', '/settings/%E0%A4%A')
 

@@ -20,7 +20,6 @@ import {
 import { StoragePanel } from './setup/StoragePanel'
 import { SidePanel } from './SidePanel'
 import { deviceNoun } from '@renderer/lib/device'
-import { modelKindLabel } from '@renderer/lib/model-kind-labels'
 import { collectTags, matchesAllTags, toggleTag } from '@renderer/lib/model-tag-filter'
 import { companionDownloadLabel } from '@renderer/lib/download-label'
 import { formatTransferSpeed } from '@offgrid/sync'
@@ -49,6 +48,11 @@ import {
   useModelDownloadProgress,
   type ModelDownloadProgressEvent
 } from '@renderer/hooks/useModelDownloadProgress'
+import {
+  internalTabFromSubroute,
+  internalTabRoutes,
+  internalTabSubroute
+} from '@renderer/lib/internal-tab-route'
 
 function Sel({
   value,
@@ -288,7 +292,13 @@ function downloadFailureText(error?: string): string {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const api = (window as any).api
 
-export function ModelsScreen(): React.JSX.Element {
+export function ModelsScreen({
+  navigationSubroute,
+  onNavigateSubroute
+}: {
+  navigationSubroute?: string | null
+  onNavigateSubroute?: (subroute: string | null) => void
+} = {}): React.JSX.Element {
   const [kinds, setKinds] = useState<string[]>([])
   const [models, setModels] = useState<ModelEntry[]>([])
   const [installed, setInstalled] = useState<string[]>([])
@@ -301,11 +311,29 @@ export function ModelsScreen(): React.JSX.Element {
   const refreshVision = (): void => {
     void api.getModelVisionStatus?.().then((s) => setVisionSt(s ?? {}))
   }
+  const initialRequestedKind = useRef<string | null>(null)
   const [activeKind, setActiveKind] = useState<string>(() => {
     const requested = window.sessionStorage.getItem('offgrid:models:initial-kind')
     window.sessionStorage.removeItem('offgrid:models:initial-kind')
-    return requested || 'text'
+    initialRequestedKind.current = requested
+    return requested || internalTabFromSubroute('models', navigationSubroute ?? null).id
   })
+  const selectKind = useCallback(
+    (kind: string): void => {
+      setActiveKind(kind)
+      onNavigateSubroute?.(internalTabSubroute('models', kind))
+    },
+    [onNavigateSubroute]
+  )
+  useEffect(() => {
+    if (!onNavigateSubroute) return
+    if (initialRequestedKind.current) {
+      onNavigateSubroute(internalTabSubroute('models', initialRequestedKind.current))
+      initialRequestedKind.current = null
+      return
+    }
+    setActiveKind(internalTabFromSubroute('models', navigationSubroute ?? null).id)
+  }, [navigationSubroute, onNavigateSubroute])
   const [progress, setProgress] = useState<Record<string, DownloadCardProgress>>({})
   // Active model ids across ALL modalities (chat + image/voice/transcription) —
   // one truth from the backend; the UI never re-derives "active" per kind.
@@ -364,7 +392,7 @@ export function ModelsScreen(): React.JSX.Element {
           setModels(c.models)
         }
         setInstalled(await api.getInstalledModels?.())
-        setActiveKind('text')
+        selectKind('text')
       } else if (res && !res.canceled && res.error) {
         window.alert(`Import failed: ${res.error}`)
       }
@@ -381,7 +409,9 @@ export function ModelsScreen(): React.JSX.Element {
     api.getModelCatalog?.().then((c: { kinds: string[]; models: ModelEntry[] }) => {
       setKinds(c.kinds)
       setModels(c.models)
-      setActiveKind((current) => (c.kinds.includes(current) ? current : (c.kinds[0] ?? 'text')))
+      setActiveKind((current) =>
+        current === 'storage' || c.kinds.includes(current) ? current : (c.kinds[0] ?? 'text')
+      )
     })
     api.getInstalledModels?.().then(setInstalled)
     refreshVision()
@@ -552,7 +582,9 @@ export function ModelsScreen(): React.JSX.Element {
       )
     })
 
-  const tabs = [...kinds.filter((k) => k !== 'vision'), 'storage']
+  const tabs = internalTabRoutes('models').filter(
+    ({ id }) => id === 'storage' || kinds.includes(id)
+  )
 
   // Live download summary for the Storage tab label. The manager owns queued vs
   // transferring; this surface only counts its emitted statuses.
@@ -889,13 +921,14 @@ export function ModelsScreen(): React.JSX.Element {
 
       {/* Tabs */}
       <div className="flex shrink-0 items-end gap-0 border-b border-neutral-800 px-6">
-        {tabs.map((k) => (
+        {tabs.map(({ id: kind, label }) => (
           <button
-            key={k}
-            onClick={() => setActiveKind(k)}
-            className={`flex items-center gap-1.5 px-3 py-2 text-[10px] uppercase tracking-wider transition-colors duration-150 ${activeKind === k ? 'border-b-2 border-green-500 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}
+            key={kind}
+            aria-current={activeKind === kind ? 'page' : undefined}
+            onClick={() => selectKind(kind)}
+            className={`flex items-center gap-1.5 px-3 py-2 text-[10px] uppercase tracking-wider transition-colors duration-150 ${activeKind === kind ? 'border-b-2 border-green-500 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}
           >
-            {k === 'storage' ? (
+            {kind === 'storage' ? (
               <>
                 <IconDatabase className="h-3 w-3" /> Storage
                 {/* Live counts: installed, transferring, queued, and failed. */}
@@ -919,7 +952,7 @@ export function ModelsScreen(): React.JSX.Element {
                 )}
               </>
             ) : (
-              modelKindLabel(k)
+              label
             )}
           </button>
         ))}

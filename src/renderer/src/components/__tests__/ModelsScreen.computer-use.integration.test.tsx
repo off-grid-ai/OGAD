@@ -3,7 +3,7 @@
 // Computer Use enters through the real Models screen and uses the same catalog projection, filters,
 // installed/available sections, card actions, and progress state as every other model kind. Only the
 // Electron IPC bridge is controlled because it is outside the renderer process.
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { CATALOG, MODEL_KINDS } from '@offgrid/models'
@@ -36,7 +36,7 @@ let activeIds: string[] = []
   onModelProgress: () => () => {}
 }
 
-let ModelsScreen: () => React.JSX.Element
+let ModelsScreen: typeof import('../ModelsScreen').ModelsScreen
 beforeAll(async () => {
   ModelsScreen = (await import('../ModelsScreen')).ModelsScreen
 })
@@ -46,6 +46,29 @@ afterEach(() => {
 })
 
 describe('<ModelsScreen/> Computer Use catalog journey', () => {
+  it('renders the direct Computer Use route and sends every model tab through one route owner', async () => {
+    const onNavigateSubroute = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <ModelsScreen navigationSubroute="computer-use" onNavigateSubroute={onNavigateSubroute} />
+    )
+
+    expect(
+      (await screen.findByRole('button', { name: 'Computer Use' })).getAttribute('aria-current')
+    ).toBe('page')
+    for (const [label, subroute] of [
+      ['Text', null],
+      ['Image', 'image'],
+      ['Computer Use', 'computer-use'],
+      ['Voice', 'voice'],
+      ['Transcription', 'transcription'],
+      ['Storage', 'storage']
+    ] as const) {
+      await user.click(screen.getByRole('button', { name: new RegExp(`^${label}`) }))
+      expect(onNavigateSubroute).toHaveBeenLastCalledWith(subroute)
+    }
+  })
+
   it('uses the shared tab, filters, cards, activation, and download states', async () => {
     const user = userEvent.setup()
     render(<ModelsScreen />)

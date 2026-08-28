@@ -68,6 +68,7 @@ import {
   type ModelSettingsPanelTab
 } from './lib/model-settings-panel'
 import { callHook } from './bootstrap/hookRegistry'
+import { internalTabLocation, internalTabPath, isInternalTabView } from './lib/internal-tab-route'
 import {
   NOTIFICATION_METADATA_HOOK,
   NOTIFICATION_OPEN_TARGET_CHANNEL,
@@ -345,6 +346,7 @@ function AppContent() {
   // live view was lost on the way out; a running task now follows you in a floating card
   // (tasks.floatingView), so there is nothing left to warn about.
   const navigateTo = useCallback((destination: ViewMode, prepare?: () => void): void => {
+    setNavigationSubroute(null)
     prepare?.()
     commitViewMode(destination)
   }, [])
@@ -459,7 +461,12 @@ function AppContent() {
       '/devices': 'devices'
     }
 
-    if (path.startsWith('/settings/')) {
+    const internalTab = internalTabLocation(path)
+    if (internalTab) {
+      setNavigationSubroute(internalTab.subroute)
+      setSettingsSection(null)
+      commitViewMode(internalTab.view)
+    } else if (path.startsWith('/settings/')) {
       let section: string | null = null
       try {
         section = decodeURIComponent(path.slice('/settings/'.length)) || null
@@ -469,16 +476,6 @@ function AppContent() {
       setSettingsSection(section)
       setNavigationSubroute(null)
       commitViewMode('settings')
-    } else if (path.startsWith('/devices/')) {
-      let subroute: string | null = null
-      try {
-        subroute = decodeURIComponent(path.slice('/devices/'.length)) || null
-      } catch {
-        subroute = null
-      }
-      setNavigationSubroute(subroute)
-      setSettingsSection(null)
-      commitViewMode('devices')
     } else if (viewMap[path]) {
       setNavigationSubroute(null)
       setSettingsSection(null)
@@ -503,7 +500,9 @@ function AppContent() {
       navigateTo(navigation.view, () => {
         setSettingsSection(navigation.view === 'settings' ? (navigation.section ?? null) : null)
         if (navigation.view === 'settings') setSettingsNavigationKey((value) => value + 1)
-        setNavigationSubroute(navigation.view === 'devices' ? (navigation.subroute ?? null) : null)
+        setNavigationSubroute(
+          isInternalTabView(navigation.view) ? (navigation.subroute ?? null) : null
+        )
         if (
           navigation.view === 'memory-chat' &&
           (navigation.conversationId || navigation.draftPrompt)
@@ -571,8 +570,8 @@ function AppContent() {
     let newPath = urlMap[viewMode]
     if (viewMode === 'settings' && settingsSection) {
       newPath = `/settings/${encodeURIComponent(settingsSection)}`
-    } else if (viewMode === 'devices' && navigationSubroute) {
-      newPath = `/devices/${encodeURIComponent(navigationSubroute)}`
+    } else if (isInternalTabView(viewMode)) {
+      newPath = internalTabPath(viewMode, navigationSubroute)
     }
     if (window.location.pathname !== newPath) {
       window.history.replaceState(null, '', newPath)
@@ -594,7 +593,7 @@ function AppContent() {
     // Avoid duplicating the same state
     const currentState: NavigationState = {
       viewMode,
-      subroute: viewMode === 'devices' ? navigationSubroute : null,
+      subroute: isInternalTabView(viewMode) ? navigationSubroute : null,
       settingsSection: viewMode === 'settings' ? settingsSection : null,
       selectedSessionId,
       selectedMemoryId,
@@ -1327,7 +1326,10 @@ function AppContent() {
                     ) : viewMode === 'chats' ? (
                       <ChatList onSelectSession={setSelectedSessionId} />
                     ) : viewMode === 'models' ? (
-                      <ModelsScreen />
+                      <ModelsScreen
+                        navigationSubroute={navigationSubroute}
+                        onNavigateSubroute={setNavigationSubroute}
+                      />
                     ) : viewMode === 'projects' ? (
                       <ProjectsScreen
                         onOpenChat={handleOpenProjectChat}
