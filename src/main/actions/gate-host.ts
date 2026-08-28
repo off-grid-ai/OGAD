@@ -21,20 +21,6 @@
 import type { ActionRecord, GateDecision, Rail } from '@offgrid/use'
 import { proposeActionApproval, type ActionKind } from './approval'
 
-/** What the inline chat card needs to render and resolve one gate. */
-export interface InlineGateRequest {
-  actionId: string
-  actionType: string
-  kind: ActionKind
-  title: string
-  args: Record<string, unknown>
-  risk: string
-  payloadHash: string
-  source: string
-  /** The chat that owns this approval. Other open chats must not render it. */
-  sourceRef?: string
-}
-
 /** The engine's rails, translated to the approval UI's executor kinds. */
 export function railToKind(rail: Rail | undefined): ActionKind {
   switch (rail) {
@@ -69,39 +55,6 @@ export function whenActionParked(actionId: string): Promise<void> {
 }
 
 const parkListeners = new Set<() => void>()
-
-/**
- * The inline gate surface (Approval UX v2): when the app registers an
- * emitter, gated actions with no pro queue listening PARK and render as a
- * card in the chat instead of auto-running. Unregistered (tests, headless),
- * the free-build behaviour stays run-now - the safe, unchanged default.
- *
- * Multiple subscribers, not one: the same parked gate fans out to every
- * surface that wants it - the desktop chat card (actions-ipc broadcasts to
- * renderer windows) AND pro's mesh forwarder (sends it to paired phones so the
- * approval can be given from a phone's chat). Each resolves the ONE engine gate
- * via resolveActionGate; the first verdict wins, the rest are no-ops.
- */
-const inlineSurfaces = new Set<(request: InlineGateRequest) => void>()
-
-export function registerInlineGateSurface(emit: (request: InlineGateRequest) => void): () => void {
-  inlineSurfaces.add(emit)
-  return () => {
-    inlineSurfaces.delete(emit)
-  }
-}
-
-/** Is any inline surface listening? Drives the park-vs-run-now decision. */
-function hasInlineSurface(): boolean {
-  return inlineSurfaces.size > 0
-}
-
-/** Fan a parked gate out to every registered inline surface. */
-function emitInline(request: InlineGateRequest): void {
-  for (const emit of inlineSurfaces) {
-    emit(request)
-  }
-}
 
 /** Fail-closed parse of a renderer-supplied decision - unknown shapes reject. */
 export function parseGateDecision(input: unknown): GateDecision | null {
@@ -232,44 +185,26 @@ export async function gateHost({ action }: { action: ActionRecord }): Promise<Ga
     return { kind: 'approve' }
   }
   const conversationId = approvalConversation(action)
-  // A Chat-owned task stays in that Chat. Sending it through Pro's queue would
-  // create a second execution chat and two notification surfaces for one task.
-  // Non-Chat tasks still enter Action Approval, which owns their decision.
-  const queued = conversationId
-    ? undefined
-    : proposeActionApproval({
-        kind: railToKind(action.rail),
-        title: action.intent,
-        detail: JSON.stringify(action.args, null, 2),
-        risk: action.risk,
-        args: action.args,
-        source: action.source,
-        // Engine-specific fields the approval card needs to resolve the gate
-        // and to show exactly what was bound.
-        actionId: action.id,
-        actionType: action.type,
-        payloadHash: action.payloadHash
-      })
-  // A non-Chat task parks when Action Approval accepts it. A Chat task parks only
-  // when its inline surface exists. Both paths resolve the same engine gate.
-  // Park BEFORE emitting so a same-tick resolve always finds the pending entry.
-  if (queued === true || (conversationId !== null && hasInlineSurface())) {
+  // A task invoked in Chat starts there immediately. Action Approval owns only tasks proposed
+  // outside Chat; after approval, that owner creates the execution Chat and starts the task.
+  if (conversationId !== null) return { kind: 'approve' }
+  const queued = proposeActionApproval({
+    kind: railToKind(action.rail),
+    title: action.intent,
+    detail: JSON.stringify(action.args, null, 2),
+    risk: action.risk,
+    args: action.args,
+    source: action.source,
+    // Engine-specific fields the approval card needs to resolve the gate
+    // and to show exactly what was bound.
+    actionId: action.id,
+    actionType: action.type,
+    payloadHash: action.payloadHash
+  })
+  if (queued === true) {
     return new Promise<GateDecision>((resolve) => {
       pending.set(action.id, resolve)
       notifyParked(action.id)
-      if (conversationId) {
-        emitInline({
-          actionId: action.id,
-          actionType: action.type,
-          kind: railToKind(action.rail),
-          title: action.intent,
-          args: action.args,
-          risk: action.risk,
-          payloadHash: action.payloadHash,
-          source: action.source,
-          sourceRef: conversationId
-        })
-      }
     })
   }
   // Nothing queued and no inline surface (tests, headless): the unchanged

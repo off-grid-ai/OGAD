@@ -21,7 +21,11 @@ vi.mock('electron', () => ({
   },
   BrowserWindow: {
     getAllWindows: () => [
-      { webContents: { send: (channel: string, payload: unknown) => world.sent.push({ channel, payload }) } }
+      {
+        webContents: {
+          send: (channel: string, payload: unknown) => world.sent.push({ channel, payload })
+        }
+      }
     ]
   }
 }))
@@ -71,14 +75,9 @@ describe('registerActionsIpc', () => {
     registerActionsIpc()
   })
 
-  it('a parked gate broadcasts the card request, and resolve-gate resolves it', async () => {
-    const parked = gateHost({ action: record() })
-    const pendingEvent = world.sent.find((s) => s.channel === 'actions:gate-pending')
-    expect(pendingEvent?.payload).toMatchObject({ actionId: 'act_ipc', risk: 'irreversible' })
-
-    const resolveHandler = world.handlers.get('actions:resolve-gate')
-    expect(await resolveHandler?.({}, 'act_ipc', { kind: 'approve' })).toBe(true)
-    await expect(parked).resolves.toEqual({ kind: 'approve' })
+  it('starts a Chat task directly without an approval broadcast', async () => {
+    await expect(gateHost({ action: record() })).resolves.toEqual({ kind: 'approve' })
+    expect(world.sent.some((event) => event.channel === 'actions:gate-pending')).toBe(false)
   })
 
   it('resolve-gate fails closed on junk decisions and ids', async () => {

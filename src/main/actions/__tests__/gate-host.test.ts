@@ -20,10 +20,8 @@ import {
   pendingActionGateCount,
   railToKind,
   registerApprovalModeProvider,
-  registerInlineGateSurface,
   resolveActionGate,
-  whenActionParked,
-  type InlineGateRequest
+  whenActionParked
 } from '../gate-host'
 
 const record = (overrides: Partial<ActionRecord> = {}): ActionRecord =>
@@ -189,94 +187,6 @@ describe('the park signals', () => {
   })
 })
 
-describe('the inline gate surface (Approval UX v2)', () => {
-  it('with a surface registered, a free-build gate parks and emits the card request', async () => {
-    const requests: InlineGateRequest[] = []
-    const unregister = registerInlineGateSurface((request) => requests.push(request))
-    try {
-      const parked = gateHost({ action: record({ risk: 'irreversible', rail: 'accessibility' }) })
-      expect(requests).toHaveLength(1)
-      expect(requests[0]).toMatchObject({
-        actionId: 'act_1',
-        actionType: 'reminder',
-        kind: 'computer',
-        risk: 'irreversible',
-        title: 'remind me to send the deck',
-        payloadHash: 'a'.repeat(64),
-        sourceRef: 'chat-1'
-      })
-      expect(pendingActionGateCount()).toBe(1)
-      resolveActionGate('act_1', { kind: 'approve' })
-      await expect(parked).resolves.toEqual({ kind: 'approve' })
-    } finally {
-      unregister()
-    }
-  })
-
-  it('unregistering restores the run-now default', async () => {
-    const unregister = registerInlineGateSurface(() => {})
-    unregister()
-    const decision = await gateHost({ action: record() })
-    expect(decision).toEqual({ kind: 'approve' })
-  })
-
-  it('fans one parked gate out to EVERY registered surface (chat card + mesh forwarder)', async () => {
-    // Two surfaces stand in for the desktop chat card and pro's phone-mesh forwarder.
-    const card: string[] = []
-    const mesh: string[] = []
-    const offCard = registerInlineGateSurface((r) => card.push(r.actionId))
-    const offMesh = registerInlineGateSurface((r) => mesh.push(r.actionId))
-    try {
-      const parked = gateHost({ action: record() })
-      expect(card).toEqual(['act_1'])
-      expect(mesh).toEqual(['act_1'])
-      // A single resolve (from whichever surface) settles the one gate.
-      expect(resolveActionGate('act_1', { kind: 'approve' })).toBe(true)
-      await expect(parked).resolves.toEqual({ kind: 'approve' })
-    } finally {
-      offCard()
-      offMesh()
-    }
-  })
-
-  it('stops delivering to a surface once it unregisters, keeps delivering to the rest', async () => {
-    const card: string[] = []
-    const mesh: string[] = []
-    const offCard = registerInlineGateSurface((r) => card.push(r.actionId))
-    const offMesh = registerInlineGateSurface((r) => mesh.push(r.actionId))
-    offMesh() // the phone forwarder goes away
-    try {
-      const parked = gateHost({ action: record() })
-      expect(card).toEqual(['act_1'])
-      expect(mesh).toEqual([]) // no longer receives
-      resolveActionGate('act_1', { kind: 'approve' })
-      await parked
-    } finally {
-      offCard()
-    }
-  })
-
-  it('keeps a Chat task inline and bypasses the Pro proposal hook', async () => {
-    const requests: InlineGateRequest[] = []
-    const unregister = registerInlineGateSurface((request) => requests.push(request))
-    try {
-      const proSaw = vi.fn(() => true)
-      registerHook(HOOKS.actionsProposeApproval, proSaw)
-      const parked = gateHost({ action: record() })
-      expect(proSaw).not.toHaveBeenCalled()
-      expect(requests).toHaveLength(1)
-      expect(requests[0]).toMatchObject({ actionId: 'act_1', kind: 'computer' })
-      expect(pendingActionGateCount()).toBe(1)
-      // Resolving once (from EITHER surface) resolves the single engine gate.
-      expect(resolveActionGate('act_1', { kind: 'approve' })).toBe(true)
-      await expect(parked).resolves.toEqual({ kind: 'approve' })
-      expect(pendingActionGateCount()).toBe(0)
-    } finally {
-      unregister()
-    }
-  })
-})
-
 describe('parseGateDecision', () => {
   it('accepts the three decision shapes and nothing else', () => {
     expect(parseGateDecision({ kind: 'approve' })).toEqual({ kind: 'approve' })
@@ -306,17 +216,13 @@ describe('needsApproval', () => {
     expect(needsApproval(record({ rail: undefined }))).toBe(false)
   })
 
-  it('parks a Chat-owned browser task inline without proposing a notification', async () => {
-    const requests: InlineGateRequest[] = []
+  it('starts a Chat-owned browser task without proposing an approval', async () => {
     const proSaw = vi.fn(() => true)
     registerHook(HOOKS.actionsProposeApproval, proSaw)
-    const dispose = registerInlineGateSurface((request) => requests.push(request))
-    const parked = gateHost({ action: record({ rail: 'browser', type: 'web_use' }) })
+    const decision = await gateHost({ action: record({ rail: 'browser', type: 'web_use' }) })
     expect(proSaw).not.toHaveBeenCalled()
-    expect(requests).toEqual([expect.objectContaining({ sourceRef: 'chat-1', kind: 'browser' })])
-    resolveActionGate('act_1', { kind: 'approve' })
-    await expect(parked).resolves.toEqual({ kind: 'approve' })
-    dispose()
+    expect(decision).toEqual({ kind: 'approve' })
+    expect(pendingActionGateCount()).toBe(0)
   })
 })
 
@@ -375,18 +281,14 @@ describe('computerApprovalMode (the Sync-sharing auto/ask setting)', () => {
     }
   })
 
-  it('does not apply the Computer Use auto setting to a Web Use task', async () => {
-    const requests: InlineGateRequest[] = []
-    const offSurface = registerInlineGateSurface((request) => requests.push(request))
+  it('starts a Chat-owned Web Use task for either Computer Use mode', async () => {
     const unregister = registerApprovalModeProvider(() => 'auto')
     try {
-      const parked = gateHost({ action: record({ rail: 'browser', type: 'web_use' }) })
-      expect(requests).toHaveLength(1)
-      resolveActionGate('act_1', { kind: 'approve' })
-      await expect(parked).resolves.toEqual({ kind: 'approve' })
+      const decision = await gateHost({ action: record({ rail: 'browser', type: 'web_use' }) })
+      expect(decision).toEqual({ kind: 'approve' })
+      expect(pendingActionGateCount()).toBe(0)
     } finally {
       unregister()
-      offSurface()
     }
   })
 })

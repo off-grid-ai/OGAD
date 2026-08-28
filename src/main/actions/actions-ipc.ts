@@ -8,7 +8,7 @@
  */
 import { BrowserWindow, ipcMain } from 'electron'
 import { parseActionRecord } from '@offgrid/use'
-import { parseGateDecision, registerInlineGateSurface, resolveActionGate } from './gate-host'
+import { parseGateDecision, resolveActionGate } from './gate-host'
 import { getActionsRuntime } from './use-runtime'
 
 function broadcast(channel: string, payload: unknown): void {
@@ -18,8 +18,6 @@ function broadcast(channel: string, payload: unknown): void {
 }
 
 export function registerActionsIpc(): void {
-  registerInlineGateSurface((request) => broadcast('actions:gate-pending', request))
-
   const runtime = getActionsRuntime()
   runtime.onOutcome(({ outcome, undoable }) => {
     broadcast('actions:outcome', { ...outcome, undoable })
