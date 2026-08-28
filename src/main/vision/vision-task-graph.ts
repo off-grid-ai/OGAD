@@ -12,10 +12,7 @@ import {
   createTaskPhaseReporter,
   formatTaskExecutionPlanContext
 } from '../tasks/task-execution-plan-service'
-import {
-  taskExecutionPlanProgress,
-  type TaskExecutionPlan
-} from '../../shared/task-execution-plan'
+import { taskExecutionPlanProgress, type TaskExecutionPlan } from '../../shared/task-execution-plan'
 import { TASK_GUIDANCE_APPLIED_TRACE } from '../tasks/task-guide'
 import type { ComputerUsePhase } from '../tasks/task-step-details'
 import type { VisionAction } from './vision-action'
@@ -153,6 +150,7 @@ class VisionTaskGraphRuntime {
     action: VisionAction
     coordinateFrame: ReturnType<typeof coordinateFrame>
   }
+  private equivalentClickRecoveries = 0
   private handoffs = 0
   private modelStep = 0
   /**
@@ -345,10 +343,10 @@ class VisionTaskGraphRuntime {
         rawResponse: this.actionResponse,
         reasoning: this.currentReasoning,
         durationMs: this.now() - captured.startedAt,
-      timings: {
-        captureMs: captured.captureMs,
-        ...(captured.decisionMs === undefined ? {} : { decisionMs: captured.decisionMs })
-      },
+        timings: {
+          captureMs: captured.captureMs,
+          ...(captured.decisionMs === undefined ? {} : { decisionMs: captured.decisionMs })
+        },
         result: 'error',
         error: message
       })
@@ -393,15 +391,28 @@ class VisionTaskGraphRuntime {
     }
     if (decision.kind === 'actions') {
       const repeatedClick = decision.actions.find((action) =>
-        isSameClickAction(action, this.previousVerifiedAction?.action)
+        isEquivalentClickTarget(
+          action,
+          coordinateFrame(this.requireCaptured().shot),
+          this.previousVerifiedAction
+        )
       )
       if (repeatedClick) {
-        const summary = `Repeated click blocked at (${repeatedClick.point.x}, ${repeatedClick.point.y}). The previous click marker shows where it landed; choose a different visible target or rethink.`
+        this.equivalentClickRecoveries += 1
+        const summary = `Repeated click region blocked at (${repeatedClick.point.x}, ${repeatedClick.point.y}). The previous click marker shows where the earlier attempt landed.`
         this.discardPendingPolicyHistory()
         this.observeDecision('blocked', summary)
         this.note(summary)
-        this.progress('checking', 'Choosing a different target after a repeated click')
         this.checkpoint()
+        if (this.equivalentClickRecoveries > 1) {
+          const failure =
+            'Computer use could not focus the intended control after a fresh observation. Use Take Over to complete this step.'
+          this.progress('failed', 'The same click region did not accept focus')
+          this.note(failure)
+          this.finish(false, failure)
+          return { route: 'end' }
+        }
+        this.progress('checking', 'Taking a fresh observation and changing the input strategy')
         return { route: 'gate' }
       }
       this.observeDecision('reviewed')
@@ -513,6 +524,7 @@ class VisionTaskGraphRuntime {
           action,
           coordinateFrame: coordinateFrame(captured.shot)
         }
+        this.equivalentClickRecoveries = 0
         if (actuation?.mappedAction) mappedActions.push(actuation.mappedAction)
       }
     } catch (error) {
@@ -538,10 +550,10 @@ class VisionTaskGraphRuntime {
         ...(mappedActions[0] ? { mappedAction: mappedActions[0] } : {}),
         ...(mappedActions.length ? { mappedActions } : {}),
         durationMs: this.now() - captured.startedAt,
-      timings: {
-        captureMs: captured.captureMs,
-        ...(captured.decisionMs === undefined ? {} : { decisionMs: captured.decisionMs })
-      },
+        timings: {
+          captureMs: captured.captureMs,
+          ...(captured.decisionMs === undefined ? {} : { decisionMs: captured.decisionMs })
+        },
         result: 'error',
         error: message
       })
@@ -773,23 +785,43 @@ function describeAction(action: VisionAction): string {
   }
 }
 
-function isSameClickAction(
-  action: VisionAction,
-  previous: VisionAction | undefined
-): action is Extract<VisionAction, { point: { x: number; y: number } }> {
-  if (!previous || action.type !== previous.type) return false
+const EQUIVALENT_CLICK_REGION_RATIO = 0.04
+
+function clickTarget(action: VisionAction): { x: number; y: number } | null {
   switch (action.type) {
     case 'click':
     case 'double_click':
     case 'right_click':
     case 'middle_click':
     case 'triple_click':
-      return (
-        'point' in previous &&
-        action.point.x === previous.point.x &&
-        action.point.y === previous.point.y
-      )
+      return action.point
     default:
-      return false
+      return null
   }
+}
+
+/** Treat nearby click variants as one target strategy, even after capture resizing. */
+export function isEquivalentClickTarget(
+  action: VisionAction,
+  currentFrame: ReturnType<typeof coordinateFrame>,
+  previous:
+    | { action: VisionAction; coordinateFrame: ReturnType<typeof coordinateFrame> }
+    | undefined
+): action is Extract<VisionAction, { point: { x: number; y: number } }> {
+  const currentPoint = clickTarget(action)
+  const previousPoint = previous ? clickTarget(previous.action) : null
+  if (!currentPoint || !previousPoint || !previous) return false
+  const currentBounds = currentFrame.encoded
+  const previousBounds = previous.coordinateFrame.encoded
+  if (
+    currentBounds.width <= 0 ||
+    currentBounds.height <= 0 ||
+    previousBounds.width <= 0 ||
+    previousBounds.height <= 0
+  ) {
+    return false
+  }
+  const deltaX = currentPoint.x / currentBounds.width - previousPoint.x / previousBounds.width
+  const deltaY = currentPoint.y / currentBounds.height - previousPoint.y / previousBounds.height
+  return Math.hypot(deltaX, deltaY) <= EQUIVALENT_CLICK_REGION_RATIO
 }

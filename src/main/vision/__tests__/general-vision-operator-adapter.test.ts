@@ -11,7 +11,7 @@ import {
 } from '../model-adapters/general-vision-operator'
 import { parseGeneralVisionToolResponse } from '../model-adapters/general-vision-tools'
 import { resolveVisionModelAdapter } from '../model-adapters/registry'
-import type { VisionPolicyResponse } from '../model-adapters/types'
+import type { VisionPolicyMessage, VisionPolicyResponse } from '../model-adapters/types'
 import {
   answerAfterThinking,
   createVisionGrounder,
@@ -412,6 +412,50 @@ describe('general vision native tool policy', () => {
     expect(rgbAt(20, 200)).not.toEqual([255, 255, 255])
     expect(rgbAt(10, 200)).toEqual([255, 255, 255])
     fs.unlinkSync(file)
+  })
+
+  it('sends the exact persisted numbered-grid bytes through the production model request', async () => {
+    const file = path.join(os.tmpdir(), `offgrid-production-model-grid-${Date.now()}.png`)
+    fs.writeFileSync(
+      file,
+      await sharp({
+        create: { width: bounds.width, height: bounds.height, channels: 4, background: '#ffffff' }
+      })
+        .png()
+        .toBuffer()
+    )
+    let modelImageUrl = ''
+    vi.spyOn(llm, 'streamChat').mockImplementationOnce(async (messages) => {
+      const policyMessages = messages as VisionPolicyMessage[]
+      const userContent = policyMessages.find((message) => message.role === 'user')?.content
+      if (Array.isArray(userContent)) {
+        const image = userContent.find((part) => part.type === 'image_url')
+        if (image?.type === 'image_url') modelImageUrl = image.image_url.url
+      }
+      return {
+        content: '',
+        toolCalls: [...complete().toolCalls],
+        finishReason: 'tool_calls'
+      }
+    })
+
+    try {
+      const grounding = await createVisionGrounder(generalVisionOperatorAdapter)({
+        goal: 'Confirm the visible result.',
+        image: file,
+        history: [],
+        retrievedFacts: [],
+        policyHistory: [],
+        guidance: [],
+        coordinateFrame: { encoded: bounds, source: bounds }
+      })
+      const persistedDataUrl = `data:image/png;base64,${fs.readFileSync(file).toString('base64')}`
+
+      expect(modelImageUrl).toBe(persistedDataUrl)
+      expect(grounding.screenshotDataUrl).toBe(persistedDataUrl)
+    } finally {
+      fs.rmSync(file, { force: true })
+    }
   })
 
   it('rejects mismatched image and coordinate dimensions before model inference', async () => {

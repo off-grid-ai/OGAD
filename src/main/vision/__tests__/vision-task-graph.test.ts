@@ -36,11 +36,11 @@ function complete(summary = 'The milestone result is visible.'): VisionPolicyDec
   }
 }
 
-function action(): VisionPolicyDecision {
+function action(point = { x: 100, y: 295 }): VisionPolicyDecision {
   return {
     kind: 'actions',
     actionText: 'Click the visible control',
-    actions: [{ type: 'click', point: { x: 100, y: 295 } }],
+    actions: [{ type: 'click', point }],
     decisionRationale: 'The point is visibly inside the named control.'
   }
 }
@@ -167,23 +167,56 @@ describe('runVisionTaskGraph', () => {
     expect(w.observations.map((item) => item.result)).toEqual(['reviewed', 'actuated', 'terminal'])
   })
 
-  it('blocks an identical repeated click and asks the next judge pass for another target', async () => {
-    const w = workflow([action(), action(), complete()])
+  it('blocks a nearby repeated click and recovers with a different visible target', async () => {
+    const w = workflow([
+      action(),
+      action({ x: 118, y: 304 }),
+      action({ x: 300, y: 295 }),
+      complete()
+    ])
     w.deps.plan = { version: 1, phases: [{ id: 'only', title: 'Use the visible control' }] }
 
     const result = await runVisionTaskGraph('Use the visible control.', w.deps)
 
     expect(result.ok).toBe(true)
-    expect(w.decisionCalls).toBe(3)
-    expect(w.actuated).toEqual(['click:100,295'])
+    expect(w.decisionCalls).toBe(4)
+    expect(w.actuated).toEqual(['click:100,295', 'click:300,295'])
     expect(result.steps).toContain(
-      'Repeated click blocked at (100, 295). The previous click marker shows where it landed; choose a different visible target or rethink.'
+      'Repeated click region blocked at (118, 304). The previous click marker shows where the earlier attempt landed.'
     )
     expect(w.observations.map((item) => item.result)).toEqual([
       'reviewed',
       'actuated',
       'blocked',
+      'reviewed',
+      'actuated',
       'terminal'
+    ])
+  })
+
+  it('stops after one fresh observation when nearby clicks keep failing to focus', async () => {
+    const w = workflow([
+      action(),
+      action({ x: 114, y: 302 }),
+      action({ x: 89, y: 310 }),
+      complete()
+    ])
+    w.deps.plan = { version: 1, phases: [{ id: 'only', title: 'Enter text in the control' }] }
+
+    const result = await runVisionTaskGraph('Enter text in the visible control.', w.deps)
+
+    expect(result).toMatchObject({
+      ok: false,
+      summary:
+        'Computer use could not focus the intended control after a fresh observation. Use Take Over to complete this step.'
+    })
+    expect(w.decisionCalls).toBe(3)
+    expect(w.actuated).toEqual(['click:100,295'])
+    expect(w.observations.map((item) => item.result)).toEqual([
+      'reviewed',
+      'actuated',
+      'blocked',
+      'blocked'
     ])
   })
 
@@ -476,6 +509,47 @@ describe('runVisionTaskGraph with a scripted action model', () => {
     expect(observations.map((item) => item.result)).toContain('blocked')
   })
 
+  it('recovers from rejected focus with one fresh frame and a changed target strategy', async () => {
+    const w = scripted([
+      "click(point='<point>100 295</point>')",
+      "type(content='Pune')",
+      "click(point='<point>118 304</point>')",
+      "click(point='<point>300 295</point>')",
+      "type(content='Pune')",
+      "finished(content='destination entered')"
+    ])
+    const actuated: string[] = []
+    let typeAttempts = 0
+    let captures = 0
+    w.deps.screen.capture = async () => {
+      captures += 1
+      return { image: `frame-${captures}.png`, bounds }
+    }
+    w.deps.screen.actuate = async (nextAction) => {
+      if (nextAction.type === 'type' && typeAttempts++ === 0) {
+        return {
+          rejected:
+            'No editable field is focused. Take a new screenshot and click the intended input before typing.'
+        }
+      }
+      actuated.push(
+        'point' in nextAction
+          ? `${nextAction.type}:${nextAction.point.x},${nextAction.point.y}`
+          : nextAction.type
+      )
+      return undefined
+    }
+
+    const result = await runVisionTaskGraph('enter the destination', w.deps)
+
+    expect(result).toMatchObject({ ok: true, summary: 'destination entered' })
+    expect(captures).toBe(6)
+    expect(actuated).toEqual(['click:100,295', 'click:300,295', 'type'])
+    expect(result.steps).toContain(
+      'Repeated click region blocked at (118, 304). The previous click marker shows where the earlier attempt landed.'
+    )
+  })
+
   it('takes a fresh screenshot after a recoverable capture boundary failure', async () => {
     const w = scripted(["finished(content='done')"])
     const observations: VisionStepObservation[] = []
@@ -609,9 +683,9 @@ describe('runVisionTaskGraph with a scripted action model', () => {
     const guard = new VisionGuard(2)
     const w = scripted(
       [
-        "click(point='<point>1 1</point>')",
-        "click(point='<point>2 2</point>')",
-        "click(point='<point>3 3</point>')"
+        "click(point='<point>100 100</point>')",
+        "click(point='<point>300 300</point>')",
+        "click(point='<point>500 500</point>')"
       ],
       guard
     )
@@ -668,7 +742,7 @@ describe('runVisionTaskGraph with a scripted action model', () => {
     const replies = Array.from({ length: 8 }, (_, index) =>
       index === 7
         ? "finished(content='ok')"
-        : `click(point='<point>${index + 1} ${index + 1}</point>')`
+        : `click(point='<point>${50 + index * 120} ${50 + index * 120}</point>')`
     )
     const w = scripted(replies)
     const observations: VisionStepObservation[] = []
@@ -683,7 +757,7 @@ describe('runVisionTaskGraph with a scripted action model', () => {
     expect(w.actuated).toHaveLength(7)
     expect(observations[0]).toMatchObject({
       step: 1,
-      rawResponse: "click(point='<point>1 1</point>')",
+      rawResponse: "click(point='<point>50 50</point>')",
       result: 'reviewed'
     })
     expect(observations.at(-1)).toMatchObject({ step: 8, result: 'terminal' })
