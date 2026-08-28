@@ -19,12 +19,51 @@ let cached: string | null = null
  *  list, so its next call is rejected - that is what makes tool access revoke on un-pair. */
 export type ActiveActionTokens = () => readonly string[]
 
+export interface ActiveActionCredential {
+  deviceId: string
+  token: string
+}
+
+export type ActiveActionCredentials = () => readonly ActiveActionCredential[]
+
 let activeActionTokens: ActiveActionTokens | null = null
+let activeActionCredentials: ActiveActionCredentials | null = null
 
 /** Install (or clear, with null) the live per-device token provider. When set, ONLY those
  *  tokens authorize; the legacy single global token is ignored. */
 export function registerActiveActionTokens(provider: ActiveActionTokens | null): void {
   activeActionTokens = provider
+}
+
+/** Install the device-bound credentials owned by the paired-device layer. */
+export function registerActiveActionCredentials(provider: ActiveActionCredentials | null): void {
+  activeActionCredentials = provider
+}
+
+function providedBearer(req: http.IncomingMessage): string | undefined {
+  const header = req.headers['authorization']
+  return Array.isArray(header) ? header[0] : header
+}
+
+export interface ActionRequestAuthorization {
+  allowed: boolean
+  deviceId: string | null
+}
+
+/** Authenticate once so tool exposure and paired-device identity cannot observe different lists. */
+export function authorizeActionRequest(req: http.IncomingMessage): ActionRequestAuthorization {
+  const provided = providedBearer(req)
+  if (activeActionCredentials) {
+    let deviceId: string | null = null
+    for (const credential of activeActionCredentials()) {
+      if (authorizeBearer(provided, credential.token)) deviceId = credential.deviceId
+    }
+    return { allowed: deviceId !== null, deviceId }
+  }
+  if (activeActionTokens) {
+    return { allowed: authorizeBearerAny(provided, activeActionTokens()), deviceId: null }
+  }
+  return { allowed: authorizeBearer(provided, getActionToken()), deviceId: null }
 }
 
 function tokenPath(): string {
@@ -64,12 +103,7 @@ export function getActionToken(): string {
  *  un-pair). With no provider (free build / no device sync), it falls back to the
  *  legacy single global token, which is never distributed in that build anyway. */
 export function isActionAuthorized(req: http.IncomingMessage): boolean {
-  const header = req.headers['authorization']
-  const provided = Array.isArray(header) ? header[0] : header
-  if (activeActionTokens) {
-    return authorizeBearerAny(provided, activeActionTokens())
-  }
-  return authorizeBearer(provided, getActionToken())
+  return authorizeActionRequest(req).allowed
 }
 
 /** Dev-only: print the action token so a device can be paired for testing. In a

@@ -12,16 +12,19 @@ const SRC = readFileSync(path.join(__dirname, '..', 'mcp-server.ts'), 'utf8')
 describe('mcp-server action-tool gate', () => {
   it('registers the action tools only inside the actionsAllowed branch', () => {
     // registerActionTools is *called* exactly once, and it is guarded.
-    const calls = SRC.match(/^\s*registerActionTools\(server\)/gm) ?? []
+    const calls = SRC.match(/^\s*registerActionTools\(server, authenticatedDeviceId\)/gm) ?? []
     expect(calls.length).toBe(1)
-    expect(SRC).toMatch(/if \(actionsAllowed\) \{\s*\n\s*registerActionTools\(server\)/)
+    expect(SRC).toMatch(
+      /if \(actionsAllowed\) \{\s*\n\s*registerActionTools\(server, authenticatedDeviceId\)/
+    )
   })
 
   it('builds the per-request server from the request authorization', () => {
     // The only build in the request path is gated on the token check.
-    expect(SRC).toMatch(/buildMcpServer\(isActionAuthorized\(req\)\)/)
+    expect(SRC).toMatch(/const authorization = authorizeActionRequest\(req\)/)
+    expect(SRC).toMatch(/buildMcpServer\(authorization\.allowed, authorization\.deviceId\)/)
     // buildMcpServer must take the flag — a no-arg call would register nothing
     // OR everything, defeating the gate.
-    expect(SRC).toMatch(/function buildMcpServer\(actionsAllowed: boolean\)/)
+    expect(SRC).toMatch(/buildMcpServer\([\s\S]*actionsAllowed: boolean/)
   })
 })

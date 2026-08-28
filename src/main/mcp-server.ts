@@ -24,8 +24,12 @@ import { parseDataUrl } from './mcp-parse-data-url'
 import { runTool, getToolExtensions } from './tools'
 import { NATIVE_TOOL_SPECS } from './tools/nativeActionToolExtension-logic'
 import { jsonSchemaToZodShape } from './mcp-tool-schema'
-import { isActionAuthorized } from './mcp-auth'
+import { authorizeActionRequest } from './mcp-auth'
 import { taskOriginFromRequestMeta } from '@offgrid/sync'
+import { mayRunRemoteTask } from './remote-task-permission'
+
+const EXECUTION_DEVICE_DESCRIPTION =
+  'Exact paired Desktop name or alias. Omit to select any enabled connected Desktop.'
 
 // Write a data URL / http(s) URL / file path / bare path to a temp file and
 // return its path (for tools that take an image or audio input).
@@ -68,7 +72,10 @@ const TEXT = (t: string): { content: { type: 'text'; text: string }[] } => ({
 /** Build a fresh MCP server. Model/inference tools are always registered (open);
  *  the ACTION tools are registered ONLY when the request is authorized with the
  *  desktop's action token, so an unpaired LAN device can't see or run them. */
-function buildMcpServer(actionsAllowed: boolean): McpServer {
+export function buildMcpServer(
+  actionsAllowed: boolean,
+  authenticatedDeviceId: string | null = null
+): McpServer {
   const server = new McpServer(
     { name: 'Off Grid AI Desktop', version: '1.0.0' },
     {
@@ -243,7 +250,7 @@ function buildMcpServer(actionsAllowed: boolean): McpServer {
   )
 
   if (actionsAllowed) {
-    registerActionTools(server)
+    registerActionTools(server, authenticatedDeviceId)
   }
   return server
 }
@@ -255,20 +262,47 @@ function buildMcpServer(actionsAllowed: boolean): McpServer {
  *  approval gate applies (computer-use asks on this machine; in-app runs
  *  through). The NATIVE_TOOL_SPECS catalog is the single source of truth for the
  *  names/descriptions/schemas; nothing is re-declared. */
-function registerActionTools(server: McpServer): void {
+function registerActionTools(server: McpServer, authenticatedDeviceId: string | null): void {
   for (const spec of NATIVE_TOOL_SPECS) {
+    const baseProperties =
+      typeof spec.parameters.properties === 'object' && spec.parameters.properties !== null
+        ? (spec.parameters.properties as Record<string, unknown>)
+        : {}
+    const parameters =
+      spec.kind === 'task'
+        ? {
+            ...spec.parameters,
+            properties: {
+              ...baseProperties,
+              execution_device: { type: 'string', description: EXECUTION_DEVICE_DESCRIPTION }
+            }
+          }
+        : spec.parameters
     server.registerTool(
       spec.name,
       {
         title: spec.name,
         description: spec.description,
-        inputSchema: jsonSchemaToZodShape(spec.parameters)
+        inputSchema: jsonSchemaToZodShape(parameters)
       },
       async (args, extra) => {
         const origin = taskOriginFromRequestMeta(extra._meta)
+        if (
+          spec.kind === 'task' &&
+          authenticatedDeviceId !== null &&
+          (!origin ||
+            origin.deviceId !== authenticatedDeviceId ||
+            !mayRunRemoteTask(authenticatedDeviceId))
+        ) {
+          return {
+            content: [{ type: 'text', text: 'Remote task access is disabled for this device.' }],
+            isError: true
+          }
+        }
+        const { execution_device: _routingOnly, ...toolArgs } = args as Record<string, unknown>
         const result = await runTool(
           spec.name,
-          args as Record<string, unknown>,
+          toolArgs,
           { conversationId: origin?.conversationId ?? 'mcp' },
           getToolExtensions()
         )
@@ -286,7 +320,8 @@ export async function handleMcpRequest(
 ): Promise<void> {
   // Action tools are exposed only to a request carrying the desktop's action
   // token; unauthenticated callers still get the open model tools.
-  const server = buildMcpServer(isActionAuthorized(req))
+  const authorization = authorizeActionRequest(req)
+  const server = buildMcpServer(authorization.allowed, authorization.deviceId)
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined, // stateless
     enableJsonResponse: true
