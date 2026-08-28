@@ -26,6 +26,8 @@ export function railToKind(rail: Rail | undefined): ActionKind {
   switch (rail) {
     case 'browser':
       return 'browser'
+    case 'connector':
+      return 'mcp'
     case 'accessibility':
     case 'vision':
       return 'computer'
@@ -37,6 +39,7 @@ export function railToKind(rail: Rail | undefined): ActionKind {
 
 const pending = new Map<string, (decision: GateDecision) => void>()
 const parkedWaiters = new Map<string, Array<() => void>>()
+const parkedListeners = new Map<string, Set<() => void>>()
 
 /**
  * Resolves as soon as the action parks at the gate (immediately when it is
@@ -52,6 +55,22 @@ export function whenActionParked(actionId: string): Promise<void> {
     waiters.push(resolve)
     parkedWaiters.set(actionId, waiters)
   })
+}
+
+/** Cancellable parked observer for a Chat tool that races terminal execution.
+ *  Unlike the legacy Promise helper, an action that finishes directly leaves no waiter behind. */
+export function onActionParked(actionId: string, listener: () => void): () => void {
+  if (pending.has(actionId)) {
+    queueMicrotask(listener)
+    return () => undefined
+  }
+  const listeners = parkedListeners.get(actionId) ?? new Set<() => void>()
+  listeners.add(listener)
+  parkedListeners.set(actionId, listeners)
+  return () => {
+    listeners.delete(listener)
+    if (listeners.size === 0) parkedListeners.delete(actionId)
+  }
 }
 
 const parkListeners = new Set<() => void>()
@@ -92,6 +111,11 @@ function notifyParked(actionId: string): void {
     for (const resolve of waiters) {
       resolve()
     }
+  }
+  const listeners = parkedListeners.get(actionId)
+  if (listeners) {
+    parkedListeners.delete(actionId)
+    for (const listener of listeners) listener()
   }
   for (const listener of parkListeners) {
     listener()
@@ -152,18 +176,23 @@ export function computerApprovalMode(): ComputerApprovalMode {
   return approvalModeProvider?.() ?? 'ask'
 }
 
-/** Web Use and Computer Use ask before a task starts. Semantic actions keep their
- *  own risk-specific approval path. */
+/** Connector mutations and visual tasks enter the source-owned approval policy.
+ *  Native semantic actions keep their existing risk-specific behavior. */
 export function needsApproval(action: Pick<ActionRecord, 'rail'>): boolean {
-  return action.rail === 'browser' || action.rail === 'accessibility' || action.rail === 'vision'
+  return (
+    action.rail === 'connector' ||
+    action.rail === 'browser' ||
+    action.rail === 'accessibility' ||
+    action.rail === 'vision'
+  )
 }
 
 function isComputerRail(rail: Rail | undefined): boolean {
   return rail === 'accessibility' || rail === 'vision'
 }
 
-/** The existing Chat that owns a task approval, or null for Action Approval.
- *  This is the routing SSOT for inline approval and notification suppression. */
+/** The existing Chat that owns an action, or null for Action Approval.
+ *  This is the routing SSOT for direct Chat execution. */
 export function approvalConversation(
   action: Pick<ActionRecord, 'source' | 'sourceRef'>
 ): string | null {
@@ -173,8 +202,8 @@ export function approvalConversation(
 
 /** The GateCallback the engine host is constructed with. */
 export async function gateHost({ action }: { action: ActionRecord }): Promise<GateDecision> {
-  // Non-task actions run straight through this gate. The env flag bypasses task
-  // approval for headless testing.
+  // Native semantic actions run straight through this gate. The env flag bypasses
+  // source approval for headless testing.
   if (approvalBypassed() || !needsApproval(action)) {
     return { kind: 'approve' }
   }

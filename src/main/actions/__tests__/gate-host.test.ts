@@ -15,6 +15,7 @@ import {
   computerApprovalMode,
   gateHost,
   needsApproval,
+  onActionParked,
   onGateParked,
   parseGateDecision,
   pendingActionGateCount,
@@ -34,8 +35,8 @@ const record = (overrides: Partial<ActionRecord> = {}): ActionRecord =>
     source: 'chat',
     sourceRef: 'chat-1',
     payloadHash: 'a'.repeat(64),
-    // Default to a COMPUTER-USE rail. Browser and computer tasks gate; semantic
-    // actions use their own risk-specific path.
+    // Default to a Computer Use rail. Connector and visual rails use the source
+    // policy; semantic actions use their own risk-specific path.
     rail: 'accessibility',
     idempotencyKey: 'k',
     attempts: 0,
@@ -57,6 +58,7 @@ describe('railToKind', () => {
   it('maps the engine rails onto the approval kinds', () => {
     expect(railToKind('semantic')).toBe('native')
     expect(railToKind('browser')).toBe('browser')
+    expect(railToKind('connector')).toBe('mcp')
     expect(railToKind('accessibility')).toBe('computer')
     expect(railToKind('vision')).toBe('computer')
     expect(railToKind(undefined)).toBe('native')
@@ -177,6 +179,17 @@ describe('the park signals', () => {
     await second
   })
 
+  it('a cancelled action-specific parked observer does not fire', async () => {
+    registerHook(HOOKS.actionsProposeApproval, () => true)
+    const listener = vi.fn()
+    const unsubscribe = onActionParked('act_1', listener)
+    unsubscribe()
+    const parked = gateHost({ action: record({ source: 'routine', sourceRef: undefined }) })
+    expect(listener).not.toHaveBeenCalled()
+    resolveActionGate('act_1', { kind: 'approve' })
+    await parked
+  })
+
   it('pendingActionGateCount tracks parks and abandonActionGate drops one', () => {
     registerHook(HOOKS.actionsProposeApproval, () => true)
     void gateHost({ action: record({ source: 'routine', sourceRef: undefined }) })
@@ -208,7 +221,8 @@ describe('parseGateDecision', () => {
 })
 
 describe('needsApproval', () => {
-  it('gates both task rails and leaves semantic actions to their own policy', () => {
+  it('gates connector and task rails and leaves semantic actions to their own policy', () => {
+    expect(needsApproval(record({ rail: 'connector' }))).toBe(true)
     expect(needsApproval(record({ rail: 'accessibility' }))).toBe(true)
     expect(needsApproval(record({ rail: 'vision' }))).toBe(true)
     expect(needsApproval(record({ rail: 'browser' }))).toBe(true)
@@ -220,6 +234,17 @@ describe('needsApproval', () => {
     const proSaw = vi.fn(() => true)
     registerHook(HOOKS.actionsProposeApproval, proSaw)
     const decision = await gateHost({ action: record({ rail: 'browser', type: 'web_use' }) })
+    expect(proSaw).not.toHaveBeenCalled()
+    expect(decision).toEqual({ kind: 'approve' })
+    expect(pendingActionGateCount()).toBe(0)
+  })
+
+  it('starts a Chat-owned connector action without proposing an approval', async () => {
+    const proSaw = vi.fn(() => true)
+    registerHook(HOOKS.actionsProposeApproval, proSaw)
+    const decision = await gateHost({
+      action: record({ rail: 'connector', type: 'connector' })
+    })
     expect(proSaw).not.toHaveBeenCalled()
     expect(decision).toEqual({ kind: 'approve' })
     expect(pendingActionGateCount()).toBe(0)

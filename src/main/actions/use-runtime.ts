@@ -29,7 +29,7 @@ import { makeOutlookNativeReader, makeWindowsSemanticRailExecutor } from './sema
 import { runPowerShell } from './win-powershell'
 import { makeReadBackVerifiers } from './verification'
 import { runNativeAction } from './native-helper'
-import { gateHost, onGateParked, whenActionParked } from './gate-host'
+import { gateHost, onActionParked, onGateParked, whenActionParked } from './gate-host'
 import { createActionWorker, type ActionWorker } from './use-worker'
 import { makeBrowserRailExecutor, registerBrowserRail } from '../browser/browser-rail'
 import { getBrowserRailHost } from '../browser/browser-host'
@@ -44,6 +44,8 @@ import { getAxRailHost } from '../accessibility/ax-host'
 import { withGrounder } from '../vision/grounder-loader'
 import { getComputerUseSettings } from '../computer-use-settings'
 import { isProEntitled } from '../licensing/license-service'
+import { callConnectorTool } from '../mcp'
+import { makeConnectorRailExecutor } from './connector-rail'
 
 export interface ActionsRuntime {
   propose(
@@ -57,6 +59,7 @@ export interface ActionsRuntime {
   onOutcome(listener: (event: { outcome: TickOutcome; undoable: boolean }) => void): () => void
   waitForOutcome(actionId: string, timeoutMs: number): Promise<TickOutcome | undefined>
   whenParked(actionId: string): Promise<void>
+  onParked(actionId: string, listener: () => void): () => void
   kick(): void
   /** True when a pro approval queue is listening - the chat tool keeps the
    *  legacy path then, so an unmigrated pro build behaves exactly as today. */
@@ -116,6 +119,12 @@ export function buildRegistry(run: typeof runNativeAction): HandlerRegistry {
   // engine routes it; the host refuses cleanly until actuation is available,
   // and the tool is not offered to the model until then.
   registerVisionRail(registry)
+  registry.register({
+    type: 'connector',
+    rail: 'connector',
+    defaultRisk: 'mutate',
+    verification: 'none_fuzzy'
+  })
   return registry
 }
 
@@ -159,6 +168,7 @@ export function getActionsRuntime(): ActionsRuntime {
   // records the model identity only after the specialist swap completes. A
   // second wrapper here caused nested swaps and restored Chat too early.
   const browserExecute = rawBrowserExecute
+  const connectorExecute = makeConnectorRailExecutor(callConnectorTool)
   // The vision rail's live host (screen capture + actuation + grounding model),
   // created lazily on first computer_task.
   const visionExecute = makeVisionRailExecutor({
@@ -214,6 +224,9 @@ export function getActionsRuntime(): ActionsRuntime {
           }
           return browserExecute(action)
         }
+        if (rail === 'connector') {
+          return connectorExecute(action)
+        }
         if (rail === 'vision') {
           if (!isProEntitled()) {
             return { ok: false, detail: 'Computer Use requires Off Grid AI Pro.' }
@@ -254,6 +267,7 @@ export function getActionsRuntime(): ActionsRuntime {
       return worker.waitForOutcome(actionId, timeoutMs)
     },
     whenParked: whenActionParked,
+    onParked: onActionParked,
     kick: () => worker.kick(),
     undo: async (record) => {
       await ready
