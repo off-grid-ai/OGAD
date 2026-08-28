@@ -1,8 +1,6 @@
 /**
- * The grounder notice: model-agnostic but honest. A grounder gets no notice; a
- * general vision model gets the "may click the wrong place" warning; a non-
- * vision or missing model gets the stronger "won't work" notice. Every path
- * still names the fix (load a grounder) - it warns, never blocks.
+ * Computer Use accepts every compatible vision model without recommending a
+ * different model. Missing and non-vision models retain their blocking notice.
  */
 import { describe, expect, it } from 'vitest'
 import {
@@ -18,11 +16,10 @@ describe('visionModelNotice', () => {
     expect(visionModelNotice({ id: 'someone/Holo1.5-7B-GGUF', vision: true })).toBeNull()
   })
 
-  it('warns (not blocks) when a general vision model is loaded', () => {
-    const notice = visionModelNotice({ id: 'unsloth/Qwen3-VL-8B-Instruct-GGUF', vision: true })
-    expect(notice).toMatch(/not a grounding model/i)
-    expect(notice).toMatch(/may click the wrong place/i)
-    expect(notice).toMatch(/UI-TARS/)
+  it('says nothing when a general vision model is loaded', () => {
+    expect(
+      visionModelNotice({ id: 'unsloth/Qwen3-VL-8B-Instruct-GGUF', vision: true })
+    ).toBeNull()
   })
 
   it('says computer use will not work when the model cannot see', () => {
@@ -35,12 +32,8 @@ describe('visionModelNotice', () => {
     expect(visionModelNotice(null)).toMatch(/No model is loaded/i)
   })
 
-  it('every notice names the fix', () => {
-    for (const model of [
-      null,
-      { id: 'x', vision: false },
-      { id: 'unsloth/Qwen3-VL-8B-Instruct-GGUF', vision: true }
-    ]) {
+  it('every blocking notice names the fix', () => {
+    for (const model of [null, { id: 'x', vision: false }]) {
       expect(visionModelNotice(model)).toMatch(/Models screen/)
     }
   })
@@ -56,9 +49,8 @@ describe('grounderNudgeForQueuedTask', () => {
     expect(grounderNudgeForQueuedTask(null, true)).toBeNull()
   })
 
-  it('warns when the task will fall to vision on a non-grounder', () => {
-    const notice = grounderNudgeForQueuedTask(general, false)
-    expect(notice).toMatch(/not a grounding model/i)
+  it('says nothing when a general vision model will drive the task', () => {
+    expect(grounderNudgeForQueuedTask(general, false)).toBeNull()
   })
 
   it('says nothing when a grounder is loaded, even falling to vision', () => {
