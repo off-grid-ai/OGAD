@@ -48,7 +48,13 @@ import type {
   BrowserTaskPointer,
   BrowserTaskStatus
 } from '../../shared/browser-session'
-import { fitWebUseDesktopRegion, webUseDesktopZoomFactor } from '../../shared/browser-session'
+import {
+  BROWSER_REGION_PRIORITY,
+  fitWebUseDesktopRegion,
+  isBrowserRegionOwner,
+  webUseDesktopZoomFactor,
+  type BrowserRegionOwner
+} from '../../shared/browser-session'
 import { encodeTaskPhase } from '../../shared/task-execution-plan'
 import { prepareTaskExecutionPlan } from '../tasks/task-execution-plan-service'
 import { retryPlanningGoal, TASK_RETRY_TRACE } from '../tasks/task-retry'
@@ -146,6 +152,8 @@ class BrowserHost implements BrowserRailHost {
   private readonly runOwners = new BrowserJourneyRunOwners()
   private readonly taskPointers = new Map<string, BrowserPointerEvent>()
   private region: Rect | null = null
+  /** Latest rect per hosting surface. The painted region is the highest-priority entry present. */
+  private readonly regions = new Map<BrowserRegionOwner, Rect>()
   private windowLifecycleBound = false
   /** Last presentation state applied to each view. setRegion runs per drag
    * frame (ResizeObserver-driven), so unchanged bounds/zoom are skipped and a
@@ -326,9 +334,31 @@ class BrowserHost implements BrowserRailHost {
     }
   }
 
-  setRegion(rect: Rect | null): void {
-    this.region = rect ? fitWebUseDesktopRegion(rect) : null
+  /**
+   * Record where one surface can host the page, and repaint into whichever surface now wins.
+   *
+   * Keyed by owner rather than last-write-wins, because two surfaces legitimately report during a
+   * handover and their order is not controllable: the arriving one mounts before the departing one
+   * cleans up. Keeping a rect per owner makes those two messages commute - a release from a surface
+   * that no longer owns the region cannot blank the surface that does.
+   */
+  setRegion(owner: BrowserRegionOwner, rect: Rect | null): void {
+    if (rect) {
+      this.regions.set(owner, fitWebUseDesktopRegion(rect))
+    } else {
+      this.regions.delete(owner)
+    }
+    this.region = this.winningRegion()
     this.syncViewVisibility()
+  }
+
+  private winningRegion(): Rect | null {
+    let winner: { rect: Rect; priority: number } | null = null
+    for (const [owner, rect] of this.regions) {
+      const priority = BROWSER_REGION_PRIORITY[owner]
+      if (!winner || priority > winner.priority) winner = { rect, priority }
+    }
+    return winner?.rect ?? null
   }
 
   private createSession(input: {
@@ -930,8 +960,9 @@ export function disposeBrowserHost(): void {
 /** Wire the renderer's pane-region reports to the live view so it docks to the
  *  watched pane and hides when there is none. Fire-and-forget (ipcMain.on). */
 export function registerBrowserViewIpc(): void {
-  ipcMain.on('browser:set-region', (_e, raw: unknown) => {
-    browserHost().setRegion(parseRect(raw))
+  ipcMain.on('browser:set-region', (_e, owner: unknown, raw: unknown) => {
+    if (!isBrowserRegionOwner(owner)) return
+    browserHost().setRegion(owner, parseRect(raw))
   })
   ipcMain.handle('browser:new-tab', () => browserHost().newTab())
   ipcMain.handle('browser:open-url', (_event, url: unknown) =>

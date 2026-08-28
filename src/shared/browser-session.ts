@@ -51,6 +51,30 @@ export interface BrowserNavigationState extends BrowserChromeState {
 export const WEB_USE_DESKTOP_VIEWPORT = { width: 1920, height: 1200 } as const
 export const WEB_USE_DESKTOP_ASPECT = WEB_USE_DESKTOP_VIEWPORT
 
+/**
+ * The surfaces that can host the live page, and which one wins when both are on screen.
+ *
+ * There is ONE native view for the window, so its position cannot be decided by whichever renderer
+ * surface reported last. Every surface that can host the page reports under its own key; main keeps
+ * the latest rect per key and paints the highest-priority key still present. That makes a handover
+ * atomic - the arriving surface's claim and the departing surface's release commute, so no ordering
+ * between them can leave the page painting nowhere, which is what produced a blank floating card
+ * and, because a hidden view captures nothing, the empty screenshots that killed running tasks.
+ *
+ * The docked pane outranks the floating card: when the full workspace is on screen it is the
+ * surface the user is looking at, and the card is not shown at all.
+ */
+export type BrowserRegionOwner = 'docked' | 'floating'
+
+export const BROWSER_REGION_PRIORITY: Record<BrowserRegionOwner, number> = {
+  docked: 2,
+  floating: 1
+}
+
+export function isBrowserRegionOwner(value: unknown): value is BrowserRegionOwner {
+  return value === 'docked' || value === 'floating'
+}
+
 /** Electron zoom needed to fit the fixed desktop viewport into the native
  * surface while preserving the viewport's CSS dimensions. */
 export function webUseDesktopZoomFactor(surface: { width: number; height: number }): number {

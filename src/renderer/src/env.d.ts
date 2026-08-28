@@ -179,7 +179,11 @@ interface RendererAPIOverrides {
   }
   browser?: {
     resolveTakeover: (taskId: string, outcome: 'resumed' | 'cancelled') => Promise<boolean>
-    setRegion: (rect: { x: number; y: number; width: number; height: number } | null) => void
+    /** Report where one surface can host the live page. Main paints the highest-priority owner. */
+    setRegion: (
+      owner: 'docked' | 'floating',
+      rect: { x: number; y: number; width: number; height: number } | null
+    ) => void
     newTab: () => Promise<{ sessionId: string }>
     openUrl: (url: string) => Promise<{ sessionId: string } | null>
     getSessions: () => Promise<{

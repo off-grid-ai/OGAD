@@ -105,8 +105,10 @@ const offGridApi = {
       ipcRenderer.invoke('browser:resolve-takeover', taskId, outcome),
     // Report the watched pane's on-screen region so the live view docks to it
     // (null hides the view). Fire-and-forget on every mount/resize.
-    setRegion: (rect: { x: number; y: number; width: number; height: number } | null) =>
-      ipcRenderer.send('browser:set-region', rect),
+    setRegion: (
+      owner: 'docked' | 'floating',
+      rect: { x: number; y: number; width: number; height: number } | null
+    ) => ipcRenderer.send('browser:set-region', owner, rect),
     newTab: (): Promise<{ sessionId: string }> => ipcRenderer.invoke('browser:new-tab'),
     openUrl: (url: string): Promise<{ sessionId: string } | null> =>
       ipcRenderer.invoke('browser:open-url', url),

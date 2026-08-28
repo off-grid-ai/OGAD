@@ -440,7 +440,9 @@ describe('<App/> desktop navigation integration', () => {
       window.dispatchEvent(new CustomEvent('og:navigate', { detail: { view: 'search' } }))
     })
     await waitFor(() => expect(screen.queryByTestId('task-side-panel')).toBeNull())
-    expect(setRegion).toHaveBeenCalledWith(null)
+    // No region assertion here. Releasing is owned by the surface that PAINTS, and this test has no
+    // live browser session, so nothing ever claimed the region - there is nothing to give up. The
+    // release-on-unmount contract is covered in WatchedBrowserPane's tests, which do have a session.
 
     act(() => {
       window.dispatchEvent(new CustomEvent('og:navigate', { detail: { view: 'memory-chat' } }))
