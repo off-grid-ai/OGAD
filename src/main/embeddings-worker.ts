@@ -12,8 +12,7 @@
  * text-in / vector-out service.
  */
 import { parentPort, workerData } from 'worker_threads'
-import { pipeline, type FeatureExtractionPipeline } from '@xenova/transformers'
-import { configureTransformersEnv } from './embeddings-env'
+import { embedText } from './embeddings-core'
 
 if (!parentPort) throw new Error('embeddings-worker must be started as a worker thread')
 const port = parentPort
@@ -21,7 +20,6 @@ const port = parentPort
 // modelsDir() reads Electron's app paths, which do not exist in a worker thread — the host
 // resolves the directory and passes it in.
 const { modelsDir } = workerData as { modelsDir: string }
-configureTransformersEnv(modelsDir)
 
 export interface EmbeddingRequest {
   id: number
@@ -33,20 +31,11 @@ export interface EmbeddingResponse {
   error?: string
 }
 
-let pipe: FeatureExtractionPipeline | null = null
-let loading: Promise<FeatureExtractionPipeline> | null = null
-
-function load(): Promise<FeatureExtractionPipeline> {
-  loading ??= pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2')
-  return loading
-}
-
 port.on('message', (request: EmbeddingRequest) => {
   void (async () => {
     try {
-      pipe ??= await load()
-      const output = await pipe(request.text, { pooling: 'mean', normalize: true })
-      port.postMessage({ id: request.id, vector: Array.from(output.data) } as EmbeddingResponse)
+      const vector = await embedText(request.text, modelsDir)
+      port.postMessage({ id: request.id, vector } as EmbeddingResponse)
     } catch (error) {
       port.postMessage({
         id: request.id,

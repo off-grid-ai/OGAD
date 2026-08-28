@@ -1,7 +1,22 @@
 import path from 'path'
+import { existsSync } from 'fs'
 import { Worker } from 'worker_threads'
 import { modelsDir } from './runtime-env'
+import { embedText } from './embeddings-core'
 import type { EmbeddingRequest, EmbeddingResponse } from './embeddings-worker'
+
+/**
+ * The built worker, when there is one.
+ *
+ * Production and dev both run from out/main, where electron.vite.config.ts puts both entries side
+ * by side. Running from SOURCE (tests) there is only the .ts, which a Worker cannot load - it gets
+ * no TypeScript transform, so its own imports fail to resolve. Returning null there is deliberate:
+ * the caller embeds in-process instead, using the same implementation.
+ */
+function builtWorkerEntry(): string | null {
+  const built = path.join(__dirname, 'embeddings-worker.js')
+  return existsSync(built) ? built : null
+}
 
 /**
  * Text -> vector, executed in a worker thread (see embeddings-worker.ts for why).
@@ -22,12 +37,13 @@ class EmbeddingService {
   /** Serializes requests: the tail of the queue, not a list, so memory does not grow with it. */
   private queue: Promise<unknown> = Promise.resolve()
 
-  private spawn(): Worker {
+  private spawn(entry: string): Worker {
     if (this.worker) return this.worker
-    // Both entries are bundled side by side into out/main by electron.vite.config.ts.
-    const worker = new Worker(path.join(__dirname, 'embeddings-worker.js'), {
-      workerData: { modelsDir: modelsDir() }
-    })
+    // Built entries sit side by side in out/main (electron.vite.config.ts), but tests and any
+    // run-from-source context have only the .ts next to this file. Resolve whichever EXISTS rather
+    // than assuming the built layout: assuming it made every embedding fail outside a packaged
+    // build, which silently demoted vector search to the FTS fallback instead of erroring.
+    const worker = new Worker(entry, { workerData: { modelsDir: modelsDir() } })
     worker.on('message', (response: EmbeddingResponse) => {
       const pending = this.waiting.get(response.id)
       if (!pending) return
@@ -57,13 +73,19 @@ class EmbeddingService {
   }
 
   async generateEmbedding(text: string): Promise<number[]> {
-    const run = (): Promise<number[]> =>
-      new Promise<number[]>((resolve, reject) => {
-        const worker = this.spawn()
+    const run = (): Promise<number[]> => {
+      const entry = builtWorkerEntry()
+      // No built worker means we are running from source. Embed here rather than failing: a failed
+      // embedding silently demotes every search to the FTS fallback, which is a far worse outcome
+      // than briefly holding this thread in a context that has no UI to block.
+      if (!entry) return embedText(text, modelsDir())
+      return new Promise<number[]>((resolve, reject) => {
+        const worker = this.spawn(entry)
         const id = this.nextId++
         this.waiting.set(id, { resolve, reject })
         worker.postMessage({ id, text } as EmbeddingRequest)
       })
+    }
     const result = this.queue.then(run, run)
     // Keep the chain alive after a rejection, or one failure stalls every later request.
     this.queue = result.catch(() => undefined)
