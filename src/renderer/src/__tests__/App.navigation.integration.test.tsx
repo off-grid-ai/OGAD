@@ -371,8 +371,8 @@ describe('<App/> desktop navigation integration', () => {
       name: 'Notifications',
       startPath: '/notifications/sharing',
       startTab: 'Sharing',
-      nextPath: '/notifications/approvals',
-      nextTab: 'Approvals'
+      nextPath: '/notifications',
+      nextTab: 'All'
     }
   ])(
     'keeps $name tabs in direct URLs and app Back/Forward history',

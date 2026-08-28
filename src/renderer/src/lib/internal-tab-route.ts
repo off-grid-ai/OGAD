@@ -38,8 +38,7 @@ const ROUTES: Record<InternalTabView, readonly InternalTabRoute[]> = {
   ],
   notifications: [
     { id: 'all', slug: null, label: 'All' },
-    { id: 'sharing', slug: 'sharing', label: 'Sharing' },
-    { id: 'approval', slug: 'approvals', label: 'Approvals' }
+    { id: 'sharing', slug: 'sharing', label: 'Sharing' }
   ]
 }
 
