@@ -73,6 +73,53 @@ function sizeRank(f: string): number {
           : 0
 }
 
+/** A Hindi transcription should contain Devanagari when it contains Hindi text. A small
+ * multilingual Whisper model can occasionally return Latin or Perso-Arabic text even with
+ * `-l hi`; that is a model-quality miss, not a request to translate the recording. */
+export function hindiTranscriptNeedsQualityRetry(text: string, language: string): boolean {
+  if (language !== 'hi' || !text.trim()) return false
+  return !/\p{Script=Devanagari}/u.test(text)
+}
+
+/** Pick a stronger downloaded multilingual Whisper model for one quality retry. English-only
+ * `.en` models cannot correct a Hindi script miss. The active model still runs first; this only
+ * returns a model whose catalog-size rank is higher than the one that produced the bad result. */
+export function strongerMultilingualWhisperModel(
+  currentModel: string,
+  files: readonly string[],
+  dir: string
+): string | null {
+  const currentRank = sizeRank(path.basename(currentModel))
+  const candidate = files
+    .filter((file) => !/\.en\.bin$/i.test(file) && sizeRank(file) > currentRank)
+    .sort((a, b) => sizeRank(b) - sizeRank(a))[0]
+  return candidate ? path.join(dir, candidate) : null
+}
+
+/** Run the selected model first, then make one quality retry when Hindi text has the wrong
+ * script and a stronger multilingual model is already on the device. `run` is the native-process
+ * boundary, which keeps the decision deterministic and testable without replacing Off Grid code. */
+export async function transcribeWithHindiQualityRetry({
+  language,
+  model,
+  modelFiles,
+  modelDir,
+  run
+}: {
+  language: string
+  model: string
+  modelFiles: readonly string[]
+  modelDir: string
+  run: (modelPath: string) => Promise<string>
+}): Promise<string> {
+  let stdout = await run(model)
+  if (!hindiTranscriptNeedsQualityRetry(stdout, language)) return stdout
+
+  const retryModel = strongerMultilingualWhisperModel(model, modelFiles, modelDir)
+  if (retryModel) stdout = await run(retryModel)
+  return stdout
+}
+
 /** Find the model to use for accurate (final) transcription. Prefers a
  *  MULTILINGUAL model (`.en` models are English-only) and a more capable size. */
 export function whisperModel(): string | null {
@@ -170,9 +217,20 @@ class WhisperCliTranscription implements TranscriptionService {
       // Bias toward custom vocabulary (names/jargon) via the initial prompt.
       const prompt = (opts.prompt ?? '').trim()
       if (prompt) args.push('--prompt', prompt.slice(0, 800))
-      const { stdout } = await execFileAsync(bin, args, {
-        maxBuffer: 64 * 1024 * 1024,
-        timeout: 30 * 60_000
+      const stdout = await transcribeWithHindiQualityRetry({
+        language,
+        model,
+        modelFiles: whisperModelFiles(),
+        modelDir: modelsDir(),
+        run: async (modelPath) => {
+          const runArgs = [...args]
+          runArgs[1] = modelPath
+          const result = await execFileAsync(bin, runArgs, {
+            maxBuffer: 64 * 1024 * 1024,
+            timeout: 30 * 60_000
+          })
+          return result.stdout
+        }
       })
       const lang = language === 'auto' ? undefined : language
       if (!opts.timestamps) return { text: stdout.trim(), language: lang }
