@@ -63,19 +63,29 @@ export function ExploreSection({
   showIntro = true,
   className = ''
 }: ExploreSectionProps): React.ReactElement {
-  const requestWorkflow = onRequestWorkflow ?? (() => openExternal(buildWorkflowRequestMailto()))
   const [copiedEmail, setCopiedEmail] = useState(false)
-  // Not everyone has a default mail client (webmail users, no handler set), so the
-  // address is always shown and copyable as a fallback to the mailto button.
-  const copyEmail = async (): Promise<void> => {
+  // Not everyone has a default mail client (webmail users, no mailto handler, an
+  // unconfigured Mail.app), so the address is always shown and copyable.
+  const copyEmail = async (): Promise<boolean> => {
     const api = window.api as { writeClipboardText?: (s: string) => Promise<boolean> }
     const ok = await writeClipboardWithFallback(SUPPORT_EMAIL, api.writeClipboardText, (t) =>
       navigator.clipboard.writeText(t)
     )
-    if (!ok) return
-    setCopiedEmail(true)
-    setTimeout(() => setCopiedEmail(false), 1500)
+    if (ok) {
+      setCopiedEmail(true)
+      setTimeout(() => setCopiedEmail(false), 2000)
+    }
+    return ok
   }
+  // The primary action can't be a dead click: mailto silently no-ops when the OS
+  // has no mail client, so it also copies the address and confirms - the click
+  // always does something useful whether or not a mail app opens.
+  const requestWorkflow =
+    onRequestWorkflow ??
+    (() => {
+      openExternal(buildWorkflowRequestMailto())
+      void copyEmail()
+    })
   return (
     <div className={`@container font-mono ${className}`}>
       {showIntro ? (
@@ -164,10 +174,19 @@ export function ExploreSection({
             type="button"
             onClick={requestWorkflow}
             data-testid="explore-request-workflow"
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-neutral-700 px-2.5 py-1.5 text-[11px] text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-green-500 active:scale-95"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] transition-all duration-150 active:scale-95 border-neutral-700 text-neutral-300 hover:border-green-500 hover:text-green-500"
           >
-            <PaperPlaneTilt className="h-3.5 w-3.5" />
-            Request a workflow
+            {copiedEmail ? (
+              <>
+                <Check className="h-3.5 w-3.5 text-green-500" weight="bold" />
+                Email address copied
+              </>
+            ) : (
+              <>
+                <PaperPlaneTilt className="h-3.5 w-3.5" />
+                Request a workflow
+              </>
+            )}
           </button>
         </div>
         <div className="mt-2.5 flex items-center gap-2 border-t border-neutral-800/60 pt-2.5">
