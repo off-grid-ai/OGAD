@@ -105,6 +105,26 @@ describe('snapshot', () => {
     const { cdp } = makeTransport(() => ({ result: {} }))
     await expect(new BrowserDriver(cdp).snapshot()).rejects.toThrow(/no value/)
   })
+
+  it('uses a collision-resistant property for each driver document identity', async () => {
+    const first = makeTransport(() => ({
+      result: { value: { url: 'https://x.test', readyState: 'complete', documentId: 'first' } }
+    }))
+    const second = makeTransport(() => ({
+      result: { value: { url: 'https://x.test', readyState: 'complete', documentId: 'second' } }
+    }))
+
+    await new BrowserDriver(first.cdp).pageState()
+    await new BrowserDriver(second.cdp).pageState()
+
+    const propertyPattern =
+      /__offgrid_document_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i
+    const firstProperty = String(first.sent[0]?.params?.expression).match(propertyPattern)?.[0]
+    const secondProperty = String(second.sent[0]?.params?.expression).match(propertyPattern)?.[0]
+    expect(firstProperty).toMatch(propertyPattern)
+    expect(secondProperty).toMatch(propertyPattern)
+    expect(firstProperty).not.toBe(secondProperty)
+  })
 })
 
 describe('navigate', () => {
@@ -161,6 +181,7 @@ describe('browser hotkeys', () => {
     expect(browserShortcutCommand(['Option', 'Right'])).toBe('forward')
     expect(browserShortcutCommand(['Meta', '['])).toBe('back')
     expect(browserShortcutCommand(['CTRL', 'SHIFT', 'R'])).toBe('hard_reload')
+    expect(browserShortcutCommand(['R', 'SHIFT', 'CTRL'])).toBe('hard_reload')
     expect(browserShortcutCommand(['F12'])).toBe('blocked_chrome')
     expect(browserShortcutCommand(['Tab'])).toBe('page')
   })

@@ -9,6 +9,7 @@
  * takeover signal. Clicking one is allowed - focusing a login form is how the
  * human takes over - but credentials never flow through the agent.
  */
+import { randomUUID } from 'node:crypto'
 import { pageScriptSource, type PageElement, type PageSnapshot } from './page-script'
 import {
   BROWSER_POINTER_VISUAL,
@@ -195,7 +196,9 @@ function canonicalShortcutTokens(keys: readonly string[]): Set<string> {
 }
 
 function shortcutSignature(keys: readonly string[]): string {
-  return [...canonicalShortcutTokens(keys)].sort().join('+')
+  return [...canonicalShortcutTokens(keys)]
+    .sort((left, right) => left.localeCompare(right))
+    .join('+')
 }
 
 // The chord registry lives in the shared Web Use control contract, so the
@@ -219,7 +222,7 @@ export function browserShortcutCommand(keys: readonly string[]): BrowserShortcut
 export class BrowserDriver {
   private pointer: BrowserPointerEvent
   private lastClick: { x: number; y: number } | null = null
-  private readonly documentIdentityProperty = `__offgrid_document_${Math.random().toString(36).slice(2)}`
+  private readonly documentIdentityProperty = `__offgrid_document_${randomUUID()}`
   private readonly zoomFactor: () => number
   private readonly onPointer?: (event: BrowserPointerEvent) => void
   private readonly pageReadyTimeoutMs: number
