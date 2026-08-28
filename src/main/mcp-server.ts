@@ -25,7 +25,7 @@ import { runTool, getToolExtensions } from './tools'
 import { NATIVE_TOOL_SPECS } from './tools/nativeActionToolExtension-logic'
 import { jsonSchemaToZodShape } from './mcp-tool-schema'
 import { isActionAuthorized } from './mcp-auth'
-import { parseMcpTaskOrigin } from './mcp-task-origin'
+import { taskOriginFromRequestMeta } from '@offgrid/sync'
 
 // Write a data URL / http(s) URL / file path / bare path to a temp file and
 // return its path (for tools that take an image or audio input).
@@ -265,7 +265,7 @@ function registerActionTools(server: McpServer): void {
         inputSchema: jsonSchemaToZodShape(spec.parameters)
       },
       async (args, extra) => {
-        const origin = parseMcpTaskOrigin(extra._meta)
+        const origin = taskOriginFromRequestMeta(extra._meta)
         const result = await runTool(
           spec.name,
           args as Record<string, unknown>,
