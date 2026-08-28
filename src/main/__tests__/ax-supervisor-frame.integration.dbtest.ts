@@ -9,12 +9,21 @@ import path from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-ax-supervisor-frame-'))
+const captureSources = vi.hoisted(() => vi.fn())
 
 vi.mock('electron', () => ({
   app: {
     getPath: () => profile,
     getAppPath: () => process.cwd(),
     isPackaged: false
+  },
+  desktopCapturer: { getSources: captureSources },
+  screen: {
+    getCursorScreenPoint: () => ({ x: 100, y: 100 }),
+    getDisplayNearestPoint: () => ({
+      id: 1,
+      bounds: { x: 0, y: 0, width: 1280, height: 720 }
+    })
   },
   safeStorage: {
     isEncryptionAvailable: () => false,
@@ -25,6 +34,7 @@ vi.mock('electron', () => ({
   ipcMain: { handle: vi.fn() }
 }))
 
+import { AxScreenCaptureError, captureAxObservationFrame } from '../accessibility/ax-frame'
 import { persistAxObservation } from '../accessibility/ax-observation'
 import { getDB } from '../database'
 import {
@@ -32,6 +42,7 @@ import {
   getTaskRun,
   resetTaskHistoryForTests
 } from '../tasks/task-history'
+import { emitVisionState } from '../vision/vision-controller'
 
 afterAll(() => {
   resetTaskHistoryForTests()
@@ -97,5 +108,48 @@ describe('AX Computer Use live supervisor projection', () => {
       mappedAction: '{"action":"press","index":4,"point":{"x":800,"y":450}}',
       actionCoordinateSpace: 'inference'
     })
+  })
+
+  it('turns a bounded screen-capture failure into a visible terminal task state', async () => {
+    captureSources.mockImplementationOnce(() => new Promise(() => {})).mockResolvedValue([])
+    emitVisionState({
+      taskId: 'ax-capture-failure',
+      journeyId: 'chat-capture-failure',
+      goal: 'Send the Slack message',
+      status: 'running',
+      phase: 'observing',
+      currentStep: 1,
+      currentAction: 'Reading Slack'
+    })
+
+    await expect(
+      captureAxObservationFrame({
+        taskId: 'ax-capture-failure',
+        journeyId: 'chat-capture-failure',
+        goal: 'Send the Slack message',
+        currentStep: 1,
+        captureNumber: 1,
+        snapshot: { windowTitle: 'Slack', elements: [] }
+      })
+    ).rejects.toBeInstanceOf(AxScreenCaptureError)
+
+    const task = getTaskRun('ax-capture-failure')
+    expect(task).toMatchObject({
+      journeyId: 'chat-capture-failure',
+      kind: 'computer_use',
+      status: 'failed',
+      phase: 'failed',
+      currentStep: 1,
+      currentAction:
+        'Off Grid AI could not capture the screen after 3 attempts. Check screen-recording permission, unlock the screen, then retry Computer Use.',
+      summary:
+        'Off Grid AI could not capture the screen after 3 attempts. Check screen-recording permission, unlock the screen, then retry Computer Use.'
+    })
+    expect(task?.steps).toEqual([
+      'Screen preview is unavailable. Retrying capture (1/3).',
+      'Screen preview is unavailable. Retrying capture (2/3).',
+      'Screen preview failed: Off Grid AI could not capture the screen after 3 attempts. Check screen-recording permission, unlock the screen, then retry Computer Use.'
+    ])
+    expect(captureSources).toHaveBeenCalledTimes(3)
   })
 })

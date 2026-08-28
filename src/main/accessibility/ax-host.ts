@@ -43,7 +43,7 @@ import { resolveComputerUseContextTokens } from '../../shared/computer-use-setti
 import { recentVisualFacts } from '../vision/visual-context'
 import { recordTaskRun } from '../tasks/task-history'
 import { persistAxObservation, type AxObservationFrame } from './ax-observation'
-import { captureAxObservationFrame } from './ax-frame'
+import { AxScreenCaptureError, captureAxObservationFrame } from './ax-frame'
 import { accessibilityHelperPath } from './ax-helper'
 import { encodeTaskPhase } from '../../shared/task-execution-plan'
 import { prepareTaskExecutionPlan } from '../tasks/task-execution-plan-service'
@@ -311,7 +311,15 @@ class AxRailHost {
             snapshot = (await axBackend().snapshot(app)) ?? { windowTitle: '', elements: [] }
           }
           captureNumber += 1
-          observationFrame = await captureAxObservationFrame(taskId, captureNumber, snapshot)
+          observationFrame = await captureAxObservationFrame({
+            taskId,
+            journeyId,
+            goal,
+            currentStep: liveStep + 1,
+            captureNumber,
+            snapshot,
+            signal: request.signal
+          })
           return snapshot
         },
         actuator: makeElementActuator(actuation, guard, (action) => {
@@ -392,16 +400,20 @@ class AxRailHost {
           : error instanceof Error
             ? error.message
             : 'accessibility run failed'
-      emitVisionState({
-        taskId,
-        journeyId,
-        goal,
-        status: guard.isHalted ? 'stopped' : 'failed',
-        phase: guard.isHalted ? 'stopped' : 'failed',
-        currentStep: liveStep,
-        currentAction: summary,
-        summary
-      })
+      // The capture coordinator already projected its precise terminal recovery
+      // state. Keep one writer for that state instead of replacing it here.
+      if (!(error instanceof AxScreenCaptureError)) {
+        emitVisionState({
+          taskId,
+          journeyId,
+          goal,
+          status: guard.isHalted ? 'stopped' : 'failed',
+          phase: guard.isHalted ? 'stopped' : 'failed',
+          currentStep: liveStep,
+          currentAction: summary,
+          summary
+        })
+      }
       return { ok: false, summary, steps: [] }
     } finally {
       releaseGuidance()
