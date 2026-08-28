@@ -433,6 +433,8 @@ app.whenReady().then(async () => {
     registerBrowserViewIpc() // dock the live browser view to the pane's region
     const { registerVisionIpc } = await import('./vision/vision-controller')
     registerVisionIpc() // the vision rail's supervisor Stop/Pause/Resume
+    const { registerSupervisorWindowIpc } = await import('./vision/supervisor-window')
+    registerSupervisorWindowIpc()
     const { registerTaskHistoryIpc } = await import('./tasks/task-history')
     registerTaskHistoryIpc() // one durable Web Use + Computer Use history
     setupDesktopBackupIPC()

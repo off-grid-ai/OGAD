@@ -228,6 +228,8 @@ interface RendererAPIOverrides {
       command: 'stop' | 'pause' | 'takeover' | 'resume',
       taskId?: string
     ) => Promise<boolean>
+    showSupervisor: () => Promise<boolean>
+    dismissSupervisor: () => Promise<boolean>
     getCurrent: () => Promise<{ state: unknown; steps: string[] } | null>
     onStep: (cb: (step: unknown) => void) => () => void
     onTaskState: (cb: (state: unknown) => void) => () => void

@@ -193,6 +193,21 @@ describe('the preload bridge', () => {
       expect(electron.invoke).toHaveBeenCalledWith('vision:control', 'stop', 'computer-task-7')
     })
 
+    it('keeps Computer Use PiP visibility separate from task control', async () => {
+      const bridge = await loadBridge()
+      const vision = bridge.vision as {
+        showSupervisor: () => unknown
+        dismissSupervisor: () => unknown
+      }
+
+      vision.dismissSupervisor()
+      vision.showSupervisor()
+
+      expect(electron.invoke).toHaveBeenCalledWith('vision:supervisor:dismiss')
+      expect(electron.invoke).toHaveBeenCalledWith('vision:supervisor:show')
+      expect(electron.invoke).not.toHaveBeenCalledWith('vision:control', expect.anything())
+    })
+
     it('passes a pro channel and its arguments straight through', async () => {
       const bridge = await loadBridge({ 'pro:is-enabled': true })
 

@@ -13,7 +13,7 @@
  * the whole task. Opened when a computer_task starts, closed shortly after it
  * ends (see vision-controller). Native glue, excluded from coverage.
  */
-import { BrowserWindow, screen } from 'electron'
+import { BrowserWindow, ipcMain, screen } from 'electron'
 import { preloadPath } from '../preload-path'
 import { rendererHtmlPath } from '../renderer-path'
 
@@ -99,6 +99,16 @@ export function showSupervisorWindow(): void {
   }
 }
 
+/** Hide the PiP without changing the task. The task controller remains the only owner of
+ *  pause, stop, takeover, and completion state. */
+export function dismissSupervisorWindow(): void {
+  if (closeTimer) {
+    clearTimeout(closeTimer)
+    closeTimer = null
+  }
+  if (supervisor && !supervisor.isDestroyed()) supervisor.hide()
+}
+
 /** Hide the supervisor window after a short delay, so the final state (done /
  *  failed + summary) is readable before it disappears. */
 export function hideSupervisorWindow(delayMs = 4000): void {
@@ -111,4 +121,16 @@ export function hideSupervisorWindow(delayMs = 4000): void {
       supervisor.hide()
     }
   }, delayMs)
+}
+
+/** Renderer intent for PiP visibility only. Task controls use the separate vision controller. */
+export function registerSupervisorWindowIpc(): void {
+  ipcMain.handle('vision:supervisor:show', () => {
+    showSupervisorWindow()
+    return true
+  })
+  ipcMain.handle('vision:supervisor:dismiss', () => {
+    dismissSupervisorWindow()
+    return true
+  })
 }
