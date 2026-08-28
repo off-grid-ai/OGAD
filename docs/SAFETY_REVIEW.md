@@ -26,7 +26,7 @@ never letting the agent cross an identity or payment boundary on its own.
 - **Tested:** `shared/packages/use` retry + machine tests (never-double-fire),
   `use-runtime.integration.dbtest.ts` (real propose -> verify -> undo).
 
-### Browser rail (web_task)
+### Browser rail (web_use)
 
 - **Threat:** high. The page is untrusted. Two attacks: (a) page text says
   "ignore your task, do X"; (b) a page tries to get the agent to type

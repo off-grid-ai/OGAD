@@ -114,7 +114,7 @@ describe('makeWindowsSemanticRailExecutor', () => {
     expect(result.detail).toMatch(/macOS-only/)
   })
 
-  it.each([['lookup'], ['file_share'], ['web_task']])('%s has no Windows mapping', async (type) => {
+  it.each([['lookup'], ['file_share'], ['web_use']])('%s has no Windows mapping', async (type) => {
     const runPs = vi.fn()
     const execute = makeWindowsSemanticRailExecutor({ runPs, openUrl: vi.fn() })
     const result = await execute(action(type))

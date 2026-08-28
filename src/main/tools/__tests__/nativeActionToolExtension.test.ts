@@ -58,17 +58,17 @@ describe('NativeActionToolExtension', () => {
   it('hides and refuses Browser Use and Computer Use without Pro', async () => {
     boundary.proEntitled = false
 
-    expect(ext.canHandle('web_task')).toBe(false)
+    expect(ext.canHandle('web_use')).toBe(false)
     expect(ext.canHandle('computer_task')).toBe(false)
     expect(ext.schemas()).not.toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ function: expect.objectContaining({ name: 'web_task' }) })
+        expect.objectContaining({ function: expect.objectContaining({ name: 'web_use' }) })
       ])
     )
-    expect(ext.systemHint()).not.toContain('web_task')
+    expect(ext.systemHint()).not.toContain('web_use')
     // Authoritative, like every other task-action outcome: the refusal is the final word the
     // model reports, not a note it can paraphrase into "I ran it" or talk the user past.
-    await expect(ext.execute('web_task', { goal: 'Buy something' })).resolves.toEqual({
+    await expect(ext.execute('web_use', { goal: 'Buy something' })).resolves.toEqual({
       text: 'Error: Browser Use and Computer Use require Off Grid AI Pro.',
       authoritative: true
     })

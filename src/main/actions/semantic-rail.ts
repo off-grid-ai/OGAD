@@ -4,7 +4,7 @@
  *
  * Maps the engine's closed Action types onto the Swift helper's verbs and
  * nothing else: an unknown type is refused, never guessed (file_share and
- * web_task belong to other rails). Pure module - the runner is injected, so
+ * web_use belongs to another rail). Pure module - the runner is injected, so
  * tests exercise every mapping through a fake boundary and the Electron-
  * bound runNativeAction is only attached at wiring time.
  */

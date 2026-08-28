@@ -5,22 +5,22 @@ import { makePlanner } from '../planner'
 import { PLAN_SCHEMA, type ToolCatalogEntry } from '../planner-logic'
 
 const catalog: ToolCatalogEntry[] = [
-  { name: 'web_task', description: 'drive a site' },
+  { name: 'web_use', description: 'drive a site' },
   { name: 'open_url', description: 'open only' }
 ]
 
 describe('makePlanner', () => {
   it('passes the plan schema + prompt to complete and parses the result', async () => {
     const complete = vi.fn(async (prompt: string) => {
-      expect(prompt).toContain('web_task')
+      expect(prompt).toContain('web_use')
       return JSON.stringify({
-        steps: [{ tool: 'web_task', args: { url: 'https://youtube.com' }, why: 'interactive' }]
+        steps: [{ tool: 'web_use', args: { url: 'https://youtube.com' }, why: 'interactive' }]
       })
     })
     const plan = await makePlanner(complete)('play X on YouTube', [], catalog)
     expect(complete).toHaveBeenCalledWith(expect.any(String), PLAN_SCHEMA, undefined, undefined)
     expect(plan.steps).toHaveLength(1)
-    expect(plan.steps[0]?.tool).toBe('web_task')
+    expect(plan.steps[0]?.tool).toBe('web_use')
   })
 
   it('retries planner narration once with validation feedback and accepts the model repair', async () => {
@@ -31,7 +31,7 @@ describe('makePlanner', () => {
         JSON.stringify({
           steps: [
             {
-              tool: 'web_task',
+              tool: 'web_use',
               args: { goal: 'open it', url: 'https://example.com' },
               why: 'The website needs interaction.'
             }
@@ -41,7 +41,7 @@ describe('makePlanner', () => {
 
     const plan = await makePlanner(complete)('open it', [], catalog)
 
-    expect(plan.steps.map(({ tool }) => tool)).toEqual(['web_task'])
+    expect(plan.steps.map(({ tool }) => tool)).toEqual(['web_use'])
     expect(complete).toHaveBeenCalledTimes(2)
     expect(complete.mock.calls[1]?.[0]).toMatch(/Validation feedback:/)
     expect(complete.mock.calls[1]?.[0]).toMatch(/not JSON/)

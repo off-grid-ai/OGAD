@@ -7,17 +7,18 @@ import {
 import { shouldGate } from '../../actions/approval'
 
 describe('native tool specs', () => {
-  it('routes every website task (incl play/watch) to web_task in the built-in browser; open_url only opens', () => {
+  it('routes every website task (incl play/watch) to web_use in the built-in browser; open_url only opens', () => {
     // Post-pivot: browser tasks run INSIDE Off Grid AI's built-in browser via
-    // web_task (play/watch included). open_url only opens a link and must point
-    // at web_task; web_task must own play/watch and name the built-in browser.
+    // web_use (play/watch included). open_url only opens a link and must point
+    // at web_use; web_use must own play/watch and name the built-in browser.
     const openUrl = findNativeToolSpec('open_url')?.description ?? ''
-    const webTask = findNativeToolSpec('web_task')?.description ?? ''
+    const webUse = findNativeToolSpec('web_use')?.description ?? ''
     expect(openUrl).toMatch(/only opens/i)
-    expect(openUrl).toMatch(/web_task/)
-    expect(webTask).toMatch(/play or watch a video|YouTube/i)
-    expect(webTask).toMatch(/built-in browser/i)
-    expect(webTask).toMatch(/not open_url/i)
+    expect(openUrl).toMatch(/web_use/)
+    expect(webUse).toMatch(/play or watch a video|YouTube/i)
+    expect(webUse).toMatch(/built-in browser/i)
+    expect(webUse).toMatch(/not open_url/i)
+    expect(findNativeToolSpec('web_task')?.name).toBe('web_use')
   })
 
   it('exposes calendar and reminder tools with matching helper commands', () => {
@@ -30,7 +31,7 @@ describe('native tool specs', () => {
       'messages_send',
       'mail_send',
       'open_url',
-      'web_task',
+      'web_use',
       'computer_task'
     ])
     expect(findNativeToolSpec('calendar_create_event')?.command).toBe('calendar.createEvent')

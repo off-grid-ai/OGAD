@@ -113,16 +113,16 @@ describe('getActionsRuntime', () => {
     expect(outcome).toBeUndefined()
   })
 
-  it('the browser rail is registered: a web_task proposes and routes to browser', async () => {
+  it('the browser rail is registered: a web_use proposal routes to browser', async () => {
     const { getActionsRuntime } = await import('../actions/use-runtime')
     const { buildRegistry } = await import('../actions/use-runtime')
-    // The runtime's registry knows web_task (registerBrowserRail composed in
+    // The runtime's registry knows web_use (registerBrowserRail composed in
     // buildRegistry), so a proposal is accepted rather than refused as unknown.
     // Not kicked - the live host needs a display; this asserts registration and
     // acceptance, the rail-routing is proven in browser-rail.test.ts.
     const proposed = await getActionsRuntime().propose(
       {
-        type: 'web_task',
+        type: 'web_use',
         intent: 'check in for my flight',
         args: { goal: 'check in' },
         risk: 'mutate'
@@ -133,7 +133,7 @@ describe('getActionsRuntime', () => {
     // route() reads only the declared rail, so a stub run suffices here.
     const stubRun = (async () => ({ ok: true as const, result: {} })) as never
     const registry = buildRegistry(stubRun)
-    expect(registry.route('web_task')).toBe('browser')
+    expect(registry.route('web_use')).toBe('browser')
     // The vision rail is composed too: computer_task routes to vision.
     expect(registry.route('computer_task')).toBe('vision')
   })

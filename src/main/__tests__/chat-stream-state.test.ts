@@ -210,17 +210,17 @@ describe('the reply being generated, as published to anything that follows it', 
 
   it('publishes a tool-owned needs-attention result as pending', () => {
     bindChatStream('stream-a', 'conversation-1')
-    noteChatStreamToolStarted('stream-a', 'web_task')
+    noteChatStreamToolStarted('stream-a', 'web_use')
     noteChatStreamToolCompleted(
       'stream-a',
-      'web_task',
+      'web_use',
       'Please answer the missing questions.',
       'pending'
     )
 
     expect(published.at(-1)?.tools).toEqual([
       {
-        name: 'web_task',
+        name: 'web_use',
         status: 'pending',
         result: 'Please answer the missing questions.'
       }

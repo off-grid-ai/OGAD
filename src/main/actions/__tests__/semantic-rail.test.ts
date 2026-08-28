@@ -45,7 +45,7 @@ describe('mapActionToCommand', () => {
     }
   })
 
-  it.each([['file_share'], ['web_task']])('refuses %s - it belongs to another rail', (type) => {
+  it.each([['file_share'], ['web_use']])('refuses %s - it belongs to another rail', (type) => {
     const mapped = mapActionToCommand(action(type))
     expect(mapped.ok).toBe(false)
     if (!mapped.ok) {
@@ -81,7 +81,7 @@ describe('makeSemanticRailExecutor', () => {
   it('a refused mapping never reaches the helper', async () => {
     const run = vi.fn()
     const execute = makeSemanticRailExecutor(run)
-    const result = await execute(record('web_task'))
+    const result = await execute(record('web_use'))
     expect(result.ok).toBe(false)
     expect(run).not.toHaveBeenCalled()
   })

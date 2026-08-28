@@ -4,7 +4,14 @@
 // Electron or process I/O here, so it is unit testable; the extension shell wires it
 // to runNativeAction + the approval seam.
 
+import { LEGACY_WEB_TASK_ACTION_TYPE, WEB_USE_ACTION_TYPE } from '@offgrid/use'
 import type { ActionRisk } from '../actions/approval'
+
+export const WEB_USE_TOOL_NAME = WEB_USE_ACTION_TYPE
+
+export function canonicalNativeToolName(name: string): string {
+  return name === LEGACY_WEB_TASK_ACTION_TYPE ? WEB_USE_TOOL_NAME : name
+}
 
 export interface NativeToolSpec {
   /** Model-facing tool name. */
@@ -175,7 +182,7 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
   {
     name: 'open_url',
     description:
-      "Open a URL or app scheme in the user's default browser or app (a web page, a mailto: draft, whatsapp://send). It ONLY opens - no searching, clicking, playing, logging in, or submitting. If the goal needs anything DONE on a website (play or watch a video, search and click a result, log in, place an order, fill a form), use web_task instead - it does the task inside Off Grid AI's own built-in browser.",
+      "Open a URL or app scheme in the user's default browser or app (a web page, a mailto: draft, whatsapp://send). It ONLY opens - no searching, clicking, playing, logging in, or submitting. If the goal needs anything DONE on a website (play or watch a video, search and click a result, log in, place an order, fill a form), use web_use instead - it does the task inside Off Grid AI's own built-in browser.",
     parameters: {
       type: 'object',
       properties: {
@@ -190,9 +197,9 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
     formatResult: () => 'Opened it.'
   },
   {
-    name: 'web_task',
+    name: WEB_USE_TOOL_NAME,
     description:
-      "Do a task on a website in Off Grid AI's own built-in browser - playing or watching a video (YouTube, etc.), searching a site and opening a result, checking in for a flight, placing an order, filling a form, or logging in. Use this whenever the goal needs to click, type, or navigate a page, not merely open it - 'play X on YouTube' or 'search Y and open the first result' is web_task, not open_url. It runs INSIDE Off Grid AI's browser and never touches the user's cursor, keyboard, or their own browser, so the user keeps working while it goes; it hands control back for any sign-in, one-time code, or payment. Use the full conversation. Ask the user before calling this tool only when a material fact is missing. When you call it, describe the whole goal in one call, including all known key inputs, constraints, and the point where the task must stop.",
+      "Do a task on a website in Off Grid AI's own built-in browser - playing or watching a video (YouTube, etc.), searching a site and opening a result, checking in for a flight, placing an order, filling a form, or logging in. Use this whenever the goal needs to click, type, or navigate a page, not merely open it - 'play X on YouTube' or 'search Y and open the first result' is web_use, not open_url. It runs INSIDE Off Grid AI's browser and never touches the user's cursor, keyboard, or their own browser, so the user keeps working while it goes; it hands control back for any sign-in, one-time code, or payment. Use the full conversation. Ask the user before calling this tool only when a material fact is missing. When you call it, describe the whole goal in one call, including all known key inputs, constraints, and the point where the task must stop.",
     parameters: {
       type: 'object',
       properties: {
@@ -224,7 +231,7 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
   {
     name: 'computer_task',
     description:
-      'Complete a task by controlling a desktop APP directly - clicking, typing, and navigating its window - for things no other tool can do (a desktop app with no web version, sharing a file through an app UI). The user watches in a supervised overlay and can stop or take over at any time; sign-ins and payments are handed back to them. Prefer web_task for anything on a website and the direct tools (calendar/reminders/mail) whenever they fit - use this only when the task genuinely needs GUI control of an installed app.',
+      'Complete a task by controlling a desktop APP directly - clicking, typing, and navigating its window - for things no other tool can do (a desktop app with no web version, sharing a file through an app UI). The user watches in a supervised overlay and can stop or take over at any time; sign-ins and payments are handed back to them. Prefer web_use for anything on a website and the direct tools (calendar/reminders/mail) whenever they fit - use this only when the task genuinely needs GUI control of an installed app.',
     parameters: {
       type: 'object',
       properties: {
@@ -248,7 +255,7 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
 const specsByName = new Map(NATIVE_TOOL_SPECS.map((s) => [s.name, s]))
 
 export function findNativeToolSpec(name: string): NativeToolSpec | undefined {
-  return specsByName.get(name)
+  return specsByName.get(canonicalNativeToolName(name))
 }
 
 /**
@@ -262,7 +269,7 @@ export const TOOL_ACTION_TYPES = {
   reminders_create: 'reminder',
   messages_send: 'message',
   mail_send: 'email',
-  web_task: 'web_task',
+  [WEB_USE_TOOL_NAME]: WEB_USE_ACTION_TYPE,
   computer_task: 'computer_task'
 } as const
 
@@ -271,7 +278,7 @@ export function actionTypeForTool(
 ): (typeof TOOL_ACTION_TYPES)[keyof typeof TOOL_ACTION_TYPES] | undefined {
   return (
     TOOL_ACTION_TYPES as Record<string, (typeof TOOL_ACTION_TYPES)[keyof typeof TOOL_ACTION_TYPES]>
-  )[name]
+  )[canonicalNativeToolName(name)]
 }
 
 /** Tool names and engine action types of the long-running task tools, read from
@@ -304,11 +311,11 @@ export const WINDOWS_TOOL_NAMES: ReadonlySet<string> = new Set([
   'open_url',
   // The browser + vision rails are cross-platform (Electron CDP / the nut.js
   // native addon are the same everywhere).
-  'web_task',
+  WEB_USE_TOOL_NAME,
   'computer_task'
 ])
 
-export const PRO_USE_TOOL_NAMES: ReadonlySet<string> = new Set(['web_task', 'computer_task'])
+export const PRO_USE_TOOL_NAMES: ReadonlySet<string> = new Set([WEB_USE_TOOL_NAME, 'computer_task'])
 
 export function specsForPlatform(
   platform: NodeJS.Platform,
@@ -332,13 +339,13 @@ export function systemHintForPlatform(platform: NodeJS.Platform, includeProUse =
     if (!includeProUse) {
       return "You can act on the user's Mac: manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme with open_url; it opens the target without interacting with it. Use ISO 8601 for all times. Anything that creates or sends needs the user's approval; tell them it is pending until they approve."
     }
-    return "You can act on the user's Mac: manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme (like whatsapp://send) with open_url - it ONLY opens, no interaction. To actually DO something on a website - play or watch a video, search and click a result, check in, order, fill a form, log in - use web_task (NOT open_url); it runs the task inside Off Grid AI's own built-in browser without touching the user's cursor or their own browser, so they keep working, and hands back for any sign-in or payment. For a task that needs to control a desktop app with no web version, use computer_task - the user watches and can take over. Prefer the direct tools and web_task when they fit. Use ISO 8601 for all times. Anything that creates, sends, or runs a task needs the user's approval; tell them it is pending until they approve."
+    return "You can act on the user's Mac: manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme (like whatsapp://send) with open_url - it ONLY opens, no interaction. To actually DO something on a website - play or watch a video, search and click a result, check in, order, fill a form, log in - use web_use (NOT open_url); it runs the task inside Off Grid AI's own built-in browser without touching the user's cursor or their own browser, so they keep working, and hands back for any sign-in or payment. For a task that needs to control a desktop app with no web version, use computer_task - the user watches and can take over. Prefer the direct tools and web_use when they fit. Use ISO 8601 for all times. Anything that creates, sends, or runs a task needs the user's approval; tell them it is pending until they approve."
   }
   if (platform === 'win32') {
     if (!includeProUse) {
       return "You can act on the user's PC through Outlook: create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url; it opens the target without interacting with it. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Anything that creates or sends needs the user's approval; tell them it is pending until they approve."
     }
-    return "You can act on the user's PC through Outlook: create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url - it ONLY opens, no interaction. To DO something on a website - play or watch a video, search and click a result, check in, order, fill a form, log in - use web_task (NOT open_url); it runs the task inside Off Grid AI's own built-in browser without touching the user's cursor or their own browser, so they keep working, and hands back for any sign-in or payment. For a task that needs to control a desktop app with no web version, use computer_task - the user watches and can take over. Prefer the direct tools and web_task when they fit. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Anything that creates, sends, or runs a task needs the user's approval; tell them it is pending until they approve."
+    return "You can act on the user's PC through Outlook: create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url - it ONLY opens, no interaction. To DO something on a website - play or watch a video, search and click a result, check in, order, fill a form, log in - use web_use (NOT open_url); it runs the task inside Off Grid AI's own built-in browser without touching the user's cursor or their own browser, so they keep working, and hands back for any sign-in or payment. For a task that needs to control a desktop app with no web version, use computer_task - the user watches and can take over. Prefer the direct tools and web_use when they fit. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Anything that creates, sends, or runs a task needs the user's approval; tell them it is pending until they approve."
   }
   return ''
 }

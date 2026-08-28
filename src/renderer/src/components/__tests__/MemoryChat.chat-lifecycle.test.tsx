@@ -115,7 +115,7 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
 
     boundary.emitToolStep(0, 'web_search')
     boundary.emitToolResult(0, 'web_search', 'Search results are ready.')
-    boundary.emitToolStep(0, 'web_task')
+    boundary.emitToolStep(0, 'web_use')
     expect(await screen.findByRole('button', { name: /Working/ })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Searched the web, complete' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Web Use, running' })).toBeTruthy()

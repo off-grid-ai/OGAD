@@ -1,5 +1,5 @@
 // The desktop's MCP action-tool token: a secret a PAIRED device presents to
-// call the action tools (mail_send, web_task, computer_task, ...) over /mcp.
+// call the action tools (mail_send, web_use, computer_task, ...) over /mcp.
 // Model/inference tools stay open. Generated once and persisted in userData.
 //
 // This is the electron/fs/http glue; the constant-time check is in

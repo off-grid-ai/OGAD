@@ -28,6 +28,7 @@ import type { NativeActionCommand, NativeActionResponse } from '../actions/nativ
 import {
   actionTypeForTool,
   buildNativeToolSchemas,
+  canonicalNativeToolName,
   findNativeToolSpec,
   isTaskAction,
   specsForPlatform,
@@ -130,7 +131,7 @@ export class NativeActionToolExtension implements ToolExtension {
   /** What the Tools settings tab lists and toggles. A getter, not a field: the set depends on the
    *  platform and the live pro entitlement, so a value captured at construction would keep showing
    *  a stale list after an upgrade. Without this the extension contributed nothing to listTools(),
-   *  which is why every native action - web_task and computer_task included - was invisible and
+   *  which is why every native action - web_use and computer_task included - was invisible and
    *  untoggleable in Settings even while the model could call it. */
   get settings(): readonly { name: string; description: string }[] {
     return specsForPlatform(this.platform, this.boundary.isProEntitled()).map((spec) => ({
@@ -140,8 +141,9 @@ export class NativeActionToolExtension implements ToolExtension {
   }
 
   canHandle(name: string): boolean {
+    const canonicalName = canonicalNativeToolName(name)
     return specsForPlatform(this.platform, this.boundary.isProEntitled()).some(
-      (spec) => spec.name === name
+      (spec) => spec.name === canonicalName
     )
   }
 
@@ -154,20 +156,21 @@ export class NativeActionToolExtension implements ToolExtension {
     args: Record<string, unknown>,
     context?: ToolContext
   ): Promise<string | ToolResult> {
-    if (isTaskAction(name) && !this.boundary.isProEntitled()) {
+    const canonicalName = canonicalNativeToolName(name)
+    if (isTaskAction(canonicalName) && !this.boundary.isProEntitled()) {
       return {
         text: 'Error: Browser Use and Computer Use require Off Grid AI Pro.',
         authoritative: true
       }
     }
-    const spec = this.canHandle(name) ? findNativeToolSpec(name) : undefined
+    const spec = this.canHandle(canonicalName) ? findNativeToolSpec(canonicalName) : undefined
     if (!spec) {
       return `Error: unknown action ${name}`
     }
     if (shouldGate(spec.risk)) {
-      const actionType = actionTypeForTool(name)
+      const actionType = actionTypeForTool(canonicalName)
       const actions = this.boundary.actions
-      // web_task and computer_task are engine-only: no connector runs them, so
+      // web_use and computer_task are engine-only: no connector runs them, so
       // they must not fall to the legacy queue even when a pro hook is listening
       // (with B4 the pro queue resolves the engine gate anyway). Other actions
       // keep the legacy path when a pro queue owns approvals.

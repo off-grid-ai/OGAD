@@ -248,7 +248,7 @@ function buildMcpServer(actionsAllowed: boolean): McpServer {
 }
 
 /** Expose the desktop's ACTION tools (calendar, reminders, contacts, messages,
- *  mail, open_url, web_task, computer_task) over MCP, so a paired client (the
+ *  mail, open_url, web_use, computer_task) over MCP, so a paired client (the
  *  mobile app) can LIST them and RUN them ON THIS DESKTOP. Each call goes through
  *  the same runTool dispatch the local chat uses - so the rails run here and the
  *  approval gate applies (computer-use asks on this machine; in-app runs

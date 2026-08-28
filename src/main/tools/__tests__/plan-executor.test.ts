@@ -38,13 +38,13 @@ describe('applyBindings', () => {
 })
 
 describe('makePlanExecutor', () => {
-  it('runs a single web_task step and reports it', async () => {
+  it('runs a single web_use step and reports it', async () => {
     const dispatch = vi.fn(async () => R('opened youtube and played the video'))
     const exec = makePlanExecutor(dispatch)
     const plan: Plan = {
       steps: [
         {
-          tool: 'web_task',
+          tool: 'web_use',
           args: { goal: 'play X', url: 'https://youtube.com' },
           why: 'interactive',
           bindings: []
@@ -52,7 +52,7 @@ describe('makePlanExecutor', () => {
       ]
     }
     const result = await exec(plan)
-    expect(dispatch).toHaveBeenCalledWith('web_task', {
+    expect(dispatch).toHaveBeenCalledWith('web_use', {
       goal: 'play X',
       url: 'https://youtube.com'
     })
@@ -138,7 +138,7 @@ describe('makePlanExecutor', () => {
     const exec = makePlanExecutor(dispatch)
     const result = await exec({
       steps: [
-        { tool: 'web_task', args: { goal: 'Find a flight' }, why: '', bindings: [] },
+        { tool: 'web_use', args: { goal: 'Find a flight' }, why: '', bindings: [] },
         { tool: 'messages_send', args: { text: 'must not run' }, why: '', bindings: [] }
       ]
     })

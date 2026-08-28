@@ -207,7 +207,7 @@ export function advanceProposal(
 export function proposalNextInstruction(stage: ProposalStage): string {
   switch (stage) {
     case 'website_research':
-      return 'Use web_task on the supplied public website. Save only factual client context with proposal_deck save_website_context.'
+      return 'Use web_use on the supplied public website. Save only factual client context with proposal_deck save_website_context.'
     case 'narrative_plan':
       return 'Write the Narrative Plan only. Then call proposal_deck with save_narrative_plan. Do not write slide titles.'
     case 'narrative_approval':

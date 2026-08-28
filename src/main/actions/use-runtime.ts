@@ -109,7 +109,7 @@ export function buildRegistry(run: typeof runNativeAction): HandlerRegistry {
       verification: 'none_fuzzy'
     })
   }
-  // The browser rail: web_task, on every platform (Electron CDP is the same
+  // The browser rail: web_use, on every platform (Electron CDP is the same
   // everywhere). Declared in the browser module so its rail/risk live there.
   registerBrowserRail(registry)
   // The vision rail: computer_task, the supervised tier. Registered so the
@@ -150,7 +150,7 @@ export function getActionsRuntime(): ActionsRuntime {
     makeSemanticRailExecutor(runNativeAction)
   )
   // The browser rail's live host (WebContentsView + CDP + model + watched
-  // pane) is created lazily on first web_task so a session that never runs one
+  // pane) is created lazily on first web_use so a session that never runs one
   // pays nothing for it.
   const rawBrowserExecute = makeBrowserRailExecutor({
     runTask: (request) => getBrowserRailHost().runTask(request)

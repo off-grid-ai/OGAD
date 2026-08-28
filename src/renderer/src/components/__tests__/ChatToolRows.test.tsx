@@ -67,7 +67,7 @@ describe('<ChatToolRows/> work timeline', () => {
     offOpen()
   })
 
-  it('keeps the work card generic and opens exact task detail from the Web Use row', async () => {
+  it('opens an old stored web_task row as canonical Web Use detail', async () => {
     const requests: OpenTaskPanelRequest[] = []
     const offOpen = onOpenTaskSidePanel((request) => requests.push(request))
     window.api.tasks!.list = vi.fn(async () => [
@@ -125,7 +125,7 @@ describe('<ChatToolRows/> work timeline', () => {
     const user = userEvent.setup()
     render(
       <ChatToolRows
-        tools={[{ name: 'web_task', status: 'running', result: 'Task reference: web-space.' }]}
+        tools={[{ name: 'web_use', status: 'running', result: 'Task reference: web-space.' }]}
       />
     )
     const row = await screen.findByRole('button', { name: 'Web Use, running' })
@@ -145,7 +145,7 @@ describe('<ChatToolRows/> work timeline', () => {
       <ChatToolRows
         tools={[
           { name: 'web_search', status: 'completed', result: 'Search results are ready.' },
-          { name: 'web_task', status: 'running', result: '' }
+          { name: 'web_use', status: 'running', result: '' }
         ]}
         liveTask={{
           taskId: 'web-reasoning',
@@ -193,7 +193,7 @@ describe('<ChatToolRows/> work timeline', () => {
             status: 'completed',
             result: 'The slide plan is ready.'
           },
-          { name: 'web_task', status: 'completed', result: 'Website research complete.' },
+          { name: 'web_use', status: 'completed', result: 'Website research complete.' },
           { name: 'computer_use', status: 'running' }
         ]}
       />
@@ -218,7 +218,7 @@ describe('<ChatToolRows/> work timeline', () => {
     render(
       <ChatToolRows
         tools={[
-          { name: 'web_task', status: 'failed', result: 'Error: browser timed out' },
+          { name: 'web_use', status: 'failed', result: 'Error: browser timed out' },
           { name: 'mcp__31__search_messages', status: 'completed', result: '3 messages found' }
         ]}
       />
@@ -226,7 +226,7 @@ describe('<ChatToolRows/> work timeline', () => {
     await user.click(screen.getByRole('button', { name: /Work failed/ }))
     expect(screen.getByText('Web Use')).toBeTruthy()
     expect(screen.getByText('Searched messages')).toBeTruthy()
-    expect(screen.queryByText(/web_task/)).toBeNull()
+    expect(screen.queryByText(/web_use/)).toBeNull()
     expect(screen.queryByText('Error: browser timed out')).toBeNull()
 
     await user.click(screen.getByRole('button', { name: 'Web Use, failed' }))
@@ -315,7 +315,7 @@ describe('<ChatToolRows/> work timeline', () => {
       <ChatToolRows
         tools={[
           {
-            name: 'web_task',
+            name: 'web_use',
             status: 'completed',
             result: 'The task is in progress. Task reference: web-flight.'
           }

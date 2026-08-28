@@ -17,7 +17,7 @@ import {
 } from '../planner-logic'
 
 const catalog: ToolCatalogEntry[] = [
-  { name: 'web_task', description: 'Do something on a website; always set url.' },
+  { name: 'web_use', description: 'Do something on a website; always set url.' },
   { name: 'open_url', description: 'Opens a page only, no interaction.' },
   { name: 'contacts_search', description: 'Find a contact by name.' },
   { name: 'messages_send', description: 'Send an iMessage.' }
@@ -47,11 +47,11 @@ describe('shouldPlan', () => {
 describe('buildPlannerPrompt', () => {
   it('lists the tools and encodes the routing + arg-filling rules', () => {
     const p = buildPlannerPrompt('play X on YouTube', [], catalog)
-    expect(p).toContain('- web_task:')
+    expect(p).toContain('- web_use:')
     expect(p).toContain('play X on YouTube')
-    // Post-pivot rule: any website task (incl play/watch) -> web_task, which runs
+    // Post-pivot rule: any website task (incl play/watch) -> web_use, which runs
     // in Off Grid AI's built-in browser; open_url only opens a link.
-    expect(p).toMatch(/is web_task/i)
+    expect(p).toMatch(/is web_use/i)
     expect(p).toMatch(/built-in browser/i)
     expect(p).toMatch(/NOT open_url/i)
     expect(p).toMatch(/Fill EVERY required argument/i)
@@ -73,7 +73,7 @@ describe('parsePlan', () => {
       JSON.stringify({
         steps: [
           {
-            tool: 'web_task',
+            tool: 'web_use',
             args: { goal: 'play X', url: 'https://youtube.com' },
             why: 'interactive'
           },
@@ -87,7 +87,7 @@ describe('parsePlan', () => {
       names
     )
     expect(plan.steps).toHaveLength(2)
-    expect(plan.steps[0]).toMatchObject({ tool: 'web_task', args: { url: 'https://youtube.com' } })
+    expect(plan.steps[0]).toMatchObject({ tool: 'web_use', args: { url: 'https://youtube.com' } })
     expect(plan.steps[1]?.bindings).toEqual([{ arg: 'to', fromStep: 0, field: 'phone' }])
   })
 
@@ -134,9 +134,9 @@ describe('resolveContactHandle', () => {
 })
 
 describe('backfillGoals', () => {
-  it('fills an empty web_task/computer_task goal with the user request', () => {
+  it('fills an empty web_use/computer_task goal with the user request', () => {
     const plan = {
-      steps: [{ tool: 'web_task', args: { url: 'https://youtube.com' }, why: '', bindings: [] }]
+      steps: [{ tool: 'web_use', args: { url: 'https://youtube.com' }, why: '', bindings: [] }]
     }
     const out = backfillGoals(plan, 'play Family Guy on YouTube')
     expect(out.steps[0]?.args).toEqual({

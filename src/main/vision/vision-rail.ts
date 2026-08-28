@@ -5,7 +5,7 @@
  * overlay) is passed in as `runTask`, so this mapping is unit-tested without a
  * display.
  *
- * computer_task registers none_fuzzy for the same reason web_task does: a GUI
+ * computer_task registers none_fuzzy for the same reason web_use does: a GUI
  * action on the live desktop is never safely auto-retried. The guard (kill
  * switch and pause) plus the user's supervision IS the reliability;
  * the model's `finished` is the executor's verdict, fired once behind the gate.

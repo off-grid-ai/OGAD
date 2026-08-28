@@ -310,10 +310,10 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
     await waitFor(() => expect(boundary.calls).toHaveLength(1))
 
     const result = 'Web Use was not started. Please confirm the departure airport.'
-    boundary.emitToolStep(0, 'web_task')
-    boundary.emitToolResult(0, 'web_task', result, 'pending')
+    boundary.emitToolStep(0, 'web_use')
+    boundary.emitToolResult(0, 'web_use', result, 'pending')
     boundary.resolve(0, result, {
-      toolCalls: [{ name: 'web_task', result, status: 'pending' }],
+      toolCalls: [{ name: 'web_use', result, status: 'pending' }],
       unified: []
     })
 

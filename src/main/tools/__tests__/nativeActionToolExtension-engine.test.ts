@@ -57,10 +57,11 @@ describe('the tool-to-action-type map', () => {
       'mail_send',
       'messages_send',
       'reminders_create',
-      'web_task'
+      'web_use'
     ])
     expect(actionTypeForTool('reminders_create')).toBe('reminder')
-    expect(actionTypeForTool('web_task')).toBe('web_task')
+    expect(actionTypeForTool('web_use')).toBe('web_use')
+    expect(actionTypeForTool('web_task')).toBe('web_use')
     expect(actionTypeForTool('computer_task')).toBe('computer_task')
     expect(actionTypeForTool('calendar_list_events')).toBeUndefined()
   })
@@ -94,8 +95,22 @@ describe('the spec table', () => {
   it('the extension exposes its schemas and system hint', () => {
     const extension = makeExtension(makePort())
     expect(extension.schemas()).toHaveLength(NATIVE_TOOL_SPECS.length)
+    const names = extension.schemas().map(
+      (schema) => (schema as { function: { name: string } }).function.name
+    )
+    expect(names).toContain('web_use')
+    expect(names).not.toContain('web_task')
     expect(extension.systemHint()).toMatch(/act on the user's Mac/)
     expect(extension.canHandle('reminders_create')).toBe(true)
+  })
+
+  it('accepts a legacy web_task call at the input boundary but proposes canonical web_use', async () => {
+    const port = makePort()
+    const extension = makeExtension(port)
+
+    await extension.execute('web_task', { goal: 'Check the release page' })
+
+    expect(port.proposed[0]).toMatchObject({ type: 'web_use' })
   })
 })
 
@@ -108,7 +123,7 @@ describe('the engine path', () => {
     )
 
     await extension.execute(
-      'web_task',
+      'web_use',
       {
         goal: 'Open the release page and stop when version 4.2 is visible.',
         url: 'https://example.test/releases'
@@ -273,16 +288,16 @@ describe('the engine path', () => {
     expect(run).toHaveBeenCalled()
   })
 
-  it('web_task becomes a browser-rail Action with the goal as its intent', async () => {
+  it('web_use becomes a browser-rail Action with the goal as its intent', async () => {
     run.mockClear()
     const port = makePort()
     const extension = makeExtension(port)
-    const reply = await extension.execute('web_task', {
+    const reply = await extension.execute('web_use', {
       goal: 'check in for my flight',
       url: 'https://air.test'
     })
     expect(port.proposed[0]).toMatchObject({
-      type: 'web_task',
+      type: 'web_use',
       intent: 'check in for my flight',
       args: { goal: 'check in for my flight', url: 'https://air.test' },
       risk: 'mutate'
@@ -299,7 +314,7 @@ describe('the engine path', () => {
     const extension = makeExtension(port)
 
     await extension.execute(
-      'web_task',
+      'web_use',
       { goal: 'check in for my flight' },
       { conversationId: 'chat-journey-1', userQuery: 'Check me in' }
     )
@@ -307,7 +322,7 @@ describe('the engine path', () => {
     expect(port.proposalMeta).toEqual([{ source: 'chat', sourceRef: 'chat-journey-1' }])
   })
 
-  it('web_task uses the engine EVEN WHEN a pro queue is listening - no connector runs a web task', async () => {
+  it('web_use uses the engine EVEN WHEN a pro queue is listening - no connector runs a web task', async () => {
     run.mockClear()
     const legacyPropose = vi.fn(() => true)
     const port = makePort({ approvalHookActive: () => true })
@@ -315,19 +330,19 @@ describe('the engine path', () => {
       { run, proposeApproval: legacyPropose, isProEntitled: proEntitled, actions: port },
       'darwin'
     )
-    await extension.execute('web_task', { goal: 'order lunch' })
+    await extension.execute('web_use', { goal: 'order lunch' })
     // The engine path was taken; the legacy queue was NOT offered a web task.
     expect(port.proposed).toHaveLength(1)
     expect(legacyPropose).not.toHaveBeenCalled()
   })
 
-  it('web_task refuses cleanly when no engine is wired, rather than falling to a connector', async () => {
+  it('web_use refuses cleanly when no engine is wired, rather than falling to a connector', async () => {
     const legacyPropose = vi.fn(() => true)
     const extension = new NativeActionToolExtension(
       { run, proposeApproval: legacyPropose, isProEntitled: proEntitled },
       'darwin'
     )
-    const reply = await extension.execute('web_task', { goal: 'x' })
+    const reply = await extension.execute('web_use', { goal: 'x' })
     expect(reply).toMatchObject({
       text: expect.stringMatching(/on-device action engine/),
       authoritative: true
@@ -353,7 +368,7 @@ describe('the engine path', () => {
     })
   })
 
-  it('queuing a computer_task announces the grounder nudge - but a web_task or a semantic tool does not', async () => {
+  it('queuing a computer_task announces the grounder nudge - but web_use or a semantic tool does not', async () => {
     const announceComputerTask = vi.fn()
     const port = makePort()
     const extension = new NativeActionToolExtension(
@@ -366,7 +381,7 @@ describe('the engine path', () => {
     expect(announceComputerTask).toHaveBeenCalledWith('share the deck')
 
     announceComputerTask.mockClear()
-    await extension.execute('web_task', { goal: 'check in' })
+    await extension.execute('web_use', { goal: 'check in' })
     await extension.execute('reminders_create', { title: 'x' })
     expect(announceComputerTask).not.toHaveBeenCalled()
   })

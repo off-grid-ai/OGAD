@@ -81,12 +81,12 @@ describe('applyStreamEvent', () => {
   it('keeps a needs-attention tool result pending instead of marking work complete', () => {
     const running = applyStreamEvent<StreamedMessage>(
       { toolCalls: [] },
-      { type: 'step', step: { kind: 'running_tool', name: 'web_task' } }
+      { type: 'step', step: { kind: 'running_tool', name: 'web_use' } }
     )
     const pending = applyStreamEvent(running, {
       type: 'tool_result',
       call: {
-        name: 'web_task',
+        name: 'web_use',
         result: 'Please answer the missing questions.',
         status: 'pending'
       }
@@ -94,7 +94,7 @@ describe('applyStreamEvent', () => {
 
     expect(pending.toolCalls).toEqual([
       {
-        name: 'web_task',
+        name: 'web_use',
         result: 'Please answer the missing questions.',
         status: 'pending'
       }
@@ -104,7 +104,7 @@ describe('applyStreamEvent', () => {
   it('stops the live indicator after the tool result arrives', () => {
     expect(
       hasLiveStreamActivity({
-        toolCalls: [{ name: 'web_task', result: 'Visual decision failed.', status: 'completed' }]
+        toolCalls: [{ name: 'web_use', result: 'Visual decision failed.', status: 'completed' }]
       })
     ).toBe(false)
   })
@@ -113,7 +113,7 @@ describe('applyStreamEvent', () => {
     expect(
       hasLiveStreamActivity({
         activity: { kind: 'running_tool' },
-        toolCalls: [{ name: 'web_task', result: '', status: 'running' }]
+        toolCalls: [{ name: 'web_use', result: '', status: 'running' }]
       })
     ).toBe(true)
   })

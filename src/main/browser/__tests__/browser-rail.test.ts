@@ -1,5 +1,5 @@
 /**
- * The browser rail's engine adapter: web_task registers on the browser rail as
+ * The browser rail's engine adapter: web_use registers on the browser rail as
  * a no-retry mutation, and the executor maps a run's result to an
  * ExecuteResult - success carries the final URL as the effect handle, failure
  * carries the honest summary. The host (the live pane) is the injected
@@ -13,7 +13,7 @@ import type { WebTaskResult } from '../web-task-agent'
 const action = (args: Record<string, unknown>, sourceRef?: string): ActionRecord =>
   ({
     id: 'act_web',
-    type: 'web_task',
+    type: 'web_use',
     intent: 'check in for my flight',
     args,
     risk: 'mutate',
@@ -31,12 +31,12 @@ const run = (over: Partial<WebTaskResult> = {}): WebTaskResult => ({
 })
 
 describe('registerBrowserRail', () => {
-  it('registers web_task on the browser rail, gating and never retrying', () => {
+  it('registers web_use on the browser rail, gating and never retrying', () => {
     const registry = new HandlerRegistry()
     registerBrowserRail(registry)
-    const handler = registry.get('web_task')
+    const handler = registry.get('web_use')
     expect(handler?.rail).toBe('browser')
-    expect(registry.route('web_task')).toBe('browser')
+    expect(registry.route('web_use')).toBe('browser')
     // none_fuzzy => no verify (registration would refuse a mismatch) and no
     // auto-retry: a web task fires exactly once behind the gate.
     expect(handler?.verification).toBe('none_fuzzy')

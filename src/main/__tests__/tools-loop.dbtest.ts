@@ -184,7 +184,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     fake.enqueue(
       {
         reasoning: 'The request is complete, so Web Use can start.',
-        toolCalls: [{ name: 'web_task', args: { goal: query, url: 'https://skyscanner.com' } }]
+        toolCalls: [{ name: 'web_use', args: { goal: query, url: 'https://skyscanner.com' } }]
       },
       { content: 'Web Use is ready.' }
     )
@@ -195,14 +195,14 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
         onStep: ({ name }) => steps.push(name)
       })
 
-      expect(steps).toEqual(['web_task'])
-      expect(result.toolCalls.map(({ name }) => name)).toEqual(['web_task'])
+      expect(steps).toEqual(['web_use'])
+      expect(result.toolCalls.map(({ name }) => name)).toEqual(['web_use'])
       expect(result.answer).toBe('Done. Task reference: web-skyscanner-1.')
       expect(fake.requests).toHaveLength(1)
       expect(proposals).toEqual([
         {
           input: {
-            type: 'web_task',
+            type: 'web_use',
             intent: query,
             args: { goal: query, url: 'https://skyscanner.com' },
             risk: 'mutate'
@@ -252,7 +252,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
         reasoning: 'The earlier request and follow-up provide the full task.',
         toolCalls: [
           {
-            name: 'web_task',
+            name: 'web_use',
             args: { goal: completeGoal, url: 'https://skyscanner.com' }
           }
         ]
@@ -273,13 +273,13 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
 
       expect(second.answer).toBe('Done. Task reference: web-flight-follow-up.')
       expect(second.toolCalls).toEqual([
-        expect.objectContaining({ name: 'web_task', status: 'completed' })
+        expect.objectContaining({ name: 'web_use', status: 'completed' })
       ])
       expect(activities).toEqual([])
       expect(proposals).toEqual([
         {
           input: {
-            type: 'web_task',
+            type: 'web_use',
             intent: completeGoal,
             args: { goal: completeGoal, url: 'https://skyscanner.com' },
             risk: 'mutate'
@@ -323,7 +323,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       {
         toolCalls: [
           {
-            name: 'web_task',
+            name: 'web_use',
             args: { goal: 'Find a flight', url: 'https://skyscanner.com' }
           }
         ]

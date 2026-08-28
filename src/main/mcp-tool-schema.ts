@@ -1,6 +1,6 @@
 // Convert a native action tool's JSON-Schema `parameters` into the Zod raw shape
 // the MCP SDK's registerTool expects, so the desktop's action tools (calendar,
-// mail, web_task, computer_task, ...) can be exposed over /mcp WITHOUT
+// mail, web_use, computer_task, ...) can be exposed over /mcp WITHOUT
 // re-declaring their schemas - the NATIVE_TOOL_SPECS catalog stays the single
 // source of truth. Handles the subset those tools use: an object of
 // string/number/boolean/enum/array properties with `required` + `description`.

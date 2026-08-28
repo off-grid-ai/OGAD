@@ -1,5 +1,5 @@
 // The pure half of the MCP action-tool auth gate. The desktop's ACTION tools
-// (mail_send, web_task, computer_task, ...) DO things, so - unlike the open
+// (mail_send, web_use, computer_task, ...) DO things, so - unlike the open
 // model/inference tools - they are only exposed to a request that presents the
 // desktop's action token (issued to a paired device). Model tools stay open.
 //

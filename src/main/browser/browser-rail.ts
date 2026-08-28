@@ -1,10 +1,10 @@
 /**
- * The browser rail's engine adapter (R2-C3): turns a web_task Action into a
+ * The browser rail's engine adapter (R2-C3): turns a web_use Action into a
  * run of the watched loop and back into an ExecuteResult. Pure and injected -
  * the live host (WebContentsView + CDP + model + takeover pane) is passed in
  * as `runTask`, so this mapping is unit-tested without a display.
  *
- * Why web_task registers none_fuzzy, not status: a web task is not safely
+ * Why web_use registers none_fuzzy, not status: a web task is not safely
  * repeatable. 'status' would let a failed verify re-execute the whole task
  * once (browse-use's retry) - and re-running "order lunch" double-orders. The
  * watched loop plus takeover IS the reliability here; the model's explicit
@@ -12,7 +12,7 @@
  * approval gate. So it takes the fuzzy path (single attempt, executor verdict
  * is the status) - the same double-fire protection sends already rely on.
  */
-import type { ActionRecord, HandlerRegistry } from '@offgrid/use'
+import { WEB_USE_ACTION_TYPE, type ActionRecord, type HandlerRegistry } from '@offgrid/use'
 import type { ExecuteResult } from '@offgrid/use'
 import type { WebTaskResult } from './web-task-agent'
 import type { TaskRetryCheckpoint } from '../tasks/task-retry'
@@ -31,11 +31,11 @@ export interface BrowserRailHost {
   runTask(request: BrowserTaskRequest): Promise<WebTaskResult>
 }
 
-/** Registers the web_task handler. Kept beside the executor so the rail,
+/** Registers the web_use handler. Kept beside the executor so the rail,
  *  risk, and verification are declared in one place the tests read. */
 export function registerBrowserRail(registry: HandlerRegistry): void {
   registry.register({
-    type: 'web_task',
+    type: WEB_USE_ACTION_TYPE,
     rail: 'browser',
     // Gates for approval like any mutation; the watched pane + takeover cover
     // the identity boundary within the run.
