@@ -107,6 +107,26 @@ describe('<MemoryChat/> generation details', () => {
     expect(row.textContent).toContain('128 tokens')
   })
 
+  it('shows details on the existing answer as soon as the open Settings panel enables them', async () => {
+    const { boundary, saveSetting } = boundaryWithSettings({})
+    const user = userEvent.setup()
+
+    await answerWith(boundary, 'conversation-live-setting', user, MEASURED)
+    expect(screen.queryByTestId('generation-metrics')).toBeNull()
+
+    render(
+      <TooltipProvider>
+        <SettingsPanel onClose={() => {}} />
+      </TooltipProvider>
+    )
+    await user.click(await screen.findByRole('switch', { name: /generation details/i }))
+
+    await waitFor(() => expect(saveSetting).toHaveBeenCalledWith('showGenerationDetails', true))
+    const row = await screen.findByTestId('generation-metrics')
+    expect(row.textContent).toContain('42.5 tok/s')
+    expect(row.textContent).toContain('TTFT 0.37s')
+  })
+
   it('prints nothing when the run reported no measurements, rather than a row of zeros', async () => {
     const { boundary } = boundaryWithSettings({ showGenerationDetails: true })
     const user = userEvent.setup()

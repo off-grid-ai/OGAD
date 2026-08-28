@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { formatContextWindow, resolveActiveTextModel } from '../lib/model-summary'
 import { recommendedContextWindow } from '../lib/ctx-options'
+import { LLM_SETTINGS_INVALIDATED_EVENT } from '../lib/settings-invalidation'
 
 type ActiveModelApi = Partial<
   Pick<
@@ -25,12 +26,19 @@ export interface ActiveModelSummary {
  *  open flag) so the chip refreshes after a switch. All formatting lives in the pure
  *  model-summary helpers; this hook only does the IPC reads. */
 export function useActiveModelSummary(refreshWhen: unknown): ActiveModelSummary {
+  const [settingsRevision, setSettingsRevision] = useState(0)
   const [summary, setSummary] = useState<ActiveModelSummary>({
     name: null,
     ctx: null,
     configuredCtx: null,
     recommendedCtx: null
   })
+
+  useEffect(() => {
+    const invalidate = (): void => setSettingsRevision((revision) => revision + 1)
+    window.addEventListener(LLM_SETTINGS_INVALIDATED_EVENT, invalidate)
+    return () => window.removeEventListener(LLM_SETTINGS_INVALIDATED_EVENT, invalidate)
+  }, [])
 
   useEffect(() => {
     const request = { active: true }
@@ -63,7 +71,7 @@ export function useActiveModelSummary(refreshWhen: unknown): ActiveModelSummary 
     return () => {
       request.active = false
     }
-  }, [refreshWhen])
+  }, [refreshWhen, settingsRevision])
 
   return summary
 }

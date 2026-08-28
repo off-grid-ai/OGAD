@@ -3,6 +3,7 @@ import { cleanup, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatBoundary, installBoundary, renderChat } from './harness/chat-boundary'
+import { invalidateLlmSettings } from '../../lib/settings-invalidation'
 
 function deferred<T>(): {
   promise: Promise<T>
@@ -108,5 +109,26 @@ describe('<MemoryChat/> active model summary lifecycle', () => {
 
     await Promise.resolve()
     expect(screen.queryByRole('button', { name: /Model A/ })).toBeNull()
+  })
+
+  it('updates the open composer when the committed context window changes', async () => {
+    const boundary = new ChatBoundary()
+    let settings = { ctxSize: 32768, effectiveCtxSize: 32768 }
+    Object.assign(boundary.api, {
+      getModelCatalog: vi.fn(async () => catalog),
+      getInstalledModels: vi.fn(async () => ['local/model-a']),
+      getActiveModel: vi.fn(async () => 'local/model-a'),
+      getActiveModalities: vi.fn(async () => ({})),
+      getLlmSettings: vi.fn(async () => settings)
+    })
+    installBoundary(boundary)
+
+    renderChat({ conversationId: 'conversation-b' })
+    expect(await screen.findByRole('button', { name: /Model A.*32K/ })).toBeTruthy()
+
+    settings = { ctxSize: 8192, effectiveCtxSize: 8192 }
+    invalidateLlmSettings()
+
+    expect(await screen.findByRole('button', { name: /Model A.*8K/ })).toBeTruthy()
   })
 })

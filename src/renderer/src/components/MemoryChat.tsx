@@ -57,6 +57,7 @@ import { ConversationTitleActions } from './ConversationTitleActions'
 import { ImageLightbox } from './media/ImageLightbox'
 import { resolveImageParams, setOverride, type ImageParamStore } from '@renderer/lib/image-params'
 import { IMAGE_SETTINGS_CHANGED_EVENT } from '@renderer/lib/image-settings-events'
+import { DISPLAY_SETTINGS_INVALIDATED_EVENT } from '@renderer/lib/settings-invalidation'
 import {
   DEFAULT_VOICE_PREFERENCES,
   VOICE_PREFERENCES_CHANGED_EVENT,
@@ -2436,6 +2437,16 @@ export function MemoryChat({
   const [incomingFiles, setIncomingFiles] = useState<IncomingSharedFile[]>([])
   // Off unless asked for (Settings -> Model -> Generation details), matching mobile.
   const [showGenerationDetails, setShowGenerationDetails] = useState(false)
+  useEffect(() => {
+    const refresh = (): void => {
+      void window.api
+        .getSettings()
+        .then((settings) => setShowGenerationDetails(settings.showGenerationDetails === true))
+        .catch(() => {})
+    }
+    window.addEventListener(DISPLAY_SETTINGS_INVALIDATED_EVENT, refresh)
+    return () => window.removeEventListener(DISPLAY_SETTINGS_INVALIDATED_EVENT, refresh)
+  }, [])
   useEffect(() => {
     if (!isPro) {
       setIncomingFiles([])

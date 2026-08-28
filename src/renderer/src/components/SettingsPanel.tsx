@@ -19,6 +19,10 @@ import {
   recommendedContextWindow
 } from '@renderer/lib/ctx-options'
 import { formatContextWindow, resolveModelName } from '@renderer/lib/model-summary'
+import {
+  invalidateDisplaySettings,
+  invalidateLlmSettings
+} from '@renderer/lib/settings-invalidation'
 import type { ModelSettingsPanelTab as Tab } from '@renderer/lib/model-settings-panel'
 import { ImageSettingsTab } from './ImageSettingsTab'
 import { SidePanel } from './SidePanel'
@@ -189,7 +193,10 @@ export function SettingsPanel({
     void Promise.resolve(window.api.setLlmSettings?.(patch))
       .then(() => window.api.getLlmSettings?.())
       .then((next) => {
-        if (next) setS(next)
+        if (next) {
+          setS(next)
+          invalidateLlmSettings()
+        }
       })
       .catch(() => {
         void window.api
@@ -201,7 +208,15 @@ export function SettingsPanel({
 
   const resetDefaults = (): void => {
     setS((prev) => ({ ...prev, ...DEFAULTS }))
-    window.api.setLlmSettings?.(DEFAULTS)
+    void Promise.resolve(window.api.setLlmSettings?.(DEFAULTS))
+      .then(() => {
+        invalidateLlmSettings()
+        return window.api.getLlmSettings?.()
+      })
+      .then((next) => {
+        if (next) setS(next)
+      })
+      .catch(() => {})
   }
 
   /**
@@ -212,10 +227,12 @@ export function SettingsPanel({
   const toggleGenerationDetails = (): void => {
     const next = !showGenerationDetails
     setShowGenerationDetails(next)
-    void Promise.resolve(window.api.saveSetting('showGenerationDetails', next)).catch(() => {
-      // The switch is only a mirror of what was stored, so a failed write puts it back.
-      setShowGenerationDetails(!next)
-    })
+    void Promise.resolve(window.api.saveSetting('showGenerationDetails', next))
+      .then(() => invalidateDisplaySettings())
+      .catch(() => {
+        // The switch is only a mirror of what was stored, so a failed write puts it back.
+        setShowGenerationDetails(!next)
+      })
   }
 
   const pickTranscriptionLanguage = (language: string): void => {
