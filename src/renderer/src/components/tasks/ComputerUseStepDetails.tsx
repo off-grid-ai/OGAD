@@ -122,7 +122,6 @@ export function ComputerUseStepDetails({
                 {tokens ? (
                   <p className="text-[10px] text-muted-foreground">Tokens: {tokens}</p>
                 ) : null}
-                <DetailBlock label="Model input" value={detail.modelInput} />
                 <DetailBlock
                   label="Retrieved facts and context"
                   value={detail.retrievedFacts?.join('\n')}

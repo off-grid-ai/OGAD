@@ -369,7 +369,6 @@ class VisionHost {
             stepId: String(observation.step),
             at: Date.now(),
             phase: observation.phase,
-            modelInput: observation.promptContext,
             ...(geometry
               ? {
                   screenshot: {

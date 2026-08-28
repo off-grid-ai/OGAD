@@ -173,7 +173,6 @@ export function browserVisionStepDetail(
     stepId: String(observation.step),
     at,
     phase: observation.phase,
-    modelInput: observation.promptContext,
     ...(geometry
       ? {
           screenshot: {

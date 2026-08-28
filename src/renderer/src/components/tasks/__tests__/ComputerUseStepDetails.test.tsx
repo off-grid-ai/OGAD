@@ -55,7 +55,6 @@ describe('<ComputerUseStepDetails/>', () => {
             stepId: 'click-settings',
             at: 1,
             phase: 'checking',
-            modelInput: 'Open Settings',
             decisionSummary: 'Open Settings',
             modelOutput: '<action>click Settings</action>',
             mappedAction: '{"type":"click","point":{"x":520,"y":240}}',
@@ -77,7 +76,9 @@ describe('<ComputerUseStepDetails/>', () => {
     await user.click(screen.getByRole('button', { name: /Computer Use step 1/ }))
 
     expect(screen.getByText('Screenshot stays on Studio Mac.')).toBeTruthy()
-    expect(screen.getAllByText('Open Settings', { selector: 'pre' })).toHaveLength(2)
+    // Once, not twice: the second copy was the persisted prompt echo (modelInput), which is no
+    // longer stored - it was 73% of the task payload on every list poll.
+    expect(screen.getAllByText('Open Settings', { selector: 'pre' })).toHaveLength(1)
     expect(screen.getByText('<action>click Settings</action>')).toBeTruthy()
     expect(document.querySelector('img')).toBeNull()
   })

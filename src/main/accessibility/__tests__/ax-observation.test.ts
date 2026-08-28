@@ -28,7 +28,6 @@ describe('persistAxObservation', () => {
       'Send the message',
       expect.objectContaining({
         stepId: '2',
-        modelInput: 'exact AX prompt',
         retrievedFacts: ['Earlier task opened Slack'],
         rawResponse: '{"action":"press","index":4}',
         mappedAction: '{"action":"press","index":4}',

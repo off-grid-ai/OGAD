@@ -257,7 +257,6 @@ describe('<ChatToolRows/> work timeline', () => {
           {
             stepId: 'open-keynote',
             at: 1,
-            modelInput: 'Open Keynote',
             screenshot: {
               originalWidth: 3024,
               originalHeight: 1964,
@@ -293,7 +292,9 @@ describe('<ChatToolRows/> work timeline', () => {
     expect(await screen.findByText('Computer Use details')).toBeTruthy()
     expect(screen.queryByText(/Task reference/)).toBeNull()
     await user.click(screen.getByRole('button', { name: /Click Keynote/ }))
-    expect(await screen.findByText('Open Keynote')).toBeTruthy()
+    // The prompt echo (modelInput) is no longer persisted or shown - it was 73% of the task
+    // payload on every list poll. The decision and result below are what the row is for.
+    expect(screen.queryByText('Open Keynote')).toBeNull()
     expect(screen.getByText('Opened Keynote')).toBeTruthy()
   })
 

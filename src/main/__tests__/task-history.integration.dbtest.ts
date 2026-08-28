@@ -534,7 +534,6 @@ describe('task history persistence', () => {
         {
           stepId: '1',
           at: 1,
-          modelInput: `Earlier action: type(content='${secret}')`,
           rawResponse: `Thought: use the supplied value\nAction: type(content='${secret}')`,
           decisionSummary: `type "${secret}"`,
           mappedAction: JSON.stringify({ type: 'type', content: secret }),

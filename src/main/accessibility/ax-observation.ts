@@ -12,7 +12,6 @@ export function persistAxObservation(
     stepId: String(observation.step),
     at: Date.now(),
     phase: observation.result === 'error' ? 'failed' : 'checking',
-    modelInput: observation.prompt,
     retrievedFacts: observation.retrievedFacts,
     decisionSummary:
       observation.parsedAction === undefined

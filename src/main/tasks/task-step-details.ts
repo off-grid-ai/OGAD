@@ -99,7 +99,18 @@ export function visibleComputerUseModelOutput(value: unknown): string | undefine
 }
 
 /** Redact and bound observability before it reaches SQLite or a renderer. */
-export function sanitizeComputerUseStepDetail(input: ComputerUseStepDetail): ComputerUseStepDetail {
+/** What callers may hand in, including fields we deliberately refuse to store. */
+export type ComputerUseStepDetailInput = Partial<ComputerUseStepDetail> & { modelInput?: string }
+
+/**
+ * Takes a LOOSE input, not a ComputerUseStepDetail: this is the boundary that decides what is
+ * allowed to be persisted, so it must be able to receive fields that are not in the stored shape
+ * and drop them. `modelInput` is the case in point - callers still hand over a prompt echo, and
+ * storing it cost 73% of the task payload on every list poll.
+ */
+export function sanitizeComputerUseStepDetail(
+  input: ComputerUseStepDetailInput
+): ComputerUseStepDetail {
   const screenshot = input.screenshot
   const originalWidth = finite(screenshot?.originalWidth)
   const originalHeight = finite(screenshot?.originalHeight)
@@ -109,7 +120,6 @@ export function sanitizeComputerUseStepDetail(input: ComputerUseStepDetail): Com
   const viewportHeight = finite(screenshot?.viewportHeight)
   const executionStatus = input.execution?.status === 'failed' ? 'failed' : 'complete'
   const modelOutput = visibleComputerUseModelOutput(input.modelOutput ?? input.rawResponse)
-  const modelInput = visibleComputerUseModelOutput(input.modelInput)
   const decisionSummary = safeText(redactTypedActionContent(input.decisionSummary))
   const reasoning = safeText(redactTypedActionContent(input.reasoning))
   const decisionRationale = safeText(redactTypedActionContent(input.decisionRationale))
@@ -125,7 +135,6 @@ export function sanitizeComputerUseStepDetail(input: ComputerUseStepDetail): Com
     stepId: safeText(input.stepId)?.slice(0, 200) || 'step',
     at: finite(input.at) ?? Date.now(),
     ...(phase(input.phase) ? { phase: phase(input.phase) } : {}),
-    ...(modelInput ? { modelInput } : {}),
     ...(screenshot && originalWidth && originalHeight && inferenceWidth && inferenceHeight
       ? {
           screenshot: {

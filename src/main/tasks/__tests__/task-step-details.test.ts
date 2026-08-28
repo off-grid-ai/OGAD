@@ -10,6 +10,9 @@ describe('Computer Use step observability', () => {
     const detail = sanitizeComputerUseStepDetail({
       stepId: 'inspect-settings',
       at: Number.NaN,
+      // Still passed in, deliberately: callers may hand over a prompt echo, and the point is that
+      // it is DROPPED rather than stored - it was 73% of the task payload on every list poll, and
+      // dropping it must also drop anything sensitive that rode inside it.
       modelInput:
         'authorization: Bearer visible-token\n<think>prior hidden reasoning</think>\nAction: click settings',
       retrievedFacts: ['API_KEY=visible-key'],
@@ -32,7 +35,8 @@ describe('Computer Use step observability', () => {
     expect(serialized).not.toContain('visible-password')
     expect(serialized).not.toContain('private chain of thought')
     expect(serialized).not.toContain('prior hidden reasoning')
-    expect(detail.modelInput).toContain('Action: click settings')
+    expect('modelInput' in detail).toBe(false)
+    expect(serialized).not.toContain('Action: click settings')
     expect(detail.decisionSummary).toBe('Open Settings')
     expect(detail.decisionRationale).toBe(
       'The Settings control matches the current task stage.'

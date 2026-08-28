@@ -14,7 +14,6 @@ export interface ComputerUseStepDetail {
   stepId: string
   at: number
   phase?: ComputerUsePhase
-  modelInput?: string
   screenshot?: {
     /** This path is valid only on the execution device. */
     path?: string
