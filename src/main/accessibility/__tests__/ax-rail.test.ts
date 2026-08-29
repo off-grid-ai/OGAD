@@ -1,5 +1,5 @@
 /**
- * computer_task tiering: a control-rich AX window drives via accessibility; a
+ * computer_use tiering: a control-rich AX window drives via accessibility; a
  * dead-AX window (or a goal that names no running app) falls through to vision.
  * The routing decision is made once, from the snapshot - AX failure is reported
  * honestly, never silently re-run under vision.

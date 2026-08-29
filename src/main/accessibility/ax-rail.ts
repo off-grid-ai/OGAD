@@ -1,5 +1,5 @@
 /**
- * The computer_task tiering (R5 T1e): try the cheapest rail that can actually
+ * The computer_use tiering (R5 T1e): try the cheapest rail that can actually
  * see the controls, and only pay for vision when it can't. Order is
  *
  *   accessibility (this rail, free, any chat model) -> vision (grounder, RAM).
@@ -55,7 +55,7 @@ export interface ComputerTaskOptions {
   now?: () => number
 }
 
-/** Build the tiered computer_task executor for the DeviceController's 'vision'
+/** Build the tiered computer_use executor for the DeviceController's 'vision'
  *  rail. Tries accessibility first, then vision - unless a rail is forced. */
 export function makeComputerTaskExecutor(
   tiers: ComputerTaskTiers,

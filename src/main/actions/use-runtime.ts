@@ -41,7 +41,6 @@ import {
   type ComputerTaskTiers
 } from '../accessibility/ax-rail'
 import { getAxRailHost } from '../accessibility/ax-host'
-import { getComputerUseSettings } from '../computer-use-settings'
 import { isProEntitled } from '../licensing/license-service'
 import { callConnectorTool } from '../mcp'
 import { makeConnectorRailExecutor } from './connector-rail'
@@ -118,7 +117,7 @@ export function buildRegistry(run: typeof runNativeAction): HandlerRegistry {
   // The browser rail: web_use, on every platform (Electron CDP is the same
   // everywhere). Declared in the browser module so its rail/risk live there.
   registerBrowserRail(registry)
-  // The vision rail: computer_task, the supervised tier. Registered so the
+  // The vision rail: computer_use, the supervised tier. Registered so the
   // engine routes it; the host refuses cleanly until actuation is available,
   // and the tool is not offered to the model until then.
   registerVisionRail(registry)
@@ -217,14 +216,14 @@ export function getActionsRuntime(): ActionsRuntime {
   const browserExecute = withRemoteScreenGate('web_use', rawBrowserExecute)
   const connectorExecute = makeConnectorRailExecutor(callConnectorTool)
   // The vision rail's live host (screen capture + actuation + grounding model),
-  // created lazily on first computer_task.
+  // created lazily on first computer_use.
   const visionExecute = makeVisionRailExecutor({
     runTask: (goal, taskId, journeyId) => getVisionRailHost().runTask(goal, taskId, journeyId)
   })
   // VisionHost owns the selected model strategy for the whole task. This keeps
   // specialist-resident and per-step hybrid swaps behind the same session port.
   const groundedVisionExecute = withRemoteScreenGate('computer_use', visionExecute)
-  // computer_task is TIERED: try the accessibility rail first (free, any chat
+  // computer_use is TIERED: try the accessibility rail first (free, any chat
   // model, most native apps), and fall through to the grounder-vision rail only
   // when AX can't see the controls. OFFGRID_COMPUTER_RAIL=ax|vision forces one
   // rail for the A/B; unset = the real tiered behaviour.
@@ -235,11 +234,11 @@ export function getActionsRuntime(): ActionsRuntime {
     visionExecute: groundedVisionExecute
   }
   const computerTaskExecute = (action: ActionRecord): Promise<ExecuteResult> => {
-    const selectedRail =
-      process.env.OFFGRID_COMPUTER_RAIL ??
-      (getComputerUseSettings().modelStrategy === 'same_as_chat' ? undefined : 'vision')
     return makeComputerTaskExecutor(computerTaskTiers, {
-      forcedRail: parseForcedRail(selectedRail)
+      // Model strategy selects which model handles a vision FALLBACK. It must
+      // never bypass verified native application controls. The environment
+      // override remains available only for explicit rail diagnostics.
+      forcedRail: parseForcedRail(process.env.OFFGRID_COMPUTER_RAIL)
     })(action)
   }
   const engine = new UseEngine({
@@ -268,7 +267,7 @@ export function getActionsRuntime(): ActionsRuntime {
             return { ok: false, detail: 'Computer Use requires Off Grid AI Pro.' }
           }
           recordAuthenticatedTaskLaunch(action, 'computer_use')
-          // computer_task: accessibility-first, vision as the fallback tier.
+          // computer_use: accessibility-first, vision as the fallback tier.
           return computerTaskExecute(action)
         }
         return { ok: false, detail: `the '${rail}' rail is not built yet` }

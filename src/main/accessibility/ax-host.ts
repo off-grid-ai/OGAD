@@ -22,7 +22,6 @@ import { llm } from '../llm'
 import { loadActuation, type ActuationPort } from '../input/actuation'
 import { parseAxElements, type AxElement, type AxSnapshot } from './ax-elements'
 import { windowsAxBackend, type AxBackend } from './ax-win'
-import { pickTargetApp } from './ax-target'
 import { namesWebsite } from '../tools/planner-logic'
 import {
   ELEMENT_STEP_FORMAT,
@@ -35,7 +34,8 @@ import {
   emitVisionState,
   emitVisionStep,
   registerVisionSession,
-  stopVisionTask
+  stopVisionTask,
+  waitForVisionUser
 } from '../vision/vision-controller'
 import { showSupervisorWindow, hideSupervisorWindow } from '../vision/supervisor-window'
 import { getComputerUseSettings } from '../computer-use-settings'
@@ -49,6 +49,10 @@ import { encodeTaskPhase } from '../../shared/task-execution-plan'
 import { prepareTaskExecutionPlan } from '../tasks/task-execution-plan-service'
 import { registerTaskGuideHandler } from '../tasks/task-guide'
 import { resolveModelIdentity } from '../models-manager'
+import { NativeAppTargeter } from './native-app-target'
+import { createMacNativeAppPlatform } from './native-app-macos'
+import { windowsNativeAppPlatform } from './native-app-windows'
+import { automationTaskReadStatus } from '@offgrid/automation'
 
 const execFileAsync = promisify(execFile)
 
@@ -60,21 +64,6 @@ const SELF_APP_NAME = 'Off Grid AI Desktop'
  *  the loop unwinds instead of actuating again. */
 class HaltError extends Error {}
 
-/** The foreground (.regular) running apps, from the helper's NSWorkspace list.
- *  This needs no Screen-Recording grant (get-windows under-reports without it),
- *  so target resolution sees every real app the user could mean. */
-async function runningAppNames(helper: string): Promise<string[]> {
-  try {
-    const { stdout } = await execFileAsync(helper, ['--apps'], { timeout: 4_000 })
-    return stdout
-      .split(/\r?\n/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0)
-  } catch {
-    return []
-  }
-}
-
 /** The macOS backend: the Swift `text-extractor` helper (NSWorkspace apps +
  *  AX element tree) and `open -a` to foreground. Available only when the helper
  *  is present on macOS. */
@@ -82,9 +71,8 @@ const macAxBackend: AxBackend = {
   available: () => process.platform === 'darwin' && accessibilityHelperPath() !== null,
   async listApps() {
     const helper = accessibilityHelperPath()
-    return helper ? runningAppNames(helper) : []
+    return helper ? createMacNativeAppPlatform(helper).listRunning() : []
   },
-  activate: activateApp,
   snapshot: snapshotApp
 }
 
@@ -96,27 +84,17 @@ function axBackend(): AxBackend {
   return process.platform === 'win32' ? windowsAxBackend : macAxBackend
 }
 
-/** The running native app a request targets, or null. Lets the orchestrator
- *  route "do X in Slack" (Slack running) to the app via computer_task instead of
- *  a website via web_use - rail-per-surface, independent of the model's guess.
- *  Only sees RUNNING apps; [] when no accessibility backend is available. */
-export async function resolveNativeApp(goal: string): Promise<string | null> {
-  const backend = axBackend()
-  if (!backend.available()) {
-    return null
+function nativeAppTargeter(): NativeAppTargeter | null {
+  if (process.platform === 'win32') {
+    return new NativeAppTargeter(windowsNativeAppPlatform, { selfName: SELF_APP_NAME })
   }
-  return pickTargetApp(goal, await backend.listApps(), SELF_APP_NAME)
-}
-
-/** Bring the target app forward so synthetic clicks land on it. `open -a` needs
- *  no automation grant (unlike osascript), so it never trips a TCC prompt. */
-async function activateApp(appName: string): Promise<void> {
-  try {
-    await execFileAsync('open', ['-a', appName], { timeout: 3_000 })
-  } catch {
-    /* best effort - the read still works by name; a miss just means the app was
-       already frontmost or could not be resolved by open. */
+  if (process.platform === 'darwin') {
+    const helper = accessibilityHelperPath()
+    return helper
+      ? new NativeAppTargeter(createMacNativeAppPlatform(helper), { selfName: SELF_APP_NAME })
+      : null
   }
+  return null
 }
 
 /** Read one named app's interactive elements, or null when the helper is
@@ -194,8 +172,8 @@ export interface AxRouting {
 }
 
 class AxRailHost {
-  /** Resolve the target app from the goal and read its elements, for the router
-   *  to score. Null => no named running app => the caller falls to vision. */
+  /** Resolve or launch the target app and read its elements for the router.
+   * Null means no verified application target or no accessible live window. */
   async routingSnapshot(goal: string): Promise<AxRouting | null> {
     const backend = axBackend()
     if (!backend.available()) {
@@ -206,10 +184,14 @@ class AxRailHost {
     if (namesWebsite(goal)) {
       return null
     }
-    const app = pickTargetApp(goal, await backend.listApps(), SELF_APP_NAME)
-    if (!app) {
+    const targeter = nativeAppTargeter()
+    const target = targeter ? await targeter.resolve(goal) : null
+    if (!target) {
       return null
     }
+    const ready = await targeter!.ensureReady(target)
+    if (!ready) return null
+    const app = ready.runningName
     const snapshot = await backend.snapshot(app)
     if (!snapshot) {
       return null
@@ -241,8 +223,7 @@ class AxRailHost {
         steps: []
       }
     }
-    await axBackend().activate(app)
-    const guard = new VisionGuard()
+    const guard = new VisionGuard({ taskId, kind: 'computer_use' })
     const request = new AbortController()
     const settings = getComputerUseSettings()
     const activeModel = llm.activeModelInfo()
@@ -258,8 +239,7 @@ class AxRailHost {
       stopVisionTask(taskId, 'stopped with Esc', 'Stopped with Esc')
     })
     const releaseSession = registerVisionSession(taskId, guard, request)
-    // The AX rail is model-agnostic and needs no grounder, so there is no
-    // grounder notice here (unlike the vision rail).
+    // The AX rail is model-agnostic and needs no grounding-model notice.
     emitVisionState({
       taskId,
       journeyId,
@@ -368,6 +348,8 @@ class AxRailHost {
         plan,
         onPhase: (phaseId) => emitVisionStep(taskId, encodeTaskPhase(phaseId)),
         takeGuidance: () => queuedGuidance.splice(0),
+        waitForUser: (why, signal) => waitForVisionUser(taskId, why, signal),
+        signal: request.signal,
         control: guard,
         contextTokens,
         checkpointInterval: settings.checkpointInterval,
@@ -381,12 +363,15 @@ class AxRailHost {
           persistAxObservation(taskId, goal, { ...observation, frame: observationFrame })
         }
       })
+      if (!result.ok && !guard.isHalted) guard.fail(result.summary)
+      const finalStatus = automationTaskReadStatus(guard.automationStatus)
       emitVisionState({
         taskId,
         journeyId,
         goal,
-        status: guard.isHalted ? 'stopped' : result.ok ? 'done' : 'failed',
-        phase: guard.isHalted ? 'stopped' : result.ok ? 'complete' : 'failed',
+        status: finalStatus,
+        phase:
+          finalStatus === 'done' ? 'complete' : finalStatus === 'failed' ? 'failed' : 'stopped',
         currentStep: liveStep,
         currentAction: result.summary,
         summary: result.summary
@@ -400,6 +385,8 @@ class AxRailHost {
           : error instanceof Error
             ? error.message
             : 'accessibility run failed'
+      if (!guard.isHalted) guard.fail(summary)
+      const finalStatus = automationTaskReadStatus(guard.automationStatus)
       // The capture coordinator already projected its precise terminal recovery
       // state. Keep one writer for that state instead of replacing it here.
       if (!(error instanceof AxScreenCaptureError)) {
@@ -407,8 +394,8 @@ class AxRailHost {
           taskId,
           journeyId,
           goal,
-          status: guard.isHalted ? 'stopped' : 'failed',
-          phase: guard.isHalted ? 'stopped' : 'failed',
+          status: finalStatus,
+          phase: finalStatus === 'failed' ? 'failed' : 'stopped',
           currentStep: liveStep,
           currentAction: summary,
           summary
