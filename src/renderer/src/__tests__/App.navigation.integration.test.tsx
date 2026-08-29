@@ -39,12 +39,25 @@ vi.mock('../bootstrap/loadProFeaturesRenderer', () => ({
 
 let App: typeof import('../App').default
 
+function routedTabButton(label: string): HTMLButtonElement {
+  const button = screen
+    .getAllByRole('button', { name: new RegExp(`^${label}`) })
+    .find((candidate) => !candidate.className.includes('group/nav'))
+  if (!(button instanceof HTMLButtonElement)) throw new Error(`No routed tab button for ${label}`)
+  return button
+}
+
 describe('<App/> desktop navigation integration', () => {
   beforeAll(async () => {
     // App's renderer graph includes modules that capture the preload bridge at
     // module initialization. Install that real boundary once, then keep module
     // loading outside the interaction assertion's timeout budget.
-    installAppBoundary()
+    installAppBoundary({
+      getModelCatalog: async () => ({
+        kinds: ['text', 'image', 'computer_use', 'voice', 'transcription'],
+        models: []
+      })
+    })
     installAppBrowserBoundary()
     ;({ default: App } = await import('../App'))
   }, 30_000)
@@ -350,33 +363,47 @@ describe('<App/> desktop navigation integration', () => {
       name: 'Sync',
       startPath: '/devices/sharing',
       startTab: 'Sync sharing',
-      nextPath: '/devices/activity',
-      nextTab: 'Activity'
+      routes: [
+        ['Devices', '/devices'],
+        ['Activity', '/devices/activity'],
+        ['Files', '/devices/files']
+      ] as const
     },
     {
       name: 'Entities',
       startPath: '/entities/people',
       startTab: 'People',
-      nextPath: '/entities/companies',
-      nextTab: 'Companies'
+      routes: [
+        ['All', '/entities'],
+        ['Projects', '/entities/projects'],
+        ['Companies', '/entities/companies'],
+        ['Topics', '/entities/topics'],
+        ['Places', '/entities/places'],
+        ['Objects', '/entities/objects']
+      ] as const
     },
     {
       name: 'Models',
       startPath: '/models/storage',
       startTab: 'Storage',
-      nextPath: '/models',
-      nextTab: 'Text'
+      routes: [
+        ['Text', '/models'],
+        ['Image', '/models/image'],
+        ['Computer Use', '/models/computer-use'],
+        ['Voice', '/models/voice'],
+        ['Transcription', '/models/transcription']
+      ] as const
     },
     {
       name: 'Notifications',
       startPath: '/notifications/sharing',
       startTab: 'Sharing',
-      nextPath: '/notifications',
-      nextTab: 'All'
+      routes: [['All', '/notifications']] as const
     }
   ])(
-    'keeps $name tabs in direct URLs and app Back/Forward history',
-    async ({ startPath, startTab, nextPath, nextTab }) => {
+    'keeps every $name tab in direct URLs, refresh, and app Back history',
+    async ({ startPath, startTab, routes }) => {
+      const routeEntries = routes
       const { registerProView } = await import('../bootstrap/proView')
       const { proView } = await import('../../../../pro/renderer/proView')
       registerProView(proView)
@@ -397,36 +424,62 @@ describe('<App/> desktop navigation integration', () => {
       window.history.replaceState(null, '', startPath)
       const user = userEvent.setup()
 
-      render(<App />)
+      const mounted = render(<App />)
 
-      const initial = await screen.findByRole('button', { name: new RegExp(`^${startTab}`) })
+      await screen.findAllByRole('button', { name: new RegExp(`^${startTab}`) })
+      const initial = routedTabButton(startTab)
       expect(initial.getAttribute('aria-current')).toBe('page')
       expect(window.location.pathname).toBe(startPath)
 
-      await user.click(screen.getByRole('button', { name: new RegExp(`^${nextTab}`) }))
-      await waitFor(() => expect(window.location.pathname).toBe(nextPath))
+      for (const [label, path] of routeEntries) {
+        await user.click(routedTabButton(label))
+        await waitFor(() => expect(window.location.pathname).toBe(path))
+        expect(routedTabButton(label).getAttribute('aria-current')).toBe('page')
+      }
 
-      act(() => {
-        window.dispatchEvent(
-          new KeyboardEvent('keydown', { key: '[', metaKey: true, bubbles: true })
-        )
-      })
-      await waitFor(() => expect(window.location.pathname).toBe(startPath))
-      expect(
-        screen
-          .getByRole('button', { name: new RegExp(`^${startTab}`) })
-          .getAttribute('aria-current')
-      ).toBe('page')
+      const [previousTab, previousPath] = routeEntries.at(-2) ?? [startTab, startPath]
 
-      act(() => {
-        window.dispatchEvent(
-          new KeyboardEvent('keydown', { key: ']', metaKey: true, bubbles: true })
-        )
+      await user.click(screen.getByRole('button', { name: 'Back' }))
+      await waitFor(() => expect(window.location.pathname).toBe(previousPath))
+      expect(routedTabButton(previousTab).getAttribute('aria-current')).toBe('page')
+
+      mounted.unmount()
+      render(<App />)
+      await screen.findAllByRole('button', { name: new RegExp(`^${previousTab}`) })
+      expect(routedTabButton(previousTab).getAttribute('aria-current')).toBe('page')
+      expect(window.location.pathname).toBe(previousPath)
+    }
+  )
+
+  it.each([
+    ['Sync', '/devices/not-a-tab', 'Devices', '/devices'],
+    ['Entities', '/entities/not-a-tab', 'All', '/entities'],
+    ['Models', '/models/image/extra', 'Text', '/models'],
+    ['Notifications', '/notifications/approvals', 'All', '/notifications']
+  ])(
+    'recovers the invalid %s route to its default tab',
+    async (_name, invalidPath, defaultTab, canonicalPath) => {
+      const { registerProView } = await import('../bootstrap/proView')
+      const { proView } = await import('../../../../pro/renderer/proView')
+      registerProView(proView)
+      installAppBoundary({
+        isPro: true,
+        getModelCatalog: async () => ({ kinds: [], models: [] }),
+        crmListEntities: async () => [],
+        proInvoke: async (channel: string) => {
+          if (channel === 'pro:sync:status') return undefined
+          if (channel === 'pro:sync:prefs') return { prefs: null, categories: [] }
+          if (channel === 'pro:sync:model-transfer-jobs') return []
+          return undefined
+        }
       })
-      await waitFor(() => expect(window.location.pathname).toBe(nextPath))
-      expect(
-        screen.getByRole('button', { name: new RegExp(`^${nextTab}`) }).getAttribute('aria-current')
-      ).toBe('page')
+      window.history.replaceState(null, '', invalidPath)
+
+      render(<App />)
+
+      await screen.findAllByRole('button', { name: new RegExp(`^${defaultTab}`) })
+      expect(routedTabButton(defaultTab).getAttribute('aria-current')).toBe('page')
+      await waitFor(() => expect(window.location.pathname).toBe(canonicalPath))
     }
   )
 

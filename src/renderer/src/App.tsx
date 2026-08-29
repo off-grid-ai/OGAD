@@ -970,7 +970,7 @@ function AppContent() {
   // drops whatever row was selected in the old one, so a stale detail pane never rides along.
   const goToView = (view: ViewMode, subroute: string | null = null): void => {
     navigateTo(view, () => {
-      setNavigationSubroute(view === 'devices' ? subroute : null)
+      setNavigationSubroute(isInternalTabView(view) ? subroute : null)
       setSettingsSection(view === 'settings' ? subroute : null)
       setSelectedSessionId(null)
       setSelectedMemoryId(null)

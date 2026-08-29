@@ -81,14 +81,19 @@ export function canonicalInternalTabSubroute(
 
 export function internalTabPath(view: InternalTabView, subroute: string | null): string {
   const canonical = canonicalInternalTabSubroute(view, subroute)
-  return canonical ? `/${view}/${encodeURIComponent(canonical)}` : `/${view}`
+  const encoded = canonical
+    ?.split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/')
+  return encoded ? `/${view}/${encoded}` : `/${view}`
 }
 
 export function internalTabLocation(
   pathname: string
 ): { view: InternalTabView; subroute: string | null } | null {
-  const [, candidateView, encodedSubroute] = pathname.split('/', 3)
+  const [, candidateView, ...encodedSegments] = pathname.split('/')
   if (!candidateView || !isInternalTabView(candidateView)) return null
+  const encodedSubroute = encodedSegments.join('/')
   if (!encodedSubroute) return { view: candidateView, subroute: null }
   try {
     return {
