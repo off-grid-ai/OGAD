@@ -143,6 +143,7 @@ describe('AX Computer Use live supervisor projection', () => {
   })
 
   it('turns a bounded screen-capture failure into a visible terminal task state', async () => {
+    captureSources.mockResolvedValue([])
     const binDir = path.join(profile, 'bin')
     const helper = path.join(binDir, 'computer-use-capture')
     fs.mkdirSync(binDir, { recursive: true })
@@ -199,7 +200,12 @@ describe('AX Computer Use live supervisor projection', () => {
       'Screen preview is unavailable. Retrying capture (2/3).',
       'Screen preview failed: Off Grid AI could not capture the screen after 3 attempts. Check screen-recording permission, unlock the screen, then retry Computer Use.'
     ])
-    expect(Number(fs.readFileSync(nativeCaptureAttempts, 'utf8'))).toBe(3)
-    expect(captureSources).not.toHaveBeenCalled()
+    if (process.platform === 'darwin') {
+      expect(Number(fs.readFileSync(nativeCaptureAttempts, 'utf8'))).toBe(3)
+      expect(captureSources).not.toHaveBeenCalled()
+    } else {
+      expect(fs.existsSync(nativeCaptureAttempts)).toBe(false)
+      expect(captureSources).toHaveBeenCalledTimes(3)
+    }
   })
 })

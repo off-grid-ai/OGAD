@@ -295,6 +295,9 @@ describe('assistant reply speech integration (#105)', () => {
     const user = userEvent.setup()
     renderChat({ conversationId: 'conversation-b' })
 
+    await waitFor(() => expect(inTranscript('Conversation B baseline')).toBeTruthy(), {
+      timeout: 10_000
+    })
     await user.click(await screen.findByRole('button', { name: 'Speak' }))
     expect(await screen.findByRole('button', { name: 'Stop' }, { timeout: 10_000 })).toBeTruthy()
 
@@ -314,6 +317,9 @@ describe('assistant reply speech integration (#105)', () => {
     const user = userEvent.setup()
     renderChat({ conversationId: 'conversation-b' })
 
+    await waitFor(() => expect(inTranscript('Conversation B baseline')).toBeTruthy(), {
+      timeout: 10_000
+    })
     await user.click(await screen.findByRole('button', { name: 'Speak' }))
 
     expect((await screen.findByRole('alert')).textContent).toMatch(
@@ -368,7 +374,10 @@ describe('assistant reply speech integration (#105)', () => {
     })
     await user.click(screen.getByText('Show transcript'))
     expect(screen.getByText('Schedule the stable release review')).toBeTruthy()
-    expect(inTranscript('The release review is scheduled locally.')).toBeTruthy()
+    await waitFor(
+      () => expect(inTranscript('The release review is scheduled locally.')).toBeTruthy(),
+      { timeout: 10_000 }
+    )
     expect((await screen.findByRole('alert')).textContent).toMatch(
       /speech could not be generated.*text-to-speech is installed in settings/i
     )
@@ -398,7 +407,10 @@ describe('assistant reply speech integration (#105)', () => {
     const reopenedTranscripts = await screen.findAllByText('Show transcript')
     expect(reopenedTranscripts).toHaveLength(1)
     await user.click(reopenedTranscripts[0]!)
-    expect(inTranscript('The release review is scheduled locally.')).toBeTruthy()
+    await waitFor(
+      () => expect(inTranscript('The release review is scheduled locally.')).toBeTruthy(),
+      { timeout: 10_000 }
+    )
     expect(database.getSetting('ttsVoice', '')).toBe('af_bella')
     expect(database.getRagMessages(conversationId)).toHaveLength(2)
 
