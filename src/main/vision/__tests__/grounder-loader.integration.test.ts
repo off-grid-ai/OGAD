@@ -47,7 +47,7 @@ function lifecycle(): {
 }
 
 describe('Computer Use specialist lifecycle', () => {
-  it('loads the specialist for one hybrid grounded action and restores the text reasoner', async () => {
+  it('keeps the specialist resident between actions when the text reasoner is remote', async () => {
     const h = lifecycle()
     const run = createGrounderRunner({
       ...h.dependencies,
@@ -59,13 +59,27 @@ describe('Computer Use specialist lifecycle', () => {
       expect(h.activeModelId()).toBe(SPECIALIST)
     })
 
-    expect(h.activeModelId()).toBe(CHAT_MODEL)
+    expect(h.activeModelId()).toBe(SPECIALIST)
     expect(h.activeRemote()).toEqual(REMOTE)
     expect(h.events).toEqual([
       'suspend-remote',
       `load:${SPECIALIST}`,
       'ground-action',
-      `restore-local:${CHAT_MODEL}`,
+      `restore-remote:${CHAT_MODEL}`
+    ])
+
+    await run(async () => {
+      h.events.push('next-ground-action')
+      expect(h.activeModelId()).toBe(SPECIALIST)
+    })
+
+    expect(h.events).toEqual([
+      'suspend-remote',
+      `load:${SPECIALIST}`,
+      'ground-action',
+      `restore-remote:${CHAT_MODEL}`,
+      'suspend-remote',
+      'next-ground-action',
       `restore-remote:${CHAT_MODEL}`
     ])
   })
@@ -84,18 +98,17 @@ describe('Computer Use specialist lifecycle', () => {
 
     expect(output.result).toBe('complete')
     expect(taskModel).toBe(SPECIALIST)
-    expect(h.activeModelId()).toBe(CHAT_MODEL)
+    expect(h.activeModelId()).toBe(SPECIALIST)
     expect(h.activeRemote()).toEqual(REMOTE)
     expect(h.events).toEqual([
       'suspend-remote',
       `load:${SPECIALIST}`,
       'run',
-      `restore-local:${CHAT_MODEL}`,
       `restore-remote:${CHAT_MODEL}`
     ])
   })
 
-  it('restores local and remote models when the specialist task fails', async () => {
+  it('restores the remote reasoner and keeps the specialist resident when the task fails', async () => {
     const h = lifecycle()
     const run = createGrounderRunner(h.dependencies)
 
@@ -106,15 +119,13 @@ describe('Computer Use specialist lifecycle', () => {
       })
     ).rejects.toThrow('browser task failed')
 
-    expect(h.activeModelId()).toBe(CHAT_MODEL)
+    expect(h.activeModelId()).toBe(SPECIALIST)
     expect(h.activeRemote()).toEqual(REMOTE)
-    expect(h.events.slice(-2)).toEqual([
-      `restore-local:${CHAT_MODEL}`,
-      `restore-remote:${CHAT_MODEL}`
-    ])
+    expect(h.events.at(-1)).toBe(`restore-remote:${CHAT_MODEL}`)
+    expect(h.events).not.toContain(`restore-local:${CHAT_MODEL}`)
   })
 
-  it('restores local and remote models when the specialist task is aborted', async () => {
+  it('restores the remote reasoner and keeps the specialist resident when the task is aborted', async () => {
     const h = lifecycle()
     const run = createGrounderRunner(h.dependencies)
     const controller = new AbortController()
@@ -128,11 +139,28 @@ describe('Computer Use specialist lifecycle', () => {
       })
     ).rejects.toMatchObject({ name: 'AbortError' })
 
-    expect(h.activeModelId()).toBe(CHAT_MODEL)
+    expect(h.activeModelId()).toBe(SPECIALIST)
     expect(h.activeRemote()).toEqual(REMOTE)
-    expect(h.events.slice(-2)).toEqual([
-      `restore-local:${CHAT_MODEL}`,
-      `restore-remote:${CHAT_MODEL}`
+    expect(h.events.at(-1)).toBe(`restore-remote:${CHAT_MODEL}`)
+    expect(h.events).not.toContain(`restore-local:${CHAT_MODEL}`)
+  })
+
+  it('restores the local chat model when no remote reasoner exists', async () => {
+    const h = lifecycle()
+    const run = createGrounderRunner({
+      ...h.dependencies,
+      activeRemote: () => null
+    })
+
+    await run(async () => {
+      h.events.push('run')
+    })
+
+    expect(h.activeModelId()).toBe(CHAT_MODEL)
+    expect(h.events).toEqual([
+      `load:${SPECIALIST}`,
+      'run',
+      `restore-local:${CHAT_MODEL}`
     ])
   })
 

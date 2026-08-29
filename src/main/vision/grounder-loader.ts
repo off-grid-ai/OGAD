@@ -172,9 +172,14 @@ export function createGrounderRunner(
       },
       run: task,
       // With no prior resident model there is nothing to restore: the callback
-      // no-ops and the selected specialist stays resident after the run.
+      // no-ops and the selected specialist stays resident after the run. A remote
+      // reasoner does not need the prior local chat model either. Keep the local
+      // specialist resident between grounded actions and restore only the remote
+      // transport; otherwise every task step pays two multi-GB model reloads.
       restore: async () => {
-        if (loadSelected && previousLocalId) await dependencies.restoreLocal(previousLocalId)
+        if (loadSelected && previousLocalId && !previousRemote) {
+          await dependencies.restoreLocal(previousLocalId)
+        }
         if (previousRemote) dependencies.restoreRemote(previousRemote)
       },
       now
