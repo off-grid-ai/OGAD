@@ -1,8 +1,13 @@
 import type { PermissionStatusContract, SystemHealthContract } from '../shared/ipc-contracts'
+import { llm } from './llm'
 import { getPermissionStatus } from './permissions'
 
 interface IpcStatusRegistrar {
   handle: (channel: string, listener: (event: unknown, ...args: unknown[]) => unknown) => unknown
+}
+
+interface ChatHealthPublisher {
+  publish: (health: SystemHealthContract['components'][number]) => void
 }
 
 function permissionComponents(
@@ -78,10 +83,31 @@ export async function getRenderedSystemHealth(): Promise<SystemHealthContract> {
 /** Narrow registration seam shared by Electron and the in-process integration
  * harness. The injectable value is ipcMain itself, an uncontrollable native
  * transport boundary; every Off Grid AI status owner above remains real. */
-export function setupSystemStatusIpc(target: IpcStatusRegistrar): void {
+export function setupSystemStatusIpc(
+  target: IpcStatusRegistrar,
+  chatHealthPublisher?: ChatHealthPublisher
+): void {
   target.handle('system:chat-health', () =>
     import('./setup').then((module) => module.getChatHealth())
   )
   target.handle('system:health', () => getRenderedSystemHealth())
   target.handle('permissions:get-status', () => getPermissionStatus())
+
+  if (chatHealthPublisher) {
+    let revision = 0
+    let lastPublished = ''
+    llm.onHealthInvalidated(() => {
+      const requestedRevision = ++revision
+      void import('./setup')
+        .then((module) => module.getChatHealth())
+        .then((health) => {
+          if (requestedRevision !== revision) return
+          const serialized = JSON.stringify(health)
+          if (serialized === lastPublished) return
+          lastPublished = serialized
+          chatHealthPublisher.publish(health)
+        })
+        .catch((error) => console.error('[system-health] chat refresh failed:', error))
+    })
+  }
 }

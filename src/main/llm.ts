@@ -88,6 +88,7 @@ export interface ChatStreamResult extends StreamResult {
 }
 
 export class LLMService {
+  private readonly healthInvalidationListeners = new Set<() => void>()
   private server: ChildProcess | null = null
   // Off the contested 8080 (collides with other local dev servers) onto a
   // less-trafficked port so the model server reliably binds.
@@ -212,6 +213,24 @@ export class LLMService {
       }
     } catch {
       /* defaults */
+    }
+  }
+
+  /** Subscribe to process-lifecycle invalidations. This does not define health
+   * status; setup.getChatHealth remains the one owner that resolves the current
+   * process facts and live endpoint probe into a product status. */
+  onHealthInvalidated(listener: () => void): () => void {
+    this.healthInvalidationListeners.add(listener)
+    return () => this.healthInvalidationListeners.delete(listener)
+  }
+
+  private invalidateHealth(): void {
+    for (const listener of this.healthInvalidationListeners) {
+      try {
+        listener()
+      } catch (error) {
+        console.error('[LLMService] health listener failed:', error)
+      }
     }
   }
 
@@ -503,6 +522,7 @@ export class LLMService {
     this.initialized = false
     this.restartTimes = [] // new model — start its crash budget fresh
     this.resolveModel()
+    this.invalidateHealth()
   }
 
   /** Switch the active model without terminating a generation already using it. */
@@ -795,6 +815,7 @@ export class LLMService {
     this.server = proc
     this.activeEnginePath = serverPath
     this.stderrTail = []
+    this.invalidateHealth()
     let abandoned = false // set when we give up on this proc so its close handler is inert
     // True until waitForReady() confirms THIS engine. A close while probing is a failed
     // LAUNCH, which launchWithFallback is already walking past - see crash-policy.ts.
@@ -837,6 +858,7 @@ export class LLMService {
           )
         }
       }
+      this.invalidateHealth()
       // Only recover from a genuine crash of an engine that WAS healthy. A deliberate
       // kill stays dead (otherwise llama-server cannot be stopped without killing the
       // app), and a launch-time failure belongs to launchWithFallback's ladder.
@@ -852,6 +874,7 @@ export class LLMService {
       console.log('[LLMService] Vision server ready!')
       this.initialized = true
       this.lastErrorMsg = null // healthy again — clear any prior failure reason
+      this.invalidateHealth()
       return true
     } catch (e) {
       console.error(`[LLMService] engine at ${binDir} failed to start:`, e)
@@ -868,6 +891,7 @@ export class LLMService {
         this.server = null
         this.initialized = false
       }
+      this.invalidateHealth()
       return false
     }
   }
@@ -912,6 +936,7 @@ export class LLMService {
     if (free === null) {
       this.lastErrorMsg = modelPortConflictReason(this.port)
       console.error(`[LLMService] ${this.lastErrorMsg}`)
+      this.invalidateHealth()
       throw new Error(this.lastErrorMsg)
     }
     console.warn(
@@ -1364,6 +1389,7 @@ export class LLMService {
       this.server.kill()
       this.server = null
       this.initialized = false
+      this.invalidateHealth()
     }
   }
 
@@ -1441,6 +1467,7 @@ export class LLMService {
     // Leave the engine down but allow a future explicit start; releasePause clears the block
     // without warming a server (on-demand — the next chat/tool turn respawns).
     this.paused = false
+    this.invalidateHealth()
     return { outcome, portFree: outcome !== 'stuck' && reap.liveOwners.length === 0 }
   }
 

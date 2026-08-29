@@ -196,23 +196,43 @@ function ModelStatusDot({
   const [status, setStatus] = useState<ChatHealth>(null)
   useEffect(() => {
     let live = true
+    let refreshInFlight: Promise<void> | null = null
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const api = (window as any).api
-    const poll = async (): Promise<void> => {
-      try {
-        const chat = await api?.chatHealth?.()
-        const s: ChatHealth =
-          chat?.status === 'ready' ? 'ready' : chat?.status === 'starting' ? 'starting' : 'down'
-        if (live) setStatus(s)
-      } catch {
-        if (live) setStatus('down')
-      }
+    const applyHealth = (chat: { status?: string } | null | undefined): void => {
+      const next: ChatHealth =
+        chat?.status === 'ready' ? 'ready' : chat?.status === 'starting' ? 'starting' : 'down'
+      if (live) setStatus(next)
     }
-    void poll()
-    const id = setInterval(poll, 5000)
+    const refresh = (): void => {
+      if (refreshInFlight) return
+      refreshInFlight = Promise.resolve(api?.chatHealth?.())
+        .then(applyHealth)
+        .catch(() => {
+          if (live) setStatus('down')
+        })
+        .finally(() => {
+          refreshInFlight = null
+        })
+    }
+    const refreshWhenVisible = (): void => {
+      if (document.visibilityState === 'visible') refresh()
+    }
+    const offChanged = api?.onChatHealthChanged?.(applyHealth)
+    refresh()
+    window.addEventListener('focus', refreshWhenVisible)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    const id = setInterval(refreshWhenVisible, 60_000)
     return () => {
       live = false
       clearInterval(id)
+      window.removeEventListener('focus', refreshWhenVisible)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+      try {
+        offChanged?.()
+      } catch {
+        /* preload subscription already closed */
+      }
     }
   }, [])
   const color =

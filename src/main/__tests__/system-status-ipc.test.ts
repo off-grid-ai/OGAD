@@ -20,6 +20,15 @@ vi.mock('../permissions', () => permissions)
 const setup = vi.hoisted(() => ({ getChatHealth: vi.fn(), getSystemHealth: vi.fn() }))
 vi.mock('../setup', () => setup)
 
+const llmBoundary = vi.hoisted(() => ({
+  listener: undefined as (() => void) | undefined,
+  onHealthInvalidated: vi.fn((listener: () => void) => {
+    llmBoundary.listener = listener
+    return vi.fn()
+  })
+}))
+vi.mock('../llm', () => ({ llm: llmBoundary }))
+
 const GRANTED = {
   accessibility: true,
   screenRecording: true,
@@ -200,6 +209,25 @@ describe('registering the status channels', () => {
       id: 'chat',
       status: 'ready'
     })
+    expect(setup.getChatHealth).toHaveBeenCalledTimes(1)
+    expect(setup.getSystemHealth).not.toHaveBeenCalled()
+    expect(permissions.getPermissionStatus).not.toHaveBeenCalled()
+  })
+
+  it('publishes the authoritative chat record when the engine lifecycle changes', async () => {
+    const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>()
+    const publish = vi.fn()
+    const { setupSystemStatusIpc } = await import('../system-status-ipc')
+
+    setupSystemStatusIpc(
+      { handle: (channel, listener) => handlers.set(channel, listener) },
+      { publish }
+    )
+    llmBoundary.listener?.()
+
+    await vi.waitFor(() =>
+      expect(publish).toHaveBeenCalledWith({ id: 'chat', label: 'Chat model', status: 'ready' })
+    )
     expect(setup.getChatHealth).toHaveBeenCalledTimes(1)
     expect(setup.getSystemHealth).not.toHaveBeenCalled()
     expect(permissions.getPermissionStatus).not.toHaveBeenCalled()

@@ -490,7 +490,12 @@ export function setupIPC() {
   setupVoiceTranscriptionIpc()
   const db = getDB()
   setupTtsIpc()
-  setupSystemStatusIpc(ipcMain)
+  setupSystemStatusIpc(ipcMain, {
+    publish: (health) =>
+      BrowserWindow.getAllWindows().forEach((window) =>
+        window.webContents.send('system:chat-health-changed', health)
+      )
+  })
 
   ipcMain.handle('db:get-memories', (_, limit: number = 50, appName?: string) => {
     let query = 'SELECT * FROM memories '

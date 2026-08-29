@@ -528,6 +528,12 @@ const offGridApi = {
   // Setup + system health
   chatHealth: (): Promise<SystemHealthComponentContract> =>
     ipcRenderer.invoke('system:chat-health'),
+  onChatHealthChanged: (callback: (health: SystemHealthComponentContract) => void) => {
+    const subscription = (_event: unknown, health: SystemHealthComponentContract): void =>
+      callback(health)
+    ipcRenderer.on('system:chat-health-changed', subscription)
+    return unsubscribe('system:chat-health-changed', subscription)
+  },
   systemHealth: (): Promise<SystemHealthContract> => ipcRenderer.invoke('system:health'),
   setupRecommendation: (mode?: string) => ipcRenderer.invoke('setup:recommendation', mode),
   setupPlan: (mode?: string) => ipcRenderer.invoke('setup:plan', mode),

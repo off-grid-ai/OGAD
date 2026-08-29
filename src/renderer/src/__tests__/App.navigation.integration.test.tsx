@@ -143,23 +143,45 @@ describe('<App/> desktop navigation integration', () => {
     expect(screen.getByText('Configure it for me')).toBeTruthy()
   })
 
-  it('keeps the idle model indicator current without reading full machine health', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true })
-    const chatHealth = vi
-      .fn()
-      .mockResolvedValueOnce({ id: 'chat', label: 'Chat model', status: 'starting' })
-      .mockResolvedValue({ id: 'chat', label: 'Chat model', status: 'ready' })
+  it('uses lifecycle updates and only checks idle chat health once per visible minute', async () => {
+    vi.useFakeTimers()
+    let publishHealth: ((health: { status: string }) => void) | undefined
+    let visibility: DocumentVisibilityState = 'visible'
+    vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility)
+    const chatHealth = vi.fn().mockResolvedValue({
+      id: 'chat',
+      label: 'Chat model',
+      status: 'starting'
+    })
     const systemHealth = vi.fn(async () => ({ ramGb: 16, components: [] }))
-    installAppBoundary({ chatHealth, systemHealth })
+    installAppBoundary({
+      chatHealth,
+      systemHealth,
+      onChatHealthChanged: (callback: (health: { status: string }) => void) => {
+        publishHealth = callback
+        return vi.fn()
+      }
+    })
 
     render(<App />)
 
-    expect(
-      await screen.findByRole('button', { name: /Model server: model starting/i })
-    ).toBeTruthy()
-    await act(async () => vi.advanceTimersByTimeAsync(5_000))
-    expect(await screen.findByRole('button', { name: /Model server: model running/i })).toBeTruthy()
-    expect(chatHealth).toHaveBeenCalledTimes(2)
+    await act(async () => Promise.resolve())
+    expect(screen.getByRole('button', { name: /Model server: model starting/i })).toBeTruthy()
+    act(() => publishHealth?.({ status: 'ready' }))
+    expect(screen.getByRole('button', { name: /Model server: model running/i })).toBeTruthy()
+    const initialReads = chatHealth.mock.calls.length
+    await act(async () => vi.advanceTimersByTimeAsync(59_999))
+    expect(chatHealth).toHaveBeenCalledTimes(initialReads)
+    await act(async () => vi.advanceTimersByTimeAsync(1))
+    expect(chatHealth).toHaveBeenCalledTimes(initialReads + 1)
+
+    visibility = 'hidden'
+    await act(async () => vi.advanceTimersByTimeAsync(60_000))
+    expect(chatHealth).toHaveBeenCalledTimes(initialReads + 1)
+
+    visibility = 'visible'
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+    expect(chatHealth).toHaveBeenCalledTimes(initialReads + 2)
     expect(systemHealth).not.toHaveBeenCalled()
   })
 
