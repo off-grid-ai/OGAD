@@ -9,6 +9,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Blob as NodeBlob } from 'node:buffer'
+import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -23,10 +24,19 @@ import {
   type FakeLlamaServer
 } from '../src/main/__tests__/harness/fake-llama-server'
 
-type IpcEvent = { sender: { send: (channel: string, payload: unknown) => void } }
+type IpcEvent = {
+  sender: EventEmitter & {
+    id: number
+    send: (channel: string, payload: unknown) => void
+  }
+}
 type IpcHandler = (event: IpcEvent, ...args: unknown[]) => unknown
 const handlers = new Map<string, IpcHandler>()
 const listeners = new Map<string, (event: IpcEvent, ...args: unknown[]) => unknown>()
+const rendererSender = Object.assign(new EventEmitter(), {
+  id: 1,
+  send: (_channel: string, _payload: unknown): void => undefined
+})
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-memory-chat-tts-'))
 const dataDir = path.join(root, 'data')
 const resourceDir = path.join(root, 'resources')
@@ -128,7 +138,7 @@ function resourceExecutable(relativePath: string, source: string): void {
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   const handler = handlers.get(channel)
   if (!handler) throw new Error(`IPC handler not registered: ${channel}`)
-  const result = Promise.resolve(handler({ sender: { send: () => undefined } }, ...args))
+  const result = Promise.resolve(handler({ sender: rendererSender }, ...args))
   if (channel === 'tts:speak') {
     pendingSpeech.add(result)
     void result.finally(() => pendingSpeech.delete(result)).catch(() => undefined)
@@ -149,8 +159,9 @@ function installProductionVoiceBridge(boundary: ChatBoundary): void {
       invoke('rag:truncate-messages', id, keepCount),
     getSettings: () => invoke('settings:get'),
     saveSetting: (key: string, value: unknown) => invoke('settings:save', key, value),
-    transcribeAudio: (audio: ArrayBuffer | Uint8Array, ext?: string) =>
-      invoke('voice:transcribe', audio, ext),
+    transcribeAudio: (audio: ArrayBuffer | Uint8Array, ext: string, requestId: string) =>
+      invoke('voice:transcribe', audio, ext, requestId),
+    cancelTranscription: (requestId: string) => invoke('voice:cancel-transcription', requestId),
     ragChat: (...args: unknown[]) => invoke('rag:chat', ...args),
     speak: (text: string, voice?: string) => invoke('tts:speak', text, voice)
   })
