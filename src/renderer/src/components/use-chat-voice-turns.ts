@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { transcriptionRecoveryMessage } from '../../../shared/transcription-recovery'
 import {
   SpeechEndpointTimer,
   audioFilename,
@@ -246,7 +247,8 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
         console.error('Transcription failed', cause)
         if (!mountedRef.current || sequence !== sequenceRef.current) return
         setError(
-          'Transcription failed. Check the speech-to-text model in Settings > Setup & health.'
+          transcriptionRecoveryMessage(cause) ??
+            'Transcription failed. Check the speech-to-text model in Settings > Setup & health.'
         )
         updateSuspended(optionsRef.current.mode === 'handsfree')
         updatePhase('idle')

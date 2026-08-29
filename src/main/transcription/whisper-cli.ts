@@ -15,6 +15,9 @@ import { catalogEngine } from './classify'
 import { decodeToWavArgs, DECODE_TIMEOUT_MS } from './ffmpeg-decode'
 import type { TranscriptionService, Transcript, TranscribeOptions, Seg } from './types'
 import { runNativeTranscriptionProcess } from './native-process'
+import { HINDI_SCRIPT_RECOVERY_MESSAGE } from '../../shared/transcription-recovery'
+
+const HINDI_DEVANAGARI_PROMPT = 'यह ऑडियो हिंदी में है। हिंदी को केवल देवनागरी लिपि में लिखें।'
 
 /** Resolve the bundled whisper-cli across dev / packaged layouts. System Health
  * reuses this exact runtime resolver so its Installed claim cannot drift from
@@ -113,8 +116,11 @@ export async function transcribeWithHindiQualityRetry({
   if (!hindiTranscriptNeedsQualityRetry(stdout, language)) return stdout
 
   const retryModel = strongerMultilingualWhisperModel(model, modelFiles, modelDir)
-  if (retryModel) stdout = await run(retryModel)
-  return stdout
+  if (retryModel) {
+    stdout = await run(retryModel)
+    if (!hindiTranscriptNeedsQualityRetry(stdout, language)) return stdout
+  }
+  throw new Error(HINDI_SCRIPT_RECOVERY_MESSAGE)
 }
 
 /** Find the model to use for accurate (final) transcription. Prefers a
@@ -215,7 +221,11 @@ class WhisperCliTranscription implements TranscriptionService {
       // -mc 0 + -sns: kill the repetition/hallucination loop + non-speech tokens.
       if (suppress) args.push('-mc', '0', '-sns')
       // Bias toward custom vocabulary (names/jargon) via the initial prompt.
-      const prompt = (opts.prompt ?? '').trim()
+      const customPrompt = (opts.prompt ?? '').trim()
+      const prompt =
+        language === 'hi'
+          ? [HINDI_DEVANAGARI_PROMPT, customPrompt].filter(Boolean).join(' ')
+          : customPrompt
       if (prompt) args.push('--prompt', prompt.slice(0, 800))
       const stdout = await transcribeWithHindiQualityRetry({
         language,
