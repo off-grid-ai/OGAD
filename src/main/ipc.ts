@@ -1589,8 +1589,8 @@ export function setupIPC() {
     import('./models-manager').then((m) => m.setActiveModel(modelId))
   )
   // Single activation seam: route any model to the right backend by its kind.
-  ipcMain.handle('models:activate', (_, modelId: string) =>
-    import('./models-manager').then((m) => m.activateModel(modelId))
+  ipcMain.handle('models:activate', (_, modelId: string, requestedKind?: string) =>
+    import('./models-manager').then((m) => m.activateModel(modelId, requestedKind))
   )
   ipcMain.handle('models:get-active', () =>
     import('./models-manager').then((m) => m.getActiveModel())

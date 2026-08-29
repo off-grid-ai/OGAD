@@ -484,8 +484,10 @@ const offGridApi = {
   cancelModelDownload: (modelId: string) => ipcRenderer.invoke('models:cancel-download', modelId),
   deleteModel: (modelId: string) => ipcRenderer.invoke('models:delete', modelId),
   setActiveModel: (modelId: string) => ipcRenderer.invoke('models:set-active', modelId),
-  // Activate any model for its type — UI calls this and never branches on kind.
-  activateModel: (modelId: string) => ipcRenderer.invoke('models:activate', modelId),
+  // Activate any model for its type. A dual-capability model can name the rail
+  // that the user selected; main validates that rail against the catalog.
+  activateModel: (modelId: string, requestedKind?: string) =>
+    ipcRenderer.invoke('models:activate', modelId, requestedKind),
   getActiveModel: () => ipcRenderer.invoke('models:get-active'),
   getActiveModelIds: () => ipcRenderer.invoke('models:active-ids'),
   setActiveModalModel: (kind: string, modelId: string | null) =>

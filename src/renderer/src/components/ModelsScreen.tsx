@@ -40,9 +40,11 @@ import {
   determineCredibility,
   hasActiveFilters,
   initialFilterState,
+  modelSupportsKind,
   recommendedImageModelId,
   type FilterState,
-  type Credibility
+  type Credibility,
+  type ModelKind
 } from '@offgrid/models'
 import {
   useModelDownloadProgress,
@@ -132,7 +134,7 @@ interface ModelEntry {
   id: string
   sourceModelId?: string
   name: string
-  kind: string
+  kind: ModelKind
   org?: string
   description?: string
   params?: number
@@ -145,6 +147,7 @@ interface ModelEntry {
   quant?: string
   availability?: 'ready' | 'coming_soon'
   availabilityNote?: string
+  grounder?: boolean
   remoteServerId?: string
   remoteModelId?: string
 }
@@ -501,7 +504,10 @@ export function ModelsScreen({
     setSwitching(id)
     try {
       // Single activation seam — main process routes by kind (chat LLM vs modal default).
-      const res = await api.activateModel?.(id)
+      const res =
+        activeKind === 'computer_use'
+          ? await api.activateModel?.(id, activeKind)
+          : await api.activateModel?.(id)
       if (res?.success) refreshActive()
       else setSwitchError(res?.error ? `Couldn't switch: ${res.error}` : "Couldn't switch model")
     } catch (e) {
@@ -535,7 +541,9 @@ export function ModelsScreen({
   }, [query, activeKind, searchEnabled])
 
   const list = models.filter(
-    (m) => m.kind === activeKind || (activeKind === 'text' && m.kind === 'vision')
+    (model) =>
+      modelSupportsKind(model, activeKind as Parameters<typeof modelSupportsKind>[1]) ||
+      (activeKind === 'text' && modelSupportsKind(model, 'vision'))
   )
 
   // The image model recommended for this machine's RAM (Light Q4 on <=16GB, full
@@ -1105,7 +1113,7 @@ export function ModelsScreen({
                       {
                         id: r.id,
                         name: r.name,
-                        kind: activeKind,
+                        kind: activeKind as ModelKind,
                         org: r.org,
                         files: [],
                         params: r.params ?? undefined,

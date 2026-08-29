@@ -812,7 +812,8 @@ export async function getActiveModelIds(): Promise<string[]> {
  * never branch on kind. Adding a new modality needs zero caller changes.
  */
 export async function activateModel(
-  modelId: string
+  modelId: string,
+  requestedKind?: string
 ): Promise<{ success: boolean; error?: string }> {
   const remote = parseRemoteVisionModelId(modelId)
   if (remote) {
@@ -821,19 +822,25 @@ export async function activateModel(
       : { success: false, error: 'Remote model is no longer available.' }
   }
   let kind: string | undefined
+  let requestedModal: Modality | null = null
   if (modelId.startsWith('local:')) {
     kind = getLocalModels().find((m) => m.id === modelId)?.kind
   } else {
-    const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models')
+    const { CATALOG, modelSupportsKind, resolveHuggingFaceModel } = await import('@offgrid/models')
     const downloaded = reconcileDownloadedModelRegistry(
       llm.getModelsDir(),
       CATALOG as unknown as CatalogEntry[]
     )
+    const catalogEntry = CATALOG.find((m) => m.id === modelId)
     kind =
       downloadedVariant(downloaded, modelId)?.kind ??
-      (CATALOG.find((m) => m.id === modelId) ?? (await resolveHuggingFaceModel(modelId)))?.kind
+      (catalogEntry ?? (await resolveHuggingFaceModel(modelId)))?.kind
+    const requested = requestedKind as Parameters<typeof modelSupportsKind>[1]
+    if (catalogEntry && requestedKind && modelSupportsKind(catalogEntry, requested)) {
+      requestedModal = modalityForModel(requestedKind)
+    }
   }
-  const modal = modalityForModel(kind)
+  const modal = requestedModal ?? modalityForModel(kind)
   const result = modal ? await setActiveModalChoice(modal, modelId) : await setActiveModel(modelId)
   if (result.success && kind && isChatLoadable(kind)) deactivateRemoteVisionModel()
   return result

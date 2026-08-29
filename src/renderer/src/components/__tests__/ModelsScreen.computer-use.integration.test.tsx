@@ -6,9 +6,9 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { CATALOG, MODEL_KINDS } from '@offgrid/models'
+import { CATALOG, MODEL_KINDS, modelsByKind } from '@offgrid/models'
 
-const computerUseModels = CATALOG.filter((model) => model.kind === 'computer_use')
+const computerUseModels = modelsByKind('computer_use')
 const uiMate = computerUseModels.find((model) => model.id === 'bartowski/tencent_UI-Mate-9B-GGUF')
 const uiTars = computerUseModels.find((model) => model.id === 'mradermacher/UI-TARS-1.5-7B-GGUF')
 if (!uiMate || !uiTars) throw new Error('Computer Use catalog fixtures are missing')
@@ -18,6 +18,7 @@ const comingSoonNames = computerUseModels
   .map((model) => model.name)
 
 let activeIds: string[] = []
+let activationRequests: Array<[string, string?]> = []
 
 ;(globalThis as unknown as { window: { api: unknown } }).window.api = {
   systemHealth: async () => ({ ramGb: 34 }),
@@ -26,7 +27,8 @@ let activeIds: string[] = []
   getModelVisionStatus: async () => ({}),
   getActiveModelIds: async () => activeIds,
   estimateModelFit: async () => ({ level: 'ok' }),
-  activateModel: async (id: string) => {
+  activateModel: async (id: string, requestedKind?: string) => {
+    activationRequests.push([id, requestedKind])
     activeIds = [id]
     return { success: true }
   },
@@ -42,6 +44,7 @@ beforeAll(async () => {
 })
 afterEach(() => {
   activeIds = []
+  activationRequests = []
   cleanup()
 })
 
@@ -81,6 +84,7 @@ describe('<ModelsScreen/> Computer Use catalog journey', () => {
     expect(within(installed).getByText('UI-Mate-9B')).toBeTruthy()
     expect(within(available).getByText('UI-TARS-1.5-7B')).toBeTruthy()
     expect(within(available).getByText('UI-Mate-27B')).toBeTruthy()
+    expect(within(available).getByText('Holo3.1-4B')).toBeTruthy()
     // Counts come FROM the catalog, never re-hardcoded here: an entry moving rails
     // is a catalog decision, and a literal copied into the test would just move the
     // duplication instead of tracking it.
@@ -111,6 +115,7 @@ describe('<ModelsScreen/> Computer Use catalog journey', () => {
 
     await user.click(screen.getByRole('button', { name: 'Use' }))
     expect(await screen.findByText('Active')).toBeTruthy()
+    expect(activationRequests.at(-1)).toEqual([uiMate.id, 'computer_use'])
 
     const uiTarsCard = screen.getByText('UI-TARS-1.5-7B').closest('[role="listitem"]')
     expect(uiTarsCard).toBeTruthy()
