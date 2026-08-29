@@ -24,7 +24,6 @@ import type { NativeActionCommand, NativeActionResponse } from '../actions/nativ
 import {
   actionTypeForTool,
   buildNativeToolSchemas,
-  canonicalNativeToolName,
   findNativeToolSpec,
   isTaskAction,
   specsForPlatform,
@@ -49,7 +48,7 @@ export interface NativeActionToolBoundary {
   /** Browser Use and Computer Use are paid capabilities. */
   isProEntitled: () => boolean
   actions?: ActionsPort
-  /** Called when a computer_task is queued: warns the chat, at queue time, if
+  /** Called when a computer_use task is queued: warns the chat, at queue time, if
    *  the loaded model is not a grounder AND the task will fall to the vision
    *  rail (an AX-drivable app needs no grounder). Takes the goal so it can check
    *  AX viability for the target app. Injected so the broadcast is faked in
@@ -57,8 +56,8 @@ export interface NativeActionToolBoundary {
   announceComputerTask?: (goal: string) => void
 }
 
-/** How long the tool waits for a free-build action to finish before calling
- *  it pending (the helper's own timeout is 20s). */
+/** How long a short native action may keep the model turn open. Web Use and
+ * Computer Use return as soon as their durable task has started. */
 const OUTCOME_WAIT_MS = 30_000
 
 function engineResult(
@@ -132,7 +131,7 @@ export class NativeActionToolExtension implements ToolExtension {
   /** What the Tools settings tab lists and toggles. A getter, not a field: the set depends on the
    *  platform and the live pro entitlement, so a value captured at construction would keep showing
    *  a stale list after an upgrade. Without this the extension contributed nothing to listTools(),
-   *  which is why every native action - web_use and computer_task included - was invisible and
+   *  which is why every native action - web_use and computer_use included - was invisible and
    *  untoggleable in Settings even while the model could call it. */
   get settings(): readonly { name: string; description: string }[] {
     return specsForPlatform(this.platform, this.boundary.isProEntitled()).map((spec) => ({
@@ -142,9 +141,8 @@ export class NativeActionToolExtension implements ToolExtension {
   }
 
   canHandle(name: string): boolean {
-    const canonicalName = canonicalNativeToolName(name)
     return specsForPlatform(this.platform, this.boundary.isProEntitled()).some(
-      (spec) => spec.name === canonicalName
+      (spec) => spec.name === name
     )
   }
 
@@ -157,20 +155,19 @@ export class NativeActionToolExtension implements ToolExtension {
     args: Record<string, unknown>,
     context?: ToolContext
   ): Promise<string | ToolResult> {
-    const canonicalName = canonicalNativeToolName(name)
-    if (isTaskAction(canonicalName) && !this.boundary.isProEntitled()) {
+    if (isTaskAction(name) && !this.boundary.isProEntitled()) {
       return {
         text: 'Error: Browser Use and Computer Use require Off Grid AI Pro.',
         status: 'failed',
         authoritative: true
       }
     }
-    const spec = this.canHandle(canonicalName) ? findNativeToolSpec(canonicalName) : undefined
+    const spec = this.canHandle(name) ? findNativeToolSpec(name) : undefined
     if (!spec) {
       return `Error: unknown action ${name}`
     }
     if (shouldGate(spec.risk)) {
-      const actionType = actionTypeForTool(canonicalName)
+      const actionType = actionTypeForTool(name)
       const actions = this.boundary.actions
       // This extension is a Chat surface. Every mapped mutation goes through the
       // durable engine even when Pro has registered its outside-Chat approval hook.
@@ -217,14 +214,20 @@ export class NativeActionToolExtension implements ToolExtension {
         'pending'
       )
     }
-    // A computer_task is now queued: warn the chat at queue time only if the
+    // A computer_use task is now queued: warn the chat at queue time only if the
     // loaded model can't ground AND the task will fall to vision (an AX-drivable
     // app needs no grounder). Pass the goal so AX viability can be checked.
-    if (actionType === 'computer_task') {
+    if (actionType === 'computer_use') {
       const goal = typeof args.goal === 'string' && args.goal.trim() ? args.goal : spec.title(args)
       this.boundary.announceComputerTask?.(goal)
     }
     actions.kick()
+    if (isTaskAction(actionType)) {
+      return reply(
+        `Started "${spec.title(args)}". Live progress and the final result will appear in this chat.${taskReference}`,
+        'pending'
+      )
+    }
     const raced = await Promise.race([
       actions
         .waitForOutcome(proposed.id, OUTCOME_WAIT_MS)

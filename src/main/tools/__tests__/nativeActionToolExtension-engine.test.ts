@@ -5,6 +5,9 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { TickOutcome } from '@offgrid/use'
+
+vi.mock('electron', () => ({ shell: { openExternal: vi.fn() } }))
+
 import { NativeActionToolExtension, type ActionsPort } from '../nativeActionToolExtension'
 import {
   actionTypeForTool,
@@ -56,7 +59,7 @@ describe('the tool-to-action-type map', () => {
   it('covers exactly the mutating tools', () => {
     expect(Object.keys(TOOL_ACTION_TYPES).sort()).toEqual([
       'calendar_create_event',
-      'computer_task',
+      'computer_use',
       'mail_send',
       'messages_send',
       'reminders_create',
@@ -64,8 +67,7 @@ describe('the tool-to-action-type map', () => {
     ])
     expect(actionTypeForTool('reminders_create')).toBe('reminder')
     expect(actionTypeForTool('web_use')).toBe('web_use')
-    expect(actionTypeForTool('web_task')).toBe('web_use')
-    expect(actionTypeForTool('computer_task')).toBe('computer_task')
+    expect(actionTypeForTool('computer_use')).toBe('computer_use')
     expect(actionTypeForTool('calendar_list_events')).toBeUndefined()
   })
 })
@@ -102,18 +104,9 @@ describe('the spec table', () => {
       .schemas()
       .map((schema) => (schema as { function: { name: string } }).function.name)
     expect(names).toContain('web_use')
-    expect(names).not.toContain('web_task')
+    expect(names).toContain('computer_use')
     expect(extension.systemHint()).toMatch(/act on the user's Mac/)
     expect(extension.canHandle('reminders_create')).toBe(true)
-  })
-
-  it('accepts a legacy web_task call at the input boundary but proposes canonical web_use', async () => {
-    const port = makePort()
-    const extension = makeExtension(port)
-
-    await extension.execute('web_task', { goal: 'Check the release page' })
-
-    expect(port.proposed[0]).toMatchObject({ type: 'web_use' })
   })
 })
 
@@ -141,6 +134,28 @@ describe('the engine path', () => {
         url: 'https://example.test/releases'
       }
     })
+  })
+
+  it.each([
+    ['web_use', { goal: 'Review the release page' }],
+    ['computer_use', { goal: 'Open Notes' }]
+  ] as const)('returns as soon as the durable %s task starts', async (name, args) => {
+    const waitForOutcome = vi.fn(() => new Promise<TickOutcome | undefined>(() => {}))
+    const whenParked = vi.fn(() => new Promise<void>(() => {}))
+    const kick = vi.fn()
+    const port = makePort({ waitForOutcome, whenParked, kick })
+    const extension = makeExtension(port)
+
+    const reply = await extension.execute(name, args)
+
+    expect(reply).toMatchObject({
+      text: expect.stringMatching(/Live progress and the final result will appear in this chat/),
+      status: 'pending',
+      authoritative: true
+    })
+    expect(kick).toHaveBeenCalledOnce()
+    expect(waitForOutcome).not.toHaveBeenCalled()
+    expect(whenParked).not.toHaveBeenCalled()
   })
 
   it('a mutation becomes a durable Action with the mapped type, intent, and risk', async () => {
@@ -275,34 +290,6 @@ describe('the engine path', () => {
     expect(await needsHelp.execute('mail_send', { to: 'a@b.c' })).toMatch(/no answer/)
   })
 
-  it('marks an unconfirmed Computer Use outcome as needing attention', async () => {
-    const extension = makeExtension(
-      makePort({
-        waitForOutcome: async () =>
-          ({
-            id: 'act_1',
-            outcome: 'needs_help',
-            record: {
-              attemptLog: [
-                {
-                  rail: 'vision',
-                  at: 1,
-                  outcome: 'error',
-                  detail: 'Remote screen access is blocked for this model.'
-                }
-              ]
-            }
-          }) as unknown as TickOutcome
-      })
-    )
-
-    expect(await extension.execute('computer_task', { goal: 'Send the message' })).toMatchObject({
-      text: expect.stringMatching(/Remote screen access is blocked/),
-      status: 'pending',
-      authoritative: true
-    })
-  })
-
   it('edited and poisoned outcomes report honestly too', async () => {
     const edited = makeExtension(
       makePort({
@@ -424,13 +411,13 @@ describe('the engine path', () => {
     expect(legacyPropose).not.toHaveBeenCalled()
   })
 
-  it('computer_task becomes a vision-rail Action with the goal as its intent', async () => {
+  it('computer_use becomes a vision-rail Action with the goal as its intent', async () => {
     run.mockClear()
     const port = makePort()
     const extension = makeExtension(port)
-    const reply = await extension.execute('computer_task', { goal: 'share the deck in WhatsApp' })
+    const reply = await extension.execute('computer_use', { goal: 'share the deck in WhatsApp' })
     expect(port.proposed[0]).toMatchObject({
-      type: 'computer_task',
+      type: 'computer_use',
       intent: 'share the deck in WhatsApp',
       args: { goal: 'share the deck in WhatsApp' },
       risk: 'mutate'
@@ -442,14 +429,14 @@ describe('the engine path', () => {
     })
   })
 
-  it('queuing a computer_task announces the grounder nudge - but web_use or a semantic tool does not', async () => {
+  it('queuing a computer_use announces the grounder nudge - but web_use or a semantic tool does not', async () => {
     const announceComputerTask = vi.fn()
     const port = makePort()
     const extension = new NativeActionToolExtension(
       { run, proposeApproval, isProEntitled: proEntitled, announceComputerTask, actions: port },
       'darwin'
     )
-    await extension.execute('computer_task', { goal: 'share the deck' })
+    await extension.execute('computer_use', { goal: 'share the deck' })
     expect(announceComputerTask).toHaveBeenCalledTimes(1)
     // The goal is passed so the boundary can check AX viability for the target app.
     expect(announceComputerTask).toHaveBeenCalledWith('share the deck')
@@ -460,7 +447,7 @@ describe('the engine path', () => {
     expect(announceComputerTask).not.toHaveBeenCalled()
   })
 
-  it('computer_task is engine-only too - never offered to the legacy pro queue', async () => {
+  it('computer_use is engine-only too - never offered to the legacy pro queue', async () => {
     run.mockClear()
     const legacyPropose = vi.fn(() => true)
     const port = makePort({ approvalHookActive: () => true })
@@ -468,7 +455,7 @@ describe('the engine path', () => {
       { run, proposeApproval: legacyPropose, isProEntitled: proEntitled, actions: port },
       'darwin'
     )
-    await extension.execute('computer_task', { goal: 'x' })
+    await extension.execute('computer_use', { goal: 'x' })
     expect(port.proposed).toHaveLength(1)
     expect(legacyPropose).not.toHaveBeenCalled()
   })

@@ -29,7 +29,7 @@ afterAll(() => {
   fs.rmSync(profile, { recursive: true, force: true })
 })
 
-describe('completed task results in Chat', () => {
+describe('task results in Chat', () => {
   it('adds the verified details and final link to the originating Chat exactly once', () => {
     const conversationId = 'flight-search-chat'
     createRagConversation(conversationId, 'Find a flight')
@@ -95,7 +95,7 @@ describe('completed task results in Chat', () => {
     })
   })
 
-  it('does not add failed or action-owned task summaries to Chat', () => {
+  it('updates one Chat row from waiting through failure without presenting false success', () => {
     const conversationId = 'unrelated-chat'
     createRagConversation(conversationId, 'Unrelated')
     recordTaskRun({
@@ -103,8 +103,52 @@ describe('completed task results in Chat', () => {
       journeyId: conversationId,
       kind: 'web_use',
       title: 'Failed task',
+      status: 'waiting',
+      currentAction: 'Sign in to continue.'
+    })
+    expect(getRagMessages(conversationId)).toMatchObject([
+      { role: 'assistant', content: 'Waiting for you: Sign in to continue.' }
+    ])
+
+    recordTaskRun({
+      taskId: 'failed-task',
+      journeyId: conversationId,
+      kind: 'web_use',
+      title: 'Failed task',
+      status: 'running'
+    })
+    expect(getRagMessages(conversationId)).toHaveLength(0)
+
+    recordTaskRun({
+      taskId: 'failed-task',
+      journeyId: conversationId,
+      kind: 'web_use',
+      title: 'Failed task',
       status: 'failed',
-      summary: 'This must not appear.'
+      summary: 'The report was sent.'
+    })
+
+    const messages = getRagMessages(conversationId)
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toMatchObject({
+      role: 'assistant',
+      content: 'Task failed: The report was sent.'
+    })
+    expect(JSON.parse(messages[0]?.context ?? '{}')).toEqual({
+      taskResult: { taskId: 'failed-task', kind: 'web_use', status: 'failed' }
+    })
+  })
+
+  it('projects stopped tasks but keeps action-owned tasks out of Chat', () => {
+    const conversationId = 'stopped-chat'
+    createRagConversation(conversationId, 'Stopped task')
+    recordTaskRun({
+      taskId: 'stopped-task',
+      journeyId: conversationId,
+      kind: 'computer_use',
+      title: 'Send a message',
+      status: 'stopped',
+      summary: 'Stopped before the message was sent.'
     })
     recordTaskRun({
       taskId: 'action-owned-task',
@@ -115,6 +159,11 @@ describe('completed task results in Chat', () => {
       summary: 'This must not appear either.'
     })
 
-    expect(getRagMessages(conversationId)).toHaveLength(0)
+    expect(getRagMessages(conversationId)).toMatchObject([
+      {
+        role: 'assistant',
+        content: 'Task stopped: Stopped before the message was sent.'
+      }
+    ])
   })
 })

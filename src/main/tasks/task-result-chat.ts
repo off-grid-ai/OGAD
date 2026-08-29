@@ -23,7 +23,7 @@ function safeResultUrl(value: string | undefined): string | undefined {
 }
 
 function resultContext(task: TaskRunSnapshot): Record<string, unknown> {
-  const url = safeResultUrl(task.lastUrl)
+  const url = task.status === 'done' ? safeResultUrl(task.lastUrl) : undefined
   return {
     [TASK_RESULT_CONTEXT_KEY]: {
       taskId: task.taskId,
@@ -34,13 +34,29 @@ function resultContext(task: TaskRunSnapshot): Record<string, unknown> {
   }
 }
 
-/** The judge owns the answer. This projection only preserves it and attaches
- * the browser location that produced the final evidence. */
+const CHAT_RESULT_STATUSES = new Set<TaskRunSnapshot['status']>([
+  'waiting',
+  'done',
+  'failed',
+  'stopped'
+])
+
+function taskResultDetail(task: TaskRunSnapshot): string {
+  return task.summary?.trim() || task.currentAction?.trim() || task.title.trim()
+}
+
+/** The task state owner supplies the status and detail. This one-way Chat
+ * projection makes the state explicit, so a failed or stopped task can never
+ * look successful because of optimistic summary text. */
 export function taskResultChatContent(task: TaskRunSnapshot): string | undefined {
-  const summary = task.summary?.trim()
-  if (!summary) return undefined
+  if (!CHAT_RESULT_STATUSES.has(task.status)) return undefined
+  const detail = taskResultDetail(task)
+  if (!detail) return undefined
+  if (task.status === 'waiting') return `Waiting for you: ${detail}`
+  if (task.status === 'failed') return `Task failed: ${detail}`
+  if (task.status === 'stopped') return `Task stopped: ${detail}`
   const url = safeResultUrl(task.lastUrl)
-  return url ? `${summary}\n\n[Open the final page](${url})` : summary
+  return url ? `${detail}\n\n[Open the final page](${url})` : detail
 }
 
 function isResultForTask(context: string | null, taskId: string): boolean {
@@ -58,11 +74,10 @@ function isResultForTask(context: string | null, taskId: string): boolean {
   }
 }
 
-/** Persist one completed task result in the Chat that started it. */
+/** Persist the latest user-relevant task state in the Chat that started it. */
 export function persistTaskResultInChat(db: Database.Database, task: TaskRunSnapshot): boolean {
-  const conversationId = task.journeyId?.trim()
-  const content = taskResultChatContent(task)
-  if (task.status !== 'done' || !conversationId || !content || conversationId === task.taskId) {
+  const conversationId = task.journeyId.trim()
+  if (!conversationId || conversationId === task.taskId) {
     return false
   }
 
@@ -80,6 +95,25 @@ export function persistTaskResultInChat(db: Database.Database, task: TaskRunSnap
     .all(conversationId) as StoredMessageContext[]
 
   const existing = messages.find(({ context }) => isResultForTask(context, task.taskId))
+  const content = taskResultChatContent(task)
+  if (!content) {
+    if (!existing) return false
+    db.prepare('DELETE FROM rag_messages WHERE uuid = ?').run(existing.uuid)
+    db.prepare('UPDATE rag_conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+      conversationId
+    )
+    emitSyncMutation({
+      entity: CORE_SYNC_ENTITIES.message,
+      entityId: existing.uuid,
+      kind: 'delete'
+    })
+    emitSyncMutation({
+      entity: CORE_SYNC_ENTITIES.conversation,
+      entityId: conversationId,
+      kind: 'put'
+    })
+    return true
+  }
   if (existing) {
     if (existing.content === content) return false
     db.prepare('UPDATE rag_messages SET content = ?, context = ? WHERE uuid = ?').run(
