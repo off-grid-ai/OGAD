@@ -27,6 +27,7 @@ import {
 type IpcEvent = {
   sender: EventEmitter & {
     id: number
+    isDestroyed: () => boolean
     send: (channel: string, payload: unknown) => void
   }
 }
@@ -35,6 +36,7 @@ const handlers = new Map<string, IpcHandler>()
 const listeners = new Map<string, (event: IpcEvent, ...args: unknown[]) => unknown>()
 const rendererSender = Object.assign(new EventEmitter(), {
   id: 1,
+  isDestroyed: (): boolean => false,
   send: (_channel: string, _payload: unknown): void => undefined
 })
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-memory-chat-tts-'))
