@@ -69,6 +69,7 @@ describe('NativeActionToolExtension', () => {
     // model reports, not a note it can paraphrase into "I ran it" or talk the user past.
     await expect(ext.execute('web_use', { goal: 'Buy something' })).resolves.toEqual({
       text: 'Error: Browser Use and Computer Use require Off Grid AI Pro.',
+      status: 'failed',
       authoritative: true
     })
     expect(boundary.commands).toEqual([])

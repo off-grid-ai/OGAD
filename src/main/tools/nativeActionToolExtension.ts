@@ -8,7 +8,7 @@
 // remains responsible for approval. Reads and navigation stay inline.
 
 import { shell } from 'electron'
-import type { ToolContext, ToolExtension, ToolResult } from '../tools'
+import type { ToolCallStatus, ToolContext, ToolExtension, ToolResult } from '../tools'
 import type { ProposeOutcome, TickOutcome } from '@offgrid/use'
 import { proposeActionApproval, shouldGate, type ActionApprovalRequest } from '../actions/approval'
 import { getActionsRuntime } from '../actions/use-runtime'
@@ -61,8 +61,12 @@ export interface NativeActionToolBoundary {
  *  it pending (the helper's own timeout is 20s). */
 const OUTCOME_WAIT_MS = 30_000
 
-function engineResult(actionType: string, text: string): string | ToolResult {
-  return isTaskAction(actionType) ? { text, authoritative: true } : text
+function engineResult(
+  actionType: string,
+  text: string,
+  status: ToolCallStatus = 'completed'
+): string | ToolResult {
+  return isTaskAction(actionType) ? { text, status, authoritative: true } : text
 }
 
 // The inline (non-engine) runner, picked by platform in exactly one place:
@@ -157,6 +161,7 @@ export class NativeActionToolExtension implements ToolExtension {
     if (isTaskAction(canonicalName) && !this.boundary.isProEntitled()) {
       return {
         text: 'Error: Browser Use and Computer Use require Off Grid AI Pro.',
+        status: 'failed',
         authoritative: true
       }
     }
@@ -173,7 +178,7 @@ export class NativeActionToolExtension implements ToolExtension {
         return this.executeViaEngine(actions, actionType, spec, args, context)
       }
       const text = 'Error: this action needs the on-device action engine, which is not available.'
-      return isTaskAction(actionType ?? '') ? { text, authoritative: true } : text
+      return isTaskAction(actionType ?? '') ? { text, status: 'failed', authoritative: true } : text
     }
     const res = await this.boundary.run({ command: spec.command, args: spec.buildArgs(args) })
     if (!res.ok) {
@@ -191,7 +196,8 @@ export class NativeActionToolExtension implements ToolExtension {
     args: Record<string, unknown>,
     context?: ToolContext
   ): Promise<string | ToolResult> {
-    const reply = (text: string): string | ToolResult => engineResult(actionType, text)
+    const reply = (text: string, status?: ToolCallStatus): string | ToolResult =>
+      engineResult(actionType, text, status)
     const proposed = await actions.propose(
       {
         type: actionType,
@@ -202,12 +208,13 @@ export class NativeActionToolExtension implements ToolExtension {
       { source: 'chat', ...(context?.conversationId ? { sourceRef: context.conversationId } : {}) }
     )
     if (!proposed.accepted) {
-      return reply(`Error: the action was refused: ${proposed.reason}`)
+      return reply(`Error: the action was refused: ${proposed.reason}`, 'failed')
     }
     const taskReference = isTaskAction(actionType) ? ` Task reference: ${proposed.id}.` : ''
     if (proposed.deduped) {
       return reply(
-        `That exact action is already in flight — not starting a duplicate.${taskReference}`
+        `That exact action is already in flight — not starting a duplicate.${taskReference}`,
+        'pending'
       )
     }
     // A computer_task is now queued: warn the chat at queue time only if the
@@ -226,14 +233,16 @@ export class NativeActionToolExtension implements ToolExtension {
     ])
     if (raced.kind === 'parked') {
       return reply(
-        `Error: the action engine held this Chat action instead of starting it. No approval was created.${taskReference}`
+        `Error: the action engine held this Chat action instead of starting it. No approval was created.${taskReference}`,
+        'failed'
       )
     }
     if (!raced.outcome) {
       // Approved and still running past the wait window - NOT queued. Say so, or
       // the model wrongly tells the user to approve something already in flight.
       return reply(
-        `"${spec.title(args)}" is running now and will finish shortly. It does NOT need approval - do not tell the user to approve it.${taskReference}`
+        `"${spec.title(args)}" is running now and will finish shortly. It does NOT need approval - do not tell the user to approve it.${taskReference}`,
+        'pending'
       )
     }
     const outcome = raced.outcome
@@ -241,20 +250,25 @@ export class NativeActionToolExtension implements ToolExtension {
       case 'done':
         return reply(`${spec.formatResult(undefined)}${taskReference}`)
       case 'rejected':
-        return reply(`The user declined — ${spec.title(args)} was not run.${taskReference}`)
+        return reply(
+          `The user declined — ${spec.title(args)} was not run.${taskReference}`,
+          'failed'
+        )
       case 'needs_help': {
         const lastAttempt = outcome.record.attemptLog.at(-1)
         const detail = lastAttempt?.detail ? ` (${lastAttempt.detail})` : ''
         return reply(
-          `It ran but could not be confirmed${detail}. Tell the user it needs their attention.${taskReference}`
+          `It ran but could not be confirmed${detail}. Tell the user it needs their attention.${taskReference}`,
+          'pending'
         )
       }
       case 'edited':
         return reply(
-          `The user is editing this action before approving it. Tell them it is pending.${taskReference}`
+          `The user is editing this action before approving it. Tell them it is pending.${taskReference}`,
+          'pending'
         )
       case 'poisoned':
-        return reply(`Error: ${outcome.error}${taskReference}`)
+        return reply(`Error: ${outcome.error}${taskReference}`, 'failed')
     }
   }
 }

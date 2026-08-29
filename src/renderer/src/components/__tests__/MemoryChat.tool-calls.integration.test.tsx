@@ -300,7 +300,7 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
     boundary.resolve(0, 'Here is the release status.')
   })
 
-  it('keeps a final Web Use intake result as Action needed, not Work done', async () => {
+  it('shows a privacy-blocked Web Use result as Action needed, not Work done', async () => {
     const boundary = new ChatBoundary()
     installBoundary(boundary)
     const user = userEvent.setup()
@@ -309,7 +309,8 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
     await send('Continue the flight search', user)
     await waitFor(() => expect(boundary.calls).toHaveLength(1))
 
-    const result = 'Web Use was not started. Please confirm the departure airport.'
+    const result =
+      'It ran but could not be confirmed (Remote screen access is blocked for this model). Tell the user it needs their attention. Task reference: task-private-screen.'
     boundary.emitToolStep(0, 'web_use')
     boundary.emitToolResult(0, 'web_use', result, 'pending')
     boundary.resolve(0, result, {

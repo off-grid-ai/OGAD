@@ -275,6 +275,34 @@ describe('the engine path', () => {
     expect(await needsHelp.execute('mail_send', { to: 'a@b.c' })).toMatch(/no answer/)
   })
 
+  it('marks an unconfirmed Computer Use outcome as needing attention', async () => {
+    const extension = makeExtension(
+      makePort({
+        waitForOutcome: async () =>
+          ({
+            id: 'act_1',
+            outcome: 'needs_help',
+            record: {
+              attemptLog: [
+                {
+                  rail: 'vision',
+                  at: 1,
+                  outcome: 'error',
+                  detail: 'Remote screen access is blocked for this model.'
+                }
+              ]
+            }
+          }) as unknown as TickOutcome
+      })
+    )
+
+    expect(await extension.execute('computer_task', { goal: 'Send the message' })).toMatchObject({
+      text: expect.stringMatching(/Remote screen access is blocked/),
+      status: 'pending',
+      authoritative: true
+    })
+  })
+
   it('edited and poisoned outcomes report honestly too', async () => {
     const edited = makeExtension(
       makePort({

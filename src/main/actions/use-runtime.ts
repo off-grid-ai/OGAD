@@ -48,6 +48,7 @@ import { makeConnectorRailExecutor } from './connector-rail'
 import { withRemoteScreenGate } from './remote-screen-gate'
 import { getTaskExecutionDevice, recordTaskRun } from '../tasks/task-history'
 import { taskLaunchFromActionArgs } from '../tasks/task-launch-identity'
+import { taskKindForActionType } from '../tools/nativeActionToolExtension-logic'
 
 export interface ActionsRuntime {
   propose(
@@ -154,6 +155,29 @@ function recordAuthenticatedTaskLaunch(
     title,
     executionDeviceId: executionDevice.id,
     executionDeviceName: executionDevice.name
+  })
+}
+
+/** Keep the durable task projection aligned with the action engine's terminal decision. */
+function recordTaskActionOutcome(outcome: TickOutcome): void {
+  if (outcome.outcome === 'poisoned') return
+  const kind = taskKindForActionType(outcome.record.type)
+  if (!kind || outcome.outcome === 'done') return
+  const detail = outcome.record.attemptLog.at(-1)?.detail?.trim()
+  const status = outcome.outcome === 'rejected' ? 'failed' : 'waiting'
+  const summary =
+    detail ||
+    (outcome.outcome === 'rejected'
+      ? 'The task was declined and did not run.'
+      : outcome.outcome === 'edited'
+        ? 'The task is waiting for changes.'
+        : 'The task ran but could not be confirmed.')
+  recordTaskRun({
+    taskId: outcome.id,
+    kind,
+    title: outcome.record.intent,
+    status,
+    summary
   })
 }
 
@@ -277,7 +301,9 @@ export function getActionsRuntime(): ActionsRuntime {
     },
     async waitForOutcome(actionId, timeoutMs) {
       await ready
-      return worker.waitForOutcome(actionId, timeoutMs)
+      const outcome = await worker.waitForOutcome(actionId, timeoutMs)
+      if (outcome) recordTaskActionOutcome(outcome)
+      return outcome
     },
     whenParked: whenActionParked,
     onParked: onActionParked,
