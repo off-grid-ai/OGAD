@@ -133,7 +133,7 @@ async function bootProductionMain(): Promise<void> {
     import('../src/main/ipc'),
     import('../src/main/rag-ipc'),
     import('../src/main/llm'),
-    import('../src/main/tasks/task-history')
+    import('../src/main/tasks/task-history-ipc')
   ])
   const service = llm as unknown as { port: number; initialized: boolean; paused: boolean }
   service.port = fake.port
