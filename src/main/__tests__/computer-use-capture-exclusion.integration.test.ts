@@ -5,7 +5,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import sharp from 'sharp'
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 const nativeCapture = vi.hoisted(() => ({
   profile: `/tmp/offgrid-computer-use-exclusion-${process.pid}`,
@@ -15,6 +15,7 @@ const nativeCapture = vi.hoisted(() => ({
 fs.mkdirSync(nativeCapture.profile, { recursive: true })
 const originalCaptureArguments = process.env.OFFGRID_CAPTURE_ARGUMENTS
 const originalCaptureSource = process.env.OFFGRID_CAPTURE_CLEAN_SOURCE
+let platformSpy: ReturnType<typeof vi.spyOn>
 
 vi.mock('electron', () => ({
   app: {
@@ -76,7 +77,13 @@ import { vision } from '../vision'
 import { modelScreenshot } from '../vision/vision-policy-runner'
 import { showSupervisorWindow } from '../vision/supervisor-window'
 
+beforeAll(() => {
+  // The production boundary is macOS-only. Make the CI host exercise that branch too.
+  platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+})
+
 afterAll(() => {
+  platformSpy.mockRestore()
   configureRuntime({ binRoots: undefined })
   if (originalCaptureArguments === undefined) delete process.env.OFFGRID_CAPTURE_ARGUMENTS
   else process.env.OFFGRID_CAPTURE_ARGUMENTS = originalCaptureArguments
