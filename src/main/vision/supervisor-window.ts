@@ -64,6 +64,11 @@ function create(): BrowserWindow {
     }
   })
   supervisor = win
+  // Keep the PiP visible to the user while the native window compositor excludes this exact
+  // BrowserWindow from screen-capture pixels. Every Computer Use consumer (model, live view, sync,
+  // and replay) reads the one captured frame, so exclusion belongs here at the window boundary.
+  // Do not hide or post-process the PiP: both approaches can race the OS capture and produce drift.
+  win.setContentProtection(true)
   // Float above full-screen apps, on every Space; plain alwaysOnTop is not enough.
   win.setVisibleOnAllWorkspaces(true, {
     visibleOnFullScreen: true,

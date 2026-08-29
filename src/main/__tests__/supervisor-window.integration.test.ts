@@ -8,6 +8,7 @@ const electron = vi.hoisted(() => ({
   options: [] as Array<Record<string, unknown>>,
   shown: 0,
   hidden: 0,
+  protected: [] as boolean[],
   handlers: new Map<string, () => unknown>()
 }))
 
@@ -43,6 +44,9 @@ vi.mock('electron', () => ({
 
     setVisibleOnAllWorkspaces(): void {}
     setAlwaysOnTop(): void {}
+    setContentProtection(protectedFromCapture: boolean): void {
+      electron.protected.push(protectedFromCapture)
+    }
     on(): void {}
     loadURL(): Promise<void> {
       return Promise.resolve()
@@ -63,6 +67,7 @@ describe('Computer Use supervisor window', () => {
     electron.options.length = 0
     electron.shown = 0
     electron.hidden = 0
+    electron.protected.length = 0
     electron.handlers.clear()
   })
 
@@ -81,6 +86,7 @@ describe('Computer Use supervisor window', () => {
       frame: false,
       alwaysOnTop: true
     })
+    expect(electron.protected).toEqual([true])
     expect(electron.shown).toBe(1)
   })
 
