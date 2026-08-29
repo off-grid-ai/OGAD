@@ -150,6 +150,10 @@ function shortResult(tool: DisplayTool, status = workStatus(tool), taskSummary?:
   }
   if (key === 'web_search' || key === 'brave_search') return 'Search results are ready.'
   if (key === 'read_url') return 'Read the selected web page.'
+  if (key === 'search_meetings') {
+    const result = visibleToolResult(tool.result).trim()
+    if (result) return result.split(/\r?\n/, 1)[0]!
+  }
   if (key.startsWith('search_')) return 'Found matching items.'
   if (status === 'failed') return 'This step failed. Open it for details.'
   const value = ('error' in tool && tool.error?.trim()) || visibleToolResult(tool.result)

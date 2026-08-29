@@ -35,6 +35,27 @@ afterEach(() => {
 })
 
 describe('<ChatToolRows/> work timeline', () => {
+  it('uses the meeting search result for the collapsed summary', async () => {
+    const user = userEvent.setup()
+    render(
+      <ChatToolRows
+        tools={[
+          {
+            name: 'search_meetings',
+            status: 'completed',
+            result: 'No matching recorded meetings were found.'
+          }
+        ]}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: /Work done/ }))
+    expect(screen.getByText('No matching recorded meetings were found.')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Searched meetings, complete' }))
+    expect(screen.getAllByText('No matching recorded meetings were found.')).toHaveLength(2)
+    expect(screen.queryByText('Found matching items.')).toBeNull()
+  })
+
   it('shows and opens a live Web Use task before its durable tool call arrives', async () => {
     const requests: OpenTaskPanelRequest[] = []
     const offOpen = onOpenTaskSidePanel((request) => requests.push(request))
