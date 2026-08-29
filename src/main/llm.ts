@@ -39,7 +39,12 @@ import { postCompletionOnce } from './llm/http-post'
 import { engineSpawnEnv } from './llm/spawn-env'
 import { shouldAutoRecover } from './llm/crash-policy'
 import { streamCompletion, type StreamResult } from './llm/stream'
-import { streamRemoteChatCompletion, type RemoteTextModelConnection } from './llm/remote-chat'
+import {
+  nativeToolPlannerUnavailableMessage,
+  remoteNativeToolCapability,
+  streamRemoteChatCompletion,
+  type RemoteTextModelConnection
+} from './llm/remote-chat'
 import {
   terminateEngine,
   ENGINE_TEARDOWN_GRACE_MS,
@@ -1017,6 +1022,16 @@ export class LLMService {
    * method uses this seam, so no caller needs local/remote branches. */
   private activeRemoteTextModel(): RemoteTextModelConnection | null {
     return getActiveRemoteVisionServer()
+  }
+
+  /** A tool turn must fail before generation when the selected remote model cannot plan actions. */
+  async toolPlannerPreflight(): Promise<string | null> {
+    const remote = this.activeRemoteTextModel()
+    if (!remote) return null
+    const capability = await remoteNativeToolCapability(remote)
+    return capability.status === 'unsupported'
+      ? nativeToolPlannerUnavailableMessage(capability)
+      : null
   }
 
   private completeRemote(

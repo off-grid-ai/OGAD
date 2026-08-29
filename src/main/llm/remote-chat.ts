@@ -33,6 +33,79 @@ export interface RemoteChatOptions {
   timeoutMs: number
 }
 
+export interface RemoteNativeToolCapability {
+  status: 'supported' | 'unsupported' | 'unknown'
+  modelName: string
+}
+
+interface OpenRouterModelMetadata {
+  id?: unknown
+  name?: unknown
+  supported_parameters?: unknown
+}
+
+const nativeToolCapabilities = new Map<string, Promise<RemoteNativeToolCapability>>()
+
+function capabilityKey(remote: RemoteTextModelConnection): string {
+  return `${remote.provider}\n${remote.endpoint}\n${remote.model}`
+}
+
+/** OpenRouter is the authority for native request features. A missing metadata response stays
+ * unknown so providers with incomplete discovery endpoints keep their existing behavior. */
+async function discoverRemoteNativeToolCapability(
+  remote: RemoteTextModelConnection
+): Promise<RemoteNativeToolCapability> {
+  if (remote.provider !== 'openrouter') {
+    return { status: 'unknown', modelName: remote.name || remote.model }
+  }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 5_000)
+  try {
+    const response = await fetch(`${remote.endpoint}/models`, {
+      headers: remote.apiKey ? { Authorization: `Bearer ${remote.apiKey}` } : {},
+      signal: controller.signal
+    })
+    if (!response.ok) return { status: 'unknown', modelName: remote.name || remote.model }
+    const body = (await response.json()) as { data?: unknown }
+    if (!Array.isArray(body.data)) {
+      return { status: 'unknown', modelName: remote.name || remote.model }
+    }
+    const selected = (body.data as OpenRouterModelMetadata[]).find(
+      (candidate) => candidate.id === remote.model
+    )
+    if (!selected || !Array.isArray(selected.supported_parameters)) {
+      return { status: 'unknown', modelName: remote.name || remote.model }
+    }
+    const modelName = typeof selected.name === 'string' ? selected.name : remote.model
+    return {
+      status: selected.supported_parameters.includes('tools') ? 'supported' : 'unsupported',
+      modelName
+    }
+  } catch {
+    return { status: 'unknown', modelName: remote.name || remote.model }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+export function remoteNativeToolCapability(
+  remote: RemoteTextModelConnection
+): Promise<RemoteNativeToolCapability> {
+  const key = capabilityKey(remote)
+  const cached = nativeToolCapabilities.get(key)
+  if (cached) return cached
+  const discovered = discoverRemoteNativeToolCapability(remote)
+  nativeToolCapabilities.set(key, discovered)
+  return discovered
+}
+
+export function nativeToolPlannerUnavailableMessage(
+  capability: RemoteNativeToolCapability
+): string {
+  return `${capability.modelName} cannot act as the Chat tool planner because OpenRouter reports that this model does not support native tools. Select it as the Computer Use specialist instead, then select a tool-capable text model for Chat.`
+}
+
 interface RemoteErrorBody {
   error?: {
     message?: string
@@ -193,6 +266,13 @@ export async function streamRemoteChatCompletion(input: {
   const { remote, request, options } = input
   const accumulator = createCompletionStreamAccumulator(input.onDelta)
   if (options.signal?.aborted) return accumulator.finish()
+
+  if (request.tools?.length) {
+    const capability = await remoteNativeToolCapability(remote)
+    if (capability.status === 'unsupported') {
+      throw new Error(nativeToolPlannerUnavailableMessage(capability))
+    }
+  }
 
   const watchdog = createIdleWatchdog(options.timeoutMs, options.signal)
   try {

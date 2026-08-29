@@ -542,6 +542,15 @@ export async function toolChat(
       }
     }
   }
+  const plannerUnavailable = await llm.toolPlannerPreflight()
+  if (plannerUnavailable) {
+    return {
+      answer: plannerUnavailable,
+      toolCalls: [],
+      unified: [],
+      imageRequests: []
+    }
+  }
   await llm.init() // respects pause; ensures the server is up
   const onDelta = opts.onDelta ?? ((): void => {})
   const toolContext: ToolContext = {
@@ -577,7 +586,7 @@ export async function toolChat(
     try {
       const s = await e.schemas()
       const enabledSchemas = s.filter((schema) => {
-        const name = (schema as { function?: { name?: unknown } })?.function?.name
+        const name = (schema as { function?: { name?: unknown } }).function?.name
         return typeof name !== 'string' || !disabled.has(name)
       })
       if (enabledSchemas.length) {

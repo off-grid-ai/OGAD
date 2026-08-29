@@ -22,6 +22,7 @@ import {
   setRemoteVisionServerSettings
 } from '../vision/remote-vision-server'
 import { planTask } from '../tools/planner'
+import { toolChat } from '../tools'
 
 interface RecordedRequest {
   body: Record<string, unknown>
@@ -72,6 +73,26 @@ function completionFrames(turn: RemoteTurn): string[] {
 function startRemoteServer(): Promise<http.Server> {
   return new Promise((resolve) => {
     const server = http.createServer((request, response) => {
+      if (request.method === 'GET' && request.url === '/v1/models') {
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end(
+          JSON.stringify({
+            data: [
+              {
+                id: 'openai/gpt-5.6',
+                name: 'GPT-5.6',
+                supported_parameters: ['tools', 'temperature', 'top_p']
+              },
+              {
+                id: 'bytedance-research/ui-tars-1.5-7b',
+                name: 'UI-TARS 1.5 7B',
+                supported_parameters: ['temperature', 'top_p']
+              }
+            ]
+          })
+        )
+        return
+      }
       if (request.method !== 'POST' || request.url !== '/v1/chat/completions') {
         response.writeHead(404).end()
         return
@@ -220,6 +241,53 @@ describe('active text model transport', () => {
       tool_choice: 'auto'
     })
     expect(requests[2]?.body.tools).toHaveLength(1)
+  })
+
+  it('does not send tools to a selected OpenRouter model without native tool support', async () => {
+    setRemoteVisionServerSettings({
+      serverId: remoteServerId,
+      provider: 'openrouter',
+      name: 'Test OpenRouter',
+      endpoint: `http://127.0.0.1:${(remoteServer.address() as AddressInfo).port}`,
+      model: 'bytedance-research/ui-tars-1.5-7b',
+      apiKey: 'test-api-key'
+    })
+
+    try {
+      const result = await toolChat('Send a message to Ali.', [])
+      expect(result).toMatchObject({
+        answer: expect.stringContaining('UI-TARS 1.5 7B cannot act as the Chat tool planner'),
+        toolCalls: []
+      })
+      expect(result.answer).toContain('Select it as the Computer Use specialist instead')
+      expect(requests).toHaveLength(0)
+
+      await expect(
+        llm.streamChat(
+          [{ role: 'user', content: 'Send a message.' }],
+          () => {},
+          {
+            tools: [
+              {
+                type: 'function',
+                function: { name: 'send_message', parameters: { type: 'object' } }
+              }
+            ]
+          },
+          5_000
+        )
+      ).rejects.toThrow('UI-TARS 1.5 7B cannot act as the Chat tool planner')
+      expect(requests).toHaveLength(0)
+    } finally {
+      setRemoteVisionServerSettings({
+        serverId: remoteServerId,
+        provider: 'openrouter',
+        name: 'Test OpenRouter',
+        endpoint: `http://127.0.0.1:${(remoteServer.address() as AddressInfo).port}`,
+        model: 'openai/gpt-5.6',
+        apiKey: 'test-api-key'
+      })
+    }
   })
 
   it('aborts an in-flight selected-remote request and returns only received evidence', async () => {
