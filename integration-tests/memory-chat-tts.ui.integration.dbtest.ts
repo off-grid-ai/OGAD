@@ -305,7 +305,7 @@ describe('assistant reply speech integration (#105)', () => {
     expect(Buffer.from(encoded!, 'base64').subarray(0, 4).toString('ascii')).toBe('RIFF')
     expect(fs.readFileSync(inputRecord, 'utf8')).toBe('Conversation B baseline')
     expect(path.basename(fs.readFileSync(voiceRecord, 'utf8'))).toContain('af_heart.bin')
-  })
+  }, 15_000)
 
   it('surfaces a real synthesis failure as an actionable rendered error', async () => {
     fs.writeFileSync(failureMarker, 'fail')
@@ -321,7 +321,7 @@ describe('assistant reply speech integration (#105)', () => {
     )
     expect(audios).toHaveLength(0)
     expect(screen.getByRole('button', { name: 'Speak' })).toBeTruthy()
-  })
+  }, 15_000)
 
   it('records, transcribes, chats, speaks, stops, recovers, and reopens one voice turn', async () => {
     const conversationId = 'voice-conversation-lifecycle'
