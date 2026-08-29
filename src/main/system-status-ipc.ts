@@ -79,6 +79,9 @@ export async function getRenderedSystemHealth(): Promise<SystemHealthContract> {
  * harness. The injectable value is ipcMain itself, an uncontrollable native
  * transport boundary; every Off Grid AI status owner above remains real. */
 export function setupSystemStatusIpc(target: IpcStatusRegistrar): void {
+  target.handle('system:chat-health', () =>
+    import('./setup').then((module) => module.getChatHealth())
+  )
   target.handle('system:health', () => getRenderedSystemHealth())
   target.handle('permissions:get-status', () => getPermissionStatus())
 }

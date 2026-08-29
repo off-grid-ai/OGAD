@@ -17,7 +17,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const permissions = vi.hoisted(() => ({ getPermissionStatus: vi.fn() }))
 vi.mock('../permissions', () => permissions)
 
-const setup = vi.hoisted(() => ({ getSystemHealth: vi.fn() }))
+const setup = vi.hoisted(() => ({ getChatHealth: vi.fn(), getSystemHealth: vi.fn() }))
 vi.mock('../setup', () => setup)
 
 const GRANTED = {
@@ -33,7 +33,9 @@ describe('the system health record the renderer is handed', () => {
     setup.getSystemHealth.mockResolvedValue({
       ramGb: 32,
       activeModel: 'gemma-4-E4B-it-Q4_K_M.gguf',
-      components: [{ id: 'chat-engine', label: 'Chat engine', status: 'granted', detail: 'Running' }]
+      components: [
+        { id: 'chat-engine', label: 'Chat engine', status: 'granted', detail: 'Running' }
+      ]
     })
   })
 
@@ -161,6 +163,7 @@ describe('the system health record the renderer is handed', () => {
 describe('registering the status channels', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    setup.getChatHealth.mockResolvedValue({ id: 'chat', label: 'Chat model', status: 'ready' })
     setup.getSystemHealth.mockResolvedValue({ ramGb: 32, activeModel: null, components: [] })
     permissions.getPermissionStatus.mockResolvedValue(GRANTED)
   })
@@ -171,7 +174,11 @@ describe('registering the status channels', () => {
 
     setupSystemStatusIpc({ handle: (channel, listener) => handlers.set(channel, listener) })
 
-    expect([...handlers.keys()]).toEqual(['system:health', 'permissions:get-status'])
+    expect([...handlers.keys()]).toEqual([
+      'system:chat-health',
+      'system:health',
+      'permissions:get-status'
+    ])
     const health = (await handlers.get('system:health')!({})) as {
       components: { id: string }[]
     }
@@ -181,6 +188,21 @@ describe('registering the status channels', () => {
       'permission-screen-recording',
       'permission-local-network'
     ])
+  })
+
+  it('answers the sidebar with chat health without reading permissions or full machine health', async () => {
+    const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>()
+    const { setupSystemStatusIpc } = await import('../system-status-ipc')
+
+    setupSystemStatusIpc({ handle: (channel, listener) => handlers.set(channel, listener) })
+
+    await expect(handlers.get('system:chat-health')!({})).resolves.toMatchObject({
+      id: 'chat',
+      status: 'ready'
+    })
+    expect(setup.getChatHealth).toHaveBeenCalledTimes(1)
+    expect(setup.getSystemHealth).not.toHaveBeenCalled()
+    expect(permissions.getPermissionStatus).not.toHaveBeenCalled()
   })
 
   it('answers permissions:get-status from the production permission owner', async () => {

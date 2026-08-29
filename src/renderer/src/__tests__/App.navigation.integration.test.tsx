@@ -130,7 +130,7 @@ describe('<App/> desktop navigation integration', () => {
   ] as const)('opens Setup & health from the %s model status row', async (status, label) => {
     const user = userEvent.setup()
     installAppBoundary({
-      systemHealth: async () => ({ ramGb: 16, components: [{ id: 'chat', status }] })
+      chatHealth: async () => ({ id: 'chat', label: 'Chat model', status })
     })
     render(<App />)
 
@@ -141,6 +141,26 @@ describe('<App/> desktop navigation integration', () => {
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeTruthy()
     expect(screen.getByText('Setup & health')).toBeTruthy()
     expect(screen.getByText('Configure it for me')).toBeTruthy()
+  })
+
+  it('keeps the idle model indicator current without reading full machine health', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const chatHealth = vi
+      .fn()
+      .mockResolvedValueOnce({ id: 'chat', label: 'Chat model', status: 'starting' })
+      .mockResolvedValue({ id: 'chat', label: 'Chat model', status: 'ready' })
+    const systemHealth = vi.fn(async () => ({ ramGb: 16, components: [] }))
+    installAppBoundary({ chatHealth, systemHealth })
+
+    render(<App />)
+
+    expect(
+      await screen.findByRole('button', { name: /Model server: model starting/i })
+    ).toBeTruthy()
+    await act(async () => vi.advanceTimersByTimeAsync(5_000))
+    expect(await screen.findByRole('button', { name: /Model server: model running/i })).toBeTruthy()
+    expect(chatHealth).toHaveBeenCalledTimes(2)
+    expect(systemHealth).not.toHaveBeenCalled()
   })
 
   it('starts collapsed and stays expanded only while hovered', async () => {
@@ -432,11 +452,7 @@ describe('<App/> desktop navigation integration', () => {
       expect(window.location.pathname).toBe(startPath)
 
       for (const [label, path] of routeEntries) {
-        await screen.findAllByRole(
-          'button',
-          { name: new RegExp(`^${label}`) },
-          { timeout: 10_000 }
-        )
+        await screen.findAllByRole('button', { name: new RegExp(`^${label}`) }, { timeout: 10_000 })
         await user.click(routedTabButton(label))
         await waitFor(() => expect(window.location.pathname).toBe(path))
         await waitFor(() =>

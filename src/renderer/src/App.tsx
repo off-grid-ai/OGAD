@@ -181,10 +181,10 @@ const navRowClass = (expanded: boolean, active = false): string =>
       : 'text-neutral-400 hover:bg-neutral-500/10 hover:text-white'
   )
 
-// Model-server health dot for the sidebar. Uses the SAME live probe as the System
-// Health panel (system:health → real /health check), not llm.isReady() (an internal
-// flag that lags). Green = running, amber = starting, red = stopped (e.g. a SIGKILL
-// we can't auto-recover) → click goes to Settings to restart.
+// Model-server health dot for the sidebar. Uses the same authoritative chat probe
+// as the full System Health panel, through a narrow IPC projection that does not
+// re-check permissions, the gateway, image generation, and native helpers every
+// five seconds. Green = running, amber = starting, red = stopped.
 type ChatHealth = 'ready' | 'starting' | 'down' | null
 function ModelStatusDot({
   open,
@@ -200,9 +200,7 @@ function ModelStatusDot({
     const api = (window as any).api
     const poll = async (): Promise<void> => {
       try {
-        const h = await api?.systemHealth?.()
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const chat = h?.components?.find((c: any) => c.id === 'chat')
+        const chat = await api?.chatHealth?.()
         const s: ChatHealth =
           chat?.status === 'ready' ? 'ready' : chat?.status === 'starting' ? 'starting' : 'down'
         if (live) setStatus(s)

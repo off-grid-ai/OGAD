@@ -5,6 +5,7 @@ import {
   type ActiveChatStreamContract,
   type CacheCleanupResultContract,
   type RagChatResultContract,
+  type SystemHealthComponentContract,
   type SystemHealthContract
 } from '../shared/ipc-contracts'
 import type {
@@ -525,6 +526,8 @@ const offGridApi = {
   },
 
   // Setup + system health
+  chatHealth: (): Promise<SystemHealthComponentContract> =>
+    ipcRenderer.invoke('system:chat-health'),
   systemHealth: (): Promise<SystemHealthContract> => ipcRenderer.invoke('system:health'),
   setupRecommendation: (mode?: string) => ipcRenderer.invoke('setup:recommendation', mode),
   setupPlan: (mode?: string) => ipcRenderer.invoke('setup:plan', mode),

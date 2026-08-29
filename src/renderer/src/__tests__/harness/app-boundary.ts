@@ -24,6 +24,7 @@ export function installAppBoundary(overrides: Record<string, unknown> = {}): voi
       allGranted: true
     }),
     checkModelStatus: async () => ({ downloaded: true, modelsDir: '/tmp/models' }),
+    chatHealth: async () => ({ id: 'chat', label: 'Chat model', status: 'ready' }),
     systemHealth: async () => ({ ramGb: 16, components: [{ id: 'chat', status: 'ready' }] }),
     getStagedUpdateVersion: async () => null,
     meetingGetState: async () => ({

@@ -86,14 +86,40 @@ function ramGb(): number {
   return Math.round(os.totalmem() / 1e9)
 }
 
+/** The authoritative live health record for the chat engine. Sidebar status and
+ * the full System Health snapshot both use this owner, so they cannot disagree.
+ * This deliberately probes only llama-server; callers that need the complete
+ * machine record must use getSystemHealth(). */
+export async function getChatHealth(): Promise<HealthComponent> {
+  const activeModel = getActiveModel()
+  const modelsExist = llm.modelsExist()
+  const llamaHealth = await pingJson(llm.getPort())
+  const { status, detail } = decideChatStatus({
+    // A healthy socket is not sufficient: another app/profile can own this port.
+    healthy: !!llamaHealth && llm.isReady(),
+    loading: llm.isStarting(),
+    modelsExist,
+    activeModel,
+    lastError: llm.lastError()
+  })
+
+  return {
+    id: 'chat',
+    label: 'Chat model (llama-server)',
+    status,
+    detail,
+    port: llm.getPort(),
+    canRestart: modelsExist
+  }
+}
+
 /** One aggregated snapshot of every local component. */
 export async function getSystemHealth(): Promise<SystemHealth> {
   const activeModel = getActiveModel()
-  const modelsExist = llm.modelsExist()
 
-  // Live probes (run in parallel): the chat server and the gateway.
-  const [llamaHealth, gatewayHealth] = await Promise.all([
-    pingJson(llm.getPort()),
+  // Live probes (run in parallel): the authoritative chat record and the gateway.
+  const [chatHealth, gatewayHealth] = await Promise.all([
+    getChatHealth(),
     pingJson(getGatewayPort())
   ])
 
@@ -115,29 +141,8 @@ export async function getSystemHealth(): Promise<SystemHealth> {
     return v === 'ready' ? 'ready' : v === 'not_installed' ? 'not_installed' : 'down'
   }
 
-  // Chat LLM (llama-server). ready = /health answers 200. starting = the process
-  // is alive but the model is still loading (cold-start warm-up — /health 503).
-  // not_installed = no model on disk. down = model present but the process isn't
-  // running. (Decision extracted to chat-health.ts so it's unit-tested.)
-  const { status: chat, detail: chatDetail } = decideChatStatus({
-    // A healthy socket is not sufficient: another app/profile can own 8439. Only report Ready
-    // when THIS LLMService completed startup and the owned engine answers its health probe.
-    healthy: !!llamaHealth && llm.isReady(),
-    loading: llm.isStarting(),
-    modelsExist,
-    activeModel,
-    lastError: llm.lastError()
-  })
-
   const components: HealthComponent[] = [
-    {
-      id: 'chat',
-      label: 'Chat model (llama-server)',
-      status: chat,
-      detail: chatDetail,
-      port: llm.getPort(),
-      canRestart: modelsExist
-    },
+    chatHealth,
     {
       id: 'gateway',
       label: 'Local gateway',
