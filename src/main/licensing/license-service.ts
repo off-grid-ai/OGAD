@@ -73,7 +73,14 @@ export function revalidateProEntitlement(reason: PersonalMeshReconciliationReaso
 }
 
 export function isProEntitled(): boolean {
-  return provider?.isEntitled() ?? false
+  if (provider?.isEntitled()) return true
+  // A real license remains the production owner. Electron E2E can fake this external boundary
+  // only in an unpackaged development process with both explicit test guards present.
+  return (
+    process.defaultApp === true &&
+    process.env.OFFGRID_E2E_HEADLESS === '1' &&
+    process.env.OFFGRID_E2E_PRO_TASKS === '1'
+  )
 }
 
 export function getProLicenseInfo(): ProLicenseInfo {

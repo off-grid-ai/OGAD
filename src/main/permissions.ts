@@ -7,6 +7,17 @@ const MDNS_MULTICAST_HOST = '224.0.0.251'
 const MDNS_PORT = 5353
 const LOCAL_NETWORK_PROBE_TIMEOUT_MS = 1_000
 
+/** Playwright replaces only the macOS permission boundary for a disposable
+ * development profile. Packaged builds and ordinary development runs cannot
+ * enable this path. */
+function computerUseE2EPermissionBoundary(): boolean {
+  return (
+    process.defaultApp === true &&
+    process.env.OFFGRID_E2E_HEADLESS === '1' &&
+    process.env.OFFGRID_E2E_COMPUTER_USE_BOUNDARY === '1'
+  )
+}
+
 /**
  * macOS does not expose Local Network TCC through Electron's systemPreferences API. Exercise the
  * same multicast route Bonjour needs instead. The empty DNS query is bounded and the socket owns
@@ -40,6 +51,7 @@ async function checkLocalNetworkPermission(): Promise<boolean> {
  * This permission is required for global dictation input and text insertion.
  */
 export function checkAccessibilityPermission(prompt: boolean = false): boolean {
+  if (computerUseE2EPermissionBoundary()) return true
   if (process.platform !== 'darwin') {
     return true // Not applicable on other platforms
   }
@@ -51,6 +63,7 @@ export function checkAccessibilityPermission(prompt: boolean = false): boolean {
  * This permission is required for desktopCapturer to capture window screenshots.
  */
 export function checkScreenRecordingPermission(): boolean {
+  if (computerUseE2EPermissionBoundary()) return true
   if (process.platform !== 'darwin') {
     return true // Not applicable on other platforms
   }
