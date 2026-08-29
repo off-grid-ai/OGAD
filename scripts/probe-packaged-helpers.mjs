@@ -41,6 +41,12 @@ const probes = [
     output: /usage:.*whisper-cli[\s\S]*options:/i
   },
   {
+    name: 'Computer Use capture',
+    relative: 'bin/computer-use-capture',
+    args: ['--help'],
+    output: /usage: computer-use-capture/i
+  },
+  {
     name: 'image server',
     relative: 'bin/sd/sd-server',
     args: ['--help'],

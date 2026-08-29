@@ -1,6 +1,7 @@
 import { desktopCapturer, app, screen } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'
+import { captureComputerUseDisplay } from './vision/computer-use-display-capture'
 
 export interface CapturedDisplayFrame {
   path: string
@@ -60,17 +61,10 @@ class VisionService {
    * live supervisor, so the model/action loop and the user never observe different screens. */
   async captureDisplayFrame(
     bounds?: { x: number; y: number; width: number; height: number },
-    outputPath?: string
+    outputPath?: string,
+    options: { excludeComputerUseSupervisor?: boolean } = {}
   ): Promise<CapturedDisplayFrame | null> {
     try {
-      const sources = await desktopCapturer.getSources({
-        types: ['screen'],
-        thumbnailSize: { width: 1920, height: 1080 }
-      })
-      if (!sources.length) {
-        console.log('Vision: No screen sources available')
-        return null
-      }
       const point =
         bounds && Number.isFinite(bounds.x)
           ? {
@@ -79,6 +73,29 @@ class VisionService {
             }
           : screen.getCursorScreenPoint()
       const display = screen.getDisplayNearestPoint(point)
+      if (options.excludeComputerUseSupervisor) {
+        const scale = Math.min(1920 / display.bounds.width, 1080 / display.bounds.height)
+        const captured = await captureComputerUseDisplay({
+          displayId: Number(display.id),
+          width: Math.max(1, Math.round(display.bounds.width * scale)),
+          height: Math.max(1, Math.round(display.bounds.height * scale))
+        })
+        const framePath = await this.writeThumb(captured.png, outputPath)
+        return {
+          path: framePath,
+          width: captured.width,
+          height: captured.height,
+          displayBounds: display.bounds
+        }
+      }
+      const sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: { width: 1920, height: 1080 }
+      })
+      if (!sources.length) {
+        console.log('Vision: No screen sources available')
+        return null
+      }
       const target =
         sources.find((source) => String(source.display_id) === String(display.id)) ?? sources[0]!
       if (target.thumbnail.isEmpty()) {

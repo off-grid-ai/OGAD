@@ -29,6 +29,10 @@ vi.mock('electron', () => ({
       electron.options.push(options)
     }
 
+    getMediaSourceId(): string {
+      return 'window:73:0'
+    }
+
     isDestroyed(): boolean {
       return false
     }

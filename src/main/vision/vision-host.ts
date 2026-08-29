@@ -18,7 +18,8 @@
  * Accessibility grant), which no headless runner has.
  */
 import fs from 'fs'
-import { desktopCapturer, globalShortcut, screen } from 'electron'
+import sharp from 'sharp'
+import { globalShortcut, screen } from 'electron'
 import { llm } from '../llm'
 import type { VisionAction, Bounds } from './vision-action'
 import { type VisionScreen, type VisionTaskResult } from './vision-agent'
@@ -45,7 +46,7 @@ import { getComputerUseSettings } from '../computer-use-settings'
 import {
   resolveComputerUseContextTokens,
   SCREENSHOT_MAX_EDGE,
-  SCREENSHOT_RESIZE_QUALITY,
+  SCREENSHOT_RESIZE_KERNEL,
   type ComputerUseSettings
 } from '../../shared/computer-use-settings'
 import {
@@ -65,6 +66,7 @@ import { createVisionGrounder } from './vision-policy-runner'
 import { resolveModelIdentity } from '../models-manager'
 import { computerUsePermissionBlock } from './computer-use-permissions'
 import { runVisionTaskGraph } from './vision-task-graph'
+import { captureComputerUseDisplay } from './computer-use-display-capture'
 
 export type { ActuationPort }
 
@@ -107,21 +109,17 @@ function makeScreen(input: {
             }
           : {})
       }
-      // desktopCapturer can hand back an EMPTY thumbnail when the system is busy
-      // (e.g. right after a multi-GB model swap) - which becomes a 0-byte PNG and
-      // then a llama-server "400 Failed to load image". Retry, prefer the source
-      // for the cursor's display, and validate the buffer before writing.
+      // Capture can return no pixels while the system is busy (for example, after a model swap).
+      // Retry the one native capture owner, which excludes the supervisor before pixels exist.
       let png: Buffer | null = null
       let encodedSize: { width: number; height: number } | null = null
       for (let attempt = 0; attempt < 4 && (png === null || png.length === 0); attempt += 1) {
-        const sources = await desktopCapturer.getSources({
-          types: ['screen'],
-          thumbnailSize: captureSize
-        })
-        const source =
-          sources.find((s) => String(s.display_id) === String(display.id)) ?? sources[0]
-        if (source && !source.thumbnail.isEmpty()) {
-          const sourceSize = source.thumbnail.getSize()
+        try {
+          const captured = await captureComputerUseDisplay({
+            displayId: Number(display.id),
+            ...captureSize
+          })
+          const sourceSize = { width: captured.width, height: captured.height }
           const plannedTarget = planAspectPreservingResize(
             sourceSize,
             SCREENSHOT_MAX_EDGE[settings.screenshotSize]
@@ -129,15 +127,16 @@ function makeScreen(input: {
           const target = screenshotResizeFactor
             ? alignPixelSize(plannedTarget, screenshotResizeFactor)
             : plannedTarget
-          const thumbnail =
+          png =
             target.width === sourceSize.width && target.height === sourceSize.height
-              ? source.thumbnail
-              : source.thumbnail.resize({
-                  ...target,
-                  quality: SCREENSHOT_RESIZE_QUALITY[settings.screenshotQuality]
-                })
-          encodedSize = thumbnail.getSize()
-          png = thumbnail.toPNG()
+              ? captured.png
+              : await sharp(captured.png)
+                  .resize({ ...target, kernel: SCREENSHOT_RESIZE_KERNEL[settings.screenshotQuality] })
+                  .png()
+                  .toBuffer()
+          encodedSize = target
+        } catch {
+          png = null
         }
         if (png === null || png.length === 0) {
           await new Promise((resolve) => setTimeout(resolve, 250))

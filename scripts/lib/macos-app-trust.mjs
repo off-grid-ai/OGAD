@@ -15,6 +15,7 @@ export const CRITICAL_SIGNED_CODE = Object.freeze([
   'Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework',
   'Contents/Resources/bin/llama/llama-server',
   'Contents/Resources/bin/meeting-recorder',
+  'Contents/Resources/bin/computer-use-capture',
   'Contents/Resources/bin/dictation-hotkey'
 ])
 

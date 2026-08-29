@@ -10,10 +10,11 @@ import { afterAll, describe, expect, it, vi } from 'vitest'
 const nativeCapture = vi.hoisted(() => ({
   profile: `/tmp/offgrid-computer-use-exclusion-${process.pid}`,
   protectedWindowSources: new Set<string>(),
-  cleanFrame: Buffer.alloc(0),
-  obstructedFrame: Buffer.alloc(0)
+  electronCaptureCalls: 0
 }))
 fs.mkdirSync(nativeCapture.profile, { recursive: true })
+const originalCaptureArguments = process.env.OFFGRID_CAPTURE_ARGUMENTS
+const originalCaptureSource = process.env.OFFGRID_CAPTURE_CLEAN_SOURCE
 
 vi.mock('electron', () => ({
   app: {
@@ -35,6 +36,10 @@ vi.mock('electron', () => ({
   ipcMain: { handle: vi.fn() },
   BrowserWindow: class BrowserWindow {
     private readonly sourceId = 'window:73:0'
+
+    getMediaSourceId(): string {
+      return this.sourceId
+    }
 
     setContentProtection(protectedFromCapture: boolean): void {
       if (protectedFromCapture) nativeCapture.protectedWindowSources.add(this.sourceId)
@@ -60,53 +65,77 @@ vi.mock('electron', () => ({
   },
   desktopCapturer: {
     getSources: vi.fn(async () => {
-      const pixels = nativeCapture.protectedWindowSources.has('window:73:0')
-        ? nativeCapture.cleanFrame
-        : nativeCapture.obstructedFrame
-      return [
-        {
-          display_id: '1',
-          thumbnail: {
-            isEmpty: () => false,
-            getSize: () => ({ width: 320, height: 200 }),
-            toPNG: () => pixels
-          }
-        }
-      ]
+      nativeCapture.electronCaptureCalls += 1
+      return []
     })
   }
 }))
 
+import { configureRuntime } from '../runtime-env'
 import { vision } from '../vision'
 import { modelScreenshot } from '../vision/vision-policy-runner'
 import { showSupervisorWindow } from '../vision/supervisor-window'
 
 afterAll(() => {
+  configureRuntime({ binRoots: undefined })
+  if (originalCaptureArguments === undefined) delete process.env.OFFGRID_CAPTURE_ARGUMENTS
+  else process.env.OFFGRID_CAPTURE_ARGUMENTS = originalCaptureArguments
+  if (originalCaptureSource === undefined) delete process.env.OFFGRID_CAPTURE_CLEAN_SOURCE
+  else process.env.OFFGRID_CAPTURE_CLEAN_SOURCE = originalCaptureSource
   fs.rmSync(nativeCapture.profile, { recursive: true, force: true })
 })
 
 describe('Computer Use capture exclusion journey', () => {
   it('excludes the visible PiP before capture and stores the exact clean model frame', async () => {
-    nativeCapture.cleanFrame = await sharp({
+    const cleanFrame = await sharp({
       create: { width: 320, height: 200, channels: 3, background: '#34d399' }
     })
       .png()
       .toBuffer()
-    nativeCapture.obstructedFrame = await sharp({
+    const obstructedFrame = await sharp({
       create: { width: 320, height: 200, channels: 3, background: '#0a0a0a' }
     })
       .png()
       .toBuffer()
-    expect(nativeCapture.cleanFrame).not.toEqual(nativeCapture.obstructedFrame)
+    expect(cleanFrame).not.toEqual(obstructedFrame)
+    const binDir = path.join(nativeCapture.profile, 'bin')
+    const cleanSource = path.join(nativeCapture.profile, 'clean-source.png')
+    const captureArguments = path.join(nativeCapture.profile, 'capture-arguments.json')
+    const helper = path.join(binDir, 'computer-use-capture')
+    fs.mkdirSync(binDir, { recursive: true })
+    fs.writeFileSync(cleanSource, cleanFrame)
+    fs.writeFileSync(
+      helper,
+      [
+        '#!/usr/bin/env node',
+        "const fs = require('node:fs')",
+        "fs.writeFileSync(process.env.OFFGRID_CAPTURE_ARGUMENTS, JSON.stringify(process.argv.slice(2)))",
+        "fs.copyFileSync(process.env.OFFGRID_CAPTURE_CLEAN_SOURCE, process.argv[2])"
+      ].join('\n'),
+      { mode: 0o755 }
+    )
+    process.env.OFFGRID_CAPTURE_ARGUMENTS = captureArguments
+    process.env.OFFGRID_CAPTURE_CLEAN_SOURCE = cleanSource
+    configureRuntime({ binRoots: [binDir] })
 
     showSupervisorWindow()
     const savedPath = path.join(nativeCapture.profile, 'task-run-snapshots', 'clean-frame.png')
     fs.mkdirSync(path.dirname(savedPath), { recursive: true })
-    const captured = await vision.captureDisplayFrame(undefined, savedPath)
+    const captured = await vision.captureDisplayFrame(undefined, savedPath, {
+      excludeComputerUseSupervisor: true
+    })
 
     expect(nativeCapture.protectedWindowSources).toEqual(new Set(['window:73:0']))
+    expect(nativeCapture.electronCaptureCalls).toBe(0)
+    expect(JSON.parse(fs.readFileSync(captureArguments, 'utf8'))).toEqual([
+      expect.stringMatching(/offgrid-computer-use-.*\.png$/),
+      '1',
+      '73',
+      '1728',
+      '1080'
+    ])
     expect(captured?.path).toBe(savedPath)
-    expect(fs.readFileSync(savedPath)).toEqual(nativeCapture.cleanFrame)
+    expect(fs.readFileSync(savedPath)).toEqual(cleanFrame)
 
     const modelFrame = await modelScreenshot({
       image: savedPath,

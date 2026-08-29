@@ -104,7 +104,8 @@ export async function captureAxObservationFrame({
     const capture = await withCaptureDeadline(
       vision.captureDisplayFrame(
         snapshotBounds(snapshot),
-        taskScreenshotPath(taskId, `ax-${captureNumber}-${attempt}`)
+        taskScreenshotPath(taskId, `ax-${captureNumber}-${attempt}`),
+        { excludeComputerUseSupervisor: true }
       ),
       signal
     ).catch(() => null)

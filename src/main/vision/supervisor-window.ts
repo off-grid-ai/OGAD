@@ -24,7 +24,14 @@ const MIN_WIN_HEIGHT = 480
 const MARGIN = 24
 
 let supervisor: BrowserWindow | null = null
+let supervisorCaptureWindowId: number | null = null
 let closeTimer: NodeJS.Timeout | null = null
+
+function captureWindowId(sourceId: string): number | null {
+  const match = /^window:(\d+):/.exec(sourceId)
+  const id = Number(match?.[1])
+  return Number.isSafeInteger(id) && id > 0 ? id : null
+}
 
 function bottomRight(): { x: number; y: number } {
   const area = screen.getPrimaryDisplay().workArea
@@ -64,10 +71,9 @@ function create(): BrowserWindow {
     }
   })
   supervisor = win
-  // Keep the PiP visible to the user while the native window compositor excludes this exact
-  // BrowserWindow from screen-capture pixels. Every Computer Use consumer (model, live view, sync,
-  // and replay) reads the one captured frame, so exclusion belongs here at the window boundary.
-  // Do not hide or post-process the PiP: both approaches can race the OS capture and produce drift.
+  supervisorCaptureWindowId = captureWindowId(win.getMediaSourceId())
+  // Windows excludes protected windows at the compositor. Newer macOS ScreenCaptureKit ignores
+  // this flag, so the capture adapter also uses the exact source ID in SCContentFilter.
   win.setContentProtection(true)
   // Float above full-screen apps, on every Space; plain alwaysOnTop is not enough.
   win.setVisibleOnAllWorkspaces(true, {
@@ -78,6 +84,7 @@ function create(): BrowserWindow {
   win.on('closed', () => {
     if (supervisor === win) {
       supervisor = null
+      supervisorCaptureWindowId = null
     }
   })
 
@@ -87,6 +94,11 @@ function create(): BrowserWindow {
     void win.loadFile(rendererHtmlPath(), { hash: 'cu-supervisor' })
   }
   return win
+}
+
+/** Exact native window ID used by the Computer Use capture filter. */
+export function getSupervisorCaptureWindowId(): number | null {
+  return supervisorCaptureWindowId
 }
 
 /** Show the supervisor window (creating it if needed) WITHOUT stealing focus

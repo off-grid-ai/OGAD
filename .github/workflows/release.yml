@@ -158,6 +158,12 @@ jobs:
           chmod +x resources/bin/meeting-recorder
           file resources/bin/meeting-recorder
           otool -l resources/bin/meeting-recorder | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print "[ci] meeting-recorder minos="$2; exit}'
+      - name: Build Computer Use capture helper (exclude supervisor window)
+        run: |
+          MACOS_DEPLOYMENT_TARGET=13.0 bash scripts/build-computer-use-capture.sh resources/bin
+          chmod +x resources/bin/computer-use-capture
+          file resources/bin/computer-use-capture
+          otool -l resources/bin/computer-use-capture | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print "[ci] computer-use-capture minos="$2; exit}'
       # Compile the dictation push-to-talk helper (CGEventTap) and stage it into
       # resources/bin so extraResources bundles it at Contents/Resources/bin — the
       # path PushToTalkHotkey resolves. Self-contained: no committed binary, built
