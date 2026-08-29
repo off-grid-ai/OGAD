@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 
@@ -12,6 +12,7 @@ const { buildMcpServer } = await import('../mcp-server')
 const { authorizeActionRequest, registerActiveActionCredentials } = await import('../mcp-auth')
 const { registerRemoteTaskPermissionProvider } = await import('../remote-task-permission')
 const { registerToolExtension, unregisterToolExtension } = await import('../tools')
+const { configureTaskExecutionDevice } = await import('../tasks/task-history')
 
 const calls: Array<{
   name: string
@@ -53,6 +54,10 @@ async function clientFor(deviceId: string): Promise<{
 }
 
 describe('authenticated Mobile task calls through the Desktop MCP surface', () => {
+  beforeEach(() => {
+    configureTaskExecutionDevice({ id: 'desktop-1', name: 'Studio Mac' })
+  })
+
   afterEach(() => {
     calls.length = 0
     unregisterToolExtension(executionBoundary.id, executionBoundary)
@@ -84,9 +89,10 @@ describe('authenticated Mobile task calls through the Desktop MCP surface', () =
           arguments: { goal: 'Open the release dashboard', execution_device: 'Studio Mac' },
           _meta: {
             'ai.offgrid/taskOrigin': {
-              conversationId: 'mobile-chat-107',
-              deviceId: 'mobile-1',
-              deviceName: 'Release phone'
+            conversationId: 'mobile-chat-107',
+            deviceId: 'mobile-1',
+            deviceName: 'Release phone',
+            executionDeviceId: 'desktop-1'
             }
           }
         })
@@ -104,7 +110,7 @@ describe('authenticated Mobile task calls through the Desktop MCP surface', () =
     }
   )
 
-  it('rejects a disabled or mismatched paired device before execution', async () => {
+  it('rejects a mismatched authenticated origin before execution', async () => {
     registerToolExtension(executionBoundary)
     registerRemoteTaskPermissionProvider(() => false)
     const session = await clientFor('mobile-1')
@@ -115,11 +121,69 @@ describe('authenticated Mobile task calls through the Desktop MCP surface', () =
         _meta: {
           'ai.offgrid/taskOrigin': {
             conversationId: 'mobile-chat-107',
-            deviceId: 'another-mobile'
+            deviceId: 'another-mobile',
+            executionDeviceId: 'desktop-1'
           }
         }
       })
       expect(result.isError).toBe(true)
+      expect(calls).toEqual([])
+    } finally {
+      await session.close()
+    }
+  })
+
+  it('rejects a paired Mobile after this Desktop turns remote task access off', async () => {
+    registerToolExtension(executionBoundary)
+    registerRemoteTaskPermissionProvider(() => false)
+    const session = await clientFor('mobile-1')
+    try {
+      const result = await session.client.callTool({
+        name: 'web_use',
+        arguments: { goal: 'Open the release dashboard' },
+        _meta: {
+          'ai.offgrid/taskOrigin': {
+            conversationId: 'mobile-chat-107',
+            deviceId: 'mobile-1',
+            executionDeviceId: 'desktop-1'
+          }
+        }
+      })
+      expect(result).toMatchObject({
+        isError: true,
+        content: [{ type: 'text', text: 'Remote task access is disabled for this device.' }]
+      })
+      expect(calls).toEqual([])
+    } finally {
+      await session.close()
+    }
+  })
+
+  it('rejects a task routed to a different Desktop instead of falling back locally', async () => {
+    registerToolExtension(executionBoundary)
+    registerRemoteTaskPermissionProvider(() => true)
+    const session = await clientFor('mobile-1')
+    try {
+      const result = await session.client.callTool({
+        name: 'computer_task',
+        arguments: { goal: 'Open the release dashboard', execution_device: 'Office Mac' },
+        _meta: {
+          'ai.offgrid/taskOrigin': {
+            conversationId: 'mobile-chat-107',
+            deviceId: 'mobile-1',
+            executionDeviceId: 'desktop-2'
+          }
+        }
+      })
+      expect(result).toMatchObject({
+        isError: true,
+        content: [
+          {
+            type: 'text',
+            text: 'This task was routed to Studio Mac, not its selected Desktop.'
+          }
+        ]
+      })
       expect(calls).toEqual([])
     } finally {
       await session.close()

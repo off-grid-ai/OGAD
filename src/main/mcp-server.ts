@@ -27,6 +27,7 @@ import { jsonSchemaToZodShape } from './mcp-tool-schema'
 import { authorizeActionRequest } from './mcp-auth'
 import { taskOriginFromRequestMeta } from '@offgrid/sync'
 import { mayRunRemoteTask } from './remote-task-permission'
+import { getTaskExecutionDevice } from './tasks/task-history'
 
 const EXECUTION_DEVICE_DESCRIPTION =
   'Exact paired Desktop name or alias. Omit to select any enabled connected Desktop.'
@@ -287,16 +288,30 @@ function registerActionTools(server: McpServer, authenticatedDeviceId: string | 
       },
       async (args, extra) => {
         const origin = taskOriginFromRequestMeta(extra._meta)
-        if (
-          spec.kind === 'task' &&
-          authenticatedDeviceId !== null &&
-          (!origin ||
-            origin.deviceId !== authenticatedDeviceId ||
-            !mayRunRemoteTask(authenticatedDeviceId))
-        ) {
-          return {
-            content: [{ type: 'text', text: 'Remote task access is disabled for this device.' }],
-            isError: true
+        if (spec.kind === 'task' && authenticatedDeviceId !== null) {
+          if (!origin || origin.deviceId !== authenticatedDeviceId) {
+            return {
+              content: [{ type: 'text', text: 'The authenticated task origin is invalid.' }],
+              isError: true
+            }
+          }
+          const executionDevice = getTaskExecutionDevice()
+          if (origin.executionDeviceId !== executionDevice.id) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `This task was routed to ${executionDevice.name}, not its selected Desktop.`
+                }
+              ],
+              isError: true
+            }
+          }
+          if (!mayRunRemoteTask(authenticatedDeviceId)) {
+            return {
+              content: [{ type: 'text', text: 'Remote task access is disabled for this device.' }],
+              isError: true
+            }
           }
         }
         const { execution_device: _routingOnly, ...toolArgs } = args as Record<string, unknown>
