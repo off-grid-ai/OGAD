@@ -57,7 +57,10 @@ import { ConversationTitleActions } from './ConversationTitleActions'
 import { ImageLightbox } from './media/ImageLightbox'
 import { resolveImageParams, setOverride, type ImageParamStore } from '@renderer/lib/image-params'
 import { IMAGE_SETTINGS_CHANGED_EVENT } from '@renderer/lib/image-settings-events'
-import { DISPLAY_SETTINGS_INVALIDATED_EVENT } from '@renderer/lib/settings-invalidation'
+import {
+  DISPLAY_SETTINGS_INVALIDATED_EVENT,
+  LLM_SETTINGS_INVALIDATED_EVENT
+} from '@renderer/lib/settings-invalidation'
 import {
   DEFAULT_VOICE_PREFERENCES,
   VOICE_PREFERENCES_CHANGED_EVENT,
@@ -71,10 +74,7 @@ import {
   readResponseCutoff,
   readGenerationMetrics
 } from '../lib/message-persistence'
-import {
-  formatGenerationMetrics,
-  type GenerationMetrics
-} from '../../../shared/generation-metrics'
+import { formatGenerationMetrics, type GenerationMetrics } from '../../../shared/generation-metrics'
 import {
   readGeneratedImageReference,
   withGeneratedImageReference
@@ -2450,8 +2450,9 @@ export function MemoryChat({
   // settled, then auto-sent by the effect below sendMessage.
   const [pendingSeed, setPendingSeed] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<Attachment[]>([])
-  // Whether the active chat model can read images. Gate image attachment on this and
-  // re-check periodically (the user can switch models from the Models screen).
+  // Whether the active chat model can read images. Gate image attachment on this. The
+  // main-owned model selection is read on mount and after an explicit invalidation;
+  // opening Chat must not create a permanent IPC polling loop.
   const [chatVision, setChatVision] = useState(true)
   const [attachWarn, setAttachWarn] = useState<string | null>(null)
   /**
@@ -2492,17 +2493,24 @@ export function MemoryChat({
       messageUuid ? incomingFiles.filter((file) => file.messageId === messageUuid) : [],
     [incomingFiles]
   )
-  useEffect(() => {
-    const check = (): void => {
-      void (window.api as { chatVisionAvailable?: () => Promise<boolean> })
-        .chatVisionAvailable?.()
-        .then((v) => setChatVision(!!v))
-        .catch(() => {})
-    }
-    check()
-    const t = setInterval(check, 4000)
-    return () => clearInterval(t)
+  const refreshChatVision = useCallback((): void => {
+    void (window.api as { chatVisionAvailable?: () => Promise<boolean> })
+      .chatVisionAvailable?.()
+      .then((v) => setChatVision(!!v))
+      .catch(() => {})
   }, [])
+  useEffect(() => {
+    const refreshWhenVisible = (): void => {
+      if (document.visibilityState === 'visible') refreshChatVision()
+    }
+    refreshChatVision()
+    window.addEventListener(LLM_SETTINGS_INVALIDATED_EVENT, refreshChatVision)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      window.removeEventListener(LLM_SETTINGS_INVALIDATED_EVENT, refreshChatVision)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
+  }, [refreshChatVision])
   useEffect(() => {
     if (chatVision) setAttachWarn(null)
   }, [chatVision]) // cleared once a vision model is active
@@ -2672,19 +2680,68 @@ export function MemoryChat({
   }, [voiceMode])
 
   // Composer preferences persist across sessions (memory scope, thinking, tools,
-  // voice mode). Individual tool toggles and model choices persist on their own
-  // (DB `disabledTools`, active-model.json). Load once, then save on every change.
-  const prefsLoaded = useRef(false)
+  // voice mode). Main owns the durable values. This snapshot distinguishes hydration
+  // and settings invalidations from a real UI edit, so opening Chat never writes the
+  // values it just read back through IPC.
+  const persistedPreferenceValues = useRef<Record<string, unknown>>({
+    composerNoMemory: noMemory,
+    composerToolsOn: toolsOn,
+    composerConnectorsOn: connectorsOn,
+    composerThinking: thinkingEnabled,
+    composerVoiceMode: voiceMode,
+    imgSeed,
+    imgNegative,
+    enhanceImagePrompts: enhanceImg,
+    imgStrength,
+    imgStyle: activeStyle,
+    imageParams: imgParamStore
+  })
+  const persistChangedPreference = useCallback((key: string, value: unknown): void => {
+    if (Object.is(persistedPreferenceValues.current[key], value)) return
+    persistedPreferenceValues.current[key] = value
+    void window.api.saveSetting(key, value)
+  }, [])
   useEffect(() => {
     ;(async () => {
       try {
         const s = await window.api.getSettings()
+        const previous = persistedPreferenceValues.current
+        Object.assign(persistedPreferenceValues.current, {
+          composerNoMemory:
+            typeof s.composerNoMemory === 'boolean'
+              ? s.composerNoMemory
+              : previous.composerNoMemory,
+          composerToolsOn:
+            typeof s.composerToolsOn === 'boolean' ? s.composerToolsOn : previous.composerToolsOn,
+          composerConnectorsOn:
+            typeof s.composerConnectorsOn === 'boolean'
+              ? s.composerConnectorsOn
+              : previous.composerConnectorsOn,
+          composerThinking:
+            typeof s.composerThinking === 'boolean'
+              ? s.composerThinking
+              : previous.composerThinking,
+          imgSeed: typeof s.imgSeed === 'string' ? s.imgSeed : previous.imgSeed,
+          imgNegative: typeof s.imgNegative === 'string' ? s.imgNegative : previous.imgNegative,
+          enhanceImagePrompts:
+            typeof s.enhanceImagePrompts === 'boolean'
+              ? s.enhanceImagePrompts
+              : previous.enhanceImagePrompts,
+          imgStrength: typeof s.imgStrength === 'number' ? s.imgStrength : previous.imgStrength,
+          imgStyle:
+            typeof s.imgStyle === 'string' || s.imgStyle === null ? s.imgStyle : previous.imgStyle,
+          imageParams:
+            s.imageParams && typeof s.imageParams === 'object'
+              ? s.imageParams
+              : previous.imageParams
+        })
         if (typeof s.composerNoMemory === 'boolean') setNoMemory(s.composerNoMemory)
         if (typeof s.composerToolsOn === 'boolean') setToolsOn(s.composerToolsOn)
         if (typeof s.composerConnectorsOn === 'boolean') setConnectorsOn(s.composerConnectorsOn)
         if (typeof s.composerThinking === 'boolean') setThinkingEnabled(s.composerThinking)
         setShowGenerationDetails(s.showGenerationDetails === true)
         const voicePreferences = readVoicePreferences(s)
+        persistedPreferenceValues.current.composerVoiceMode = voicePreferences.voiceMode
         setVoiceMode(voicePreferences.voiceMode)
         setVoiceTurnMode(voicePreferences.turnMode)
         setVoiceSilenceAfterSpeechMs(voicePreferences.silenceAfterSpeechMs)
@@ -2704,29 +2761,28 @@ export function MemoryChat({
           setActiveStyle((s.imgStyle as string | null) ?? null)
       } catch (e) {
         console.error('Failed to load composer prefs', e)
-      } finally {
-        prefsLoaded.current = true
       }
     })()
   }, [])
   useEffect(() => {
-    if (prefsLoaded.current) void window.api.saveSetting('composerNoMemory', noMemory)
-  }, [noMemory])
+    persistChangedPreference('composerNoMemory', noMemory)
+  }, [noMemory, persistChangedPreference])
   useEffect(() => {
-    if (prefsLoaded.current) void window.api.saveSetting('composerToolsOn', toolsOn)
-  }, [toolsOn])
+    persistChangedPreference('composerToolsOn', toolsOn)
+  }, [persistChangedPreference, toolsOn])
   useEffect(() => {
-    if (prefsLoaded.current) void window.api.saveSetting('composerConnectorsOn', connectorsOn)
-  }, [connectorsOn])
+    persistChangedPreference('composerConnectorsOn', connectorsOn)
+  }, [connectorsOn, persistChangedPreference])
   useEffect(() => {
-    if (prefsLoaded.current) void window.api.saveSetting('composerThinking', thinkingEnabled)
-  }, [thinkingEnabled])
+    persistChangedPreference('composerThinking', thinkingEnabled)
+  }, [persistChangedPreference, thinkingEnabled])
   useEffect(() => {
-    if (prefsLoaded.current) void window.api.saveSetting('composerVoiceMode', voiceMode)
-  }, [voiceMode])
+    persistChangedPreference('composerVoiceMode', voiceMode)
+  }, [persistChangedPreference, voiceMode])
   useEffect(() => {
     const applyPreferences = (event: Event): void => {
       const next = (event as CustomEvent<VoicePreferences>).detail
+      persistedPreferenceValues.current.composerVoiceMode = next.voiceMode
       setVoiceMode(next.voiceMode)
       setVoiceTurnMode(next.turnMode)
       setVoiceSilenceAfterSpeechMs(next.silenceAfterSpeechMs)
@@ -2737,24 +2793,23 @@ export function MemoryChat({
     window.addEventListener(VOICE_PREFERENCES_CHANGED_EVENT, applyPreferences)
     return () => window.removeEventListener(VOICE_PREFERENCES_CHANGED_EVENT, applyPreferences)
   }, [])
-  // Persist the global image-composer params (per-model steps/size live in the
-  // store, saved on change). Guarded by prefsLoaded so the initial load doesn't
-  // echo back an empty default.
+  // Persist the global image-composer params only when they differ from the latest
+  // main-owned values. Hydration and settings invalidations update the snapshot first.
   useEffect(() => {
-    if (prefsLoaded.current) void window.api.saveSetting('imgSeed', imgSeed)
-  }, [imgSeed])
+    persistChangedPreference('imgSeed', imgSeed)
+  }, [imgSeed, persistChangedPreference])
   useEffect(() => {
-    if (prefsLoaded.current) void window.api.saveSetting('imgNegative', imgNegative)
-  }, [imgNegative])
+    persistChangedPreference('imgNegative', imgNegative)
+  }, [imgNegative, persistChangedPreference])
   useEffect(() => {
-    if (prefsLoaded.current) void window.api.saveSetting('enhanceImagePrompts', enhanceImg)
-  }, [enhanceImg])
+    persistChangedPreference('enhanceImagePrompts', enhanceImg)
+  }, [enhanceImg, persistChangedPreference])
   useEffect(() => {
-    if (prefsLoaded.current) void window.api.saveSetting('imgStrength', imgStrength)
-  }, [imgStrength])
+    persistChangedPreference('imgStrength', imgStrength)
+  }, [imgStrength, persistChangedPreference])
   useEffect(() => {
-    if (prefsLoaded.current) void window.api.saveSetting('imgStyle', activeStyle)
-  }, [activeStyle])
+    persistChangedPreference('imgStyle', activeStyle)
+  }, [activeStyle, persistChangedPreference])
   const [autoPlayId, setAutoPlayId] = useState<string | null>(null) // assistant reply to auto-speak once
   const [speakingId, setSpeakingId] = useState<string | null>(null)
   const [speakLoadingId, setSpeakLoadingId] = useState<string | null>(null)
@@ -2926,12 +2981,22 @@ export function MemoryChat({
   useEffect(() => {
     const refreshImageSettings = (): void => {
       void Promise.all([window.api.getSettings(), refreshImageModel()]).then(([settings]) => {
-        if (settings.imageParams && typeof settings.imageParams === 'object')
+        if (settings.imageParams && typeof settings.imageParams === 'object') {
+          persistedPreferenceValues.current.imageParams = settings.imageParams
           setImgParamStore(settings.imageParams as ImageParamStore)
-        if (typeof settings.imgSeed === 'string') setImgSeed(settings.imgSeed)
-        if (typeof settings.imgNegative === 'string') setImgNegative(settings.imgNegative)
-        if (typeof settings.enhanceImagePrompts === 'boolean')
+        }
+        if (typeof settings.imgSeed === 'string') {
+          persistedPreferenceValues.current.imgSeed = settings.imgSeed
+          setImgSeed(settings.imgSeed)
+        }
+        if (typeof settings.imgNegative === 'string') {
+          persistedPreferenceValues.current.imgNegative = settings.imgNegative
+          setImgNegative(settings.imgNegative)
+        }
+        if (typeof settings.enhanceImagePrompts === 'boolean') {
+          persistedPreferenceValues.current.enhanceImagePrompts = settings.enhanceImagePrompts
           setEnhanceImg(settings.enhanceImagePrompts)
+        }
       })
     }
     window.addEventListener(IMAGE_SETTINGS_CHANGED_EVENT, refreshImageSettings)
@@ -3033,10 +3098,9 @@ export function MemoryChat({
   )
   // Persist the per-model image params in ONE effect (not inside the state updater —
   // an updater must be pure; StrictMode double-invokes it, firing the IPC save twice).
-  // Gated on prefsLoaded so the initial hydrate doesn't write back.
   useEffect(() => {
-    if (prefsLoaded.current) void window.api.saveSetting('imageParams', imgParamStore)
-  }, [imgParamStore])
+    persistChangedPreference('imageParams', imgParamStore)
+  }, [imgParamStore, persistChangedPreference])
 
   const activeProjectName = projects.find((p) => p.id === activeProjectId)?.name ?? null
 
@@ -6445,7 +6509,13 @@ export function MemoryChat({
         )}
 
         {modelPickerOpen && (
-          <ModelPicker key="model-picker" onClose={() => setModelPickerOpen(false)} />
+          <ModelPicker
+            key="model-picker"
+            onClose={() => {
+              setModelPickerOpen(false)
+              refreshChatVision()
+            }}
+          />
         )}
 
         {settingsOpen && (

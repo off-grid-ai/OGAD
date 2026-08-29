@@ -31,6 +31,7 @@ import {
   imageMemoryGuardErrorMessage,
   type ImageGenerationJobContract
 } from '../../../../shared/image-generation-contract'
+import { invalidateLlmSettings } from '../../lib/settings-invalidation'
 
 // The real app mounts MemoryChat inside a global TooltipProvider (App shell). Mirror
 // that here so the composer's tooltip-wrapped controls render — this wraps the REAL
@@ -144,6 +145,7 @@ type InstalledApi = {
   getRagMessages: Mock<(id: string) => Promise<unknown[]>>
   cancelImageGen: Mock<() => void>
   chatVisionAvailable: Mock<() => Promise<boolean>>
+  saveSetting: Mock<(key: string, value: unknown) => Promise<void>>
   processFile: Mock<ProcessImage>
   ragChat: Mock<(...args: unknown[]) => Promise<{ answer: string; context: { unified: never[] } }>>
   listGeneratedImages: Mock<() => Promise<GalleryImage[]>>
@@ -241,6 +243,9 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     context: { unified: [] as never[] }
   }))
   const listGeneratedImages = vi.fn(async () => generatedGallery.map((image) => ({ ...image })))
+  const saveSetting = vi.fn(async (k: string, v: unknown) => {
+    settings[k] = v
+  })
   const api = {
     isPro: opts.isPro ?? false,
     // --- assertion subjects ---
@@ -303,9 +308,7 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     exportGeneratedImage,
     // --- settings round-trip (per-model override persistence) ---
     getSettings: vi.fn(async () => settings),
-    saveSetting: vi.fn(async (k: string, v: unknown) => {
-      settings[k] = v
-    }),
+    saveSetting,
     // --- misc mount-time calls (inert) ---
     listProjects: vi.fn(async () => []),
     listArtifacts: vi.fn(async () => []),
@@ -329,6 +332,7 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     imageGenConversationPersisted,
     cancelImageGen,
     chatVisionAvailable,
+    saveSetting,
     processFile,
     ragChat,
     listGeneratedImages,
@@ -1149,6 +1153,52 @@ describe('<MemoryChat/> image and vision release journeys', () => {
     const ragArgs = boundary.ragChat.mock.calls[0]!
     expect(ragArgs[0]).toBe('What is in this image?')
     expect(ragArgs[8]).toEqual(['/uploads/bicycle.png'])
+  })
+
+  it('keeps an idle Chat event-driven and does not write hydrated preferences back', async () => {
+    const boundary = installApi({
+      active: FULL,
+      models: [FULL],
+      chatVision: true,
+      settings: {
+        composerToolsOn: true,
+        composerThinking: true,
+        imgSeed: '42',
+        enhanceImagePrompts: false
+      }
+    })
+    renderChat()
+
+    await waitFor(() => expect(boundary.chatVisionAvailable).toHaveBeenCalledTimes(1))
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(boundary.saveSetting).not.toHaveBeenCalled()
+
+    invalidateLlmSettings()
+    await waitFor(() => expect(boundary.chatVisionAvailable).toHaveBeenCalledTimes(2))
+    expect(boundary.saveSetting).not.toHaveBeenCalled()
+  })
+
+  it('persists a composer preference only after the user changes it', async () => {
+    const boundary = installApi({
+      active: FULL,
+      models: [FULL],
+      settings: { composerThinking: true }
+    })
+    const user = userEvent.setup()
+    renderChat()
+
+    await waitFor(() => expect(boundary.chatVisionAvailable).toHaveBeenCalledTimes(1))
+    const thinkingButton = screen.getByRole('button', { name: 'Thinking' })
+    await waitFor(() => expect(thinkingButton.className).toContain('border-green-500'))
+    expect(boundary.saveSetting).not.toHaveBeenCalled()
+
+    await user.click(thinkingButton)
+    await waitFor(() =>
+      expect(boundary.saveSetting).toHaveBeenCalledWith('composerThinking', false)
+    )
   })
 
   it('explains why a text-only model rejects an image and sends no unsupported content (#69)', async () => {
