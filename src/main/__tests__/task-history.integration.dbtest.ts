@@ -10,12 +10,17 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   ORPHANED_LOCAL_WEB_TASK_SUMMARY,
   TASK_HISTORY_LIMIT,
-  TaskHistoryStore,
-  canonicalTaskKind
+  TaskHistoryStore
 } from '../tasks/task-history-store'
 import { MAX_TASK_STEP_DETAILS } from '../tasks/task-step-details'
 import { MAX_COMPUTER_USE_REASONING_CHARS } from '../../shared/computer-use-limits'
 import { encodeTaskExecutionPlan, encodeTaskPhase } from '../../shared/task-execution-plan'
+import {
+  automationTaskKindLabel,
+  automationTaskReadStatus,
+  createAutomationTask,
+  transitionAutomationTask
+} from '@offgrid/automation'
 
 const temporaryDirectories: string[] = []
 
@@ -35,6 +40,50 @@ afterEach(() => {
 })
 
 describe('task history persistence', () => {
+  it('persists the real shared automation projection and rejects unknown vocabularies', () => {
+    const { db, store } = openStore(4_000)
+    let task = createAutomationTask({
+      taskId: 'shared-contract-task',
+      kind: 'web_use',
+      now: 1_000
+    })
+    const started = transitionAutomationTask(task, { type: 'START' }, 2_000)
+    expect(started.accepted).toBe(true)
+    if (!started.accepted) throw new Error(started.reason)
+    task = started.snapshot
+
+    store.upsert({
+      taskId: task.taskId,
+      journeyId: 'chat-shared-contract',
+      kind: task.kind,
+      title: automationTaskKindLabel(task.kind),
+      status: automationTaskReadStatus(task.status),
+      at: task.updatedAt
+    })
+    db.prepare(
+      `INSERT INTO task_run_history (
+        task_id, journey_id, kind, title, status, steps_json, started_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, '[]', ?, ?)`
+    ).run(
+      'invalid-task-vocabulary',
+      'chat-invalid',
+      'web_task',
+      'Old task',
+      'completed',
+      1_000,
+      3_000
+    )
+
+    expect(store.get(task.taskId)).toMatchObject({
+      kind: 'web_use',
+      status: 'running',
+      title: 'Web Use'
+    })
+    expect(store.get('invalid-task-vocabulary')).toBeUndefined()
+    expect(store.list().map((item) => item.taskId)).toEqual(['shared-contract-task'])
+    db.close()
+  })
+
   it('materializes and removes a synced visual step without changing task ownership timestamps', () => {
     const { db, store } = openStore(4_000)
     store.upsert({
@@ -112,7 +161,7 @@ describe('task history persistence', () => {
     first.migrate()
     first.upsert({
       taskId: 'legacy-web-run',
-      kind: 'web_task',
+      kind: 'web_use',
       title: 'Gather proposal facts',
       status: 'failed',
       summary: 'Runtime.evaluate timed out',
@@ -473,14 +522,12 @@ describe('task history persistence', () => {
     db.close()
   })
 
-  it('bounds retained task history and accepts both legacy names', () => {
+  it('bounds retained task history for canonical task kinds', () => {
     const { db, store } = openStore()
-    expect(canonicalTaskKind('web_task')).toBe('web_use')
-    expect(canonicalTaskKind('computer_task')).toBe('computer_use')
     for (let index = 0; index < TASK_HISTORY_LIMIT + 3; index += 1) {
       store.upsert({
         taskId: `task-${index}`,
-        kind: index % 2 ? 'web_task' : 'computer_task',
+        kind: index % 2 ? 'web_use' : 'computer_use',
         title: `Task ${index}`,
         status: 'done',
         at: index + 1

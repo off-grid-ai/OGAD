@@ -8,6 +8,14 @@
  * into separate persistence systems.
  */
 import {
+  automationTaskKindLabel,
+  isAutomationTaskTerminal,
+  parseAutomationTaskKind,
+  parseAutomationTaskReadStatus,
+  type AutomationTaskKind,
+  type AutomationTaskReadStatus
+} from '@offgrid/automation'
+import {
   boundComputerUseStepDetails,
   storedComputerUseStepDetails,
   sanitizeComputerUseReasoning,
@@ -15,16 +23,8 @@ import {
   type ComputerUseStepDetail
 } from './task-step-details'
 
-export type TaskRunKind = 'web_use' | 'computer_use'
-export type LegacyTaskRunKind = TaskRunKind | 'web_task' | 'computer_task'
-export type TaskRunStatus =
-  | 'running'
-  | 'paused'
-  | 'waiting'
-  | 'reconnecting'
-  | 'done'
-  | 'failed'
-  | 'stopped'
+export type TaskRunKind = AutomationTaskKind
+export type TaskRunStatus = AutomationTaskReadStatus
 
 export interface TaskRunSnapshot {
   taskId: string
@@ -64,7 +64,7 @@ export interface TaskRunUpdate {
   journeyId?: string
   modelId?: string
   modelName?: string
-  kind: LegacyTaskRunKind
+  kind: TaskRunKind
   title?: string
   status?: TaskRunStatus
   summary?: string
@@ -130,10 +130,6 @@ export const TASK_HISTORY_LIMIT = 50
 export const ORPHANED_LOCAL_WEB_TASK_SUMMARY =
   'Stopped because the earlier local Web Use process is no longer active.'
 
-export function canonicalTaskKind(kind: LegacyTaskRunKind): TaskRunKind {
-  return kind === 'web_task' || kind === 'web_use' ? 'web_use' : 'computer_use'
-}
-
 function safeSteps(raw: string): string[] {
   try {
     const parsed = JSON.parse(raw) as unknown
@@ -153,10 +149,11 @@ function sanitizeTaskSteps(steps: readonly string[]): string[] {
   )
 }
 
-function rowToSnapshot(row: TaskRunRow): TaskRunSnapshot {
-  const kind = canonicalTaskKind(row.kind as LegacyTaskRunKind)
-  const status = row.status as TaskRunStatus
-  const terminal = status === 'done' || status === 'failed' || status === 'stopped'
+function rowToSnapshot(row: TaskRunRow): TaskRunSnapshot | undefined {
+  const kind = parseAutomationTaskKind(row.kind)
+  const status = parseAutomationTaskReadStatus(row.status)
+  if (!kind || !status) return undefined
+  const terminal = isAutomationTaskTerminal(status)
   const currentReasoning =
     kind === 'web_use' ? sanitizeComputerUseReasoning(row.current_reasoning) : undefined
   return {
@@ -224,7 +221,7 @@ function persistedReasoning(
     update.reasoningLive !== undefined ||
     previous?.currentReasoning !== undefined ||
     previous?.reasoningLive !== undefined
-  const terminal = status === 'done' || status === 'failed' || status === 'stopped'
+  const terminal = isAutomationTaskTerminal(status)
   const reasoningLive = terminal
     ? hasReasoningState
       ? false
@@ -331,22 +328,17 @@ export class TaskHistoryStore {
   upsert(update: TaskRunUpdate): TaskRunSnapshot {
     const at = update.at ?? this.now()
     const previous = this.get(update.taskId)
-    const kind = canonicalTaskKind(update.kind)
-    const status = update.status ?? previous?.status ?? 'running'
-    const finishedAt =
-      status === 'done' || status === 'failed' || status === 'stopped'
-        ? (previous?.finishedAt ?? at)
-        : undefined
+    const kind = parseAutomationTaskKind(update.kind)
+    const status = parseAutomationTaskReadStatus(update.status ?? previous?.status ?? 'running')
+    if (!kind || !status) throw new Error('Task history received an invalid task kind or status.')
+    const finishedAt = isAutomationTaskTerminal(status) ? (previous?.finishedAt ?? at) : undefined
     const snapshot: TaskRunSnapshot = {
       taskId: update.taskId,
       journeyId: update.journeyId?.trim() || previous?.journeyId || update.taskId,
       ...persistedModelIdentity(previous, update),
       ...persistedReasoning(previous, update, kind, status),
       kind,
-      title:
-        update.title?.trim() ||
-        previous?.title ||
-        (kind === 'web_use' ? 'Web Use' : 'Computer Use'),
+      title: update.title?.trim() || previous?.title || automationTaskKindLabel(kind),
       status,
       ...(update.summary !== undefined
         ? { summary: update.summary }
@@ -486,12 +478,7 @@ export class TaskHistoryStore {
     return snapshot
   }
 
-  appendStep(
-    taskId: string,
-    kind: LegacyTaskRunKind,
-    title: string,
-    step: string
-  ): TaskRunSnapshot {
+  appendStep(taskId: string, kind: TaskRunKind, title: string, step: string): TaskRunSnapshot {
     const previous = this.get(taskId)
     return this.upsert({
       taskId,
@@ -514,7 +501,10 @@ export class TaskHistoryStore {
       this.db
         .prepare('SELECT * FROM task_run_history ORDER BY updated_at DESC, task_id DESC LIMIT ?')
         .all(safeLimit) as TaskRunRow[]
-    ).map(rowToSnapshot)
+    ).flatMap((row) => {
+      const snapshot = rowToSnapshot(row)
+      return snapshot ? [snapshot] : []
+    })
   }
 
   /** Add one remote visual audit step without changing the execution owner's task timestamps. */
@@ -559,7 +549,7 @@ export class TaskHistoryStore {
     if (
       !task ||
       task.kind !== 'web_use' ||
-      !['running', 'paused', 'waiting', 'reconnecting'].includes(task.status) ||
+      isAutomationTaskTerminal(task.status) ||
       (task.executionDeviceId && task.executionDeviceId !== executionDeviceId)
     ) {
       return undefined
