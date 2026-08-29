@@ -435,7 +435,7 @@ app.whenReady().then(async () => {
     registerVisionIpc() // the vision rail's supervisor Stop/Pause/Resume
     const { registerSupervisorWindowIpc } = await import('./vision/supervisor-window')
     registerSupervisorWindowIpc()
-    const { registerTaskHistoryIpc } = await import('./tasks/task-history')
+    const { registerTaskHistoryIpc } = await import('./tasks/task-history-ipc')
     registerTaskHistoryIpc() // one durable Web Use + Computer Use history
     setupDesktopBackupIPC()
     // one OpenAI-compatible local gateway (LLM + STT); auto-picks a free port. Async, so handle a

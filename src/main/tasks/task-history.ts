@@ -2,13 +2,11 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { getDB } from '../database'
 import { CORE_SYNC_ENTITIES, emitSyncMutation } from '../sync-mutation'
 import { TaskHistoryStore, type TaskRunSnapshot, type TaskRunUpdate } from './task-history-store'
 import { sanitizeComputerUseStepDetail, type ComputerUseStepDetail } from './task-step-details'
-import { registerTaskRetryIpc } from './task-retry-ipc'
-import { registerTaskGuideIpc } from './task-guide-ipc'
 import { persistTaskResultInChat } from './task-result-chat'
 import { notifyRagConversationChanged } from '../rag-conversation-events'
 
@@ -291,31 +289,8 @@ export function appendTaskStepDetail(
   })
 }
 
-export function registerTaskHistoryIpc(): void {
+export function initializeTaskHistory(): void {
   recoverInterruptedTasks(executionDevice.id)
-  ipcMain.handle('tasks:list', (_event, limit: unknown) =>
-    taskHistoryStore().list(typeof limit === 'number' ? limit : undefined)
-  )
-  registerTaskRetryIpc(ipcMain, {
-    availability: async (taskId) => {
-      const { getTaskRetryAvailability } = await import('./task-retry')
-      return getTaskRetryAvailability(taskId)
-    },
-    retry: async (taskId) => {
-      const { retryTask } = await import('./task-retry')
-      return retryTask(taskId)
-    }
-  })
-  registerTaskGuideIpc(ipcMain, {
-    availability: async (taskId) => {
-      const { taskGuideAvailability } = await import('./task-guide')
-      return taskGuideAvailability(taskId)
-    },
-    guide: async (taskId, input) => {
-      const { guideTask } = await import('./task-guide')
-      return guideTask(taskId, input)
-    }
-  })
 }
 
 /** Test seam for a simulated process restart. Live state is memory-only, so it goes too. */

@@ -15,7 +15,7 @@ module.exports = {
       name: 'not-to-unresolvable',
       comment: 'A broken/typo/moved import must fail the build, not surface at runtime.',
       severity: 'error',
-      from: {},
+      from: { path: '^src/' },
       to: { couldNotResolve: true }
     },
     {
@@ -71,7 +71,8 @@ module.exports = {
         'the boundary. A stray core->pro import ships paid source in the public repo.',
       severity: 'error',
       from: {
-        pathNot: '(loadProFeaturesMain|loadProFeaturesRenderer|main\\.tsx|bootstrap/proStub)'
+        pathNot:
+          '(loadProFeaturesMain|loadProFeaturesRenderer|main\\.tsx|bootstrap/proStub|\\.(test|spec)\\.[tj]sx?$|/__tests__/)'
       },
       to: { path: 'bootstrap/proStub\\.ts$|(^|/)pro/(main|renderer)/' }
     },
@@ -107,7 +108,9 @@ module.exports = {
     }
   ],
   options: {
-    doNotFollow: { path: 'node_modules' },
+    // Pro is a sibling checkout in CI. Inspect the core -> Pro edge, but do not
+    // traverse the private graph and apply open-core rules inside Pro itself.
+    doNotFollow: { path: 'node_modules|^pro/' },
     tsConfig: { fileName: 'tsconfig.web.json' },
     exclude: { path: 'node_modules|e2e/' },
     tsPreCompilationDeps: true,

@@ -127,26 +127,21 @@ export function taskRetryAvailability(
   }
 }
 
+let configuredRunner: TaskRetryRunner | null = null
+
+/** Bind runtime hosts at the process composition root, not inside retry policy. */
+export function configureTaskRetryRunner(runner: TaskRetryRunner): void {
+  configuredRunner = runner
+}
+
 const liveRunner: TaskRetryRunner = {
-  async web(task, taskId, checkpoint) {
-    const { getBrowserRailHost } = await import('../browser/browser-host')
-    return getBrowserRailHost().runTask({
-      goal: task.title,
-      url: task.lastUrl,
-      taskId,
-      journeyId: task.journeyId,
-      checkpoint
-    })
+  web: (task, taskId, checkpoint) => {
+    if (!configuredRunner) throw new Error('Task retry runner is not configured.')
+    return configuredRunner.web(task, taskId, checkpoint)
   },
-  async computer(task, taskId, checkpoint) {
-    const [{ withGrounder }, { getVisionRailHost }] = await Promise.all([
-      import('../vision/grounder-loader'),
-      import('../vision/vision-host')
-    ])
-    const { result } = await withGrounder(() =>
-      getVisionRailHost().runTask(task.title, taskId, task.journeyId, checkpoint)
-    )
-    return result
+  computer: (task, taskId, checkpoint) => {
+    if (!configuredRunner) throw new Error('Task retry runner is not configured.')
+    return configuredRunner.computer(task, taskId, checkpoint)
   }
 }
 
