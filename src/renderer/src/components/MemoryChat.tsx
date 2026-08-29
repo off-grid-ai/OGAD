@@ -2358,7 +2358,7 @@ function textRecordingTooltip(phase: ChatVoicePhase, transcriptionLabel: string)
 }
 
 async function stopLiveWebUseForConversation(conversationId: string | null): Promise<void> {
-  if (!conversationId || !window.api.tasks?.list || !window.api.browser?.stopTask) return
+  if (!conversationId || !window.api.tasks?.list || !window.api.vision?.control) return
   try {
     const tasks = await window.api.tasks.list()
     const live = new Set(['running', 'paused', 'waiting', 'reconnecting'])
@@ -2366,16 +2366,13 @@ async function stopLiveWebUseForConversation(conversationId: string | null): Pro
       (task) =>
         task.kind === 'web_use' && task.journeyId === conversationId && live.has(task.status)
     )
-    await Promise.all(matching.map((task) => window.api.browser!.stopTask(task.taskId)))
+    await Promise.all(matching.map((task) => window.api.vision!.control('stop', task.taskId)))
   } catch (error) {
     console.error('Failed to stop Web Use for this Chat:', error)
   }
 }
 
 async function stopLiveTask(task: Pick<TaskSession, 'taskId' | 'kind'>): Promise<boolean> {
-  if (task.kind === 'web_use') {
-    return (await window.api.browser?.stopTask(task.taskId)) ?? false
-  }
   return (await window.api.vision?.control('stop', task.taskId)) ?? false
 }
 

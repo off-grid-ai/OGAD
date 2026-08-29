@@ -518,7 +518,9 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     })
     await user.click(screen.getByRole('button', { name: /stop generating/i }))
 
-    await waitFor(() => expect(boundary.stopBrowserTask).toHaveBeenCalledWith('web-live-stop'))
+    await waitFor(() =>
+      expect(boundary.stopComputerTask).toHaveBeenCalledWith('stop', 'web-live-stop')
+    )
     expect(boundary.cancelRag).toHaveBeenCalledWith(boundary.calls[0]!.streamId)
     expect(boundary.listTasks).toHaveBeenCalledTimes(listCallsBeforeStop)
   })
@@ -549,13 +551,12 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     await waitFor(() =>
       expect(boundary.stopComputerTask).toHaveBeenCalledWith('stop', 'computer-live-stop')
     )
-    expect(boundary.stopBrowserTask).not.toHaveBeenCalled()
     expect(boundary.cancelRag).toHaveBeenCalledWith(boundary.calls[0]!.streamId)
   })
 
   it('shows a Stop failure and keeps the originating task busy', async () => {
     const boundary = new ChatBoundary()
-    boundary.stopBrowserTask.mockResolvedValue(false)
+    boundary.stopComputerTask.mockResolvedValue(false)
     installBoundary(boundary)
     const user = userEvent.setup()
     renderChat({ conversationId: 'conversation-a' })
@@ -790,14 +791,16 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     renderChat({ conversationId: 'conversation-a' })
 
     await user.click(await screen.findByRole('button', { name: 'Resend' }))
-    await waitFor(() => expect(boundary.stopBrowserTask).toHaveBeenCalledWith('web-live-1'))
+    await waitFor(() =>
+      expect(boundary.stopComputerTask).toHaveBeenCalledWith('stop', 'web-live-1')
+    )
     await waitFor(() => expect(boundary.calls).toHaveLength(1))
-    expect(boundary.stopBrowserTask.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(boundary.stopComputerTask.mock.invocationCallOrder[0]).toBeLessThan(
       boundary.api.ragChat.mock.invocationCallOrder[0]!
     )
 
     await user.click(screen.getByTitle('Edit this message'))
-    await waitFor(() => expect(boundary.stopBrowserTask).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(boundary.stopComputerTask).toHaveBeenCalledTimes(2))
   })
 
   it('shows Thinking and the live Web Use row while an edited turn is running', async () => {

@@ -135,7 +135,6 @@ export class ChatBoundary {
 
   readonly cancelRag = vi.fn()
   readonly listTasks = vi.fn(async () => [] as TaskSnapshot[])
-  readonly stopBrowserTask = vi.fn(async () => true)
   readonly stopComputerTask = vi.fn(async () => true)
   readonly guideTask = vi.fn(async () => ({ available: true, accepted: true }))
   readonly saveArtifact = vi.fn(async () => 'artifact-id')
@@ -188,7 +187,6 @@ export class ChatBoundary {
         }
       })
     },
-    browser: { stopTask: this.stopBrowserTask },
     vision: { control: this.stopComputerTask },
     onImageGenProgress: vi.fn(() => () => {}),
     onRagConversationsChanged: vi.fn(

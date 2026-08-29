@@ -38,14 +38,6 @@ export class BrowserJourneyRunOwners {
     return this.owners.get(owner.journeyId) === owner
   }
 
-  stop(taskId: string, reason: string): boolean {
-    const owner = [...this.owners.values()].find((candidate) => candidate.taskId === taskId)
-    if (!owner) return false
-    owner.guard.halt(reason)
-    owner.controller.abort(reason)
-    return true
-  }
-
   release(owner: BrowserJourneyRunOwner): void {
     if (this.isCurrent(owner)) this.owners.delete(owner.journeyId)
   }

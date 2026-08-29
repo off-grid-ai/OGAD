@@ -65,7 +65,7 @@ describe('macOS Computer Use journey', () => {
           return mapped ? { mappedAction: mapped } : { rejected: 'The point could not be mapped.' }
         }
       },
-      guard: new VisionGuard(),
+      guard: new VisionGuard({ taskId: 'macos-journey-test', kind: 'computer_use' }),
       decide: async (input) => {
         policyHistory.push(input.policyHistory.map((step) => step.actionText))
         const response = responses.shift()!

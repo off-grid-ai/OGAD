@@ -75,11 +75,6 @@ export function resolveActiveBrowserVisionSelection(): BrowserVisionSelection {
   }
 }
 
-/** Back-compatible adapter-only boundary for callers that do not own a task. */
-export function resolveActiveBrowserVisionAdapter(): VisionModelAdapter {
-  return resolveActiveBrowserVisionSelection().adapter
-}
-
 /** Run only after the selected Computer Use model is resident. Identity and
  * adapter come from the same post-swap snapshot that performs the task. */
 export async function withActiveBrowserVision<T>(
@@ -119,7 +114,7 @@ interface BrowserVisualTaskInput {
   resumedSteps?: readonly string[]
   activePage: () => { view: WebContentsView; driver: BrowserDriver }
   takeGuidance: () => readonly string[]
-  waitForUser: (why: string) => Promise<void>
+  waitForUser: (why: string, signal?: AbortSignal) => Promise<void>
   onStep: (note: string) => void
   onPhase: (phaseId: string) => void
   onProgress: (progress: VisionTaskProgress) => void

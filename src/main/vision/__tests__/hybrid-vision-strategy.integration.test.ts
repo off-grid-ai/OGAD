@@ -143,7 +143,7 @@ describe('Text + Specialist visual task journey', () => {
                 actions.push(action)
               }
             },
-            guard: new VisionGuard(),
+            guard: new VisionGuard({ taskId: 'hybrid-strategy-test', kind: 'computer_use' }),
             decide: session.decide,
             parseResponse: session.adapter.parseResponse,
             waitForUser: async () => undefined,

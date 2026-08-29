@@ -83,7 +83,7 @@ function workflow(decisions: VisionPolicyDecision[]): {
         actuated.push(`${nextAction.type}:${point}`)
       }
     },
-    guard: new VisionGuard(),
+    guard: new VisionGuard({ taskId: 'vision-graph-test', kind: 'computer_use' }),
     decide: async (input) => {
       state.decisionCalls += 1
       policyHistory.push(input.policyHistory.map((step) => step.actionText))
@@ -105,23 +105,34 @@ function workflow(decisions: VisionPolicyDecision[]): {
 
 describe('runVisionTaskGraph', () => {
   it('records and advances every completed milestone exactly once without an action request', async () => {
-    const w = workflow([complete('Site visible.'), complete('Details visible.')])
+    const w = workflow([
+      complete('Site visible.'),
+      complete('Details visible.'),
+      complete('Details visible.')
+    ])
 
     const result = await runVisionTaskGraph('Complete both milestones.', w.deps)
 
     expect(result.ok).toBe(true)
-    expect(w.decisionCalls).toBe(2)
+    // The last milestone is checked again from a fresh verification frame
+    // before the shared lifecycle owner accepts completion.
+    expect(w.decisionCalls).toBe(3)
     expect(w.phases).toEqual(['phase-1', 'phase-2'])
     expect(result.steps.filter((step) => step.startsWith('milestone complete:'))).toEqual([
       'milestone complete: Navigate to the site',
       'milestone complete: Enter the requested details'
     ])
     expect(w.actuated).toEqual([])
-    expect(w.observations.map((item) => item.result)).toEqual(['terminal', 'terminal'])
+    expect(w.observations.map((item) => item.result)).toEqual(['terminal', 'terminal', 'terminal'])
   })
 
   it('starts each milestone with a fresh model trajectory', async () => {
-    const w = workflow([action(), complete('Site visible.'), complete('Details visible.')])
+    const w = workflow([
+      action(),
+      complete('Site visible.'),
+      complete('Details visible.'),
+      complete('Details visible.')
+    ])
 
     const result = await runVisionTaskGraph('Complete both milestones.', w.deps)
 
@@ -131,31 +142,35 @@ describe('runVisionTaskGraph', () => {
   })
 
   it('does not let a model-level done verdict skip remaining execution-plan milestones', async () => {
-    const w = workflow([done('Everything is complete.'), complete('Final result verified.')])
+    const w = workflow([
+      done('Everything is complete.'),
+      complete('Final result verified.'),
+      complete('Final result verified.')
+    ])
 
     const result = await runVisionTaskGraph('Complete both milestones.', w.deps)
 
     expect(result.ok).toBe(true)
     expect(result.summary).toBe('Final result verified.')
-    expect(w.decisionCalls).toBe(2)
+    expect(w.decisionCalls).toBe(3)
     expect(w.phases).toEqual(['phase-1', 'phase-2'])
     expect(result.steps).toContain('milestone complete: Navigate to the site')
     expect(result.steps).not.toContain('done: Everything is complete.')
   })
 
   it('keeps model-level done as a terminal result when no execution plan exists', async () => {
-    const w = workflow([done('Unplanned task complete.')])
+    const w = workflow([done('Unplanned task complete.'), done('Unplanned task complete.')])
     w.deps.plan = undefined
 
     const result = await runVisionTaskGraph('Complete the task.', w.deps)
 
     expect(result).toMatchObject({ ok: true, summary: 'Unplanned task complete.' })
-    expect(w.decisionCalls).toBe(1)
+    expect(w.decisionCalls).toBe(2)
     expect(result.steps).toContain('done: Unplanned task complete.')
   })
 
   it('uses one decision call for one approved action and preserves screenshot coordinates', async () => {
-    const w = workflow([action(), complete()])
+    const w = workflow([action(), complete(), complete()])
     w.deps.plan = { version: 1, phases: [{ id: 'only', title: 'Use the visible control' }] }
 
     const result = await runVisionTaskGraph('Use the visible control.', w.deps)
@@ -224,7 +239,7 @@ describe('runVisionTaskGraph', () => {
   })
 
   it('publishes reasoning through the separated live channel and closes that state', async () => {
-    const w = workflow([complete()])
+    const w = workflow([complete(), complete()])
     w.deps.plan = { version: 1, phases: [{ id: 'only', title: 'Confirm the result' }] }
     const reasoning: Array<{ step: number; content: string; live: boolean }> = []
     w.deps.onReasoning = (event) => reasoning.push(event)
@@ -240,29 +255,38 @@ describe('runVisionTaskGraph', () => {
       { step: 1, content: '', live: true },
       { step: 1, content: 'The result page ', live: true },
       { step: 1, content: 'The result page is visible.', live: true },
-      { step: 1, content: 'The result page is visible.', live: false }
+      { step: 1, content: 'The result page is visible.', live: false },
+      { step: 2, content: '', live: true },
+      { step: 2, content: 'The result page ', live: true },
+      { step: 2, content: 'The result page is visible.', live: true },
+      { step: 2, content: 'The result page is visible.', live: false }
     ])
   })
 
   it('does not tell the model that a rejected action was executed', async () => {
-    const w = workflow([action(), complete()])
+    const w = workflow([action(), complete(), complete()])
     w.deps.plan = { version: 1, phases: [{ id: 'only', title: 'Use the visible control' }] }
     w.deps.screen.actuate = async () => ({ rejected: 'The captured viewport changed.' })
 
     const result = await runVisionTaskGraph('Use the visible control.', w.deps)
 
     expect(result.ok).toBe(true)
-    expect(w.policyHistory).toEqual([[], []])
-    expect(w.observations.map((item) => item.result)).toEqual(['reviewed', 'blocked', 'terminal'])
+    expect(w.policyHistory).toEqual([[], [], []])
+    expect(w.observations.map((item) => item.result)).toEqual([
+      'reviewed',
+      'blocked',
+      'terminal',
+      'terminal'
+    ])
   })
 
   it('never routes a complete_milestone transition through the execution node', async () => {
-    const w = workflow([complete()])
+    const w = workflow([complete(), complete()])
     w.deps.plan = { version: 1, phases: [{ id: 'only', title: 'Confirm the result' }] }
 
     await runVisionTaskGraph('Confirm the result.', w.deps)
 
-    expect(w.decisionCalls).toBe(1)
+    expect(w.decisionCalls).toBe(2)
     expect(w.actuated).toEqual([])
   })
 
@@ -277,6 +301,7 @@ describe('runVisionTaskGraph', () => {
           direction,
           decisionRationale: 'The point is outside the named control.'
         },
+        complete(),
         complete()
       ])
       w.deps.plan = { version: 1, phases: [{ id: 'only', title: 'Use the control' }] }
@@ -284,7 +309,7 @@ describe('runVisionTaskGraph', () => {
       const result = await runVisionTaskGraph('Use the control.', w.deps)
 
       expect(result.ok).toBe(true)
-      expect(w.decisionCalls).toBe(2)
+      expect(w.decisionCalls).toBe(3)
       expect(w.actuated).toEqual([])
       expect(result.steps).toContain(`${direction}: The proposed point is not verified.`)
     }
@@ -293,6 +318,7 @@ describe('runVisionTaskGraph', () => {
   it('takes a fresh observation when a transition command is malformed', async () => {
     const w = workflow([
       { kind: 'invalid', actionText: '', error: 'The model command did not parse.' },
+      complete(),
       complete()
     ])
     w.deps.plan = { version: 1, phases: [{ id: 'only', title: 'Use the visible control' }] }
@@ -300,9 +326,13 @@ describe('runVisionTaskGraph', () => {
     const result = await runVisionTaskGraph('Use the visible control.', w.deps)
 
     expect(result.ok).toBe(true)
-    expect(w.decisionCalls).toBe(2)
+    expect(w.decisionCalls).toBe(3)
     expect(w.actuated).toEqual([])
-    expect(w.observations.map((item) => item.result)).toEqual(['parse_failed', 'terminal'])
+    expect(w.observations.map((item) => item.result)).toEqual([
+      'parse_failed',
+      'terminal',
+      'terminal'
+    ])
   })
 })
 
@@ -332,7 +362,7 @@ function parseScriptedDecision(response: string, target: Bounds): VisionPolicyDe
 
 function scripted(
   replies: string[],
-  guard = new VisionGuard()
+  guard = new VisionGuard({ taskId: 'vision-graph-test', kind: 'computer_use' })
 ): {
   deps: VisionTaskGraphDeps
   actuated: string[]
@@ -457,38 +487,80 @@ describe('runVisionTaskGraph with a scripted action model', () => {
   it('call_user hands off and resumes after the user acts', async () => {
     const w = scripted([
       "call_user(content='enter your PIN')",
+      "finished(content='done after the PIN')",
       "finished(content='done after the PIN')"
     ])
+    let captures = 0
+    w.deps.screen.capture = async () => {
+      captures += 1
+      return { image: `frame-${captures}.png`, bounds }
+    }
     const result = await runVisionTaskGraph('pay', w.deps)
     expect(result.handoffs).toBe(1)
     expect(w.userWaits).toEqual(['enter your PIN'])
     expect(result.steps.join('\n')).toContain('resumed by the user')
+    expect(captures).toBe(3)
   })
 
   it('pauses only after explicit takeover and resumes from the same task', async () => {
-    const guard = new VisionGuard()
+    const guard = new VisionGuard({ taskId: 'vision-graph-test', kind: 'computer_use' })
     const w = scripted(["click(point='<point>1 1</point>')", "finished(content='ok')"], guard)
-    guard.pauseForUser('you selected Take Over')
+    guard.takeOver('you selected Take Over')
     w.deps.onProgress = (progress) => {
       if (progress.phase === 'paused') guard.resume()
     }
     const result = await runVisionTaskGraph('t', w.deps)
     expect(w.userWaits).toEqual([])
     expect(result.ok).toBe(true)
-    expect(result.steps.join('\n')).toContain('paused: you selected Take Over')
+    expect(result.steps.join('\n')).toContain('paused: Waiting for you')
+  })
+
+  it('discards a model reply that completes after Take Over and re-observes on Continue', async () => {
+    const guard = new VisionGuard({ taskId: 'vision-graph-test', kind: 'computer_use' })
+    const w = scripted(
+      [
+        "finished(content='stale result')",
+        "finished(content='verified after takeover')",
+        "finished(content='verified after takeover')"
+      ],
+      guard
+    )
+    let captures = 0
+    let tookOver = false
+    w.deps.screen.capture = async () => {
+      captures += 1
+      return { image: `frame-${captures}.png`, bounds }
+    }
+    w.deps.onProgress = (progress) => {
+      if (progress.phase === 'thinking' && !tookOver) {
+        tookOver = true
+        guard.takeOver('you selected Take Over')
+      }
+      if (progress.phase === 'paused') guard.resume()
+    }
+
+    const result = await runVisionTaskGraph('finish the task', w.deps)
+
+    expect(result).toMatchObject({ ok: true, summary: 'verified after takeover' })
+    expect(captures).toBe(3)
+    expect(result.steps.join('\n')).not.toContain('stale result')
   })
 
   it('stops immediately when the kill switch is down, actuating nothing', async () => {
-    const guard = new VisionGuard()
+    const guard = new VisionGuard({ taskId: 'vision-graph-test', kind: 'computer_use' })
     guard.halt('stopped with Esc')
     const w = scripted(["click(point='<point>1 1</point>')"], guard)
     const result = await runVisionTaskGraph('t', w.deps)
-    expect(result).toMatchObject({ ok: false, summary: 'stopped with Esc' })
+    expect(result).toMatchObject({ ok: false, summary: 'Stopped' })
     expect(w.actuated).toEqual([])
   })
 
   it('re-observes a recoverable focus miss without failing the task or milestone', async () => {
-    const w = scripted(["type(content='Pune')", "finished(content='done')"])
+    const w = scripted([
+      "type(content='Pune')",
+      "finished(content='done')",
+      "finished(content='done')"
+    ])
     const observations: VisionStepObservation[] = []
     let captures = 0
     w.deps.screen.capture = async () => {
@@ -504,7 +576,7 @@ describe('runVisionTaskGraph with a scripted action model', () => {
     const result = await runVisionTaskGraph('enter the destination', w.deps)
 
     expect(result).toMatchObject({ ok: true, summary: 'done' })
-    expect(captures).toBe(2)
+    expect(captures).toBe(3)
     expect(w.guard.snapshot().steps).toBe(0)
     expect(result.steps).toContain(
       'rejected action: No editable field is focused. Take a new screenshot and click the intended input before typing.'
@@ -554,7 +626,7 @@ describe('runVisionTaskGraph with a scripted action model', () => {
   })
 
   it('takes a fresh screenshot after a recoverable capture boundary failure', async () => {
-    const w = scripted(["finished(content='done')"])
+    const w = scripted(["finished(content='done')", "finished(content='done')"])
     const observations: VisionStepObservation[] = []
     let captures = 0
     w.deps.screen.capture = async () => {
@@ -569,7 +641,7 @@ describe('runVisionTaskGraph with a scripted action model', () => {
     const result = await runVisionTaskGraph('continue browsing', w.deps)
 
     expect(result).toMatchObject({ ok: true, summary: 'done' })
-    expect(captures).toBe(2)
+    expect(captures).toBe(3)
     expect(result.steps).toContain('rejected observation: The browser target was detached.')
     expect(observations[0]).toMatchObject({ result: 'blocked', phase: 'checking' })
     expect(observations.at(-1)).toMatchObject({ result: 'terminal' })
@@ -683,7 +755,11 @@ describe('runVisionTaskGraph with a scripted action model', () => {
   })
 
   it('the step budget stops the run after its cap', async () => {
-    const guard = new VisionGuard(2)
+    const guard = new VisionGuard({
+      taskId: 'vision-graph-test',
+      kind: 'computer_use',
+      maxSteps: 2
+    })
     const w = scripted(
       [
         "click(point='<point>100 100</point>')",
@@ -699,7 +775,7 @@ describe('runVisionTaskGraph with a scripted action model', () => {
   })
 
   it('re-checks the guard right before dispatch - a kill mid-decision actuates nothing more', async () => {
-    const guard = new VisionGuard()
+    const guard = new VisionGuard({ taskId: 'vision-graph-test', kind: 'computer_use' })
     const w = scripted(["click(point='<point>1 1</point>')"], guard)
     const phases: string[] = []
     // The decision resolves, THEN the user hits Esc before dispatch.
@@ -710,7 +786,7 @@ describe('runVisionTaskGraph with a scripted action model', () => {
     w.deps.onProgress = ({ phase }) => phases.push(phase)
     const result = await runVisionTaskGraph('t', w.deps)
     expect(w.actuated).toEqual([])
-    expect(result.summary).toBe('stopped with Esc')
+    expect(result.summary).toBe('Stopped')
     expect(phases.at(-1)).toBe('stopped')
   })
 

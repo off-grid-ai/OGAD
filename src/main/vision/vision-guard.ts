@@ -1,101 +1,228 @@
 /**
- * The supervised-tier safety guard (R2-D): the vision rail actuates real
- * synthetic input on the user's live desktop, so it runs under a state machine
- * the user always overrides. Three controls, in priority order:
+ * Platform input guard for Computer Use.
  *
- *  - the kill switch (Esc): halts immediately and for good. A halted session
- *    never actuates again - the run is over.
- *  - explicit Pause or Take Over: the session pauses only after a visible
- *    command. Mouse movement does not change the task state.
- *  - an optional policy limit: callers can inject a finite cap when a managed
- *    environment requires one. Normal user runs have no arbitrary action cap.
- *
- * Pure state - the native input hooks and the overlay live in the host and
- * call these transitions - so the priority rules are unit-tested without a
- * screen. canActuate() is the one gate the loop checks before every action;
- * if it is false, nothing is dispatched.
+ * @offgrid/automation owns task status and the agent/user input lease. This
+ * adapter enforces that shared decision at the native I/O boundary and keeps
+ * only platform-local concerns: action count and parked promise release.
  */
+import {
+  canAgentAct,
+  automationCommandForControl,
+  automationTaskReadStatus,
+  classifyHumanRequiredReason,
+  createAutomationTask,
+  transitionAutomationTask,
+  type AutomationTaskKind,
+  type AutomationTaskCommand,
+  type AutomationTaskSnapshot,
+  type AutomationTaskStatus
+} from '@offgrid/automation'
 import { DEFAULT_COMPUTER_USE_STEP_BUDGET } from '../../shared/computer-use-limits'
 
-export type GuardState = 'running' | 'paused' | 'halted'
-
-export interface GuardSnapshot {
-  state: GuardState
+export interface GuardSnapshot extends AutomationTaskSnapshot {
   steps: number
   reason: string
 }
 
+export interface VisionGuardOptions {
+  taskId: string
+  kind: AutomationTaskKind
+  maxSteps?: number
+}
+
+function runningTask(taskId: string, kind: AutomationTaskKind): AutomationTaskSnapshot {
+  const prepared = createAutomationTask({ taskId, kind, now: Date.now() })
+  const started = transitionAutomationTask(prepared, { type: 'START' }, Date.now())
+  if (!started.accepted) throw new Error(started.reason)
+  return started.snapshot
+}
+
 export class VisionGuard {
-  private state: GuardState = 'running'
+  private task: AutomationTaskSnapshot
   private steps = 0
-  private reason = ''
   private readonly waiters = new Set<(snapshot: GuardSnapshot) => void>()
+  private actionLease = new AbortController()
+  private readonly maxSteps: number
 
-  constructor(private readonly maxSteps: number = DEFAULT_COMPUTER_USE_STEP_BUDGET) {}
-
-  /** The kill switch. Terminal: once halted, no transition brings it back. */
-  halt(reason = 'stopped with Esc'): void {
-    this.state = 'halted'
-    this.reason = reason
-    this.resolveWaiters()
+  constructor(options: VisionGuardOptions) {
+    this.task = runningTask(options.taskId, options.kind)
+    this.maxSteps = options.maxSteps ?? DEFAULT_COMPUTER_USE_STEP_BUDGET
   }
 
-  /** A visible Pause or Take Over command stops actuation. A halted session
-   *  stays halted because the kill switch outranks a pause. */
-  pauseForUser(reason = 'you took over'): void {
-    if (this.state !== 'halted') {
-      this.state = 'paused'
-      this.reason = reason
-    }
-  }
-
-  /** The user handed control back. Only a paused session resumes; a halted one
-   *  is done. */
-  resume(): void {
-    if (this.state === 'paused') {
-      this.state = 'running'
-      this.reason = ''
+  /** The kill switch. STOP is terminal in the shared state owner. */
+  halt(_reason = 'stopped with Esc'): boolean {
+    if (this.apply({ type: 'STOP' })) {
       this.resolveWaiters()
+      return true
     }
+    return false
   }
 
-  /** Park the task loop while the user has control. Stop also releases the wait. */
-  waitUntilRunnable(): Promise<GuardSnapshot> {
-    if (this.state !== 'paused') return Promise.resolve(this.snapshot())
-    return new Promise((resolve) => this.waiters.add(resolve))
+  /** Pause parks the agent without transferring input to the user. */
+  pause(_reason = 'paused by you'): boolean {
+    if (!this.apply({ type: 'PAUSE' })) return false
+    return true
   }
 
-  /** Call before dispatching each action. Returns false (and does not count a
-   *  step) when the session is paused, halted, or out of budget - the loop
-   *  then stops or waits instead of actuating. */
-  canActuate(): boolean {
-    if (this.state !== 'running') {
+  /** Take Over transfers the shared input lease to the user. */
+  takeOver(_reason = 'you took over'): boolean {
+    if (!this.apply({ type: 'TAKE_OVER' })) return false
+    return true
+  }
+
+  /** REQUIRE_USER transfers input to the user without ending the task. */
+  requestUser(reason: string): boolean {
+    if (
+      !this.apply({
+        type: 'REQUIRE_USER',
+        reason: classifyHumanRequiredReason(reason),
+        message: reason
+      })
+    )
       return false
+    return true
+  }
+
+  /** Continue or Resume returns the input lease to the agent. */
+  resume(): boolean {
+    const command = automationCommandForControl('resume', {
+      status: automationTaskReadStatus(this.task.status),
+      inputOwner: this.task.inputLease.owner
+    })
+    const before = this.task
+    this.apply(command)
+    if (this.task !== before) {
+      this.resolveWaiters()
+      return true
     }
+    return false
+  }
+
+  /** A fresh platform observation unlocks agent input after start or Continue. */
+  markObservationReady(): boolean {
+    if (!this.task.observationRequired) return this.canActuate()
+    const before = this.task
+    this.apply({ type: 'OBSERVATION_READY', leaseEpoch: this.task.inputLease.epoch })
+    return this.task !== before && this.canActuate()
+  }
+
+  get isVerifying(): boolean {
+    return this.task.status === 'verifying'
+  }
+
+  get automationStatus(): AutomationTaskStatus {
+    return this.task.status
+  }
+
+  get taskId(): string {
+    return this.task.taskId
+  }
+
+  get kind(): AutomationTaskKind {
+    return this.task.kind
+  }
+
+  /** Capture the current agent lease before asynchronous platform work. Any
+   * ownership change aborts this signal and invalidates the epoch. */
+  currentActionLease(): { epoch: number; signal: AbortSignal } {
+    return { epoch: this.task.inputLease.epoch, signal: this.actionLease.signal }
+  }
+
+  ownsActionLease(epoch: number): boolean {
+    return (
+      (this.task.status === 'running' || this.task.status === 'verifying') &&
+      this.task.inputLease.owner === 'agent' &&
+      this.task.inputLease.epoch === epoch
+    )
+  }
+
+  /** Move the shared owner into verification. The next platform observation
+   * must arrive before COMPLETE can be accepted. */
+  beginVerification(): boolean {
+    return this.apply({ type: 'BEGIN_VERIFICATION' })
+  }
+
+  complete(): boolean {
+    return this.apply({ type: 'COMPLETE' })
+  }
+
+  fail(message: string): boolean {
+    if (!this.apply({ type: 'FAIL', message })) return false
+    this.resolveWaiters()
+    return true
+  }
+
+  /** The loop may capture while the agent owns the lease, even when that fresh
+   * observation is still required before native input can resume. */
+  get canCapture(): boolean {
+    return (
+      (this.task.status === 'running' || this.task.status === 'verifying') &&
+      this.task.inputLease.owner === 'agent'
+    )
+  }
+
+  waitUntilRunnable(signal?: AbortSignal): Promise<GuardSnapshot> {
+    if (!this.isPaused) return Promise.resolve(this.snapshot())
+    signal?.throwIfAborted()
+    return new Promise((resolve, reject) => {
+      const waiter = (snapshot: GuardSnapshot): void => {
+        signal?.removeEventListener('abort', onAbort)
+        resolve(snapshot)
+      }
+      const onAbort = (): void => {
+        this.waiters.delete(waiter)
+        reject(signal?.reason ?? new DOMException('Aborted', 'AbortError'))
+      }
+      this.waiters.add(waiter)
+      signal?.addEventListener('abort', onAbort, { once: true })
+    })
+  }
+
+  /** The only native actuation gate. */
+  canActuate(leaseEpoch: number = this.task.inputLease.epoch): boolean {
+    if (!canAgentAct(this.task, leaseEpoch)) return false
     if (this.steps >= this.maxSteps) {
-      this.state = 'halted'
-      this.reason = `reached the ${this.maxSteps}-step limit`
+      const reason = `reached the ${this.maxSteps}-step limit`
+      this.apply({ type: 'FAIL', message: reason })
       return false
     }
     return true
   }
 
-  /** Record that an action was dispatched. Separate from canActuate so a
-   *  refused action never burns budget. */
   countStep(): void {
     this.steps += 1
   }
 
   get isHalted(): boolean {
-    return this.state === 'halted'
+    return (
+      this.task.status === 'completed' ||
+      this.task.status === 'failed' ||
+      this.task.status === 'stopped'
+    )
   }
 
   get isPaused(): boolean {
-    return this.state === 'paused'
+    return this.task.inputLease.owner !== 'agent' && !this.isHalted
   }
 
   snapshot(): GuardSnapshot {
-    return { state: this.state, steps: this.steps, reason: this.reason }
+    return {
+      ...this.task,
+      steps: this.steps,
+      reason: this.task.failure ?? this.task.humanRequired?.message ?? ''
+    }
+  }
+
+  private apply(command: AutomationTaskCommand): boolean {
+    const result = transitionAutomationTask(this.task, command, Date.now())
+    if (!result.accepted) return false
+    const ownershipChanged = result.snapshot.inputLease.epoch !== this.task.inputLease.epoch
+    this.task = result.snapshot
+    if (ownershipChanged) {
+      this.actionLease.abort(`input lease changed to ${this.task.inputLease.owner}`)
+      this.actionLease = new AbortController()
+    }
+    return true
   }
 
   private resolveWaiters(): void {

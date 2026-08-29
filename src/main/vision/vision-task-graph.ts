@@ -92,6 +92,7 @@ export async function runVisionTaskGraph(
     .addEdge('decide', 'handle_decision')
     .addConditionalEdges('advance', route, { gate: 'gate', end: END })
     .addConditionalEdges('handle_decision', route, {
+      pause: 'pause',
       execute: 'execute',
       advance: 'advance',
       gate: 'gate',
@@ -115,6 +116,21 @@ export async function runVisionTaskGraph(
 
 function route(state: typeof WorkflowState.State): WorkflowRoute {
   return state.route
+}
+
+function waitForDelay(durationMs: number, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted()
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, durationMs)
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      reject(signal?.reason ?? new DOMException('Aborted', 'AbortError'))
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 /**
@@ -224,9 +240,9 @@ class VisionTaskGraphRuntime {
       this.finish(false, summary)
       return { route: 'end' }
     }
-    if (this.deps.guard.canActuate()) return { route: 'capture' }
+    if (this.deps.guard.canCapture) return { route: 'capture' }
     const snapshot = this.deps.guard.snapshot()
-    if (snapshot.state === 'paused') return { route: 'pause' }
+    if (this.deps.guard.isPaused) return { route: 'pause' }
     const summary = snapshot.reason || 'Stopped'
     this.progress('stopped', summary)
     this.note(`stopped: ${summary}`)
@@ -238,7 +254,7 @@ class VisionTaskGraphRuntime {
     const reason = this.deps.guard.snapshot().reason || 'Waiting for you'
     this.progress('paused', reason)
     this.note(`paused: ${reason}`)
-    await this.deps.guard.waitUntilRunnable()
+    await this.deps.guard.waitUntilRunnable(this.deps.signal)
     if (!this.deps.guard.isHalted) this.note('resumed by the user')
     return { route: 'gate' }
   }
@@ -285,6 +301,7 @@ class VisionTaskGraphRuntime {
         promptContext,
         currentMilestone: currentPhase?.title
       }
+      if (!this.deps.guard.markObservationReady()) return { route: 'gate' }
       this.decision = undefined
       this.actionResponse = undefined
       this.actionModelInput = undefined
@@ -363,16 +380,23 @@ class VisionTaskGraphRuntime {
       this.finish(false, 'Only the milestone judge can advance the execution plan.')
       return { route: 'end' }
     }
-    const completed = this.deps.plan?.phases[this.phaseIndex]
-    this.note(`milestone complete: ${completed?.title ?? this.decision.summary}`)
     const hasNextPhase = Boolean(
       this.deps.plan && this.phaseIndex < this.deps.plan.phases.length - 1
     )
     if (!hasNextPhase) {
+      if (!this.deps.guard.isVerifying) {
+        this.deps.guard.beginVerification()
+        this.progress('checking', 'Verifying the result on a fresh screen')
+        return { route: 'gate' }
+      }
+      const completed = this.deps.plan?.phases[this.phaseIndex]
+      this.note(`milestone complete: ${completed?.title ?? this.decision.summary}`)
       this.progress('complete', this.decision.summary)
       this.finish(true, this.decision.summary)
       return { route: 'end' }
     }
+    const completed = this.deps.plan?.phases[this.phaseIndex]
+    this.note(`milestone complete: ${completed?.title ?? this.decision.summary}`)
     // A model trajectory belongs to one milestone. Do not let actions from a
     // completed milestone bias the first decision for the next milestone.
     this.policyHistory.length = 0
@@ -384,6 +408,13 @@ class VisionTaskGraphRuntime {
 
   async handleDecision(): Promise<{ route: WorkflowRoute }> {
     if (this.finalResult) return { route: 'end' }
+    // Take Over can arrive while the model request is in flight. Discard that
+    // now-stale reply and park before it can act or finish the task. Continue
+    // returns through the gate and captures the user's current screen.
+    if (this.deps.guard.isPaused) {
+      this.discardPendingPolicyHistory()
+      return { route: 'pause' }
+    }
     const decision = this.decision
     if (!decision) {
       this.finish(false, 'The action model returned no decision.')
@@ -447,11 +478,24 @@ class VisionTaskGraphRuntime {
     if (decision.kind === 'wait') {
       this.discardPendingPolicyHistory()
       this.progress('waiting', `Waiting ${decision.durationMs} ms`)
-      await new Promise((resolve) => setTimeout(resolve, decision.durationMs))
+      await waitForDelay(decision.durationMs, this.deps.signal)
       this.observeDecision('wait')
       this.note(`wait ${decision.durationMs}ms`)
       this.checkpoint()
       return { route: 'gate' }
+    }
+    if (decision.kind === 'done' && !this.deps.plan?.phases.length) {
+      this.discardPendingPolicyHistory()
+      this.observeDecision('terminal')
+      this.checkpoint()
+      if (!this.deps.guard.isVerifying) {
+        this.deps.guard.beginVerification()
+        this.progress('checking', 'Verifying the result on a fresh screen')
+        return { route: 'gate' }
+      }
+      this.note(`done: ${decision.summary}`)
+      this.finish(true, decision.summary)
+      return { route: 'end' }
     }
     if (decision.kind === 'handoff') {
       this.discardPendingPolicyHistory()
@@ -460,7 +504,7 @@ class VisionTaskGraphRuntime {
       this.handoffs += 1
       this.note(`handoff: ${decision.reason}`)
       this.checkpoint()
-      await this.deps.waitForUser(decision.reason)
+      await this.deps.waitForUser(decision.reason, this.deps.signal)
       if (!this.deps.guard.isHalted) this.note('resumed by the user')
       return { route: 'gate' }
     }
@@ -571,7 +615,7 @@ class VisionTaskGraphRuntime {
       this.handoffs += 1
       this.note(`handoff: ${executionHandoff}`)
       this.checkpoint()
-      await this.deps.waitForUser(executionHandoff)
+      await this.deps.waitForUser(executionHandoff, this.deps.signal)
       if (!this.deps.guard.isHalted) this.note('resumed by the user')
       return { route: 'gate' }
     }
@@ -582,6 +626,7 @@ class VisionTaskGraphRuntime {
       this.checkpoint()
       return { route: 'gate' }
     }
+    if (!blocked && !this.deps.guard.isVerifying) this.deps.guard.beginVerification()
     if (blocked) this.discardPendingPolicyHistory()
     else this.commitPendingPolicyHistory()
     const blockedPhase: ComputerUsePhase = this.deps.guard.isHalted ? 'stopped' : 'paused'
@@ -731,6 +776,8 @@ class VisionTaskGraphRuntime {
   }
 
   private finish(ok: boolean, summary: string): void {
+    if (ok) this.deps.guard.complete()
+    else if (!this.deps.guard.isHalted) this.deps.guard.fail(summary)
     this.finalResult = {
       ok,
       summary,

@@ -28,11 +28,10 @@ import {
   emitVisionState,
   emitVisionStep,
   registerVisionSession,
-  stopVisionTask
+  stopVisionTask,
+  waitForVisionUser
 } from './vision-controller'
 import { showSupervisorWindow, hideSupervisorWindow } from './supervisor-window'
-import { visionModelNotice } from './vision-model-notice'
-import { getTakeoverCoordinator } from '../browser/takeover'
 import { loadActuation, actuationAvailable, type ActuationPort } from '../input/actuation'
 import { checkAccessibilityPermission, checkScreenRecordingPermission } from '../permissions'
 import { mapActionToScreen, type DisplayGeometry } from '../input/coordinate-mapping'
@@ -59,6 +58,7 @@ import { retryPlanningGoal, type TaskRetryCheckpoint } from '../tasks/task-retry
 import { dispatchVisionAction } from './vision-actuation'
 import { encodeTaskPhase } from '../../shared/task-execution-plan'
 import { prepareTaskExecutionPlan } from '../tasks/task-execution-plan-service'
+import { automationTaskReadStatus } from '@offgrid/automation'
 import { registerTaskGuideHandler } from '../tasks/task-guide'
 import { withVisionTaskModelStrategy } from './vision-task-model-strategy'
 import type { VisionTaskModelSession } from './vision-task-model-strategy'
@@ -230,7 +230,7 @@ class VisionHost {
     if (blocked) {
       return blocked
     }
-    const guard = new VisionGuard()
+    const guard = new VisionGuard({ taskId, kind: 'computer_use' })
     const request = new AbortController()
     const settings = getComputerUseSettings()
     try {
@@ -316,11 +316,9 @@ class VisionHost {
       stopVisionTask(taskId, 'stopped with Esc', 'Stopped with Esc')
     })
     const releaseSession = registerVisionSession(taskId, guard, request)
-    const coordinator = getTakeoverCoordinator()
-    // Model-agnostic, but honest: warn (do not block) when the loaded model is
-    // not a grounder, so the user sees why a click may miss and what to load.
+    // The only run-level notice is an unavailable emergency shortcut. Model
+    // selection guidance belongs in settings, not in a live task.
     const notice = [
-      visionModelNotice(llm.activeModelInfo()),
       escapeRegistered ? null : 'Esc is unavailable. Use Stop or Take Over in the task controls.'
     ]
       .filter((value): value is string => Boolean(value))
@@ -365,8 +363,8 @@ class VisionHost {
         guard,
         decide,
         parseResponse: modelAdapter.parseResponse,
-        waitForUser: async (why) => {
-          await coordinator.waitForTakeover(taskId, why)
+        waitForUser: async (why, signal) => {
+          await waitForVisionUser(taskId, why, signal)
         },
         onStep: (note) => emitVisionStep(taskId, note),
         plan,
@@ -448,12 +446,14 @@ class VisionHost {
           })
         }
       })
+      const finalStatus = automationTaskReadStatus(guard.automationStatus)
       emitVisionState({
         taskId,
         journeyId,
         goal,
-        status: guard.isHalted ? 'stopped' : result.ok ? 'done' : 'failed',
-        phase: guard.isHalted ? 'stopped' : result.ok ? 'complete' : 'failed',
+        status: finalStatus,
+        phase:
+          finalStatus === 'done' ? 'complete' : finalStatus === 'failed' ? 'failed' : 'stopped',
         currentAction: result.summary,
         summary: result.summary
       })
@@ -464,12 +464,14 @@ class VisionHost {
         : error instanceof Error
           ? error.message
           : 'Computer Use failed.'
+      if (!guard.isHalted) guard.fail(summary)
+      const finalStatus = automationTaskReadStatus(guard.automationStatus)
       emitVisionState({
         taskId,
         journeyId,
         goal,
-        status: guard.isHalted ? 'stopped' : 'failed',
-        phase: guard.isHalted ? 'stopped' : 'failed',
+        status: finalStatus,
+        phase: finalStatus === 'failed' ? 'failed' : 'stopped',
         currentAction: summary,
         summary
       })

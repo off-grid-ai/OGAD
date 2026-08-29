@@ -50,7 +50,8 @@ const world = (
     deps: {
       read: async () => snapshot,
       actuator,
-      decide: async () => replies.shift() ?? '{"action":"give_up","why":"script exhausted"}'
+      decide: async () => replies.shift() ?? '{"action":"give_up","why":"script exhausted"}',
+      waitForUser: async () => undefined
     }
   }
 }
@@ -160,7 +161,7 @@ describe('runElementTask', () => {
 
   it('Stop during model work prevents later steps and actions', async () => {
     const w = world([])
-    const guard = new VisionGuard()
+    const guard = new VisionGuard({ taskId: 'ax-agent-test', kind: 'computer_use' })
     let finishDecision: ((reply: string) => void) | undefined
     let markDecisionStarted: (() => void) | undefined
     const decisionStarted = new Promise<void>((resolve) => {
@@ -178,14 +179,14 @@ describe('runElementTask', () => {
 
     const result = await run
 
-    expect(result).toMatchObject({ ok: false, summary: 'stopped from the supervisor' })
+    expect(result).toMatchObject({ ok: false, summary: 'stopped' })
     expect(result.steps).toEqual([])
     expect(w.acted).toEqual([])
   })
 
   it('Pause parks a completed model decision before any action until Resume', async () => {
     const w = world([])
-    const guard = new VisionGuard()
+    const guard = new VisionGuard({ taskId: 'ax-agent-test', kind: 'computer_use' })
     let markPaused: (() => void) | undefined
     const paused = new Promise<void>((resolve) => {
       markPaused = resolve
@@ -194,7 +195,7 @@ describe('runElementTask', () => {
     w.deps.decide = async () => {
       if (!first) return '{"action":"done","summary":"sent"}'
       first = false
-      guard.pauseForUser('you took over')
+      guard.takeOver('you took over')
       markPaused?.()
       return '{"action":"press","index":1}'
     }
@@ -217,6 +218,57 @@ describe('runElementTask', () => {
       ok: false,
       summary: 'this needs a login'
     })
+  })
+
+  it('hands a private step to the user and re-observes after Continue', async () => {
+    const w = world([
+      '{"action":"human_required","why":"Enter the one-time code"}',
+      '{"action":"done","summary":"signed in"}',
+      '{"action":"done","summary":"signed in"}'
+    ])
+    const guard = new VisionGuard({ taskId: 'ax-agent-test', kind: 'computer_use' })
+    let reads = 0
+    const reasons: string[] = []
+    w.deps.read = async () => {
+      reads += 1
+      return { windowTitle: 'Sign in', elements: [] }
+    }
+    w.deps.waitForUser = async (why) => {
+      reasons.push(why)
+      guard.requestUser(why)
+      const continued = guard.waitUntilRunnable()
+      guard.resume()
+      await continued
+    }
+
+    const result = await runElementTask('sign in', { ...w.deps, control: guard })
+
+    expect(result).toMatchObject({ ok: true, summary: 'signed in' })
+    expect(reasons).toEqual(['Enter the one-time code'])
+    expect(reads).toBe(3)
+    expect(result.steps.join('\n')).toContain('resumed by the user')
+    expect(w.acted).toEqual([])
+  })
+
+  it('Stop remains terminal while the user step is parked', async () => {
+    const w = world(['{"action":"human_required","why":"Enter the password"}'])
+    const guard = new VisionGuard({ taskId: 'ax-agent-test', kind: 'computer_use' })
+    let handoffStarted: (() => void) | undefined
+    const started = new Promise<void>((resolve) => {
+      handoffStarted = resolve
+    })
+    w.deps.waitForUser = async (why) => {
+      guard.requestUser(why)
+      handoffStarted?.()
+      await guard.waitUntilRunnable()
+    }
+    const run = runElementTask('sign in', { ...w.deps, control: guard })
+    await started
+
+    guard.halt('stopped by you')
+
+    expect(await run).toMatchObject({ ok: false, summary: 'stopped' })
+    expect(w.acted).toEqual([])
   })
 
   it('stops at the step budget', async () => {
@@ -425,7 +477,7 @@ describe('buildElementPrompt', () => {
     })
     expect(prompt).toContain('Task: send hi to sidd')
     expect(prompt).toContain('[1] AXButton')
-    expect(prompt).toMatch(/sign-in.*give_up/i)
+    expect(prompt).toMatch(/sign-in.*human_required/i)
     // The type rule must teach the optional-index + trailing-submit shape a
     // general model needs, or it re-observes forever (the Slack regression).
     expect(prompt).toMatch(/omit "index".*focused/i)

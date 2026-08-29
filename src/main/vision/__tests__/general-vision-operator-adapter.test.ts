@@ -216,7 +216,7 @@ describe('general vision native tool policy', () => {
             actuated.push(action)
           }
         },
-        guard: new VisionGuard(),
+        guard: new VisionGuard({ taskId: 'operator-adapter-test', kind: 'computer_use' }),
         decide: createVisionGrounder(generalVisionOperatorAdapter, 'embedded_browser'),
         parseResponse: generalVisionOperatorAdapter.parseResponse,
         waitForUser: async () => undefined,
@@ -260,7 +260,7 @@ describe('general vision native tool policy', () => {
             throw new Error('invalid tool output must not actuate')
           }
         },
-        guard: new VisionGuard(),
+        guard: new VisionGuard({ taskId: 'operator-adapter-test', kind: 'computer_use' }),
         decide: createVisionGrounder(generalVisionOperatorAdapter),
         parseResponse: generalVisionOperatorAdapter.parseResponse,
         waitForUser: async () => undefined,

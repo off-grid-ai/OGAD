@@ -8,6 +8,11 @@ import { appendTaskStep, getTaskExecutionDevice, recordTaskRun } from '../tasks/
 import type { TaskRunUpdate } from '../tasks/task-history-store'
 import type { ComputerUsePhase } from '../tasks/task-step-details'
 import type { VisionGuard } from './vision-guard'
+import {
+  automationTaskReadStatus,
+  type AutomationTaskReadStatus,
+  type AutomationTaskSnapshot
+} from '@offgrid/automation'
 
 function broadcast(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -21,7 +26,7 @@ export interface VisionTaskState {
   modelId?: string
   modelName?: string
   goal: string
-  status: 'running' | 'paused' | 'done' | 'failed' | 'stopped'
+  status: AutomationTaskReadStatus
   phase?: ComputerUsePhase
   currentStep?: number
   currentAction?: string
@@ -48,24 +53,41 @@ const taskHistoryPersistence: VisionControllerPersistence = {
 }
 
 export class VisionController {
-  private readonly sessions = new Map<string, { guard: VisionGuard; request: AbortController }>()
+  private readonly sessions = new Map<
+    string,
+    {
+      guard: VisionGuard
+      request: AbortController
+      project?: (
+        snapshot: AutomationTaskSnapshot,
+        status: AutomationTaskReadStatus,
+        currentAction: string
+      ) => void
+    }
+  >()
   private readonly runs = new Map<string, { state: VisionTaskState; steps: string[] }>()
-  private readonly terminalTaskIds = new Set<string>()
   private currentTaskId: string | null = null
 
   constructor(private readonly persistence: VisionControllerPersistence) {}
 
-  registerSession(taskId: string, guard: VisionGuard, request: AbortController): () => void {
+  registerSession(
+    taskId: string,
+    guard: VisionGuard,
+    request: AbortController,
+    project?: (
+      snapshot: AutomationTaskSnapshot,
+      status: AutomationTaskReadStatus,
+      currentAction: string
+    ) => void
+  ): () => void {
     const previous = this.sessions.get(taskId)
     if (previous) {
       previous.guard.halt('replaced by a newer run for this task')
       previous.request.abort('replaced by a newer run for this task')
     }
-    const session = { guard, request }
+    if (guard.taskId !== taskId) throw new Error('VisionGuard task identity does not match session')
+    const session = { guard, request, project }
     this.sessions.set(taskId, session)
-    // A deliberate new session is the only event that may reopen a task ID.
-    // Late progress from the prior session remains blocked until this point.
-    this.terminalTaskIds.delete(taskId)
     return () => {
       if (this.sessions.get(taskId) === session) this.sessions.delete(taskId)
     }
@@ -80,9 +102,12 @@ export class VisionController {
   }
 
   emitState(state: VisionTaskState): void {
-    const isLiveUpdate = state.status === 'running' || state.status === 'paused'
-    if (isLiveUpdate && this.terminalTaskIds.has(state.taskId)) return
-    if (!isLiveUpdate) this.terminalTaskIds.add(state.taskId)
+    const owner = this.sessions.get(state.taskId)?.guard.snapshot()
+    const ownerProjection = owner ? automationTaskReadStatus(owner.status) : undefined
+    // Native hosts may finish an in-flight read or model reply after control
+    // changed. Shared owns the state, so stale projections cannot reopen or
+    // complete the task with a different status.
+    if (ownerProjection && ownerProjection !== state.status) return
     const current = this.runs.get(state.taskId)
     const previous = current?.state
     const steps = current?.steps ?? []
@@ -136,30 +161,63 @@ export class VisionController {
       return this.stop(taskId, 'stopped from the supervisor', 'Stopped from the supervisor')
     }
     if (command === 'pause' || command === 'takeover') {
-      guard.pauseForUser(
-        command === 'takeover' ? 'you took over from the supervisor' : 'paused from the supervisor'
-      )
-      this.transition(
+      const accepted =
+        command === 'takeover'
+          ? guard.takeOver('you took over from the supervisor')
+          : guard.pause('paused from the supervisor')
+      if (!accepted) return false
+      this.projectSession(
         taskId,
-        'paused',
-        'paused',
         command === 'takeover' ? 'You have control of this computer' : 'Paused by you'
       )
       return true
     }
     if (!guard.isPaused) return false
-    guard.resume()
-    this.transition(taskId, 'running', 'observing', 'Reading the current screen')
+    if (!guard.resume()) return false
+    this.projectSession(taskId, 'Reading the current screen')
     return true
+  }
+
+  /** Park the active run at a human-only step. The guard is the state owner;
+   * the durable task record and every renderer are projections of it. */
+  async waitForUser(taskId: string, reason: string, signal?: AbortSignal): Promise<void> {
+    const session = this.sessions.get(taskId)
+    if (!session) return
+    if (!session.guard.requestUser(reason)) return
+    this.projectSession(taskId, reason)
+    await session.guard.waitUntilRunnable(signal ?? session.request.signal)
   }
 
   stop(taskId: string, reason: string, currentAction: string): boolean {
     const session = this.sessions.get(taskId)
     if (!session) return false
-    session.guard.halt(reason)
+    if (!session.guard.halt(reason)) return false
     session.request.abort(reason)
-    this.transition(taskId, 'stopped', 'stopped', currentAction)
+    this.projectSession(taskId, currentAction)
     return true
+  }
+
+  private projectSession(taskId: string, currentAction: string): void {
+    const session = this.sessions.get(taskId)
+    if (!session) return
+    const snapshot = session.guard.snapshot()
+    const status = automationTaskReadStatus(snapshot.status)
+    if (session.project) {
+      session.project(snapshot, status, currentAction)
+      return
+    }
+    this.transition(
+      taskId,
+      status,
+      status === 'waiting'
+        ? 'waiting'
+        : status === 'paused'
+          ? 'paused'
+          : status === 'stopped'
+            ? 'stopped'
+            : 'observing',
+      currentAction
+    )
   }
 
   private transition(
@@ -179,9 +237,14 @@ const controller = new VisionController(taskHistoryPersistence)
 export function registerVisionSession(
   taskId: string,
   guard: VisionGuard,
-  request: AbortController
+  request: AbortController,
+  project?: (
+    snapshot: AutomationTaskSnapshot,
+    status: AutomationTaskReadStatus,
+    currentAction: string
+  ) => void
 ): () => void {
-  return controller.registerSession(taskId, guard, request)
+  return controller.registerSession(taskId, guard, request, project)
 }
 
 export function emitVisionStep(taskId: string, note: string): void {
@@ -199,6 +262,16 @@ export function emitVisionState(state: VisionTaskState): void {
 /** Native kill switches route through the same owner as the renderer Stop button. */
 export function stopVisionTask(taskId: string, reason: string, currentAction: string): boolean {
   return controller.stop(taskId, reason, currentAction)
+}
+
+/** Agent-requested human handoff uses the same run owner as Pause, Take Over,
+ * Continue, Stop, and Esc. */
+export function waitForVisionUser(
+  taskId: string,
+  reason: string,
+  signal?: AbortSignal
+): Promise<void> {
+  return controller.waitForUser(taskId, reason, signal)
 }
 
 /** Remote and renderer controls converge on the same active VisionController session. */

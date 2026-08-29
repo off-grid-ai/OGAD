@@ -178,7 +178,6 @@ interface RendererAPIOverrides {
     onChanged: (cb: (task: import('./lib/task-session-store').TaskSession) => void) => () => void
   }
   browser?: {
-    resolveTakeover: (taskId: string, outcome: 'resumed' | 'cancelled') => Promise<boolean>
     /** Report where one surface can host the live page. Main paints the highest-priority owner. */
     setRegion: (
       owner: 'docked' | 'floating',
@@ -215,12 +214,9 @@ interface RendererAPIOverrides {
       Array<{ historyId: string; title: string; url: string; updatedAt: number }>
     >
     reopenManual: (historyId: string) => Promise<{ sessionId: string } | null>
-    stopTask: (taskId: string) => Promise<boolean>
     onSessionsState: (cb: (state: unknown) => void) => () => void
     onNavigationState: (cb: (state: unknown) => void) => () => void
-    onPointer: (cb: (event: unknown) => void) => () => void
     onStep: (cb: (step: unknown) => void) => () => void
-    onTakeover: (cb: (request: unknown) => void) => () => void
     onTaskState: (cb: (state: unknown) => void) => () => void
   }
   vision?: {

@@ -1,12 +1,8 @@
+import type { AutomationTaskReadStatus } from '@offgrid/automation'
+
 export type BrowserSessionKind = 'manual' | 'task'
 export type BrowserControl = 'back' | 'forward' | 'reload' | 'stop'
-export type BrowserTaskStatus =
-  | 'running'
-  | 'waiting'
-  | 'reconnecting'
-  | 'done'
-  | 'failed'
-  | 'stopped'
+export type BrowserTaskStatus = AutomationTaskReadStatus
 
 export interface BrowserChromeState {
   url: string

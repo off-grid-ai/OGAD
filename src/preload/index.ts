@@ -21,7 +21,6 @@ import {
 import type {
   BrowserControl,
   BrowserNavigationState,
-  BrowserPointerEvent,
   BrowserSessionsSnapshot,
   BrowserTaskPointer,
   ManualBrowserHistoryEntry
@@ -100,10 +99,8 @@ const offGridApi = {
       return unsubscribe('tasks:changed', sub)
     }
   },
-  // Browser rail (R2-C): the watched pane's step feed + the takeover handoff.
+  // Browser rail: one watched page and its task feed.
   browser: {
-    resolveTakeover: (taskId: string, outcome: 'resumed' | 'cancelled') =>
-      ipcRenderer.invoke('browser:resolve-takeover', taskId, outcome),
     // Report the watched pane's on-screen region so the live view docks to it
     // (null hides the view). Fire-and-forget on every mount/resize.
     setRegion: (
@@ -127,7 +124,6 @@ const offGridApi = {
       ipcRenderer.invoke('browser:list-manual-history'),
     reopenManual: (historyId: string): Promise<{ sessionId: string } | null> =>
       ipcRenderer.invoke('browser:reopen-manual', historyId),
-    stopTask: (taskId: string): Promise<boolean> => ipcRenderer.invoke('browser:stop-task', taskId),
     onSessionsState: (cb: (state: BrowserSessionsSnapshot) => void) => {
       const sub = (_e: unknown, state: BrowserSessionsSnapshot): void => cb(state)
       ipcRenderer.on('browser:sessions-state', sub)
@@ -138,20 +134,10 @@ const offGridApi = {
       ipcRenderer.on('browser:navigation-state', sub)
       return unsubscribe('browser:navigation-state', sub)
     },
-    onPointer: (cb: (event: BrowserPointerEvent) => void) => {
-      const sub = (_e: unknown, event: BrowserPointerEvent): void => cb(event)
-      ipcRenderer.on('browser:pointer', sub)
-      return unsubscribe('browser:pointer', sub)
-    },
     onStep: (cb: (step: unknown) => void) => {
       const sub = (_e: unknown, step: unknown): void => cb(step)
       ipcRenderer.on('browser:step', sub)
       return unsubscribe('browser:step', sub)
-    },
-    onTakeover: (cb: (request: unknown) => void) => {
-      const sub = (_e: unknown, request: unknown): void => cb(request)
-      ipcRenderer.on('browser:takeover', sub)
-      return unsubscribe('browser:takeover', sub)
     },
     onTaskState: (cb: (state: BrowserTaskPointer & { sessionId: string }) => void) => {
       const sub = (_e: unknown, state: BrowserTaskPointer & { sessionId: string }): void =>

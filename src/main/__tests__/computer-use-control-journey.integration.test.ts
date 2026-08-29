@@ -78,7 +78,7 @@ describe('Computer Use supervisor control journey', () => {
     const bridge = electron.exposed.get('api') as RendererBridge
 
     const taskId = 'computer-use-stop-journey'
-    const guard = new VisionGuard()
+    const guard = new VisionGuard({ taskId, kind: 'computer_use' })
     const request = new AbortController()
     owner.registerSession(taskId, guard, request)
     owner.emitState({
@@ -123,6 +123,7 @@ describe('Computer Use supervisor control journey', () => {
           releaseModelReply = resolve
           markModelStarted?.()
         }),
+      waitForUser: async () => undefined,
       control: guard
     })
     await modelStarted
@@ -138,7 +139,7 @@ describe('Computer Use supervisor control journey', () => {
     releaseModelReply?.('{"action":"press","index":1}')
     expect(await loop).toMatchObject({
       ok: false,
-      summary: 'stopped from the supervisor'
+      summary: 'stopped'
     })
     expect(actions).toEqual([])
 
