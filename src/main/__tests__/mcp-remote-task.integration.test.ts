@@ -89,10 +89,10 @@ describe('authenticated Mobile task calls through the Desktop MCP surface', () =
           arguments: { goal: 'Open the release dashboard', execution_device: 'Studio Mac' },
           _meta: {
             'ai.offgrid/taskOrigin': {
-            conversationId: 'mobile-chat-107',
-            deviceId: 'mobile-1',
-            deviceName: 'Release phone',
-            executionDeviceId: 'desktop-1'
+              conversationId: 'mobile-chat-107',
+              deviceId: 'mobile-1',
+              deviceName: 'Release phone',
+              executionDeviceId: 'desktop-1'
             }
           }
         })

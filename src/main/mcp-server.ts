@@ -31,7 +31,6 @@ import { getTaskExecutionDevice } from './tasks/task-history'
 
 const EXECUTION_DEVICE_DESCRIPTION =
   'Exact paired Desktop name or alias. Omit to select any enabled connected Desktop.'
-
 // Write a data URL / http(s) URL / file path / bare path to a temp file and
 // return its path (for tools that take an image or audio input).
 async function materialize(ref: string, fallbackExt: string): Promise<string> {
@@ -314,7 +313,8 @@ function registerActionTools(server: McpServer, authenticatedDeviceId: string | 
             }
           }
         }
-        const { execution_device: _routingOnly, ...toolArgs } = args as Record<string, unknown>
+        const toolArgs = { ...(args as Record<string, unknown>) }
+        delete toolArgs.execution_device
         const result = await runTool(
           spec.name,
           toolArgs,
