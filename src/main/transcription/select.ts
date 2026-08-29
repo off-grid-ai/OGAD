@@ -10,7 +10,8 @@
 import type { TranscriptionService, TranscribeOptions } from './types'
 import { transcriptionService as whisper } from './whisper-cli'
 import { parakeetTranscription as parakeet } from './parakeet-cli'
-import { whisperServerTranscription as whisperResident, whisperServer } from './whisper-server'
+import { whisperServer } from './whisper-server'
+import { whisperServerTranscription as whisperResident } from './whisper-server-transcription'
 import { getActiveModal } from '../active-models'
 import { modelsByKind } from '@offgrid/models'
 import { transcriptionLanguages, type SpeechLanguage } from '@offgrid/speech'
@@ -128,10 +129,7 @@ export function getActiveTranscription(
     readSetting('sttLanguage', 'auto'),
     transcriptionLanguages(engine, active)
   )
-  return withConfiguredTranscriptionLanguage(
-    getTranscription(engine),
-    language
-  )
+  return withConfiguredTranscriptionLanguage(getTranscription(engine), language)
 }
 
 /** Apply the user's language hint at the shared transcription seam. An explicit
@@ -154,7 +152,7 @@ export function resolveConfiguredTranscriptionLanguage(
 ): string {
   return languages.some((candidate) => candidate.code === configuredLanguage)
     ? configuredLanguage
-    : languages[0]?.code ?? 'auto'
+    : (languages[0]?.code ?? 'auto')
 }
 
 export function transcriptionActiveInfo(
@@ -167,10 +165,7 @@ export function transcriptionActiveInfo(
   options: ReturnType<typeof transcriptionModelOptions>
 } {
   const activeEntry = installed.find((entry) => transcriptionEntryMatches(entry, info.modelId))
-  const languages = transcriptionLanguages(
-    info.engine,
-    activeEntry?.familyId ?? info.modelId
-  )
+  const languages = transcriptionLanguages(info.engine, activeEntry?.familyId ?? info.modelId)
   return {
     ...info,
     language: resolveConfiguredTranscriptionLanguage(configuredLanguage, languages),
