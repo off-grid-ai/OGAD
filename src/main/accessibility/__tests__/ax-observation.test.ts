@@ -1,15 +1,52 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ appendComputerUseStepDetail: vi.fn() }))
-
-vi.mock('../../tasks/task-history', () => ({
-  appendComputerUseStepDetail: mocks.appendComputerUseStepDetail
+const mocks = vi.hoisted(() => ({
+  appendComputerUseStepDetail: vi.fn(),
+  getTaskExecutionDevice: vi.fn(() => ({ id: 'mac-1', name: 'My Mac' })),
+  recordTaskRun: vi.fn()
 }))
 
-import { persistAxObservation } from '../ax-observation'
+vi.mock('../../tasks/task-history', () => ({
+  appendComputerUseStepDetail: mocks.appendComputerUseStepDetail,
+  getTaskExecutionDevice: mocks.getTaskExecutionDevice,
+  recordTaskRun: mocks.recordTaskRun
+}))
+
+import { persistAxFrame, persistAxObservation } from '../ax-observation'
 
 describe('persistAxObservation', () => {
-  beforeEach(() => mocks.appendComputerUseStepDetail.mockReset())
+  beforeEach(() => {
+    mocks.appendComputerUseStepDetail.mockReset()
+    mocks.recordTaskRun.mockReset()
+  })
+
+  it('makes a captured frame durable before later task progress can prune it', () => {
+    persistAxFrame({
+      taskId: 'task-6',
+      journeyId: 'chat-6',
+      title: 'Send the message',
+      frame: {
+        capture: {
+          path: '/captures/task-6.png',
+          width: 1280,
+          height: 720,
+          displayBounds: { x: 0, y: 0, width: 2560, height: 1440 }
+        },
+        snapshot: { windowTitle: 'WhatsApp', elements: [] }
+      }
+    })
+
+    expect(mocks.recordTaskRun).toHaveBeenCalledWith({
+      taskId: 'task-6',
+      journeyId: 'chat-6',
+      kind: 'computer_use',
+      title: 'Send the message',
+      screenshotPath: '/captures/task-6.png',
+      screenshotDeviceId: 'mac-1',
+      executionDeviceId: 'mac-1',
+      executionDeviceName: 'My Mac'
+    })
+  })
 
   it('writes bounded task evidence through the shared history adapter without a screenshot', () => {
     persistAxObservation('task-7', 'Send the message', {

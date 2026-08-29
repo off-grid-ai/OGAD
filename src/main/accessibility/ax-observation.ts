@@ -12,6 +12,31 @@ export interface AxObservationFrame {
   snapshot: AxSnapshot
 }
 
+interface AxFramePersistence {
+  taskId: string
+  journeyId: string
+  title: string
+  frame: AxObservationFrame
+}
+
+/** Make a newly captured frame durable before any later progress projection can
+ * prune files that are not referenced by task history yet. This is the single
+ * owner for the AX rail's current live-frame path. */
+export function persistAxFrame(input: AxFramePersistence): void {
+  const { taskId, journeyId, title, frame } = input
+  const executionDevice = getTaskExecutionDevice()
+  recordTaskRun({
+    taskId,
+    journeyId,
+    kind: 'computer_use',
+    title,
+    screenshotPath: frame.capture.path,
+    screenshotDeviceId: executionDevice.id,
+    executionDeviceId: executionDevice.id,
+    executionDeviceName: executionDevice.name
+  })
+}
+
 type AxObservationInput = ElementStepObservation & { frame?: AxObservationFrame }
 
 function targetIndex(observation: ElementStepObservation): number | undefined {
@@ -49,15 +74,6 @@ export function persistAxObservation(
 ): void {
   const { frame } = observation
   const executionDevice = frame ? getTaskExecutionDevice() : undefined
-  if (frame && executionDevice) {
-    recordTaskRun({
-      taskId,
-      kind: 'computer_use',
-      title,
-      screenshotPath: frame.capture.path,
-      screenshotDeviceId: executionDevice.id
-    })
-  }
   appendComputerUseStepDetail(taskId, title, {
     stepId: String(observation.step),
     at: Date.now(),

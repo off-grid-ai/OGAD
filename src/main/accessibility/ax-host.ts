@@ -42,7 +42,7 @@ import { getComputerUseSettings } from '../computer-use-settings'
 import { resolveComputerUseContextTokens } from '../../shared/computer-use-settings'
 import { recentVisualFacts } from '../vision/visual-context'
 import { recordTaskRun } from '../tasks/task-history'
-import { persistAxObservation, type AxObservationFrame } from './ax-observation'
+import { persistAxFrame, persistAxObservation, type AxObservationFrame } from './ax-observation'
 import { AxScreenCaptureError, captureAxObservationFrame } from './ax-frame'
 import { accessibilityHelperPath } from './ax-helper'
 import { encodeTaskPhase } from '../../shared/task-execution-plan'
@@ -300,6 +300,10 @@ class AxRailHost {
             snapshot,
             signal: request.signal
           })
+          // The next model/progress update prunes unreferenced task images.
+          // Reference this frame first so the live view can load it while the
+          // model decides and after the task completes.
+          persistAxFrame({ taskId, journeyId, title: goal, frame: observationFrame })
           return snapshot
         },
         actuator: makeElementActuator(actuation, guard, (action) => {
