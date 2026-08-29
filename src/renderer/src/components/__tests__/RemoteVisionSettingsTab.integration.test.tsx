@@ -64,9 +64,14 @@ describe('<RemoteVisionSettingsTab/>', () => {
     render(<RemoteVisionSettingsTab />)
 
     expect(await screen.findByDisplayValue('https://models.example/v1')).toBeTruthy()
+    expect(screen.getByRole('group', { name: 'Remote server details' }).className).toContain(
+      'lg:grid-cols-2'
+    )
     expect(screen.queryByText(/OpenRouter/i)).toBeNull()
     expect((screen.getByPlaceholderText(/stored key/i) as HTMLInputElement).value).toBe('')
-    expect(screen.getByText(/Web Use and Computer Use stay blocked/i)).toBeTruthy()
+    expect(screen.getByText(/Blocked until you allow it/i).textContent).toBe(
+      'Blocked until you allow it. Web Use and Computer Use can send screen images with visible text, apps, and other content to this server.'
+    )
 
     fireEvent.click(screen.getByRole('button', { name: 'Change model' }))
     await screen.findByText('Connected in 42 ms. 2 models found.')
@@ -75,8 +80,11 @@ describe('<RemoteVisionSettingsTab/>', () => {
     fireEvent.click(screen.getByText('New vision model'))
     fireEvent.click(screen.getByRole('switch', { name: 'Allow screen images' }))
     expect(
-      screen.getByText(/can send screen images to Models example at models.example/i)
-    ).toBeTruthy()
+      screen.getByText(/can send screen images with visible text, apps, and other content/i)
+        .textContent
+    ).toBe(
+      'Allowed after Save. Web Use and Computer Use can send screen images with visible text, apps, and other content to Models example at models.example.'
+    )
     fireEvent.change(screen.getByLabelText('API key (optional)'), {
       target: { value: 'private-key' }
     })
