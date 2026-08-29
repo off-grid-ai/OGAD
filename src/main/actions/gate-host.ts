@@ -155,27 +155,6 @@ export function approvalBypassed(): boolean {
   return process.env['OFFGRID_AUTO_APPROVE'] === '1'
 }
 
-/** How computer-use approvals are handled, chosen by the user in Sync sharing:
- *  'ask' (the default) parks every task for approval; 'auto' runs it with no
- *  prompt. Distinct from approvalBypassed (a headless-test env flag) - this is a
- *  real, persisted user setting. Pro owns the setting + its toggle and registers
- *  a provider; with none registered (free build, tests) the safe default is ask. */
-export type ComputerApprovalMode = 'auto' | 'ask'
-let approvalModeProvider: (() => ComputerApprovalMode) | null = null
-
-export function registerApprovalModeProvider(provider: () => ComputerApprovalMode): () => void {
-  approvalModeProvider = provider
-  return () => {
-    if (approvalModeProvider === provider) {
-      approvalModeProvider = null
-    }
-  }
-}
-
-export function computerApprovalMode(): ComputerApprovalMode {
-  return approvalModeProvider?.() ?? 'ask'
-}
-
 /** Connector mutations and visual tasks enter the source-owned approval policy.
  *  Native semantic actions keep their existing risk-specific behavior. */
 export function needsApproval(action: Pick<ActionRecord, 'rail'>): boolean {
@@ -185,10 +164,6 @@ export function needsApproval(action: Pick<ActionRecord, 'rail'>): boolean {
     action.rail === 'accessibility' ||
     action.rail === 'vision'
   )
-}
-
-function isComputerRail(rail: Rail | undefined): boolean {
-  return rail === 'accessibility' || rail === 'vision'
 }
 
 /** The existing Chat that owns an action, or null for Action Approval.
@@ -205,12 +180,6 @@ export async function gateHost({ action }: { action: ActionRecord }): Promise<Ga
   // Native semantic actions run straight through this gate. The env flag bypasses
   // source approval for headless testing.
   if (approvalBypassed() || !needsApproval(action)) {
-    return { kind: 'approve' }
-  }
-  // The user's Sync-sharing policy: "Auto-approve" runs computer-use tasks with no
-  // prompt (they still journal, and the outcome shows in chat); "Ask every time"
-  // (the default) falls through to park for approval below.
-  if (isComputerRail(action.rail) && computerApprovalMode() === 'auto') {
     return { kind: 'approve' }
   }
   const conversationId = approvalConversation(action)

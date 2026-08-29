@@ -693,5 +693,7 @@ test.describe('Devices surface — pro tier', () => {
   test('sync also appears in Settings as its own section', async () => {
     await page.getByRole('button', { name: 'Settings', exact: true }).first().click()
     await expect(page.getByRole('heading', { name: 'Device sync' })).toBeVisible()
+    await expect(page.getByRole('radiogroup', { name: 'Computer task permissions' })).toHaveCount(0)
+    await expect(page.getByText(/approval in chat.*paired phone/i)).toHaveCount(0)
   })
 })
