@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ModelPicker } from '../ModelPicker'
+import { OPEN_MODEL_SETTINGS_PANEL_EVENT } from '@renderer/lib/model-settings-panel'
 
 afterEach(() => {
   cleanup()
@@ -120,6 +121,24 @@ describe('<ModelPicker/> dismissal', () => {
     const onClose = renderPicker()
     fireEvent.click(screen.getByTestId('side-panel-backdrop'))
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('closes before opening model settings', () => {
+    const sequence: string[] = []
+    const onClose = vi.fn(() => sequence.push('close'))
+    renderPicker(onClose)
+    const opened: Array<{ tab?: string }> = []
+    const onOpen = (event: Event): void => {
+      sequence.push('open')
+      opened.push((event as CustomEvent<{ tab?: string }>).detail)
+    }
+    window.addEventListener(OPEN_MODEL_SETTINGS_PANEL_EVENT, onOpen, { once: true })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(opened).toEqual([{ tab: 'model' }])
+    expect(sequence).toEqual(['close', 'open'])
   })
 
   it('does not close when the panel content is clicked', () => {

@@ -23,7 +23,10 @@ import {
   invalidateDisplaySettings,
   invalidateLlmSettings
 } from '@renderer/lib/settings-invalidation'
-import type { ModelSettingsPanelTab as Tab } from '@renderer/lib/model-settings-panel'
+import {
+  openActiveModelsPanel,
+  type ModelSettingsPanelTab as Tab
+} from '@renderer/lib/model-settings-panel'
 import { ImageSettingsTab } from './ImageSettingsTab'
 import { SidePanel } from './SidePanel'
 import { VoiceSettingsTab } from './VoiceSettingsTab'
@@ -270,6 +273,11 @@ export function SettingsPanel({
     refreshConnectors()
   }
 
+  const openActiveModels = (): void => {
+    onClose()
+    openActiveModelsPanel()
+  }
+
   const content = (
     <>
       {!embedded ? (
@@ -279,12 +287,20 @@ export function SettingsPanel({
               Settings
             </span>
           </div>
-          <button
-            onClick={onClose}
-            className="rounded-md border border-neutral-700 px-3 py-1 text-xs text-neutral-300 transition-colors hover:text-white"
-          >
-            Close
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={openActiveModels}
+              className="rounded-md border border-neutral-700 px-3 py-1 text-xs text-neutral-300 transition-colors hover:text-white"
+            >
+              Active models
+            </button>
+            <button
+              onClick={onClose}
+              className="rounded-md border border-neutral-700 px-3 py-1 text-xs text-neutral-300 transition-colors hover:text-white"
+            >
+              Close
+            </button>
+          </div>
         </div>
       ) : null}
 

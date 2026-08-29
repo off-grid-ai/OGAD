@@ -51,6 +51,7 @@ import { useChatVoiceTurns, type ChatVoicePhase } from './use-chat-voice-turns'
 import { SkillsPanel } from './SkillsPanel'
 import { ModelPicker } from './ModelPicker'
 import { SettingsPanel } from './SettingsPanel'
+import { OPEN_ACTIVE_MODELS_PANEL_EVENT } from '@renderer/lib/model-settings-panel'
 import { LoadingDots } from './ui/loading-dots'
 import { SidePanel } from './SidePanel'
 import { ConversationTitleActions } from './ConversationTitleActions'
@@ -4473,6 +4474,14 @@ export function MemoryChat({
     setModelPickerOpen(false)
     setSettingsOpen(false)
   }, [])
+  useEffect(() => {
+    const openActiveModels = (): void => {
+      closePanels()
+      setModelPickerOpen(true)
+    }
+    window.addEventListener(OPEN_ACTIVE_MODELS_PANEL_EVENT, openActiveModels)
+    return () => window.removeEventListener(OPEN_ACTIVE_MODELS_PANEL_EVENT, openActiveModels)
+  }, [closePanels])
   const openCanvas = useCallback(
     (a: Artifact) => {
       closePanels()

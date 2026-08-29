@@ -1,4 +1,5 @@
 export const OPEN_MODEL_SETTINGS_PANEL_EVENT = 'og:open-model-settings-panel'
+export const OPEN_ACTIVE_MODELS_PANEL_EVENT = 'og:open-active-models-panel'
 export type ModelSettingsPanelTab =
   | 'model'
   | 'image'
@@ -28,4 +29,9 @@ export function supportsModelSettings(kind?: string): boolean {
 /** Open the one shared model-settings drawer over the current screen. */
 export function openModelSettingsPanel(tab: ModelSettingsPanelTab = 'model'): void {
   window.dispatchEvent(new CustomEvent(OPEN_MODEL_SETTINGS_PANEL_EVENT, { detail: { tab } }))
+}
+
+/** Open the Active models drawer through the chat surface that owns it. */
+export function openActiveModelsPanel(): void {
+  window.dispatchEvent(new CustomEvent(OPEN_ACTIVE_MODELS_PANEL_EVENT))
 }

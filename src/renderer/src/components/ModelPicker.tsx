@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { IconLoader2, IconCheck, IconCpu, IconX, IconPower } from '@tabler/icons-react'
 import { SidePanel } from './SidePanel'
 import type { ComputerUseActiveModelProjection } from '../../../shared/computer-use-settings'
+import { openModelSettingsPanel } from '@renderer/lib/model-settings-panel'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const api = (): any => (window as any).api
@@ -47,6 +48,11 @@ type UnloadStatus = 'unloading' | 'unloaded' | 'error'
 
 function primaryFile(m: ModelEntry): string {
   return m.files?.find((f) => f.role === 'primary')?.name ?? m.files?.[0]?.name ?? m.id
+}
+
+function openSettings(onClose: () => void): void {
+  onClose()
+  openModelSettingsPanel('model')
 }
 
 export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactElement {
@@ -147,9 +153,21 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
         <div className="flex items-center gap-2 text-sm text-white">
           <IconCpu className="h-4 w-4 text-green-500" aria-hidden /> Active models
         </div>
-        <button onClick={onClose} aria-label="Close" className="text-neutral-500 hover:text-white">
-          <IconX className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => openSettings(onClose)}
+            className="rounded-md border border-neutral-700 px-3 py-1 text-xs text-neutral-300 transition-colors hover:text-white"
+          >
+            Settings
+          </button>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="text-neutral-500 hover:text-white"
+          >
+            <IconX className="h-4 w-4" />
+          </button>
+        </div>
       </div>
       <div className="flex-1 space-y-5 overflow-y-auto p-4">
         <section aria-label="Computer Use">

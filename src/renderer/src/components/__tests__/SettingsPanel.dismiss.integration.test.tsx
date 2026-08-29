@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, cleanup, fireEvent, screen } from '@testing-library/react'
 import { SettingsPanel } from '../SettingsPanel'
+import { OPEN_ACTIVE_MODELS_PANEL_EVENT } from '@renderer/lib/model-settings-panel'
 
 beforeEach(() => {
   ;(window as unknown as { api: Record<string, unknown> }).api = {
@@ -45,6 +46,20 @@ describe('<SettingsPanel/> dismissal', () => {
     render(<SettingsPanel onClose={onClose} />)
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('closes before opening Active models', () => {
+    const sequence: string[] = []
+    const onClose = vi.fn(() => sequence.push('close'))
+    const onOpen = vi.fn(() => sequence.push('open'))
+    window.addEventListener(OPEN_ACTIVE_MODELS_PANEL_EVENT, onOpen, { once: true })
+    render(<SettingsPanel onClose={onClose} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Active models' }))
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onOpen).toHaveBeenCalledTimes(1)
+    expect(sequence).toEqual(['close', 'open'])
   })
 
   it('a click INSIDE the panel does not close it', () => {
