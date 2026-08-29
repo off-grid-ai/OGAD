@@ -400,9 +400,12 @@ class VisionTaskGraphRuntime {
       if (repeatedClick) {
         this.equivalentClickRecoveries += 1
         const summary = `Repeated click region blocked at (${repeatedClick.point.x}, ${repeatedClick.point.y}). The previous click marker shows where the earlier attempt landed.`
+        const recovery =
+          'Do not guess another Dock or taskbar icon from its color or position. If the target application is not visibly identified, use the operating system application launcher or search.'
         this.discardPendingPolicyHistory()
         this.observeDecision('blocked', summary)
         this.note(summary)
+        this.note(recovery)
         this.checkpoint()
         if (this.equivalentClickRecoveries > 1) {
           const failure =

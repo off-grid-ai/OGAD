@@ -297,6 +297,22 @@ describe('general vision native tool policy', () => {
     expect(stream).toHaveBeenCalledTimes(2)
   })
 
+  it('uses the application launcher instead of guessing an unidentified Dock icon', () => {
+    const request = generalVisionOperatorAdapter.buildRequest({
+      goal: 'Open the requested desktop application.',
+      operatorEnvironment: 'desktop',
+      currentScreenshotDataUrl: 'data:image/png;base64,current',
+      coordinateFrame: { encoded: bounds, source: bounds },
+      history: [],
+      recentSteps: [],
+      olderVisualFacts: []
+    })
+    const userText = JSON.stringify(request.messages[1]?.content)
+
+    expect(userText).toContain('Do not identify an application from icon color or position alone')
+    expect(userText).toContain('operating system application launcher or search')
+  })
+
   it('keeps native calls in audit history without using the serialization for routing', () => {
     const serialized = serializeVisionPolicyResponse(perform())
     expect(serialized).toContain('perform_action')

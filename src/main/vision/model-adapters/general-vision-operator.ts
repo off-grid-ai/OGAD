@@ -18,6 +18,16 @@ function browserControlContext(input: VisionPolicyInput): string {
   ].join('\n')
 }
 
+function desktopLaunchContext(input: VisionPolicyInput): string {
+  if (input.operatorEnvironment !== 'desktop') return ''
+  return [
+    'Desktop application launch rule:',
+    '- Do not identify an application from icon color or position alone.',
+    '- Click a Dock or taskbar icon only when the target application identity is visibly verified.',
+    '- If the target application is not visibly identified, open the operating system application launcher or search with a supported hotkey, type the application name, and continue after the application is visible.'
+  ].join('\n')
+}
+
 function previousActionContext(input: VisionPolicyInput): string {
   if (!input.previousClickMarker) return ''
   return `Previous action to judge:\n${input.verifiedActions?.at(-1) ?? 'click'}\nThe emerald-green marker at (${input.previousClickMarker.x}, ${input.previousClickMarker.y}) shows where that click landed in the current screenshot. Verify its visible result before choosing the next tool.`
@@ -36,6 +46,7 @@ function taskContext(input: VisionPolicyInput): string {
   return [
     `Task brief:\n${input.goal}`,
     browserControlContext(input),
+    desktopLaunchContext(input),
     input.currentMilestone ? `Current milestone:\n${input.currentMilestone}` : '',
     input.verifiedActions?.length
       ? `Recent verified actions:\n${input.verifiedActions.slice(-12).join('\n')}`
