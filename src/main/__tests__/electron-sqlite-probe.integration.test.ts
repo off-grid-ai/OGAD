@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -16,6 +17,12 @@ function runProbe(executable: '/usr/bin/true' | '/usr/bin/false'): {
 }
 
 describe('Electron SQLite restoration probe', () => {
+  it('uses Electron\'s cross-platform package shim by default', () => {
+    expect(fs.readFileSync(PROBE, 'utf8')).toContain(
+      'electron_binary="${2:-./node_modules/.bin/electron}"'
+    )
+  })
+
   it('reports that Electron can load the restored native module', () => {
     expect(runProbe('/usr/bin/true')).toEqual({
       status: 0,
