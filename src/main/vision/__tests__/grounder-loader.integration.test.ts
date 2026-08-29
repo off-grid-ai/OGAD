@@ -47,6 +47,29 @@ function lifecycle(): {
 }
 
 describe('Computer Use specialist lifecycle', () => {
+  it('loads the specialist for one hybrid grounded action and restores the text reasoner', async () => {
+    const h = lifecycle()
+    const run = createGrounderRunner({
+      ...h.dependencies,
+      modelStrategy: () => 'text_plus_specialist'
+    })
+
+    await run(async () => {
+      h.events.push('ground-action')
+      expect(h.activeModelId()).toBe(SPECIALIST)
+    })
+
+    expect(h.activeModelId()).toBe(CHAT_MODEL)
+    expect(h.activeRemote()).toEqual(REMOTE)
+    expect(h.events).toEqual([
+      'suspend-remote',
+      `load:${SPECIALIST}`,
+      'ground-action',
+      `restore-local:${CHAT_MODEL}`,
+      `restore-remote:${CHAT_MODEL}`
+    ])
+  })
+
   it('runs the task on the selected specialist and restores remote Gemini afterward', async () => {
     const h = lifecycle()
     const run = createGrounderRunner(h.dependencies)

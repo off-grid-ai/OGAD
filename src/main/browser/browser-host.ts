@@ -815,7 +815,7 @@ class BrowserHost implements BrowserRailHost {
       // Web Use is vision-only: capture, judge, persist evidence, then either
       // advance the milestone or choose one visual action. Never silently
       // replace this contract with semantic DOM control.
-      const visual = await withActiveBrowserVision(async ({ selection, identity }) => {
+      const visual = await withActiveBrowserVision(async ({ selection, identity, decide }) => {
         if (!ownsRun()) owner.controller.abort()
         owner.controller.signal.throwIfAborted()
         recordTaskRun({
@@ -830,6 +830,7 @@ class BrowserHost implements BrowserRailHost {
           taskId,
           journeyId,
           adapter: selection.adapter,
+          decide,
           guard,
           plan,
           // A retry must resume at the phase the failed attempt reached. Without this the runtime

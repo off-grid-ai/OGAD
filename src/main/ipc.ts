@@ -1600,6 +1600,11 @@ export function setupIPC() {
   ipcMain.handle('models:active-modalities', () =>
     import('./models-manager').then((m) => m.getActiveModalities())
   )
+  ipcMain.handle('models:computer-use-active', () =>
+    import('./vision/vision-task-model-strategy').then((m) =>
+      m.getComputerUseActiveModelProjection()
+    )
+  )
 
   // Storage + download manager
   ipcMain.handle('models:storage', () => import('./models-manager').then((m) => m.getStorageInfo()))

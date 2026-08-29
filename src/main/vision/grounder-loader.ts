@@ -32,12 +32,13 @@ import {
   deactivateRemoteVisionModel,
   getActiveRemoteVisionServer
 } from './remote-vision-server'
+import type { ComputerUseModelStrategy } from '../../shared/computer-use-settings'
 
 /** Migration default for people who used computer tasks before the Computer Use catalog existed. */
 export const GROUNDER_MODEL_ID = 'mradermacher/UI-TARS-1.5-7B-GGUF'
 
 /** The saved Computer Use choice, with the established UI-TARS model as the migration default. */
-function selectedGrounderModelId(): string {
+export function selectedGrounderModelId(): string {
   return getActiveModal('computer_use') ?? GROUNDER_MODEL_ID
 }
 
@@ -85,7 +86,7 @@ interface GrounderActiveModel {
 }
 
 export interface GrounderRunnerDependencies {
-  modelStrategy(): 'same_as_chat' | 'separate_specialist'
+  modelStrategy(): ComputerUseModelStrategy
   selectedModelId(): string
   installed(modelId: string): Promise<boolean>
   activeModel(): GrounderActiveModel | null

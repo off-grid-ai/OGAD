@@ -41,7 +41,6 @@ import {
   type ComputerTaskTiers
 } from '../accessibility/ax-rail'
 import { getAxRailHost } from '../accessibility/ax-host'
-import { withGrounder } from '../vision/grounder-loader'
 import { getComputerUseSettings } from '../computer-use-settings'
 import { isProEntitled } from '../licensing/license-service'
 import { callConnectorTool } from '../mcp'
@@ -175,22 +174,9 @@ export function getActionsRuntime(): ActionsRuntime {
   const visionExecute = makeVisionRailExecutor({
     runTask: (goal, taskId, journeyId) => getVisionRailHost().runTask(goal, taskId, journeyId)
   })
-  // The grounder-vision executor: swap in UI-TARS (evict the chat model), run the
-  // vision rail, restore the chat model - the tier-3 fallback. The swap/run/swap
-  // wall-clock is logged so a computer_task's cost is attributable (the AX-vs-
-  // grounder A/B). OFFGRID_GROUNDER=0 keeps the current model (no swap) for a
-  // grounder-format A/B without paying the reload.
-  const runGroundedVision = async (action: ActionRecord): Promise<ExecuteResult> => {
-    if (process.env.OFFGRID_GROUNDER === '0') {
-      return visionExecute(action)
-    }
-    const { result, timing } = await withGrounder(() => visionExecute(action))
-    console.log(
-      `[computer-task] grounder rail: skippedSwap=${timing.skippedSwap} swapInMs=${timing.swapInMs} runMs=${timing.runMs} swapOutMs=${timing.swapOutMs} totalMs=${timing.swapInMs + timing.runMs + timing.swapOutMs}`
-    )
-    return result
-  }
-  const groundedVisionExecute = withRemoteScreenGate('computer_use', runGroundedVision)
+  // VisionHost owns the selected model strategy for the whole task. This keeps
+  // specialist-resident and per-step hybrid swaps behind the same session port.
+  const groundedVisionExecute = withRemoteScreenGate('computer_use', visionExecute)
   // computer_task is TIERED: try the accessibility rail first (free, any chat
   // model, most native apps), and fall through to the grounder-vision rail only
   // when AX can't see the controls. OFFGRID_COMPUTER_RAIL=ax|vision forces one
@@ -204,7 +190,7 @@ export function getActionsRuntime(): ActionsRuntime {
   const computerTaskExecute = (action: ActionRecord): Promise<ExecuteResult> => {
     const selectedRail =
       process.env.OFFGRID_COMPUTER_RAIL ??
-      (getComputerUseSettings().modelStrategy === 'separate_specialist' ? 'vision' : undefined)
+      (getComputerUseSettings().modelStrategy === 'same_as_chat' ? undefined : 'vision')
     return makeComputerTaskExecutor(computerTaskTiers, {
       forcedRail: parseForcedRail(selectedRail)
     })(action)

@@ -3,7 +3,10 @@ export type ComputerUseScreenshotSize = 'compact' | 'balanced' | 'large'
 export type ComputerUseScreenshotQuality = 'efficient' | 'balanced' | 'detailed'
 export type ComputerUseCheckpointInterval = 8 | 9 | 10
 export type ComputerUseVisualHistoryFrames = 0 | 1 | 2 | 5
-export type ComputerUseModelStrategy = 'same_as_chat' | 'separate_specialist'
+export type ComputerUseModelStrategy =
+  | 'same_as_chat'
+  | 'separate_specialist'
+  | 'text_plus_specialist'
 
 export interface ComputerUseSettings {
   modelStrategy: ComputerUseModelStrategy
@@ -13,6 +16,21 @@ export interface ComputerUseSettings {
   checkpointInterval: ComputerUseCheckpointInterval
   visualHistoryFrames: ComputerUseVisualHistoryFrames
   retrieveOlderVisuals: boolean
+}
+
+export interface ComputerUseActiveModel {
+  role: 'reasoner' | 'grounding_specialist'
+  modelId: string
+  modelName: string
+  remote: boolean
+}
+
+/** Read-only Active Models projection. Strategy and role composition are
+ * resolved in main; the renderer never becomes a second selection owner. */
+export interface ComputerUseActiveModelProjection {
+  strategy: ComputerUseModelStrategy
+  strategyLabel: string
+  models: ComputerUseActiveModel[]
 }
 
 export const COMPUTER_USE_SETTINGS_KEY = 'computerUseSettings'
@@ -94,7 +112,9 @@ export function normalizeComputerUseSettings(value: unknown): ComputerUseSetting
 
   return {
     modelStrategy:
-      input.modelStrategy === 'same_as_chat' || input.modelStrategy === 'separate_specialist'
+      input.modelStrategy === 'same_as_chat' ||
+      input.modelStrategy === 'separate_specialist' ||
+      input.modelStrategy === 'text_plus_specialist'
         ? input.modelStrategy
         : DEFAULT_COMPUTER_USE_SETTINGS.modelStrategy,
     context,

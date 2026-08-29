@@ -24,7 +24,25 @@ function renderPicker(onClose = vi.fn()): ReturnType<typeof vi.fn> {
     getInstalledModels: vi.fn().mockResolvedValue(['local/qwen']),
     getActiveModel: vi.fn().mockResolvedValue(null),
     getActiveModalities: vi.fn().mockResolvedValue({}),
-    getActiveModelIds: vi.fn().mockResolvedValue([])
+    getActiveModelIds: vi.fn().mockResolvedValue([]),
+    getComputerUseActiveModels: vi.fn().mockResolvedValue({
+      strategy: 'text_plus_specialist',
+      strategyLabel: 'Text + Specialist',
+      models: [
+        {
+          role: 'reasoner',
+          modelId: 'remote/reasoner',
+          modelName: 'Qwen Reasoner',
+          remote: true
+        },
+        {
+          role: 'grounding_specialist',
+          modelId: 'local/ui-tars',
+          modelName: 'UI-TARS 1.5 7B',
+          remote: false
+        }
+      ]
+    })
   }
   render(<ModelPicker onClose={onClose} />)
   return onClose
@@ -51,6 +69,11 @@ function renderPickerWithRemote(): ReturnType<typeof vi.fn> {
       .fn()
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce(['remote-vision:home:google%2Fgemma-4']),
+    getComputerUseActiveModels: vi.fn().mockResolvedValue({
+      strategy: 'same_as_chat',
+      strategyLabel: 'Same as Chat',
+      models: []
+    }),
     activateModel
   }
   render(<ModelPicker onClose={vi.fn()} />)
@@ -66,7 +89,14 @@ describe('<ModelPicker/> dismissal', () => {
       )
     ).toBeTruthy()
     expect(screen.queryByText(/swaps the chat model/i)).toBeNull()
-    expect(screen.queryByRole('region', { name: 'Computer Use' })).toBeNull()
+    const computerUse = screen.getByRole('region', { name: 'Computer Use' })
+    expect(computerUse.textContent).toContain('Text + Specialist')
+    expect(computerUse.textContent).toContain('Reasoner')
+    expect(computerUse.textContent).toContain('Qwen Reasoner')
+    expect(computerUse.textContent).toContain('Remote')
+    expect(computerUse.textContent).toContain('Grounding specialist')
+    expect(computerUse.textContent).toContain('UI-TARS 1.5 7B')
+    expect(computerUse.textContent).toContain('On device')
   })
 
   it('shows and activates a saved remote model through the shared model seam', async () => {

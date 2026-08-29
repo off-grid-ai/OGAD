@@ -379,6 +379,57 @@ function redactGuidance(serializedInput: string, guidance: readonly string[]): s
   )
 }
 
+export interface PreparedVisionGrounding {
+  policyInput: VisionPolicyInput
+  screenshotDataUrl: string
+}
+
+/** Annotate and persist the captured frame once. Multi-model strategies reuse
+ * these exact bytes, so the reasoner, specialist, task history, and replay do
+ * not diverge or draw the coordinate grid twice. */
+export async function prepareVisionGrounding(
+  input: VisionGroundingInput,
+  operatorEnvironment: VisionPolicyInput['operatorEnvironment'] = 'desktop'
+): Promise<PreparedVisionGrounding> {
+  const screenshot = await modelScreenshot(input)
+  return {
+    policyInput: visionPolicyInput(
+      input,
+      screenshot.dataUrl,
+      screenshot.marker,
+      operatorEnvironment
+    ),
+    screenshotDataUrl: screenshot.dataUrl
+  }
+}
+
+/** Run one adapter against an already-prepared frame. The adapter remains the
+ * sole parser for its model protocol. */
+export async function runPreparedVisionGrounder(
+  adapter: VisionModelAdapter,
+  input: VisionGroundingInput,
+  prepared: PreparedVisionGrounding,
+  policyInput: VisionPolicyInput = prepared.policyInput
+): Promise<VisionGroundingResult> {
+  const request = adapter.buildRequest(policyInput)
+  input.reportProgress?.('Reviewing direction, milestone, and next action')
+  const policyResponse = await runVisionPolicyRequest(request, input.signal, input.reportReasoning)
+  const response = serializeVisionPolicyResponse(policyResponse)
+  const bounds = input.coordinateFrame?.encoded ?? { width: 0, height: 0 }
+  const decision = adapter.parsePolicyResponse
+    ? adapter.parsePolicyResponse(policyResponse, bounds, input.coordinateFrame)
+    : adapter.parseResponse(response, bounds, input.coordinateFrame)
+  return {
+    response,
+    decision,
+    modelInput: redactGuidance(
+      `Visual step decision request:\n${serializeVisionPolicyMessages(request.messages)}`,
+      input.guidance
+    ),
+    screenshotDataUrl: prepared.screenshotDataUrl
+  }
+}
+
 /** One model call per screenshot. General adapters consolidate direction,
  * milestone completion, action choice, and action validation in this request;
  * specialist adapters keep their native one-call protocol. */
@@ -387,30 +438,7 @@ export function createVisionGrounder(
   operatorEnvironment: VisionPolicyInput['operatorEnvironment'] = 'desktop'
 ): (input: VisionGroundingInput) => Promise<VisionGroundingResult> {
   return async (input) => {
-    const screenshot = await modelScreenshot(input)
-    const request = adapter.buildRequest(
-      visionPolicyInput(input, screenshot.dataUrl, screenshot.marker, operatorEnvironment)
-    )
-    input.reportProgress?.('Reviewing direction, milestone, and next action')
-    const policyResponse = await runVisionPolicyRequest(
-      request,
-      input.signal,
-      input.reportReasoning
-    )
-    const response = serializeVisionPolicyResponse(policyResponse)
-    const decision = adapter.parsePolicyResponse?.(
-      policyResponse,
-      input.coordinateFrame?.encoded ?? { width: 0, height: 0 },
-      input.coordinateFrame
-    )
-    return {
-      response,
-      ...(decision ? { decision } : {}),
-      modelInput: redactGuidance(
-        `Visual step decision request:\n${serializeVisionPolicyMessages(request.messages)}`,
-        input.guidance
-      ),
-      screenshotDataUrl: screenshot.dataUrl
-    }
+    const prepared = await prepareVisionGrounding(input, operatorEnvironment)
+    return runPreparedVisionGrounder(adapter, input, prepared)
   }
 }

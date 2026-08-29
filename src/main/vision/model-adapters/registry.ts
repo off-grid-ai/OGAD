@@ -1,3 +1,4 @@
+import type { ComputerUseModelStrategy } from '../../../shared/computer-use-settings'
 import type { VisionModelAdapter, VisionModelArtifacts } from './types'
 import { generalVisionOperatorAdapter } from './general-vision-operator'
 import { uiMateAdapter } from './ui-mate'
@@ -20,7 +21,7 @@ const adapters: readonly VisionModelAdapter[] = [
  */
 export function resolveVisionModelAdapterForStrategy(
   model: VisionModelArtifacts,
-  strategy: 'same_as_chat' | 'separate_specialist'
+  strategy: Exclude<ComputerUseModelStrategy, 'text_plus_specialist'>
 ): VisionModelAdapter {
   if (strategy === 'same_as_chat') {
     generalVisionOperatorAdapter.assertCapabilities(model)
@@ -38,6 +39,13 @@ export function resolveVisionModelAdapter(model: VisionModelArtifacts): VisionMo
     adapters.find((candidate) => candidate.matches(model)) ?? generalVisionOperatorAdapter
   adapter.assertCapabilities(model)
   return adapter
+}
+
+/** Select a model protocol without asserting files that are not resident yet.
+ * The hybrid strategy uses this only to plan capture geometry. The loaded-model
+ * boundary still calls resolveVisionModelAdapter and enforces capabilities. */
+export function matchVisionModelAdapter(model: VisionModelArtifacts): VisionModelAdapter {
+  return adapters.find((candidate) => candidate.matches(model)) ?? generalVisionOperatorAdapter
 }
 
 /** The model-load boundary only enforces families that declare a strict paired-artifact gate. */

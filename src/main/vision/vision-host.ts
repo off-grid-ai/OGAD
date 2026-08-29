@@ -55,15 +55,13 @@ import {
   type ScreenshotGeometry
 } from './screenshot-geometry'
 import { recentVisualFacts } from './visual-context'
-import { resolveVisionModelAdapterForStrategy } from './model-adapters'
-import type { VisionModelAdapter } from './model-adapters/types'
 import { retryPlanningGoal, type TaskRetryCheckpoint } from '../tasks/task-retry'
 import { dispatchVisionAction } from './vision-actuation'
 import { encodeTaskPhase } from '../../shared/task-execution-plan'
 import { prepareTaskExecutionPlan } from '../tasks/task-execution-plan-service'
 import { registerTaskGuideHandler } from '../tasks/task-guide'
-import { createVisionGrounder } from './vision-policy-runner'
-import { resolveModelIdentity } from '../models-manager'
+import { withVisionTaskModelStrategy } from './vision-task-model-strategy'
+import type { VisionTaskModelSession } from './vision-task-model-strategy'
 import { computerUsePermissionBlock } from './computer-use-permissions'
 import { runVisionTaskGraph } from './vision-task-graph'
 import { captureComputerUseDisplay } from './computer-use-display-capture'
@@ -235,19 +233,43 @@ class VisionHost {
     const guard = new VisionGuard()
     const request = new AbortController()
     const settings = getComputerUseSettings()
-    const activeArtifacts = llm.activeModelArtifacts()
-    if (!activeArtifacts) {
-      return {
-        ok: false,
-        summary: 'Load a computer-use model before you start this task.',
-        steps: [],
-        handoffs: 0
-      }
-    }
-    let modelAdapter: VisionModelAdapter
     try {
-      // Same rule as Web Use: the user's strategy decides the adapter, not the model's name.
-      modelAdapter = resolveVisionModelAdapterForStrategy(activeArtifacts, settings.modelStrategy)
+      return await withVisionTaskModelStrategy(
+        'desktop',
+        async ({ adapter: modelAdapter, identity: modelIdentity, decide }) => {
+          const contextTokens = resolveComputerUseContextTokens(
+            settings.context,
+            llm.effectiveContextSize()
+          )
+          const retrievedFacts = [
+            ...(checkpoint
+              ? [
+                  `Resume checkpoint for task ${checkpoint.taskId}: ${checkpoint.steps.join('; ')}`,
+                  ...(checkpoint.currentAction
+                    ? [`Last attempted action: ${checkpoint.currentAction}`]
+                    : []),
+                  ...(checkpoint.summary ? [`Earlier attempt ended: ${checkpoint.summary}`] : [])
+                ]
+              : []),
+            ...(settings.retrieveOlderVisuals ? recentVisualFacts(taskId) : [])
+          ].slice(0, 5)
+          return this.runActiveTask({
+            goal,
+            taskId,
+            journeyId,
+            checkpoint,
+            actuation,
+            guard,
+            request,
+            settings,
+            modelAdapter,
+            modelIdentity,
+            decide,
+            contextTokens,
+            retrievedFacts
+          })
+        }
+      )
     } catch (error) {
       return {
         ok: false,
@@ -256,23 +278,38 @@ class VisionHost {
         handoffs: 0
       }
     }
-    const modelIdentity = await resolveModelIdentity(activeArtifacts.id)
-    const contextTokens = resolveComputerUseContextTokens(
-      settings.context,
-      llm.effectiveContextSize()
-    )
-    const retrievedFacts = [
-      ...(checkpoint
-        ? [
-            `Resume checkpoint for task ${checkpoint.taskId}: ${checkpoint.steps.join('; ')}`,
-            ...(checkpoint.currentAction
-              ? [`Last attempted action: ${checkpoint.currentAction}`]
-              : []),
-            ...(checkpoint.summary ? [`Earlier attempt ended: ${checkpoint.summary}`] : [])
-          ]
-        : []),
-      ...(settings.retrieveOlderVisuals ? recentVisualFacts(taskId) : [])
-    ].slice(0, 5)
+  }
+
+  private async runActiveTask(input: {
+    goal: string
+    taskId: string
+    journeyId: string
+    checkpoint?: TaskRetryCheckpoint
+    actuation: ActuationPort
+    guard: VisionGuard
+    request: AbortController
+    settings: ComputerUseSettings
+    modelAdapter: import('./model-adapters/types').VisionModelAdapter
+    modelIdentity: { modelId: string; modelName: string }
+    decide: VisionTaskModelSession['decide']
+    contextTokens: number
+    retrievedFacts: string[]
+  }): Promise<VisionTaskResult> {
+    const {
+      goal,
+      taskId,
+      journeyId,
+      checkpoint,
+      actuation,
+      guard,
+      request,
+      settings,
+      modelAdapter,
+      modelIdentity,
+      decide,
+      contextTokens,
+      retrievedFacts
+    } = input
     // The kill switch: Esc halts the run and consumes the keypress. The supervisor's
     // Stop routes to the SAME guard via the controller session.
     const escapeRegistered = globalShortcut.register('Escape', () => {
@@ -326,7 +363,7 @@ class VisionHost {
           screenshotResizeFactor: modelAdapter.screenshotResizeFactor
         }),
         guard,
-        decide: createVisionGrounder(modelAdapter),
+        decide,
         parseResponse: modelAdapter.parseResponse,
         waitForUser: async (why) => {
           await coordinator.waitForTakeover(taskId, why)

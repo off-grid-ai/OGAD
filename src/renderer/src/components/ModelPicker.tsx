@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { IconLoader2, IconCheck, IconCpu, IconX, IconPower } from '@tabler/icons-react'
 import { SidePanel } from './SidePanel'
+import type { ComputerUseActiveModelProjection } from '../../../shared/computer-use-settings'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const api = (): any => (window as any).api
@@ -56,6 +57,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
   const [activeIds, setActiveIds] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState<string | null>(null)
   const [unload, setUnload] = useState<Record<string, UnloadStatus>>({})
+  const [computerUse, setComputerUse] = useState<ComputerUseActiveModelProjection | null>(null)
 
   const load = useCallback(async () => {
     const cat = await api().getModelCatalog?.()
@@ -65,6 +67,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     const text = await api().getActiveModel?.()
     const modal = (await api().getActiveModalities?.()) ?? {}
     const nextActiveIds = new Set<string>((await api().getActiveModelIds?.()) ?? [])
+    const computerUseProjection = await api().getComputerUseActiveModels?.()
     const remoteTextActive = catalogModels.some(
       (model) => model.remoteServerId && nextActiveIds.has(model.id)
     )
@@ -75,6 +78,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
       speech: modal.speech ?? null,
       transcription: modal.transcription ?? null
     })
+    setComputerUse(computerUseProjection ?? null)
   }, [])
   useEffect(() => {
     void load()
@@ -148,6 +152,46 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
         </button>
       </div>
       <div className="flex-1 space-y-5 overflow-y-auto p-4">
+        <section aria-label="Computer Use">
+          <div className="mb-1.5 flex items-center justify-between gap-3">
+            <span className="text-[10px] uppercase tracking-wide text-neutral-600">
+              Computer Use
+            </span>
+            {computerUse ? (
+              <span className="text-[10px] text-neutral-500">{computerUse.strategyLabel}</span>
+            ) : null}
+          </div>
+          {computerUse?.models.length ? (
+            <div className="space-y-1">
+              {computerUse.models.map((model) => (
+                <div
+                  key={model.role}
+                  className="flex items-center justify-between gap-3 rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs"
+                >
+                  <span className="min-w-0">
+                    <span className="block text-[9px] uppercase tracking-wide text-neutral-600">
+                      {model.role === 'reasoner' ? 'Reasoner' : 'Grounding specialist'}
+                    </span>
+                    <span className="block truncate text-neutral-200">{model.modelName}</span>
+                  </span>
+                  {model.remote ? (
+                    <span className="shrink-0 rounded-sm border border-green-500/50 px-1 py-px text-[8px] uppercase tracking-wide text-green-500">
+                      Remote
+                    </span>
+                  ) : (
+                    <span className="shrink-0 text-[9px] uppercase tracking-wide text-neutral-600">
+                      On device
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="px-2 py-1.5 text-xs text-neutral-600">
+              No Computer Use model is selected.
+            </p>
+          )}
+        </section>
         {MODALITIES.map(({ label, kinds, mode }) => {
           const list = models.filter((m) => kinds.includes(m.kind) && installed.includes(m.id))
           const cur = active[mode]

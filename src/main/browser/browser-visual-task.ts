@@ -19,8 +19,11 @@ import { remoteVisionModelId } from '../../shared/remote-vision-server'
 import { createVisionGrounder } from '../vision/vision-policy-runner'
 import { runVisionTaskGraph } from '../vision/vision-task-graph'
 import type { VisionGuard } from '../vision/vision-guard'
-import { withGrounder } from '../vision/grounder-loader'
-import { resolveModelIdentity, type ModelIdentity } from '../models-manager'
+import type { ModelIdentity } from '../models-manager'
+import {
+  withVisionTaskModelStrategy,
+  type VisionTaskModelSession
+} from '../vision/vision-task-model-strategy'
 import type { BrowserDriver } from './browser-driver'
 import { createBrowserVisionScreen } from './browser-vision-screen'
 
@@ -32,6 +35,7 @@ export interface BrowserVisionSelection {
 export interface ActiveBrowserVision {
   selection: BrowserVisionSelection
   identity: ModelIdentity
+  decide: VisionTaskModelSession['decide']
 }
 
 export interface ActiveBrowserVisionDependencies {
@@ -55,12 +59,13 @@ export function resolveActiveBrowserVisionSelection(): BrowserVisionSelection {
     throw new Error('Web Use requires an active model with installed vision support.')
   }
   try {
+    const strategy = getComputerUseSettings().modelStrategy
     return {
       // The user's strategy decides the adapter: "Same as Chat" means a general tool-calling VLM
       // is driving, whatever it is named.
       adapter: resolveVisionModelAdapterForStrategy(
         artifacts,
-        getComputerUseSettings().modelStrategy
+        strategy === 'text_plus_specialist' ? 'same_as_chat' : strategy
       ),
       modelId: artifacts.id
     }
@@ -75,22 +80,29 @@ export function resolveActiveBrowserVisionAdapter(): VisionModelAdapter {
   return resolveActiveBrowserVisionSelection().adapter
 }
 
-const productionActiveBrowserVisionDependencies: ActiveBrowserVisionDependencies = {
-  withSelectedModel: withGrounder,
-  resolveSelection: resolveActiveBrowserVisionSelection,
-  resolveIdentity: resolveModelIdentity
-}
-
 /** Run only after the selected Computer Use model is resident. Identity and
  * adapter come from the same post-swap snapshot that performs the task. */
 export async function withActiveBrowserVision<T>(
   task: (active: ActiveBrowserVision) => Promise<T>,
-  dependencies: ActiveBrowserVisionDependencies = productionActiveBrowserVisionDependencies
+  dependencies?: ActiveBrowserVisionDependencies
 ): Promise<T> {
+  if (!dependencies) {
+    return withVisionTaskModelStrategy('embedded_browser', (session) =>
+      task({
+        selection: { adapter: session.adapter, modelId: session.identity.modelId },
+        identity: session.identity,
+        decide: session.decide
+      })
+    )
+  }
   const { result } = await dependencies.withSelectedModel(async () => {
     const selection = dependencies.resolveSelection()
     const identity = await dependencies.resolveIdentity(selection.modelId)
-    return task({ selection, identity })
+    return task({
+      selection,
+      identity,
+      decide: createVisionGrounder(selection.adapter, 'embedded_browser')
+    })
   })
   return result
 }
@@ -100,6 +112,7 @@ interface BrowserVisualTaskInput {
   taskId: string
   journeyId: string
   adapter: VisionModelAdapter
+  decide?: VisionTaskModelSession['decide']
   guard: VisionGuard
   plan: TaskExecutionPlan
   /** Trace of the attempt being resumed, so a retry restarts at the phase it reached. */
@@ -129,7 +142,7 @@ export function runBrowserVisualTask(input: BrowserVisualTaskInput): Promise<Vis
       screenshotResizeFactor: input.adapter.screenshotResizeFactor
     }),
     guard: input.guard,
-    decide: createVisionGrounder(input.adapter, 'embedded_browser'),
+    decide: input.decide ?? createVisionGrounder(input.adapter, 'embedded_browser'),
     parseResponse: input.adapter.parseResponse,
     waitForUser: input.waitForUser,
     onStep: input.onStep,

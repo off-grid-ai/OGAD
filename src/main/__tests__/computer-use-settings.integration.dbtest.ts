@@ -58,6 +58,14 @@ describe('Computer Use settings persistence', () => {
     })
   })
 
+  it('persists the text reasoner plus grounding specialist strategy', () => {
+    setComputerUseSettings({ modelStrategy: 'text_plus_specialist' })
+
+    expect(getComputerUseSettings()).toMatchObject({
+      modelStrategy: 'text_plus_specialist'
+    })
+  })
+
   it('retrieves only bounded text outcomes from older Computer Use runs', () => {
     const history = new TaskHistoryStore(getDB(), () => 100)
     history.upsert({
