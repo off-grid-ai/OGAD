@@ -83,7 +83,5 @@ async function captureElectronDisplay(input: CaptureInput): Promise<ComputerUseD
 export async function captureComputerUseDisplay(
   input: CaptureInput
 ): Promise<ComputerUseDisplayCapture> {
-  return process.platform === 'darwin'
-    ? captureMacDisplay(input)
-    : captureElectronDisplay(input)
+  return process.platform === 'darwin' ? captureMacDisplay(input) : captureElectronDisplay(input)
 }

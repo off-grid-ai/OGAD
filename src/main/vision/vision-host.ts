@@ -131,7 +131,10 @@ function makeScreen(input: {
             target.width === sourceSize.width && target.height === sourceSize.height
               ? captured.png
               : await sharp(captured.png)
-                  .resize({ ...target, kernel: SCREENSHOT_RESIZE_KERNEL[settings.screenshotQuality] })
+                  .resize({
+                    ...target,
+                    kernel: SCREENSHOT_RESIZE_KERNEL[settings.screenshotQuality]
+                  })
                   .png()
                   .toBuffer()
           encodedSize = target

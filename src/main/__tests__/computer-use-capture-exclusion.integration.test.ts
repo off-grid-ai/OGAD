@@ -109,8 +109,8 @@ describe('Computer Use capture exclusion journey', () => {
       [
         '#!/usr/bin/env node',
         "const fs = require('node:fs')",
-        "fs.writeFileSync(process.env.OFFGRID_CAPTURE_ARGUMENTS, JSON.stringify(process.argv.slice(2)))",
-        "fs.copyFileSync(process.env.OFFGRID_CAPTURE_CLEAN_SOURCE, process.argv[2])"
+        'fs.writeFileSync(process.env.OFFGRID_CAPTURE_ARGUMENTS, JSON.stringify(process.argv.slice(2)))',
+        'fs.copyFileSync(process.env.OFFGRID_CAPTURE_CLEAN_SOURCE, process.argv[2])'
       ].join('\n'),
       { mode: 0o755 }
     )
