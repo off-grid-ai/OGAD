@@ -54,6 +54,7 @@ import { emitChangedLlmSettings } from './sync-mutation'
 import { loadGatedVisionModelAdapter } from './vision/model-adapters/registry'
 import type { VisionModelArtifacts } from './vision/model-adapters/types'
 import { getActiveRemoteVisionServer } from './vision/remote-vision-server'
+import { currentRemoteScreenTaskSession } from './actions/remote-screen-session'
 
 export type { KvCacheType, PerformanceMode }
 
@@ -1021,7 +1022,8 @@ export class LLMService {
   /** Resolve the selected text model once at request admission. Every text
    * method uses this seam, so no caller needs local/remote branches. */
   private activeRemoteTextModel(): RemoteTextModelConnection | null {
-    return getActiveRemoteVisionServer()
+    const screenTask = currentRemoteScreenTaskSession()
+    return screenTask ? screenTask.activeServer : getActiveRemoteVisionServer()
   }
 
   /** A tool turn must fail before generation when the selected remote model cannot plan actions. */

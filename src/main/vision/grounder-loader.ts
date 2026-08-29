@@ -33,6 +33,10 @@ import {
   getActiveRemoteVisionServer
 } from './remote-vision-server'
 import type { ComputerUseModelStrategy } from '../../shared/computer-use-settings'
+import {
+  currentRemoteScreenTaskSession,
+  runWithRemoteScreenTaskSession
+} from '../actions/remote-screen-session'
 
 /** Migration default for people who used computer tasks before the Computer Use catalog existed. */
 export const GROUNDER_MODEL_ID = 'mradermacher/UI-TARS-1.5-7B-GGUF'
@@ -100,12 +104,16 @@ export interface GrounderRunnerDependencies {
 }
 
 const productionGrounderDependencies: GrounderRunnerDependencies = {
-  modelStrategy: () => getComputerUseSettings().modelStrategy,
+  modelStrategy: () =>
+    currentRemoteScreenTaskSession()?.modelStrategy ?? getComputerUseSettings().modelStrategy,
   selectedModelId: selectedGrounderModelId,
   installed: grounderInstalled,
   activeModel: () => llm.activeModelInfo(),
   activeModelId: getActiveModel,
-  activeRemote: getActiveRemoteVisionServer,
+  activeRemote: () => {
+    const session = currentRemoteScreenTaskSession()
+    return session ? session.activeServer : getActiveRemoteVisionServer()
+  },
   isGrounder: isGrounderActive,
   load: loadGrounder,
   restoreLocal: restoreChatModel,
@@ -186,5 +194,12 @@ export async function withGrounder<T>(
   task: () => Promise<T>,
   now: () => number = Date.now
 ): Promise<{ result: T; timing: GrounderTiming }> {
-  return runWithProductionGrounder(task, now)
+  const screenTask = currentRemoteScreenTaskSession()
+  if (!screenTask) return runWithProductionGrounder(task, now)
+  // A remote Chat reasoner remains bound to the outer task session. The grounding specialist is
+  // local, so its nested request must not inherit that remote transport or rewrite the saved active
+  // server while the task swaps the resident local model.
+  return runWithRemoteScreenTaskSession({ ...screenTask, activeServer: null }, () =>
+    runWithProductionGrounder(task, now)
+  )
 }

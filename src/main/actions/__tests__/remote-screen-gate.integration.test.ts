@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ActionRecord } from '@offgrid/use'
 import { withRemoteScreenGate } from '../remote-screen-gate'
+import {
+  currentRemoteScreenTaskSession,
+  runWithRemoteScreenTaskSession
+} from '../remote-screen-session'
 
 const action = { id: 'screen-task-1' } as ActionRecord
 const remoteServer = {
@@ -40,5 +44,63 @@ describe('remote screen execution gate', () => {
 
     await expect(guarded(action)).resolves.toEqual({ ok: true, effectId: 'done' })
     expect(execute).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the allowed server and strategy fixed for the complete host execution', async () => {
+    let strategy: 'same_as_chat' | 'separate_specialist' = 'same_as_chat'
+    let server = { ...remoteServer, screenFramesAllowed: true }
+    const observed: unknown[] = []
+    const execute = vi.fn(async () => {
+      observed.push(currentRemoteScreenTaskSession())
+      strategy = 'separate_specialist'
+      server = {
+        ...remoteServer,
+        id: 'server-2',
+        name: 'Changed server',
+        screenFramesAllowed: false
+      }
+      await Promise.resolve()
+      observed.push(currentRemoteScreenTaskSession())
+      return { ok: true as const, effectId: 'done' }
+    })
+    const guarded = withRemoteScreenGate('computer_use', execute, {
+      modelStrategy: () => strategy,
+      activeServer: () => server
+    })
+
+    await expect(guarded(action)).resolves.toEqual({ ok: true, effectId: 'done' })
+    expect(observed).toEqual([
+      expect.objectContaining({
+        taskKind: 'computer_use',
+        modelStrategy: 'same_as_chat',
+        activeServer: expect.objectContaining({ id: 'server-1', screenFramesAllowed: true })
+      }),
+      expect.objectContaining({
+        taskKind: 'computer_use',
+        modelStrategy: 'same_as_chat',
+        activeServer: expect.objectContaining({ id: 'server-1', screenFramesAllowed: true })
+      })
+    ])
+    expect(currentRemoteScreenTaskSession()).toBeUndefined()
+  })
+
+  it('supports one local specialist request without changing the outer remote reasoner', async () => {
+    const observed: unknown[] = []
+    const execute = vi.fn(async () => {
+      const outer = currentRemoteScreenTaskSession()
+      observed.push(outer?.activeServer?.id)
+      await runWithRemoteScreenTaskSession({ ...outer!, activeServer: null }, async () => {
+        observed.push(currentRemoteScreenTaskSession()?.activeServer)
+      })
+      observed.push(currentRemoteScreenTaskSession()?.activeServer?.id)
+      return { ok: true as const, effectId: 'done' }
+    })
+    const guarded = withRemoteScreenGate('computer_use', execute, {
+      modelStrategy: () => 'text_plus_specialist',
+      activeServer: () => ({ ...remoteServer, screenFramesAllowed: true })
+    })
+
+    await expect(guarded(action)).resolves.toEqual({ ok: true, effectId: 'done' })
+    expect(observed).toEqual(['server-1', null, 'server-1'])
   })
 })
