@@ -299,7 +299,9 @@ describe('assistant reply speech integration (#105)', () => {
       timeout: 10_000
     })
     await user.click(await screen.findByRole('button', { name: 'Speak' }))
-    expect(await screen.findByRole('button', { name: 'Stop' }, { timeout: 10_000 })).toBeTruthy()
+    // This crosses a real child-process boundary. Shared Linux runners can take
+    // more than 10 seconds to schedule the native speech worker under DB-suite load.
+    expect(await screen.findByRole('button', { name: 'Stop' }, { timeout: 30_000 })).toBeTruthy()
 
     expect(audios).toHaveLength(1)
     expect(audios[0]!.play).toHaveBeenCalledOnce()
@@ -308,7 +310,7 @@ describe('assistant reply speech integration (#105)', () => {
     expect(Buffer.from(encoded!, 'base64').subarray(0, 4).toString('ascii')).toBe('RIFF')
     expect(fs.readFileSync(inputRecord, 'utf8')).toBe('Conversation B baseline')
     expect(path.basename(fs.readFileSync(voiceRecord, 'utf8'))).toContain('af_heart.bin')
-  }, 15_000)
+  }, 40_000)
 
   it('surfaces a real synthesis failure as an actionable rendered error', async () => {
     fs.writeFileSync(failureMarker, 'fail')
