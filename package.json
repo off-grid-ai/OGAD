@@ -15,6 +15,7 @@
     "format": "prettier --write .",
     "lint": "eslint --cache .",
     "test": "vitest run --project product-integration",
+    "test:flow:web-use-boundary": "vitest run --project product-integration src/main/browser/__tests__/browser-playwright-boundary.integration.test.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage --project product-integration",
     "test:heavy": "vitest run --project model-port-integration --project packaging-integration",
@@ -68,6 +69,7 @@
     "@offgrid/ui": "file:../shared/packages/ui",
     "@offgrid/use": "file:../shared/packages/use",
     "@phosphor-icons/react": "^2.1.10",
+    "@playwright/mcp": "^0.0.79",
     "@scure/bip39": "^2.2.0",
     "@tabler/icons-react": "^3.36.1",
     "@tailwindcss/vite": "^4.1.18",
@@ -103,7 +105,8 @@
     "tailwind-merge": "^3.4.0",
     "tweetnacl": "^1.0.3",
     "tweetnacl-util": "^0.15.1",
-    "unified": "^11.0.5"
+    "unified": "^11.0.5",
+    "ws": "^8.18.3"
   },
   "optionalDependencies": {
     "@nut-tree-fork/nut-js": "^4.2.6"
@@ -122,6 +125,7 @@
     "@types/node": "^22.19.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.1.1",
     "@vitest/coverage-v8": "^4.1.10",
     "autoprefixer": "^10.4.23",
