@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   CheckCircle,
   CircleNotch,
@@ -39,27 +39,49 @@ function StatusIcon({
   return <Circle className="h-4 w-4 text-neutral-600" />
 }
 
-/** Live status of every local component. Polls system:health on an interval. */
+/**
+ * Live status of every local component.
+ *
+ * Full health reads inspect native permissions and local services. They are therefore demand-driven:
+ * opening or returning to this panel reads once, lifecycle events invalidate it, and user actions
+ * refresh it after they finish. A timer here made an idle app repeat the full native probe forever.
+ */
 export function HealthPanel(): React.ReactElement {
   const api = window.api
   const [health, setHealth] = useState<SystemHealthContract | null>(null)
   const [restarting, setRestarting] = useState<string | null>(null)
   const [freeing, setFreeing] = useState(false)
   const [freeMsg, setFreeMsg] = useState<string | null>(null)
+  const activeRefresh = useRef<Promise<void> | null>(null)
 
-  const refresh = useCallback(async (): Promise<void> => {
-    try {
-      const h = await api.systemHealth()
-      setHealth(h)
-    } catch {
-      /* ignore — keep last snapshot */
-    }
+  const refresh = useCallback((): Promise<void> => {
+    if (activeRefresh.current) return activeRefresh.current
+    const request = api
+      .systemHealth()
+      .then(setHealth)
+      .catch(() => {
+        /* ignore — keep last snapshot */
+      })
+      .finally(() => {
+        if (activeRefresh.current === request) activeRefresh.current = null
+      })
+    activeRefresh.current = request
+    return request
   }, [api])
 
   useEffect(() => {
-    refresh()
-    const t = setInterval(refresh, 3000)
-    return () => clearInterval(t)
+    const refreshWhenVisible = (): void => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    void refresh()
+    const stopChatHealth = api.onChatHealthChanged?.(() => void refresh())
+    window.addEventListener('focus', refreshWhenVisible)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      stopChatHealth?.()
+      window.removeEventListener('focus', refreshWhenVisible)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
   }, [refresh])
 
   const restart = async (id: string): Promise<void> => {
