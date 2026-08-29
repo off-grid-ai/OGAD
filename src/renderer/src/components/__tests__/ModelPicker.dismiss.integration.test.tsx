@@ -117,6 +117,12 @@ describe('<ModelPicker/> dismissal', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  it('closes from the accessible icon control', () => {
+    const onClose = renderPicker()
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   it('closes when the backdrop is clicked', () => {
     const onClose = renderPicker()
     fireEvent.click(screen.getByTestId('side-panel-backdrop'))

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { IconLoader2, IconCheck, IconCpu, IconX, IconPower } from '@tabler/icons-react'
+import { IconLoader2, IconCheck, IconCpu, IconPower } from '@tabler/icons-react'
+import { X } from '@phosphor-icons/react'
 import { SidePanel } from './SidePanel'
 import type { ComputerUseActiveModelProjection } from '../../../shared/computer-use-settings'
 import { openModelSettingsPanel } from '@renderer/lib/model-settings-panel'
@@ -165,7 +166,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
             aria-label="Close"
             className="text-neutral-500 hover:text-white"
           >
-            <IconX className="h-4 w-4" />
+            <X className="h-4 w-4" />
           </button>
         </div>
       </div>

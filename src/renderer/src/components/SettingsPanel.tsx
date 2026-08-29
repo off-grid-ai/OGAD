@@ -34,6 +34,7 @@ import { RemoteVisionSettingsTab } from './RemoteVisionSettingsTab'
 import { SettingsRow as Row } from './SettingsRow'
 import { SettingsSelect } from './SettingsSelect'
 import type { SpeechLanguage } from '@offgrid/speech'
+import { X } from '@phosphor-icons/react'
 
 const MAX_OUTPUT_AUTO = MAX_TOKENS_AUTO
 // The values THIS picker offers. The nesting rule they obey is shared (@offgrid/models); which
@@ -296,9 +297,10 @@ export function SettingsPanel({
             </button>
             <button
               onClick={onClose}
-              className="rounded-md border border-neutral-700 px-3 py-1 text-xs text-neutral-300 transition-colors hover:text-white"
+              aria-label="Close"
+              className="text-neutral-500 transition-colors hover:text-white"
             >
-              Close
+              <X className="h-4 w-4" />
             </button>
           </div>
         </div>
