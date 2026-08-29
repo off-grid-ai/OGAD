@@ -64,7 +64,8 @@ describe('remote model inventory ids', () => {
           provider: 'custom',
           endpoint: 'https://models.example/v1',
           model: 'google/gemma-4',
-          hasApiKey: true
+          hasApiKey: true,
+          screenFramesAllowed: true
         }
       ])
     ).toEqual([

@@ -46,6 +46,7 @@ import { getComputerUseSettings } from '../computer-use-settings'
 import { isProEntitled } from '../licensing/license-service'
 import { callConnectorTool } from '../mcp'
 import { makeConnectorRailExecutor } from './connector-rail'
+import { withRemoteScreenGate } from './remote-screen-gate'
 
 export interface ActionsRuntime {
   propose(
@@ -167,7 +168,7 @@ export function getActionsRuntime(): ActionsRuntime {
   // BrowserHost owns the Web Use model lifecycle. It resolves the adapter and
   // records the model identity only after the specialist swap completes. A
   // second wrapper here caused nested swaps and restored Chat too early.
-  const browserExecute = rawBrowserExecute
+  const browserExecute = withRemoteScreenGate('web_use', rawBrowserExecute)
   const connectorExecute = makeConnectorRailExecutor(callConnectorTool)
   // The vision rail's live host (screen capture + actuation + grounding model),
   // created lazily on first computer_task.
@@ -179,7 +180,7 @@ export function getActionsRuntime(): ActionsRuntime {
   // wall-clock is logged so a computer_task's cost is attributable (the AX-vs-
   // grounder A/B). OFFGRID_GROUNDER=0 keeps the current model (no swap) for a
   // grounder-format A/B without paying the reload.
-  const groundedVisionExecute = async (action: ActionRecord): Promise<ExecuteResult> => {
+  const runGroundedVision = async (action: ActionRecord): Promise<ExecuteResult> => {
     if (process.env.OFFGRID_GROUNDER === '0') {
       return visionExecute(action)
     }
@@ -189,6 +190,7 @@ export function getActionsRuntime(): ActionsRuntime {
     )
     return result
   }
+  const groundedVisionExecute = withRemoteScreenGate('computer_use', runGroundedVision)
   // computer_task is TIERED: try the accessibility rail first (free, any chat
   // model, most native apps), and fall through to the grounder-vision rail only
   // when AX can't see the controls. OFFGRID_COMPUTER_RAIL=ax|vision forces one

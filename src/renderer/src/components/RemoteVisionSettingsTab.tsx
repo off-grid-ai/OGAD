@@ -7,6 +7,7 @@ import {
   type RemoteVisionServerSettings,
   type RemoteVisionServerUpdate
 } from '../../../shared/remote-vision-server'
+import { providerNeedsScreenDisclosure } from '../../../shared/remote-screen-privacy'
 import { SettingsRow as Row } from './SettingsRow'
 
 const EMPTY_SETTINGS: RemoteVisionServerSettings = {
@@ -24,9 +25,17 @@ interface ServerForm {
   endpoint: string
   model: string
   hasApiKey: boolean
+  screenFramesAllowed: boolean
 }
 
-const EMPTY_FORM: ServerForm = { id: null, name: '', endpoint: '', model: '', hasApiKey: false }
+const EMPTY_FORM: ServerForm = {
+  id: null,
+  name: '',
+  endpoint: '',
+  model: '',
+  hasApiKey: false,
+  screenFramesAllowed: false
+}
 
 interface RemoteModelOption {
   id: string
@@ -39,7 +48,8 @@ function formFromServer(server: RemoteVisionSavedServer): ServerForm {
     name: server.name,
     endpoint: server.endpoint,
     model: server.model,
-    hasApiKey: server.hasApiKey
+    hasApiKey: server.hasApiKey,
+    screenFramesAllowed: server.screenFramesAllowed
   }
 }
 
@@ -61,7 +71,8 @@ function normalizeSettings(value: RemoteVisionServerSettings): RemoteVisionServe
           provider: value.provider,
           endpoint: value.endpoint,
           model: value.model,
-          hasApiKey: value.hasApiKey
+          hasApiKey: value.hasApiKey,
+          screenFramesAllowed: false
         }
       : null
   return {
@@ -142,7 +153,8 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
       model: form.model,
       serverId: form.id ?? undefined,
       name: form.name,
-      ...(apiKey ? { apiKey } : {})
+      ...(apiKey ? { apiKey } : {}),
+      screenFramesAllowed: form.screenFramesAllowed
     }
   }
 
@@ -369,7 +381,12 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
               id="remote-server-address"
               value={form.endpoint}
               onChange={(event) => {
-                setForm((current) => ({ ...current, endpoint: event.target.value, model: '' }))
+                setForm((current) => ({
+                  ...current,
+                  endpoint: event.target.value,
+                  model: '',
+                  screenFramesAllowed: false
+                }))
                 setModels([])
                 setModelQuery('')
                 setStatus('Not tested.')
@@ -402,6 +419,36 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
               className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-1.5 text-xs text-neutral-200 outline-none placeholder:text-neutral-600 focus-visible:border-green-500"
             />
           </Row>
+          {providerNeedsScreenDisclosure(remoteVisionProviderForEndpoint(form.endpoint)) ? (
+            <Row
+              label="Allow screen images"
+              controlId="remote-server-screen-frames"
+              hint={
+                form.screenFramesAllowed
+                  ? `After you save, Web Use and Computer Use can send screen images to ${form.name || serverNameFromEndpoint(form.endpoint)} at ${serverNameFromEndpoint(form.endpoint)}. Screen images can contain visible text, apps, and other content.`
+                  : 'Web Use and Computer Use stay blocked. Allow this only if the selected model accepts images and you want this remote server to receive visible screen content.'
+              }
+            >
+              <button
+                id="remote-server-screen-frames"
+                type="button"
+                role="switch"
+                aria-checked={form.screenFramesAllowed}
+                onClick={() => {
+                  setForm((current) => ({
+                    ...current,
+                    screenFramesAllowed: !current.screenFramesAllowed
+                  }))
+                  setStatus('Not saved.')
+                }}
+                className={`relative h-6 w-11 rounded-full border transition-colors ${form.screenFramesAllowed ? 'border-green-500 bg-green-500/20' : 'border-neutral-700 bg-neutral-900'}`}
+              >
+                <span
+                  className={`absolute left-1 top-1 h-3.5 w-3.5 rounded-full transition-transform ${form.screenFramesAllowed ? 'translate-x-5 bg-green-500' : 'translate-x-0 bg-neutral-500'}`}
+                />
+              </button>
+            </Row>
+          ) : null}
           {models.length > 0 ? (
             <Row
               label="Model"

@@ -15,7 +15,7 @@ import {
 } from '../../shared/remote-vision-server'
 
 const LEGACY_API_KEY_SECRET = 'remote-vision-server:api-key'
-const CONFIG_VERSION = 2
+const CONFIG_VERSION = 3
 
 interface StoredRemoteVisionServer {
   id: string
@@ -23,10 +23,11 @@ interface StoredRemoteVisionServer {
   provider: Exclude<RemoteVisionProvider, 'local'>
   endpoint: string
   model: string
+  screenFramesAllowed: boolean
 }
 
 interface StoredRemoteVisionConfig {
-  version: 2
+  version: 3
   activeServerId: string | null
   servers: StoredRemoteVisionServer[]
 }
@@ -69,7 +70,8 @@ function normalizeServer(
     name: value.name?.trim() || defaultServerName(value.endpoint),
     provider: value.provider,
     endpoint: remoteVisionApiBase(remoteVisionEndpoint(value.provider, value.endpoint)),
-    model: value.model.trim()
+    model: value.model.trim(),
+    screenFramesAllowed: value.screenFramesAllowed === true
   }
 }
 
@@ -195,7 +197,8 @@ export function setRemoteVisionServerSettings(
     name: update.name?.trim() || defaultServerName(endpoint),
     provider: update.provider,
     endpoint,
-    model
+    model,
+    screenFramesAllowed: update.screenFramesAllowed === true
   }
   const servers = stored.servers.some((server) => server.id === id)
     ? stored.servers.map((server) => (server.id === id ? next : server))

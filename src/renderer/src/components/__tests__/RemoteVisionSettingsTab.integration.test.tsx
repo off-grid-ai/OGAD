@@ -32,7 +32,8 @@ describe('<RemoteVisionSettingsTab/>', () => {
           provider: update.provider,
           endpoint: update.endpoint,
           model: update.model,
-          hasApiKey: true
+          hasApiKey: true,
+          screenFramesAllowed: update.screenFramesAllowed
         }
       ]
     }))
@@ -50,7 +51,8 @@ describe('<RemoteVisionSettingsTab/>', () => {
             provider: 'custom',
             endpoint: 'https://models.example/v1',
             model: 'vision-model',
-            hasApiKey: true
+            hasApiKey: true,
+            screenFramesAllowed: false
           }
         ]
       })),
@@ -64,12 +66,17 @@ describe('<RemoteVisionSettingsTab/>', () => {
     expect(await screen.findByDisplayValue('https://models.example/v1')).toBeTruthy()
     expect(screen.queryByText(/OpenRouter/i)).toBeNull()
     expect((screen.getByPlaceholderText(/stored key/i) as HTMLInputElement).value).toBe('')
+    expect(screen.getByText(/Web Use and Computer Use stay blocked/i)).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: 'Change model' }))
     await screen.findByText('Connected in 42 ms. 2 models found.')
     fireEvent.change(screen.getByPlaceholderText('Search models'), { target: { value: 'new' } })
     expect(screen.queryByText('Vision model')).toBeNull()
     fireEvent.click(screen.getByText('New vision model'))
+    fireEvent.click(screen.getByRole('switch', { name: 'Allow screen images' }))
+    expect(
+      screen.getByText(/can send screen images to Models example at models.example/i)
+    ).toBeTruthy()
     fireEvent.change(screen.getByLabelText('API key (optional)'), {
       target: { value: 'private-key' }
     })
@@ -82,7 +89,8 @@ describe('<RemoteVisionSettingsTab/>', () => {
         model: 'new-vision-model',
         name: 'Models example',
         serverId: 'server-1',
-        apiKey: 'private-key'
+        apiKey: 'private-key',
+        screenFramesAllowed: true
       })
     )
     expect((screen.getByLabelText('API key (optional)') as HTMLInputElement).value).toBe('')

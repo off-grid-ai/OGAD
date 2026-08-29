@@ -16,6 +16,8 @@ export interface RemoteVisionSavedServer {
   endpoint: string
   model: string
   hasApiKey: boolean
+  /** The user has confirmed that this remote server can receive screen images. */
+  screenFramesAllowed: boolean
 }
 
 export interface RemoteVisionModelReference {
@@ -90,6 +92,7 @@ export interface RemoteVisionServerUpdate {
   name?: string
   apiKey?: string
   clearApiKey?: boolean
+  screenFramesAllowed?: boolean
 }
 
 export interface RemoteVisionConnectionResult {
