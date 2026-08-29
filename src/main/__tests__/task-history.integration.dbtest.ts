@@ -305,6 +305,34 @@ describe('task history persistence', () => {
     db.close()
   })
 
+  it('persists authenticated launch identity through later task updates and restart', () => {
+    const { db, store } = openStore(4_000)
+    store.upsert({
+      taskId: 'remote-web-launch',
+      journeyId: 'mobile-chat-107',
+      launchId: 'launch-web-107',
+      requestingDeviceId: 'mobile-1',
+      kind: 'web_use',
+      title: 'Open the release dashboard',
+      status: 'running',
+      executionDeviceId: 'studio-mac'
+    })
+    store.upsert({
+      taskId: 'remote-web-launch',
+      kind: 'web_use',
+      status: 'done',
+      summary: 'Dashboard opened'
+    })
+
+    expect(store.get('remote-web-launch')).toMatchObject({
+      launchId: 'launch-web-107',
+      requestingDeviceId: 'mobile-1',
+      journeyId: 'mobile-chat-107',
+      status: 'done'
+    })
+    db.close()
+  })
+
   it('stops one orphaned local Web Use run without changing remote or native runs', () => {
     const { db, store } = openStore(4_000)
     store.upsert({

@@ -43,6 +43,8 @@ export interface TaskRunSnapshot {
   updatedAt: number
   executionDeviceId?: string
   executionDeviceName?: string
+  launchId?: string
+  requestingDeviceId?: string
   phase?: ComputerUsePhase
   currentStep?: number
   currentAction?: string
@@ -70,6 +72,8 @@ export interface TaskRunUpdate {
   at?: number
   executionDeviceId?: string
   executionDeviceName?: string
+  launchId?: string
+  requestingDeviceId?: string
   phase?: ComputerUsePhase
   currentStep?: number
   currentAction?: string
@@ -108,6 +112,8 @@ interface TaskRunRow {
   updated_at: number
   execution_device_id?: string | null
   execution_device_name?: string | null
+  launch_id?: string | null
+  requesting_device_id?: string | null
   phase?: string | null
   current_step?: number | null
   current_action?: string | null
@@ -168,6 +174,8 @@ function rowToSnapshot(row: TaskRunRow): TaskRunSnapshot {
     updatedAt: row.updated_at,
     ...(row.execution_device_id ? { executionDeviceId: row.execution_device_id } : {}),
     ...(row.execution_device_name ? { executionDeviceName: row.execution_device_name } : {}),
+    ...(row.launch_id ? { launchId: row.launch_id } : {}),
+    ...(row.requesting_device_id ? { requestingDeviceId: row.requesting_device_id } : {}),
     ...(row.phase ? { phase: row.phase as ComputerUsePhase } : {}),
     ...(typeof row.current_step === 'number' ? { currentStep: row.current_step } : {}),
     ...(row.current_action ? { currentAction: row.current_action } : {}),
@@ -251,6 +259,8 @@ export class TaskHistoryStore {
         updated_at INTEGER NOT NULL,
         execution_device_id TEXT,
         execution_device_name TEXT,
+        launch_id TEXT,
+        requesting_device_id TEXT,
         phase TEXT,
         current_step INTEGER,
         current_action TEXT,
@@ -273,6 +283,8 @@ export class TaskHistoryStore {
     for (const column of [
       'execution_device_id TEXT',
       'execution_device_name TEXT',
+      'launch_id TEXT',
+      'requesting_device_id TEXT',
       'model_id TEXT',
       'model_name TEXT',
       'phase TEXT',
@@ -355,6 +367,16 @@ export class TaskHistoryStore {
         : previous?.executionDeviceName
           ? { executionDeviceName: previous.executionDeviceName }
           : {}),
+      ...(update.launchId !== undefined
+        ? { launchId: update.launchId }
+        : previous?.launchId
+          ? { launchId: previous.launchId }
+          : {}),
+      ...(update.requestingDeviceId !== undefined
+        ? { requestingDeviceId: update.requestingDeviceId }
+        : previous?.requestingDeviceId
+          ? { requestingDeviceId: previous.requestingDeviceId }
+          : {}),
       ...(update.phase !== undefined
         ? { phase: update.phase }
         : previous?.phase
@@ -401,10 +423,11 @@ export class TaskHistoryStore {
       .prepare(
         `INSERT INTO task_run_history (
            task_id, journey_id, model_id, model_name, kind, title, status, summary, steps_json, started_at,
-           finished_at, updated_at, execution_device_id, execution_device_name, phase,
+           finished_at, updated_at, execution_device_id, execution_device_name, launch_id,
+           requesting_device_id, phase,
            current_step, current_action, current_reasoning, reasoning_live, last_url, last_title, screenshot_path,
            screenshot_device_id, step_details_json
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(task_id) DO UPDATE SET
            journey_id = excluded.journey_id,
            model_id = excluded.model_id,
@@ -418,6 +441,8 @@ export class TaskHistoryStore {
            updated_at = excluded.updated_at,
            execution_device_id = excluded.execution_device_id,
            execution_device_name = excluded.execution_device_name,
+           launch_id = excluded.launch_id,
+           requesting_device_id = excluded.requesting_device_id,
            phase = excluded.phase,
            current_step = excluded.current_step,
            current_action = excluded.current_action,
@@ -444,6 +469,8 @@ export class TaskHistoryStore {
         snapshot.updatedAt,
         snapshot.executionDeviceId ?? null,
         snapshot.executionDeviceName ?? null,
+        snapshot.launchId ?? null,
+        snapshot.requestingDeviceId ?? null,
         snapshot.phase ?? null,
         snapshot.currentStep ?? null,
         snapshot.currentAction ?? null,

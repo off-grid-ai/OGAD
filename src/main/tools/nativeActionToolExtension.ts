@@ -31,6 +31,7 @@ import {
   systemHintForPlatform,
   type NativeToolSpec
 } from './nativeActionToolExtension-logic'
+import { actionArgsWithTaskLaunch } from '../tasks/task-launch-identity'
 
 /** The engine port the extension needs - implemented by the actions runtime,
  *  faked in tests. Optional: absent means the legacy path only. */
@@ -169,7 +170,7 @@ export class NativeActionToolExtension implements ToolExtension {
       // This extension is a Chat surface. Every mapped mutation goes through the
       // durable engine even when Pro has registered its outside-Chat approval hook.
       if (actions && actionType) {
-        return this.executeViaEngine(actions, actionType, spec, args, context?.conversationId)
+        return this.executeViaEngine(actions, actionType, spec, args, context)
       }
       const text = 'Error: this action needs the on-device action engine, which is not available.'
       return isTaskAction(actionType ?? '') ? { text, authoritative: true } : text
@@ -188,17 +189,17 @@ export class NativeActionToolExtension implements ToolExtension {
     actionType: string,
     spec: NativeToolSpec,
     args: Record<string, unknown>,
-    sourceRef?: string
+    context?: ToolContext
   ): Promise<string | ToolResult> {
     const reply = (text: string): string | ToolResult => engineResult(actionType, text)
     const proposed = await actions.propose(
       {
         type: actionType,
         intent: spec.title(args),
-        args: spec.buildArgs(args),
+        args: actionArgsWithTaskLaunch(spec.buildArgs(args), context?.taskLaunch),
         risk: spec.risk
       },
-      { source: 'chat', ...(sourceRef ? { sourceRef } : {}) }
+      { source: 'chat', ...(context?.conversationId ? { sourceRef: context.conversationId } : {}) }
     )
     if (!proposed.accepted) {
       return reply(`Error: the action was refused: ${proposed.reason}`)

@@ -18,14 +18,27 @@ const calls: Array<{
   name: string
   args: Record<string, unknown>
   conversationId?: string
+  taskLaunch?: { launchId: string; requestingDeviceId: string }
 }> = []
 const executionBoundary = {
   id: 'remote-task-integration-boundary',
   category: 'tool' as const,
   schemas: () => [],
   canHandle: (name: string) => name === 'web_use' || name === 'computer_task',
-  execute: (name: string, args: Record<string, unknown>, context?: { conversationId?: string }) => {
-    calls.push({ name, args, conversationId: context?.conversationId })
+  execute: (
+    name: string,
+    args: Record<string, unknown>,
+    context?: {
+      conversationId?: string
+      taskLaunch?: { launchId: string; requestingDeviceId: string }
+    }
+  ) => {
+    calls.push({
+      name,
+      args,
+      conversationId: context?.conversationId,
+      taskLaunch: context?.taskLaunch
+    })
     return { text: 'Task started.', authoritative: true as const }
   }
 }
@@ -90,6 +103,7 @@ describe('authenticated Mobile task calls through the Desktop MCP surface', () =
           _meta: {
             'ai.offgrid/taskOrigin': {
               conversationId: 'mobile-chat-107',
+              launchId: `launch-${name}-107`,
               deviceId: 'mobile-1',
               deviceName: 'Release phone',
               executionDeviceId: 'desktop-1'
@@ -101,7 +115,11 @@ describe('authenticated Mobile task calls through the Desktop MCP surface', () =
           {
             name,
             args: { goal: 'Open the release dashboard' },
-            conversationId: 'mobile-chat-107'
+            conversationId: 'mobile-chat-107',
+            taskLaunch: {
+              launchId: `launch-${name}-107`,
+              requestingDeviceId: 'mobile-1'
+            }
           }
         ])
       } finally {
@@ -121,6 +139,7 @@ describe('authenticated Mobile task calls through the Desktop MCP surface', () =
         _meta: {
           'ai.offgrid/taskOrigin': {
             conversationId: 'mobile-chat-107',
+            launchId: 'launch-mismatch-107',
             deviceId: 'another-mobile',
             executionDeviceId: 'desktop-1'
           }
@@ -144,6 +163,7 @@ describe('authenticated Mobile task calls through the Desktop MCP surface', () =
         _meta: {
           'ai.offgrid/taskOrigin': {
             conversationId: 'mobile-chat-107',
+            launchId: 'launch-disabled-107',
             deviceId: 'mobile-1',
             executionDeviceId: 'desktop-1'
           }
@@ -170,6 +190,7 @@ describe('authenticated Mobile task calls through the Desktop MCP surface', () =
         _meta: {
           'ai.offgrid/taskOrigin': {
             conversationId: 'mobile-chat-107',
+            launchId: 'launch-other-desktop-107',
             deviceId: 'mobile-1',
             executionDeviceId: 'desktop-2'
           }

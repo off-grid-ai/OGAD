@@ -46,6 +46,8 @@ export function setToolEnabled(name: string, enabled: boolean): void {
 // excludes the current conversation so it can't cite itself).
 export interface ToolContext {
   conversationId?: string
+  /** Authenticated Mobile launch identity. Only the MCP admission boundary sets it. */
+  taskLaunch?: { launchId: string; requestingDeviceId: string }
   /** The exact user message. Approval-gated tools use this instead of trusting model-made args. */
   userQuery?: string
   /** Bounded prior user/assistant turns. Intake tools combine these facts with

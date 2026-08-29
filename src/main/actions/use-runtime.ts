@@ -46,6 +46,8 @@ import { isProEntitled } from '../licensing/license-service'
 import { callConnectorTool } from '../mcp'
 import { makeConnectorRailExecutor } from './connector-rail'
 import { withRemoteScreenGate } from './remote-screen-gate'
+import { getTaskExecutionDevice, recordTaskRun } from '../tasks/task-history'
+import { taskLaunchFromActionArgs } from '../tasks/task-launch-identity'
 
 export interface ActionsRuntime {
   propose(
@@ -134,6 +136,27 @@ export function pickByPlatform<T>(platform: NodeJS.Platform, win: T, mac: T): T 
   return platform === 'win32' ? win : mac
 }
 
+function recordAuthenticatedTaskLaunch(
+  action: ActionRecord,
+  kind: 'web_use' | 'computer_use'
+): void {
+  const launch = taskLaunchFromActionArgs(action.args)
+  if (!launch) return
+  const executionDevice = getTaskExecutionDevice()
+  const args = action.args as Record<string, unknown>
+  const title = typeof args.goal === 'string' && args.goal.trim() ? args.goal : action.intent
+  recordTaskRun({
+    taskId: action.id,
+    journeyId: action.sourceRef ?? action.id,
+    launchId: launch.launchId,
+    requestingDeviceId: launch.requestingDeviceId,
+    kind,
+    title,
+    executionDeviceId: executionDevice.id,
+    executionDeviceName: executionDevice.name
+  })
+}
+
 let runtime: ActionsRuntime | null = null
 
 /** Lazy singleton: built on first use so the DB and helper exist by then. */
@@ -210,6 +233,7 @@ export function getActionsRuntime(): ActionsRuntime {
           if (!isProEntitled()) {
             return { ok: false, detail: 'Browser Use requires Off Grid AI Pro.' }
           }
+          recordAuthenticatedTaskLaunch(action, 'web_use')
           return browserExecute(action)
         }
         if (rail === 'connector') {
@@ -219,6 +243,7 @@ export function getActionsRuntime(): ActionsRuntime {
           if (!isProEntitled()) {
             return { ok: false, detail: 'Computer Use requires Off Grid AI Pro.' }
           }
+          recordAuthenticatedTaskLaunch(action, 'computer_use')
           // computer_task: accessibility-first, vision as the fallback tier.
           return computerTaskExecute(action)
         }

@@ -318,7 +318,17 @@ function registerActionTools(server: McpServer, authenticatedDeviceId: string | 
         const result = await runTool(
           spec.name,
           toolArgs,
-          { conversationId: origin?.conversationId ?? 'mcp' },
+          {
+            conversationId: origin?.conversationId ?? 'mcp',
+            ...(origin?.deviceId
+              ? {
+                  taskLaunch: {
+                    launchId: origin.launchId,
+                    requestingDeviceId: origin.deviceId
+                  }
+                }
+              : {})
+          },
           getToolExtensions()
         )
         return TEXT(result.text)
