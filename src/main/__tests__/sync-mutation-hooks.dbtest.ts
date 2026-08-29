@@ -32,7 +32,7 @@ import {
   updateRagConversationTitle
 } from '../database'
 import { createProject, deleteProject, updateProject } from '../rag/store'
-import type { SyncMutation } from '../sync-mutation'
+import { CORE_SYNC_ENTITIES, type SyncMutation } from '../sync-mutation'
 
 const mutations: SyncMutation[] = []
 
@@ -49,6 +49,10 @@ afterAll(() => {
 })
 
 describe('core sync mutation contract', () => {
+  it('uses the shared task launch wire identity', () => {
+    expect(CORE_SYNC_ENTITIES.taskLaunch).toBe('task_launch')
+  })
+
   it('reports committed chat and project writes with stable cross-device ids', () => {
     createProject({ id: 'project-1', name: 'Shared project' })
     createRagConversation('conversation-1', 'First title', 'project-1')

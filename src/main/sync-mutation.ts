@@ -4,6 +4,7 @@ import {
   KNOWLEDGE_DOCUMENT_ENTITY,
   SHARED_FILE_ENTITY,
   TASK_CONTROL_ENTITY,
+  TASK_LAUNCH_ENTITY,
   TASK_RUN_ENTITY,
   TASK_VISUAL_STEP_ENTITY
 } from '@offgrid/sync'
@@ -20,6 +21,7 @@ export const CORE_SYNC_ENTITIES = {
   sharedFile: SHARED_FILE_ENTITY,
   modelSetting: 'model_setting',
   actionApproval: ACTION_APPROVAL_ENTITY,
+  taskLaunch: TASK_LAUNCH_ENTITY,
   taskRun: TASK_RUN_ENTITY,
   taskControl: TASK_CONTROL_ENTITY,
   taskVisualStep: TASK_VISUAL_STEP_ENTITY
