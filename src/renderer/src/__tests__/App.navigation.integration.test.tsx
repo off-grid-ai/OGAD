@@ -432,16 +432,25 @@ describe('<App/> desktop navigation integration', () => {
       expect(window.location.pathname).toBe(startPath)
 
       for (const [label, path] of routeEntries) {
+        await screen.findAllByRole(
+          'button',
+          { name: new RegExp(`^${label}`) },
+          { timeout: 10_000 }
+        )
         await user.click(routedTabButton(label))
         await waitFor(() => expect(window.location.pathname).toBe(path))
-        expect(routedTabButton(label).getAttribute('aria-current')).toBe('page')
+        await waitFor(() =>
+          expect(routedTabButton(label).getAttribute('aria-current')).toBe('page')
+        )
       }
 
       const [previousTab, previousPath] = routeEntries.at(-2) ?? [startTab, startPath]
 
       await user.click(screen.getByRole('button', { name: 'Back' }))
       await waitFor(() => expect(window.location.pathname).toBe(previousPath))
-      expect(routedTabButton(previousTab).getAttribute('aria-current')).toBe('page')
+      await waitFor(() =>
+        expect(routedTabButton(previousTab).getAttribute('aria-current')).toBe('page')
+      )
 
       mounted.unmount()
       render(<App />)
