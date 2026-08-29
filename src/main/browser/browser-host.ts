@@ -24,12 +24,11 @@ import {
   type BrowserPointerEvent,
   type CdpTransport
 } from './browser-driver'
-import type { WebTaskResult } from './web-task-agent'
 import { getTakeoverCoordinator } from './takeover'
 import { VisionGuard } from '../vision/vision-guard'
 import { registerVisionSession } from '../vision/vision-controller'
 import { getMainWindow } from '../main-window'
-import type { BrowserRailHost, BrowserTaskRequest } from './browser-rail'
+import type { BrowserRailHost, BrowserTaskRequest, WebTaskResult } from './browser-rail'
 import {
   getTaskExecutionDevice,
   getTaskRun,
@@ -835,7 +834,7 @@ class BrowserHost implements BrowserRailHost {
           plan,
           // A retry must resume at the phase the failed attempt reached. Without this the runtime
           // restarted at phase 1 and redid the first milestone on every retry.
-          ...(checkpoint?.steps?.length ? { resumedSteps: checkpoint.steps } : {}),
+          ...(checkpoint?.steps.length ? { resumedSteps: checkpoint.steps } : {}),
           activePage,
           waitForUser: async (why) => {
             if (!ownsRun()) return

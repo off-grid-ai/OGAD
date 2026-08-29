@@ -14,8 +14,15 @@
  */
 import { WEB_USE_ACTION_TYPE, type ActionRecord, type HandlerRegistry } from '@offgrid/use'
 import type { ExecuteResult } from '@offgrid/use'
-import type { WebTaskResult } from './web-task-agent'
 import type { TaskRetryCheckpoint } from '../tasks/task-retry'
+
+export interface WebTaskResult {
+  ok: boolean
+  summary: string
+  steps: string[]
+  takeovers: number
+  finalUrl: string
+}
 
 export interface BrowserTaskRequest {
   goal: string

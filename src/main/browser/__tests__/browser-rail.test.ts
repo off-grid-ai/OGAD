@@ -7,8 +7,12 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import { HandlerRegistry, type ActionRecord } from '@offgrid/use'
-import { makeBrowserRailExecutor, registerBrowserRail, type BrowserRailHost } from '../browser-rail'
-import type { WebTaskResult } from '../web-task-agent'
+import {
+  makeBrowserRailExecutor,
+  registerBrowserRail,
+  type BrowserRailHost,
+  type WebTaskResult
+} from '../browser-rail'
 
 const action = (args: Record<string, unknown>, sourceRef?: string): ActionRecord =>
   ({

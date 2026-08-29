@@ -9,7 +9,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function renderPicker(onClose = vi.fn()) {
+function renderPicker(onClose = vi.fn()): ReturnType<typeof vi.fn> {
   ;(window as unknown as { api: Record<string, unknown> }).api = {
     getModelCatalog: vi.fn().mockResolvedValue({
       models: [
@@ -30,7 +30,7 @@ function renderPicker(onClose = vi.fn()) {
   return onClose
 }
 
-function renderPickerWithRemote() {
+function renderPickerWithRemote(): ReturnType<typeof vi.fn> {
   const activateModel = vi.fn().mockResolvedValue({ success: true })
   ;(window as unknown as { api: Record<string, unknown> }).api = {
     getModelCatalog: vi.fn().mockResolvedValue({
@@ -66,6 +66,7 @@ describe('<ModelPicker/> dismissal', () => {
       )
     ).toBeTruthy()
     expect(screen.queryByText(/swaps the chat model/i)).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Computer Use' })).toBeNull()
   })
 
   it('shows and activates a saved remote model through the shared model seam', async () => {

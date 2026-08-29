@@ -39,8 +39,8 @@ for rejected or non-action decisions.
 
 The standalone `vision-agent.test.ts` command does not finish and had to be stopped after 30 seconds.
 Scoped ESLint also reports a hard error in `vision-policy-runner.ts`, plus size and complexity
-warnings in both workflow owners. The earlier `web-task-agent.ts` maintainability finding is no
-longer the active production owner.
+warnings in both workflow owners. The superseded semantic `web-task-agent.ts` runtime and its tests
+have been removed; Web Use now has one production workflow owner.
 
 **Impact:** the same valid model response can produce different history and recovery behavior on the
 desktop and browser surfaces. Two owners can drift on Stop, evidence, milestone, and action-commit
