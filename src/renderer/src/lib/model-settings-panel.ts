@@ -6,6 +6,7 @@ export type ModelSettingsPanelTab =
   | 'voice'
   | 'transcription'
   | 'remote'
+  | 'tasks'
   | 'tools'
   | 'connectors'
 

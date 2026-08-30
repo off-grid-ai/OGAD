@@ -4,6 +4,7 @@ import { X } from '@phosphor-icons/react'
 import { SidePanel } from './SidePanel'
 import type { ComputerUseActiveModelProjection } from '../../../shared/computer-use-settings'
 import { openModelSettingsPanel } from '@renderer/lib/model-settings-panel'
+import { SettingsSelect } from './SettingsSelect'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const api = (): any => (window as any).api
@@ -18,6 +19,8 @@ interface ModelEntry {
   kind: string
   files?: ModelFile[]
   remoteServerId?: string
+  grounder?: boolean
+  availability?: 'ready' | 'coming_soon'
 }
 
 // The text/vision LLM is selected by catalog id (it reloads llama-server); image
@@ -83,7 +86,8 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
       text: remoteTextActive ? null : (text ?? modal.text ?? null),
       image: modal.image ?? null,
       speech: modal.speech ?? null,
-      transcription: modal.transcription ?? null
+      transcription: modal.transcription ?? null,
+      computer_use: modal.computer_use ?? null
     })
     setComputerUse(computerUseProjection ?? null)
   }, [])
@@ -117,6 +121,20 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
         const fname = primaryFile(m)
         await api().setActiveModalModel?.(mode, fname)
         setActive((a) => ({ ...a, [mode]: fname }))
+      }
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const chooseComputerUse = async (modelId: string): Promise<void> => {
+    if (!modelId) return
+    setBusy(modelId)
+    try {
+      const result = await api().setActiveModalModel?.('computer_use', modelId)
+      if (result?.success !== false) {
+        setActive((current) => ({ ...current, computer_use: modelId }))
+        await load()
       }
     } finally {
       setBusy(null)
@@ -187,11 +205,34 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
                   key={model.role}
                   className="flex items-center justify-between gap-3 rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs"
                 >
-                  <span className="min-w-0">
+                  <span className="min-w-0 flex-1">
                     <span className="block text-[9px] uppercase tracking-wide text-neutral-600">
                       {model.role === 'reasoner' ? 'Reasoner' : 'Grounding specialist'}
                     </span>
-                    <span className="block truncate text-neutral-200">{model.modelName}</span>
+                    {model.role === 'grounding_specialist' ? (
+                      <SettingsSelect<string>
+                        id="active-computer-use-model"
+                        label="Active Computer Use model"
+                        value={model.modelId}
+                        disabled={busy !== null}
+                        onValueChange={(modelId) => void chooseComputerUse(modelId)}
+                        options={[
+                          ...models
+                            .filter(
+                              (candidate) =>
+                                installed.includes(candidate.id) &&
+                                candidate.availability !== 'coming_soon' &&
+                                (candidate.kind === 'computer_use' || candidate.grounder === true)
+                            )
+                            .map((candidate) => ({ value: candidate.id, label: candidate.name })),
+                          ...(models.some((candidate) => candidate.id === model.modelId)
+                            ? []
+                            : [{ value: model.modelId, label: model.modelName }])
+                        ]}
+                      />
+                    ) : (
+                      <span className="block truncate text-neutral-200">{model.modelName}</span>
+                    )}
                   </span>
                   {model.remote ? (
                     <span className="shrink-0 rounded-sm border border-green-500/50 px-1 py-px text-[8px] uppercase tracking-wide text-green-500">

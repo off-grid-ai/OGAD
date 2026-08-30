@@ -1,5 +1,5 @@
 import { useState, useEffect, type JSX } from 'react'
-import { motion, AnimatePresence, stagger, useAnimate } from 'motion/react'
+import { motion, AnimatePresence, stagger, useAnimate, useReducedMotion } from 'motion/react'
 import { LampContainer } from './ui/lamp'
 import { OrbitingCircles } from './ui/orbiting-circles'
 import { GridBackdrop } from './ui/grid-backdrop'
@@ -26,7 +26,9 @@ import {
   ClipboardText,
   Devices,
   Files,
-  Package
+  Package,
+  Browser,
+  CursorClick
 } from '@phosphor-icons/react'
 
 // Word-by-word blur-in, matching the brand's terminal feel.
@@ -40,20 +42,22 @@ function TextGenerate({
   delay?: number
 }): JSX.Element {
   const [scope, animate] = useAnimate()
+  const reducedMotion = useReducedMotion()
   const wordsArray = words.split(' ')
   useEffect(() => {
+    if (reducedMotion) return
     const timer = setTimeout(() => {
       animate('span', { opacity: 1, filter: 'blur(0px)' }, { duration: 0.4, delay: stagger(0.08) })
     }, delay * 1000)
     return () => clearTimeout(timer)
-  }, [animate, delay])
+  }, [animate, delay, reducedMotion])
   return (
     <motion.div ref={scope} className={cn('inline', className)}>
       {wordsArray.map((word, idx) => (
         <motion.span
           key={word + idx}
-          className="opacity-0 inline-block"
-          style={{ filter: 'blur(8px)' }}
+          className={cn('inline-block', !reducedMotion && 'opacity-0')}
+          style={reducedMotion ? undefined : { filter: 'blur(8px)' }}
         >
           {word}
           {idx < wordsArray.length - 1 ? ' ' : ''}
@@ -61,27 +65,6 @@ function TextGenerate({
       ))}
     </motion.div>
   )
-}
-
-function AnimatedNumber({ value, delay = 0 }: { value: number; delay?: number }): JSX.Element {
-  const [displayValue, setDisplayValue] = useState(0)
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      const steps = 30
-      const increment = value / steps
-      let current = 0
-      const interval = setInterval(() => {
-        current += increment
-        if (current >= value) {
-          setDisplayValue(value)
-          clearInterval(interval)
-        } else setDisplayValue(Math.floor(current))
-      }, 1000 / steps)
-      return () => clearInterval(interval)
-    }, delay * 1000)
-    return () => clearTimeout(timer)
-  }, [value, delay])
-  return <span>{displayValue.toLocaleString()}</span>
 }
 
 interface OnboardingProps {
@@ -108,6 +91,8 @@ const ORBIT = [
   { icon: ImageIcon, label: 'Image' },
   { icon: Microphone, label: 'Voice' },
   { icon: SpeakerHigh, label: 'Speech' },
+  { icon: Browser, label: 'Web Use' },
+  { icon: CursorClick, label: 'Computer Use' },
   { icon: FolderOpen, label: 'Projects' }
 ]
 
@@ -125,8 +110,8 @@ const PRO_GRID = [
   },
   {
     icon: CheckSquare,
-    label: 'To-dos',
-    line: 'Pulls the commitments out of your day and queues the next step, so nothing you promised quietly slips.'
+    label: 'Actions',
+    line: 'Gets browser and desktop work done from chat with Web Use and Computer Use, while you can pause or take control.'
   },
   {
     icon: MagnifyingGlass,
@@ -174,7 +159,7 @@ const SYNC_GRID = [
   {
     icon: Package,
     label: 'Models',
-    line: 'Send installed models and keep model settings together.'
+    line: 'See and switch the active Chat, Image, Transcription, Voice, and Computer Use model on a named Desktop.'
   }
 ]
 
@@ -216,8 +201,9 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                   Off Grid AI
                 </h1>
                 <p className="mx-auto mt-4 max-w-xl text-lg text-neutral-400">
-                  Private AI that runs on <span className="text-emerald-600 dark:text-emerald-400">your</span> machine. Your
-                  models, your data — <span className="text-emerald-600 dark:text-emerald-400">no cloud, no accounts</span>.
+                  Your AI workspace starts on{' '}
+                  <span className="text-emerald-600 dark:text-emerald-400">your</span>{' '}
+                  {deviceNoun()}. Local models and your data need no Off Grid AI cloud or account.
                 </p>
               </motion.div>
             </LampContainer>
@@ -237,13 +223,13 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
             <div className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6">
               <div className="mb-6 text-center">
                 <TextGenerate
-                  words={`One app. Every model. On your ${deviceNoun()}.`}
+                  words={`Choose what runs on your ${deviceNoun()}.`}
                   className="text-3xl font-semibold tracking-tight text-white md:text-5xl"
                   delay={0}
                 />
                 <div className="mt-4">
                   <TextGenerate
-                    words="Download open models and chat, see, draw, listen, and speak — all on-device."
+                    words="Chat, read images, generate images, transcribe, speak, browse with Web Use, and run Computer Use with local models. Add a model server only when you want one."
                     className="text-neutral-400"
                     delay={0.4}
                   />
@@ -260,23 +246,29 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                   <img src={logo} alt="Off Grid AI" className="h-12 w-12 rounded-lg" />
                 </div>
                 <OrbitingCircles radius={110} duration={26} iconSize={56}>
-                  {ORBIT.slice(0, 3).map(({ icon: Icon, label }) => (
+                  {ORBIT.slice(0, 4).map(({ icon: Icon, label }) => (
                     <div
                       key={label}
                       className="flex h-14 w-14 flex-col items-center justify-center gap-0.5 rounded-xl border border-neutral-800 bg-neutral-900"
                     >
-                      <Icon className="h-5 w-5 text-emerald-600 dark:text-emerald-400" weight="regular" />
+                      <Icon
+                        className="h-5 w-5 text-emerald-600 dark:text-emerald-400"
+                        weight="regular"
+                      />
                       <span className="text-[8px] text-neutral-500">{label}</span>
                     </div>
                   ))}
                 </OrbitingCircles>
                 <OrbitingCircles radius={180} duration={32} reverse iconSize={56}>
-                  {ORBIT.slice(3).map(({ icon: Icon, label }) => (
+                  {ORBIT.slice(4).map(({ icon: Icon, label }) => (
                     <div
                       key={label}
                       className="flex h-14 w-14 flex-col items-center justify-center gap-0.5 rounded-xl border border-neutral-800 bg-neutral-900"
                     >
-                      <Icon className="h-5 w-5 text-emerald-600 dark:text-emerald-400" weight="regular" />
+                      <Icon
+                        className="h-5 w-5 text-emerald-600 dark:text-emerald-400"
+                        weight="regular"
+                      />
                       <span className="text-[8px] text-neutral-500">{label}</span>
                     </div>
                   ))}
@@ -289,7 +281,7 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                 transition={{ delay: 1 }}
                 className="mt-4 text-xs text-neutral-600"
               >
-                Text · Vision · Image · Voice · Speech — one local gateway
+                Chat / Vision / Image / Transcription / Voice / Web Use / Computer Use
               </motion.p>
             </div>
           </motion.div>
@@ -324,9 +316,9 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                 transition={{ delay: 0.5 }}
                 className="mx-auto mb-10 max-w-2xl text-center text-sm text-neutral-400"
               >
-                The free app runs models. Pro adds the always-on layer: turn on capture and Off Grid AI
-                keeps a private record of what you see and do, then acts on it with your approval.
-                Every one runs on-device. Nothing is uploaded.
+                The free app runs models. Pro adds the always-on layer: turn on capture and Off Grid
+                AI keeps a private record of what you see and do, then acts on it with your
+                approval. Every one runs on-device. Nothing is uploaded.
               </motion.p>
 
               <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
@@ -393,7 +385,8 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                 >
                   Sync your workspace directly between up to five total devices, including this one.
                   Off Grid AI uses LAN first and Nearby when needed. Traffic is encrypted between
-                  paired devices. No Off Grid AI server receives it.
+                  paired devices. No Off Grid AI server receives it. In Off Grid AI Mobile, choose a
+                  paired Desktop by name. You can use its tools and change its active models.
                 </motion.p>
                 <motion.p
                   initial={{ opacity: 0 }}
@@ -415,7 +408,10 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                     transition={{ delay: 0.35 + index * 0.08, duration: 0.35 }}
                     className="min-h-36 border border-neutral-800 bg-neutral-900/60 p-4 transition-colors duration-150 hover:border-green-500/30"
                   >
-                    <Icon className="mb-5 h-5 w-5 text-emerald-600 dark:text-emerald-400" weight="regular" />
+                    <Icon
+                      className="mb-5 h-5 w-5 text-emerald-600 dark:text-emerald-400"
+                      weight="regular"
+                    />
                     <h3 className="text-xs font-medium uppercase tracking-wide text-white">
                       {label}
                     </h3>
@@ -439,7 +435,7 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
             <GridBackdrop className="opacity-70" />
             <div className="relative z-10 mx-auto max-w-2xl text-center">
               <TextGenerate
-                words={`It all runs in your ${deviceNoun()}'s RAM.`}
+                words="You choose where each model runs."
                 className="text-3xl font-semibold tracking-tight text-white md:text-5xl"
                 delay={0}
               />
@@ -449,38 +445,29 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                 transition={{ delay: 0.6 }}
                 className="mx-auto mt-5 max-w-xl text-neutral-400"
               >
-                No account, no API key, no telemetry. Inference happens on your CPU and GPU. Turn
-                off wifi and it keeps working. You can verify it yourself.
+                Local models run in your {`${deviceNoun()}'s`} RAM. A saved model server receives
+                prompts only while you select it. Personal Mesh does not copy server API keys to Off
+                Grid AI Mobile.
               </motion.p>
 
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 1, duration: 0.5 }}
-                className="mt-12 flex items-center justify-center gap-12"
+                className="mt-12 grid grid-cols-2 gap-px overflow-hidden border border-neutral-800 bg-neutral-800"
               >
-                <div className="text-center">
-                  <div className="text-3xl font-light text-emerald-600 dark:text-emerald-400">
-                    <AnimatedNumber value={100} delay={1.2} />%
+                <div className="bg-neutral-950 px-8 py-5 text-center">
+                  <div className="text-lg font-light text-emerald-600 dark:text-emerald-400">
+                    LOCAL
                   </div>
                   <div className="mt-1 text-xs uppercase tracking-wider text-neutral-600">
-                    Local
+                    Default
                   </div>
                 </div>
-                <div className="h-8 w-px bg-neutral-800" />
-                <div className="text-center">
-                  <div className="text-3xl font-light text-white">
-                    <AnimatedNumber value={0} delay={1.3} />
-                  </div>
+                <div className="bg-neutral-950 px-8 py-5 text-center">
+                  <div className="text-lg font-light text-white">REMOTE</div>
                   <div className="mt-1 text-xs uppercase tracking-wider text-neutral-600">
-                    Cloud
-                  </div>
-                </div>
-                <div className="h-8 w-px bg-neutral-800" />
-                <div className="text-center">
-                  <div className="text-3xl font-light tabular-nums text-white">∞</div>
-                  <div className="mt-1 text-xs uppercase tracking-wider text-neutral-600">
-                    Private
+                    Your choice
                   </div>
                 </div>
               </motion.div>

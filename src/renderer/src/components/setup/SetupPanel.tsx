@@ -7,7 +7,9 @@ import {
   Image as ImageIcon,
   SpeakerHigh,
   Microphone,
-  DownloadSimple
+  DownloadSimple,
+  DesktopTower,
+  Devices
 } from '@phosphor-icons/react'
 import { cn } from '@renderer/lib/utils'
 import { deviceNoun } from '@renderer/lib/device'
@@ -22,14 +24,14 @@ const MODES: { id: Mode; label: string; hint: string }[] = [
   {
     id: 'conservative',
     label: 'Conservative',
-    hint: 'Lightest — small, fast, low memory (skips the image model)'
+    hint: 'Lightest - small, fast, low memory (skips the image model)'
   },
   {
     id: 'balanced',
     label: 'Balanced',
-    hint: 'Recommended — capable vision model within a safe share of RAM'
+    hint: 'Recommended - capable vision model within a safe share of RAM'
   },
-  { id: 'extreme', label: 'Extreme', hint: 'Largest model & context your RAM allows' }
+  { id: 'extreme', label: 'Extreme', hint: 'Largest model and context your RAM allows' }
 ]
 
 type ItemKind = 'chat' | 'transcription' | 'voice' | 'image'
@@ -146,7 +148,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
     if (running) return
     firedConfigured.current = false
     setRunning(true)
-    setProgress({ phase: 'select', message: `Picking a model that fits your ${deviceNoun()}…` })
+    setProgress({ phase: 'select', message: `Picking a model that fits your ${deviceNoun()}...` })
     try {
       await api.autoConfigure()
     } catch (e) {
@@ -180,7 +182,8 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium text-white">Configure it for me</div>
             <div className="text-xs text-neutral-500">
-              Pick how much of your {deviceNoun()} to use, then one click does the rest.
+              Pick how much of your {deviceNoun()} to use. Off Grid AI Desktop shows each model
+              before it downloads anything.
             </div>
           </div>
           <button
@@ -191,8 +194,31 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
               'bg-green-600 text-white hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-60'
             )}
           >
-            {running ? 'Setting up…' : done ? 'Run again' : 'Configure'}
+            {running ? 'Setting up...' : done ? 'Run again' : 'Configure'}
           </button>
+        </div>
+
+        <div className="mt-4 grid gap-px overflow-hidden rounded-lg border border-neutral-800 bg-neutral-800 lg:grid-cols-2">
+          <div className="bg-neutral-950/70 p-3">
+            <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-neutral-400">
+              <DesktopTower className="h-4 w-4 text-green-500" />
+              Local and remote
+            </div>
+            <p className="mt-2 text-[11px] leading-5 text-neutral-500">
+              Installed models can handle Chat, images, transcription, voice, and Computer Use on
+              this {deviceNoun()}. A saved model server is an optional Chat source.
+            </p>
+          </div>
+          <div className="bg-neutral-950/70 p-3">
+            <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-neutral-400">
+              <Devices className="h-4 w-4 text-green-500" />
+              Control from Mobile
+            </div>
+            <p className="mt-2 text-[11px] leading-5 text-neutral-500">
+              Pair Off Grid AI Mobile through Personal Mesh. Choose this Desktop by name to see and
+              switch its active models. Server API keys stay on this Desktop.
+            </p>
+          </div>
         </div>
 
         {/* Resource-use selector (Conservative / Balanced / Extreme) */}
@@ -246,7 +272,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
                         {it.name}
                         {it.kind === 'chat' && (
                           <span className="ml-1.5 text-[10px] text-neutral-500">
-                            · chat + vision
+                            {' / chat + vision'}
                           </span>
                         )}
                       </div>
@@ -261,7 +287,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
                     ) : (
                       <span className="flex shrink-0 items-center gap-1 text-[10px] text-neutral-500">
                         <DownloadSimple className="h-3.5 w-3.5" />{' '}
-                        {it.sizeGb ? `${it.sizeGb.toFixed(1)} GB` : '—'}
+                        {it.sizeGb ? `${it.sizeGb.toFixed(1)} GB` : 'size unknown'}
                       </span>
                     )}
                   </li>
@@ -269,15 +295,15 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
               })}
             </ul>
             <div className="mt-1.5 text-[11px] text-neutral-600">
-              Chat first (you’re in as soon as it’s ready); voice, speech
-              {plan.items.some((i) => i.kind === 'image') ? ' & image' : ''} finish in the
+              Chat is ready first. Transcription, voice
+              {plan.items.some((i) => i.kind === 'image') ? ', and image' : ''} finish in the
               background.
             </div>
             <div className="mt-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-2.5 py-1.5 text-[11px] text-neutral-500">
-              For solid reasoning &amp; tool use,{' '}
+              For solid reasoning and tool use,{' '}
               <span className="text-neutral-300">Gemma 4 E4B</span> is the recommended minimum (4B,
-              ~6&nbsp;GB — fine on a 16&nbsp;GB {deviceNoun()}). Smaller 2B models are lighter and
-              add vision, but are noticeably weaker at reasoning.
+              ~6 GB - fine on a 16 GB {deviceNoun()}). Smaller 2B models are lighter and add vision,
+              but are noticeably weaker at reasoning.
             </div>
           </div>
         )}

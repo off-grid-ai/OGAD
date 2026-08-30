@@ -1,12 +1,16 @@
 import type { ComputerUseModelStrategy } from '../../../shared/computer-use-settings'
 import type { VisionModelAdapter, VisionModelArtifacts } from './types'
 import { generalVisionOperatorAdapter } from './general-vision-operator'
+import { fara15Adapter } from './fara-1-5'
+import { holo31Adapter } from './holo-3-1'
 import { uiMateAdapter } from './ui-mate'
 import { uiTarsAdapter } from './ui-tars'
 
 // Specialists FIRST, each claiming only the models it can actually parse; the general operator
 // last because it is the fallback, not a family. Order is the whole contract here.
 const adapters: readonly VisionModelAdapter[] = [
+  fara15Adapter,
+  holo31Adapter,
   uiMateAdapter,
   uiTarsAdapter,
   generalVisionOperatorAdapter

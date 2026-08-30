@@ -13,10 +13,6 @@ const uiMate = computerUseModels.find((model) => model.id === 'bartowski/tencent
 const uiTars = computerUseModels.find((model) => model.id === 'mradermacher/UI-TARS-1.5-7B-GGUF')
 if (!uiMate || !uiTars) throw new Error('Computer Use catalog fixtures are missing')
 
-const comingSoonNames = computerUseModels
-  .filter((model) => model.availability === 'coming_soon')
-  .map((model) => model.name)
-
 let activeIds: string[] = []
 let activationRequests: Array<[string, string?]> = []
 
@@ -80,18 +76,11 @@ describe('<ModelsScreen/> Computer Use catalog journey', () => {
 
     const installed = await screen.findByRole('list', { name: 'Models on this device' })
     const available = screen.getByRole('list', { name: 'Models available to download' })
-    const comingSoon = screen.getByRole('list', { name: 'Computer Use models coming soon' })
     expect(within(installed).getByText('UI-Mate-9B')).toBeTruthy()
     expect(within(available).getByText('UI-TARS-1.5-7B')).toBeTruthy()
     expect(within(available).getByText('UI-Mate-27B')).toBeTruthy()
     expect(within(available).getByText('Holo3.1-4B')).toBeTruthy()
-    // Counts come FROM the catalog, never re-hardcoded here: an entry moving rails
-    // is a catalog decision, and a literal copied into the test would just move the
-    // duplication instead of tracking it.
-    expect(within(comingSoon).getAllByText('Coming soon')).toHaveLength(comingSoonNames.length)
-    for (const name of comingSoonNames) {
-      expect(within(comingSoon).getByText(name)).toBeTruthy()
-    }
+    expect(screen.queryByRole('list', { name: 'Computer Use models coming soon' })).toBeNull()
     expect(screen.getByText(`${computerUseModels.length} models`)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'All sources' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Any size' })).toBeTruthy()
@@ -110,8 +99,7 @@ describe('<ModelsScreen/> Computer Use catalog journey', () => {
 
     const holoCard = screen.getByText('Holo3.1-0.8B').closest('[role="listitem"]')
     expect(holoCard).toBeTruthy()
-    expect(within(holoCard as HTMLElement).queryByRole('button', { name: 'Download' })).toBeNull()
-    expect(within(holoCard as HTMLElement).getByText(/Available after support/)).toBeTruthy()
+    expect(within(holoCard as HTMLElement).getByRole('button', { name: 'Download' })).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Use' }))
     expect(await screen.findByText('Active')).toBeTruthy()

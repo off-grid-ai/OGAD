@@ -36,6 +36,8 @@ export const SLOTS = {
   chatMessagesFooter: 'chat.messagesFooter',
   /** Licensed Browser Use and Computer Use task workspace. */
   taskWorkspace: 'tasks.workspace',
+  /** Licensed Web Use and Computer Use settings inside the shared Settings drawer. */
+  taskSettings: 'tasks.settings',
   /** Optional task supervisor surface mounted above the chat composer. */
   taskSupervisorOverlay: 'tasks.supervisorOverlay',
   /** A running task, kept visible in a floating card after its workspace is left. Mounted at the

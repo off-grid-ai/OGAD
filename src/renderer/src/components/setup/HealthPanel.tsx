@@ -78,7 +78,7 @@ export function HealthPanel(): React.ReactElement {
     window.addEventListener('focus', refreshWhenVisible)
     document.addEventListener('visibilitychange', refreshWhenVisible)
     return () => {
-      stopChatHealth?.()
+      if (typeof stopChatHealth === 'function') stopChatHealth()
       window.removeEventListener('focus', refreshWhenVisible)
       document.removeEventListener('visibilitychange', refreshWhenVisible)
     }
