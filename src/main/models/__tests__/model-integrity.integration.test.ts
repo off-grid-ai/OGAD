@@ -15,6 +15,16 @@ process.env.OFFGRID_DATA_DIR = dataDir
 const manager = await import('../../models-manager')
 const { CATALOG } = await import('@offgrid/models')
 
+const unavailableSource = CATALOG.find((entry) => entry.kind === 'computer_use')
+if (!unavailableSource) throw new Error('Model catalog needs a Computer Use fixture')
+const unavailableModel = {
+  ...unavailableSource,
+  id: 'offgrid-test/unavailable-computer-use',
+  name: 'Unavailable Computer Use fixture',
+  availability: 'coming_soon' as const,
+  availabilityNote: 'This Computer Use model has no runtime adapter.'
+}
+
 // Single-file GGUF models — download-mechanics fixtures (disk-full / interrupted /
 // offline). Kind-agnostic: the catalog no longer has a pure 'text' kind (every
 // former text model ships an mmproj → derived 'vision'), and these scenarios test
@@ -76,6 +86,7 @@ function capacityLimitedFileStream(
 }
 
 beforeAll(() => {
+  CATALOG.push(unavailableModel)
   fs.mkdirSync(path.dirname(primary.filePath), { recursive: true })
 })
 
@@ -96,28 +107,29 @@ afterEach(() => {
 })
 
 afterAll(() => {
+  const fixtureIndex = CATALOG.findIndex((entry) => entry.id === unavailableModel.id)
+  if (fixtureIndex >= 0) CATALOG.splice(fixtureIndex, 1)
   if (originalDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
   else process.env.OFFGRID_DATA_DIR = originalDataDir
   fs.rmSync(dataDir, { recursive: true, force: true })
 })
 
 describe('model-manager GGUF integrity', () => {
-  it('refuses a coming-soon Computer Use model before any network or disk work', async () => {
-    const model = CATALOG.find(
-      (entry) => entry.kind === 'computer_use' && entry.availability === 'coming_soon'
-    )
-    expect(model).toBeTruthy()
+  it('refuses an unavailable Computer Use model before any network or disk work', async () => {
     const fetchBoundary = vi.fn()
     vi.stubGlobal('fetch', fetchBoundary)
+    const modelsDir = path.join(dataDir, 'models')
+    const filesBefore = fs.readdirSync(modelsDir).sort()
 
-    const result = await manager.downloadModel(model!.id)
+    const result = await manager.downloadModel(unavailableModel.id)
 
-    expect(result).toEqual({ success: false, error: model!.availabilityNote })
+    expect(result).toEqual({ success: false, error: unavailableModel.availabilityNote })
     expect(fetchBoundary).not.toHaveBeenCalled()
-    expect(await manager.listInstalled()).not.toContain(model!.id)
-    await expect(manager.loadComputerUseModel(model!.id)).resolves.toEqual({
+    expect(fs.readdirSync(modelsDir).sort()).toEqual(filesBefore)
+    expect(await manager.listInstalled()).not.toContain(unavailableModel.id)
+    await expect(manager.loadComputerUseModel(unavailableModel.id)).resolves.toEqual({
       success: false,
-      error: model!.availabilityNote
+      error: unavailableModel.availabilityNote
     })
   })
 
