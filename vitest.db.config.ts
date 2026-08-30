@@ -68,6 +68,9 @@ export default defineConfig({
         'src/main/actions/semantic-rail-win.ts',
         'src/main/tools/nativeActionToolExtension.ts',
         'src/main/tools/nativeActionToolExtension-logic.ts',
+        // The default unit suite owns the injected NutApi adapter. DB journeys
+        // only load it through runtime composition and do not actuate native input.
+        'src/main/input/actuation.ts',
         // The browser + vision rails are UNIT-owned (browser-rail / vision-rail
         // / driver / loop / guard / parser all have their own suites). This
         // suite only LOADS them through use-runtime's import graph and never

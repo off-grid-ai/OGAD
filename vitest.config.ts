@@ -127,10 +127,9 @@ export default defineConfig({
         // spawn + synthetic input + the Accessibility grant, over the unit-tested
         // parser/router/loop/target-picker. Driven on a real Mac (the T1f pass).
         'src/main/accessibility/ax-host.ts',
-        // The shared synthetic-input adapter: dynamically requires the OPTIONAL
-        // native addon (nut.js) and needs a real display to actuate - the same
-        // class of shell as the rail hosts above.
-        'src/main/input/actuation.ts',
+        // The shared synthetic-input adapter is measured here through its injected
+        // NutApi boundary. Only loadActuation performs the optional native require;
+        // the complete adapter contract runs without a display in the unit suite.
         // powershell.exe-spawning I/O shell (Windows-only twin of native-helper's
         // spawn side); its parsing is the shared parseHelperResponse, which is
         // covered. Exercised on a real Windows machine per WINDOWS_TEST_PLAN.md.
