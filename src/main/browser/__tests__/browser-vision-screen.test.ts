@@ -283,15 +283,15 @@ describe('browser screenshot evidence', () => {
 
   it('keeps one exact model frame and clicks the captured target after the pane resizes', async () => {
     const sourcePng = await sharp({
-      create: { width: 1920, height: 1200, channels: 4, background: '#ffffff' }
+      create: { width: 1442, height: 901, channels: 4, background: '#ffffff' }
     })
       .composite([
         {
           input: Buffer.from(
             '<svg width="120" height="80"><rect width="120" height="80" fill="#059669"/></svg>'
           ),
-          left: 900,
-          top: 560
+          left: 660,
+          top: 410
         }
       ])
       .png()
@@ -300,12 +300,12 @@ describe('browser screenshot evidence', () => {
     const capturePage = vi.fn(async () => ({
       isEmpty: () => false,
       toPNG: () => sourcePng,
-      getSize: () => ({ width: 1920, height: 1200 })
+      getSize: () => ({ width: 1442, height: 901 })
     }))
     const viewportSize = vi
       .fn()
-      .mockResolvedValueOnce({ width: 1920, height: 1200 })
-      .mockResolvedValueOnce({ width: 1920, height: 1200 })
+      .mockResolvedValueOnce({ width: 1442, height: 901 })
+      .mockResolvedValueOnce({ width: 1442, height: 901 })
       // The former click-time remap consumed this transient resize value.
       .mockResolvedValue({ width: 1, height: 1 })
     const actuate = vi.fn(async () => ({ ok: true as const }))
@@ -325,7 +325,7 @@ describe('browser screenshot evidence', () => {
       actuate
     } as unknown as BrowserDriver
     const view = {
-      getBounds: () => ({ x: 0, y: 0, width: 1920, height: 1200 }),
+      getBounds: () => ({ x: 0, y: 0, width: 1442, height: 901 }),
       webContents: {
         invalidate: vi.fn(),
         capturePage,
@@ -356,7 +356,7 @@ describe('browser screenshot evidence', () => {
     // to (1, 1) while the user resized the task pane.
     await screen.actuate({ type: 'click', point: { x: 281, y: 186 } })
 
-    expect(actuate).toHaveBeenCalledWith({ type: 'click', point: { x: 527, y: 349 } })
+    expect(actuate).toHaveBeenCalledWith({ type: 'click', point: { x: 396, y: 262 } })
     expect(viewportSize).toHaveBeenCalledTimes(2)
   })
 

@@ -110,6 +110,38 @@ beforeEach(() => {
 })
 
 describe('Web Use shared lifecycle', () => {
+  it('publishes bounded replay observations for a semantic-only task', async () => {
+    model.replies.push(
+      decision({ action: 'click', ref: 's1', element: 'Submit' }),
+      decision({ action: 'done', evidenceText: 'Saved', summary: 'The form was saved.' })
+    )
+    const observations: Array<{ step: number; phase: string; summary: string }> = []
+    const result = await runBrowserPlaywrightTask({
+      goal: 'Submit the form',
+      plan,
+      session: boundarySession(
+        ['button "Submit" [ref=s1]', 'status "Saved" [ref=s2]', 'status "Saved" [ref=s2]'],
+        []
+      ),
+      guard: new VisionGuard({ taskId: 'web-semantic-replay', kind: 'web_use' }),
+      activeDriver: () => pointerDriver([]),
+      activeUrl: () => 'https://example.test/form',
+      waitForUser: async () => undefined,
+      takeGuidance: () => [],
+      onStep: () => undefined,
+      onPhase: () => undefined,
+      onProgress: () => undefined,
+      onObservation: async (observation) => void observations.push(observation)
+    })
+
+    expect(result.ok).toBe(true)
+    expect(observations).toEqual([
+      { step: 0, phase: 'observing', summary: 'Initial page' },
+      { step: 1, phase: 'checking', summary: 'click' },
+      { step: 2, phase: 'complete', summary: 'The form was saved.' }
+    ])
+  })
+
   it('discards a late Playwright snapshot after Pause and requires a fresh snapshot after Resume', async () => {
     let markSnapshotStarted: (() => void) | undefined
     const snapshotStarted = new Promise<void>((resolve) => {
@@ -318,5 +350,46 @@ describe('Web Use shared lifecycle', () => {
     await expect(run).resolves.toMatchObject({ ok: true, summary: 'You are signed in.' })
     expect(waiting).toBe(true)
     expect(guard.snapshot().status).toBe('completed')
+  })
+
+  it('fails completion when the current page no longer contains the model evidence', async () => {
+    model.replies.push(
+      decision({
+        action: 'done',
+        evidenceText: 'Order complete',
+        summary: 'The order is complete.'
+      })
+    )
+    const guard = new VisionGuard({ taskId: 'web-current-evidence', kind: 'web_use' })
+    const notes: string[] = []
+    const session = boundarySession(
+      ['heading "Order complete" [ref=done1]', 'heading "Your cart" [ref=cart1]'],
+      []
+    )
+
+    const result = await runBrowserPlaywrightTask({
+      goal: 'Complete the order',
+      plan,
+      session,
+      guard,
+      activeDriver: () => pointerDriver([]),
+      activeUrl: () => 'https://example.test/cart',
+      waitForUser: async () => undefined,
+      takeGuidance: () => [],
+      onStep: (note) => void notes.push(note),
+      onPhase: () => undefined,
+      onProgress: () => undefined
+    })
+
+    expect(result).toEqual({
+      ok: false,
+      fallback: false,
+      summary: 'The final page no longer contained the evidence required for completion.',
+      handoffs: 0
+    })
+    expect(notes).toContain(
+      'verification failed: The final page no longer contained the evidence required for completion.'
+    )
+    expect(guard.snapshot()).toMatchObject({ status: 'failed', kind: 'web_use' })
   })
 })

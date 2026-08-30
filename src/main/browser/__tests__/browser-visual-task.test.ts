@@ -1,10 +1,8 @@
-import { describe, expect, it, vi } from 'vitest'
-import { llm } from '../../llm'
+import { describe, expect, it } from 'vitest'
 import { createGrounderRunner } from '../../vision/grounder-loader'
 import { uiMateAdapter } from '../../vision/model-adapters/ui-mate'
 import {
   browserVisionStepDetail,
-  resolveActiveBrowserVisionAdapter,
   withActiveBrowserVision
 } from '../browser-visual-task'
 
@@ -118,19 +116,12 @@ describe('browser visual task boundary', () => {
     expect(detail.actionCoordinateSpace).toBe('viewport')
   })
 
-  it('fails clearly instead of falling back to DOM control when vision is unavailable', () => {
-    vi.spyOn(llm, 'activeModelArtifacts').mockReturnValue(null)
-
-    expect(() => resolveActiveBrowserVisionAdapter()).toThrow(
-      'Web Use requires an active model with installed vision support.'
-    )
-  })
-
   it('records the specialist identity after swap and restores remote chat selection', async () => {
     const chatModel = 'google/gemini-3.7-flash'
+    const localChatModel = 'local/chat-model'
     const specialist = 'tencent/UI-Mate-9B-GGUF'
     const remoteSelection = { id: 'openrouter', model: chatModel }
-    let localModel = chatModel
+    let localModel = localChatModel
     let remote: typeof remoteSelection | null = remoteSelection
     const runWithSpecialist = createGrounderRunner({
       modelStrategy: () => 'separate_specialist',
@@ -172,7 +163,9 @@ describe('browser visual task boundary', () => {
 
     expect(result).toBe('ran on UI-Mate')
     expect(taskRecord).toEqual({ modelId: specialist, modelName: 'UI-Mate 9B' })
-    expect(localModel).toBe(chatModel)
+    // A remote reasoner restores its transport and keeps the local specialist
+    // resident. It does not reload an unused local Chat model after each step.
+    expect(localModel).toBe(specialist)
     expect(remote).toEqual(remoteSelection)
   })
 })

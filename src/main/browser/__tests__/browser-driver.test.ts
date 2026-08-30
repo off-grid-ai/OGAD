@@ -402,9 +402,9 @@ describe('CDP command timeout (a wedged transport must not hang the rail)', () =
     on: () => () => {}
   }
 
-  it('rejects snapshot after the command timeout instead of hanging forever', async () => {
+  it('treats the optional pointer overlay as best effort after the command timeout', async () => {
     const driver = new BrowserDriver(deadTransport, 20)
-    await expect(driver.ensurePointer()).rejects.toThrow(/Runtime\.evaluate timed out/)
+    await expect(driver.ensurePointer()).resolves.toBeUndefined()
   })
 
   it('rejects navigate after the command timeout instead of hanging forever', async () => {

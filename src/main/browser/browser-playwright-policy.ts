@@ -243,14 +243,21 @@ function validateActionFields(decision: SemanticDecision, snapshot: string): voi
   }
 }
 
-function validateCompletionEvidence(decision: SemanticDecision, snapshot: string): void {
+export function completionEvidenceMatches(
+  decision: Pick<SemanticDecision, 'evidence_ref' | 'evidence_text'>,
+  snapshot: string
+): boolean {
   const evidenceRef = decision.evidence_ref?.trim()
   const evidenceText = decision.evidence_text?.trim()
   const hasRef = Boolean(evidenceRef && snapshot.includes(`[ref=${evidenceRef}]`))
   const hasText = Boolean(
     evidenceText && evidenceText.length >= 3 && snapshot.includes(evidenceText)
   )
-  if (!hasRef && !hasText) {
+  return hasRef || hasText
+}
+
+function validateCompletionEvidence(decision: SemanticDecision, snapshot: string): void {
+  if (!completionEvidenceMatches(decision, snapshot)) {
     throw invalidDecision('done requires exact evidence from the current page snapshot')
   }
 }

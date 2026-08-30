@@ -80,6 +80,11 @@ export class BrowserSessionStore<Resource> {
     return undefined
   }
 
+  /** Every page that belongs to one chat journey, in creation order. */
+  journeyRecords(journeyId: string): readonly BrowserSessionRecord<Resource>[] {
+    return [...this.records.values()].filter((record) => record.journeyId === journeyId)
+  }
+
   updateJourneyTask(journeyId: string, task: BrowserTaskPointer): number {
     let updated = 0
     for (const record of this.records.values()) {

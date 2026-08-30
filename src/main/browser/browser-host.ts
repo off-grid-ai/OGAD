@@ -54,6 +54,7 @@ import { encodeTaskPhase } from '../../shared/task-execution-plan'
 import { prepareTaskExecutionPlan } from '../tasks/task-execution-plan-service'
 import { retryPlanningGoal, TASK_RETRY_TRACE } from '../tasks/task-retry'
 import { runBrowserVisualTask, withActiveBrowserVision } from './browser-visual-task'
+import { createBrowserSemanticEvidenceRecorder } from './browser-semantic-evidence'
 import { BrowserJourneyRunOwners } from './browser-run-owners'
 import { ElectronPlaywrightRelay } from './electron-playwright-relay'
 import { PlaywrightMcpSession } from './playwright-mcp-session'
@@ -785,6 +786,12 @@ class BrowserHost implements BrowserRailHost {
         const page = this.sessions.findJourney(journeyId) ?? record
         return { view: page.resource, driver: this.driverFor(page) }
       }
+      const recordSemanticEvidence = createBrowserSemanticEvidenceRecorder({
+        goal,
+        taskId,
+        journeyId,
+        activePage
+      })
 
       const relay = new ElectronPlaywrightRelay({
         pages: () =>
@@ -874,6 +881,7 @@ class BrowserHost implements BrowserRailHost {
               currentAction: action
             })
           },
+          onObservation: recordSemanticEvidence,
           signal: owner.controller.signal
         })
       })().finally(() => playwright.close())

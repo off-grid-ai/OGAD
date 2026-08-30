@@ -1,11 +1,10 @@
 import { useSyncExternalStore } from 'react'
 
 export type TaskPanelKind = 'web_use' | 'computer_use'
-export type LegacyTaskPanelKind = TaskPanelKind | 'web_task' | 'computer_task'
 
 export interface OpenTaskPanelRequest {
   taskId?: string
-  kind?: LegacyTaskPanelKind
+  kind?: TaskPanelKind
   detail?: boolean
   immersive?: boolean
 }
@@ -23,22 +22,9 @@ function setTaskWorkspaceOpen(open: boolean): void {
 }
 
 export function openTaskSidePanel(request: OpenTaskPanelRequest = {}): void {
-  const normalized: OpenTaskPanelRequest = {
-    ...request,
-    ...(request.kind
-      ? {
-          kind:
-            request.kind === 'web_task'
-              ? 'web_use'
-              : request.kind === 'computer_task'
-                ? 'computer_use'
-                : request.kind
-        }
-      : {})
-  }
   setTaskWorkspaceOpen(true)
   for (const listener of listeners) {
-    listener(normalized)
+    listener(request)
   }
 }
 

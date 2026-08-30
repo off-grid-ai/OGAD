@@ -1,7 +1,11 @@
 import type { TaskExecutionPlan } from '../../shared/task-execution-plan'
 import type { BrowserDriver } from './browser-driver'
 import type { PlaywrightMcpSession, PlaywrightToolResult } from './playwright-mcp-session'
-import { decideBrowserSemanticAction, type SemanticDecision } from './browser-playwright-policy'
+import {
+  completionEvidenceMatches,
+  decideBrowserSemanticAction,
+  type SemanticDecision
+} from './browser-playwright-policy'
 import {
   executePlaywrightAction,
   isPrivateSemanticTarget,
@@ -44,7 +48,14 @@ export interface BrowserPlaywrightTaskInput {
   onStep: (note: string) => void
   onPhase: (phaseId: string) => void
   onProgress: (step: number, phase: 'observing' | 'thinking' | 'acting', action: string) => void
+  onObservation?: (observation: BrowserSemanticObservation) => Promise<void>
   signal?: AbortSignal
+}
+
+export interface BrowserSemanticObservation {
+  step: number
+  phase: 'observing' | 'checking' | 'waiting' | 'complete'
+  summary: string
 }
 
 interface SemanticLoopState {
@@ -91,6 +102,7 @@ async function runSemanticLoop(
   if (observation.isError || !hasSemanticReferences(observation.text)) {
     return fallback('The page did not expose usable semantic controls.')
   }
+  await publishObservation(input, { step: 0, phase: 'observing', summary: 'Initial page' })
 
   const state: SemanticLoopState = {
     observation,
@@ -145,13 +157,13 @@ async function runSemanticStep(
   }
   state.recoveryNote = ''
   publishPhase(input, decision)
-  const terminal = await terminalDecision(input, state, decision)
+  const terminal = await terminalDecision(context, decision, step)
   if (terminal) return terminal
   if (
     decision.action === 'human_required' ||
     isPrivateSemanticTarget(decision, state.observation.text)
   ) {
-    await performHumanHandoff(input, state, decision)
+    await performHumanHandoff(context, decision, step)
     return undefined
   }
   if (skipUnchangedDuplicate(input, state, decision)) {
@@ -169,10 +181,11 @@ function publishPhase(input: BrowserPlaywrightTaskInput, decision: SemanticDecis
 }
 
 async function terminalDecision(
-  input: BrowserPlaywrightTaskInput,
-  state: SemanticLoopState,
-  decision: SemanticDecision
+  context: SemanticLoopContext,
+  decision: SemanticDecision,
+  step: number
 ): Promise<BrowserPlaywrightTaskResult | undefined> {
+  const { input, state } = context
   if (decision.action === 'done') {
     const summary = decision.summary.trim() || 'The web task is complete.'
     if (!input.guard.beginVerification()) return undefined
@@ -186,6 +199,13 @@ async function terminalDecision(
         handoffs: state.handoffs
       }
     }
+    if (!completionEvidenceMatches(decision, verification.text)) {
+      const failure = 'The final page no longer contained the evidence required for completion.'
+      input.guard.fail(failure)
+      input.onStep(`verification failed: ${failure}`)
+      return { ok: false, fallback: false, summary: failure, handoffs: state.handoffs }
+    }
+    await publishObservation(input, { step, phase: 'complete', summary })
     if (!input.guard.complete()) return undefined
     input.onStep(`verified: ${summary}`)
     return { ok: true, fallback: false, summary, handoffs: state.handoffs }
@@ -196,15 +216,21 @@ async function terminalDecision(
 }
 
 async function performHumanHandoff(
-  input: BrowserPlaywrightTaskInput,
-  state: SemanticLoopState,
-  decision: SemanticDecision
+  context: SemanticLoopContext,
+  decision: SemanticDecision,
+  step: number
 ): Promise<void> {
+  const { input, state } = context
   const why = decision.reason.trim() || 'This step needs your input in the watched page.'
   input.onStep(`waiting for you: ${why}`)
   await input.waitForUser(why, input.signal)
   state.handoffs += 1
   state.observation = await observeWithCurrentLease(input)
+  await publishObservation(input, {
+    step,
+    phase: 'waiting',
+    summary: 'Continued after user input'
+  })
   state.lastFingerprint = fingerprint(state.observation.text)
   state.lastActionKey = ''
   state.noChangeCount = 0
@@ -272,10 +298,24 @@ async function performSemanticAction(
   const recovery = await recoverObservationError(input, state)
   if (recovery === 'recovered') return undefined
   if (recovery) return recovery
+  await publishObservation(input, { step, phase: 'checking', summary: actionLabel(decision) })
   updateProgressEvidence(context, { decision, actionKey, before })
   return state.noChangeCount >= MAX_NO_CHANGE
     ? fallback('Semantic control made no visible progress.', state.handoffs)
     : undefined
+}
+
+async function publishObservation(
+  input: BrowserPlaywrightTaskInput,
+  observation: BrowserSemanticObservation
+): Promise<void> {
+  if (!input.onObservation) return
+  try {
+    await input.onObservation(observation)
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    input.onStep(`replay frame unavailable: ${compact(detail)}`)
+  }
 }
 
 async function recoverActionError(

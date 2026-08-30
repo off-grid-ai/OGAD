@@ -47,10 +47,13 @@ vi.mock('motion/react', async () => {
     return out
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const host = (tag: string): any =>
-    React.forwardRef((props: Record<string, unknown>, ref) =>
+  const host = (tag: string): any => {
+    const component = React.forwardRef((props: Record<string, unknown>, ref) =>
       React.createElement(tag, { ...strip(props), ref })
     )
+    component.displayName = `MotionTest${tag}`
+    return component
+  }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const cache = new Map<string, any>()
   const motion = new Proxy(
@@ -72,7 +75,9 @@ vi.mock('motion/react', async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     MotionConfig: ({ children }: { children: any }) =>
       React.createElement(React.Fragment, null, children),
-    useReducedMotion: () => true
+    useReducedMotion: () => true,
+    useAnimate: () => [React.useRef(null), async () => undefined],
+    stagger: () => 0
   }
 })
 

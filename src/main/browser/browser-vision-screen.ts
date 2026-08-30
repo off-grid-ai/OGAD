@@ -7,7 +7,7 @@ import {
   SCREENSHOT_RESIZE_KERNEL,
   type ComputerUseSettings
 } from '../../shared/computer-use-settings'
-import { WEB_USE_DESKTOP_VIEWPORT, webUseDesktopZoomFactor } from '../../shared/browser-session'
+import { WEB_USE_DESKTOP_VIEWPORT } from '../../shared/browser-session'
 import { getTaskExecutionDevice, recordTaskRun, taskScreenshotPath } from '../tasks/task-history'
 import type { VisionAction } from '../vision/vision-action'
 import { RecoverableVisionError, type VisionScreen } from '../vision/vision-agent'
@@ -85,36 +85,22 @@ interface CapturedBrowserFrame {
   viewport: { width: number; height: number }
 }
 
-/**
- * The CSS viewport is `bounds / zoom`, so the smallest change the geometry can express is 1 device
- * pixel = 1/zoom CSS pixels. A flat 2px tolerance therefore asks for precision that does not exist
- * at small sizes: the floating card runs at the 0.25 zoom floor, where one pixel of layout rounding
- * is FOUR CSS pixels, and a 3px rounding difference reported 1908x1192 - rejected forever, so every
- * capture ran to the deadline and the task failed as soon as the card took over. The docked pane
- * sits near zoom 1, where the same rounding stayed inside 2px, which is why only the card broke.
- *
- * Tolerance is a device-pixel budget, converted to whatever that means in CSS pixels at this zoom.
- */
-function isFixedWebUseViewport(
-  viewport: { width: number; height: number },
-  zoom: number
-): boolean {
-  const devicePixelBudget = 2
-  const tolerance = zoom > 0 ? Math.ceil(devicePixelBudget / zoom) : devicePixelBudget
-  return (
-    Math.abs(viewport.width - WEB_USE_DESKTOP_VIEWPORT.width) <= tolerance &&
-    Math.abs(viewport.height - WEB_USE_DESKTOP_VIEWPORT.height) <= tolerance
-  )
+/** The live pane can be any size. The model frame is normalized later, and the
+ * coordinate transform maps its actions back to this exact captured viewport. */
+function isUsableWebUseViewport(viewport: { width: number; height: number }): boolean {
+  if (viewport.width <= 0 || viewport.height <= 0) return false
+  const expectedAspect = WEB_USE_DESKTOP_VIEWPORT.width / WEB_USE_DESKTOP_VIEWPORT.height
+  const actualAspect = viewport.width / viewport.height
+  return Math.abs(actualAspect - expectedAspect) <= 0.02
 }
 
 function stableWebUseViewport(
   before: { width: number; height: number },
-  after: { width: number; height: number },
-  zoom: number
+  after: { width: number; height: number }
 ): boolean {
   return (
-    isFixedWebUseViewport(before, zoom) &&
-    isFixedWebUseViewport(after, zoom) &&
+    isUsableWebUseViewport(before) &&
+    isUsableWebUseViewport(after) &&
     Math.abs(before.width - after.width) <= 1 &&
     Math.abs(before.height - after.height) <= 1
   )
@@ -126,16 +112,12 @@ async function capturePaintedBrowserFrame(
 ): Promise<CapturedBrowserFrame> {
   const deadline = Date.now() + PAINTED_FRAME_TIMEOUT_MS
   let sawPixels = false
-  // Read the zoom from the view's CURRENT bounds each time rather than caching it: the surface can
-  // change size mid-capture (a drag, a resize, the handover between docked pane and floating card),
-  // and the tolerance has to describe the geometry we actually have.
-  const viewZoom = (): number => webUseDesktopZoomFactor(view.getBounds())
   // WHY the loop gave up, not just that it did. Four different conditions end it and they were all
   // reported as one of two sentences, so a failure could not be told apart: the commonest case does
   // not even reach capturePage - if the view never reports the fixed desktop viewport (no region
   // claimed, or a surface too small to reach the 0.25 zoom floor) it spins to the deadline and still
   // said "empty screenshot". Record the last blocker and the numbers behind it.
-  let blocker = 'the view never reported the fixed Web Use desktop viewport'
+  let blocker = 'the view never reported a usable Web Use viewport'
   for (;;) {
     // The injected pointer is part of the page. Put it in the compositor frame
     // before capture so Task history and the model receive the same pixels.
@@ -143,10 +125,10 @@ async function capturePaintedBrowserFrame(
       driver.ensurePointer(true),
       driver.viewportSize()
     ])
-    if (!isFixedWebUseViewport(viewportBefore, viewZoom())) {
+    if (!isUsableWebUseViewport(viewportBefore)) {
       blocker =
         `the view reported a ${viewportBefore.width}x${viewportBefore.height} viewport, ` +
-        `not the fixed ${WEB_USE_DESKTOP_VIEWPORT.width}x${WEB_USE_DESKTOP_VIEWPORT.height} desktop viewport`
+        'not a usable 16:10 browser viewport'
       if (Date.now() >= deadline) break
       await waitForPaintRetry()
       continue
@@ -159,7 +141,7 @@ async function capturePaintedBrowserFrame(
     const viewportAfter = await driver.viewportSize()
     if (image.isEmpty()) {
       blocker = 'capturePage returned no pixels at all (the native view is hidden or has no bounds)'
-    } else if (!stableWebUseViewport(viewportBefore, viewportAfter, viewZoom())) {
+    } else if (!stableWebUseViewport(viewportBefore, viewportAfter)) {
       blocker =
         `the viewport changed mid-capture, ${viewportBefore.width}x${viewportBefore.height} ` +
         `then ${viewportAfter.width}x${viewportAfter.height}`

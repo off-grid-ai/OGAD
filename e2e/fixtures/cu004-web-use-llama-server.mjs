@@ -10,15 +10,7 @@ import { writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 const MODEL_ID = 'mradermacher/UI-TARS-1.5-7B-GGUF'
-const VISUAL_FIELDS = [
-  'direction',
-  'milestone_complete',
-  'action_verdict',
-  'summary',
-  'visible_evidence',
-  'action',
-  'action_reason'
-]
+const VISUAL_TOOLS = ['complete_milestone', 'perform_action', 'rethink', 'call_user']
 const args = process.argv.slice(2)
 const portFlag = Math.max(args.indexOf('--port'), args.indexOf('-p'))
 const port = portFlag >= 0 ? Number(args[portFlag + 1]) : 8439
@@ -52,18 +44,21 @@ const imageParts = (payload) =>
   )
 
 const auditVisualRequest = (payload, prompt) => {
-  const schema = payload.response_format?.json_schema
-  const required = [...(schema?.schema?.required ?? [])].sort()
+  const tools = payload.tools ?? []
+  const names = tools.map((tool) => tool?.function?.name).sort()
   const errors = []
   if (payload.stream !== true) errors.push('visual request was not streamed')
-  if (schema?.name !== 'visual_step_decision' || schema?.strict !== true) {
-    errors.push('visual_step_decision was not strict')
+  if (names.join(',') !== [...VISUAL_TOOLS].sort().join(',')) {
+    errors.push('visual tools did not match the canonical contract')
   }
-  if (required.join(',') !== [...VISUAL_FIELDS].sort().join(',')) {
-    errors.push('visual decision fields did not match the canonical contract')
-  }
-  if (schema?.schema?.additionalProperties !== false) {
-    errors.push('visual decision allowed additional properties')
+  for (const tool of tools) {
+    if (
+      tool?.type !== 'function' ||
+      tool?.function?.strict !== true ||
+      tool?.function?.parameters?.additionalProperties !== false
+    ) {
+      errors.push(`${tool?.function?.name ?? 'unknown'} was not a strict native tool`)
+    }
   }
   if (payload.chat_template_kwargs?.enable_thinking !== true) {
     errors.push('visual decision was not thinking-enabled')
@@ -93,24 +88,41 @@ const screenshotBounds = (prompt) => {
   return match ? { width: Number(match[1]), height: Number(match[2]) } : null
 }
 
-const verdict = ({ summary, evidence, action = null, milestoneComplete = false }) => ({
-  direction: 'aligned',
-  milestone_complete: milestoneComplete,
-  action_verdict: milestoneComplete ? 'none' : action ? 'approve' : 'rethink',
-  summary,
-  visible_evidence: evidence,
-  action,
-  action_reason: milestoneComplete
-    ? 'The visible result completes the current milestone.'
-    : action
-      ? 'This one visible action advances the current milestone.'
-      : 'A verified target is not available for the current milestone.'
-})
+const toolDecision = (name, args) => ({ name, args })
+
+const verdict = ({ summary, evidence, action = null, milestoneComplete = false }) => {
+  if (milestoneComplete) {
+    return toolDecision('complete_milestone', {
+      summary,
+      visible_evidence: evidence
+    })
+  }
+  if (!action) {
+    return toolDecision('rethink', {
+      direction: 'aligned',
+      summary,
+      visible_evidence: evidence
+    })
+  }
+  return toolDecision('perform_action', {
+    direction: 'aligned',
+    summary,
+    visible_evidence: evidence,
+    action,
+    action_reason: 'This one visible action advances the current milestone.'
+  })
+}
 
 const decisionFor = (prompt) => {
   if (prompt.includes('Create a short execution plan for a web agent.')) {
     return {
-      phases: ['Enter the requested text', 'Click the target', 'Confirm the protected account step']
+      content: JSON.stringify({
+        phases: [
+          'Enter the requested text',
+          'Click the target',
+          'Confirm the protected account step'
+        ]
+      })
     }
   }
   if (prompt.includes('resumed by the user')) return null
@@ -127,7 +139,7 @@ const decisionFor = (prompt) => {
       return verdict({
         summary: 'Enter the requested text in the focused field.',
         evidence: 'The Type target field is visible and focused.',
-        action: "type(content='cursor stays visible')"
+        action: { type: 'type', content: 'cursor stays visible' }
       })
     }
     const bounds = screenshotBounds(prompt)
@@ -137,12 +149,10 @@ const decisionFor = (prompt) => {
         evidence: 'No exact screenshot coordinate space is available.'
       })
     }
-    const x = Math.round(bounds.width * 0.26)
-    const y = Math.round(bounds.height * 0.32)
     return verdict({
       summary: 'Focus the visible text field.',
       evidence: 'The Type target field is visible at the specified point.',
-      action: `click(point='${x} ${y}')`
+      action: { type: 'click', point: { x: 260, y: 320 } }
     })
   }
   if (prompt.includes('Current milestone:\nClick the target')) {
@@ -161,19 +171,16 @@ const decisionFor = (prompt) => {
         evidence: 'No exact screenshot coordinate space is available.'
       })
     }
-    const x = Math.round(bounds.width * 0.26)
-    const y = Math.round(bounds.height * 0.58)
     return verdict({
       summary: 'Activate the visible click target.',
       evidence: 'The Click target button is visible at the specified point.',
-      action: `click(point='${x} ${y}')`
+      action: { type: 'click', point: { x: 260, y: 580 } }
     })
   }
   if (prompt.includes('Current milestone:\nConfirm the protected account step')) {
-    return verdict({
-      summary: 'The protected account step requires the user.',
-      evidence: 'A password field is visible on the current page.',
-      action: "call_user(content='Confirm the protected account step yourself.')"
+    return toolDecision('call_user', {
+      reason: 'Confirm the protected account step yourself.',
+      visible_evidence: 'A password field is visible on the current page.'
     })
   }
   return verdict({
@@ -197,7 +204,17 @@ const sendDecision = (response, decision, stream, audit) => {
     response.end(JSON.stringify({ error: { message: 'CU-004 terminal model failure' } }))
     return
   }
-  const content = JSON.stringify(decision)
+  const content = decision.content ?? ''
+  const toolCalls = decision.name
+    ? [
+        {
+          index: 0,
+          id: `call_${decision.name}`,
+          type: 'function',
+          function: { name: decision.name, arguments: JSON.stringify(decision.args) }
+        }
+      ]
+    : null
   if (stream) {
     response.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -208,7 +225,7 @@ const sendDecision = (response, decision, stream, audit) => {
       `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: 'Reviewed the fresh screenshot and current milestone.' } }] })}\n\n`
     )
     response.write(
-      `data: ${JSON.stringify({ choices: [{ delta: { content }, finish_reason: 'stop' }] })}\n\n`
+      `data: ${JSON.stringify({ choices: [{ delta: toolCalls ? { tool_calls: toolCalls } : { content }, finish_reason: toolCalls ? 'tool_calls' : 'stop' }] })}\n\n`
     )
     response.end('data: [DONE]\n\n')
     return
@@ -218,8 +235,12 @@ const sendDecision = (response, decision, stream, audit) => {
     JSON.stringify({
       choices: [
         {
-          message: { role: 'assistant', content },
-          finish_reason: 'stop'
+          message: {
+            role: 'assistant',
+            content,
+            ...(toolCalls ? { tool_calls: toolCalls } : {})
+          },
+          finish_reason: toolCalls ? 'tool_calls' : 'stop'
         }
       ],
       usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 }
