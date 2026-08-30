@@ -101,14 +101,10 @@ func capture() async throws -> CGImage {
             userInfo: [NSLocalizedDescriptionKey: "display \(displayID) is not available"]
         )
     }
-    guard let excludedWindow = content.windows.first(where: { $0.windowID == excludedWindowID }) else {
-        throw NSError(
-            domain: "computer-use-capture",
-            code: 4,
-            userInfo: [NSLocalizedDescriptionKey: "PiP window \(excludedWindowID) is not available"]
-        )
-    }
-    let filter = SCContentFilter(display: display, excludingWindows: [excludedWindow])
+    // A hidden PiP is not present in `onScreenWindowsOnly` and needs no exclusion.
+    // If it is visible, exclude its exact native window before pixels exist.
+    let excludedWindows = content.windows.filter { $0.windowID == excludedWindowID }
+    let filter = SCContentFilter(display: display, excludingWindows: excludedWindows)
     let configuration = SCStreamConfiguration()
     configuration.width = width
     configuration.height = height

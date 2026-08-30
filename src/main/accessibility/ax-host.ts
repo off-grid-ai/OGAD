@@ -37,13 +37,13 @@ import {
   stopVisionTask,
   waitForVisionUser
 } from '../vision/vision-controller'
-import { showSupervisorWindow, hideSupervisorWindow } from '../vision/supervisor-window'
+import { hideSupervisorWindow } from '../vision/supervisor-window'
 import { getComputerUseSettings } from '../computer-use-settings'
 import { resolveComputerUseContextTokens } from '../../shared/computer-use-settings'
 import { recentVisualFacts } from '../vision/visual-context'
 import { recordTaskRun } from '../tasks/task-history'
 import { persistAxFrame, persistAxObservation, type AxObservationFrame } from './ax-observation'
-import { AxScreenCaptureError, captureAxObservationFrame } from './ax-frame'
+import { captureAxObservationFrame } from './ax-frame'
 import { accessibilityHelperPath } from './ax-helper'
 import { encodeTaskPhase } from '../../shared/task-execution-plan'
 import { prepareTaskExecutionPlan } from '../tasks/task-execution-plan-service'
@@ -253,9 +253,6 @@ class AxRailHost {
         ? {}
         : { notice: 'Esc is unavailable. Use Stop or Take Over in the task controls.' })
     })
-    // Float the supervisor window over the app we are about to drive, so the
-    // user sees the step feed even though the driven app takes the foreground.
-    showSupervisorWindow()
     let usedInitial = false
     let liveStep = 0
     let captureNumber = 0
@@ -391,20 +388,19 @@ class AxRailHost {
             : 'accessibility run failed'
       if (!guard.isHalted) guard.fail(summary)
       const finalStatus = automationTaskReadStatus(guard.automationStatus)
-      // The capture coordinator already projected its precise terminal recovery
-      // state. Keep one writer for that state instead of replacing it here.
-      if (!(error instanceof AxScreenCaptureError)) {
-        emitVisionState({
-          taskId,
-          journeyId,
-          goal,
-          status: finalStatus,
-          phase: finalStatus === 'failed' ? 'failed' : 'stopped',
-          currentStep: liveStep,
-          currentAction: summary,
-          summary
-        })
-      }
+      // Project the terminal state after the guard changes. A capture failure first
+      // reports its detailed recovery trace while the guard is still running, so the
+      // controller correctly rejects that early terminal projection as stale.
+      emitVisionState({
+        taskId,
+        journeyId,
+        goal,
+        status: finalStatus,
+        phase: finalStatus === 'failed' ? 'failed' : 'stopped',
+        currentStep: liveStep,
+        currentAction: summary,
+        summary
+      })
       return { ok: false, summary, steps: [] }
     } finally {
       releaseGuidance()

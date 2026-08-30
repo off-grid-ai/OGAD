@@ -1,11 +1,11 @@
 /**
- * The vision rail's engine adapter (R2-D): turns a computer_task Action into a
+ * The vision rail's engine adapter (R2-D): turns a computer_use Action into a
  * supervised vision run and back into an ExecuteResult. Pure and injected -
  * the live host (screen capture + robotjs actuation + grounding model +
  * overlay) is passed in as `runTask`, so this mapping is unit-tested without a
  * display.
  *
- * computer_task registers none_fuzzy for the same reason web_use does: a GUI
+ * computer_use registers none_fuzzy for the same reason web_use does: a GUI
  * action on the live desktop is never safely auto-retried. The guard (kill
  * switch and pause) plus the user's supervision IS the reliability;
  * the model's `finished` is the executor's verdict, fired once behind the gate.
@@ -17,10 +17,10 @@ export interface VisionRailHost {
   runTask(goal: string, taskId: string, journeyId: string): Promise<VisionTaskResult>
 }
 
-/** Registers the computer_task handler on the vision rail. */
+/** Registers the computer_use handler on the vision rail. */
 export function registerVisionRail(registry: HandlerRegistry): void {
   registry.register({
-    type: 'computer_task',
+    type: 'computer_use',
     rail: 'vision',
     // Gates for approval; the supervised overlay covers the run itself.
     defaultRisk: 'mutate',

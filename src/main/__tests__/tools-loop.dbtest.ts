@@ -160,7 +160,6 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     })
     const proposals: Array<{ input: unknown; meta: unknown }> = []
     const actions: ActionsPort = {
-      approvalHookActive: () => true,
       propose: async (input, meta) => {
         proposals.push({ input, meta })
         return { accepted: true, id: 'message-ali-1', deduped: false }
@@ -180,7 +179,6 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
           command === 'contacts.search'
             ? { ok: true, result: [{ name: 'Ali', phone: '+15551111' }] }
             : { ok: false, error: `Unexpected inline command: ${command}` },
-        proposeApproval: () => true,
         isProEntitled: () => true,
         actions
       },
@@ -225,7 +223,6 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       'Go to skyscanner.com and help me find the cheapest flight to book for a one way trip from San Francisco 2026 to Pune on 1st September 2026 with a budget range of $500 - $3000'
     const proposals: Array<{ input: unknown; meta: unknown }> = []
     const actions: ActionsPort = {
-      approvalHookActive: () => false,
       propose: async (input, meta) => {
         proposals.push({ input, meta })
         return { accepted: true, id: 'web-skyscanner-1', deduped: false }
@@ -242,7 +239,6 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     const extension = new NativeActionToolExtension(
       {
         run: async () => ({ ok: true, result: undefined }),
-        proposeApproval: () => undefined,
         isProEntitled: () => true,
         actions
       },
@@ -291,7 +287,6 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       'Find the cheapest one-way flight from SFO to Pune on September 1, 2026, within $500-$3,000, with at most one stop and no airline or cabin preference.'
     const proposals: Array<{ input: unknown; meta: unknown }> = []
     const actions: ActionsPort = {
-      approvalHookActive: () => false,
       propose: async (input, meta) => {
         proposals.push({ input, meta })
         return { accepted: true, id: 'web-flight-follow-up', deduped: false }
@@ -308,7 +303,6 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     const extension = new NativeActionToolExtension(
       {
         run: async () => ({ ok: true, result: undefined }),
-        proposeApproval: () => undefined,
         isProEntitled: () => true,
         actions
       },
@@ -363,7 +357,6 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
   it('runs a reactive Web Use call without an application-side intake gate', async () => {
     const proposals: unknown[] = []
     const actions: ActionsPort = {
-      approvalHookActive: () => false,
       propose: async (input) => {
         proposals.push(input)
         return { accepted: true, id: 'reactive-web-task', deduped: false }
@@ -380,7 +373,6 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     const extension = new NativeActionToolExtension(
       {
         run: async () => ({ ok: true, result: undefined }),
-        proposeApproval: () => undefined,
         isProEntitled: () => true,
         actions
       },

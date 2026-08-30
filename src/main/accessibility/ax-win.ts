@@ -12,7 +12,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { parseAxElements, type AxSnapshot } from './ax-elements'
-import { UIA_APPS_SCRIPT, uiaActivateScript, uiaElementsScript } from './ax-uia-script'
+import { UIA_APPS_SCRIPT, uiaElementsScript } from './ax-uia-script'
 
 const execFileAsync = promisify(execFile)
 
@@ -33,8 +33,6 @@ export interface AxBackend {
   available(): boolean
   /** Foreground-windowed apps the user could name (display names). */
   listApps(): Promise<string[]>
-  /** Bring the target app forward so synthetic input lands on it. */
-  activate(app: string): Promise<void>
   /** Read the target app's interactive elements, or null on any failure. */
   snapshot(app: string): Promise<AxSnapshot | null>
 }
@@ -51,13 +49,6 @@ export const windowsAxBackend: AxBackend = {
         .filter((s) => s.length > 0)
     } catch {
       return []
-    }
-  },
-  async activate(app: string): Promise<void> {
-    try {
-      await runPowerShellRaw(uiaActivateScript(app), 3_000)
-    } catch {
-      /* best effort - a miss just means it was already frontmost / not resolvable */
     }
   },
   async snapshot(app: string): Promise<AxSnapshot | null> {

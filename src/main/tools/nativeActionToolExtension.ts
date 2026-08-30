@@ -10,13 +10,8 @@
 import { shell } from 'electron'
 import type { ToolCallStatus, ToolContext, ToolExtension, ToolResult } from '../tools'
 import type { ProposeOutcome, TickOutcome } from '@offgrid/use'
-import { proposeActionApproval, shouldGate, type ActionApprovalRequest } from '../actions/approval'
+import { shouldGate } from '../actions/approval'
 import { getActionsRuntime } from '../actions/use-runtime'
-import { llm } from '../llm'
-import { grounderNudgeForQueuedTask } from '../vision/vision-model-notice'
-import { emitVisionNotice } from '../vision/vision-controller'
-import { getAxRailHost } from '../accessibility/ax-host'
-import { axRailViable } from '../accessibility/ax-router'
 import { isProEntitled } from '../licensing/license-service'
 import { makeWinInlineRunner } from '../actions/semantic-rail-win'
 import { runNativeAction } from '../actions/native-helper'
@@ -30,12 +25,12 @@ import {
   systemHintForPlatform,
   type NativeToolSpec
 } from './nativeActionToolExtension-logic'
+import { createHash } from 'node:crypto'
 import { actionArgsWithTaskLaunch } from '../tasks/task-launch-identity'
 
 /** The engine port the extension needs - implemented by the actions runtime,
  *  faked in tests. Optional: absent means the legacy path only. */
 export interface ActionsPort {
-  approvalHookActive(): boolean
   propose(input: unknown, meta: { source: 'chat' }): Promise<ProposeOutcome>
   waitForOutcome(actionId: string, timeoutMs: number): Promise<TickOutcome | undefined>
   whenParked(actionId: string): Promise<void>
@@ -44,16 +39,9 @@ export interface ActionsPort {
 
 export interface NativeActionToolBoundary {
   run: (cmd: NativeActionCommand) => Promise<NativeActionResponse>
-  proposeApproval: (request: ActionApprovalRequest) => boolean | undefined
   /** Browser Use and Computer Use are paid capabilities. */
   isProEntitled: () => boolean
   actions?: ActionsPort
-  /** Called when a computer_use task is queued: warns the chat, at queue time, if
-   *  the loaded model is not a grounder AND the task will fall to the vision
-   *  rail (an AX-drivable app needs no grounder). Takes the goal so it can check
-   *  AX viability for the target app. Injected so the broadcast is faked in
-   *  tests. */
-  announceComputerTask?: (goal: string) => void
 }
 
 /** How long a short native action may keep the model turn open. Web Use and
@@ -87,29 +75,11 @@ const inlineRun = inlineRunnerForPlatform(process.platform)
 
 const productionBoundary: NativeActionToolBoundary = {
   run: inlineRun,
-  proposeApproval: proposeActionApproval,
   isProEntitled,
   get actions(): ActionsPort {
     // The import is static (the main bundle is one CJS chunk); the runtime
     // itself builds lazily on first access, once the DB exists.
     return getActionsRuntime()
-  },
-  announceComputerTask: (goal: string) => {
-    const model = llm.activeModelInfo()
-    // AX-first: if the accessibility rail can drive the target app, the task
-    // needs no grounder - so resolve AX viability first, THEN decide the nudge.
-    // Fire-and-forget so queuing is never blocked; any AX error nudges as before
-    // (assume vision will run).
-    void getAxRailHost()
-      .routingSnapshot(goal)
-      .then((routing) => routing !== null && axRailViable(routing.snapshot))
-      .catch(() => false)
-      .then((axWillDrive) => {
-        const notice = grounderNudgeForQueuedTask(model, axWillDrive)
-        if (notice) {
-          emitVisionNotice(notice)
-        }
-      })
   }
 }
 
@@ -177,6 +147,7 @@ export class NativeActionToolExtension implements ToolExtension {
       const text = 'Error: this action needs the on-device action engine, which is not available.'
       return isTaskAction(actionType ?? '') ? { text, status: 'failed', authoritative: true } : text
     }
+    if (!spec.command) return `Error: ${name} has no inline command.`
     const res = await this.boundary.run({ command: spec.command, args: spec.buildArgs(args) })
     if (!res.ok) {
       return `Error: ${res.error}`
@@ -195,14 +166,25 @@ export class NativeActionToolExtension implements ToolExtension {
   ): Promise<string | ToolResult> {
     const reply = (text: string, status?: ToolCallStatus): string | ToolResult =>
       engineResult(actionType, text, status)
+    const cleanArgs = spec.buildArgs(args)
     const proposed = await actions.propose(
       {
         type: actionType,
         intent: spec.title(args),
-        args: actionArgsWithTaskLaunch(spec.buildArgs(args), context?.taskLaunch),
+        args: actionArgsWithTaskLaunch(cleanArgs, context?.taskLaunch),
         risk: spec.risk
       },
-      { source: 'chat', ...(context?.conversationId ? { sourceRef: context.conversationId } : {}) }
+      {
+        source: 'chat',
+        ...(context?.conversationId ? { sourceRef: context.conversationId } : {}),
+        ...(context?.taskLaunch
+          ? {
+              idempotencyKey: `${actionType}:${createHash('sha256')
+                .update(JSON.stringify(cleanArgs))
+                .digest('hex')}`
+            }
+          : {})
+      }
     )
     if (!proposed.accepted) {
       return reply(`Error: the action was refused: ${proposed.reason}`, 'failed')
@@ -214,17 +196,10 @@ export class NativeActionToolExtension implements ToolExtension {
         'pending'
       )
     }
-    // A computer_use task is now queued: warn the chat at queue time only if the
-    // loaded model can't ground AND the task will fall to vision (an AX-drivable
-    // app needs no grounder). Pass the goal so AX viability can be checked.
-    if (actionType === 'computer_use') {
-      const goal = typeof args.goal === 'string' && args.goal.trim() ? args.goal : spec.title(args)
-      this.boundary.announceComputerTask?.(goal)
-    }
     actions.kick()
     if (isTaskAction(actionType)) {
       return reply(
-        `Started "${spec.title(args)}". Live progress and the final result will appear in this chat.${taskReference}`,
+        `Started "${spec.title(args)}". Do not call ${actionType} again for this goal. Live progress and the final result will appear in this chat.${taskReference}`,
         'pending'
       )
     }

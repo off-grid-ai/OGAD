@@ -63,8 +63,7 @@ function harness(
           const snapshot: TaskRunSnapshot = {
             taskId: update.taskId,
             journeyId: update.journeyId ?? update.taskId,
-            kind:
-              update.kind === 'web_task' || update.kind === 'web_use' ? 'web_use' : 'computer_use',
+            kind: update.kind,
             title: update.title ?? 'Task',
             status: update.status ?? 'running',
             summary: update.summary,

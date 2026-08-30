@@ -171,7 +171,7 @@ describe('<ActionGateDock/>', () => {
     render(<ActionGateDock />)
     emitPending({
       ...request,
-      actionType: 'computer_task',
+      actionType: 'computer_use',
       title: 'approved. please proceed',
       args: { goal: 'approved. please proceed' },
       risk: 'mutate'
@@ -189,7 +189,7 @@ describe('<ActionGateDock/>', () => {
     render(<ActionGateDock />)
     emitPending({
       ...request,
-      actionType: 'computer_task',
+      actionType: 'computer_use',
       title: 'Generate the proposal deck',
       args: {
         sourceFolder: '/Documents/Investor Relations',

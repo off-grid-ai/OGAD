@@ -184,7 +184,7 @@ describe('runElementTask', () => {
     expect(w.acted).toEqual([])
   })
 
-  it('Pause parks a completed model decision before any action until Resume', async () => {
+  it('Pause discards a completed model decision and re-observes after Resume', async () => {
     const w = world([])
     const guard = new VisionGuard({ taskId: 'ax-agent-test', kind: 'computer_use' })
     let markPaused: (() => void) | undefined
@@ -209,7 +209,10 @@ describe('runElementTask', () => {
     const result = await run
 
     expect(result.ok).toBe(true)
-    expect(w.acted).toEqual(['press:1'])
+    expect(w.acted).toEqual([])
+    expect(result.steps.join('\n')).toContain(
+      'control changed during model work; re-observing before the next action'
+    )
   })
 
   it('give_up is an honest failure with the reason', async () => {
@@ -293,7 +296,47 @@ describe('runElementTask', () => {
     expect(result.summary).toBe('sent')
     // Actuated exactly once - the message was not sent twice.
     expect(w.acted).toEqual(['type:2:hi', 'keys:Enter'])
-    expect(result.steps.join('\n')).toMatch(/skipped a repeated action/i)
+    expect(result.steps.join('\n')).toMatch(/text is already entered/i)
+  })
+
+  it('tells the model to submit after it repeats a type action', async () => {
+    const w = world([
+      '{"action":"type","index":2,"text":"hi"}',
+      '{"action":"type","index":2,"text":"hi"}',
+      '{"action":"key","keys":"Enter"}',
+      '{"action":"done","summary":"sent"}'
+    ])
+    const prompts: string[] = []
+    const originalDecide = w.deps.decide
+    w.deps.decide = async (prompt) => {
+      prompts.push(prompt)
+      return originalDecide(prompt)
+    }
+
+    const result = await runElementTask('send hi', w.deps)
+
+    expect(result).toMatchObject({ ok: true, summary: 'sent' })
+    expect(w.acted).toEqual(['type:2:hi', 'keys:Enter'])
+    expect(prompts[2]).toContain(
+      'text is already entered; do not type it again; press Enter or click Send'
+    )
+  })
+
+  it('rejects completion while typed text is still an unsent draft', async () => {
+    const w = world([
+      '{"action":"type","index":2,"text":"hi"}',
+      '{"action":"done","summary":"sent"}',
+      '{"action":"key","keys":"Enter"}',
+      '{"action":"done","summary":"sent"}'
+    ])
+
+    const result = await runElementTask('send hi', w.deps)
+
+    expect(result).toMatchObject({ ok: true, summary: 'sent' })
+    expect(w.acted).toEqual(['type:2:hi', 'keys:Enter'])
+    expect(result.steps.join('\n')).toContain(
+      'completion rejected: text is still a draft; press Enter or click Send'
+    )
   })
 
   it('skips a re-typed text even at a different index (no double-send) but keeps going', async () => {

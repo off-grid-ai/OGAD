@@ -18,7 +18,7 @@ describe('native tool specs', () => {
     expect(webUse).toMatch(/play or watch a video|YouTube/i)
     expect(webUse).toMatch(/built-in browser/i)
     expect(webUse).toMatch(/not open_url/i)
-    expect(findNativeToolSpec('web_task')?.name).toBe('web_use')
+    expect(findNativeToolSpec('web_use')?.name).toBe('web_use')
   })
 
   it('exposes calendar and reminder tools with matching helper commands', () => {
@@ -32,7 +32,7 @@ describe('native tool specs', () => {
       'mail_send',
       'open_url',
       'web_use',
-      'computer_task'
+      'computer_use'
     ])
     expect(findNativeToolSpec('calendar_create_event')?.command).toBe('calendar.createEvent')
     expect(findNativeToolSpec('calendar_list_events')?.command).toBe('calendar.listEvents')

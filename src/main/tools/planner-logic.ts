@@ -131,7 +131,7 @@ export function buildPlannerPrompt(
     `User request: ${goal}`,
     '',
     'Rules:',
-    "- A task on a WEBSITE - play or watch a video, search and click a result, log in, fill a form, check in, place an order, extract - is web_use; it runs inside Off Grid AI's own built-in browser. open_url ONLY opens a link or app scheme, no interaction, so 'play X on YouTube' or 'search Y and open the first result' is web_use, NOT open_url. A task in an installed desktop APP with no web version (a native-only app) is computer_task.",
+    "- A task on a WEBSITE - play or watch a video, search and click a result, log in, fill a form, check in, place an order, extract - is web_use; it runs inside Off Grid AI's own built-in browser. open_url ONLY opens a link or app scheme, no interaction, so 'play X on YouTube' or 'search Y and open the first result' is web_use, NOT open_url. A task in an installed desktop APP with no web version (a native-only app) is computer_use.",
     '- Fill EVERY required argument. For web_use always set the "url" to the site (e.g. https://youtube.com). Do not leave a required arg blank.',
     '- The args field is a JSON-encoded object string. Example: {"tool":"web_use","args":"{\\"url\\":\\"https://youtube.com\\",\\"goal\\":\\"Find the requested video\\"}","why":"The task needs website interaction","bindings":[]}.',
     '- If a step needs a value produced by an earlier step (e.g. a phone number from contacts_search to message someone), add a binding: {"arg":"to","fromStep":0,"field":"phone"} and leave that value out of the JSON object encoded in args.',
@@ -247,7 +247,7 @@ export function parsePlan(raw: string, knownToolNames: readonly string[]): Plan 
 
 /** Tools whose required `goal` arg IS the task and must never be blank - the
  *  rail drives that string. */
-const GOAL_TOOLS = new Set(['web_use', 'computer_task'])
+const GOAL_TOOLS = new Set(['web_use', 'computer_use'])
 
 /** Unambiguous "this is a WEBSITE" signals. Used so a word in the request that
  *  happens to match a running app name ('music' -> the Music app) does NOT pull
@@ -261,7 +261,7 @@ export function namesWebsite(text: string): boolean {
   return WEBSITE_HINTS.test(text)
 }
 
-/** Deterministic backfill: a `web_use`/`computer_task` step whose `goal` the
+/** Deterministic backfill: a `web_use`/`computer_use` step whose `goal` the
  *  planner left empty gets the user's full request - so the rail always drives
  *  the real task, never a generic placeholder (the "Run a web task" bug). Keeps
  *  a goal the planner DID provide (it may have refined it). Pure. */

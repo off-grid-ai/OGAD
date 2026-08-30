@@ -17,7 +17,7 @@ const SPECIALIST_ID = 'mradermacher/UI-TARS-1.5-7B-GGUF'
 
 // This journey starts the native model boundary, reopens Electron, and runs a complete visual
 // task. The default 60-second budget can expire during model startup before a product assertion.
-test.setTimeout(180_000)
+test.describe.configure({ timeout: 180_000 })
 
 function executable(source: string, target: string): void {
   fs.copyFileSync(source, target)
@@ -182,15 +182,12 @@ test('a Chat request runs the hybrid reasoner and specialist through one Compute
   await page.getByRole('button', { name: 'Composer options' }).click()
   await page.getByRole('menuitem', { name: /^Tools/ }).click()
   await page.keyboard.press('Escape')
-  await composer.fill('Move the pointer to the center of this test window.')
+  await composer.fill('Click the center of this test window.')
   await composer.press('Enter')
 
   await expect(
-    page.getByText(/(?:Done\. Task reference|is running now and will finish shortly)/i).last()
-  ).toBeVisible({ timeout: 60_000 })
-  await expect(
     page.getByRole('button', {
-      name: /Computer Use done Move the pointer to the center of the visible Off Grid AI test window/
+      name: /Computer Use done Click the center of the visible Off Grid AI test window/
     })
   ).toBeVisible({ timeout: 120_000 })
   expect(
@@ -208,3 +205,29 @@ test('a Chat request runs the hybrid reasoner and specialist through one Compute
   expect(requests.some((request) => request.includes('delegate_grounded_action'))).toBe(true)
   expect(requests.some((request) => request.includes('"max_tokens":200'))).toBe(true)
 })
+
+for (const [strategy, counter] of [
+  ['Same as Chat', 'sameAsChatCalls'],
+  ['Specialist', 'specialistCalls']
+] as const) {
+  test(`a Chat request completes a real Computer Use task with ${strategy}`, async () => {
+    await selectStrategy(strategy)
+    await gotoChat()
+    const composer = page.getByPlaceholder(/ask anything/i)
+    await page.getByRole('button', { name: 'Composer options' }).click()
+    await page.getByRole('menuitem', { name: /^Tools/ }).click()
+    await page.keyboard.press('Escape')
+    await composer.fill('Click the center of this test window.')
+    await composer.press('Enter')
+
+    await expect(
+      page.getByRole('button', {
+        name: /Computer Use done Click the center of the visible Off Grid AI test window/
+      })
+    ).toBeVisible({ timeout: 120_000 })
+    const state = JSON.parse(
+      fs.readFileSync(path.join(profileDir, 'hybrid-model-state.json'), 'utf8')
+    ) as Record<string, number>
+    expect(state[counter]).toBeGreaterThanOrEqual(2)
+  })
+}

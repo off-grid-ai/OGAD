@@ -88,7 +88,7 @@ describe('<ChatToolRows/> work timeline', () => {
     offOpen()
   })
 
-  it('opens an old stored web_task row as canonical Web Use detail', async () => {
+  it('opens an old stored web_use row as canonical Web Use detail', async () => {
     const requests: OpenTaskPanelRequest[] = []
     const offOpen = onOpenTaskSidePanel((request) => requests.push(request))
     window.api.tasks!.list = vi.fn(async () => [
@@ -106,7 +106,7 @@ describe('<ChatToolRows/> work timeline', () => {
     const user = userEvent.setup()
     render(
       <ChatToolRows
-        tools={[{ name: 'web_task', status: 'completed', result: 'Task reference: web-keyboard.' }]}
+        tools={[{ name: 'web_use', status: 'completed', result: 'Task reference: web-keyboard.' }]}
       />
     )
 
@@ -299,7 +299,7 @@ describe('<ChatToolRows/> work timeline', () => {
       <ChatToolRows
         tools={[
           {
-            name: 'computer_task',
+            name: 'computer_use',
             status: 'completed',
             result: 'Done. Task reference: act_1.'
           }
@@ -428,7 +428,7 @@ describe('<ChatToolRows/> work timeline', () => {
       <ChatToolRows
         tools={[
           {
-            name: 'computer_task',
+            name: 'computer_use',
             status: 'failed',
             result: 'Task reference: remote-task.'
           }

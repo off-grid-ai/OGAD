@@ -10,7 +10,7 @@
  *
  * It appears WITHOUT stealing focus (showInactive) so the driven app keeps
  * focus for actuation, and it does NOT dismiss on blur - it must stay up for
- * the whole task. Opened when a computer_task starts, closed shortly after it
+ * the whole task. Opened when a computer_use starts, closed shortly after it
  * ends (see vision-controller). Native glue, excluded from coverage.
  */
 import { BrowserWindow, ipcMain, screen } from 'electron'
@@ -98,6 +98,12 @@ function create(): BrowserWindow {
 
 /** Exact native window ID used by the Computer Use capture filter. */
 export function getSupervisorCaptureWindowId(): number | null {
+  return supervisorCaptureWindowId
+}
+
+/** Create the protected capture-exclusion window without making the PiP visible. */
+export function ensureSupervisorCaptureWindowId(): number | null {
+  if (!supervisor || supervisor.isDestroyed()) create()
   return supervisorCaptureWindowId
 }
 

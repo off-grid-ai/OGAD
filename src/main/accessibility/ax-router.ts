@@ -1,5 +1,5 @@
 /**
- * The cheapest-first decision for a computer_task (R5 T1e, pure half): is the
+ * The cheapest-first decision for a computer_use (R5 T1e, pure half): is the
  * accessibility tree rich enough to DRIVE this app, or do we fall through to
  * vision? The router prefers AX (free, model-agnostic) and only pays for the
  * vision grounder when AX genuinely can't see the controls.

@@ -247,6 +247,11 @@ describe('general vision native tool policy', () => {
         toolCalls: [...complete().toolCalls],
         finishReason: 'tool_calls'
       })
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [...complete().toolCalls],
+        finishReason: 'tool_calls'
+      })
     let captures = 0
 
     try {
@@ -268,8 +273,8 @@ describe('general vision native tool policy', () => {
       })
 
       expect(result).toMatchObject({ ok: true, summary: 'The requested result is visible.' })
-      expect(captures).toBe(2)
-      expect(stream).toHaveBeenCalledTimes(3)
+      expect(captures).toBe(3)
+      expect(stream).toHaveBeenCalledTimes(4)
       expect(result.steps).toContain(
         'the model returned 0 tool calls; exactly one is required; re-observing'
       )

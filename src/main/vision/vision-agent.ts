@@ -144,7 +144,7 @@ export interface VisionTaskDeps {
     coordinateFrame?: VisionPolicyCoordinateFrame
   ) => VisionPolicyDecision
   /** Parks until the user finishes a call_user handoff. */
-  waitForUser: (why: string) => Promise<void>
+  waitForUser: (why: string, signal?: AbortSignal) => Promise<void>
   onStep?: (note: string) => void
   onProgress?: (progress: VisionTaskProgress) => void
   onReasoning?: (reasoning: VisionTaskReasoning) => void

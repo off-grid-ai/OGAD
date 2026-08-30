@@ -31,7 +31,7 @@ import {
   stopVisionTask,
   waitForVisionUser
 } from './vision-controller'
-import { showSupervisorWindow, hideSupervisorWindow } from './supervisor-window'
+import { hideSupervisorWindow } from './supervisor-window'
 import { loadActuation, actuationAvailable, type ActuationPort } from '../input/actuation'
 import { checkAccessibilityPermission, checkScreenRecordingPermission } from '../permissions'
 import { mapActionToScreen, type DisplayGeometry } from '../input/coordinate-mapping'
@@ -334,7 +334,6 @@ class VisionHost {
       currentAction: 'Preparing local screen control',
       ...(notice ? { notice } : {})
     })
-    showSupervisorWindow()
     const queuedGuidance: string[] = [...(checkpoint?.guidance ?? [])]
     const releaseGuidance = registerTaskGuideHandler(taskId, (text) => {
       queuedGuidance.push(text)

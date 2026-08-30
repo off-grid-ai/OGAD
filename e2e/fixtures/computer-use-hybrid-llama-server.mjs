@@ -13,15 +13,20 @@ const port = portFlag >= 0 ? Number(args[portFlag + 1]) : 8439
 const stateFile = path.join(process.env.OFFGRID_USER_DATA, 'hybrid-model-state.json')
 const requestLog = path.join(process.env.OFFGRID_USER_DATA, 'hybrid-model-requests.jsonl')
 
-const readCount = () => {
+const readState = () => {
   try {
-    return JSON.parse(fs.readFileSync(stateFile, 'utf8')).reasonerCalls ?? 0
+    return JSON.parse(fs.readFileSync(stateFile, 'utf8'))
   } catch {
-    return 0
+    return {}
   }
 }
 
-const writeCount = (reasonerCalls) => fs.writeFileSync(stateFile, JSON.stringify({ reasonerCalls }))
+const increment = (key) => {
+  const state = readState()
+  state[key] = (state[key] ?? 0) + 1
+  fs.writeFileSync(stateFile, JSON.stringify(state))
+  return state[key]
+}
 
 const toolCall = (name, value) => ({
   index: 0,
@@ -32,14 +37,13 @@ const toolCall = (name, value) => ({
 
 const responseFor = (body) => {
   if (body.includes('delegate_grounded_action')) {
-    const count = readCount()
-    writeCount(count + 1)
-    return count === 0
+    const count = increment('reasonerCalls')
+    return count === 1
       ? {
           toolCalls: [
             toolCall('delegate_grounded_action', {
-              instruction: 'Move the pointer to the center of the visible test window.',
-              summary: 'Point at the visible test window.',
+              instruction: 'Click the center of the visible test window.',
+              summary: 'Click the visible test window.',
               visible_evidence: 'The Off Grid AI test window is visible.'
             })
           ]
@@ -47,8 +51,8 @@ const responseFor = (body) => {
       : {
           toolCalls: [
             toolCall('complete_milestone', {
-              summary: 'The pointer moved to the test window.',
-              visible_evidence: 'The current screen remains visible after the pointer move.'
+              summary: 'The test window was clicked.',
+              visible_evidence: 'The current screen remains visible after the click.'
             })
           ]
         }
@@ -56,23 +60,47 @@ const responseFor = (body) => {
   // The production UI-TARS adapter owns the specialist request budget. Match that native
   // boundary instead of a presentation string that is not required to include the model name.
   if (body.includes('"max_tokens":200')) {
-    return { content: "mouse_move(point='<point>500 500</point>')" }
+    return increment('specialistCalls') === 1
+      ? { content: "click(point='<point>500 500</point>')" }
+      : { content: 'subtask_complete()' }
+  }
+  if (body.includes('"name":"perform_action"')) {
+    return increment('sameAsChatCalls') === 1
+      ? {
+          toolCalls: [
+            toolCall('perform_action', {
+              direction: 'aligned',
+              summary: 'Click the visible test window.',
+              visible_evidence: 'The Off Grid AI test window is visible.',
+              action: { type: 'click', point: { x: 500, y: 500 } },
+              action_reason: 'The requested target is the center of the visible window.'
+            })
+          ]
+        }
+      : {
+          toolCalls: [
+            toolCall('complete_milestone', {
+              summary: 'The test window was clicked.',
+              visible_evidence: 'The current screen remains visible after the click.'
+            })
+          ]
+        }
   }
   if (body.includes('execution plan') || body.includes('Execution plan')) {
     return {
       content: JSON.stringify({
         version: 1,
-        phases: [{ id: 'move-pointer', title: 'Move the pointer to the test window' }]
+        phases: [{ id: 'click-window', title: 'Click the test window' }]
       })
     }
   }
-  if (body.includes('computer_task') && !body.includes('The pointer moved to the test window.')) {
+  if (body.includes('computer_use') && !body.includes('The pointer moved to the test window.')) {
     return {
       content:
-        '<tool_call>{"name":"computer_task","arguments":{"goal":"Move the pointer to the center of the visible Off Grid AI test window."}}</tool_call>'
+        '<tool_call>{"name":"computer_use","arguments":{"goal":"Click the center of the visible Off Grid AI test window."}}</tool_call>'
     }
   }
-  return { content: 'Done - the hybrid Computer Use task completed.' }
+  return { content: 'Done - the Computer Use task completed.' }
 }
 
 const server = http.createServer((request, response) => {

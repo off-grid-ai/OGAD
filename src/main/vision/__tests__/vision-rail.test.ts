@@ -1,5 +1,5 @@
 /**
- * The vision rail's engine adapter: computer_task registers on the vision rail
+ * The vision rail's engine adapter: computer_use registers on the vision rail
  * as a no-retry mutation, and the executor maps a run's result to an
  * ExecuteResult. The host (the supervised session) is the injected boundary.
  */
@@ -11,7 +11,7 @@ import type { VisionTaskResult } from '../vision-agent'
 const action = (args: Record<string, unknown>): ActionRecord =>
   ({
     id: 'act_vis',
-    type: 'computer_task',
+    type: 'computer_use',
     intent: 'share the deck over WhatsApp',
     args,
     risk: 'mutate',
@@ -27,12 +27,12 @@ const run = (over: Partial<VisionTaskResult> = {}): VisionTaskResult => ({
 })
 
 describe('registerVisionRail', () => {
-  it('registers computer_task on the vision rail, gating and never retrying', () => {
+  it('registers computer_use on the vision rail, gating and never retrying', () => {
     const registry = new HandlerRegistry()
     registerVisionRail(registry)
-    const handler = registry.get('computer_task')
+    const handler = registry.get('computer_use')
     expect(handler?.rail).toBe('vision')
-    expect(registry.route('computer_task')).toBe('vision')
+    expect(registry.route('computer_use')).toBe('vision')
     expect(handler?.verification).toBe('none_fuzzy')
     expect(handler?.verify).toBeUndefined()
     expect(handler?.defaultRisk).toBe('mutate')

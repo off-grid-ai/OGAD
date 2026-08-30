@@ -9,7 +9,7 @@ const electron = vi.hoisted(() => ({
   shown: 0,
   hidden: 0,
   protected: [] as boolean[],
-  handlers: new Map<string, () => unknown>()
+  handlers: new Map<string, (...args: unknown[]) => unknown>()
 }))
 
 vi.mock('electron', () => ({
@@ -20,7 +20,8 @@ vi.mock('electron', () => ({
     getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } })
   },
   ipcMain: {
-    handle: (channel: string, handler: () => unknown) => electron.handlers.set(channel, handler)
+    handle: (channel: string, handler: (...args: unknown[]) => unknown) =>
+      electron.handlers.set(channel, handler)
   },
   BrowserWindow: class BrowserWindow {
     private visible = false
@@ -92,6 +93,15 @@ describe('Computer Use supervisor window', () => {
     })
     expect(electron.protected).toEqual([true])
     expect(electron.shown).toBe(1)
+  })
+
+  it('creates the protected capture exclusion without showing the PiP', async () => {
+    const { ensureSupervisorCaptureWindowId } = await import('../vision/supervisor-window')
+
+    expect(ensureSupervisorCaptureWindowId()).toBe(73)
+    expect(electron.options).toHaveLength(1)
+    expect(electron.protected).toEqual([true])
+    expect(electron.shown).toBe(0)
   })
 
   it('dismisses and reopens the same PiP without issuing a task command', async () => {

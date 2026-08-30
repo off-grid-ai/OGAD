@@ -26,6 +26,7 @@ import {
 } from '../tasks/task-execution-plan-service'
 import { TASK_GUIDANCE_TRACE } from '../tasks/task-guide'
 import { CurrentTaskBrief } from '../tasks/current-task-brief'
+import type { GuardSnapshot } from '../vision/vision-guard'
 
 export interface ElementActuator {
   /** Click at the element's center. */
@@ -56,6 +57,10 @@ export interface ElementTaskDeps {
   plan?: TaskExecutionPlan
   onPhase?: (phaseId: string) => void
   takeGuidance?: () => readonly string[]
+  /** Park this same task when a private step needs the user. Continue returns
+   * the loop to a fresh Accessibility observation. */
+  waitForUser: (why: string, signal?: AbortSignal) => Promise<void>
+  signal?: AbortSignal
   /** The Computer Use task owner. The loop checks it after every external wait,
    *  so Pause parks before another action and Stop cannot be overwritten by a
    *  late observation or model reply. */
@@ -63,8 +68,13 @@ export interface ElementTaskDeps {
 }
 
 export interface ElementTaskControl {
-  snapshot(): { state: 'running' | 'paused' | 'halted'; reason: string }
-  waitUntilRunnable(): Promise<{ state: 'running' | 'paused' | 'halted'; reason: string }>
+  snapshot(): Pick<GuardSnapshot, 'status' | 'reason' | 'inputLease'>
+  waitUntilRunnable(signal?: AbortSignal): Promise<Pick<GuardSnapshot, 'status' | 'reason'>>
+  markObservationReady(): boolean
+  readonly isVerifying: boolean
+  beginVerification(): boolean
+  complete(): boolean
+  fail(message: string): boolean
 }
 
 export interface ElementTaskResult {
@@ -81,6 +91,7 @@ export type ElementStep =
   // "Enter" so "type hi and send" lands in one step (how the model phrases it).
   | { action: 'type'; index?: number; text: string; submitKeys?: string }
   | { action: 'key'; keys: string }
+  | { action: 'human_required'; why: string }
   | { action: 'done'; summary: string }
   | { action: 'give_up'; why: string }
 
@@ -91,7 +102,14 @@ export interface ElementStepObservation {
   rawResponse?: string
   parsedAction?: ElementStep | null
   durationMs: number
-  result: 'parse_failed' | 'actuated' | 'terminal' | 'skipped' | 'invalid_target' | 'error'
+  result:
+    | 'parse_failed'
+    | 'actuated'
+    | 'terminal'
+    | 'handoff'
+    | 'skipped'
+    | 'invalid_target'
+    | 'error'
   error?: string
 }
 
@@ -105,7 +123,10 @@ export const ELEMENT_STEP_FORMAT = {
     schema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['click', 'press', 'type', 'key', 'done', 'give_up'] },
+        action: {
+          type: 'string',
+          enum: ['click', 'press', 'type', 'key', 'human_required', 'done', 'give_up']
+        },
         index: { type: 'integer' },
         text: { type: 'string' },
         keys: { type: 'string' },
@@ -166,6 +187,8 @@ export function parseElementStep(raw: string): ElementStep | null {
     }
     case 'done':
       return { action: 'done', summary: str('summary') ?? 'done' }
+    case 'human_required':
+      return { action: 'human_required', why: str('why') ?? 'Complete this step' }
     case 'give_up':
       return { action: 'give_up', why: str('why') ?? 'could not finish' }
     default:
@@ -207,12 +230,13 @@ export function buildElementPrompt(input: {
     '- Click: {"action":"click","index":N} or {"action":"press","index":N}',
     '- Type: {"action":"type","index":N,"text":"..."} - omit "index" to type into the field that is already focused; add "keys":"Enter" to send.',
     '- Key: {"action":"key","keys":"Enter"} (or "cmd k").',
-    '- Sign-in, one-time code, or payment: {"action":"give_up","why":"..."} and let the user act.',
+    '- Sign-in, password, one-time code, or payment: {"action":"human_required","why":"..."}. The user completes the step, then you continue this same task from a fresh screen.',
     '- Task complete: {"action":"done","summary":"..."}. Cannot be done: {"action":"give_up","why":"..."}.',
     '- STOP as soon as the goal is achieved: the instant the target is open or PLAYING, the message is sent, or the file is attached, reply {"action":"done"}. Do NOT keep clicking once the visible end-state is reached - a video that is already playing is done, not a cue to click more.',
     'Messaging a person in a chat app (Slack, etc.), in order:',
     '  1) Open their conversation with the quick switcher: {"action":"key","keys":"cmd k"}, then type their name, then {"action":"key","keys":"Enter"}. (Typing in the left sidebar "Search"/"Channel or user name" box only FILTERS the list - Enter there does NOT open the chat; you would have to CLICK the matching result.)',
     '  2) THEN type the message into the box labeled "Message to <name>" (or "Message #<channel>") by ITS [number], and add "keys":"Enter" to send. Do not assume the message box is focused.',
+    'If Previous steps says the text was typed but not submitted, NEVER type it again. Press Enter or click the visible Send control.',
     'A Search / "Channel or user name" / "To" field is for navigation only - never put the message text there.',
     'Attaching or uploading a file, AFTER an Attach/Upload opens the system file dialog (the dialog runs in its own window - drive it with keys, not the app search box):',
     '  1) Open "Go to Folder": {"action":"key","keys":"cmd shift g"}.',
@@ -247,6 +271,14 @@ export function actionSignature(step: ElementStep): string | null {
   }
 }
 
+function isSubmitKey(keys: string): boolean {
+  return /(^|\s)(enter|return)(\s|$)/i.test(keys)
+}
+
+function isSubmitElement(element: AxElement): boolean {
+  return /\b(send|submit|post)\b/i.test(`${element.name} ${element.role}`)
+}
+
 /* eslint-disable complexity -- one state machine; per-action helpers would hide
    the observe/act/stop control flow the tests pin down. */
 export async function runElementTask(
@@ -272,13 +304,22 @@ export async function runElementTask(
   // send (type[74]->Enter->type[71]->Enter...), an A-B-A-B loop the consecutive
   // check can't see.
   const typedTexts = new Set<string>()
+  // A type action without Enter only changes the draft. Do not accept a model
+  // claim that the task is done until a later action submits that draft.
+  let draftAwaitingSubmit = false
   const taskBrief = new CurrentTaskBrief(goal)
   let consecutiveParseFailures = 0
+  const requireFreshVerification = (): void => {
+    if (deps.control && !deps.control.isVerifying) deps.control.beginVerification()
+  }
 
   const waitForControl = async (): Promise<ElementTaskResult | null> => {
     const before = deps.control?.snapshot()
-    const after = before?.state === 'paused' ? await deps.control?.waitUntilRunnable() : before
-    if (after?.state !== 'halted') return null
+    const after =
+      before?.status === 'paused' || before?.status === 'waiting_for_user'
+        ? await deps.control?.waitUntilRunnable(deps.signal)
+        : before
+    if (!after || !['completed', 'failed', 'stopped'].includes(after.status)) return null
     const summary = after.reason || 'stopped'
     return { ok: false, summary, steps }
   }
@@ -317,6 +358,7 @@ export async function runElementTask(
       const snapshot = await read()
       const stoppedAfterRead = await waitForControl()
       if (stoppedAfterRead) return stoppedAfterRead
+      if (deps.control && !deps.control.markObservationReady()) continue
       taskBrief.accept(deps.takeGuidance?.() ?? [])
       modelPrompt = buildElementPrompt({
         goal: taskBrief.objective,
@@ -330,9 +372,22 @@ export async function runElementTask(
         (safePrompt, privateText) => safePrompt.split(privateText).join(TASK_GUIDANCE_TRACE),
         modelPrompt
       )
+      const decisionLeaseEpoch = deps.control?.snapshot().inputLease.epoch
       rawResponse = await decide(modelPrompt)
       const stoppedAfterDecision = await waitForControl()
       if (stoppedAfterDecision) return stoppedAfterDecision
+      const controlAfterDecision = deps.control?.snapshot()
+      if (
+        decisionLeaseEpoch !== undefined &&
+        controlAfterDecision &&
+        (controlAfterDecision.inputLease.epoch !== decisionLeaseEpoch ||
+          controlAfterDecision.inputLease.owner !== 'agent')
+      ) {
+        observe('skipped')
+        note('control changed during model work; re-observing before the next action')
+        checkpoint()
+        continue
+      }
       const parsedDecision = parseElementStep(rawResponse)
       decision = parsedDecision
       if (!parsedDecision) {
@@ -350,6 +405,20 @@ export async function runElementTask(
       consecutiveParseFailures = 0
       const action = parsedDecision
       if (action.action === 'done') {
+        if (draftAwaitingSubmit) {
+          observe('skipped')
+          note('completion rejected: text is still a draft; press Enter or click Send')
+          checkpoint()
+          continue
+        }
+        if (deps.control && !deps.control.isVerifying) {
+          observe('terminal')
+          note(`verification requested: ${action.summary}`)
+          checkpoint()
+          deps.control.beginVerification()
+          continue
+        }
+        deps.control?.complete()
         reportPhase((deps.plan?.phases.length ?? 1) - 1)
         observe('terminal')
         note(`done: ${action.summary}`)
@@ -357,11 +426,22 @@ export async function runElementTask(
         return { ok: true, summary: action.summary, steps }
       }
       if (action.action === 'give_up') {
+        deps.control?.fail(action.why)
         reportPhase((deps.plan?.phases.length ?? 1) - 1)
         observe('terminal')
         note(`gave up: ${action.why}`)
         checkpoint()
         return { ok: false, summary: action.why, steps }
+      }
+      if (action.action === 'human_required') {
+        observe('handoff')
+        note(`handoff: ${action.why}`)
+        checkpoint()
+        await deps.waitForUser(action.why, deps.signal)
+        const stoppedAfterHandoff = await waitForControl()
+        if (stoppedAfterHandoff) return stoppedAfterHandoff
+        note('resumed by the user')
+        continue
       }
       // Runaway guard: the model just asked to repeat the EXACT action it already
       // did (e.g. send "hi" again). Stop before actuating the duplicate - a live
@@ -372,13 +452,19 @@ export async function runElementTask(
         // fires twice) but keep going - a repeat should not kill the task. The
         // user can stop a run that does not make useful progress.
         observe('skipped')
-        note('skipped a repeated action; moving on')
+        note(
+          action.action === 'type'
+            ? 'text is already entered; do not type it again; press Enter or click Send if submission is required'
+            : 'skipped a repeated action; choose a different action'
+        )
         checkpoint()
         continue
       }
       lastActionSig = sig
       if (action.action === 'key') {
         await actuator.keys(action.keys)
+        if (isSubmitKey(action.keys)) draftAwaitingSubmit = false
+        requireFreshVerification()
         observe('actuated')
         note(`key ${action.keys}`)
         checkpoint()
@@ -423,7 +509,11 @@ export async function runElementTask(
         if (action.submitKeys) {
           await actuator.keys(action.submitKeys)
           note(`key ${action.submitKeys}`)
+          if (isSubmitKey(action.submitKeys)) draftAwaitingSubmit = false
+        } else if (typed.length > 0) {
+          draftAwaitingSubmit = true
         }
+        requireFreshVerification()
         observe('actuated')
         checkpoint()
         continue
@@ -444,6 +534,8 @@ export async function runElementTask(
         await actuator.click(el)
         note(`clicked [${el.index}] ${el.name || el.role}`)
       }
+      if (isSubmitElement(el)) draftAwaitingSubmit = false
+      requireFreshVerification()
       observe('actuated')
       checkpoint()
     } catch (error) {
@@ -455,6 +547,8 @@ export async function runElementTask(
   }
 
   note('ran out of steps')
-  return { ok: false, summary: `stopped after ${maxSteps} steps without finishing`, steps }
+  const summary = `stopped after ${maxSteps} steps without finishing`
+  deps.control?.fail(summary)
+  return { ok: false, summary, steps }
 }
 /* eslint-enable complexity */

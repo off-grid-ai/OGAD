@@ -23,7 +23,6 @@ function makePort(
   return {
     proposed,
     proposalMeta,
-    approvalHookActive: () => false,
     async propose(input, meta) {
       proposed.push(input)
       proposalMeta.push(meta)
@@ -43,7 +42,6 @@ function makePort(
 }
 
 const run = vi.fn(async () => ({ ok: true as const, result: { id: 'r1' } }))
-const proposeApproval = vi.fn(() => undefined)
 const proEntitled = (): boolean => true
 
 // Pin darwin: these assert the full macOS tool set (messages_send, the inline
@@ -51,7 +49,7 @@ const proEntitled = (): boolean => true
 // a Linux CI runner specsForPlatform('linux') is empty - every tool unknown.
 const makeExtension = (actions?: ActionsPort): NativeActionToolExtension =>
   new NativeActionToolExtension(
-    { run, proposeApproval, isProEntitled: proEntitled, actions },
+    { run, isProEntitled: proEntitled, actions },
     'darwin'
   )
 
@@ -114,7 +112,7 @@ describe('the engine path', () => {
   it('starts the exact Web Use brief selected by the Chat model without a second gate', async () => {
     const port = makePort()
     const extension = new NativeActionToolExtension(
-      { run, proposeApproval, isProEntitled: proEntitled, actions: port },
+      { run, isProEntitled: proEntitled, actions: port },
       'darwin'
     )
 
@@ -158,6 +156,35 @@ describe('the engine path', () => {
     expect(whenParked).not.toHaveBeenCalled()
   })
 
+  it('dedupes repeated companion task calls without dropping launch identity', async () => {
+    const port = makePort()
+    const extension = makeExtension(port)
+    const context = {
+      conversationId: 'mobile-chat',
+      taskLaunch: { launchId: 'launch-1', requestingDeviceId: 'phone-1' }
+    }
+
+    await extension.execute('web_use', { goal: 'Open example.com' }, context)
+    await extension.execute('web_use', { goal: 'Open example.com' }, {
+      ...context,
+      taskLaunch: { ...context.taskLaunch, launchId: 'launch-2' }
+    })
+
+    expect(port.proposalMeta[0]).toMatchObject({ idempotencyKey: expect.stringMatching(/^web_use:/) })
+    expect(port.proposalMeta[1]).toMatchObject({ idempotencyKey: expect.stringMatching(/^web_use:/) })
+    expect((port.proposalMeta[0] as { idempotencyKey: string }).idempotencyKey).toBe(
+      (port.proposalMeta[1] as { idempotencyKey: string }).idempotencyKey
+    )
+    expect(port.proposed).toEqual([
+      expect.objectContaining({
+        args: expect.objectContaining({ __offgridTaskLaunchId: 'launch-1' })
+      }),
+      expect.objectContaining({
+        args: expect.objectContaining({ __offgridTaskLaunchId: 'launch-2' })
+      })
+    ])
+  })
+
   it('a mutation becomes a durable Action with the mapped type, intent, and risk', async () => {
     run.mockClear()
     const port = makePort()
@@ -171,21 +198,18 @@ describe('the engine path', () => {
     })
     expect(reply).toBe('Created the reminder.')
     expect(run).not.toHaveBeenCalled()
-    expect(proposeApproval).not.toHaveBeenCalled()
   })
 
-  it('runs contacts_search then messages_send from Chat without a Pro approval copy', async () => {
-    const activeProApprovalHook = vi.fn(() => true)
+  it('runs contacts_search then messages_send from Chat without an approval copy', async () => {
     const nativeRun = vi.fn(async (command) =>
       command.command === 'contacts.search'
         ? { ok: true as const, result: [{ name: 'Ali', phone: '+15551111' }] }
         : { ok: true as const, result: undefined }
     )
-    const port = makePort({ approvalHookActive: () => true })
+    const port = makePort()
     const extension = new NativeActionToolExtension(
       {
         run: nativeRun,
-        proposeApproval: activeProApprovalHook,
         isProEntitled: proEntitled,
         actions: port
       },
@@ -211,7 +235,6 @@ describe('the engine path', () => {
       })
     ])
     expect(port.proposalMeta).toEqual([{ source: 'chat', sourceRef: 'chat-ali' }])
-    expect(activeProApprovalHook).not.toHaveBeenCalled()
     expect(sent).toBe('Sent the message.')
     expect(sent).not.toMatch(/queued|approval/i)
   })
@@ -322,30 +345,23 @@ describe('the engine path', () => {
     )
   })
 
-  it('a listening Pro approval hook cannot divert a Chat mutation from the engine', async () => {
+  it('a Chat mutation uses the durable engine', async () => {
     run.mockClear()
-    const legacyPropose = vi.fn(() => true)
-    const port = makePort({ approvalHookActive: () => true })
-    const extension = new NativeActionToolExtension(
-      { run, proposeApproval: legacyPropose, isProEntitled: proEntitled, actions: port },
-      'darwin'
-    )
+    const port = makePort()
+    const extension = makeExtension(port)
     const reply = await extension.execute('reminders_create', { title: 'x' })
     expect(port.proposed).toHaveLength(1)
-    expect(legacyPropose).not.toHaveBeenCalled()
     expect(reply).toBe('Created the reminder.')
   })
 
-  it('fails honestly without an engine and never creates a Chat approval copy', async () => {
+  it('fails honestly without an engine', async () => {
     run.mockClear()
-    const legacyPropose = vi.fn(() => undefined)
     const extension = new NativeActionToolExtension(
-      { run, proposeApproval: legacyPropose, isProEntitled: proEntitled },
+      { run, isProEntitled: proEntitled },
       'darwin'
     )
     const reply = await extension.execute('reminders_create', { title: 'x' })
     expect(reply).toMatch(/on-device action engine/)
-    expect(legacyPropose).not.toHaveBeenCalled()
     expect(run).not.toHaveBeenCalled()
   })
 
@@ -383,24 +399,17 @@ describe('the engine path', () => {
     expect(port.proposalMeta).toEqual([{ source: 'chat', sourceRef: 'chat-journey-1' }])
   })
 
-  it('web_use uses the engine EVEN WHEN a pro queue is listening - no connector runs a web task', async () => {
+  it('web_use uses the durable engine instead of a connector', async () => {
     run.mockClear()
-    const legacyPropose = vi.fn(() => true)
-    const port = makePort({ approvalHookActive: () => true })
-    const extension = new NativeActionToolExtension(
-      { run, proposeApproval: legacyPropose, isProEntitled: proEntitled, actions: port },
-      'darwin'
-    )
+    const port = makePort()
+    const extension = makeExtension(port)
     await extension.execute('web_use', { goal: 'order lunch' })
-    // The engine path was taken; the legacy queue was NOT offered a web task.
     expect(port.proposed).toHaveLength(1)
-    expect(legacyPropose).not.toHaveBeenCalled()
   })
 
   it('web_use refuses cleanly when no engine is wired, rather than falling to a connector', async () => {
-    const legacyPropose = vi.fn(() => true)
     const extension = new NativeActionToolExtension(
-      { run, proposeApproval: legacyPropose, isProEntitled: proEntitled },
+      { run, isProEntitled: proEntitled },
       'darwin'
     )
     const reply = await extension.execute('web_use', { goal: 'x' })
@@ -408,7 +417,6 @@ describe('the engine path', () => {
       text: expect.stringMatching(/on-device action engine/),
       authoritative: true
     })
-    expect(legacyPropose).not.toHaveBeenCalled()
   })
 
   it('computer_use becomes a vision-rail Action with the goal as its intent', async () => {
@@ -429,34 +437,11 @@ describe('the engine path', () => {
     })
   })
 
-  it('queuing a computer_use announces the grounder nudge - but web_use or a semantic tool does not', async () => {
-    const announceComputerTask = vi.fn()
-    const port = makePort()
-    const extension = new NativeActionToolExtension(
-      { run, proposeApproval, isProEntitled: proEntitled, announceComputerTask, actions: port },
-      'darwin'
-    )
-    await extension.execute('computer_use', { goal: 'share the deck' })
-    expect(announceComputerTask).toHaveBeenCalledTimes(1)
-    // The goal is passed so the boundary can check AX viability for the target app.
-    expect(announceComputerTask).toHaveBeenCalledWith('share the deck')
-
-    announceComputerTask.mockClear()
-    await extension.execute('web_use', { goal: 'check in' })
-    await extension.execute('reminders_create', { title: 'x' })
-    expect(announceComputerTask).not.toHaveBeenCalled()
-  })
-
-  it('computer_use is engine-only too - never offered to the legacy pro queue', async () => {
+  it('computer_use uses the durable engine', async () => {
     run.mockClear()
-    const legacyPropose = vi.fn(() => true)
-    const port = makePort({ approvalHookActive: () => true })
-    const extension = new NativeActionToolExtension(
-      { run, proposeApproval: legacyPropose, isProEntitled: proEntitled, actions: port },
-      'darwin'
-    )
+    const port = makePort()
+    const extension = makeExtension(port)
     await extension.execute('computer_use', { goal: 'x' })
     expect(port.proposed).toHaveLength(1)
-    expect(legacyPropose).not.toHaveBeenCalled()
   })
 })

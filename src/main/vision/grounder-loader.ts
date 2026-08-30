@@ -1,6 +1,6 @@
 /**
  * On-demand grounder swap (R5 tier 3): load the selected Computer Use model for a
- * computer_task, then restore the chat model. There is ONE llama-server (one
+ * computer_use, then restore the chat model. There is ONE llama-server (one
  * `llm` singleton), so "load the grounder" means reload it with the model's GGUF
  * and projector, then reload the chat model - the image-gen evict pattern, applied
  * to the model itself.
@@ -8,7 +8,7 @@
  * This is the EXPENSIVE tier: a multi-GB reload each way (~seconds), and the chat
  * model is unavailable while the grounder is loaded. The router only reaches here
  * when the cheaper rails (accessibility) cannot drive the surface. The swap is
- * timed and broken out (swap-in / run / swap-out) so a computer_task's cost is
+ * timed and broken out (swap-in / run / swap-out) so a computer_use's cost is
  * attributable - which is what the AX-vs-grounder A/B compares.
  *
  * Native/engine glue over the tested decision (isGrounderActive) - it reloads
@@ -38,12 +38,11 @@ import {
   runWithRemoteScreenTaskSession
 } from '../actions/remote-screen-session'
 
-/** Migration default for people who used computer tasks before the Computer Use catalog existed. */
-export const GROUNDER_MODEL_ID = 'mradermacher/UI-TARS-1.5-7B-GGUF'
+const DEFAULT_GROUNDER_MODEL_ID = 'mradermacher/UI-TARS-1.5-7B-GGUF'
 
-/** The saved Computer Use choice, with the established UI-TARS model as the migration default. */
+/** The saved Computer Use choice, or the current catalog default. */
 export function selectedGrounderModelId(): string {
-  return getActiveModal('computer_use') ?? GROUNDER_MODEL_ID
+  return getActiveModal('computer_use') ?? DEFAULT_GROUNDER_MODEL_ID
 }
 
 async function grounderInstalled(modelId: string): Promise<boolean> {

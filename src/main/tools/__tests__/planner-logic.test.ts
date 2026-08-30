@@ -134,7 +134,7 @@ describe('resolveContactHandle', () => {
 })
 
 describe('backfillGoals', () => {
-  it('fills an empty web_use/computer_task goal with the user request', () => {
+  it('fills an empty web_use/computer_use goal with the user request', () => {
     const plan = {
       steps: [{ tool: 'web_use', args: { url: 'https://youtube.com' }, why: '', bindings: [] }]
     }
@@ -148,7 +148,7 @@ describe('backfillGoals', () => {
   it('keeps a goal the planner already provided, and ignores non-goal tools', () => {
     const plan = {
       steps: [
-        { tool: 'computer_task', args: { goal: 'open the DM with sidd' }, why: '', bindings: [] },
+        { tool: 'computer_use', args: { goal: 'open the DM with sidd' }, why: '', bindings: [] },
         { tool: 'messages_send', args: { text: 'hi' }, why: '', bindings: [] }
       ]
     }

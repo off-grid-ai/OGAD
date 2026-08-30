@@ -1,7 +1,5 @@
 const PRODUCT_TOOL_NAMES: Readonly<Record<string, string>> = {
-  web_task: 'Web Use',
   web_use: 'Web Use',
-  computer_task: 'Computer Use',
   computer_use: 'Computer Use'
 }
 

@@ -144,7 +144,7 @@ export function presentActionApproval(
   return {
     title,
     description:
-      request.actionType === 'computer_task' || request.actionType === 'computer'
+      request.actionType === 'computer_use' || request.actionType === 'computer'
         ? 'Off Grid AI will use the open app to complete this task after you approve.'
         : 'Off Grid AI will complete this task after you approve.',
     details,

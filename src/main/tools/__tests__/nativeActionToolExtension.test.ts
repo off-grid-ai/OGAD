@@ -48,6 +48,12 @@ beforeEach(() => {
 })
 
 describe('NativeActionToolExtension', () => {
+  it('lists Browser Use and Computer Use in Tools settings for Pro', () => {
+    expect(ext.settings.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining(['web_use', 'computer_use'])
+    )
+  })
+
   it('owns only its known tool names', () => {
     expect(ext.canHandle('calendar_create_event')).toBe(true)
     expect(ext.canHandle('calendar_list_events')).toBe(true)
@@ -58,7 +64,7 @@ describe('NativeActionToolExtension', () => {
     boundary.proEntitled = false
 
     expect(ext.canHandle('web_use')).toBe(false)
-    expect(ext.canHandle('computer_task')).toBe(false)
+    expect(ext.canHandle('computer_use')).toBe(false)
     expect(ext.schemas()).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ function: expect.objectContaining({ name: 'web_use' }) })

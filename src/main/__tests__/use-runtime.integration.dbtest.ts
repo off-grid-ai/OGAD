@@ -134,15 +134,15 @@ describe('getActionsRuntime', () => {
     const stubRun = (async () => ({ ok: true as const, result: {} })) as never
     const registry = buildRegistry(stubRun)
     expect(registry.route('web_use')).toBe('browser')
-    // The vision rail is composed too: computer_task routes to vision.
-    expect(registry.route('computer_task')).toBe('vision')
+    // The vision rail is composed too: computer_use routes to vision.
+    expect(registry.route('computer_use')).toBe('vision')
   })
 
-  it('the vision rail is registered: a computer_task proposes and routes to vision', async () => {
+  it('the vision rail is registered: a computer_use proposes and routes to vision', async () => {
     const { getActionsRuntime } = await import('../actions/use-runtime')
     const proposed = await getActionsRuntime().propose(
       {
-        type: 'computer_task',
+        type: 'computer_use',
         intent: 'share the deck over WhatsApp',
         args: { goal: 'share the deck' },
         risk: 'mutate'

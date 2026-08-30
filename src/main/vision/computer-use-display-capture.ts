@@ -9,7 +9,7 @@ import { desktopCapturer } from 'electron'
 import sharp from 'sharp'
 import { binRoots, exe } from '../runtime-env'
 import { existing } from '../transcription/bin-resolution'
-import { getSupervisorCaptureWindowId } from './supervisor-window'
+import { ensureSupervisorCaptureWindowId } from './supervisor-window'
 
 const execFileAsync = promisify(execFile)
 const CAPTURE_TIMEOUT_MS = 10_000
@@ -33,7 +33,7 @@ function captureBinary(): string | null {
 async function captureMacDisplay(input: CaptureInput): Promise<ComputerUseDisplayCapture> {
   const binary = captureBinary()
   if (!binary) throw new Error('Computer Use screen-capture helper is not installed.')
-  const excludedWindowId = getSupervisorCaptureWindowId()
+  const excludedWindowId = ensureSupervisorCaptureWindowId()
   if (!excludedWindowId) {
     throw new Error('Computer Use cannot identify its supervisor window for safe screen capture.')
   }

@@ -47,9 +47,7 @@ const PROPOSAL_STAGE_LABELS: Record<string, string> = {
 }
 
 const TOOL_LABELS: Record<string, string> = {
-  web_task: 'Web Use',
   web_use: 'Web Use',
-  computer_task: 'Computer Use',
   computer_use: 'Computer Use',
   generate_image: 'Generated image',
   image_generation: 'Generated image',
@@ -93,8 +91,8 @@ function normalizedToolKey(name: string): string {
 
 function taskKindForTool(name: string): TaskSession['kind'] | undefined {
   const key = normalizedToolKey(name)
-  if (key === 'web_task' || key === 'web_use') return 'web_use'
-  if (key === 'computer_task' || key === 'computer_use') return 'computer_use'
+  if (key === 'web_use') return 'web_use'
+  if (key === 'computer_use') return 'computer_use'
   return undefined
 }
 

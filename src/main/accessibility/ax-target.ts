@@ -1,5 +1,5 @@
 /**
- * Which app does a computer_task target? (R5 T1d, pure half.)
+ * Which app does a computer_use target? (R5 T1d, pure half.)
  *
  * The accessibility rail reads and drives ONE named app, so before it can run it
  * has to decide which. The Off Grid AI window is frontmost the instant the user
