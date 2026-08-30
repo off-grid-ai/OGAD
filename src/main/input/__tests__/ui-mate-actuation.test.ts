@@ -72,4 +72,50 @@ describe('UI-Mate nut.js actuation contract', () => {
       'scrollRight:[1]'
     ])
   })
+
+  it('maps the complete pointer, text, hotkey, and directional scroll journey', async () => {
+    const { nut, calls } = fakeNut()
+    const port = adaptNutActuation(nut)
+
+    await port.moveMouse(320, 180)
+    await port.click('left', 1)
+    await port.click('right', 2)
+    await port.typeText('Release 107 is ready')
+    await port.tapKeys('shift+b')
+    await port.scroll('up')
+    await port.scroll('down')
+    await port.scroll('left')
+    await port.scroll('right')
+    await port.scrollBy('vertical', 121)
+    await port.scrollBy('horizontal', -121)
+    await port.scrollBy('vertical', 0)
+
+    expect(calls).toEqual([
+      'move:[{"x":320,"y":180}]',
+      'click:[1]',
+      'doubleClick:[2]',
+      'type:["Release 107 is ready"]',
+      'pressKey:[13,11]',
+      'releaseKey:[13,11]',
+      'scrollUp:[3]',
+      'scrollDown:[3]',
+      'scrollLeft:[3]',
+      'scrollRight:[3]',
+      'scrollUp:[2]',
+      'scrollLeft:[2]'
+    ])
+  })
+
+  it('refuses unknown or partially mapped keys before native input', async () => {
+    const { nut, calls } = fakeNut()
+    const port = adaptNutActuation(nut)
+
+    await port.tapKeys('shift+unknown')
+    await port.tapKeys('not a hotkey')
+    await expect(port.pressKeys(['unknown'])).rejects.toThrow('Unsupported key: unknown')
+    await expect(port.keyDown(['shift', 'unknown'])).rejects.toThrow('Unsupported key: unknown')
+    await expect(port.keyUp(['unknown'])).rejects.toThrow('Unsupported key: unknown')
+
+    expect(calls).toEqual([])
+  })
 })
