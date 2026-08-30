@@ -261,7 +261,9 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
 
       expect(steps).toEqual(['web_use'])
       expect(result.toolCalls.map(({ name }) => name)).toEqual(['web_use'])
-      expect(result.answer).toBe('Done. Task reference: web-skyscanner-1.')
+      expect(result.answer).toBe(
+        `Started "${query}". Do not call web_use again for this goal. Live progress and the final result will appear in this chat. Task reference: web-skyscanner-1.`
+      )
       expect(fake.requests).toHaveLength(1)
       expect(proposals).toEqual([
         {
@@ -333,9 +335,11 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
         onActivity: ({ label }) => activities.push(label)
       })
 
-      expect(second.answer).toBe('Done. Task reference: web-flight-follow-up.')
+      expect(second.answer).toBe(
+        `Started "${completeGoal}". Do not call web_use again for this goal. Live progress and the final result will appear in this chat. Task reference: web-flight-follow-up.`
+      )
       expect(second.toolCalls).toEqual([
-        expect.objectContaining({ name: 'web_use', status: 'completed' })
+        expect.objectContaining({ name: 'web_use', status: 'pending' })
       ])
       expect(activities).toEqual([])
       expect(proposals).toEqual([
@@ -393,8 +397,10 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
 
     try {
       const result = await toolChat('do it', [], { conversationId: 'chat-reactive-intake' })
-      expect(result.answer).toBe('Done. Task reference: reactive-web-task.')
-      expect(result.toolCalls[0]?.status).toBe('completed')
+      expect(result.answer).toBe(
+        'Started "Find a flight". Do not call web_use again for this goal. Live progress and the final result will appear in this chat. Task reference: reactive-web-task.'
+      )
+      expect(result.toolCalls[0]?.status).toBe('pending')
       expect(proposals).toHaveLength(1)
       expect(fake.requests).toHaveLength(1)
     } finally {

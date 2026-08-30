@@ -40,7 +40,7 @@ const DEVICE_ID = 'desktop-release-107'
 
 beforeAll(() => {
   taskHistory.configureTaskExecutionDevice({ id: DEVICE_ID, name: 'Studio Mac' })
-  configureTaskControlSync(DEVICE_ID)
+  configureTaskControlSync(DEVICE_ID, (deviceId) => deviceId === 'mobile-release-107')
 })
 
 afterAll(() => {
@@ -65,7 +65,7 @@ describe('a task controlled from its synced Mobile chat', () => {
         executionDeviceId: DEVICE_ID,
         executionDeviceName: 'Studio Mac'
       })
-      const guard = new VisionGuard()
+      const guard = new VisionGuard({ taskId, kind })
       const request = new AbortController()
       const release = registerVisionSession(taskId, guard, request)
       const consumed: string[] = []
@@ -133,8 +133,8 @@ describe('a task controlled from its synced Mobile chat', () => {
         executionDeviceId: DEVICE_ID,
         executionDeviceName: 'Studio Mac'
       })
-      const guard = new VisionGuard()
-      guard.pauseForUser('paused for the integration journey')
+      const guard = new VisionGuard({ taskId, kind })
+      guard.pause('paused for the integration journey')
       const request = new AbortController()
       const release = registerVisionSession(taskId, guard, request)
       const receipts: Array<Record<string, unknown>> = []
@@ -158,14 +158,10 @@ describe('a task controlled from its synced Mobile chat', () => {
         )
 
       expect(control('resume', 1)).toBe(true)
-      expect(guard.snapshot().state).toBe('running')
+      expect(guard.snapshot().status).toBe('running')
       expect(control('stop', 2)).toBe(true)
-      if (kind === 'web_use') {
-        expect(taskHistory.getTaskRun(taskId)?.status).toBe('stopped')
-      } else {
-        expect(guard.snapshot().state).toBe('halted')
-        expect(request.signal.aborted).toBe(true)
-      }
+      expect(guard.snapshot().status).toBe('stopped')
+      expect(request.signal.aborted).toBe(true)
       expect(receipts).toEqual([
         expect.objectContaining({ controlId: `resume-${kind}`, outcome: 'applied' }),
         expect.objectContaining({ controlId: `stop-${kind}`, outcome: 'applied' })
@@ -188,7 +184,7 @@ describe('a task controlled from its synced Mobile chat', () => {
         executionDeviceId: DEVICE_ID,
         executionDeviceName: 'Studio Mac'
       })
-      const guard = new VisionGuard()
+      const guard = new VisionGuard({ taskId, kind })
       const request = new AbortController()
       const release = registerVisionSession(taskId, guard, request)
       const fields = {
@@ -212,10 +208,8 @@ describe('a task controlled from its synced Mobile chat', () => {
           () => undefined
         )
       ).toBe(true)
-      expect(guard.snapshot()).toMatchObject({
-        state: 'paused',
-        reason: 'you took over from the supervisor'
-      })
+      expect(guard.isPaused).toBe(true)
+      expect(guard.snapshot().inputLease.owner).toBe('user')
       release()
     }
   )

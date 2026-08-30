@@ -62,7 +62,7 @@ vi.mock('electron', () => ({
 }))
 
 import { AxScreenCaptureError, captureAxObservationFrame } from '../accessibility/ax-frame'
-import { persistAxObservation } from '../accessibility/ax-observation'
+import { persistAxFrame, persistAxObservation } from '../accessibility/ax-observation'
 import { getDB } from '../database'
 import { configureRuntime } from '../runtime-env'
 import {
@@ -87,6 +87,35 @@ describe('AX Computer Use live supervisor projection', () => {
     configureTaskExecutionDevice({ id: 'desktop:test-mac', name: 'Test Mac' })
     const screenshotPath = path.join(profile, 'task-run-snapshots', 'ax-current.png')
 
+    const frame: Parameters<typeof persistAxFrame>[0]['frame'] = {
+      capture: {
+        path: screenshotPath,
+        width: 1280,
+        height: 720,
+        displayBounds: { x: 100, y: 50, width: 1280, height: 720 }
+      },
+      snapshot: {
+        windowTitle: 'Slack',
+        elements: [
+          {
+            index: 4,
+            role: 'AXButton',
+            name: 'Send',
+            value: '',
+            cx: 900,
+            cy: 500,
+            actionable: true,
+            enabled: true
+          }
+        ]
+      }
+    }
+    persistAxFrame({
+      taskId: 'ax-live-task',
+      journeyId: 'ax-live-chat',
+      title: 'Send the Slack message',
+      frame
+    })
     persistAxObservation('ax-live-task', 'Send the Slack message', {
       step: 3,
       prompt: 'AX element prompt',
@@ -95,29 +124,7 @@ describe('AX Computer Use live supervisor projection', () => {
       parsedAction: { action: 'press', index: 4 },
       durationMs: 31,
       result: 'actuated',
-      frame: {
-        capture: {
-          path: screenshotPath,
-          width: 1280,
-          height: 720,
-          displayBounds: { x: 100, y: 50, width: 1280, height: 720 }
-        },
-        snapshot: {
-          windowTitle: 'Slack',
-          elements: [
-            {
-              index: 4,
-              role: 'AXButton',
-              name: 'Send',
-              value: '',
-              cx: 900,
-              cy: 500,
-              actionable: true,
-              enabled: true
-            }
-          ]
-        }
-      }
+      frame
     })
 
     const task = getTaskRun('ax-live-task')
