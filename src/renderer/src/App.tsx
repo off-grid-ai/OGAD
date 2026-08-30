@@ -54,7 +54,11 @@ import {
   IconActivityHeartbeat,
   IconDeviceMobile,
   IconListCheck,
-  IconExternalLink
+  IconExternalLink,
+  IconSparkles,
+  IconBriefcase,
+  IconShieldLock,
+  IconTool
 } from '@tabler/icons-react'
 import { OFF_GRID_MOBILE_URL, openExternal } from './constants/links'
 import { cn } from './lib/utils'
@@ -892,9 +896,8 @@ function AppContent() {
   // wraps the nav, so a TypeError here white-screens every user on boot (0.0.34).
   // If a route has no ProFeature, skip that item and warn; a dropped tab is
   // recoverable, a render-time throw is not.
-  const proItem = (
-    route: string
-  ): { label: string; icon: React.ReactNode; view: ViewMode; locked: boolean } | null => {
+  type NavItem = { label: string; icon: React.ReactNode; view: ViewMode; locked?: boolean }
+  const proItem = (route: string): NavItem | null => {
     const f = getProFeature(route)
     if (!f) {
       console.warn(`[nav] no pro catalog entry for "${route}" — skipping nav item`)
@@ -908,75 +911,78 @@ function AppContent() {
     }
   }
   // Icons take no color — the nav button drives it (emerald when active).
-  type NavItem = { label: string; icon: React.ReactNode; view: ViewMode; locked?: boolean }
-  const navigationItems = (
-    [
-      {
-        label: 'Explore',
-        icon: <IconCompass className="h-5 w-5 shrink-0" />,
-        view: 'explore' as ViewMode
-      },
-      proItem('search'),
-      proItem('day'),
-      proItem('replay'),
-      proItem('reflect'),
-      proItem('meetings'),
-      proItem('actions'),
-      proItem('entities'),
-      {
-        label: 'Projects',
-        icon: <IconFolders className="h-5 w-5 shrink-0" />,
-        view: 'projects' as ViewMode
-      },
-      {
-        label: 'Chat',
-        icon: <IconMessageCircle className="h-5 w-5 shrink-0" />,
-        view: 'memory-chat' as ViewMode
-      },
-      {
-        label: 'Tasks',
-        icon: <IconListCheck className="h-5 w-5 shrink-0" />,
-        view: 'tasks' as ViewMode
-      },
-      proItem('voice'),
-      proItem('vault'),
-      proItem('clipboard'),
-      proItem('devices'),
-      {
-        label: 'Integrations',
-        icon: <IconPlug className="h-5 w-5 shrink-0" />,
-        view: 'connectors' as ViewMode
-      },
-      {
-        label: 'Models',
-        icon: <IconDownload className="h-5 w-5 shrink-0" />,
-        view: 'models' as ViewMode
-      },
-      {
-        label: 'Gateway',
-        icon: <IconServer2 className="h-5 w-5 shrink-0" />,
-        view: 'gateway' as ViewMode
-      },
-      proItem('notifications')
-    ] as Array<NavItem | null>
-  ).filter((item): item is NavItem => item !== null)
-  const navigationGroupDefinitions: { label: string; views: readonly ViewMode[] }[] = [
-    { label: 'Discover', views: ['explore', 'search', 'day', 'replay', 'reflect'] },
+  const navItems = (...items: Array<NavItem | null>): NavItem[] =>
+    items.filter((item): item is NavItem => item !== null)
+  const navigationGroups = [
+    {
+      label: 'Discover',
+      icon: <IconSparkles className="h-5 w-5 shrink-0" />,
+      items: navItems(
+        {
+          label: 'Explore',
+          icon: <IconCompass className="h-5 w-5 shrink-0" />,
+          view: 'explore' as ViewMode
+        },
+        proItem('search'),
+        proItem('day'),
+        proItem('replay'),
+        proItem('reflect')
+      )
+    },
     {
       label: 'Work',
-      views: ['meetings', 'actions', 'entities', 'projects', 'memory-chat', 'tasks', 'voice']
+      icon: <IconBriefcase className="h-5 w-5 shrink-0" />,
+      items: navItems(
+        proItem('meetings'),
+        proItem('actions'),
+        proItem('entities'),
+        {
+          label: 'Projects',
+          icon: <IconFolders className="h-5 w-5 shrink-0" />,
+          view: 'projects' as ViewMode
+        },
+        {
+          label: 'Chat',
+          icon: <IconMessageCircle className="h-5 w-5 shrink-0" />,
+          view: 'memory-chat' as ViewMode
+        },
+        {
+          label: 'Tasks',
+          icon: <IconListCheck className="h-5 w-5 shrink-0" />,
+          view: 'tasks' as ViewMode
+        },
+        proItem('voice')
+      )
     },
-    { label: 'Private data', views: ['vault', 'clipboard', 'devices'] },
-    { label: 'System', views: ['connectors', 'models', 'gateway', 'notifications'] }
-  ]
-  const navigationGroups = navigationGroupDefinitions
-    .map((group) => ({
-      label: group.label,
-      items: group.views
-        .map((view) => navigationItems.find((item) => item.view === view))
-        .filter((item): item is NavItem => item !== undefined)
-    }))
-    .filter((group) => group.items.length > 0)
+    {
+      label: 'Private Data',
+      icon: <IconShieldLock className="h-5 w-5 shrink-0" />,
+      items: navItems(proItem('vault'), proItem('clipboard'), proItem('devices'))
+    },
+    {
+      label: 'System',
+      icon: <IconTool className="h-5 w-5 shrink-0" />,
+      items: navItems(
+        {
+          label: 'Integrations',
+          icon: <IconPlug className="h-5 w-5 shrink-0" />,
+          view: 'connectors' as ViewMode
+        },
+        {
+          label: 'Models',
+          icon: <IconDownload className="h-5 w-5 shrink-0" />,
+          view: 'models' as ViewMode
+        },
+        {
+          label: 'Gateway',
+          icon: <IconServer2 className="h-5 w-5 shrink-0" />,
+          view: 'gateway' as ViewMode
+        },
+        proItem('notifications')
+      )
+    }
+  ].filter((group) => group.items.length > 0)
+  const navigationItems = navigationGroups.flatMap((group) => group.items)
   const bottomNav: { label: string; icon: React.ReactNode; view: ViewMode; locked?: boolean }[] = [
     {
       label: 'Settings',
@@ -1009,6 +1015,7 @@ function AppContent() {
       <button
         key={item.view}
         onClick={() => goToView(item.view)}
+        aria-label={item.label}
         title={!sidebarOpen ? item.label : undefined}
         className={navRowClass(sidebarOpen, active)}
       >
@@ -1234,6 +1241,7 @@ function AppContent() {
                   (App Store + Google Play). Mirrors mobile's link back to desktop. */}
               <button
                 onClick={() => openExternal(OFF_GRID_MOBILE_URL)}
+                aria-label="Mobile app"
                 title={!sidebarOpen ? 'Get the mobile app' : undefined}
                 className={navRowClass(sidebarOpen)}
               >

@@ -1,7 +1,7 @@
 'use client'
 import { cn } from '@renderer/lib/utils'
 import React, { useState, createContext, useContext } from 'react'
-import { motion } from 'motion/react'
+import { motion, useReducedMotion } from 'motion/react'
 
 interface Links {
   label: string
@@ -81,6 +81,7 @@ export const DesktopSidebar = ({
   ...props
 }: React.ComponentProps<typeof motion.div>) => {
   const { open, animate } = useSidebar()
+  const reduceMotion = useReducedMotion()
   return (
     <>
       <motion.div
@@ -96,7 +97,9 @@ export const DesktopSidebar = ({
         animate={{
           width: animate ? (open ? '220px' : '60px') : '220px'
         }}
-        transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+        transition={reduceMotion ? { duration: 0 } : { duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+        data-state={open ? 'expanded' : 'collapsed'}
+        data-motion={reduceMotion ? 'reduced' : 'full'}
         {...props}
       >
         {children}

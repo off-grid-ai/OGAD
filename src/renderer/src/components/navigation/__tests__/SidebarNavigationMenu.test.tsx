@@ -7,6 +7,7 @@ import { SidebarNavigationMenu } from '../SidebarNavigationMenu'
 const groups = [
   {
     label: 'Discover',
+    icon: <span data-testid="discover-icon" />,
     items: [
       { label: 'Explore', view: 'explore' },
       { label: 'Search', view: 'search' }
@@ -14,6 +15,7 @@ const groups = [
   },
   {
     label: 'Work',
+    icon: <span data-testid="work-icon" />,
     items: [
       { label: 'Chat', view: 'chat' },
       { label: 'Tasks', view: 'tasks' }
@@ -28,9 +30,8 @@ const renderItem = (item: { label: string; view: string }): React.ReactElement =
 afterEach(cleanup)
 
 describe('SidebarNavigationMenu', () => {
-  // Every section starts open so the expanded sidebar shows exactly what the collapsed rail shows.
-  // The rail has no section headers and therefore always renders every item, so seeding only the
-  // active section made an icon you could hover in the rail vanish when the sidebar expanded.
+  // Every section starts open so both widths expose the same destinations before the user changes
+  // a section. Compact section headers keep that same state available without visible labels.
   it('opens every section by default so the rail and the expanded sidebar agree', () => {
     render(
       <SidebarNavigationMenu activeView="chat" expanded groups={groups} renderItem={renderItem} />
@@ -45,9 +46,9 @@ describe('SidebarNavigationMenu', () => {
     expect(screen.getByRole('button', { name: 'Explore' })).toBeTruthy()
   })
 
-  it('keeps other sections open and lets each section close independently', async () => {
+  it('keeps one section-open state when the sidebar width changes', async () => {
     const user = userEvent.setup()
-    render(
+    const view = render(
       <SidebarNavigationMenu activeView="chat" expanded groups={groups} renderItem={renderItem} />
     )
 
@@ -57,6 +58,35 @@ describe('SidebarNavigationMenu', () => {
       'false'
     )
     expect(screen.getByRole('button', { name: 'Work' }).getAttribute('aria-expanded')).toBe('true')
+    expect(screen.queryByRole('button', { name: 'Explore' })).toBeNull()
+    const expandedMenu = screen.getByLabelText('Menu sections')
+    const expandedWorkGroup = screen.getByRole('group', { name: 'Work' })
+    const menuSpacingClass = expandedMenu.className
+    const groupSpacingClass = expandedWorkGroup.className
+
+    view.rerender(
+      <SidebarNavigationMenu
+        activeView="chat"
+        expanded={false}
+        groups={groups}
+        renderItem={renderItem}
+      />
+    )
+    expect(screen.getByRole('button', { name: 'Discover' }).getAttribute('aria-expanded')).toBe(
+      'false'
+    )
+    expect(screen.queryByRole('button', { name: 'Explore' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Chat' })).toBeTruthy()
+    expect(screen.getByLabelText('Menu sections').className).toBe(menuSpacingClass)
+    expect(screen.getByRole('group', { name: 'Work' }).className).toBe(groupSpacingClass)
+
+    view.rerender(
+      <SidebarNavigationMenu activeView="chat" expanded groups={groups} renderItem={renderItem} />
+    )
+    expect(screen.getByRole('button', { name: 'Discover' }).getAttribute('aria-expanded')).toBe(
+      'false'
+    )
+    expect(screen.queryByRole('button', { name: 'Explore' })).toBeNull()
 
     await user.click(screen.getByRole('button', { name: 'Discover' }))
     expect(screen.getByRole('button', { name: 'Discover' }).getAttribute('aria-expanded')).toBe(
@@ -65,10 +95,14 @@ describe('SidebarNavigationMenu', () => {
     expect(screen.getByRole('button', { name: 'Work' }).getAttribute('aria-expanded')).toBe('true')
   })
 
-  it('opens the new section when navigation changes', () => {
+  it('keeps a user-closed section closed when its route becomes active at both widths', async () => {
+    const user = userEvent.setup()
     const view = render(
       <SidebarNavigationMenu activeView="chat" expanded groups={groups} renderItem={renderItem} />
     )
+
+    await user.click(screen.getByRole('button', { name: 'Discover' }))
+    expect(screen.queryByRole('button', { name: 'Explore' })).toBeNull()
 
     view.rerender(
       <SidebarNavigationMenu
@@ -79,10 +113,23 @@ describe('SidebarNavigationMenu', () => {
       />
     )
 
-    expect(screen.getByRole('button', { name: 'Discover' }).getAttribute('aria-expanded')).toBe(
-      'true'
-    )
+    const expandedHeader = screen.getByRole('button', { name: 'Discover, current: Explore' })
+    expect(expandedHeader.getAttribute('aria-expanded')).toBe('false')
+    expect(expandedHeader.textContent).toContain('Explore')
+    expect(screen.queryByRole('button', { name: 'Explore' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Work' }).getAttribute('aria-expanded')).toBe('true')
+
+    view.rerender(
+      <SidebarNavigationMenu
+        activeView="explore"
+        expanded={false}
+        groups={groups}
+        renderItem={renderItem}
+      />
+    )
+    const collapsedHeader = screen.getByRole('button', { name: 'Discover, current: Explore' })
+    expect(collapsedHeader.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByRole('button', { name: 'Explore' })).toBeNull()
   })
 
   it('shows the current screen in a closed section header', async () => {
@@ -98,7 +145,7 @@ describe('SidebarNavigationMenu', () => {
     expect(closedWork.textContent).toContain('Chat')
   })
 
-  it('preserves the named groups in the compact icon rail', () => {
+  it('renders labelled icon buttons for every section in the compact rail', () => {
     render(
       <SidebarNavigationMenu
         activeView="chat"
@@ -108,11 +155,36 @@ describe('SidebarNavigationMenu', () => {
       />
     )
 
+    const discover = screen.getByRole('button', { name: 'Discover' })
+    const work = screen.getByRole('button', { name: 'Work' })
+    expect(discover.title).toBe('Discover')
+    expect(work.title).toBe('Work')
+    expect(screen.getByTestId('discover-icon')).toBeTruthy()
+    expect(screen.getByTestId('work-icon')).toBeTruthy()
     expect(
       within(screen.getByRole('group', { name: 'Discover' })).getAllByRole('button')
-    ).toHaveLength(2)
+    ).toHaveLength(3)
     expect(within(screen.getByRole('group', { name: 'Work' })).getAllByRole('button')).toHaveLength(
-      2
+      3
     )
+  })
+
+  it('toggles a compact section by keyboard and keeps focus on its header', async () => {
+    const user = userEvent.setup()
+    render(
+      <SidebarNavigationMenu
+        activeView="chat"
+        expanded={false}
+        groups={groups}
+        renderItem={renderItem}
+      />
+    )
+
+    const discover = screen.getByRole('button', { name: 'Discover' })
+    discover.focus()
+    await user.keyboard('{Enter}')
+    expect(discover.getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(discover)
+    expect(screen.queryByRole('button', { name: 'Explore' })).toBeNull()
   })
 })

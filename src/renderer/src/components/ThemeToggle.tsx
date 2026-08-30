@@ -22,6 +22,7 @@ export function NavThemeToggle({ expanded }: { expanded: boolean }): React.React
   return (
     <button
       onClick={cycle}
+      aria-label={`Theme: ${LABEL[mode]}`}
       title={!expanded ? `Theme: ${LABEL[mode]}` : undefined}
       className={cn(
         'group/nav relative flex items-center gap-3 rounded-lg py-2 text-sm transition-colors',

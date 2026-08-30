@@ -8,7 +8,7 @@
 // reached through real clicks and KeyboardEvents, and assertions stay on the
 // rendered view and selected project.
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { registerHook } from '../bootstrap/hookRegistry'
@@ -20,6 +20,7 @@ import {
 import { TooltipProvider } from '../components/ui/tooltip'
 import { closeTaskWorkspace, openTaskSidePanel } from '../lib/task-side-panel'
 import { resetTaskSessionStoreForTests } from '../lib/task-session-store'
+import { NOTIFICATION_STORAGE_KEY } from '../hooks/notification-state'
 import { registerSlot, SLOTS, clearRegisteredSlots } from '../bootstrap/slotRegistry'
 import { WatchedBrowserPane } from '../../../../pro/renderer/components/browser/WatchedBrowserPane'
 import {
@@ -193,10 +194,29 @@ describe('<App/> desktop navigation integration', () => {
     const navigation = screen.getByRole('navigation', { name: 'Primary navigation' })
     expect(navigation.getAttribute('aria-expanded')).toBe('false')
     expect(screen.queryByText('Menu')).toBeNull()
+    const menu = navigation.querySelector<HTMLElement>('[aria-label="Menu sections"]')!
+    const buttonNames = (): string[] =>
+      within(menu)
+        .getAllByRole('button')
+        .map((button) => button.getAttribute('aria-label') ?? button.textContent?.trim() ?? '')
+    const collapsedDestinations = buttonNames()
+    expect(collapsedDestinations).toEqual(
+      expect.arrayContaining(['Discover', 'Work', 'Private Data', 'System', 'Projects'])
+    )
+    expect(new Set(collapsedDestinations).size).toBe(collapsedDestinations.length)
+    const sectionIndexes = ['Discover', 'Work', 'Private Data', 'System'].map((label) =>
+      collapsedDestinations.indexOf(label)
+    )
+    expect(sectionIndexes).toEqual([...sectionIndexes].sort((a, b) => a - b))
+    expect(screen.getByRole('button', { name: /Model server:/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Theme: System' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Settings' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Mobile app' })).toBeTruthy()
 
     await user.hover(navigation)
     expect(await screen.findByText('Menu')).toBeTruthy()
     expect(navigation.getAttribute('aria-expanded')).toBe('true')
+    expect(buttonNames()).toEqual(collapsedDestinations)
 
     fireEvent.click(screen.getByRole('button', { name: 'Integrations' }))
     await waitFor(() => expect(window.location.pathname).toBe('/connectors'))
@@ -205,6 +225,62 @@ describe('<App/> desktop navigation integration', () => {
     await user.unhover(navigation)
     await waitFor(() => expect(navigation.getAttribute('aria-expanded')).toBe('false'))
     expect(screen.queryByText('Menu')).toBeNull()
+  })
+
+  it('keeps a section toggle and destination order through hover collapse and expansion', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'Projects' })
+    const navigation = screen.getByRole('navigation', { name: 'Primary navigation' })
+    await user.hover(navigation)
+    const discover = screen.getByRole('button', { name: 'Discover' })
+    await user.click(discover)
+    expect(discover.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByRole('button', { name: 'Explore' })).toBeNull()
+
+    await user.unhover(navigation)
+    await waitFor(() => expect(navigation.getAttribute('aria-expanded')).toBe('false'))
+    expect(screen.getByRole('button', { name: 'Discover' }).getAttribute('aria-expanded')).toBe(
+      'false'
+    )
+    expect(screen.queryByRole('button', { name: 'Explore' })).toBeNull()
+
+    await user.hover(navigation)
+    expect(screen.getByRole('button', { name: 'Discover' }).getAttribute('aria-expanded')).toBe(
+      'false'
+    )
+    expect(screen.queryByRole('button', { name: 'Explore' })).toBeNull()
+  })
+
+  it('keeps the notification badge and active route visible at both sidebar widths', async () => {
+    const storage = installAppStorage()
+    storage.setItem('onboarding_completed', 'true')
+    storage.setItem(
+      NOTIFICATION_STORAGE_KEY,
+      JSON.stringify(
+        Array.from({ length: 10 }, (_, index) => ({
+          id: `notice-${index}`,
+          type: 'info',
+          title: `Notice ${index}`,
+          message: 'Stored on this device.',
+          timestamp: new Date(1_700_000_000_000 + index).toISOString(),
+          read: false
+        }))
+      )
+    )
+    const user = userEvent.setup()
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'Projects' })
+    const navigation = screen.getByRole('navigation', { name: 'Primary navigation' })
+    const projects = screen.getByRole('button', { name: 'Projects' })
+    expect(projects.className).toContain('text-emerald-400')
+    expect(screen.getByLabelText('10 unread notifications').textContent).toBe('9+')
+
+    await user.hover(navigation)
+    expect(screen.getByRole('button', { name: 'Projects' }).className).toContain('text-emerald-400')
+    expect(screen.getByLabelText('10 unread notifications').textContent).toBe('9+')
   })
 
   it('expands for keyboard focus and collapses when focus leaves the navigation', async () => {
