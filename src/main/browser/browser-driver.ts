@@ -1,6 +1,6 @@
 /**
- * The browser rail's hands: snapshot / navigate / click / type / key over raw
- * CDP. The transport is a seam (CdpTransport) so the driver's decisions - what
+ * The browser rail's visible fallback hands: navigate / click / type / key over
+ * raw CDP. Playwright MCP owns the normal semantic path. The transport is a seam so the driver's decisions - what
  * gets dispatched, what is refused - are testable against a fake; Electron's
  * webContents.debugger attach lives in the pane host, not here.
  *
@@ -10,7 +10,6 @@
  * human takes over - but credentials never flow through the agent.
  */
 import { randomUUID } from 'node:crypto'
-import { pageScriptSource, type PageElement, type PageSnapshot } from './page-script'
 import {
   BROWSER_POINTER_VISUAL,
   browserPointerBackgroundImage
@@ -288,13 +287,16 @@ export class BrowserDriver {
         marker.style.cssText = 'position:fixed;left:0;top:0;width:14px;height:14px;margin:-7px 0 0 -7px;border:2px solid ${BROWSER_POINTER_VISUAL.action};border-radius:9999px;pointer-events:none;z-index:2147483646;box-sizing:border-box;box-shadow:0 0 0 2px rgba(255,255,255,.9),0 0 7px ${BROWSER_POINTER_VISUAL.glow};';
       }
       const mount = () => {
-        if (!cursor.isConnected) (document.body || document.documentElement).appendChild(cursor);
-        if (marker && !marker.isConnected) (document.body || document.documentElement).appendChild(marker);
+        const root = document.body || document.documentElement;
+        if (!root) return;
+        if (!cursor.isConnected) root.appendChild(cursor);
+        if (marker && !marker.isConnected) root.appendChild(marker);
       };
       mount();
-      if (!window[observerKey]) {
+      const observerRoot = document.body || document.documentElement;
+      if (observerRoot && !window[observerKey]) {
         const observer = new MutationObserver(mount);
-        observer.observe(document.body || document.documentElement, { childList: true });
+        observer.observe(observerRoot, { childList: true });
         window[observerKey] = observer;
       }
       cursor.style.transition = reduceMotion || ${transitionMs} <= 0
@@ -339,7 +341,10 @@ export class BrowserDriver {
     })
     const thrown = response?.exceptionDetails
     if (thrown) {
-      console.warn('[browser] pointer injection threw', thrown.exception?.description ?? thrown.text)
+      console.warn(
+        '[browser] pointer injection threw',
+        thrown.exception?.description ?? thrown.text
+      )
     }
     return response?.result?.value === true
   }
@@ -449,22 +454,26 @@ export class BrowserDriver {
     throw new Error('The browser page did not finish loading after reload.')
   }
 
-  /** The indexed elements + text the agent reasons over, straight from the page. */
-  async snapshot(): Promise<PageSnapshot> {
-    const reply = await this.send<{ result?: { value?: string } }>('Runtime.evaluate', {
-      expression: pageScriptSource(),
-      returnByValue: true
-    })
-    const raw = reply.result?.value
-    if (typeof raw !== 'string') {
-      throw new Error('page snapshot returned no value')
-    }
-    const snapshot = JSON.parse(raw) as PageSnapshot
-    // A document navigation replaces the injected DOM. Recreate the cursor on
-    // every observation so Web Use always has a visible agent pointer, even
-    // before its first click on a new page.
+  /** Move the watched-page pointer to a Playwright accessibility reference.
+   * Playwright boxes and CDP input share viewport CSS coordinates, so this is
+   * presentation only: Playwright remains the single semantic actuator. */
+  async projectSemanticTarget(ref: string, snapshot: string): Promise<boolean> {
+    const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const line = snapshot
+      .split('\n')
+      .find((candidate) => new RegExp(`\\[ref=${escaped}\\]`).test(candidate))
+    const box = line?.match(
+      /\[box=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),(\d+(?:\.\d+)?),(\d+(?:\.\d+)?)\]/
+    )
+    if (!box) return false
+    const x = Number(box[1])
+    const y = Number(box[2])
+    const width = Number(box[3])
+    const height = Number(box[4])
+    if (![x, y, width, height].every(Number.isFinite)) return false
     await this.ensurePointer(true)
-    return snapshot
+    await this.movePointerTo(x + width / 2, y + height / 2)
+    return true
   }
 
   /** Navigates and resolves on the load event (or the timeout - slow pages
@@ -520,10 +529,6 @@ export class BrowserDriver {
       reason: 'recoverable',
       detail: 'The browser did not finish moving through its history.'
     }
-  }
-
-  async click(el: PageElement): Promise<DriverResult> {
-    return this.clickPoint(el.cx, el.cy, 'left', 1)
   }
 
   private async clickPoint(
@@ -584,42 +589,6 @@ export class BrowserDriver {
     })
     await this.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA' })
     await this.send('Input.insertText', { text })
-    return { ok: true }
-  }
-
-  /** Click-to-focus (when given an element), then insert. A null element types
-   *  into whatever is already focused (a search box the agent just clicked).
-   *  Identity fields refuse - that is the takeover boundary, enforced here so no
-   *  prompt injection can talk the agent past it. */
-  async type(el: PageElement | null, text: string): Promise<DriverResult> {
-    if (el?.identity) {
-      return {
-        ok: false,
-        reason: 'takeover',
-        detail: `"${el.name || el.tag}" is a credential field - the user signs in directly in the watched pane`
-      }
-    }
-    if (el) {
-      await this.click(el)
-    }
-    return this.typeFocused(text)
-  }
-
-  /** A named key (Enter, Escape, Tab) to the focused element. */
-  async pressKey(key: string): Promise<DriverResult> {
-    const spec = namedBrowserKey(key)
-    if (!spec) {
-      return { ok: false, reason: 'error', detail: `unsupported key "${key}"` }
-    }
-    for (const type of ['rawKeyDown', 'keyUp'] as const) {
-      await this.send('Input.dispatchKeyEvent', {
-        type,
-        key: spec.key,
-        code: spec.code,
-        windowsVirtualKeyCode: spec.keyCode,
-        nativeVirtualKeyCode: spec.keyCode
-      })
-    }
     return { ok: true }
   }
 

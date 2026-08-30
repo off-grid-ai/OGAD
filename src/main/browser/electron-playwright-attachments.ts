@@ -18,6 +18,10 @@ export interface AttachedPage extends RelayPage {
   childSessions: Set<string>
 }
 
+// Playwright requires every attached page target to name a browser context.
+// All pages exposed by this relay belong to one journey-scoped default context.
+const JOURNEY_BROWSER_CONTEXT_ID = 'offgrid-journey-context'
+
 /** Own debugger attachment, target identity, and native listener cleanup. */
 export class ElectronPlaywrightAttachments {
   private readonly attached = new Map<number, AttachedPage & { release: () => void }>()
@@ -143,6 +147,7 @@ export class ElectronPlaywrightAttachments {
       type: 'page',
       title: page.contents.getTitle(),
       url: page.contents.getURL() || 'about:blank',
+      browserContextId: JOURNEY_BROWSER_CONTEXT_ID,
       attached: this.attached.has(page.id),
       canAccessOpener: false
     }

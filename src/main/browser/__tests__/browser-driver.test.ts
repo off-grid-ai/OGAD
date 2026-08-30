@@ -13,7 +13,6 @@ import {
   browserShortcutCommand,
   type CdpTransport
 } from '../browser-driver'
-import type { PageElement } from '../page-script'
 import {
   BROWSER_POINTER_VISUAL,
   browserPointerBackgroundImage
@@ -45,19 +44,6 @@ const makeTransport = (
   }
 }
 
-const el = (over: Partial<PageElement> = {}): PageElement => ({
-  index: 1,
-  tag: 'input',
-  role: 'textbox',
-  name: 'Booking reference',
-  value: '',
-  cx: 200,
-  cy: 80,
-  identity: false,
-  href: '',
-  ...over
-})
-
 describe('snapshot', () => {
   it('parks and publishes the semantic pointer before the first browser action', async () => {
     const t = makeTransport()
@@ -82,28 +68,11 @@ describe('snapshot', () => {
     expect(expression).toContain(`drop-shadow(0 0 5px ${BROWSER_POINTER_VISUAL.glow})`)
     expect(expression).toContain("const observerKey = '__offgrid_agent_pointer_observer__'")
     expect(expression).toContain('new MutationObserver(mount)')
-    expect(expression).toContain('(document.body || document.documentElement).appendChild(cursor)')
+    expect(expression).toContain('const root = document.body || document.documentElement')
+    expect(expression).toContain('if (!root) return')
+    expect(expression).toContain('root.appendChild(cursor)')
     expect(expression).not.toContain('clip-path:polygon')
     expect(pointer).toEqual([{ phase: 'released', x: 32, y: 32 }])
-  })
-
-  it('evaluates the injected collector and parses its JSON', async () => {
-    const { cdp, sent } = makeTransport(() => ({
-      result: {
-        value: JSON.stringify({ url: 'https://x.test', title: 't', elements: [], text: '' })
-      }
-    }))
-    const snapshot = await new BrowserDriver(cdp).snapshot()
-    expect(snapshot.url).toBe('https://x.test')
-    expect(sent[0]?.method).toBe('Runtime.evaluate')
-    expect(String(sent[0]?.params?.expression)).toContain('collectInteractiveElements')
-    expect(String(sent[1]?.params?.expression)).toContain('__offgrid_agent_pointer__')
-    expect(String(sent[1]?.params?.expression)).not.toContain('cursor?.remove')
-  })
-
-  it('throws when the page returns nothing rather than inventing an empty page', async () => {
-    const { cdp } = makeTransport(() => ({ result: {} }))
-    await expect(new BrowserDriver(cdp).snapshot()).rejects.toThrow(/no value/)
   })
 
   it('uses a collision-resistant property for each driver document identity', async () => {
@@ -344,7 +313,7 @@ describe('click and type', () => {
     const pointer: Array<{ phase: string; x: number; y: number }> = []
     await new BrowserDriver(t.cdp, undefined, {
       onPointer: (event) => pointer.push(event)
-    }).click(el())
+    }).actuate({ type: 'click', point: { x: 200, y: 80 } })
     const mouseEvents = t.sent.filter((entry) => entry.method === 'Input.dispatchMouseEvent')
     expect(mouseEvents.length).toBeGreaterThan(3)
     expect(mouseEvents.slice(-3).map((event) => event.params?.type)).toEqual([
@@ -367,33 +336,6 @@ describe('click and type', () => {
       { phase: 'pressed', x: 200, y: 80 },
       { phase: 'released', x: 200, y: 80 }
     ])
-  })
-
-  it('type focuses, selects the prefilled value, then inserts the text', async () => {
-    const t = makeTransport((method) =>
-      method === 'Runtime.evaluate' ? { result: { value: false } } : {}
-    )
-    await new BrowserDriver(t.cdp).type(el(), 'KX93F')
-    const methods = t.sent.map((s) => s.method).filter((method) => method !== 'Runtime.evaluate')
-    expect(methods.slice(-5)).toEqual([
-      'Input.dispatchMouseEvent',
-      'Input.dispatchMouseEvent',
-      'Input.dispatchKeyEvent',
-      'Input.dispatchKeyEvent',
-      'Input.insertText'
-    ])
-    expect(t.sent.at(-1)?.params).toEqual({ text: 'KX93F' })
-  })
-
-  it('REFUSES to type into an identity field - the takeover boundary is the driver, not the prompt', async () => {
-    const t = makeTransport()
-    const result = await new BrowserDriver(t.cdp).type(
-      el({ identity: true, name: 'Password', tag: 'input' }),
-      'hunter2'
-    )
-    expect(result).toMatchObject({ ok: false, reason: 'takeover' })
-    // Nothing was dispatched: no focus click, no keystrokes, no credential text.
-    expect(t.sent).toEqual([])
   })
 
   it('REFUSES visual typing when the focused field is private', async () => {
@@ -419,36 +361,6 @@ describe('click and type', () => {
     expect(t.sent.find((entry) => entry.method === 'Input.insertText')?.params).toEqual({
       text: 'Pune'
     })
-  })
-
-  it('clicking an identity field is allowed - focusing the login form is how the human takes over', async () => {
-    const t = makeTransport()
-    const result = await new BrowserDriver(t.cdp).click(el({ identity: true }))
-    expect(result).toEqual({ ok: true })
-    const mouseEvents = t.sent.filter((entry) => entry.method === 'Input.dispatchMouseEvent')
-    expect(mouseEvents.length).toBeGreaterThan(3)
-    expect(mouseEvents.slice(-2).map((event) => event.params?.type)).toEqual([
-      'mousePressed',
-      'mouseReleased'
-    ])
-  })
-})
-
-describe('pressKey', () => {
-  it('dispatches a known key with its virtual key code', async () => {
-    const t = makeTransport()
-    expect(await new BrowserDriver(t.cdp).pressKey('Enter')).toEqual({ ok: true })
-    expect(t.sent.map((s) => [s.params?.type, s.params?.windowsVirtualKeyCode])).toEqual([
-      ['rawKeyDown', 13],
-      ['keyUp', 13]
-    ])
-  })
-
-  it('refuses an unknown key instead of guessing a code', async () => {
-    const t = makeTransport()
-    const result = await new BrowserDriver(t.cdp).pressKey('F13')
-    expect(result).toMatchObject({ ok: false, reason: 'error' })
-    expect(t.sent).toEqual([])
   })
 })
 
@@ -492,7 +404,7 @@ describe('CDP command timeout (a wedged transport must not hang the rail)', () =
 
   it('rejects snapshot after the command timeout instead of hanging forever', async () => {
     const driver = new BrowserDriver(deadTransport, 20)
-    await expect(driver.snapshot()).rejects.toThrow(/Runtime\.evaluate timed out/)
+    await expect(driver.ensurePointer()).rejects.toThrow(/Runtime\.evaluate timed out/)
   })
 
   it('rejects navigate after the command timeout instead of hanging forever', async () => {

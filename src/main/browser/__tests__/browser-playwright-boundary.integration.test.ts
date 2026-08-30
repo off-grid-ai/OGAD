@@ -96,7 +96,8 @@ describe('journey-scoped Electron Playwright relay', () => {
       targetInfos: [
         expect.objectContaining({
           targetId: 'offgrid-target-7',
-          url: 'https://example.test/account'
+          url: 'https://example.test/account',
+          browserContextId: 'offgrid-journey-context'
         })
       ]
     })
