@@ -1540,3 +1540,72 @@ the public MCP client/server integration passes 3/3; remote-task DB journeys pas
 Electron build passes. Keep this entry open only for the final two-Desktop physical journey on the
 release build: default routing, exact named routing, permission off, live frame, all four controls,
 offline recovery, and terminal cleanup.
+
+---
+
+## Release 107 exact-operation Sync needs final Desktop owner and restart proof
+
+**Status:** Code and Shared build evidence exist; Desktop Built and Live verified gates are open.
+Filed 2026-08-29.
+
+Shared now persists durable per-entity and per-device watermarks. It also uses exact operation IDs
+for delivery acknowledgement, deduplication, and applied-winner checkpoints. A watermark is only an
+anti-entropy position. It is not proof that one operation arrived, because destination-gated delivery
+can leave a valid hole below that position.
+
+Desktop loads the full operation log through `loadOps()`. No Desktop production caller uses the
+Shared compaction helpers. The Shared focused checkpoint set passed 29/29, and the Shared Sync
+typecheck and package build passed.
+
+Keep this gap open until these gates pass on the final tree:
+
+1. The exact winning operation is checkpointed only after each external file or meeting owner has
+   completed its durable write.
+2. Missing bytes, missing dependencies, and failed puts remain retryable.
+3. The Desktop exact-operation external-owner tests pass.
+4. One final Desktop production build passes after the last related change.
+5. Two clean Desktop restarts show no runtime symbol mismatch, no per-record
+   `record_already_present` flood, no active compaction, and no 550-record loop.
+6. One Desktop change reaches the iPhone once, and one iPhone change reaches Desktop once.
+
+Two earlier clean restarts are retained evidence. They do not close this gap because the related
+exact-operation code changed later.
+
+---
+
+## Release 107 Computer Use PiP needs final installed visual proof
+
+**Status:** Code and Wired gates pass; Built and Live verified gates are open. Filed 2026-08-29.
+
+Release 107 uses the task pane as the Computer Use interface. The hidden native window exists only
+to provide the exact ScreenCaptureKit exclusion ID. Its creation path does not show the PiP. The task
+pane has no Open PiP action, and the in-app floating task view selects only Web Use.
+
+Keep this gap open until the final Desktop build passes and one installed macOS Computer Use journey
+confirms that no Computer Use PiP appears before, during, or after the task. Also confirm that the
+task pane still shows the live frame, current step, controls, guidance, and terminal replay.
+
+---
+
+## Release 107 QR panel and sidebar parity need final Desktop proof
+
+**Status:** Shared QR Code and Built gates pass. Desktop code is still being finalized. Desktop Built
+and Live verified gates are open. Filed 2026-08-30.
+
+The Shared versioned QR codec and private-route projector are complete. The Sync ESM, CJS, and DTS
+builds pass. Focused QR, real-handshake, and runtime checks pass 21/21. The final QR suite passes
+11/11. Sync typecheck, focused ESLint, and diff check pass.
+
+The Desktop end state is:
+
+1. Show QR Code opens the existing Devices side panel. The QR code is hidden before that action.
+2. Generate new code and Show QR Code use labeled icons. The QR code has the Off Grid AI logo at its
+   center and keeps a copyable-code fallback.
+3. The payload identifies this Desktop and includes only private routes that this host can prove.
+4. One sidebar model owns Discover, Work, Private Data, System, and the footer destinations.
+5. Collapsed and expanded widths keep the same section state, item order, active route, notification
+   badge, and footer actions. Hover and keyboard focus change width without changing the item set.
+
+Keep this gap open until focused Desktop tests pass, the final production build passes, and an
+installed macOS check proves the QR panel and both sidebar widths. The QR check must use an iPhone to
+scan and pair the exact Desktop. Android is not required to close the Desktop visual proof.

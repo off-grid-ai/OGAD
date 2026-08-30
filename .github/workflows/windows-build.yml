@@ -24,7 +24,7 @@ on:
         # off-grid-ai/shared carries @offgrid/models|sync|use. This core branch depends
         # on shared feature work that is NOT on shared main, and the auto match below is
         # by BRANCH NAME - which differs across repos here - so it would fall back to main
-        # and miss effectId/undo/computer_task. Pin it on dispatch (e.g. feat/use-approval-tiers).
+        # and miss effectId/undo/computer_use. Pin it on dispatch (e.g. feat/use-approval-tiers).
         description: 'off-grid-ai/shared ref for @offgrid/* (empty = match this branch name, else shared main)'
         type: string
         required: false

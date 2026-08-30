@@ -33,7 +33,7 @@ real machine. Reuse the browser rail's loop - do not fork a parallel one.
   drive `runElementTask` with the local model + the shared nut.js actuation. Reuses the
   vision guard (Esc) + controller (overlay Stop). Excluded from coverage like the other
   rail hosts. Target-picker: `ax-target.ts` (+ 7 tests).
-- [x] **T1e. Engine wiring + the router.** `computer_task` tries the accessibility rail
+- [x] **T1e. Engine wiring + the router.** `computer_use` tries the accessibility rail
   FIRST and falls to vision when the AX tree is too thin (`ax-router.axRailViable`, 7
   tests) or the goal names no running app. The tiering is a pure, tested function
   (`ax-rail.ts`, 5 tests); `use-runtime` wires the live hosts into the 'vision' branch.

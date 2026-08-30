@@ -47,7 +47,7 @@ never letting the agent cross an identity or payment boundary on its own.
   `rail-injection-stance.test.ts` (the shared prompt contract), and
   `page-script.test.ts` (the collector never includes a credential value).
 
-### Vision rail (computer_task) - supervised tier
+### Vision rail (computer_use) - supervised tier
 
 - **Threat:** highest. The model drives real synthetic input on the live
   desktop from a screenshot, and the screenshot is untrusted (any app in view
@@ -63,7 +63,7 @@ never letting the agent cross an identity or payment boundary on its own.
      is untrusted content.
   3. **Capability-gated OFF until it is real.** Actuation needs a native addon +
      Accessibility/Screen-Recording entitlements; until those land the rail
-     refuses cleanly and `computer_task` is not offered to the model. The tier
+     refuses cleanly and `computer_use` is not offered to the model. The tier
      ships labeled or not at all.
 - **Tested:** `vision-guard.test.ts` (the kill switch is terminal and outranks a
   pause; the budget halts), `vision-agent.test.ts` (re-check-before-dispatch: a

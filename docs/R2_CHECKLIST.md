@@ -52,11 +52,11 @@ commit, port before writing, brand copy rules on every UI string.
 The whole spine landed, screen-free and tested (parser, guard, loop, engine
 adapter), wired into the engine. What remains is the native actuation dep +
 entitlements + a real-machine pass - a packaging decision, not code. Until it
-lands the rail refuses cleanly and computer_task is NOT offered to the model,
+lands the rail refuses cleanly and computer_use is NOT offered to the model,
 so the tier is honestly gated (see the watch-list).
 
 - [x] **D1a. The UI-TARS action parser** (ported from @ui-tars/sdk, closed to the
-  shipped verbs; 0-1000 -> pixel denormalization, fail-closed). `computer_task`
+  shipped verbs; 0-1000 -> pixel denormalization, fail-closed). `computer_use`
   added to the shared ACTION_TYPES enum.
 - [x] **D1b. UI-TARS-1.5-7B catalog entry** in **OGAD's own `packages/models`**
   (OGAD ships `file:./packages/models`, NOT the shared copy - the first attempt
@@ -73,7 +73,7 @@ so the tier is honestly gated (see the watch-list).
 - [x] **D2a. The operator spine**: the guard (kill switch terminal + outranks all,
   pause-on-user-input, step budget), the supervised loop (screenshot -> ground ->
   actuate, handoff + resume, re-check-before-dispatch), and the engine adapter
-  (computer_task on the vision rail, no-retry). The host shell captures via
+  (computer_use on the vision rail, no-retry). The host shell captures via
   desktopCapturer, grounds via the vision LLM, Esc kill switch wired.
 - [x] **D2b-UX. The supervised surface**: the overlay (live step feed, visible
   Stop + Pause, the takeover promise on-screen) + the controller routing
@@ -83,12 +83,12 @@ so the tier is honestly gated (see the watch-list).
   @nut-tree-fork/nut-js (optionalDependency; CGEvent mac / SendInput win),
   dynamic-required so an absent/unbuilt addon degrades to a clean refusal. The
   macOS Accessibility grant is checked at run start (prompts once, stops with a
-  clear message if missing). `computer_task` exposed as an engine-only tool. The
+  clear message if missing). `computer_use` exposed as an engine-only tool. The
   pure hotkey map (vision-keys) is tested; the actuation ITSELF still needs a
   real machine to VERIFY (a display + the Accessibility grant) - the code is on
   the branch for local testing, not proven headlessly.
 - [ ] **D3. file_share recipe** (the WhatsApp share-a-file flow) as a labeled
-  showcase - a nicety on top of the general computer_task, once the rail is
+  showcase - a nicety on top of the general computer_use, once the rail is
   verified on a real machine.
 
 ## E. Safety pass + the release
@@ -123,10 +123,10 @@ so the tier is honestly gated (see the watch-list).
   in isolation and on CI; retry a blocked coverage push rather than chasing them.
 - Vision rail actuation is capability-gated OFF (D2b): the spine is wired and
   tested, but the native input addon + Accessibility/Screen-Recording
-  entitlements are unshipped, so computer_task is not offered to the model and
+  entitlements are unshipped, so computer_use is not offered to the model and
   the host refuses cleanly. The E2 checkpoint's "supervised vision action from
   chat" needs D2b first - on both platforms, with a human on a real machine.
-- Shared `@offgrid/use` change (computer_task type) rides shared branch
+- Shared `@offgrid/use` change (computer_use type) rides shared branch
   feat/r2-full-rails (mirrors the OGAD branch name so CI's matching-branch
   checkout finds it) and feat/use-approval-tiers; both need merging to shared
   main with the OGAD PR.
