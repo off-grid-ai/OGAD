@@ -1609,3 +1609,32 @@ The Desktop end state is:
 Keep this gap open until focused Desktop tests pass, the final production build passes, and an
 installed macOS check proves the QR panel and both sidebar widths. The QR check must use an iPhone to
 scan and pair the exact Desktop. Android is not required to close the Desktop visual proof.
+
+---
+
+## PR #84 Dependency Cruiser reported a Playwright task cycle
+
+**Status:** resolved by the type-contract split below on 2026-08-30; final build and live verification
+are pending.
+
+Dependency Cruiser failed on this import path:
+
+```text
+browser-playwright-task-support.ts
+  -> browser-playwright-task.ts
+  -> browser-playwright-task-support.ts
+```
+
+The support module imported task input and result types from the task implementation. The task
+implementation imported the support functions. `browser-playwright-task-contract.ts` now owns the
+task input, result, and semantic observation contracts. The task implementation keeps type re-exports
+for existing consumers. The support and semantic evidence modules import the type-only contract
+directly. Runtime behavior did not change.
+
+Local evidence on commit `bcb86a09675cca8a60da68ff2afb571510454b9f` plus this directed fix:
+
+1. Focused Dependency Cruiser: 107 modules and 206 dependencies, 0 violations.
+2. Full Dependency Cruiser: 1,011 modules and 2,808 dependencies, 0 errors. The two existing orphan
+   warnings remain for `computer-use-frame-pointer.ts` and `MessageNudge.tsx`.
+3. Node and web TypeScript checks: pass.
+4. Web Use lifecycle and semantic evidence tests: 2 files, 7 tests, all pass.

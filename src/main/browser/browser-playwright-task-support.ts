@@ -4,7 +4,7 @@ import type { PlaywrightToolResult } from './playwright-mcp-session'
 import type {
   BrowserPlaywrightTaskInput,
   BrowserPlaywrightTaskResult
-} from './browser-playwright-task'
+} from './browser-playwright-task-contract'
 
 export function combinedSignal(parent: AbortSignal | undefined, lease: AbortSignal): AbortSignal {
   return parent ? AbortSignal.any([parent, lease]) : lease

@@ -1,6 +1,4 @@
-import type { TaskExecutionPlan } from '../../shared/task-execution-plan'
-import type { BrowserDriver } from './browser-driver'
-import type { PlaywrightMcpSession, PlaywrightToolResult } from './playwright-mcp-session'
+import type { PlaywrightToolResult } from './playwright-mcp-session'
 import {
   completionEvidenceMatches,
   decideBrowserSemanticAction,
@@ -11,7 +9,11 @@ import {
   isPrivateSemanticTarget,
   projectPlaywrightPointer
 } from './browser-playwright-actions'
-import type { VisionGuard } from '../vision/vision-guard'
+import type {
+  BrowserPlaywrightTaskInput,
+  BrowserPlaywrightTaskResult,
+  BrowserSemanticObservation
+} from './browser-playwright-task-contract'
 import {
   actionLabel,
   combinedSignal,
@@ -29,34 +31,11 @@ import {
 const MAX_STEPS = 24
 const MAX_NO_CHANGE = 2
 
-export interface BrowserPlaywrightTaskResult {
-  ok: boolean
-  fallback: boolean
-  summary: string
-  handoffs: number
-}
-
-export interface BrowserPlaywrightTaskInput {
-  goal: string
-  plan: TaskExecutionPlan
-  session: PlaywrightMcpSession
-  guard: VisionGuard
-  activeDriver: () => BrowserDriver
-  activeUrl: () => string
-  waitForUser: (why: string, signal?: AbortSignal) => Promise<void>
-  takeGuidance: () => readonly string[]
-  onStep: (note: string) => void
-  onPhase: (phaseId: string) => void
-  onProgress: (step: number, phase: 'observing' | 'thinking' | 'acting', action: string) => void
-  onObservation?: (observation: BrowserSemanticObservation) => Promise<void>
-  signal?: AbortSignal
-}
-
-export interface BrowserSemanticObservation {
-  step: number
-  phase: 'observing' | 'checking' | 'waiting' | 'complete'
-  summary: string
-}
+export type {
+  BrowserPlaywrightTaskInput,
+  BrowserPlaywrightTaskResult,
+  BrowserSemanticObservation
+} from './browser-playwright-task-contract'
 
 interface SemanticLoopState {
   observation: PlaywrightToolResult
