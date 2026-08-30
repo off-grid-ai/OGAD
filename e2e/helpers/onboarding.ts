@@ -20,6 +20,15 @@ import { expect, type Page } from '@playwright/test'
  */
 const ONBOARDING_CTA = /^(Continue|Start using Off Grid AI)/i
 
+const dismissOptionalSetupNudge = async (page: Page): Promise<void> => {
+  const dismiss = page.getByRole('button', { name: 'Dismiss', exact: true })
+  const visible = await dismiss
+    .waitFor({ state: 'visible', timeout: 5_000 })
+    .then(() => true)
+    .catch(() => false)
+  if (visible) await dismiss.click()
+}
+
 export const completeOnboarding = async (page: Page, maxSteps = 10): Promise<void> => {
   const cta = page.getByRole('button', { name: ONBOARDING_CTA }).first()
   // An existing/seeded profile may skip onboarding entirely — that is not a failure.
@@ -27,13 +36,19 @@ export const completeOnboarding = async (page: Page, maxSteps = 10): Promise<voi
     .waitFor({ state: 'visible', timeout: 10_000 })
     .then(() => true)
     .catch(() => false)
-  if (!onOnboarding) return
-
-  for (let step = 0; step < maxSteps; step += 1) {
-    if (!(await cta.isVisible().catch(() => false))) break
-    await cta.click().catch(() => {})
-    await page.waitForTimeout(350)
+  if (onOnboarding) {
+    for (let step = 0; step < maxSteps; step += 1) {
+      if (!(await cta.isVisible().catch(() => false))) break
+      await cta.click().catch(() => {})
+      await page.waitForTimeout(350)
+    }
+    // Reaching the shell is the point of this helper — assert it rather than hoping.
+    await expect(cta).toBeHidden()
   }
-  // Reaching the shell is the point of this helper — assert it rather than hoping.
-  await expect(cta).toBeHidden()
+
+  // Most journeys test the app shell, not first-model setup. A fresh profile has no
+  // model, so PermissionGate shows its non-blocking setup nudge over that shell. Dismiss
+  // it through the real user control once here. The dedicated onboarding journey keeps
+  // owning model-setup coverage without every other spec carrying this precondition.
+  await dismissOptionalSetupNudge(page)
 }

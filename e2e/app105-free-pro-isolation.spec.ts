@@ -92,9 +92,10 @@ test.beforeAll(async () => {
   await page.waitForLoadState('domcontentloaded')
   await completeOnboarding(page)
 
-  const expandSidebar = page.getByRole('button', { name: 'Expand sidebar' })
-  if (await expandSidebar.isVisible().catch(() => false)) await expandSidebar.click()
-  await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible()
+  const navigation = page.getByRole('navigation', { name: 'Primary navigation' })
+  await expect(navigation).toBeVisible()
+  await navigation.hover()
+  await expect(navigation).toHaveAttribute('aria-expanded', 'true')
 })
 
 test.afterAll(async () => {
@@ -109,7 +110,7 @@ test('every locked Pro destination opens its matching upgrade explanation', asyn
     const button = navButton(page, feature.label)
     await expect(button, `${feature.label} remains discoverable in the free sidebar`).toBeVisible()
     await expect(
-      button.getByRole('img', { name: 'Pro' }),
+      button.getByTitle('Pro'),
       `${feature.label} is visibly marked Pro`
     ).toBeVisible()
 
