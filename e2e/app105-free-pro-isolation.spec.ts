@@ -85,6 +85,7 @@ test.beforeAll(async () => {
       ...process.env,
       OFFGRID_USER_DATA: profileDir,
       OFFGRID_PRO: '0',
+      OFFGRID_E2E_ISOLATED_INSTANCE: '1',
       NODE_ENV: 'production'
     }
   })
@@ -110,7 +111,7 @@ test('every locked Pro destination opens its matching upgrade explanation', asyn
     const button = navButton(page, feature.label)
     await expect(button, `${feature.label} remains discoverable in the free sidebar`).toBeVisible()
     await expect(
-      button.getByTitle('Pro'),
+      button.locator('svg:has(title:text-is("Pro"))'),
       `${feature.label} is visibly marked Pro`
     ).toBeVisible()
 
@@ -182,7 +183,7 @@ test('visiting locked surfaces leaves every protected runtime and durable store 
       channelResults[channel]?.rejected,
       `${channel} must not be registered for free users`
     ).toBe(true)
-    expect(channelResults[channel]?.message).toContain('No handler registered')
+    expect(channelResults[channel]?.message).toBe('Pro license required.')
   }
 
   // Clipboard quick-paste and dictation each create an auxiliary BrowserWindow when their Pro

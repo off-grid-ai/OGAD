@@ -209,7 +209,7 @@ function ModelStatusDot({
       if (live) setStatus(next)
     }
     const refresh = (): void => {
-      if (refreshInFlight) return
+      if (refreshInFlight !== null) return
       refreshInFlight = Promise.resolve(api?.chatHealth?.())
         .then(applyHealth)
         .catch(() => {
