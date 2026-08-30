@@ -64,6 +64,7 @@ import { OFF_GRID_MOBILE_URL, openExternal } from './constants/links'
 import { cn } from './lib/utils'
 import { normalizeProNavigationIntent, type ProNavigationIntent } from './lib/pro-navigation'
 import { navigateSearchHit } from './lib/search-navigation'
+import { internalTabPaletteScreens } from './lib/paletteScreens'
 import { getSlot, SLOTS } from './bootstrap/slotRegistry'
 import { SidebarNavigationMenu } from './components/navigation/SidebarNavigationMenu'
 import { CHAT_VIEW, setCurrentView } from './lib/current-view'
@@ -1054,18 +1055,7 @@ function AppContent() {
             view,
             locked
           })),
-          {
-            label: 'Activity',
-            view: 'devices',
-            subroute: 'activity',
-            locked: !isPro && proActivation !== 'entitlement-bootstrap'
-          },
-          {
-            label: 'Files',
-            view: 'devices',
-            subroute: 'files',
-            locked: !isPro && proActivation !== 'entitlement-bootstrap'
-          },
+          ...internalTabPaletteScreens([...navigationItems, ...bottomNav]),
           ...SETTINGS_DESTINATIONS
         ]}
         onGoTo={(view, subroute) => {

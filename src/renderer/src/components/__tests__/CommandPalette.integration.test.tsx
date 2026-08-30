@@ -15,6 +15,7 @@ let hits: unknown[] = []
 
 const SCREENS = [
   { label: 'Devices', view: 'devices' },
+  { label: 'Sync sharing', view: 'devices', subroute: 'sharing' },
   { label: 'Activity', view: 'devices', subroute: 'activity' },
   { label: 'Files', view: 'devices', subroute: 'files' },
   { label: 'Integrations', view: 'connectors' },
@@ -104,6 +105,7 @@ describe('command palette', () => {
   })
 
   it.each([
+    ['Sync sharing', 'sharing'],
     ['Activity', 'activity'],
     ['Files', 'files'],
     ['Remote model server', 'remote']
