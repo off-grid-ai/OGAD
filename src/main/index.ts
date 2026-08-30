@@ -427,8 +427,6 @@ app.whenReady().then(async () => {
     registerNativeActionTools(registerToolExtension) // the assistant's tools (macOS full set; Windows Outlook subset)
     const { registerActionsIpc } = await import('./actions/actions-ipc')
     registerActionsIpc() // Approval UX v2: inline gate cards + outcome/undo feed
-    const { registerBrowserIpc } = await import('./browser/browser-ipc')
-    registerBrowserIpc() // the browser rail's watched-pane takeover handoff
     const { registerBrowserViewIpc } = await import('./browser/browser-host')
     registerBrowserViewIpc() // dock the live browser view to the pane's region
     const { registerVisionIpc } = await import('./vision/vision-controller')

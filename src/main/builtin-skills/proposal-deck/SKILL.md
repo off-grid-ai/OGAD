@@ -36,7 +36,7 @@ Follow the gate returned by the tool. Never skip a gate and never infer approval
 5. Final approval. Revise only the slides the user names and save the complete updated deck with
    revise_full_copy. Regenerate one existing image with regenerate_illustration, without rerunning the deck.
    Call approve_full_copy only after explicit approval.
-   The tool returns an exact computer_task goal. Call computer_task immediately, let the user approve control,
+   The tool returns an exact computer_use goal. Call computer_use immediately, let the user approve control,
    create the editable deck in Keynote or PowerPoint, export its PDF, and confirm both files exist in the
    selected output folder. Do not stop after preparing Markdown or images.
 

@@ -464,7 +464,7 @@ export async function autoConfigure(
   emit({
     phase: 'done',
     message: ok
-      ? `Ready — ${model.name} + voice & image are set up.`
+      ? `Ready - ${model.name} is active. Optional model downloads are complete.`
       : `${model.name} installed; the server is still warming up.`,
     modelId: model.id,
     modelName: model.name

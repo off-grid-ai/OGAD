@@ -113,7 +113,7 @@ describe('proposal deck chat journey', () => {
     ])
     const approved = await call({ action: 'approve_full_copy' }, 'I approve this.')
     expect(approved.text).toContain('Stage: complete')
-    expect(approved.text).toContain('Now call computer_task with this exact goal')
+    expect(approved.text).toContain('Now call computer_use with this exact goal')
     expect(approved.text).toContain('Save an editable .pptx and a .pdf')
 
     const session = service.get(conversationId)

@@ -24,7 +24,7 @@ const executionBoundary = {
   id: 'remote-task-integration-boundary',
   category: 'tool' as const,
   schemas: () => [],
-  canHandle: (name: string) => name === 'web_use' || name === 'computer_task',
+  canHandle: (name: string) => name === 'web_use' || name === 'computer_use',
   execute: (
     name: string,
     args: Record<string, unknown>,
@@ -78,7 +78,7 @@ describe('authenticated Mobile task calls through the Desktop MCP surface', () =
     registerActiveActionCredentials(null)
   })
 
-  it.each(['web_use', 'computer_task'] as const)(
+  it.each(['web_use', 'computer_use'] as const)(
     'exposes routing for %s, strips it, and starts once in the originating chat',
     async (name) => {
       registerToolExtension(executionBoundary)
@@ -185,7 +185,7 @@ describe('authenticated Mobile task calls through the Desktop MCP surface', () =
     const session = await clientFor('mobile-1')
     try {
       const result = await session.client.callTool({
-        name: 'computer_task',
+        name: 'computer_use',
         arguments: { goal: 'Open the release dashboard', execution_device: 'Office Mac' },
         _meta: {
           'ai.offgrid/taskOrigin': {

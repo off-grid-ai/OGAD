@@ -208,7 +208,7 @@ function transitionProposal(input: {
   const imageRequests = imageRequestsFor(transition, conversationId)
   const buildInstruction =
     next.stage === 'complete'
-      ? `\n\nNow call computer_task with this exact goal:\n${service.computerBuildGoal(next)}`
+      ? `\n\nNow call computer_use with this exact goal:\n${service.computerBuildGoal(next)}`
       : ''
   return {
     text: `${service.summary(next)}${buildInstruction}`,

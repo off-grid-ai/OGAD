@@ -36,17 +36,17 @@ function makeWorld() {
   tempDirs.push(dir)
   const db = new Database(path.join(dir, 'app.db'))
   openDbs.push(db)
-  db.exec(`CREATE TABLE test_computer_tasks (title TEXT NOT NULL)`)
+  db.exec(`CREATE TABLE test_computer_uses (title TEXT NOT NULL)`)
 
   const registry = new HandlerRegistry()
   registry.register({
-    type: 'computer_task',
+    type: 'computer_use',
     rail: 'vision',
     defaultRisk: 'mutate',
     verification: 'read_back',
     verify: async (action) => {
       const row = db
-        .prepare(`SELECT COUNT(*) AS n FROM test_computer_tasks WHERE title = ?`)
+        .prepare(`SELECT COUNT(*) AS n FROM test_computer_uses WHERE title = ?`)
         .get(String(action.args.title)) as { n: number }
       return row.n > 0
     }
@@ -56,7 +56,7 @@ function makeWorld() {
   const device = {
     async execute(action: ActionRecord) {
       executed.push({ ...action.args })
-      db.prepare(`INSERT INTO test_computer_tasks (title) VALUES (?)`).run(
+      db.prepare(`INSERT INTO test_computer_uses (title) VALUES (?)`).run(
         String(action.args.title)
       )
       return { ok: true }
@@ -104,7 +104,7 @@ function requestAt(requests: Record<string, unknown>[], index: number): Record<s
 }
 
 const proposal = {
-  type: 'computer_task',
+  type: 'computer_use',
   intent: 'open the deck on my desktop',
   args: { title: 'Open the deck' },
   risk: 'mutate'
@@ -128,7 +128,7 @@ describe('the engine gated through the real approval seam', () => {
     expect(request).toMatchObject({
       kind: 'computer',
       risk: 'mutate',
-      actionType: 'computer_task',
+      actionType: 'computer_use',
       args: { title: 'Open the deck' }
     })
     resolveActionGate(String(request.actionId), { kind: 'approve' })
