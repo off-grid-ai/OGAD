@@ -39,6 +39,7 @@ export interface PresetIntakeField {
 export interface PresetIntake {
   title: string
   description: string
+  recommendedConnector?: string
   fields: readonly PresetIntakeField[]
 }
 
@@ -447,6 +448,7 @@ ${EXECUTION_RULES}`,
         intake: {
           title: 'Brief the email reply',
           description: 'Give enough thread detail to find the right message and draft once.',
+          recommendedConnector: 'Gmail',
           fields: [
             {
               id: 'thread',

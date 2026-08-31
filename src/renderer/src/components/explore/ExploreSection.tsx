@@ -66,13 +66,13 @@ export function ExploreSection({
         </div>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-3 @4xl:grid-cols-2">
+      <div className="columns-1 gap-3 @4xl:columns-2">
         {PRESET_SECTIONS.map((section) => {
           const Icon = CAPABILITY_ICON[section.capability]
           return (
             <section
               key={section.id}
-              className="flex flex-col rounded-md border border-border bg-card p-3 text-card-foreground"
+              className="mb-3 break-inside-avoid rounded-md border border-border bg-card p-3 text-card-foreground"
             >
               <div className="mb-3 flex items-center gap-2.5">
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-background text-primary">
@@ -87,26 +87,26 @@ export function ExploreSection({
                 </span>
               </div>
 
-              <div className="grid flex-1 grid-cols-1 gap-2 @md:grid-cols-2">
+              <div className="grid grid-cols-1 gap-2 @2xl:grid-cols-2">
                 {section.presets.map((preset) => (
                   <button
                     key={preset.id}
                     type="button"
                     onClick={() => onRun(preset)}
-                    className="group flex flex-col rounded-md border border-border bg-background p-3 text-left text-foreground transition-all duration-150 hover:border-primary/50 hover:bg-accent active:scale-[0.98]"
+                    className="group grid min-h-28 grid-cols-[1.5rem_minmax(0,1fr)_1rem] gap-x-2 rounded-md border border-border bg-background p-3 text-left text-foreground transition-all duration-150 hover:border-primary/50 hover:bg-accent active:scale-[0.99]"
                     data-testid={`explore-preset-${preset.id}`}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <preset.icon className="h-[18px] w-[18px] shrink-0 text-muted-foreground transition-colors duration-150 group-hover:text-primary" />
-                      <ArrowRight className="h-3.5 w-3.5 shrink-0 -translate-x-0.5 text-muted-foreground/60 transition-all duration-150 group-hover:translate-x-0 group-hover:text-primary" />
+                    <preset.icon className="mt-0.5 h-[18px] w-[18px] shrink-0 text-muted-foreground transition-colors duration-150 group-hover:text-primary" />
+                    <div className="min-w-0">
+                      <span className="block text-xs text-foreground transition-colors duration-150">
+                        {preset.title}
+                      </span>
+                      <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">
+                        {preset.blurb}
+                      </span>
                     </div>
-                    <span className="mt-2 text-xs text-foreground transition-colors duration-150">
-                      {preset.title}
-                    </span>
-                    <span className="mt-1 text-[11px] leading-4 text-muted-foreground">
-                      {preset.blurb}
-                    </span>
-                    <div className="mt-auto pt-2">
+                    <ArrowRight className="mt-0.5 h-3.5 w-3.5 shrink-0 -translate-x-0.5 text-muted-foreground/60 transition-all duration-150 group-hover:translate-x-0 group-hover:text-primary" />
+                    <div className="col-start-2 mt-2">
                       {preset.requires ? (
                         <span className="inline-block rounded-sm bg-muted px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-muted-foreground">
                           {REQUIREMENT_LABEL[preset.requires]}

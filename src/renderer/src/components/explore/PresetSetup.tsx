@@ -1,5 +1,5 @@
-import { useMemo, useState, type FormEvent } from 'react'
-import { ArrowLeft, FolderOpen } from '@phosphor-icons/react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { ArrowLeft, CheckCircle, FolderOpen, PlugsConnected } from '@phosphor-icons/react'
 import { Button } from '@/components/ui/button'
 import type { DemoPreset, PresetIntakeField } from './presetCatalog'
 import { buildPresetPrompt, hasRequiredPresetAnswers, initialPresetAnswers } from './presetPrompt'
@@ -8,6 +8,13 @@ interface PresetSetupProps {
   preset: DemoPreset
   onSubmit: (prompt: string) => void
   onCancel: () => void
+  onOpenConnectors?: () => void
+}
+
+interface ConnectorSummary {
+  name: string
+  enabled: number
+  status: string
 }
 
 interface IntakeFieldProps {
@@ -120,9 +127,40 @@ function IntakeField({ field, value, onChange }: IntakeFieldProps): React.ReactE
   )
 }
 
-export function PresetSetup({ preset, onSubmit, onCancel }: PresetSetupProps): React.ReactElement {
+export function PresetSetup({
+  preset,
+  onSubmit,
+  onCancel,
+  onOpenConnectors
+}: PresetSetupProps): React.ReactElement {
   const [answers, setAnswers] = useState<Record<string, string>>(() => initialPresetAnswers(preset))
+  const [connectorReady, setConnectorReady] = useState<boolean | null>(null)
   const canStart = useMemo(() => hasRequiredPresetAnswers(preset, answers), [answers, preset])
+  const recommendedConnector = preset.intake.recommendedConnector
+
+  useEffect(() => {
+    if (!recommendedConnector) return
+    let cancelled = false
+    const listConnectors = window.api.mcpList
+    if (typeof listConnectors !== 'function') {
+      setConnectorReady(false)
+      return
+    }
+    void listConnectors()
+      .then((connectors) => {
+        if (cancelled) return
+        const match = (connectors as ConnectorSummary[]).find(
+          (connector) => connector.name.toLowerCase() === recommendedConnector.toLowerCase()
+        )
+        setConnectorReady(Boolean(match && match.enabled === 1 && match.status === 'ok'))
+      })
+      .catch(() => {
+        if (!cancelled) setConnectorReady(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [recommendedConnector])
 
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault()
@@ -155,6 +193,33 @@ export function PresetSetup({ preset, onSubmit, onCancel }: PresetSetupProps): R
           </div>
         </div>
       </div>
+
+      {recommendedConnector && connectorReady !== null ? (
+        <div className="mb-4 flex items-center gap-3 rounded-md border border-border bg-background px-3 py-2.5">
+          {connectorReady ? (
+            <CheckCircle className="h-4 w-4 shrink-0 text-primary" weight="fill" />
+          ) : (
+            <PlugsConnected className="h-4 w-4 shrink-0 text-primary" />
+          )}
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] text-foreground">
+              {connectorReady
+                ? `${recommendedConnector} is connected`
+                : `Connect ${recommendedConnector} for direct access`}
+            </p>
+            <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">
+              {connectorReady
+                ? `Off Grid AI can use ${recommendedConnector} to find the right item.`
+                : 'You can continue without it. Off Grid AI will use Computer Use instead.'}
+            </p>
+          </div>
+          {!connectorReady && onOpenConnectors ? (
+            <Button type="button" size="sm" variant="outline" onClick={onOpenConnectors}>
+              Connect
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="grid gap-3 @3xl:grid-cols-2">
         {preset.intake.fields.map((field) => (
