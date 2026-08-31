@@ -28,7 +28,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { randomUUID } from 'crypto'
-import { desktopExtraction } from './rag/extractors'
+import { getActiveTranscription } from './transcription/select'
+import { transcriptionRequestOptions } from './model-server/transcription-request'
 import * as tts from './tts'
 import { generateImage, imageGenStatus, activeImageModel, type ImageGenParams } from './imagegen'
 import { whisperModel } from './rag/extractors'
@@ -650,15 +651,23 @@ async function handleTranscription(
   }
   const ext = path.extname(file.filename) || '.audio'
   const tmp = path.join(os.tmpdir(), `offgrid-stt-${process.pid}-${body.length}${ext}`)
+  let transcriptionOptions: ReturnType<typeof transcriptionRequestOptions>
+  try {
+    transcriptionOptions = transcriptionRequestOptions(fields)
+  } catch (error) {
+    json(
+      res,
+      400,
+      errBody(error instanceof Error ? error.message : 'Invalid transcription options')
+    )
+    return
+  }
   const run = async (): Promise<unknown> => {
     try {
       await fs.promises.writeFile(tmp, file.data)
-      if (!desktopExtraction.transcribeAudio) {
-        const err = new Error('Transcription runtime not available.') as Error & { status?: number }
-        err.status = 501
-        throw err
-      }
-      const text = (await desktopExtraction.transcribeAudio(tmp)).trim()
+      const text = (
+        await getActiveTranscription().transcribe({ path: tmp }, transcriptionOptions)
+      ).text.trim()
       return { text }
     } finally {
       fs.promises.unlink(tmp).catch(() => {})
