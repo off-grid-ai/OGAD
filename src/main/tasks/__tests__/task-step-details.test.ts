@@ -6,6 +6,17 @@ import {
 } from '../task-step-details'
 
 describe('Computer Use step observability', () => {
+  it('drops empty model sentinel values before persistence', () => {
+    const detail = sanitizeComputerUseStepDetail({
+      stepId: '1',
+      decisionSummary: 'null',
+      mappedAction: 'undefined'
+    })
+
+    expect(detail).not.toHaveProperty('decisionSummary')
+    expect(detail).not.toHaveProperty('mappedAction')
+  })
+
   it('redacts secrets and rejects invalid numeric metadata before persistence', () => {
     const detail = sanitizeComputerUseStepDetail({
       stepId: 'inspect-settings',
@@ -38,9 +49,7 @@ describe('Computer Use step observability', () => {
     expect('modelInput' in detail).toBe(false)
     expect(serialized).not.toContain('Action: click settings')
     expect(detail.decisionSummary).toBe('Open Settings')
-    expect(detail.decisionRationale).toBe(
-      'The Settings control matches the current task stage.'
-    )
+    expect(detail.decisionRationale).toBe('The Settings control matches the current task stage.')
     expect(detail.modelOutput).toContain('<action>Open Settings</action>')
     expect(detail).not.toHaveProperty('rawResponse')
     expect(serialized).not.toContain('access_token=visible')

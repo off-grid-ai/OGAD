@@ -127,8 +127,6 @@ export function ComputerUseStepDetails({
                   value={detail.retrievedFacts?.join('\n')}
                 />
                 <DetailBlock label="Decision summary" value={detail.decisionSummary} />
-                <DetailBlock label="Model output" value={detail.modelOutput} />
-                <DetailBlock label="Mapped action and coordinates" value={detail.mappedAction} />
                 <DetailBlock label="Execution result" value={detail.execution?.result} />
                 <DetailBlock label="Error" value={detail.execution?.error} />
               </CollapsibleContent>

@@ -79,6 +79,15 @@ export function encodeTaskPhase(phaseId: string): string {
   return `${TASK_PHASE_PREFIX}${phaseId}`
 }
 
+/** Restore the durable control records from a portable plan projection. */
+export function encodeTaskExecutionPlanProgress(
+  plan: TaskExecutionPlan,
+  activePhaseIndex: number
+): string[] {
+  const activePhase = plan.phases[activePhaseIndex]
+  return [encodeTaskExecutionPlan(plan), ...(activePhase ? [encodeTaskPhase(activePhase.id)] : [])]
+}
+
 export function decodeTaskPhase(step: string): string | null {
   if (!step.startsWith(TASK_PHASE_PREFIX)) return null
   const id = step.slice(TASK_PHASE_PREFIX.length).trim()

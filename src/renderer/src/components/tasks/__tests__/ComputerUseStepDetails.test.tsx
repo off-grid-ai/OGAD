@@ -79,7 +79,8 @@ describe('<ComputerUseStepDetails/>', () => {
     // Once, not twice: the second copy was the persisted prompt echo (modelInput), which is no
     // longer stored - it was 73% of the task payload on every list poll.
     expect(screen.getAllByText('Open Settings', { selector: 'pre' })).toHaveLength(1)
-    expect(screen.getByText('<action>click Settings</action>')).toBeTruthy()
+    expect(screen.queryByText('<action>click Settings</action>')).toBeNull()
+    expect(screen.queryByText('{"type":"click","point":{"x":520,"y":240}}')).toBeNull()
     expect(document.querySelector('img')).toBeNull()
   })
 })

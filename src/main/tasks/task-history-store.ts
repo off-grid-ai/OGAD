@@ -323,6 +323,24 @@ export class TaskHistoryStore {
     } catch {
       // Keep migration compatible with partial test databases.
     }
+    // Normalize legacy Computer Use details through the current persistence boundary. Earlier
+    // builds stored model sentinel strings such as "null", which then appeared as real decisions.
+    try {
+      const rows = this.db
+        .prepare('SELECT task_id, step_details_json FROM task_run_history')
+        .all() as Array<{ task_id: string; step_details_json: string }>
+      const update = this.db.prepare(
+        'UPDATE task_run_history SET step_details_json = ? WHERE task_id = ?'
+      )
+      for (const row of rows) {
+        const next = JSON.stringify(
+          boundComputerUseStepDetails(storedComputerUseStepDetails(row.step_details_json))
+        )
+        if (next !== row.step_details_json) update.run(next, row.task_id)
+      }
+    } catch {
+      // Keep migration compatible with partial test databases.
+    }
   }
 
   upsert(update: TaskRunUpdate): TaskRunSnapshot {

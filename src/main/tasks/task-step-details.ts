@@ -20,6 +20,7 @@ const SECRET_PATTERNS: ReadonlyArray<[RegExp, string]> = [
 
 function safeText(value: unknown): string | undefined {
   if (typeof value !== 'string' || !value.trim()) return undefined
+  if (/^(?:null|undefined)$/i.test(value.trim())) return undefined
   const redacted = SECRET_PATTERNS.reduce(
     (result, [pattern, replacement]) => result.replace(pattern, replacement),
     value
