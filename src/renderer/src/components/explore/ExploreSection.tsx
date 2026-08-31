@@ -12,16 +12,14 @@ import {
   type PresetCapability,
   type PresetRequirement
 } from './presetCatalog'
-import { useState } from 'react'
-import { ProposalDeckSetup } from './ProposalDeckSetup'
 
 /**
  * The Explore surface: the demo-preset catalog rendered as capability panels, each holding a
  * dense grid of runnable cards. A card shows the capability label + blurb only - never the raw
  * prompt; that stays behind the tap.
  *
- * Tapping a card calls `onRun(preset)` - the host seeds a real chat with the preset's prompt
- * so the agent asks its own follow-ups and acts. Placement-agnostic via container queries: the
+ * Tapping a card calls `onRun(preset)` - the host opens a real chat with the preset's intake form.
+ * The form collects the complete brief before one detailed prompt is sent. Container queries keep the
  * same component backs the chat empty state (one panel column) and the Explore screen (two).
  * Data comes from presetCatalog (the SSOT).
  */
@@ -42,47 +40,28 @@ const REQUIREMENT_LABEL: Record<PresetRequirement, string> = {
 }
 
 interface ExploreSectionProps {
-  /** Run a preset: the host seeds a new chat with `preset.prompt`. */
+  /** Configure a preset: the host opens its intake form in Chat. */
   onRun: (preset: DemoPreset) => void
   /** Where "Request a capability" points (a Google Form for now). Omit to hide the link. */
   requestUrl?: string
   /** Hide the built-in intro when the host renders its own header (the Explore screen). */
   showIntro?: boolean
   className?: string
-  /** Open a deep-linked preset directly in its setup state. */
-  initialPreset?: DemoPreset
 }
 
 export function ExploreSection({
   onRun,
   requestUrl,
   showIntro = true,
-  className = '',
-  initialPreset
+  className = ''
 }: ExploreSectionProps): React.ReactElement {
-  const [setupPreset, setSetupPreset] = useState<DemoPreset | null>(() =>
-    initialPreset?.setup ? initialPreset : null
-  )
-
-  if (setupPreset) {
-    return (
-      <div className={`@container w-full font-mono ${className}`}>
-        <ProposalDeckSetup
-          preset={setupPreset}
-          onRun={onRun}
-          onCancel={() => setSetupPreset(null)}
-        />
-      </div>
-    )
-  }
-
   return (
     <div className={`@container font-mono ${className}`}>
       {showIntro ? (
         <div className="mb-4">
           <h2 className="text-sm text-foreground">Explore what Off Grid AI can do</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Pick one - it starts a chat and asks you the rest. Everything runs on your Mac.
+            Pick one - add the details once, then start the run. Everything runs on your Mac.
           </p>
         </div>
       ) : null}
@@ -113,9 +92,7 @@ export function ExploreSection({
                   <button
                     key={preset.id}
                     type="button"
-                    onClick={() =>
-                      preset.setup === 'proposal-deck' ? setSetupPreset(preset) : onRun(preset)
-                    }
+                    onClick={() => onRun(preset)}
                     className="group flex flex-col rounded-md border border-border bg-background p-3 text-left text-foreground transition-all duration-150 hover:border-primary/50 hover:bg-accent active:scale-[0.98]"
                     data-testid={`explore-preset-${preset.id}`}
                   >

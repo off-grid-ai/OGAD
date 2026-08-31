@@ -22,33 +22,17 @@ describe('<ExploreSection/>', () => {
     }
   })
 
-  it('runs the preset that was clicked, with the full preset', async () => {
+  it('hands every clicked preset to the host so Chat can open its intake form', () => {
     const onRun = vi.fn()
     render(<ExploreSection onRun={onRun} />)
 
-    fireEvent.click(screen.getByTestId('explore-preset-find-flight'))
+    for (const preset of ALL_PRESETS) {
+      fireEvent.click(screen.getByTestId(`explore-preset-${preset.id}`))
+    }
 
-    expect(onRun).toHaveBeenCalledTimes(1)
-    expect(onRun.mock.calls[0]?.[0]).toMatchObject({ id: 'find-flight' })
-  })
-
-  it('collects user-approved proposal folders before starting chat', async () => {
-    const onRun = vi.fn()
-    render(<ExploreSection onRun={onRun} />)
-
-    fireEvent.click(screen.getByTestId('explore-preset-proposal-deck'))
-    expect(screen.getByTestId('proposal-deck-setup')).toBeTruthy()
-    expect(screen.queryByTestId('explore-preset-find-flight')).toBeNull()
-    const source = screen.getByLabelText('Content folder')
-    const output = screen.getByLabelText('Save under')
-    fireEvent.change(source, { target: { value: '/tmp/client-material' } })
-    fireEvent.change(output, { target: { value: '/tmp/client-output' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Start in chat' }))
-
-    expect(onRun).toHaveBeenCalledTimes(1)
-    expect(onRun.mock.calls[0]?.[0].prompt).toContain('/tmp/client-material')
-    expect(onRun.mock.calls[0]?.[0].prompt).toContain('Q: Where should the finished deck be saved?')
-    expect(onRun.mock.calls[0]?.[0].prompt).toContain('A: /tmp/client-output')
+    expect(onRun.mock.calls.map(([preset]) => preset.id)).toEqual(
+      ALL_PRESETS.map((preset) => preset.id)
+    )
   })
 
   it('annotates a gated preset so it never dead-ends silently', () => {

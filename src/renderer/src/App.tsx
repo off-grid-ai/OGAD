@@ -359,7 +359,7 @@ function AppContent() {
     conversationId?: string
     projectId?: string
     openGallery?: boolean
-    seedPrompt?: string
+    presetId?: string
     draftPrompt?: string
   } | null>(null)
   // Navigation is unconditional. Leaving a chat with a task running used to prompt, because the
@@ -854,24 +854,21 @@ function AppContent() {
     [navigateTo]
   )
 
-  // Run an Explore preset: open a fresh chat seeded with the preset's prompt, which auto-sends so
-  // the agent takes over and asks its own follow-ups. Same handoff whether the tap came from the
-  // Explore screen or the chat empty state.
+  // Run an Explore preset: open a fresh chat with its catalog-owned intake form. The form collects
+  // the complete brief before one detailed user message reaches the model.
   const handleRunPreset = useCallback(
     (preset: DemoPreset) => {
-      navigateTo('memory-chat', () => setChatTarget({ seedPrompt: preset.prompt }))
+      navigateTo('memory-chat', () => setChatTarget({ presetId: preset.id }))
     },
     [navigateTo]
   )
 
-  const [explorePresetId, setExplorePresetId] = useState<string | undefined>()
   const handleOpenSkillPreset = useCallback(
     (preset: DemoPreset) => {
-      navigateTo('explore', () => setExplorePresetId(preset.id))
+      navigateTo('memory-chat', () => setChatTarget({ presetId: preset.id }))
     },
     [navigateTo]
   )
-  const handleExploreTargetConsumed = useCallback(() => setExplorePresetId(undefined), [])
 
   // Global keyboard shortcuts for back/forward navigation (Cmd+[ and Cmd+])
   useEffect(() => {
@@ -1290,11 +1287,7 @@ function AppContent() {
                     className="p-6 h-full overflow-y-auto"
                   >
                     {viewMode === 'explore' ? (
-                      <ExploreScreen
-                        onRunPreset={handleRunPreset}
-                        initialPresetId={explorePresetId}
-                        onTargetConsumed={handleExploreTargetConsumed}
-                      />
+                      <ExploreScreen onRunPreset={handleRunPreset} />
                     ) : viewMode === 'memory-chat' ? (
                       <MemoryChat
                         onNavigateToMemory={handleSelectMemory}

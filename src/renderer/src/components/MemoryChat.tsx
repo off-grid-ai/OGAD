@@ -46,7 +46,13 @@ import { VoiceBubble } from './VoiceBubble'
 import { stopAllVoicePlayback } from '@renderer/lib/voice-playback-bus'
 import { ChatVoiceComposer, VoiceModeControl } from './ChatVoiceComposer'
 import { ExploreSection } from './explore/ExploreSection'
-import { REQUEST_FORM_URL, presetForSkillName, type DemoPreset } from './explore/presetCatalog'
+import { PresetSetup } from './explore/PresetSetup'
+import {
+  REQUEST_FORM_URL,
+  presetById,
+  presetForSkillName,
+  type DemoPreset
+} from './explore/presetCatalog'
 import { useChatVoiceTurns, type ChatVoicePhase } from './use-chat-voice-turns'
 import { SkillsPanel } from './SkillsPanel'
 import { ModelPicker } from './ModelPicker'
@@ -417,8 +423,8 @@ interface MemoryChatProps {
     conversationId?: string
     projectId?: string
     openGallery?: boolean
-    /** Start a fresh chat and auto-send this prompt (an Explore preset handed off from a landing surface). */
-    seedPrompt?: string
+    /** Start a fresh chat with this Explore preset's intake form. */
+    presetId?: string
     /** Open the composer with this text. The user still confirms the send. */
     draftPrompt?: string
   }> | null
@@ -2444,9 +2450,8 @@ export function MemoryChat({
     [loadLatestConversationMessages, replaceDurableMessages]
   )
   const [input, setInput] = useState('')
-  // A preset prompt handed in via openTarget.seedPrompt, held until the fresh-chat state has
-  // settled, then auto-sent by the effect below sendMessage.
-  const [pendingSeed, setPendingSeed] = useState<string | null>(null)
+  // A curated run collects its complete brief inside Chat before any model request starts.
+  const [presetSetup, setPresetSetup] = useState<DemoPreset | null>(null)
   const [attachments, setAttachments] = useState<Attachment[]>([])
   // Whether the active chat model can read images. Gate image attachment on this. The
   // main-owned model selection is read on mount and after an explicit invalidation;
@@ -3342,6 +3347,7 @@ export function MemoryChat({
     if (!openTarget) return
     ;(async () => {
       try {
+        setPresetSetup(null)
         if (openTarget.conversationId) {
           const convId = openTarget.conversationId
           setActiveConversationId(convId)
@@ -3355,13 +3361,11 @@ export function MemoryChat({
           setActiveConversationId(null)
           setConvMessages(null, [])
           setActiveProjectId(openTarget.projectId)
-        } else if (openTarget.seedPrompt) {
-          // Open a fresh chat, then let the effect below sendMessage fire the preset once the
-          // reset state has settled - so the prompt lands in the new empty conversation.
+        } else if (openTarget.presetId) {
           setActiveConversationId(null)
           setConvMessages(null, [])
           setActiveProjectId(null)
-          setPendingSeed(openTarget.seedPrompt)
+          setPresetSetup(presetById(openTarget.presetId) ?? null)
         } else if (openTarget.draftPrompt) {
           setActiveConversationId(null)
           setConvMessages(null, [])
@@ -3384,6 +3388,7 @@ export function MemoryChat({
     setActiveConversationId(null)
     setConvMessages(null, []) // clear the fresh-chat bucket
     setActiveProjectId(null)
+    setPresetSetup(null)
   }, [setConvMessages])
 
   const deleteConversation = useCallback(
@@ -3422,9 +3427,11 @@ export function MemoryChat({
       conversationId?: string
       imageRequest?: ImageGenerationRequestContract
       projectIdOverride?: string | null
+      /** A form submission is user input even though its text is supplied as an argument. */
+      asUserInput?: boolean
     }
   ) => {
-    const isInput = override === undefined
+    const isInput = override === undefined || opts?.asUserInput === true
     // Regenerate/Resend: the user turn already exists in the thread — re-run it
     // in place instead of echoing another user bubble.
     const regen = opts?.regen ?? false
@@ -4167,17 +4174,6 @@ export function MemoryChat({
       if (activeStreamId) streamConvRef.current.delete(activeStreamId)
     }
   }
-
-  // Fire a preset handed in via openTarget.seedPrompt. Runs after sendMessage is defined and
-  // after the fresh-chat reset from the openTarget effect has settled, so the prompt lands in
-  // the new empty conversation rather than whatever was open before.
-  useEffect(() => {
-    if (!pendingSeed) return
-    const prompt = pendingSeed
-    setPendingSeed(null)
-    void sendMessage(prompt)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingSeed])
 
   // Pull the next queued message for THIS conversation (sent while it was generating)
   // and send it — bound to its own conversation, never the active tab.
@@ -5318,65 +5314,77 @@ export function MemoryChat({
                 <div ref={scrollRef} onScroll={onScrollFollow} className="flex-1 overflow-y-auto">
                   {messages.length === 0 ? (
                     <div className="flex min-h-full w-full flex-col items-center justify-center px-6 py-6 text-center">
-                      <div className="mx-auto flex max-w-2xl flex-col items-center">
-                        <div
-                          data-testid="chat-empty-hero"
-                          className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-card shadow-sm"
-                        >
-                          <svg
-                            className="h-8 w-8 text-primary"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={1.5}
-                              d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
-                            />
-                          </svg>
-                        </div>
-                        <h2 className="text-3xl font-semibold tracking-tight text-foreground">
-                          {mode === 'image' ? 'Create an image' : 'Start a conversation'}
-                        </h2>
-                        <p className="mt-3 max-w-md text-sm text-muted-foreground">
-                          {mode === 'image'
-                            ? 'Pick a style, then describe your subject — generated on-device.'
-                            : activeProjectName
-                              ? `Grounded in the “${activeProjectName}” knowledge base.`
-                              : isPro
-                                ? 'Ask across your memories, chats, and entities from every source.'
-                                : 'Ask anything, generate images, or build — all on-device.'}
-                        </p>
-                      </div>
-                      {mode !== 'image' ? (
-                        <ExploreSection
-                          onRun={(preset) => {
-                            void sendMessage(preset.prompt)
+                      {presetSetup ? (
+                        <PresetSetup
+                          key={presetSetup.id}
+                          preset={presetSetup}
+                          onCancel={() => setPresetSetup(null)}
+                          onSubmit={(prompt) => {
+                            setPresetSetup(null)
+                            void sendMessage(prompt, { asUserInput: true })
                           }}
-                          requestUrl={REQUEST_FORM_URL}
-                          className="mt-6 w-full text-left"
-                        />
-                      ) : null}
-                      {mode === 'image' ? (
-                        <StylePresetPicker
-                          activeStyle={activeStyle}
-                          styleThumbs={styleThumbs}
-                          onChange={setActiveStyle}
                         />
                       ) : (
-                        <div className="mt-6 grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
-                          {examples.map((ex) => (
-                            <button
-                              key={ex}
-                              onClick={() => sendMessage(ex)}
-                              className="rounded-md border border-border bg-background px-3 py-2.5 text-left text-xs text-muted-foreground transition-colors hover:border-primary hover:bg-accent hover:text-foreground"
+                        <>
+                          <div className="mx-auto flex max-w-2xl flex-col items-center">
+                            <div
+                              data-testid="chat-empty-hero"
+                              className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-card shadow-sm"
                             >
-                              {ex}
-                            </button>
-                          ))}
-                        </div>
+                              <svg
+                                className="h-8 w-8 text-primary"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={1.5}
+                                  d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
+                                />
+                              </svg>
+                            </div>
+                            <h2 className="text-3xl font-semibold tracking-tight text-foreground">
+                              {mode === 'image' ? 'Create an image' : 'Start a conversation'}
+                            </h2>
+                            <p className="mt-3 max-w-md text-sm text-muted-foreground">
+                              {mode === 'image'
+                                ? 'Pick a style, then describe your subject — generated on-device.'
+                                : activeProjectName
+                                  ? `Grounded in the “${activeProjectName}” knowledge base.`
+                                  : isPro
+                                    ? 'Ask across your memories, chats, and entities from every source.'
+                                    : 'Ask anything, generate images, or build — all on-device.'}
+                            </p>
+                          </div>
+                          {mode !== 'image' ? (
+                            <ExploreSection
+                              onRun={setPresetSetup}
+                              requestUrl={REQUEST_FORM_URL}
+                              className="mt-6 w-full text-left"
+                            />
+                          ) : null}
+                          {mode === 'image' ? (
+                            <StylePresetPicker
+                              activeStyle={activeStyle}
+                              styleThumbs={styleThumbs}
+                              onChange={setActiveStyle}
+                            />
+                          ) : (
+                            <div className="mt-6 grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
+                              {examples.map((ex) => (
+                                <button
+                                  key={ex}
+                                  onClick={() => sendMessage(ex)}
+                                  className="rounded-md border border-border bg-background px-3 py-2.5 text-left text-xs text-muted-foreground transition-colors hover:border-primary hover:bg-accent hover:text-foreground"
+                                >
+                                  {ex}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   ) : (

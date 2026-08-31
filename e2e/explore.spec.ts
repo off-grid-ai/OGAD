@@ -71,16 +71,39 @@ test('the Explore screen renders capability panels with labels, never the prompt
   await page.screenshot({ path: 'e2e/screenshots/explore-screen.png' })
 })
 
-test('proposal setup scopes the content, style, and output folders before chat', async () => {
+test('every Explore card opens its intake form inside Chat before a run starts', async () => {
+  for (const presetId of [
+    'find-flight',
+    'best-nearby',
+    'price-compare',
+    'play-music',
+    'crop-screenshot',
+    'draft-reply',
+    'proposal-deck',
+    'work-today',
+    'that-article',
+    'phone-summarize'
+  ]) {
+    await page.getByRole('button', { name: 'Explore', exact: true }).first().click()
+    await page.getByTestId(`explore-preset-${presetId}`).click()
+    await expect(page.getByTestId(`preset-intake-${presetId}`)).toBeVisible()
+  }
+})
+
+test('proposal intake collects the complete brief before enabling chat', async () => {
+  await page.getByRole('button', { name: 'Explore', exact: true }).first().click()
   await page.getByTestId('explore-preset-proposal-deck').click()
-  const setup = page.getByTestId('proposal-deck-setup')
+  const setup = page.getByTestId('preset-intake-proposal-deck')
   await expect(setup).toBeVisible()
-  await expect(setup.getByRole('textbox', { name: 'Content folder' })).toHaveValue('')
-  await expect(setup.getByRole('textbox', { name: 'Save under' })).toHaveValue('')
-  await expect(setup.getByRole('textbox', { name: 'Style example (optional)' })).toHaveValue('')
-  await setup.getByRole('textbox', { name: 'Content folder' }).fill('/tmp/client-material')
+  await expect(setup.getByRole('textbox', { name: /Company/ })).toHaveValue('')
+  await expect(setup.getByRole('textbox', { name: /Meeting context/ })).toHaveValue('')
+  await expect(setup.getByRole('textbox', { name: /Content folder/ })).toHaveValue('')
+  await expect(setup.getByRole('textbox', { name: /Save under/ })).toHaveValue('')
   await expect(setup.getByRole('button', { name: 'Start in chat' })).toBeDisabled()
-  await setup.getByRole('textbox', { name: 'Save under' }).fill('/tmp/client-output')
+  await setup.getByRole('textbox', { name: /Company/ }).fill('Acme')
+  await setup.getByRole('textbox', { name: /Meeting context/ }).fill('Plan the product launch.')
+  await setup.getByRole('textbox', { name: /Content folder/ }).fill('/tmp/client-material')
+  await setup.getByRole('textbox', { name: /Save under/ }).fill('/tmp/client-output')
   await expect(setup.getByRole('button', { name: 'Start in chat' })).toBeEnabled()
   await page.screenshot({ path: 'e2e/screenshots/explore-proposal-setup.png' })
 })
