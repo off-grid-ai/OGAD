@@ -9,6 +9,7 @@ import { TaskHistoryStore, type TaskRunSnapshot, type TaskRunUpdate } from './ta
 import { sanitizeComputerUseStepDetail, type ComputerUseStepDetail } from './task-step-details'
 import { persistTaskResultInChat } from './task-result-chat'
 import { notifyRagConversationChanged } from '../rag-conversation-events'
+import { callHook, HOOKS } from '../bootstrap/hookRegistry'
 
 let store: TaskHistoryStore | null = null
 let executionDevice = {
@@ -130,6 +131,7 @@ export function recordTaskRun(update: TaskRunUpdate): TaskRunSnapshot {
   if (persistTaskResultInChat(getDB(), snapshot) && snapshot.journeyId) {
     notifyRagConversationChanged({ conversationId: snapshot.journeyId })
   }
+  callHook(HOOKS.actionsObserveTaskResult, snapshot)
   // A durable write is the authority again: drop any live overlay it supersedes.
   live.delete(snapshot.taskId)
   latest.set(snapshot.taskId, snapshot)

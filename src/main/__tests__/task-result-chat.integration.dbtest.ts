@@ -22,6 +22,7 @@ vi.mock('electron', () => ({
 
 import { createRagConversation, getDB, getRagMessages } from '../database'
 import { recordTaskRun, resetTaskHistoryForTests } from '../tasks/task-history'
+import { HOOKS, registerHook, unregisterHook } from '../bootstrap/hookRegistry'
 
 afterAll(() => {
   resetTaskHistoryForTests()
@@ -30,6 +31,35 @@ afterAll(() => {
 })
 
 describe('task results in Chat', () => {
+  it('offers the committed task snapshot to the optional approval projection', () => {
+    const conversationId = 'approved-task-chat'
+    createRagConversation(conversationId, 'Approved task')
+    const observed: unknown[] = []
+    const observe = (snapshot: unknown): void => void observed.push(snapshot)
+    registerHook(HOOKS.actionsObserveTaskResult, observe)
+    try {
+      recordTaskRun({
+        taskId: 'approved-task',
+        journeyId: conversationId,
+        kind: 'web_use',
+        title: 'Complete the approved task',
+        status: 'done',
+        summary: 'The approved task is complete.'
+      })
+    } finally {
+      unregisterHook(HOOKS.actionsObserveTaskResult, observe)
+    }
+
+    expect(observed).toMatchObject([
+      {
+        taskId: 'approved-task',
+        journeyId: conversationId,
+        status: 'done',
+        summary: 'The approved task is complete.'
+      }
+    ])
+  })
+
   it('adds the verified details and final link to the originating Chat exactly once', () => {
     const conversationId = 'flight-search-chat'
     createRagConversation(conversationId, 'Find a flight')

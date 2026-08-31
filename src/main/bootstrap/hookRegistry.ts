@@ -82,6 +82,9 @@ export const HOOKS = {
   /** ({ conversationId, message }) => Promise<{ answer: string } | null> - lets Pro resolve a
    * confirmation written in an Action's execution chat before the model can infer a new Action. */
   actionsResolveChatDecision: 'actions:resolveChatDecision',
+  /** (task: TaskRunSnapshot) => void - lets Pro project the normal task outcome onto the
+   * approval that started the task. Core task state remains the single source of truth. */
+  actionsObserveTaskResult: 'actions:observeTaskResult',
   /** Legacy MCP-only predecessor of actionsProposeApproval. Kept so a pro build
    *  that has not yet migrated still gates connector writes; remove once
    *  desktop-pro registers actionsProposeApproval. */
