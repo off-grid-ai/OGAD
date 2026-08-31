@@ -357,6 +357,7 @@ function AppContent() {
   // existing conversation, or a request to start a new chat scoped to a project.
   const [chatTarget, setChatTarget] = useState<{
     conversationId?: string
+    approvalId?: number
     projectId?: string
     openGallery?: boolean
     presetId?: string
@@ -788,7 +789,9 @@ function AppContent() {
         }
         void window.api.approvalsExecutionChat(intent.approvalId).then((conversationId) => {
           if (!conversationId) return
-          navigateTo('memory-chat', () => setChatTarget({ conversationId }))
+          navigateTo('memory-chat', () =>
+            setChatTarget({ conversationId, approvalId: intent.approvalId })
+          )
         })
         return
       }
@@ -1303,6 +1306,7 @@ function AppContent() {
                           navigateTo('replay', () => setReplayTarget(ts || Date.now()))
                         }}
                         onOpenSkillPreset={handleOpenSkillPreset}
+                        onOpenConnectors={() => navigateTo('connectors')}
                         openTarget={chatTarget}
                         onTargetConsumed={() => setChatTarget(null)}
                         onTaskDetailModeChange={setTaskDetailSidebarMode}

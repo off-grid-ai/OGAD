@@ -47,6 +47,7 @@ import { stopAllVoicePlayback } from '@renderer/lib/voice-playback-bus'
 import { ChatVoiceComposer, VoiceModeControl } from './ChatVoiceComposer'
 import { ExploreSection } from './explore/ExploreSection'
 import { PresetSetup } from './explore/PresetSetup'
+import { ApprovalSetup, type ApprovalSetupRecord } from './actions/ApprovalSetup'
 import {
   REQUEST_FORM_URL,
   presetById,
@@ -172,6 +173,13 @@ type RagContext = {
     taskId: string
     state: 'accepted' | 'applied'
     attachmentNames?: string[]
+  }
+  executionApproval?: {
+    approvalId: number
+    actionId?: string | null
+    title: string
+    detail?: string | null
+    status: string
   }
 }
 
@@ -418,9 +426,12 @@ interface MemoryChatProps {
   readonly onSeekReplay?: (ts: number) => void
   /** Open the catalog-owned setup/run surface for a skill mention. */
   readonly onOpenSkillPreset?: (preset: DemoPreset) => void
+  /** Open connector settings from an Explore intake recommendation. */
+  readonly onOpenConnectors?: () => void
   /** Open a specific conversation, or start a new one scoped to a project. */
   readonly openTarget?: Readonly<{
     conversationId?: string
+    approvalId?: number
     projectId?: string
     openGallery?: boolean
     /** Start a fresh chat with this Explore preset's intake form. */
@@ -1545,7 +1556,9 @@ function AssistantMessageActions({
     <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
       {speechEnabled ? <SpeechAction state={speechState} onSpeak={onSpeak} /> : null}
       <CopyAction copied={copied} onCopy={onCopy} />
-      <RegenerateAction label="Regenerate" title="Regenerate" onRegenerate={onRegenerate} />
+      {!message.context?.executionApproval ? (
+        <RegenerateAction label="Regenerate" title="Regenerate" onRegenerate={onRegenerate} />
+      ) : null}
       <VariantNavigation message={message} onSelect={onSelectVariant} />
       {artifact ? (
         <button
@@ -2394,6 +2407,7 @@ export function MemoryChat({
   onOpenProject,
   onSeekReplay,
   onOpenSkillPreset,
+  onOpenConnectors,
   openTarget,
   onTargetConsumed,
   onActiveConversationChange,
@@ -2452,6 +2466,7 @@ export function MemoryChat({
   const [input, setInput] = useState('')
   // A curated run collects its complete brief inside Chat before any model request starts.
   const [presetSetup, setPresetSetup] = useState<DemoPreset | null>(null)
+  const [approvalSetup, setApprovalSetup] = useState<ApprovalSetupRecord | null>(null)
   const [attachments, setAttachments] = useState<Attachment[]>([])
   // Whether the active chat model can read images. Gate image attachment on this. The
   // main-owned model selection is read on mount and after an explicit invalidation;
@@ -3348,6 +3363,7 @@ export function MemoryChat({
     ;(async () => {
       try {
         setPresetSetup(null)
+        setApprovalSetup(null)
         if (openTarget.conversationId) {
           const convId = openTarget.conversationId
           setActiveConversationId(convId)
@@ -3356,6 +3372,10 @@ export function MemoryChat({
           setActiveProjectId((conv as { project_id?: string | null }).project_id ?? null)
           const nextMessages = await loadLatestConversationMessages(convId)
           if (nextMessages) replaceDurableMessages(convId, nextMessages)
+          if (openTarget.approvalId) {
+            const approval = await window.api.proInvoke?.('approvals:for-execution-chat', convId)
+            setApprovalSetup((approval as ApprovalSetupRecord | null | undefined) ?? null)
+          }
           if (openTarget.draftPrompt) setInput(openTarget.draftPrompt)
         } else if (openTarget.projectId) {
           setActiveConversationId(null)
@@ -3384,11 +3404,32 @@ export function MemoryChat({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openTarget])
 
+  useEffect(() => {
+    const openApprovalIntake = (event: Event): void => {
+      const approvalId = (event as CustomEvent<{ approvalId?: number }>).detail?.approvalId
+      if (!approvalId) return
+      void window.api
+        .proInvoke?.('approvals:list')
+        .then((approvals) => {
+          const match = Array.isArray(approvals)
+            ? (approvals as ApprovalSetupRecord[]).find(
+                (approval) => Number(approval.id) === approvalId
+              )
+            : undefined
+          if (match) setApprovalSetup(match)
+        })
+        .catch(() => undefined)
+    }
+    window.addEventListener('og:approval-intake', openApprovalIntake)
+    return () => window.removeEventListener('og:approval-intake', openApprovalIntake)
+  }, [])
+
   const startNewConversation = useCallback(() => {
     setActiveConversationId(null)
     setConvMessages(null, []) // clear the fresh-chat bucket
     setActiveProjectId(null)
     setPresetSetup(null)
+    setApprovalSetup(null)
   }, [setConvMessages])
 
   const deleteConversation = useCallback(
@@ -5312,13 +5353,33 @@ export function MemoryChat({
                 )}
                 {/* Messages */}
                 <div ref={scrollRef} onScroll={onScrollFollow} className="flex-1 overflow-y-auto">
-                  {messages.length === 0 ? (
+                  {approvalSetup ? (
+                    <div className="flex min-h-full w-full flex-col items-center justify-center px-6 py-6 text-center">
+                      <ApprovalSetup
+                        key={approvalSetup.id}
+                        record={approvalSetup}
+                        onCancel={() => setApprovalSetup(null)}
+                        onSubmit={(prompt) => {
+                          void (async () => {
+                            const approved = await window.api.proInvoke?.(
+                              'approvals:approve-for-chat',
+                              approvalSetup.id
+                            )
+                            if (!approved) return
+                            setApprovalSetup(null)
+                            await sendMessage(prompt, { asUserInput: true })
+                          })()
+                        }}
+                      />
+                    </div>
+                  ) : messages.length === 0 ? (
                     <div className="flex min-h-full w-full flex-col items-center justify-center px-6 py-6 text-center">
                       {presetSetup ? (
                         <PresetSetup
                           key={presetSetup.id}
                           preset={presetSetup}
                           onCancel={() => setPresetSetup(null)}
+                          onOpenConnectors={onOpenConnectors}
                           onSubmit={(prompt) => {
                             setPresetSetup(null)
                             void sendMessage(prompt, { asUserInput: true })
