@@ -24,7 +24,7 @@ vi.mock('electron', () => ({
     getVersion: () => 'test'
   },
   safeStorage: {
-    isEncryptionAvailable: () => false,
+    isEncryptionAvailable: () => true,
     encryptString: (value: string) => Buffer.from(value),
     decryptString: (value: Buffer) => value.toString()
   }
@@ -175,6 +175,20 @@ describe('model gateway chat streaming', () => {
       expect(activeBefore.status).toBe(200)
       expect(await activeBefore.json()).toMatchObject({ text: inventoryId })
 
+      const inventory = await fetch(`http://127.0.0.1:${gatewayPort}/v1/models`)
+      expect(inventory.status).toBe(200)
+      const inventoryBody = (await inventory.json()) as {
+        data: Array<Record<string, unknown>>
+        models: Array<Record<string, unknown>>
+      }
+      expect(inventoryBody.data.find((entry) => entry.kind === 'chat')).toMatchObject({
+        id: inventoryId,
+        remote: true
+      })
+      expect(inventoryBody.models.find((entry) => entry.kind === 'chat')).toMatchObject({
+        model: inventoryId
+      })
+
       remote.deactivateRemoteVisionModel()
       const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/models/activate`, {
         method: 'POST',
@@ -187,6 +201,66 @@ describe('model gateway chat streaming', () => {
       expect(remote.getRemoteVisionServerSettings().activeServerId).toBe(serverId)
     } finally {
       remote.removeRemoteVisionServer(serverId)
+    }
+  })
+
+  it('routes a Mobile remote inventory id through its configured provider', async () => {
+    const remote = await import('../vision/remote-vision-server')
+    const codec = await import('../../shared/remote-vision-server')
+    const serverId = 'mobile-gemini-route'
+    const modelId = 'google/gemini-3.7-flash'
+    let providerBody: Record<string, unknown> | undefined
+    let providerAuthorization: string | undefined
+    const provider = http.createServer((request, response) => {
+      let raw = ''
+      request.setEncoding('utf8')
+      request.on('data', (chunk) => {
+        raw += chunk
+      })
+      request.on('end', () => {
+        providerBody = JSON.parse(raw) as Record<string, unknown>
+        providerAuthorization = request.headers.authorization
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify({ choices: [{ message: { content: 'Real Gemini answer' } }] }))
+      })
+    })
+    await new Promise<void>((resolve) => provider.listen(0, '127.0.0.1', resolve))
+    const providerPort = (provider.address() as AddressInfo).port
+    const localRequestBefore = upstreamRequest
+
+    try {
+      remote.setRemoteVisionServerSettings({
+        provider: 'custom',
+        endpoint: `http://127.0.0.1:${providerPort}/v1`,
+        model: modelId,
+        serverId,
+        name: 'Gemini provider',
+        apiKey: 'provider-secret'
+      })
+      const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: codec.remoteVisionModelId(serverId, modelId),
+          stream: false,
+          messages: [{ role: 'user', content: 'Do not echo me' }]
+        })
+      })
+
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        choices: [{ message: { content: 'Real Gemini answer' } }]
+      })
+      expect(providerBody).toMatchObject({
+        model: modelId,
+        stream: false,
+        messages: [{ role: 'user', content: 'Do not echo me' }]
+      })
+      expect(providerAuthorization).toBe('Bearer provider-secret')
+      expect(upstreamRequest).toBe(localRequestBefore)
+    } finally {
+      remote.removeRemoteVisionServer(serverId)
+      await new Promise<void>((resolve) => provider.close(() => resolve()))
     }
   })
 

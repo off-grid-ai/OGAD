@@ -61,6 +61,8 @@ import { tagLlmEntries, modelEntry, ollamaMirror } from './model-server/models-l
 import { buildGatewayModalities, type GatewayModalities } from './model-server/health'
 import { safeProxyResponse } from './model-server/proxy-response'
 import { writeDiagnosticLog } from './diagnostics-log'
+import { parseRemoteVisionModelId, remoteVisionModelId } from '../shared/remote-vision-server'
+import { getActiveRemoteVisionServer } from './vision/remote-vision-server'
 
 const UPSTREAM_HOST = '127.0.0.1'
 // The upstream llama-server port is LIVE, not fixed: llm.getPort() moves off LLAMA_SERVER_PORT when
@@ -247,6 +249,49 @@ function proxyToLlama(
   retryWithDeadline(attempt, { deadlineMs: retryUntil, replayable: !!bodyOverride }).catch(() => {
     json(res, 502, errBody('Local model not ready (llama-server unavailable).', 'upstream_error'))
   })
+}
+
+/** Forward an inventory-selected remote model through the Desktop connection that owns it.
+ * Mobile sees the stable inventory id, while the provider must receive its native model id. */
+function proxyToSelectedRemote(res: http.ServerResponse, body: Record<string, unknown>): boolean {
+  const requested = typeof body.model === 'string' ? parseRemoteVisionModelId(body.model) : null
+  if (!requested) return false
+  const remote = getActiveRemoteVisionServer()
+  if (!remote || requested.serverId !== remote.id || requested.modelId !== remote.model) {
+    json(res, 400, errBody('The selected remote model is not active.', 'invalid_request_error'))
+    return true
+  }
+
+  const target = new URL(`${remote.endpoint.replace(/\/+$/, '')}/chat/completions`)
+  const payload = Buffer.from(JSON.stringify({ ...body, model: remote.model }))
+  const client = target.protocol === 'https:' ? https : http
+  const proxyReq = client.request(
+    target,
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'content-length': String(payload.length),
+        ...(remote.apiKey ? { authorization: `Bearer ${remote.apiKey}` } : {})
+      }
+    },
+    (proxyRes) => {
+      const safeResponse = safeProxyResponse(proxyRes.statusCode, proxyRes.headers)
+      res.writeHead(safeResponse.statusCode, safeResponse.headers)
+      guardProxyStreams(proxyRes, res)
+      proxyRes.pipe(res)
+    }
+  )
+  proxyReq.setTimeout(300_000, () => proxyReq.destroy(new Error('Remote model timed out.')))
+  proxyReq.on('error', () => {
+    if (!res.headersSent) {
+      json(res, 502, errBody('Remote model connection failed.', 'upstream_error'))
+    } else {
+      res.end()
+    }
+  })
+  proxyReq.end(payload)
+  return true
 }
 
 // Fetch an image reference into a Buffer. Accepts data: URLs, http(s):// URLs,
@@ -477,6 +522,11 @@ async function handleChat(
     // model process can return its own stable input error.
   }
 
+  // A paired Mobile sends the stable remote inventory id advertised by Desktop.
+  // Route that id through the configured remote server instead of llama-server.
+  res.setHeader('X-Request-Id', rid)
+  if (proxyToSelectedRemote(res, body)) return
+
   // Async chat: run a non-streaming completion in the background and poll for it.
   if (isAsync(req, body)) {
     const inlined = body
@@ -494,7 +544,6 @@ async function handleChat(
 
   // Sync: stream straight through. Retry for up to 45s if llama-server is mid-reload
   // (e.g. just after an image generation freed and is respawning it, ~16s).
-  res.setHeader('X-Request-Id', rid)
   proxyToLlama(req, res, forward, Date.now() + 45_000)
 }
 
@@ -573,11 +622,24 @@ async function handleModelsList(res: http.ServerResponse): Promise<void> {
   const upData = Array.isArray(upstream.data) ? (upstream.data as Record<string, unknown>[]) : []
   // Tag the LLM entries chat vs vision from their advertised capabilities.
   let text: Record<string, unknown>[] = tagLlmEntries(upData)
+  const activeRemote = getActiveRemoteVisionServer()
+  if (activeRemote) {
+    text = [
+      {
+        id: remoteVisionModelId(activeRemote.id, activeRemote.model),
+        object: 'model',
+        created: now,
+        owned_by: activeRemote.name,
+        kind: 'chat',
+        remote: true
+      }
+    ]
+  }
   // Fall back to the on-disk active model when the upstream llama-server hasn't
   // loaded one yet (idle app, headless gateway, or a server that came up without
   // a model). Without this, /v1/models reports an empty chat model even though one
   // is installed and would load on the next request.
-  if (text.length === 0) {
+  if (!activeRemote && text.length === 0) {
     const info = llm.activeModelInfo()
     if (info) {
       text = [
