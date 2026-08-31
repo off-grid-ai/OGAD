@@ -183,7 +183,9 @@ describe('model gateway chat streaming', () => {
       }
       expect(inventoryBody.data.find((entry) => entry.kind === 'chat')).toMatchObject({
         id: inventoryId,
-        remote: true
+        name: modelId,
+        remote: true,
+        capabilities: ['vision', 'tools']
       })
       expect(inventoryBody.models.find((entry) => entry.kind === 'chat')).toMatchObject({
         model: inventoryId

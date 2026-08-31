@@ -627,11 +627,16 @@ async function handleModelsList(res: http.ServerResponse): Promise<void> {
     text = [
       {
         id: remoteVisionModelId(activeRemote.id, activeRemote.model),
+        name: activeRemote.model,
         object: 'model',
         created: now,
         owned_by: activeRemote.name,
         kind: 'chat',
-        remote: true
+        remote: true,
+        // The Desktop gateway has already validated this OpenAI-compatible route.
+        // Mobile must not probe the local llama /props endpoint for capabilities of
+        // this remote model, because that reports the wrong active model.
+        capabilities: ['vision', 'tools']
       }
     ]
   }
