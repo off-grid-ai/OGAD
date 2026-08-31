@@ -2,7 +2,10 @@ import { useCallback, useEffect, useState } from 'react'
 import { persistToggle } from '@renderer/lib/persist-toggle'
 import {
   DEFAULT_CTX_SIZE,
+  DEFAULT_MAX_TOOL_CALLS,
+  MAX_MAX_TOOL_CALLS,
   MAX_TOKENS_AUTO,
+  MIN_MAX_TOOL_CALLS,
   MIN_CAPTURE_CTX_SIZE
 } from '@offgrid/core/shared/llm-defaults'
 import {
@@ -88,6 +91,7 @@ type LlmSettings = {
   minP?: number
   repeatPenalty?: number
   maxTokens?: number
+  maxToolCalls?: number
   reasoningBudget?: number
   systemPrompt?: string
   kvCacheType?: KvCacheType
@@ -127,6 +131,7 @@ const DEFAULTS: LlmSettings = {
   minP: 0.05,
   repeatPenalty: 1.1,
   maxTokens: MAX_TOKENS_AUTO,
+  maxToolCalls: DEFAULT_MAX_TOOL_CALLS,
   ctxSize: DEFAULT_CTX_SIZE,
   systemPrompt: '',
   kvCacheType: 'f16',
@@ -309,16 +314,18 @@ export function SettingsPanel({
       ) : null}
 
       <div className="flex flex-nowrap items-center gap-1 overflow-x-auto border-b border-neutral-800 px-3 py-2">
-        {([
-          'model',
-          'remote',
-          'image',
-          'voice',
-          'transcription',
-          ...(TaskSettings ? (['tasks'] as const) : []),
-          'tools',
-          'connectors'
-        ] as const).map((t) => (
+        {(
+          [
+            'model',
+            'remote',
+            'image',
+            'voice',
+            'transcription',
+            ...(TaskSettings ? (['tasks'] as const) : []),
+            'tools',
+            'connectors'
+          ] as const
+        ).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -395,6 +402,23 @@ export function SettingsPanel({
               >
                 {showGenerationDetails ? 'Showing under each answer' : 'Hidden'}
               </button>
+            </Row>
+            <Row
+              label="Maximum tool calls"
+              controlId="maximum-tool-calls"
+              value={String(s.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS)}
+              hint="Emergency limit for tool calls in one response."
+            >
+              <input
+                id="maximum-tool-calls"
+                type="range"
+                min={MIN_MAX_TOOL_CALLS}
+                max={MAX_MAX_TOOL_CALLS}
+                step={1}
+                value={s.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS}
+                onChange={(e) => set({ maxToolCalls: Math.round(Number(e.target.value)) })}
+                className="w-full accent-green-500"
+              />
             </Row>
             <Row label="Top-P" value={(s.topP ?? 0.95).toFixed(2)} hint="Nucleus sampling cutoff.">
               <input

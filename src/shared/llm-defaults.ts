@@ -20,3 +20,14 @@ export const MAX_TOKENS_AUTO = 0
 
 // Fresh-install / reset default for max output: auto (context is the limit, not a fixed number).
 export const DEFAULT_MAX_TOKENS = MAX_TOKENS_AUTO
+
+// Emergency ceiling for tool calls in one response. Keep this aligned with Off Grid AI Mobile so
+// a synced value has the same meaning on both products.
+export const MIN_MAX_TOOL_CALLS = 1
+export const MAX_MAX_TOOL_CALLS = 100
+export const DEFAULT_MAX_TOOL_CALLS = 25
+
+export function normalizeMaxToolCalls(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_MAX_TOOL_CALLS
+  return Math.max(MIN_MAX_TOOL_CALLS, Math.min(MAX_MAX_TOOL_CALLS, Math.round(value)))
+}

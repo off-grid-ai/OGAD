@@ -61,4 +61,33 @@ describe('LLM settings sync contract', () => {
     expect(settings.getSettings().temperature).toBe(0.55)
     expect(mutations).toHaveLength(2)
   })
+
+  it('defaults, clamps, persists, and syncs the maximum tool-call setting', async () => {
+    const mutations: SyncMutation[] = []
+    const [{ registerHook, HOOKS }, { LLMService }] = await Promise.all([
+      import('../../bootstrap/hookRegistry'),
+      import('../../llm')
+    ])
+    registerHook(HOOKS.syncRecordLocalMutation, (mutation: SyncMutation) => {
+      mutations.push(mutation)
+    })
+    const settings = new LLMService()
+
+    expect(settings.getSettings().maxToolCalls).toBe(25)
+
+    await settings.setSettings({ maxToolCalls: 120 })
+
+    expect(settings.getSettings().maxToolCalls).toBe(100)
+    expect(
+      JSON.parse(fs.readFileSync(path.join(dataDir, 'models', 'llm-settings.json'), 'utf8'))
+    ).toMatchObject({ maxToolCalls: 100 })
+    expect(mutations).toEqual([
+      {
+        entity: 'model_setting',
+        entityId: 'maxToolCalls',
+        kind: 'put',
+        fields: { value: 100 }
+      }
+    ])
+  })
 })

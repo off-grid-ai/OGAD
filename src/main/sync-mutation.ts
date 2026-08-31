@@ -47,6 +47,7 @@ export const SYNCABLE_LLM_SETTING_KEYS = [
   'minP',
   'repeatPenalty',
   'maxTokens',
+  'maxToolCalls',
   'systemPrompt',
   'kvCacheType',
   'flashAttn',

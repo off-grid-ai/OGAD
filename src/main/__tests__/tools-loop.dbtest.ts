@@ -417,12 +417,23 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     expect(round1.tool_choice).toBe('auto')
   })
 
-  it('stops after the max tool-step budget instead of looping forever', async () => {
-    // Enqueue more tool-call rounds than the cap; the loop must bail, not spin.
-    for (let i = 0; i < 8; i++) fake.enqueue({ toolCalls: [{ name: 'get_datetime', args: {} }] })
-    const r = await toolChat('loop', [])
-    expect(r.answer).toMatch(/too many tool steps/i)
-    expect(fake.requests.length).toBeLessThanOrEqual(6)
+  it('uses the configured tool-step budget beyond the old five-step cap', async () => {
+    await llm.setSettings({ maxToolCalls: 7 })
+    try {
+      enqueueReactiveAfterEmptyPlan(
+        ...Array.from({ length: 7 }, () => ({
+          toolCalls: [{ name: 'get_datetime', args: {} }]
+        })),
+        { content: 'Finished after seven tool calls.' }
+      )
+      const r = await toolChat('keep going', [])
+
+      expect(r.toolCalls).toHaveLength(7)
+      expect(r.answer).toBe('Finished after seven tool calls.')
+      expect(fake.requests).toHaveLength(8)
+    } finally {
+      await llm.setSettings({ maxToolCalls: 25 })
+    }
   })
 
   it('runs the calculator the model asks for, feeds the real result back, and answers', async () => {
@@ -467,22 +478,49 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     expect(round2.messages?.some((m) => m.role === 'tool')).toBe(true)
   })
 
-  it('forces a real final answer from the results when the step cap is hit (no dead-end)', async () => {
-    // Five tool-call rounds exhaust the loop; instead of a canned "stopped" reply,
-    // the loop makes ONE more no-tools generation so the user gets a real answer
-    // built from what the tools returned.
-    enqueueReactiveAfterEmptyPlan(
-      ...Array.from({ length: 5 }, () => ({
-        toolCalls: [{ name: 'get_datetime', args: {} }]
-      })),
-      { content: 'Based on the tools, here is your answer.' }
-    )
-    const r = await toolChat('keep going', [])
-    expect(r.answer).toBe('Based on the tools, here is your answer.')
-    expect(r.answer).not.toMatch(/too many tool steps/i)
-    // The final generation ran WITHOUT tools (the forced answer pass).
-    const lastReq = fake.requests[fake.requests.length - 1] as { tools?: unknown[] }
-    expect(lastReq.tools ?? []).toHaveLength(0)
+  it('forces a real final answer when the configured emergency limit is reached', async () => {
+    await llm.setSettings({ maxToolCalls: 3 })
+    try {
+      enqueueReactiveAfterEmptyPlan(
+        ...Array.from({ length: 3 }, () => ({
+          toolCalls: [{ name: 'get_datetime', args: {} }]
+        })),
+        { content: 'Based on the tools, here is your answer.' }
+      )
+      const r = await toolChat('keep going', [])
+      expect(r.toolCalls).toHaveLength(3)
+      expect(r.answer).toBe('Based on the tools, here is your answer.')
+      expect(r.answer).not.toMatch(/too many tool steps/i)
+      const lastReq = fake.requests[fake.requests.length - 1] as { tools?: unknown[] }
+      expect(lastReq.tools ?? []).toHaveLength(0)
+    } finally {
+      await llm.setSettings({ maxToolCalls: 25 })
+    }
+  })
+
+  it('counts parallel tool calls against the configured emergency limit', async () => {
+    await llm.setSettings({ maxToolCalls: 2 })
+    try {
+      enqueueReactiveAfterEmptyPlan(
+        {
+          toolCalls: [
+            { name: 'get_datetime', args: {} },
+            { name: 'get_datetime', args: {} },
+            { name: 'get_datetime', args: {} }
+          ]
+        },
+        { content: 'Stopped after the configured two calls.' }
+      )
+
+      const r = await toolChat('use only the allowed calls', [])
+
+      expect(r.toolCalls).toHaveLength(2)
+      expect(r.answer).toBe('Stopped after the configured two calls.')
+      const lastReq = fake.requests[fake.requests.length - 1] as { tools?: unknown[] }
+      expect(lastReq.tools ?? []).toHaveLength(0)
+    } finally {
+      await llm.setSettings({ maxToolCalls: 25 })
+    }
   })
 
   it('rejects a non-arithmetic calculator expression (real guard branch)', async () => {

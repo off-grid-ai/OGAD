@@ -586,6 +586,7 @@ const offGridApi = {
     minP?: number
     repeatPenalty?: number
     maxTokens?: number
+    maxToolCalls?: number
     systemPrompt?: string
     kvCacheType?: 'f16' | 'q8_0' | 'q4_0'
     flashAttn?: boolean

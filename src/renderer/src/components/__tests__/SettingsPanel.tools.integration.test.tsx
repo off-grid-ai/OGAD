@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SettingsPanel } from '../SettingsPanel'
@@ -13,6 +13,33 @@ afterEach(() => {
 })
 
 describe('<SettingsPanel/> tool settings', () => {
+  it('shows and saves the maximum tool-call setting', async () => {
+    let settings = { maxToolCalls: 25 }
+    const setLlmSettings = vi.fn(async (patch: { maxToolCalls?: number }) => {
+      settings = { ...settings, ...patch }
+      return settings
+    })
+    ;(window as unknown as { api: Record<string, unknown> }).api = {
+      getLlmSettings: async () => settings,
+      setLlmSettings,
+      getModelCatalog: async () => ({ models: [] }),
+      getActiveModel: async () => null,
+      getSettings: async () => ({}),
+      getTranscriptionInfo: async () => null,
+      listTools: async () => [],
+      mcpList: async () => []
+    }
+
+    render(<SettingsPanel embedded onClose={() => {}} />)
+
+    const slider = await screen.findByRole('slider', { name: 'Maximum tool calls' })
+    expect((slider as HTMLInputElement).value).toBe('25')
+    fireEvent.change(slider, { target: { value: '42' } })
+
+    await waitFor(() => expect(setLlmSettings).toHaveBeenCalledWith({ maxToolCalls: 42 }))
+    expect(screen.getByText('42')).toBeTruthy()
+  })
+
   it('hosts licensed task settings in the shared Tasks tab', async () => {
     registerSlot(SLOTS.taskSettings, () => <div>Task settings content</div>)
     ;(window as unknown as { api: Record<string, unknown> }).api = {

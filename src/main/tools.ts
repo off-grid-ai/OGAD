@@ -25,6 +25,7 @@ import {
 } from './proposal-deck/tool'
 import { proposalDeckSystemHint, proposalDeckService } from './proposal-deck/service'
 import { callHookAsync, HOOKS } from './bootstrap/hookRegistry'
+import { DEFAULT_MAX_TOOL_CALLS } from '../shared/llm-defaults'
 
 // Per-tool enable/disable, persisted as a list of disabled tool names.
 function disabledSet(): Set<string> {
@@ -696,7 +697,9 @@ export async function toolChat(
     }
   }
 
-  for (let step = 0; step < 5; step++) {
+  const maxToolCalls = llm.getSettings().maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS
+  let round = 0
+  while (toolCalls.length < maxToolCalls) {
     // Stream this round: reasoning + any answer text flow through onDelta live; tool_calls
     // are accumulated and returned. A tool-calling round streams thinking (and no content);
     // the final round streams the answer. tool temperature stays 0.3 (was the blocking path).
@@ -732,24 +735,28 @@ export async function toolChat(
             rawArgs: c.arguments || '{}'
           }))
         : parseToolCallsFromText(content).map((c, i) => ({
-            id: `txt-${String(step)}-${String(i)}`,
+            id: `txt-${String(round)}-${String(i)}`,
             name: c.name,
             args: c.args,
             rawArgs: JSON.stringify(c.args)
           }))
 
     if (effective.length) {
+      // One model round can request several tools in parallel. Count the actual calls, as Mobile
+      // does, and execute only the remaining allowance so the configured ceiling stays truthful.
+      const remaining = maxToolCalls - toolCalls.length
+      const callsToRun = effective.slice(0, remaining)
       // Re-add the assistant turn (with its tool_calls) so the model sees what it invoked.
       messages.push({
         role: 'assistant',
         content: content || null,
-        tool_calls: effective.map((c) => ({
+        tool_calls: callsToRun.map((c) => ({
           id: c.id,
           type: 'function',
           function: { name: c.name, arguments: c.rawArgs }
         }))
       })
-      for (const c of effective) {
+      for (const c of callsToRun) {
         // Small models sometimes call a search tool with no query — backfill the
         // user's message so the search isn't empty (rather than erroring out).
         if (
@@ -781,12 +788,13 @@ export async function toolChat(
           return resultWithImages({ answer: res.text, toolCalls, unified })
         }
       }
+      round += 1
       continue // let the model use the results
     }
     // No tool calls this round: `content` is the final answer (already streamed via onDelta).
     return resultWithImages({ answer: content.trim(), toolCalls, unified })
   }
-  // Step cap reached with the model still calling tools. Instead of dead-ending
+  // The configured emergency cap was reached with the model still calling tools. Instead of dead-ending
   // with a canned "stopped" message, FORCE one final answer WITHOUT tools, so the
   // user gets a real response built from the results gathered so far.
   if (opts.signal?.aborted) {

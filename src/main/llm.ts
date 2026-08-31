@@ -18,7 +18,11 @@ import { resolveMaxTokens, maxTokensForWire, MAX_TOKENS_AUTO } from './llm/gen-p
 import { classifyLlamaError, modelPortConflictReason } from './llama-error'
 import type { ManagedRuntime } from './runtime-manager'
 import { LLAMA_SERVER_PORT } from '../shared/ports'
-import { DEFAULT_CTX_SIZE } from '../shared/llm-defaults'
+import {
+  DEFAULT_CTX_SIZE,
+  DEFAULT_MAX_TOOL_CALLS,
+  normalizeMaxToolCalls
+} from '../shared/llm-defaults'
 import { REASONING_BUDGET_AUTO, reasoningBudgetPayload } from '@offgrid/models'
 import { acceleratorForEngine, type EngineAccelerator } from '../shared/engine-accelerator'
 import {
@@ -67,6 +71,7 @@ export interface LlmSettings {
   minP?: number
   repeatPenalty?: number
   maxTokens?: number
+  maxToolCalls?: number
   reasoningBudget?: number
   systemPrompt?: string
   // Launch-time (require a server respawn to take effect):
@@ -145,6 +150,7 @@ export class LLMService {
   // Auto by default: a reply runs until the model stops (EOS) or the window fills, instead of a
   // fixed 2048-token cap that truncated long answers regardless of the (large) context window.
   private maxTokens = MAX_TOKENS_AUTO
+  private maxToolCalls = DEFAULT_MAX_TOOL_CALLS
   // Thinking budget: caps the tokens a reasoning model spends thinking before it answers.
   // Auto (0) = unrestricted. Applied per request; no reload needed.
   private reasoningBudget = REASONING_BUDGET_AUTO
@@ -191,6 +197,8 @@ export class LLMService {
       if (typeof s.minP === 'number') this.minP = s.minP
       if (typeof s.repeatPenalty === 'number') this.repeatPenalty = s.repeatPenalty
       if (typeof s.maxTokens === 'number') this.maxTokens = s.maxTokens
+      if (typeof s.maxToolCalls === 'number')
+        this.maxToolCalls = normalizeMaxToolCalls(s.maxToolCalls)
       if (typeof s.reasoningBudget === 'number') this.reasoningBudget = s.reasoningBudget
       if (typeof s.systemPrompt === 'string') this.systemPrompt = s.systemPrompt
       if (s.kvCacheType === 'f16' || s.kvCacheType === 'q8_0' || s.kvCacheType === 'q4_0')
@@ -331,6 +339,7 @@ export class LLMService {
       minP: this.minP,
       repeatPenalty: this.repeatPenalty,
       maxTokens: this.maxTokens,
+      maxToolCalls: this.maxToolCalls,
       reasoningBudget: this.reasoningBudget,
       systemPrompt: this.systemPrompt,
       kvCacheType: this.kvCacheType,
@@ -466,6 +475,8 @@ export class LLMService {
     if (typeof s.minP === 'number') this.minP = s.minP
     if (typeof s.repeatPenalty === 'number') this.repeatPenalty = s.repeatPenalty
     if (typeof s.maxTokens === 'number') this.maxTokens = s.maxTokens
+    if (typeof s.maxToolCalls === 'number')
+      this.maxToolCalls = normalizeMaxToolCalls(s.maxToolCalls)
     if (typeof s.reasoningBudget === 'number') this.reasoningBudget = s.reasoningBudget
     if (typeof s.systemPrompt === 'string') this.systemPrompt = s.systemPrompt
     if (s.kvCacheType === 'f16' || s.kvCacheType === 'q8_0' || s.kvCacheType === 'q4_0')
