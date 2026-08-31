@@ -133,7 +133,9 @@ export class VisionController {
       title: next.goal,
       status: next.status,
       summary: next.summary,
-      steps: [...steps],
+      // Task history owns the durable step trace. emitStep appends there first. Re-sending this
+      // controller's display cache here can replace a newer persisted plan marker with a stale
+      // list, which makes the Execution plan flicker and then disappear.
       executionDeviceId: next.executionDeviceId,
       executionDeviceName: next.executionDeviceName,
       phase: next.phase,

@@ -360,4 +360,18 @@ describe('the overlay feed', () => {
       })
     })
   })
+
+  it('never replaces the durable execution plan with its display step cache', () => {
+    owner.emitState({ taskId: 'plan-task', goal: 'Send the message', status: 'running' })
+    owner.emitStep('plan-task', 'TASK_PLAN:{"version":1,"phases":[]}')
+    owner.emitState({
+      taskId: 'plan-task',
+      goal: 'Send the message',
+      status: 'running',
+      phase: 'checking'
+    })
+
+    expect(owner.current().steps).toEqual(['TASK_PLAN:{"version":1,"phases":[]}'])
+    expect(records.at(-1)).not.toHaveProperty('steps')
+  })
 })
