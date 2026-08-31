@@ -93,6 +93,7 @@ import { Button } from '@renderer/components/ui/button'
 import { ActionGateDock } from '@renderer/components/actions/ActionGateDock'
 import { TaskPanelTrigger } from '@renderer/components/tasks/TaskPanelTrigger'
 import { useTaskWorkspaceOpen } from '@renderer/lib/task-side-panel'
+import { setActiveConversationId as publishActiveConversationId } from '@renderer/lib/active-conversation'
 import { useWorkspacePaneController } from './workspace/useWorkspacePaneController'
 import {
   guidanceTaskForJourney,
@@ -2543,6 +2544,9 @@ export function MemoryChat({
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   useEffect(() => {
     onActiveConversationChange?.(activeConversationId)
+    // Publish to the module store so out-of-tree handlers (Chat link clicks) can
+    // bind opened browser tabs to this chat.
+    publishActiveConversationId(activeConversationId)
   }, [activeConversationId, onActiveConversationChange])
   // Active tab's messages (derived) + a shim so the existing active-conversation call
   // sites keep working. The send path targets its own conv via setConvMessages instead.

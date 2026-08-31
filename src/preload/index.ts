@@ -107,9 +107,10 @@ const offGridApi = {
       owner: 'docked' | 'floating',
       rect: { x: number; y: number; width: number; height: number } | null
     ) => ipcRenderer.send('browser:set-region', owner, rect),
-    newTab: (): Promise<{ sessionId: string }> => ipcRenderer.invoke('browser:new-tab'),
-    openUrl: (url: string): Promise<{ sessionId: string } | null> =>
-      ipcRenderer.invoke('browser:open-url', url),
+    newTab: (journeyId?: string): Promise<{ sessionId: string }> =>
+      ipcRenderer.invoke('browser:new-tab', journeyId),
+    openUrl: (url: string, journeyId?: string): Promise<{ sessionId: string } | null> =>
+      ipcRenderer.invoke('browser:open-url', url, journeyId),
     getSessions: (): Promise<BrowserSessionsSnapshot> => ipcRenderer.invoke('browser:get-sessions'),
     activateSession: (sessionId: string): Promise<boolean> =>
       ipcRenderer.invoke('browser:activate-session', sessionId),
