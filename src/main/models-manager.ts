@@ -876,7 +876,12 @@ export async function setActiveModalChoice(
 }
 
 export function getActiveModalities(): { text: string | null } & Record<Modality, string | null> {
-  return { text: getActiveModel(), ...getAllActiveModals() }
+  const settings = getRemoteVisionServerSettings()
+  const remote = settings.servers.find((server) => server.id === settings.activeServerId)
+  return {
+    text: remote ? remoteVisionModelId(remote.id, remote.model) : getActiveModel(),
+    ...getAllActiveModals()
+  }
 }
 
 // ---------------------------------------------------------------------------

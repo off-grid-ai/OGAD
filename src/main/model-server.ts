@@ -1193,10 +1193,10 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
           if (url === '/v1/models/activate' && method === 'POST') {
             const { id, kind } = await readJson(req)
             if (!id) return json(res, 400, { error: 'id required' })
-            const r =
-              kind && kind !== 'text' && kind !== 'vision'
-                ? await mm.setActiveModalChoice(String(kind), String(id))
-                : await mm.setActiveModel(String(id))
+            const r = await mm.activateModel(
+              String(id),
+              typeof kind === 'string' ? kind : undefined
+            )
             return json(res, r.success ? 200 : 400, r)
           }
           // DELETE /v1/models/{id}  (or POST /v1/models/delete {id})

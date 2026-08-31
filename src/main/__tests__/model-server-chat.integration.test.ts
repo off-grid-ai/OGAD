@@ -155,6 +155,41 @@ afterAll(async () => {
 })
 
 describe('model gateway chat streaming', () => {
+  it('reports and activates the Desktop remote Chat model through the management API', async () => {
+    const remote = await import('../vision/remote-vision-server')
+    const codec = await import('../../shared/remote-vision-server')
+    const serverId = 'mobile-model-parity'
+    const modelId = 'google/gemini-3.7-flash'
+    const inventoryId = codec.remoteVisionModelId(serverId, modelId)
+
+    try {
+      remote.setRemoteVisionServerSettings({
+        provider: 'custom',
+        endpoint: 'https://openrouter.ai/api/v1',
+        model: modelId,
+        serverId,
+        name: 'OpenRouter'
+      })
+
+      const activeBefore = await fetch(`http://127.0.0.1:${gatewayPort}/v1/models/active`)
+      expect(activeBefore.status).toBe(200)
+      expect(await activeBefore.json()).toMatchObject({ text: inventoryId })
+
+      remote.deactivateRemoteVisionModel()
+      const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/models/activate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: inventoryId, kind: 'text' })
+      })
+
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ success: true })
+      expect(remote.getRemoteVisionServerSettings().activeServerId).toBe(serverId)
+    } finally {
+      remote.removeRemoteVisionServer(serverId)
+    }
+  })
+
   it('rejects malformed input with a stable JSON envelope and remains healthy', async () => {
     const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/chat/completions`, {
       method: 'POST',
