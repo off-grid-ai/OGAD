@@ -13,7 +13,6 @@ interface PresetSetupProps {
 
 interface ConnectorSummary {
   name: string
-  enabled: number
   status: string
 }
 
@@ -142,17 +141,15 @@ export function PresetSetup({
     if (!recommendedConnector) return
     let cancelled = false
     const listConnectors = window.api.mcpList
-    if (typeof listConnectors !== 'function') {
-      setConnectorReady(false)
-      return
-    }
-    void listConnectors()
+    const connectorsRequest =
+      typeof listConnectors === 'function' ? listConnectors() : Promise.resolve([])
+    void connectorsRequest
       .then((connectors) => {
         if (cancelled) return
         const match = (connectors as ConnectorSummary[]).find(
           (connector) => connector.name.toLowerCase() === recommendedConnector.toLowerCase()
         )
-        setConnectorReady(Boolean(match && match.enabled === 1 && match.status === 'ok'))
+        setConnectorReady(Boolean(match && match.status === 'ok'))
       })
       .catch(() => {
         if (!cancelled) setConnectorReady(false)
