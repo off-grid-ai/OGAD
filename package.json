@@ -37,7 +37,7 @@
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "node scripts/stage-native.mjs && electron-vite build && npm run prepare:speech-defaults && electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux",
-    "test:e2e": "electron-vite build && OFFGRID_E2E_HEADLESS=1 playwright test",
+    "test:e2e": "electron-vite build && OFFGRID_E2E_HEADLESS=1 node node_modules/@playwright/test/cli.js test",
     "test:sync:physical": "node scripts/physical-sync/iosMacKnowledgeSync.mjs",
     "smoke": "bash scripts/smoke-api.sh",
     "smoke:packaged": "bash scripts/smoke-packaged.sh",
