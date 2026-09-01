@@ -147,8 +147,8 @@ export class ChatBoundary {
     ) => {
       if (role === 'user' && this.pendingUserWrite) {
         const gate = this.pendingUserWrite
-        this.pendingUserWrite = null
         await gate.promise
+        if (this.pendingUserWrite === gate) this.pendingUserWrite = null
       }
       this.messages[conversationId] ??= []
       const id = this.nextMessageId++

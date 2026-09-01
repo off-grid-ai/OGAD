@@ -80,6 +80,33 @@ describe('DesktopChatSession', () => {
     expect(session.queueProjection().entries).toEqual([])
   })
 
+  it('starts a new turn after stopping while durable user persistence is pending', async () => {
+    let releaseWrite = (): void => undefined
+    const writeGate = new Promise<void>((resolve) => {
+      releaseWrite = resolve
+    })
+    const boundary: DesktopChatSessionBoundary = {
+      ragChat: vi.fn(async () => ({ answer: 'done' })),
+      onRagStream: () => () => undefined,
+      cancelRag: vi.fn(),
+      addRagMessage: vi.fn(async () => writeGate.then(() => ({ id: 1, uuid: 'user-1' })))
+    }
+    const session = new DesktopChatSession(boundary)
+    const first = session.send({
+      ...input('turn-a'),
+      userPersistence: { content: 'Question turn-a' }
+    })
+
+    await vi.waitFor(() => expect(boundary.addRagMessage).toHaveBeenCalledOnce())
+    expect(session.stopConversation('conversation-a', 'stop')).toBe(1)
+    releaseWrite()
+    const second = session.send(input('turn-b'))
+
+    await expect(first).resolves.toMatchObject({ turn: { status: 'stopped' } })
+    await expect(second).resolves.toMatchObject({ turn: { status: 'completed' } })
+    expect(boundary.ragChat).toHaveBeenCalledOnce()
+  })
+
   it('keeps complete tool rounds in the shared canonical response transcript', async () => {
     const boundary: DesktopChatSessionBoundary = {
       ragChat: vi.fn(async () => ({ answer: '' })),

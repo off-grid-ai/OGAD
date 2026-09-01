@@ -6,6 +6,10 @@ import type {
 } from '@offgrid/models'
 
 export interface DesktopToolExecutionSession {
+  prepare?(
+    call: GenerationToolCall,
+    context: ToolExecutionContext
+  ): GenerationToolCall | Promise<GenerationToolCall>
   execute(call: GenerationToolCall, context: ToolExecutionContext): Promise<ToolExecutionResult>
 }
 
@@ -21,6 +25,15 @@ class DesktopToolExecutor implements ToolExecutorPort {
     return () => {
       if (this.sessions.get(turnId) === session) this.sessions.delete(turnId)
     }
+  }
+
+  prepare(
+    call: GenerationToolCall,
+    context: ToolExecutionContext
+  ): GenerationToolCall | Promise<GenerationToolCall> {
+    const turnId = context.identity?.turnId
+    const session = turnId ? this.sessions.get(turnId) : undefined
+    return session?.prepare?.(call, context) ?? call
   }
 
   execute(call: GenerationToolCall, context: ToolExecutionContext): Promise<ToolExecutionResult> {

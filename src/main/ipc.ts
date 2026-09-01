@@ -51,8 +51,22 @@ import {
 import { setupSystemStatusIpc } from './system-status-ipc'
 import { CACHE_CLEANUP_CHANNEL } from '../shared/ipc-contracts'
 import {
+  CHAT_INTENT_RESPONSE_SCHEMA,
+  buildArtifactGenerationPrompt,
+  buildChatIntentClassifierPrompt,
+  buildImagePromptEnhancementRequest,
+  buildNoMemoryChatMessages,
+  formatDeferredImageAnswer,
+  formatRetrievalContext,
+  formatRetrievalHistory,
   normalizeTextResponse as toResponseGenerationResult,
-  type NormalizedTextResponse
+  parseChatIntentResponse,
+  type ChatIntent,
+  type NormalizedTextResponse,
+  type RetrievalEntity,
+  type RetrievalFact,
+  type RetrievalMessage,
+  type RetrievalSummary
 } from '@offgrid/models'
 import type { GenerationMetrics } from '../shared/generation-metrics'
 import { getAllPromptDefs } from './prompts'
@@ -62,14 +76,12 @@ import { setupVoiceTranscriptionIpc } from './voice-transcription-ipc'
 import {
   safeParseJson,
   ftsMatchExpression,
-  clipText,
-  isGenerativeRequest,
   isTrivialMessage,
   appNameLikeClause
 } from './ipc-query-logic'
 import { requestApplicationRelaunch } from './shutdown'
 import { sampleProgressRate, type ProgressRateSample } from '@offgrid/ui'
-import type { GenerationMessage } from '@offgrid/models'
+import type { GenerationMessage, GenerationRequest } from '@offgrid/models'
 import { notifyRagConversationChanged } from './rag-conversation-events'
 import { readImages } from './llm/read-images'
 import { generateDesktopText } from './desktop-generation'
@@ -122,16 +134,42 @@ import {
 const streamControllers = new Map<string, AbortController>()
 
 function generationMessages(
-  prompt: string,
+  input: string | readonly GenerationMessage[],
   images: string[],
   systemPrompt: string
 ): GenerationMessage[] {
   const decoded = readImages(images)
+  if (typeof input !== 'string') {
+    const messages = input.map((message) => ({ ...message }))
+    const userIndex = messages.findLastIndex((message) => message.role === 'user')
+    if (userIndex >= 0 && decoded.length) {
+      const user = messages[userIndex]!
+      const content =
+        typeof user.content === 'string'
+          ? [{ type: 'text' as const, text: user.content }]
+          : [...user.content]
+      messages[userIndex] = {
+        ...user,
+        content: [
+          ...content,
+          ...decoded.map((image) => ({
+            type: 'image' as const,
+            mimeType: image.mime,
+            data: image.base64
+          }))
+        ]
+      }
+    }
+    if (systemPrompt.trim() && !messages.some((message) => message.role === 'system')) {
+      messages.unshift({ role: 'system', content: systemPrompt })
+    }
+    return messages
+  }
   const messages: GenerationMessage[] = [
     {
       role: 'user',
       content: [
-        { type: 'text', text: prompt },
+        { type: 'text', text: input },
         ...decoded.map((image) => ({
           type: 'image' as const,
           mimeType: image.mime,
@@ -147,7 +185,7 @@ function generationMessages(
 async function streamAnswer(
   event: { sender?: { send: (channel: string, payload: unknown) => void } } | undefined,
   streamId: string | undefined,
-  prompt: string,
+  prompt: string | readonly GenerationMessage[],
   thinking: boolean = false,
   images: string[] = []
 ): Promise<ResponseGenerationResult> {
@@ -156,7 +194,7 @@ async function streamAnswer(
 
   await desktopModelServices.refresh()
   const turnId = streamId ?? `desktop-chat:${Date.now()}:${Math.random().toString(36).slice(2)}`
-  const request = (signal?: AbortSignal) => ({
+  const request = (signal?: AbortSignal): GenerationRequest => ({
     messages: generationMessages(prompt, images, llm.getSettings().systemPrompt ?? ''),
     identity: { conversationId: streamId ?? turnId, turnId },
     requiredCapabilities: {
@@ -228,18 +266,6 @@ async function streamAnswer(
   }
 }
 
-type ChatIntent = { intent: 'build' | 'image' | 'chat'; urls: string[] }
-
-const INTENT_SCHEMA = {
-  type: 'object',
-  properties: {
-    intent: { type: 'string', enum: ['build', 'image', 'chat'] },
-    urls: { type: 'array', items: { type: 'string' } }
-  },
-  required: ['intent', 'urls'],
-  additionalProperties: false
-}
-
 // Decide the output format for a turn with the model itself (grammar-constrained
 // JSON), instead of brittle keyword matching: build (runnable artifact), image
 // (generate a picture), or chat. Also pulls out any URLs the user wants read.
@@ -249,29 +275,13 @@ async function classifyIntent(
   history?: { role: string; content: string }[],
   streamId?: string
 ): Promise<ChatIntent> {
-  const regexUrls = (query.match(/https?:\/\/[^\s)<>"']+/g) || []).slice(0, 3)
   // Register a controller for this pre-stream classify so a rag:cancel during the
   // "Searching your memory…" window actually aborts the model call (D11) — without
   // it the classify ran to completion after Stop, holding the model + the next turn.
   const controller = streamId ? new AbortController() : undefined
   if (streamId && controller) streamControllers.set(streamId, controller)
   try {
-    const hist = (history ?? [])
-      .slice(-4)
-      .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${clipText(m.content, 200)}`)
-      .join('\n')
-    const prompt = [
-      'You route a request for an on-device assistant. Decide the OUTPUT FORMAT:',
-      '- "build": the user wants runnable code / a UI created — an app, component, page, playground, dashboard, form, diagram, chart, visualization, game, etc. (rendered live in a canvas).',
-      '- "image": the user wants a picture/photo/logo/illustration/art generated.',
-      '- "chat": anything else — questions, explanations, writing, discussion.',
-      'Also list any http(s) URLs the user wants you to read or build from.',
-      'Reply with ONLY JSON: {"intent":"build|image|chat","urls":[]}.',
-      hist ? `Recent conversation:\n${hist}` : '',
-      `User: ${query}`
-    ]
-      .filter(Boolean)
-      .join('\n\n')
+    const prompt = buildChatIntentClassifierPrompt(query, history)
     const raw = (
       await generateDesktopText(prompt, {
         operation: { type: 'classifier', input: query, labels: ['build', 'image', 'chat'] },
@@ -280,18 +290,15 @@ async function classifyIntent(
         thinking: false,
         responseFormat: {
           type: 'json_schema',
-          json_schema: { name: 'intent', schema: INTENT_SCHEMA, strict: true }
+          json_schema: { name: 'intent', schema: CHAT_INTENT_RESPONSE_SCHEMA, strict: true }
         },
         signal: controller?.signal
       })
     ).content
-    const j = JSON.parse(raw) as Partial<ChatIntent>
-    const intent = j.intent === 'build' || j.intent === 'image' ? j.intent : 'chat'
-    const urls = Array.isArray(j.urls) ? j.urls.filter((u) => /^https?:\/\//i.test(u)) : []
-    return { intent, urls: urls.length ? urls.slice(0, 3) : regexUrls }
+    return parseChatIntentResponse(raw, query)
   } catch (e) {
     console.warn('[intent] classifier failed, falling back to heuristic', (e as Error).message)
-    return { intent: isGenerativeRequest(query) ? 'build' : 'chat', urls: regexUrls }
+    return parseChatIntentResponse('', query)
   } finally {
     // Only remove OUR entry — streamAnswer re-registers its own controller under
     // the same streamId for the streaming phase.
@@ -706,7 +713,7 @@ export function setupIPC() {
       // Image request → have the model write a vivid prompt, then the renderer
       // generates it (it already detects an ```image block).
       if (intent === 'image') {
-        const imgPrompt = `Write ONE vivid, detailed image-generation prompt (visual description only, no preamble) for this request:\n${query}`
+        const imgPrompt = buildImagePromptEnhancementRequest(query)
         const desc = (
           await generateDesktopText(imgPrompt, {
             timeoutMs: 60_000,
@@ -714,27 +721,15 @@ export function setupIPC() {
             thinking: false
           })
         ).content
-          .trim()
-          .replace(/^["']|["']$/g, '')
-        return { answer: '```image\n' + (desc || query) + '\n```', context: undefined }
+        return { answer: formatDeferredImageAnswer(desc, query), context: undefined }
       }
 
       // Build request → artifact prompt (even in No-memory mode), with any URLs
       // fetched for us so the small model never has to chain tools.
       if (intent === 'build') {
-        let historyBlock = ''
-        if (conversationHistory && conversationHistory.length > 0) {
-          const historyLines = conversationHistory
-            .map(
-              (msg) =>
-                `${msg.role === 'user' ? 'User' : 'Assistant'}: ${clipText(msg.content, 400)}`
-            )
-            .join('\n')
-          historyBlock = `Conversation so far:\n${historyLines}`
-        }
         // read_url → build: fetch the classifier's URLs (deterministic).
-        let referenceBlock = ''
         const urls = intentUrls
+        const references: { url: string; content?: string; error?: string }[] = []
         if (urls.length) {
           if (streamId)
             event.sender.send('rag:stream', {
@@ -743,53 +738,26 @@ export function setupIPC() {
               step: { kind: 'reading', counts: { urls: urls.length } }
             })
           const { readUrlText } = await import('./tools')
-          const parts: string[] = []
           for (const u of urls) {
             try {
-              parts.push(
-                `--- Content fetched from ${u} ---\n${clipText(await readUrlText(u), 5000)}`
-              )
+              references.push({ url: u, content: await readUrlText(u) })
             } catch (e) {
-              parts.push(`--- Could not fetch ${u}: ${(e as Error).message} ---`)
+              references.push({ url: u, error: (e as Error).message })
             }
           }
-          referenceBlock = `REFERENCE — the user pointed you at these page(s); BUILD using this content (e.g. if it's API docs, build a UI that actually calls those endpoints):\n${parts.join('\n\n')}`
         }
-        const prompt = [
-          'You are Off Grid AI, an on-device assistant with a LIVE, sandboxed code canvas built in.',
-          'The user wants you to BUILD something. Output the FINISHED, self-contained code as ONE fenced block — it runs immediately in the canvas beside the chat:',
-          '- React app/component -> ```jsx — write idiomatic React (you may `import React, { useState } from "react"` and `export default function App() {…}`; the sandbox handles imports/exports). Define the main component as `App` or a default export.',
-          '- a plain web page / interactive UI (no React) -> ```html — one complete document, inline all CSS and JS.',
-          '- a diagram -> ```mermaid.  a static graphic -> ```svg.',
-          'You DO have a real execution sandbox — do NOT say "since I am on-device" or "copy this into a new project", do NOT give npm/Vite/Create-React-App setup steps, and do NOT split it into src/App.js + src/App.css instructions. Just write ONE runnable code block. At most one short sentence before it.',
-          referenceBlock,
-          historyBlock,
-          `User: ${query}`,
-          'Assistant:'
-        ]
-          .filter(Boolean)
-          .join('\n\n')
+        const prompt = buildArtifactGenerationPrompt({
+          query,
+          history: conversationHistory,
+          references
+        })
         const completion = await streamAnswer(event, streamId, prompt, thinking, imgs)
         return { ...completion, context: undefined }
       }
 
       // No-memory mode: a plain on-device assistant — no retrieval at all.
       if (noMemory) {
-        const { llm } = await import('./llm')
-        const hist = (conversationHistory ?? [])
-          .slice(-10)
-          .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${m.content}`)
-          .join('\n')
-        const prompt = [
-          'You are Off Grid AI, a private, on-device assistant.',
-          'You can generate images on-device. If (and only if) the user is asking for a picture/image/logo/art to be CREATED, respond with ONLY a fenced block ```image\\n<a detailed image prompt>\\n``` and nothing else. For everything else, answer normally in text.',
-          hist ? `Conversation so far:\n${hist}` : '',
-          `User: ${query}`,
-          'Assistant:'
-        ]
-          .filter(Boolean)
-          .join('\n\n')
-        void llm // retained for non-stream fallback inside streamAnswer
+        const prompt = buildNoMemoryChatMessages({ query, history: conversationHistory })
         const completion = await streamAnswer(event, streamId, prompt, thinking, imgs)
         return { ...completion, context: undefined }
       }
@@ -902,7 +870,7 @@ export function setupIPC() {
         messageParams.push(msgFilter.param)
       }
       messageQuery += ` ORDER BY score ASC LIMIT 12`
-      const messages = db.prepare(messageQuery).all(...messageParams)
+      const messages = db.prepare(messageQuery).all(...messageParams) as RetrievalMessage[]
 
       const summaryParams: any[] = [ftsQuery]
       let summaryQuery = `
@@ -919,7 +887,7 @@ export function setupIPC() {
         summaryParams.push(sumFilter.param)
       }
       summaryQuery += ` ORDER BY score ASC LIMIT 8`
-      const summaries = db.prepare(summaryQuery).all(...summaryParams)
+      const summaries = db.prepare(summaryQuery).all(...summaryParams) as RetrievalSummary[]
 
       const entityParams: any[] = [ftsQuery]
       let entityQuery = `
@@ -942,7 +910,7 @@ export function setupIPC() {
         entityParams.push(entFilter.param)
       }
       entityQuery += ` ORDER BY score ASC LIMIT 8`
-      const entities = db.prepare(entityQuery).all(...entityParams)
+      const entities = db.prepare(entityQuery).all(...entityParams) as RetrievalEntity[]
 
       const factParams: any[] = [ftsQuery]
       let factQuery = `
@@ -959,50 +927,11 @@ export function setupIPC() {
         factParams.push(factFilter.param)
       }
       factQuery += ` ORDER BY score ASC LIMIT 8`
-      const entityFacts = db.prepare(factQuery).all(...factParams)
-
-      // Supplementary context (no bracket labels — the ONLY citeable tags are the
-      // numbered [S#] SOURCES below, so the model can't invent uncited labels).
-      const memoryLines = memories
-        .slice(0, 6)
-        .map(
-          (m: any) =>
-            `- (${m.source_app || 'Unknown'} | ${m.created_at}): ${clipText(m.content, 500)}`
-        )
-        .join('\n')
-
-      const messageLines = messages
-        .slice(0, 6)
-        .map(
-          (m: any) =>
-            `- (${m.app_name || 'Unknown'} | ${m.title || 'Untitled'} | ${m.created_at}) ${m.role}: ${clipText(m.content, 400)}`
-        )
-        .join('\n')
-
-      const summaryLines = summaries
-        .slice(0, 6)
-        .map(
-          (s: any) =>
-            `- (${s.app_name || 'Unknown'} | ${s.title || 'Untitled'}): ${clipText(s.summary, 600)}`
-        )
-        .join('\n')
-
-      const entityLines = entities
-        .slice(0, 6)
-        .map((e: any) => `- (${e.type || 'Unknown'}) ${e.name}: ${clipText(e.summary || '', 400)}`)
-        .join('\n')
-
-      const factLines = entityFacts
-        .slice(0, 6)
-        .map((f: any) => `- (${f.type || 'Unknown'}) ${f.name}: ${clipText(f.fact, 400)}`)
-        .join('\n')
-
-      const contextBlock = `RELEVANT MEMORIES:\n${memoryLines || '(none)'}\n\nRELEVANT MESSAGES:\n${messageLines || '(none)'}\n\nRELEVANT SUMMARIES:\n${summaryLines || '(none)'}\n\nRELEVANT ENTITIES:\n${entityLines || '(none)'}\n\nRELEVANT ENTITY FACTS:\n${factLines || '(none)'}`
+      const entityFacts = db.prepare(factQuery).all(...factParams) as RetrievalFact[]
 
       // Unified search: fuse in the best-ranked hits across screens, meetings,
       // memories, entities and facts (hybrid FTS + vectors with RRF) — the same
       // engine as the search screen, so the chat gets the right context too.
-      let unifiedBlock = ''
       let unifiedHits: {
         kind: string
         title: string
@@ -1015,30 +944,19 @@ export function setupIPC() {
       try {
         const { universalSearch } = await import('./search')
         unifiedHits = await universalSearch(query, { limit: 12, semantic: true })
-        if (unifiedHits.length) {
-          unifiedBlock =
-            '\n\nSOURCES — every factual claim must cite the source it came from using its tag in square brackets, e.g. [S2]. Cite ONLY sources you actually used; never invent a citation:\n' +
-            unifiedHits
-              .map((h, i) => {
-                const when = h.ts ? ` · ${new Date(h.ts).toISOString().slice(0, 10)}` : ''
-                return `[S${i + 1}] (${h.kind} · ${h.surface || 'unknown'}${when})${h.title ? ` ${h.title} —` : ''} ${clipText(h.snippet || '', 350)}`
-              })
-              .join('\n')
-        }
       } catch (e) {
         console.error('[RAG] universalSearch failed', e)
       }
 
-      // Build conversation history block if provided
-      let historyBlock = ''
-      if (conversationHistory && conversationHistory.length > 0) {
-        const historyLines = conversationHistory
-          .map(
-            (msg) => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${clipText(msg.content, 500)}`
-          )
-          .join('\n\n')
-        historyBlock = `\nCONVERSATION HISTORY:\n${historyLines}\n`
-      }
+      const contextBlock = formatRetrievalContext({
+        memories,
+        messages,
+        summaries,
+        entities,
+        facts: entityFacts,
+        unified: unifiedHits
+      })
+      const historyBlock = formatRetrievalHistory(conversationHistory ?? [])
 
       let skillsBlock = 'None installed.'
       try {
@@ -1052,7 +970,7 @@ export function setupIPC() {
       const prompt = getPrompt('ragChat', {
         HISTORY_BLOCK: historyBlock,
         QUERY: query,
-        CONTEXT_BLOCK: contextBlock + unifiedBlock,
+        CONTEXT_BLOCK: contextBlock,
         SKILLS_BLOCK: skillsBlock
       })
 

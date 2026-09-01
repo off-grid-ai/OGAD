@@ -11,13 +11,13 @@
  * it). The selector only needs the category field, so it asks for exactly
  * that and stays generic over the caller's richer type.
  */
-export interface CategorizedExtension {
-  category?: 'tool' | 'connector'
-}
+import { selectToolExtensions as selectSharedToolExtensions } from '@offgrid/models'
+
+export interface CategorizedExtension { category?: 'tool' | 'connector' }
 
 export function selectToolExtensions<T extends CategorizedExtension>(
   extensions: T[],
   opts: { connectors: boolean }
 ): T[] {
-  return extensions.filter((e) => e.category === 'tool' || opts.connectors)
+  return selectSharedToolExtensions(extensions, opts)
 }

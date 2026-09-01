@@ -5,6 +5,7 @@ import {
   type ChatSessionRepositoryPort,
   type ChatTurn,
   type GenerationEvents,
+  type GenerationMessage,
   type GenerationResult,
   type RuntimeModel
 } from '@offgrid/models'
@@ -17,6 +18,7 @@ import type {
   DesktopImageChatSessionInput,
   DesktopImageChatSessionResult,
   DesktopImageGenerationResponse,
+  DesktopQueuedTurnProjection,
   DesktopToolChatResponse,
   DesktopToolChatSessionInput,
   DesktopToolChatSessionResult
@@ -87,7 +89,7 @@ export class DesktopChatSession {
     this.service = new ChatSessionService(
       {
         generate: (request, events) =>
-          this.generate(request.identity?.turnId, request.signal, events)
+          this.generate(request.identity?.turnId, request.messages ?? [], request.signal, events)
       },
       this.repository,
       { events: { publish: (event) => this.publish(event) } }
@@ -101,6 +103,23 @@ export class DesktopChatSession {
 
   queueProjection(): ChatQueueProjection {
     return this.service.queueProjection()
+  }
+
+  queuedTurns(conversationId: string): DesktopQueuedTurnProjection[] {
+    return this.service
+      .queueProjection()
+      .entries.filter(
+        (entry) => entry.conversationId === conversationId && entry.status === 'queued'
+      )
+      .flatMap((entry) => {
+        const execution = this.executions.get(entry.turnId)
+        if (!execution) return []
+        return [{
+          turnId: entry.turnId,
+          text: execution.input.query,
+          attachmentCount: execution.input.images.length
+        }]
+      })
   }
 
   async send(input: DesktopChatSessionInput): Promise<DesktopChatSessionResult> {
@@ -198,6 +217,7 @@ export class DesktopChatSession {
 
   private async generate(
     turnId: string | undefined,
+    messages: readonly GenerationMessage[],
     signal: AbortSignal | undefined,
     events?: GenerationEvents
   ): Promise<GenerationResult> {
@@ -212,8 +232,10 @@ export class DesktopChatSession {
     })
     try {
       if (execution.route === 'image') return this.generateImage(execution, signal)
-      if (execution.route === 'tools') return this.generateTools(execution, signal, events)
-      return this.generateRag(execution, signal)
+      if (execution.route === 'tools') {
+        return this.generateTools(execution, messages, signal, events)
+      }
+      return this.generateRag(execution, messages, signal)
     } finally {
       unsubscribe()
     }
@@ -258,12 +280,13 @@ export class DesktopChatSession {
 
   private async generateTools(
     execution: TurnExecution,
+    messages: readonly GenerationMessage[],
     signal: AbortSignal | undefined,
     events?: GenerationEvents
   ): Promise<GenerationResult> {
     if (!this.boundary.toolChat) throw new Error('Desktop tool-chat boundary is unavailable')
     const input = execution.input as DesktopToolChatSessionInput
-    const response = await this.boundary.toolChat(input.query, input.history, {
+    const response = await this.boundary.toolChat(input.query, desktopHistory(messages), {
       connectors: input.connectors,
       conversationId: input.conversationId,
       ...(input.projectId ? { projectId: input.projectId } : {}),
@@ -299,13 +322,14 @@ export class DesktopChatSession {
 
   private async generateRag(
     execution: TurnExecution,
+    messages: readonly GenerationMessage[],
     signal: AbortSignal | undefined
   ): Promise<GenerationResult> {
     const { input } = execution
     const response = await this.boundary.ragChat(
       input.query,
       'All',
-      input.history,
+      desktopHistory(messages),
       input.projectId,
       input.conversationId,
       input.noMemory && !input.projectId,
@@ -330,9 +354,39 @@ export class DesktopChatSession {
     }
   }
 
-  private publish(event: ChatSessionEvent): void {
+  private async publish(event: ChatSessionEvent): Promise<void> {
+    if (event.type === 'started') {
+      const execution = this.executions.get(event.turn.id)
+      const persistence = execution?.input.userPersistence
+      if (execution && persistence && this.boundary.addRagMessage) {
+        await this.boundary.addRagMessage(
+          execution.input.conversationId,
+          'user',
+          persistence.content,
+          persistence.context
+        )
+      }
+    }
     for (const listener of this.listeners) listener(event)
   }
+}
+
+function desktopHistory(messages: readonly GenerationMessage[]): Array<{
+  role: string
+  content: string
+}> {
+  return messages.slice(0, -1).flatMap((message) => {
+    if (message.role !== 'user' && message.role !== 'assistant') return []
+    return [{ role: message.role, content: generationMessageText(message) }]
+  })
+}
+
+function generationMessageText(message: GenerationMessage): string {
+  if (typeof message.content === 'string') return message.content
+  return message.content
+    .filter((part) => part.type === 'text')
+    .map((part) => (part.type === 'text' ? part.text : ''))
+    .join('\n')
 }
 
 export function createDesktopChatSession(

@@ -78,6 +78,12 @@ export interface DesktopChatSessionBoundary {
     options: DesktopToolChatOptions
   ): Promise<DesktopToolChatResponse>
   generateImage?(request: DesktopImageGenerationRequest): Promise<DesktopImageGenerationResponse>
+  addRagMessage?(
+    conversationId: string,
+    role: 'user' | 'assistant',
+    content: string,
+    context?: unknown
+  ): Promise<{ id: number; uuid: string }>
 }
 
 export interface DesktopChatSessionInput {
@@ -90,11 +96,18 @@ export interface DesktopChatSessionInput {
   noMemory: boolean
   thinking: boolean
   images: string[]
+  userPersistence?: { content: string; context?: unknown }
 }
 
 export interface DesktopChatSessionResult {
   turn: ChatTurn
   response: RagChatResultContract
+}
+
+export interface DesktopQueuedTurnProjection {
+  turnId: string
+  text: string
+  attachmentCount: number
 }
 
 export interface DesktopToolChatSessionInput extends DesktopChatSessionInput {

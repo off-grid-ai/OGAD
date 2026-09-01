@@ -1,7 +1,34 @@
 import { describe, it, expect } from 'vitest'
-import { buildAssistantContext, readReasoning, readResponseCutoff } from '../message-persistence'
+import {
+  buildAssistantContext,
+  readPersistedChatSessionTurn,
+  readReasoning,
+  readResponseCutoff
+} from '../message-persistence'
 
 describe('message-persistence carrier', () => {
+  it('round-trips the canonical Shared transcript and keeps old rows compatible', () => {
+    const responseMessages = [
+      {
+        role: 'assistant' as const,
+        content: '',
+        toolCalls: [{ id: 'call-a', name: 'weather', arguments: '{}' }]
+      },
+      { role: 'tool' as const, content: 'Clear', toolCallId: 'call-a', name: 'weather' },
+      { role: 'assistant' as const, content: 'It is clear.' }
+    ]
+    const ctx = buildAssistantContext(undefined, {
+      session: { turnId: 'turn-a', status: 'completed', responseMessages }
+    })
+
+    expect(readPersistedChatSessionTurn(ctx)).toEqual({
+      turnId: 'turn-a',
+      status: 'completed',
+      responseMessages
+    })
+    expect(readPersistedChatSessionTurn({ reasoning: 'legacy row' })).toBeUndefined()
+  })
+
   it('round-trips reasoning through the context blob', () => {
     const ctx = buildAssistantContext(undefined, { reasoning: 'weighing the options' })
     expect(readReasoning(ctx)).toBe('weighing the options')

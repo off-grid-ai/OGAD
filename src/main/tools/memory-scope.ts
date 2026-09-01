@@ -6,8 +6,14 @@
 // Non-memory tools (web_search, read_url, calculator, …) are never gated by scope.
 // Pure + Electron-free so it unit-tests the semantics directly.
 
-export const KB_TOOL_NAME = 'search_knowledge_base'
-export const MEMORY_TOOL_NAME = 'search_memory'
+import {
+  ALL_MEMORY_TOOL_ID,
+  KNOWLEDGE_BASE_TOOL_ID,
+  isMemoryToolAllowed as sharedMemoryToolAllowed
+} from '@offgrid/models'
+
+export const KB_TOOL_NAME = KNOWLEDGE_BASE_TOOL_ID
+export const MEMORY_TOOL_NAME = ALL_MEMORY_TOOL_ID
 
 export interface MemoryScope {
   projectActive: boolean
@@ -15,11 +21,5 @@ export interface MemoryScope {
 }
 
 export function isMemoryToolAllowed(toolName: string, scope: MemoryScope): boolean {
-  if (toolName === KB_TOOL_NAME) {
-    return scope.projectActive
-  }
-  if (toolName === MEMORY_TOOL_NAME) {
-    return scope.allMemory
-  }
-  return true
+  return sharedMemoryToolAllowed(toolName, scope)
 }

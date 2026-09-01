@@ -12,6 +12,9 @@ import { isMemoryToolAllowed } from './tools/memory-scope'
 import { getSetting, saveSetting } from './database'
 import { readImages } from './llm/read-images'
 import {
+  DeferredImageRequestCollector,
+  boundedToolHistory,
+  buildAgentToolMessages,
   budgetToolSchemas,
   decodeSearchRedirect as decodeDdgHref,
   evaluateArithmetic,
@@ -19,9 +22,12 @@ import {
   htmlToReadableText as htmlToText,
   catalogEntryToDefinition,
   findToolCatalogEntry,
+  parseToolArguments,
+  prepareToolCallWithQueryFallback,
   rankToolSchemas,
   rankToolSchemasByEmbedding,
   stripHtmlTags as stripTags,
+  toolSchemaTokenBudget,
   ToolEmbeddingCache
 } from '@offgrid/models'
 
@@ -45,7 +51,7 @@ import { proposalDeckSystemHint, proposalDeckService } from './proposal-deck/ser
 import { callHookAsync, HOOKS } from './bootstrap/hookRegistry'
 import { DEFAULT_MAX_TOOL_CALLS } from '../shared/llm-defaults'
 import { generateDesktopMessages } from './desktop-generation'
-import type { GenerationMessage, GenerationToolCall } from '@offgrid/models'
+import type { GenerationToolCall } from '@offgrid/models'
 
 // Per-tool enable/disable, persisted as a list of disabled tool names.
 function disabledSet(): Set<string> {
@@ -637,14 +643,7 @@ export async function toolChat(
       rankedTools = rankToolSchemas(query, rawTools, builtins.length)
     }
   }
-  const ctx = llm.effectiveContextSize()
-  // Cap tool tokens in ABSOLUTE terms too, not just as a fraction of context:
-  // llama-server re-processes the entire tool prompt every tool round (gemma-4's
-  // sliding-window attention defeats the prompt cache), so on CPU-only inference a
-  // large tool payload dominates latency. ~4k keeps a useful connector set while
-  // roughly halving per-round prompt cost vs the old 45%-of-a-big-context budget.
-  const MAX_TOOL_TOKENS = 4000
-  const toolBudget = Math.max(1024, Math.min(Math.floor(ctx * 0.4), MAX_TOOL_TOKENS))
+  const toolBudget = toolSchemaTokenBudget(llm.effectiveContextSize())
   const budgeted = budgetToolSchemas(rankedTools, toolBudget, builtins.length)
   if (budgeted.pruned || budgeted.droppedCount) {
     console.warn(
@@ -656,10 +655,7 @@ export async function toolChat(
       )
   }
   const tools = budgeted.tools
-  const sys =
-    'You are Off Grid AI, a private on-device assistant. Use the provided tools when they help answer precisely. Before calling web_use, use the full conversation and ask the user one concise set of questions only when a material fact is missing. If the task is actionable, call web_use immediately. Keep answers concise.' +
-    (hints.length ? ' ' + hints.join(' ') : '') +
-    (proposalDeckActive ? ` ${proposalDeckSystemHint(opts.conversationId)}` : '')
+  if (proposalDeckActive) hints.push(proposalDeckSystemHint(opts.conversationId))
 
   // Attached images ride on the current user turn so the vision model can read
   // them even in tools/connectors mode (otherwise they were silently dropped).
@@ -668,49 +664,25 @@ export async function toolChat(
   // text-only model given image_url parts either ignores them (silent wrong answer)
   // or errors, so drop the attachments when there's no vision projector.
   const decodedImages = opts.images?.length && llm.hasVision() ? readImages(opts.images) : []
-  const messages: GenerationMessage[] = [
-    { role: 'system', content: sys },
-    ...history.slice(-10).map((m) => ({
-      role: m.role === 'assistant' ? ('assistant' as const) : ('user' as const),
-      content: m.content
-    })),
-    {
-      role: 'user',
-      content: [
-        { type: 'text', text: query },
-        ...decodedImages.map((image) => ({
-          type: 'image' as const,
-          mimeType: image.mime,
-          data: image.base64
-        }))
-      ]
-    }
-  ]
+  const messages = buildAgentToolMessages({
+    query,
+    history,
+    systemHints: hints,
+    imageParts: decodedImages.map((image) => ({
+      type: 'image' as const,
+      mimeType: image.mime,
+      data: image.base64
+    }))
+  })
   const toolCalls: ToolCall[] = []
   const unified: UnifiedSource[] = []
   const unifiedKeys = new Set<string>()
   // Deferred image generation: keep EVERY request in tool-call order. The renderer generates after
   // the turn so we never evict the LLM mid-loop, and one model round that asks for two pictures does
   // not silently replace the first request with the last.
-  const imageRequests: (ProposalDeferredImageRequest | { prompt: string })[] = []
-  const resultWithImages = (result: {
-    answer: string
-    toolCalls: ToolCall[]
-    unified: UnifiedSource[]
-  }): {
-    answer: string
-    toolCalls: ToolCall[]
-    unified: UnifiedSource[]
-    imageRequests: (ProposalDeferredImageRequest | { prompt: string })[]
-    imageRequest?: { prompt: string }
-  } => {
-    const finalImageRequest = imageRequests.at(-1)
-    return {
-      ...result,
-      imageRequests,
-      ...(finalImageRequest ? { imageRequest: finalImageRequest } : {})
-    }
-  }
+  const imageRequests = new DeferredImageRequestCollector<
+    ProposalDeferredImageRequest | { prompt: string }
+  >()
 
   const maxToolRounds = llm.getSettings().maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS
   let streamedContent = ''
@@ -740,15 +712,10 @@ export async function toolChat(
         }
       },
       toolExecution: {
+        prepare: (call) => prepareToolCallWithQueryFallback(call, query),
         execute: async (call: GenerationToolCall) => {
           if (opts.signal?.aborted) throw opts.signal.reason
-          let args = safeParseArgs(call.arguments)
-          if (
-            (call.name === 'web_search' || call.name === 'brave_search') &&
-            !String(args.query ?? '').trim()
-          ) {
-            args = { ...args, query }
-          }
+          const args = parseToolArguments(call.arguments)
           opts.onStep?.({ name: call.name, args })
           const res = await runTool(call.name, args, toolContext, exts)
           for (const source of res.sources ?? []) {
@@ -756,8 +723,7 @@ export async function toolChat(
             unifiedKeys.add(source.key)
             unified.push(source)
           }
-          if (res.imageRequests?.length) imageRequests.push(...res.imageRequests)
-          else if (res.imageRequest) imageRequests.push(res.imageRequest)
+          imageRequests.add(res)
           const status = res.status ?? 'completed'
           toolCalls.push({ name: call.name, args, result: res.text, status })
           opts.onToolResult?.({ name: call.name, result: res.text, status })
@@ -776,38 +742,12 @@ export async function toolChat(
         }
       }
     })
-    return resultWithImages({ answer: result.content.trim(), toolCalls, unified })
+    return imageRequests.project({ answer: result.content.trim(), toolCalls, unified })
   } catch (error) {
     if (opts.signal?.aborted) {
-      return resultWithImages({ answer: streamedContent.trim(), toolCalls, unified })
+      return imageRequests.project({ answer: streamedContent.trim(), toolCalls, unified })
     }
     throw error
-  }
-}
-
-const TOOL_HISTORY_TURNS = 8
-const TOOL_HISTORY_CHARS_PER_TURN = 1_500
-
-function boundedToolHistory(history: { role: string; content: string }[]): ToolConversationTurn[] {
-  return history
-    .filter(
-      (turn): turn is { role: 'user' | 'assistant'; content: string } =>
-        (turn.role === 'user' || turn.role === 'assistant') && typeof turn.content === 'string'
-    )
-    .slice(-TOOL_HISTORY_TURNS)
-    .map((turn) => ({
-      role: turn.role,
-      content: turn.content.slice(0, TOOL_HISTORY_CHARS_PER_TURN)
-    }))
-}
-
-/** Parse a tool-call arguments JSON string to an object; empty object on failure. */
-function safeParseArgs(raw: string | undefined): Record<string, unknown> {
-  try {
-    const v = JSON.parse(raw || '{}')
-    return v && typeof v === 'object' ? (v as Record<string, unknown>) : {}
-  } catch {
-    return {}
   }
 }
 

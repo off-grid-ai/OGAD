@@ -1,3 +1,5 @@
+import { isArtifactBuildRequest } from '@offgrid/models'
+
 // Pure query/message helpers extracted from ipc.ts so the retrieval-gating logic
 // is unit-testable without Electron / the DB (mirrors search-ranking.ts,
 // model-sizing.ts). No imports, no side effects. ipc.ts re-imports these; the
@@ -94,17 +96,7 @@ export function clipText(text: string, maxLength: number): string {
 // the model cite junk and second-guess itself. Detect them so we can answer with
 // the artifact instructions only and skip the search.
 export function isGenerativeRequest(text: string): boolean {
-  const q = (text || '').trim().toLowerCase()
-  if (!q) return false
-  const hasNoun =
-    /\b(react|next\.?js|vue|svelte|html|css|svg|website|web ?app|web ?page|landing page|component|widget|diagram|chart|flowchart|mermaid|game|canvas|prototype|mock-?up|ui|app|script|function|snippet|webpage|playground|frontend|front-end|dashboard|form|interface|page|tool|visualization|visualisation|simulator|editor|viewer|demo|site)\b/.test(
-      q
-    )
-  const hasVerb =
-    /\b(build|create|make|write|generate|code|implement|design|draw|render|scaffold|give me a|show me a)\b/.test(
-      q
-    )
-  return hasNoun && hasVerb
+  return isArtifactBuildRequest(text)
 }
 
 /**

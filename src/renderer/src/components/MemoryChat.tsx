@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { shouldQueue, enqueue, dequeue, queuedCount, clearQueue } from '@renderer/lib/chat-queue'
 import { buildSendHistory } from '@renderer/lib/chat-history'
 import { waitingLabel } from '@renderer/lib/chat-labels'
 import { parseSqliteUtc, shiftLocalDay, startOfLocalDay, timeAgo } from '@renderer/lib/time'
@@ -2931,9 +2930,8 @@ export function MemoryChat({
   const onScrollFollow = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     followBottomRef.current = shouldFollowBottom(e.currentTarget)
   }, [])
-  // Per-conversation generation lock + queue: a send belongs to its OWN conversation,
-  // never the active tab. generatingRef is the synchronous source of truth for the
-  // queue decision; generatingConvs mirrors it for rendering.
+  // Per-conversation generation state is a read-only projection of the Shared queue.
+  // Native image-job restoration also writes this projection until Shared reattaches it.
   const generatingRef = useRef<Set<string>>(new Set())
   const [generatingConvs, setGeneratingConvs] = useState<Set<string>>(new Set())
   const markGenerating = useCallback((cid: string, on: boolean): void => {
@@ -2941,12 +2939,21 @@ export function MemoryChat({
     else generatingRef.current.delete(cid)
     setGeneratingConvs(new Set(generatingRef.current))
   }, [])
-  // Queued sends carry their attachments too, so a message waiting behind an in-flight
-  // generation keeps its image/files when it finally runs — keyed per conversation.
-  const queuedRef = useRef<Record<string, { text: string; atts: Attachment[] }[]>>({})
-  const [queuedByConv, setQueuedByConv] = useState<
-    Record<string, { text: string; atts: Attachment[] }[]>
-  >({})
+  const [chatQueue, setChatQueue] = useState(desktopChatSession.queueProjection())
+  useEffect(
+    () =>
+      desktopChatSession.subscribe((event) => {
+        if (event.type === 'queue_changed') setChatQueue(event.queue)
+      }),
+    [desktopChatSession]
+  )
+  const activeQueuedTurns = activeConversationId
+    ? chatQueue.entries.some(
+        (entry) => entry.conversationId === activeConversationId && entry.status === 'queued'
+      )
+      ? desktopChatSession.queuedTurns(activeConversationId)
+      : []
+    : []
   // Map streamId → convId so the onRagStream handler can route tokens to the right
   // conversation regardless of which tab is active when the event fires.
   const streamConvRef = useRef<Map<string, string>>(new Map())
@@ -3510,8 +3517,7 @@ export function MemoryChat({
     const imagePaths = atts.filter((a) => a.kind === 'image' && a.path).map((a) => a.path as string)
     let modelQuery = (attBlock ? `${attBlock}\n\n${typed}` : typed).trim()
     if (!typed && atts.length === 0) return
-    // Don't block the user — if a generation is in flight, queue this message and
-    // let them keep typing/sending. The queue drains in order when each finishes.
+    // Shared ChatSessionService queues this turn by conversation after its durable input is saved.
     const targetConv = opts?.conversationId ?? activeConversationId
     // A live operator task owns this journey until it finishes. New Chat input is
     // guidance for that task, not a second memory/model turn running beside it.
@@ -3549,16 +3555,6 @@ export function MemoryChat({
           return
         }
       }
-    }
-    if (shouldQueue(targetConv, generatingRef.current)) {
-      const item = { text: typed, atts }
-      queuedRef.current = enqueue(queuedRef.current, targetConv as string, item)
-      setQueuedByConv({ ...queuedRef.current })
-      if (isInput) {
-        setInput('')
-        setAttachments([])
-      }
-      return
     }
     if (isInput) setAttachments([])
 
@@ -3646,33 +3642,29 @@ export function MemoryChat({
     setInput('')
     setLoading(true)
 
-    // Persist user message (skip on regen — it's already in the thread). Stash
-    // the attachments in the message context so the clickable chips survive reload.
-    try {
-      if (!regen) {
-        const attMeta = atts.map((a) => ({
-          id: a.id,
-          name: a.name,
-          kind: a.kind,
-          text: a.text,
-          path: a.path,
-          mimeType: a.mimeType,
-          fileSize: a.fileSize,
-          createdAt: a.createdAt
-        }))
-        // Appended, never folded into `atts`: those are what the MODEL is given, and the init image is
-        // an input to the image runtime rather than text for the language model to read.
-        const persisted = initAttachment ? [...attMeta, initAttachment] : attMeta
-        await window.api.addRagMessage(
-          convId,
-          'user',
-          trimmed,
-          persisted.length ? { attachments: persisted } : undefined
-        )
-      }
-    } catch (e) {
-      console.error('Failed to persist user message:', e)
-    }
+    // Shared starts and persists a queued user turn only when its conversation lane begins.
+    // This keeps durable user/assistant order identical to execution order.
+    const attachmentMetadata = atts.map((a) => ({
+      id: a.id,
+      name: a.name,
+      kind: a.kind,
+      text: a.text,
+      path: a.path,
+      mimeType: a.mimeType,
+      fileSize: a.fileSize,
+      createdAt: a.createdAt
+    }))
+    const persistedAttachments = initAttachment
+      ? [...attachmentMetadata, initAttachment]
+      : attachmentMetadata
+    const userPersistence = regen
+      ? undefined
+      : {
+          content: trimmed,
+          context: persistedAttachments.length
+            ? { attachments: persistedAttachments }
+            : undefined
+        }
 
     // Catalogue attached inputs (files / pasted text) as artifacts of this chat &
     // project, so the gallery holds the whole working set — inputs and outputs.
@@ -3742,7 +3734,7 @@ export function MemoryChat({
         strength: imgInit ? imgStrength : undefined
       }
       try {
-        const { response: img } = await desktopChatSession.sendImage({
+        const { response: img, turn: sessionTurn } = await desktopChatSession.sendImage({
           conversationId: convId,
           turnId: `image-${crypto.randomUUID()}`,
           projectId,
@@ -3752,6 +3744,7 @@ export function MemoryChat({
           noMemory,
           thinking: false,
           images: [],
+          userPersistence,
           request: {
             ...imageRequest,
             conversationId: convId, // the turn's own conversation (activeConversationId can lag for a fresh/queued chat)
@@ -3788,7 +3781,16 @@ export function MemoryChat({
             convId,
             'assistant',
             completedImage.storedContent,
-            withGeneratedImageReference({ imageMetadata }, { id: img.syncId, path: img.path })
+            buildAssistantContext(
+              withGeneratedImageReference({ imageMetadata }, { id: img.syncId, path: img.path }),
+              {
+                session: {
+                  turnId: sessionTurn.id,
+                  status: sessionTurn.status,
+                  responseMessages: sessionTurn.responseMessages ?? []
+                }
+              }
+            )
           )
           await announceImageMessagePersisted(convId, stored.uuid)
         } catch {
@@ -3819,12 +3821,16 @@ export function MemoryChat({
           }
         }
       } finally {
-        markGenerating(convId, false)
+        markGenerating(
+          convId,
+          desktopChatSession
+            .queueProjection()
+            .entries.some((entry) => entry.conversationId === convId)
+        )
         setLoading(false)
         setImgProgress(null)
         setImageGenConv((c) => (c === convId ? null : c))
         await loadConversations()
-        drainQueue(convId)
       }
       return
     }
@@ -3856,7 +3862,7 @@ export function MemoryChat({
             streaming: true
           }
         ])
-        const { response: tr } = await desktopChatSession.sendWithTools({
+        const { response: tr, turn: sessionTurn } = await desktopChatSession.sendWithTools({
           userMessage: {
             role: 'user',
             content: [
@@ -3876,6 +3882,7 @@ export function MemoryChat({
           imageAvailable,
           turnId: toolStreamId,
           noMemory,
+          userPersistence,
           thinking: thinkingEnabled
         })
         const toolCalls = (tr?.toolCalls || []).map(
@@ -3898,7 +3905,8 @@ export function MemoryChat({
             answer: tr?.answer,
             context,
             persistContext: toolCtx,
-            toolCalls
+            toolCalls,
+            sessionTurn
           })
           return
         }
@@ -3917,7 +3925,14 @@ export function MemoryChat({
               : m
           )
         )
-        const toolCtxWithReasoning = buildAssistantContext(toolCtx, { reasoning: toolReasoning })
+        const toolCtxWithReasoning = buildAssistantContext(toolCtx, {
+          reasoning: toolReasoning,
+          session: {
+            turnId: sessionTurn.id,
+            status: sessionTurn.status,
+            responseMessages: sessionTurn.responseMessages ?? []
+          }
+        })
         // Deferred image generation: the tool loop only RECORDS prompts (it never generates inline,
         // which would evict the LLM). Each completed request gets one generated file and one durable
         // assistant image message. A message context has one imageRef by design; putting two results
@@ -4056,7 +4071,7 @@ export function MemoryChat({
           streaming: true
         }
       ])
-      const { response: result } = await desktopChatSession.send({
+      const { response: result, turn: sessionTurn } = await desktopChatSession.send({
         conversationId: convId,
         turnId: streamId,
         projectId,
@@ -4071,7 +4086,8 @@ export function MemoryChat({
         history,
         noMemory,
         thinking: thinkingEnabled,
-        images: imagePaths
+        images: imagePaths,
+        userPersistence
       })
       const resultContext = result.context as RagContext | undefined
 
@@ -4080,7 +4096,8 @@ export function MemoryChat({
         await finalizeStoppedTurn(convId, streamId, {
           answer: result.answer,
           context: resultContext,
-          cutoff: result.cutoff
+          cutoff: result.cutoff,
+          sessionTurn
         })
         return
       }
@@ -4193,7 +4210,12 @@ export function MemoryChat({
             buildAssistantContext(resultContext, {
               reasoning: ragReasoning,
               cutoff: result.cutoff,
-              metrics: result.metrics
+              metrics: result.metrics,
+              session: {
+                turnId: sessionTurn.id,
+                status: sessionTurn.status,
+                responseMessages: sessionTurn.responseMessages ?? []
+              }
             })
           )
           setConvMessages(convId, (previous) =>
@@ -4245,24 +4267,16 @@ export function MemoryChat({
       }
     } finally {
       cancelledRef.current.delete(convId)
-      markGenerating(convId, false)
+      markGenerating(
+        convId,
+        desktopChatSession
+          .queueProjection()
+          .entries.some((entry) => entry.conversationId === convId)
+      )
       setLoading(false)
       await loadConversations()
-      drainQueue(convId)
       if (activeStreamId) streamConvRef.current.delete(activeStreamId)
     }
-  }
-
-  // Pull the next queued message for THIS conversation (sent while it was generating)
-  // and send it — bound to its own conversation, never the active tab.
-  const drainQueue = (convId: string): void => {
-    const { item, next } = dequeue(queuedRef.current, convId)
-    queuedRef.current = next
-    setQueuedByConv({ ...next })
-    if (item === undefined) return
-    setTimeout(() => {
-      void sendMessage(item.text || ' ', { atts: item.atts, conversationId: convId })
-    }, 30)
   }
 
   const handleVoicePlaybackChange = useCallback((messageId: string, active: boolean): void => {
@@ -4332,6 +4346,7 @@ export function MemoryChat({
         persistContext?: Record<string, unknown>
         cutoff?: ResponseCutoffContract
         toolCalls?: ChatMessage['toolCalls']
+        sessionTurn?: import('@offgrid/models').ChatTurn
       }
     ): Promise<void> => {
       const reasoning = reasoningByStream.current[streamId]?.trim() || undefined
@@ -4368,7 +4383,16 @@ export function MemoryChat({
           answer,
           buildAssistantContext(settled?.persistContext ?? settled?.context, {
             reasoning,
-            cutoff: settled?.cutoff
+            cutoff: settled?.cutoff,
+            ...(settled?.sessionTurn
+              ? {
+                  session: {
+                    turnId: settled.sessionTurn.id,
+                    status: settled.sessionTurn.status,
+                    responseMessages: settled.sessionTurn.responseMessages ?? []
+                  }
+                }
+              : {})
           })
         )
       } catch (e) {
@@ -4405,10 +4429,6 @@ export function MemoryChat({
       // Streams restored after renderer navigation predate this renderer-owned session instance.
       // Keep the IPC fallback only for those legacy live streams.
       if (streamingId && sharedStops === 0) window.api.cancelRag(streamingId)
-      if (queuedRef.current[convId]?.length) {
-        queuedRef.current = clearQueue(queuedRef.current, convId)
-        setQueuedByConv({ ...queuedRef.current })
-      }
       markGenerating(convId, false)
       // Cancel + clear the image job ONLY if THIS conversation owns it, so stopping
       // one conversation never kills another's in-flight image (D9). imgProgress is a
@@ -5796,14 +5816,11 @@ export function MemoryChat({
                       </div>
                     )}
 
-                    {queuedCount(queuedByConv, activeConversationId) > 0 && (
+                    {activeQueuedTurns.length > 0 && (
                       <div className="mb-2 flex flex-col gap-1">
-                        {(activeConversationId
-                          ? (queuedByConv[activeConversationId] ?? [])
-                          : []
-                        ).map((q, i) => (
+                        {activeQueuedTurns.map((q) => (
                           <div
-                            key={i}
+                            key={q.turnId}
                             className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-1.5 text-[11px] text-neutral-400"
                           >
                             <svg
@@ -5821,12 +5838,12 @@ export function MemoryChat({
                             </svg>
                             <span className="flex-1 select-text cursor-text whitespace-pre-wrap break-words">
                               {q.text ||
-                                `(${q.atts.length} attachment${q.atts.length > 1 ? 's' : ''})`}
+                                `(${q.attachmentCount} attachment${q.attachmentCount > 1 ? 's' : ''})`}
                             </span>
-                            {q.atts.length > 0 ? (
+                            {q.attachmentCount > 0 ? (
                               <span
                                 className="flex shrink-0 items-center gap-1 text-neutral-500"
-                                title={q.atts.map((a) => a.name).join(', ')}
+                                title={`${q.attachmentCount} queued attachment${q.attachmentCount > 1 ? 's' : ''}`}
                               >
                                 <svg
                                   className="h-3 w-3"
@@ -5841,7 +5858,7 @@ export function MemoryChat({
                                     d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
                                   />
                                 </svg>
-                                {q.atts.length}
+                                {q.attachmentCount}
                               </span>
                             ) : null}
                             <button
@@ -6386,9 +6403,9 @@ export function MemoryChat({
                               <SlidersHorizontal className="h-3.5 w-3.5" /> Image options
                             </Button>
                           )}
-                          {queuedCount(queuedByConv, activeConversationId) > 0 && (
+                          {activeQueuedTurns.length > 0 && (
                             <span className="flex h-8 items-center rounded-full border border-neutral-800 px-2.5 text-[11px] text-neutral-400">
-                              {queuedCount(queuedByConv, activeConversationId)} queued
+                              {activeQueuedTurns.length} queued
                             </span>
                           )}
                         </div>
