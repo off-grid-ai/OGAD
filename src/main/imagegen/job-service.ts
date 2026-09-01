@@ -1,12 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import {
-  canAcknowledgeImageConversation,
-  finishImageJob,
-  idleImageJob,
-  ImageGenerationLifecycle,
-  startImageJob,
-  updateImageJob
-} from '@offgrid/models'
+import { canAcknowledgeImageConversation, ImageGenerationJobCoordinator } from '@offgrid/models'
 import { generatedImageMetadataJson } from '@offgrid/sync'
 import type { ChatHome } from '@offgrid/sync'
 import {
@@ -67,20 +60,23 @@ const nativeImageGenerationRuntime: ImageGenerationRuntime = {
  * in imagegen.ts; this service adds durable identity/observation across renderer
  * navigation without introducing a second generation state machine. */
 export class ImageGenerationJobService {
-  private snapshot: ImageGenerationJobContract = idleImageJob()
-  private readonly lifecycle = new ImageGenerationLifecycle()
-  private readonly listeners = new Set<JobListener>()
+  private readonly jobs: ImageGenerationJobCoordinator<ImageGenerationJobRequest, ImageGenOutput>
   private readonly conversationListeners = new Set<ConversationListener>()
 
-  constructor(private readonly runtime: ImageGenerationRuntime = nativeImageGenerationRuntime) {}
+  constructor(private readonly runtime: ImageGenerationRuntime = nativeImageGenerationRuntime) {
+    this.jobs = new ImageGenerationJobCoordinator(runtime, {
+      createId: randomUUID,
+      outputPath: (output) => output.path,
+      finalize: (context) => this.finalize(context)
+    })
+  }
 
   status(): ImageGenerationJobContract {
-    return { ...this.snapshot, progress: this.snapshot.progress && { ...this.snapshot.progress } }
+    return this.jobs.status()
   }
 
   onChange(listener: JobListener): () => void {
-    this.listeners.add(listener)
-    return () => this.listeners.delete(listener)
+    return this.jobs.onChange(listener)
   }
 
   onConversationUpdated(listener: ConversationListener): () => void {
@@ -90,106 +86,15 @@ export class ImageGenerationJobService {
 
   /** Reject before a caller reserves related state for a job this service cannot accept. */
   assertCanStart(): void {
-    if (this.lifecycle.isRunning()) {
-      throw new Error('An image is already generating - please wait for it to finish.')
-    }
+    this.jobs.assertCanStart()
   }
 
   async start(request: ImageGenerationJobRequest): Promise<ImageGenerationResult> {
-    this.lifecycle.start()
-    const id = randomUUID()
-    this.snapshot = startImageJob(id, request)
-    this.publish()
-    console.log(
-      `[image-job] ${JSON.stringify({
-        event: 'started',
-        id,
-        conversationId: this.snapshot.conversationId,
-        projectId: this.snapshot.projectId
-      })}`
-    )
-
-    try {
-      const result = await this.runtime.generate(request, (update) => this.update(id, update))
-      // Always, not only inside a chat. The syncId is what this image is called on the mesh, so an
-      // image made from the tool loop or the gateway needs one exactly as much as one made in a
-      // conversation; without it the gallery and the file record name the same picture differently.
-      // Kept BEFORE the facts are written, so the record names a copy this app owns rather than a
-      // path on the user's disk that can be moved the moment the generation ends.
-      const keptSource = request.initImage
-        ? this.runtime.preserveSource(id, request.initImage)
-        : null
-      if (result.path) {
-        try {
-          this.runtime.saveScope(result.path, {
-            syncId: id,
-            ...(keptSource ? { initImage: keptSource } : {}),
-            ...(request.conversationId ? { conversationId: request.conversationId } : {}),
-            ...(request.messageId ? { messageId: request.messageId } : {}),
-            projectId: request.projectId ?? null,
-            createdAt: new Date(this.snapshot.startedAt ?? Date.now()).toISOString(),
-            ...(request.width ? { width: request.width } : {}),
-            ...(request.height ? { height: request.height } : {}),
-            // The shared names, so the phone reads what this Mac wrote. It wrote `model` and the
-            // phone reads `modelId`, so every image made here arrived with its model reading
-            // "synced" and its steps reading 0.
-            metadataJson: generatedImageMetadataJson({
-              prompt: result.prompt,
-              ...(request.negativePrompt === undefined
-                ? {}
-                : { negativePrompt: request.negativePrompt }),
-              ...(request.steps === undefined ? {} : { steps: request.steps }),
-              seed: result.seed,
-              modelId: result.model
-            })
-          })
-        } catch (scopeError) {
-          console.error(
-            `[image-job] ${JSON.stringify({
-              event: 'save-scope-failed',
-              id,
-              error: scopeError instanceof Error ? scopeError.message : String(scopeError)
-            })}`
-          )
-        }
-      }
-      this.snapshot = finishImageJob(this.snapshot, id, {
-        phase: 'succeeded',
-        outputPath: result.path
-      })
-      // Described from the sidecar just written, by the one function the chat link also calls, so a
-      // picture offered when it is made and the same picture offered once its message exists cannot
-      // be described two different ways.
-      if (result.path) this.runtime.share(result.path)
-      this.publish()
-      console.log(`[image-job] ${JSON.stringify({ event: 'succeeded', id, path: result.path })}`)
-      return { ...result, syncId: id }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      const cancelled = this.snapshot.id === id && this.snapshot.phase === 'cancelled'
-      this.snapshot = finishImageJob(
-        this.snapshot,
-        id,
-        cancelled ? { phase: 'cancelled', error: message } : { phase: 'failed', error: message }
-      )
-      this.publish()
-      console.error(
-        `[image-job] ${JSON.stringify({ event: this.snapshot.phase, id, error: message })}`
-      )
-      throw error
-    } finally {
-      this.lifecycle.finish()
-    }
+    return this.jobs.start(request)
   }
 
   cancel(): boolean {
-    if (this.snapshot.phase !== 'running') return false
-    const cancelled = this.runtime.cancel()
-    if (!cancelled) return false
-    this.lifecycle.cancel()
-    this.snapshot = finishImageJob(this.snapshot, this.snapshot.id!, { phase: 'cancelled' })
-    this.publish()
-    return true
+    return this.jobs.cancel()
   }
 
   /**
@@ -201,9 +106,10 @@ export class ImageGenerationJobService {
    * an idempotent acknowledgement, so it does not publish or transfer the same image a second time.
    */
   acknowledgeConversation(conversationId: string, messageId?: string): boolean {
-    if (!canAcknowledgeImageConversation(this.snapshot, conversationId)) return false
-    if (messageId && this.snapshot.outputPath) {
-      this.runtime.noteMessage(this.snapshot.outputPath, { conversationId, messageId })
+    const snapshot = this.jobs.status()
+    if (!canAcknowledgeImageConversation(snapshot, conversationId)) return false
+    if (messageId && snapshot.outputPath) {
+      this.runtime.noteMessage(snapshot.outputPath, { conversationId, messageId })
     }
     for (const listener of this.conversationListeners) {
       try {
@@ -221,27 +127,45 @@ export class ImageGenerationJobService {
     return true
   }
 
-  private update(id: string, update: ImageGenerationPipelineUpdateContract): void {
-    const next = updateImageJob(this.snapshot, id, update)
-    if (next === this.snapshot) return
-    this.snapshot = next
-    this.publish()
-  }
-
-  private publish(): void {
-    const snapshot = this.status()
-    for (const listener of this.listeners) {
+  private finalize(context: {
+    id: string
+    request: ImageGenerationJobRequest
+    output: ImageGenOutput
+    startedAt: number
+  }): void {
+    const { id, request, output, startedAt } = context
+    const keptSource = request.initImage ? this.runtime.preserveSource(id, request.initImage) : null
+    if (output.path) {
       try {
-        listener(snapshot)
-      } catch (error) {
+        this.runtime.saveScope(output.path, {
+          syncId: id,
+          ...(keptSource ? { initImage: keptSource } : {}),
+          ...(request.conversationId ? { conversationId: request.conversationId } : {}),
+          ...(request.messageId ? { messageId: request.messageId } : {}),
+          projectId: request.projectId ?? null,
+          createdAt: new Date(startedAt).toISOString(),
+          ...(request.width ? { width: request.width } : {}),
+          ...(request.height ? { height: request.height } : {}),
+          metadataJson: generatedImageMetadataJson({
+            prompt: output.prompt,
+            ...(request.negativePrompt === undefined
+              ? {}
+              : { negativePrompt: request.negativePrompt }),
+            ...(request.steps === undefined ? {} : { steps: request.steps }),
+            seed: output.seed,
+            modelId: output.model
+          })
+        })
+      } catch (scopeError) {
         console.error(
           `[image-job] ${JSON.stringify({
-            event: 'observer-failed',
-            id: snapshot.id,
-            error: error instanceof Error ? error.message : String(error)
+            event: 'save-scope-failed',
+            id,
+            error: scopeError instanceof Error ? scopeError.message : String(scopeError)
           })}`
         )
       }
+      this.runtime.share(output.path)
     }
   }
 }

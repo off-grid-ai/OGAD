@@ -198,3 +198,10 @@ export async function generateDesktopOperation(
     options.events
   )
 }
+
+/** Read the canonical selected model from LLMService without exposing its store to adapters. */
+export function activeDesktopModelId(
+  modality: Parameters<typeof desktopModelServices.llm.active>[0]
+): string | null {
+  return desktopModelServices.llm.active(modality).model?.id ?? null
+}

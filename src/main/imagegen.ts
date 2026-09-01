@@ -30,7 +30,10 @@ import {
   type ManagedRuntimePort as ManagedRuntime,
   imageTaesdFilename,
   selectInstalledImageModel,
-  standardImageModelDefaults
+  standardImageModelDefaults,
+  applyImageLoras,
+  normalizeImageLoras,
+  resolveImageToImageDimensions
 } from '@offgrid/models'
 import {
   isMfluxModelId,
@@ -40,7 +43,6 @@ import {
   cancelMflux,
   MFLUX_MODELS
 } from './mflux'
-import { getActiveModal } from './active-models'
 import { binRoots, dataDir, modelsDir, resourceDirs, exe } from './runtime-env'
 import { sdServer } from './sd-server'
 import { hasMlmodelc, isZImageModel, isQuantizedModel } from './imagegen/runtime-detect'
@@ -63,7 +65,11 @@ import {
   type ImageGenerationRequestContract
 } from '../shared/image-generation-contract'
 import type { GenerationOperation } from '@offgrid/models'
-import { generateDesktopOperation, generateDesktopText } from './desktop-generation'
+import {
+  activeDesktopModelId,
+  generateDesktopOperation,
+  generateDesktopText
+} from './desktop-generation'
 import { registerDesktopImageProgress } from './model-generation-adapters'
 
 function findSdCli(): string | null {
@@ -338,7 +344,7 @@ function resolveModel(preferred?: string): string | null {
   const dir = modelsDir()
   const sd = listImageModels()
   if (!sd.length) return null
-  const chosen = getActiveModal('image')
+  const chosen = activeDesktopModelId('image')
   const selected = selectInstalledImageModel({
     installed: sd,
     preferred: preferred ? imageRuntimeModelId(preferred) : null,
@@ -606,6 +612,7 @@ async function runImageGen(
     throw new Error('An image is already generating — please wait for it to finish.')
   }
   if (!params.prompt.trim()) throw new Error('A prompt is required.')
+  params = { ...params, loras: normalizeImageLoras(params.loras) }
 
   // --- MLX / mflux runtime branch (FLUX / Z-Image with native LoRA) ----------
   // Self-contained: reuses the single-flight guard; the LLM is already evicted by the
@@ -663,9 +670,13 @@ async function runImageGen(
       const sharp = (await import('sharp')).default
       const meta = await sharp(params.initImage).metadata()
       if (meta.width && meta.height) {
-        const r64 = (n: number): number => Math.max(256, Math.min(2048, Math.round(n / 64) * 64))
-        params.width = params.width ?? r64(meta.width)
-        params.height = params.height ?? r64(meta.height)
+        const dimensions = resolveImageToImageDimensions({
+          width: params.width,
+          height: params.height,
+          sourceWidth: meta.width,
+          sourceHeight: meta.height
+        })
+        params = { ...params, ...dimensions }
       }
     } catch {
       /* fall back to model defaults */
@@ -724,21 +735,15 @@ async function runImageGen(
   // LoRA adapters: inject <lora:NAME:WEIGHT> into the prompt (Core ML helper
   // doesn't support LoRA, so skip there). The --lora-model-dir flag is added to
   // the sd-cli args below.
-  const loras = (params.loras || []).filter((l) => l.name && Number.isFinite(l.weight))
-  if (!coreml && loras.length) {
-    // HARD LIMIT: stable-diffusion.cpp can only merge a LoRA into FULL-PRECISION
-    // (f16/f32) weights. Our shipped checkpoints are quantized (q8_0 / Q4_K) to
-    // save disk, and the LoRA merge then aborts the binary (Metal: unsupported
-    // op CPY/ADD; CPU: GGML_ASSERT src1->type == F32). Fail with a clear message
-    // instead of crash-aborting. Re-enable once an f16 base model ships.
-    if (isQuantizedModel(path.basename(model))) {
-      throw new Error(
-        `LoRAs can't be applied to "${path.basename(model)}" — it's a quantized model, and the image engine can only merge a LoRA into a full-precision (f16) model. LoRA support needs a non-quantized base model (not yet shipped).`
-      )
-    }
-    const tags = loras.map((l) => `<lora:${l.name}:${l.weight}>`).join(' ')
-    params.prompt = `${params.prompt} ${tags}`
-  }
+  const preparedLoras = applyImageLoras({
+    prompt: params.prompt,
+    loras: params.loras ?? [],
+    supportsLoras: !coreml,
+    quantizedModel: isQuantizedModel(path.basename(model)),
+    modelName: path.basename(model)
+  })
+  const loras = preparedLoras.loras
+  params = { ...params, prompt: preparedLoras.prompt }
 
   const outDir = path.join(dataDir(), 'generated-images')
   fs.mkdirSync(outDir, { recursive: true })
