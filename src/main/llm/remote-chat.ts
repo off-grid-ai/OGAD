@@ -4,10 +4,14 @@ import {
   reasoningMetadataForOllama,
   reasoningMetadataFromChatTemplate,
   reasoningMetadataFromOpenRouter,
+  publishedCompatibleReasoningMetadata,
+  ollamaReasoningMetadata,
+  openRouterNativeToolCapability,
+  nativeToolPlannerUnavailableMessage,
   type ModelReasoningMetadata,
   type OpenRouterPublishedReasoning,
-  type ReasoningEffort,
-  type ReasoningWireFragment
+  type ReasoningWireFragment,
+  type RemoteNativeToolCapability
 } from '@offgrid/models'
 import type { RemoteVisionProvider } from '../../shared/remote-vision-server'
 import {
@@ -44,11 +48,6 @@ export interface RemoteChatOptions {
   timeoutMs: number
 }
 
-export interface RemoteNativeToolCapability {
-  status: 'supported' | 'unsupported' | 'unknown'
-  modelName: string
-}
-
 interface OpenRouterModelMetadata {
   id?: unknown
   name?: unknown
@@ -74,21 +73,7 @@ async function discoverOllamaReasoningMetadata(
       signal: AbortSignal.timeout(5_000)
     })
     if (!response.ok) return reasoningMetadataForOllama('unsupported')
-    const body = (await response.json()) as { capabilities?: unknown; template?: unknown }
-    if (!Array.isArray(body.capabilities) || !body.capabilities.includes('thinking')) {
-      return reasoningMetadataForOllama('no-control')
-    }
-    const template = typeof body.template === 'string' ? body.template : ''
-    const supportsEffort =
-      /(?:low|medium|high).{0,160}(?:\.Think|think)/is.test(template) ||
-      /(?:\.Think|think).{0,160}(?:low|medium|high)/is.test(template)
-    return supportsEffort
-      ? reasoningMetadataForOllama('effort', {
-          supportedEfforts: ['low', 'medium', 'high'],
-          defaultEffort: 'medium',
-          mandatory: true
-        })
-      : reasoningMetadataForOllama('boolean')
+    return ollamaReasoningMetadata(await response.json())
   } catch {
     return reasoningMetadataForOllama('unsupported')
   }
@@ -114,57 +99,6 @@ async function discoverOpenRouterReasoningMetadata(
   }
 }
 
-const REASONING_TRANSPORTS = new Set([
-  'llama-server',
-  'llama-rn',
-  'openrouter',
-  'ollama',
-  'openai-compatible'
-])
-const REASONING_CONTROLS = new Set([
-  'enable-thinking',
-  'reasoning-strength',
-  'boolean',
-  'effort',
-  'provider-native',
-  'no-control',
-  'unsupported'
-])
-
-function publishedReasoningMetadata(value: unknown): ModelReasoningMetadata | undefined {
-  if (!value || typeof value !== 'object') return undefined
-  const metadata = value as Record<string, unknown>
-  if (
-    typeof metadata.transport !== 'string' ||
-    !REASONING_TRANSPORTS.has(metadata.transport) ||
-    typeof metadata.control !== 'string' ||
-    !REASONING_CONTROLS.has(metadata.control)
-  ) {
-    return undefined
-  }
-  const effort = (candidate: unknown): candidate is ReasoningEffort =>
-    candidate === 'minimal' ||
-    candidate === 'low' ||
-    candidate === 'medium' ||
-    candidate === 'high' ||
-    candidate === 'xhigh' ||
-    candidate === 'max'
-  const supportedEfforts = Array.isArray(metadata.supportedEfforts)
-    ? metadata.supportedEfforts.filter(effort)
-    : undefined
-  return {
-    transport: metadata.transport as ModelReasoningMetadata['transport'],
-    control: metadata.control as ModelReasoningMetadata['control'],
-    ...(metadata.supportsTokenBudget === true ? { supportsTokenBudget: true } : {}),
-    ...(supportedEfforts ? { supportedEfforts } : {}),
-    ...(effort(metadata.defaultEffort) ? { defaultEffort: metadata.defaultEffort } : {}),
-    ...(metadata.mandatory === true ? { mandatory: true } : {}),
-    ...(metadata.reasoningFormat === 'auto' || metadata.reasoningFormat === 'deepseek'
-      ? { reasoningFormat: metadata.reasoningFormat }
-      : {})
-  }
-}
-
 async function discoverCompatibleReasoningMetadata(
   remote: RemoteTextModelConnection
 ): Promise<ModelReasoningMetadata> {
@@ -179,7 +113,7 @@ async function discoverCompatibleReasoningMetadata(
     const selected = (body.data as Array<Record<string, unknown>>).find(
       (candidate) => candidate.id === remote.model
     )
-    const published = publishedReasoningMetadata(selected?.reasoning)
+    const published = publishedCompatibleReasoningMetadata(selected?.reasoning)
     if (published) return published
     const template =
       typeof selected?.chat_template === 'string' ? selected.chat_template : undefined
@@ -227,20 +161,7 @@ async function discoverRemoteNativeToolCapability(
     })
     if (!response.ok) return { status: 'unknown', modelName: remote.name || remote.model }
     const body = (await response.json()) as { data?: unknown }
-    if (!Array.isArray(body.data)) {
-      return { status: 'unknown', modelName: remote.name || remote.model }
-    }
-    const selected = (body.data as OpenRouterModelMetadata[]).find(
-      (candidate) => candidate.id === remote.model
-    )
-    if (!selected || !Array.isArray(selected.supported_parameters)) {
-      return { status: 'unknown', modelName: remote.name || remote.model }
-    }
-    const modelName = typeof selected.name === 'string' ? selected.name : remote.model
-    return {
-      status: selected.supported_parameters.includes('tools') ? 'supported' : 'unsupported',
-      modelName
-    }
+    return openRouterNativeToolCapability(body.data, remote.model, remote.name || remote.model)
   } catch {
     return { status: 'unknown', modelName: remote.name || remote.model }
   } finally {
@@ -257,12 +178,6 @@ export function remoteNativeToolCapability(
   const discovered = discoverRemoteNativeToolCapability(remote)
   nativeToolCapabilities.set(key, discovered)
   return discovered
-}
-
-export function nativeToolPlannerUnavailableMessage(
-  capability: RemoteNativeToolCapability
-): string {
-  return `${capability.modelName} cannot act as the Chat tool planner because OpenRouter reports that this model does not support native tools. Select it as the Computer Use specialist instead, then select a tool-capable text model for Chat.`
 }
 
 /** Keep remote transport errors useful without exposing the endpoint, headers,
@@ -291,23 +206,25 @@ function completionRequestBody(
   remote: RemoteTextModelConnection,
   request: RemoteChatRequest
 ): string {
-  return JSON.stringify(openAICompatibleCompletionPayload({
-    model: remote.model,
-    messages: request.messages,
-    maxTokens: request.maxTokens,
-    temperature: request.temperature,
-    topP: request.topP,
-    responseFormat: request.responseFormat,
-    tools: request.tools,
-    toolChoice: request.toolChoice,
-    // Carry the user's configured thinking cap, not just a coarse effort hint. Without this the
-    // cap was dropped for every remote model and the budget setting did nothing.
-    reasoningWire: request.reasoningWire,
-    provider: remote.provider,
-    thinking: request.thinking,
-    reasoningBudget: request.reasoningBudget,
-    stream: true
-  }))
+  return JSON.stringify(
+    openAICompatibleCompletionPayload({
+      model: remote.model,
+      messages: request.messages,
+      maxTokens: request.maxTokens,
+      temperature: request.temperature,
+      topP: request.topP,
+      responseFormat: request.responseFormat,
+      tools: request.tools,
+      toolChoice: request.toolChoice,
+      // Carry the user's configured thinking cap, not just a coarse effort hint. Without this the
+      // cap was dropped for every remote model and the budget setting did nothing.
+      reasoningWire: request.reasoningWire,
+      provider: remote.provider,
+      thinking: request.thinking,
+      reasoningBudget: request.reasoningBudget,
+      stream: true
+    })
+  )
 }
 
 interface IdleWatchdog {

@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as fs from 'fs'
 import os from 'os'
 import * as path from 'path'
-import type { PerformanceMode } from '../../model-sizing'
+import type { PerformanceMode } from '@offgrid/models'
 
 function argValue(args: string[], flag: string): string | undefined {
   const index = args.indexOf(flag)
@@ -46,12 +46,13 @@ describe('resource mode settings -> restart -> setup plan', () => {
   })
 
   it('applies every preset to persisted launch limits and settings-driven model plans', async () => {
-    const [{ llm, LLMService }, { MODE_PRESETS }, setupLogic, setup] = await Promise.all([
-      import('../../llm'),
-      import('../settings-math'),
-      import('../../models/setup-logic'),
-      import('../../setup')
-    ])
+    const [{ llm, LLMService }, { TEXT_RUNTIME_MODE_PRESETS: MODE_PRESETS }, setupLogic, setup] =
+      await Promise.all([
+        import('../../llm'),
+        import('@offgrid/models'),
+        import('../../models/setup-logic'),
+        import('../../setup')
+      ])
 
     const recommendations = new Map<PerformanceMode, string>()
 

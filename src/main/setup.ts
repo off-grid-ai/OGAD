@@ -188,22 +188,27 @@ function settingsMode(): RecMode {
 export async function recommendChatModel(
   modeOverride?: RecMode
 ): Promise<{ id: string; name: string } | null> {
-  const { CATALOG, recommendForRam } = await import('@offgrid/models')
-  const { chooseChatModel, recommendedParamCeiling, preferredModelIds, totalBytes } =
-    await import('./model-sizing')
+  const {
+    CATALOG,
+    recommendForRam,
+    chooseTextModel,
+    recommendedTextModelParamCeiling,
+    preferredTextModelIds,
+    modelFileBytes
+  } = await import('@offgrid/models')
   const gb = ramGb()
   const tier = recommendForRam(gb)
   const mode: RecMode = modeOverride ?? settingsMode()
   const frac = recommendBudgetFraction(mode)
   const budget = gb * frac * 1e9
   // 1) Curated default for the tier (16GB → Gemma 4 E2B), if it fits the budget.
-  for (const id of preferredModelIds(gb, mode)) {
+  for (const id of preferredTextModelIds(gb, mode)) {
     const e = CATALOG.find((m) => m.id === id)
-    if (e && totalBytes(e as never) <= budget) return { id: e.id, name: e.name }
+    if (e && modelFileBytes(e as never) <= budget) return { id: e.id, name: e.name }
   }
   // 2) Otherwise the size heuristic, capped by recommended params (8B only ≥24GB).
-  const maxParams = Math.min(tier.maxParams, recommendedParamCeiling(gb, mode))
-  const pick = chooseChatModel(CATALOG as never, gb, maxParams, frac) as {
+  const maxParams = Math.min(tier.maxParams, recommendedTextModelParamCeiling(gb, mode))
+  const pick = chooseTextModel(CATALOG as never, gb, maxParams, frac) as {
     id: string
     name: string
   } | null
@@ -223,9 +228,8 @@ export interface FitEstimate {
 export async function estimateModelFit(modelId: string): Promise<FitEstimate> {
   const gb = ramGb()
   try {
-    const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models')
+    const { CATALOG, resolveHuggingFaceModel, fitLevel } = await import('@offgrid/models')
     const entry = CATALOG.find((m) => m.id === modelId) ?? (await resolveHuggingFaceModel(modelId))
-    const { fitLevel } = await import('./model-sizing')
     const weightsGb =
       (entry?.files.reduce((s: number, f: { sizeBytes?: number }) => s + (f.sizeBytes ?? 0), 0) ??
         0) / 1e9

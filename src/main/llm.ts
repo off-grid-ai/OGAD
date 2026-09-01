@@ -6,14 +6,6 @@ import path from 'path'
 import * as fs from 'fs'
 import { modelsDir as getModelsDir, binRoots, isPackaged, exe } from './runtime-env'
 import { reapOrphanProcessesOnPort, type PortReapResult } from './kill-orphan-port'
-import {
-  computeSafeCtx,
-  modeBudget,
-  loadAttempts,
-  capContextToModel,
-  type KvCacheType,
-  type PerformanceMode
-} from './model-sizing'
 import { classifyLlamaError, modelPortConflictReason } from './llama-error'
 import type { ManagedRuntimePort as ManagedRuntime } from '@offgrid/models'
 import { LLAMA_SERVER_PORT } from '../shared/ports'
@@ -27,24 +19,33 @@ import {
   MAX_TOKENS_AUTO,
   maxTokensForLlamaServer as maxTokensForWire,
   reasoningControlFromChatTemplate,
-  reasoningBudgetPayload,
   reasoningMetadataFromChatTemplate,
   resolveMaxTokens,
   shouldAutoRecoverRuntime as shouldAutoRecover,
+  safeTextContext,
+  textRuntimeModeBudget,
+  textRuntimeLoadAttempts,
+  capContextToTrainedWindow,
+  applyTextRuntimeModePreset,
+  llamaServerCompletionPayload,
+  llamaServerReasoningPayload,
+  llamaServerLaunchArgs,
+  localCompletionText,
+  nativeToolPlannerUnavailableMessage,
+  textRuntimeLaunchChanged,
+  textRuntimeCrashRecoveryPlan,
+  isPerformanceMode,
+  isReasoningEffort,
+  type LlamaKvCacheType as KvCacheType,
+  type PerformanceMode,
+  type PresetField,
   type GenerationReasoning,
   type ModelReasoningMetadata,
   type ReasoningEffort,
   type ReasoningWireFragment
 } from '@offgrid/models'
 import { acceleratorForEngine, type EngineAccelerator } from '../shared/engine-accelerator'
-import {
-  applyModePreset,
-  samplingPayload,
-  launchArgsChanged,
-  buildLaunchArgs,
-  type PresetField
-} from './llm/settings-math'
-import { buildMessages, thinkingPayload, type ChatMessage } from './llm/chat-payload'
+import { buildMessages, type ChatMessage } from './llm/chat-payload'
 import { readImages } from './llm/read-images'
 import { isValidGgufFile } from './models/gguf'
 import { isGrounderModel } from '@offgrid/models'
@@ -54,7 +55,6 @@ import { postCompletionOnce } from './llm/http-post'
 import { engineSpawnEnv } from './llm/spawn-env'
 import { streamCompletion, type StreamResult } from './llm/stream'
 import {
-  nativeToolPlannerUnavailableMessage,
   remoteNativeToolCapability,
   streamRemoteChatCompletion,
   type RemoteTextModelConnection
@@ -71,17 +71,6 @@ import { getActiveRemoteVisionServer } from './vision/remote-vision-server'
 import { currentRemoteScreenTaskSession } from './actions/remote-screen-session'
 
 export type { KvCacheType, PerformanceMode }
-
-function isReasoningEffort(value: unknown): value is ReasoningEffort {
-  return (
-    value === 'minimal' ||
-    value === 'low' ||
-    value === 'medium' ||
-    value === 'high' ||
-    value === 'xhigh' ||
-    value === 'max'
-  )
-}
 
 export interface LlmSettings {
   performanceMode?: PerformanceMode
@@ -244,12 +233,7 @@ export class LLMService {
       if (typeof s.gpuLayers === 'number') this.gpuLayers = s.gpuLayers
       if (typeof s.threads === 'number') this.threads = s.threads
       if (typeof s.batchSize === 'number') this.batchSize = s.batchSize
-      if (
-        s.performanceMode === 'conservative' ||
-        s.performanceMode === 'balanced' ||
-        s.performanceMode === 'extreme'
-      )
-        this.performanceMode = s.performanceMode
+      if (isPerformanceMode(s.performanceMode)) this.performanceMode = s.performanceMode
       // Restore which preset fields the user pinned, so a plain restart keeps an
       // explicit KV/ctx/flash-attn choice instead of letting the mode preset win.
       if (Array.isArray(s.userExplicit)) {
@@ -313,7 +297,7 @@ export class LLMService {
   private safeCtxSize(requestedRaw: number): number {
     // First cap to the model's trained window (pure), THEN clamp to what RAM can hold.
     const trained = this.trainedContext()
-    const requested = capContextToModel(requestedRaw, trained)
+    const requested = capContextToTrainedWindow(requestedRaw, trained)
     try {
       const totalGb = os.totalmem() / 1e9
       let weightsGb = 0
@@ -327,8 +311,8 @@ export class LLMService {
       } catch {
         /* unknown */
       }
-      const { frac, reserveGb } = modeBudget(this.performanceMode)
-      const rounded = computeSafeCtx({
+      const { frac, reserveGb } = textRuntimeModeBudget(this.performanceMode)
+      const rounded = safeTextContext({
         requested,
         totalGb,
         weightsGb,
@@ -341,12 +325,12 @@ export class LLMService {
           `[LLMService] Clamping context ${requested} -> ${rounded} (RAM ${totalGb.toFixed(0)}GB, weights ${weightsGb.toFixed(1)}GB) to avoid memory overcommit`
         )
       }
-      // computeSafeCtx has a 2048-token floor (Math.max(2048, …)); re-cap to the trained window so a
+      // The shared safe-context policy has a 2048-token floor; re-cap to the trained window so a
       // model trained BELOW that floor (e.g. 1024) is never run past its context.
-      return capContextToModel(rounded, trained)
+      return capContextToTrainedWindow(rounded, trained)
     } catch {
       // If anything goes wrong reading sizes, fall back to a universally-safe value.
-      return capContextToModel(Math.min(requested, 8192), trained)
+      return capContextToTrainedWindow(Math.min(requested, 8192), trained)
     }
   }
 
@@ -406,7 +390,7 @@ export class LLMService {
 
   /** The exact argv handed to `llama-server` for the CURRENT settings — the terminal
    *  artifact of the whole settings→persist→reload path. Delegates to the pure
-   *  `buildLaunchArgs` (single source of truth) after applying the impure RAM clamp,
+   *  the shared launch policy after applying the impure RAM observations,
    *  so `_doInit` and tests build args the same way. */
   launchArgs(): string[] {
     return this.launchArgsFor(this.safeCtxSize(this.ctxSize), this.gpuLayers)
@@ -416,7 +400,7 @@ export class LLMService {
    *  source used by both `launchArgs()` and the OOM fallback ladder, so every
    *  attempt is constructed the same way (only ctx + ngl vary). */
   private launchArgsFor(effectiveCtxSize: number, gpuLayers: number): string[] {
-    return buildLaunchArgs({
+    return llamaServerLaunchArgs({
       modelPath: this.modelPath,
       mmProjPath: this.mmProjPath,
       port: this.port,
@@ -452,16 +436,6 @@ export class LLMService {
     }
   }
 
-  /** Sampling params to merge into a request payload (only those the user set). */
-  private samplingPayload(): Record<string, number> {
-    return samplingPayload({
-      topP: this.topP,
-      topK: this.topK,
-      minP: this.minP,
-      repeatPenalty: this.repeatPenalty
-    })
-  }
-
   /** Read each image off disk and decode to base64 + mime (the one impure step of
    *  payload building). A file that can't be read is logged and skipped so a broken
    *  path never fails the whole request. */
@@ -481,14 +455,9 @@ export class LLMService {
     // preset fields the user has NOT pinned, so it can't wipe an explicit KV choice.
     // Always treated as a launch change.
     let modeChanged = false
-    if (
-      (s.performanceMode === 'conservative' ||
-        s.performanceMode === 'balanced' ||
-        s.performanceMode === 'extreme') &&
-      s.performanceMode !== this.performanceMode
-    ) {
+    if (isPerformanceMode(s.performanceMode) && s.performanceMode !== this.performanceMode) {
       this.performanceMode = s.performanceMode
-      const merged = applyModePreset(
+      const merged = applyTextRuntimeModePreset(
         { ctxSize: this.ctxSize, kvCacheType: this.kvCacheType, flashAttn: this.flashAttn },
         s.performanceMode,
         this.userExplicit
@@ -499,7 +468,7 @@ export class LLMService {
       modeChanged = true
     }
     // Launch-time args: changing any of these requires a server respawn.
-    const launchChanged = launchArgsChanged(
+    const launchChanged = textRuntimeLaunchChanged(
       s,
       {
         ctxSize: this.ctxSize,
@@ -799,9 +768,9 @@ export class LLMService {
    *  context on GPU → smaller contexts → CPU-only at 2048). We only step DOWN the
    *  ladder on an out-of-memory failure — any other failure (unsupported arch,
    *  missing dylib) won't be fixed by less context, so we move to the next engine.
-   *  launchArgs()/buildLaunchArgs stays the single source for the argv shape. */
+   *  the Shared launch policy stays the single source for the argv shape. */
   private async launchWithFallback(serverPaths: string[]): Promise<boolean> {
-    const attempts = loadAttempts(this.safeCtxSize(this.ctxSize), this.gpuLayers)
+    const attempts = textRuntimeLoadAttempts(this.safeCtxSize(this.ctxSize), this.gpuLayers)
     for (const serverPath of serverPaths) {
       if (!serverPath) continue
       for (let a = 0; a < attempts.length; a++) {
@@ -1011,27 +980,27 @@ export class LLMService {
     // Prevents thrash-respawning a multi-GB process when the model is too heavy for
     // the machine (memory-pressure kills). Surface it; the user can pick a smaller
     // model / Conservative mode or hit Health → Restart.
-    const now = Date.now()
-    this.restartTimes = this.restartTimes.filter((t) => now - t < 120_000)
-    if (this.restartTimes.length >= 3) {
+    const plan = textRuntimeCrashRecoveryPlan({
+      now: Date.now(),
+      restartTimes: this.restartTimes,
+      currentContext: this.ctxSize
+    })
+    this.restartTimes = plan.restartTimes
+    if (!plan.shouldRestart) {
       console.error(
         `[LLMService] llama-server died ${this.restartTimes.length + 1}× in 2min (last code ${code}); NOT auto-restarting — likely memory pressure. Pick a smaller model or Conservative mode.`
       )
       return
     }
-    this.restartTimes.push(now)
-    // On a repeat death in the window, halve the context — usually OOM/overcommit.
-    if (this.restartTimes.length >= 2) {
-      const reduced = Math.max(2048, Math.floor(this.ctxSize / 2 / 1024) * 1024)
-      if (reduced < this.ctxSize) {
-        console.warn(
-          `[LLMService] reducing context ${this.ctxSize} -> ${reduced} after repeated crashes`
-        )
-        this.ctxSize = reduced
-        this.persist()
-      }
+    // On a repeat death in the window, use the shared reduced-context plan.
+    if (plan.nextContext < this.ctxSize) {
+      console.warn(
+        `[LLMService] reducing context ${this.ctxSize} -> ${plan.nextContext} after repeated crashes`
+      )
+      this.ctxSize = plan.nextContext
+      this.persist()
     }
-    await new Promise((r) => setTimeout(r, 1000 * this.restartTimes.length))
+    await new Promise((r) => setTimeout(r, plan.delayMs))
     if (this.paused || this.intentionalStop) return
     console.log(`[LLMService] auto-restarting llama-server (attempt ${this.restartTimes.length})`)
     this.init().catch(() => {})
@@ -1261,34 +1230,27 @@ export class LLMService {
     await this.ensureReady()
     return this.chatMutex.runExclusive(async () => {
       try {
-        const payload: Record<string, unknown> = {
-          messages: messages,
-          max_tokens: maxTokensForWire(resolveMaxTokens(maxTokens, this.maxTokens)),
+        const payload = llamaServerCompletionPayload({
+          messages,
+          requestedMaxTokens: maxTokens,
+          savedMaxTokens: this.maxTokens,
           temperature: opts.temperature ?? this.temperature,
-          ...this.samplingPayload(),
-          ...(opts.topP === undefined ? {} : { top_p: opts.topP })
-        }
-        // Grammar-constrained output: llama.cpp converts the JSON schema to a
-        // GBNF grammar so the model can ONLY emit valid matching JSON.
-        if (opts.responseFormat) payload.response_format = opts.responseFormat
-        // Specialist adapters can require inline <think> output as part of
-        // their official protocol. General models use the separated reasoning
-        // channel so a long thought does not hide the final policy answer.
-        if (opts.enableThinking !== undefined) {
-          if (opts.separateReasoning) {
-            Object.assign(
-              payload,
-              thinkingPayload(opts.enableThinking, this.thinkingDialect),
-              reasoningBudgetPayload(opts.enableThinking, this.reasoningBudget)
-            )
-          } else {
-            payload.chat_template_kwargs = { enable_thinking: opts.enableThinking }
-          }
-        } else if (opts.disableThinking) {
-          // Turn off the model's reasoning channel for fast, direct output (its
-          // chain-of-thought otherwise eats the token budget and leaves content empty).
-          Object.assign(payload, thinkingPayload(false, this.thinkingDialect))
-        }
+          sampling: {
+            topP: this.topP,
+            topK: this.topK,
+            minP: this.minP,
+            repeatPenalty: this.repeatPenalty
+          },
+          topPOverride: opts.topP,
+          responseFormat: opts.responseFormat,
+          reasoningWire: llamaServerReasoningPayload({
+            enableThinking: opts.enableThinking,
+            disableThinking: opts.disableThinking,
+            separateReasoning: opts.separateReasoning,
+            control: this.thinkingDialect,
+            budget: this.reasoningBudget
+          })
+        })
         const body = JSON.stringify(payload)
 
         console.log(
@@ -1311,13 +1273,7 @@ export class LLMService {
         } catch {
           /* audit is never load-bearing */
         }
-        const message = data.choices?.[0]?.message
-        const content = message?.content ?? ''
-        const reasoning = message?.reasoning_content?.trim() ?? ''
-        if (opts.enableThinking && reasoning && !/<think\b[^>]*>/i.test(content)) {
-          return `<think>${reasoning}</think>\n${content}`
-        }
-        return content
+        return localCompletionText(data.choices?.[0]?.message, opts.enableThinking === true)
       } catch (e: unknown) {
         console.error('[LLMService] Chat error:', e instanceof Error ? e.message : e)
         throw e
@@ -1355,21 +1311,22 @@ export class LLMService {
     try {
       this.assertImageInputSupported(images)
       await this.ensureReady()
-      const payload: Record<string, unknown> = {
+      const payload = llamaServerCompletionPayload({
         messages,
-        max_tokens: maxTokensForWire(resolvedMaxTokens),
+        requestedMaxTokens: resolvedMaxTokens,
+        savedMaxTokens: this.maxTokens,
         temperature: opts.temperature ?? this.temperature,
-        ...this.samplingPayload(),
+        sampling: {
+          topP: this.topP,
+          topK: this.topK,
+          minP: this.minP,
+          repeatPenalty: this.repeatPenalty
+        },
         stream: true,
-        // Ask for the token counts. Without this the final chunk carries no usage, so the app can
-        // report how long a generation took but never how many tokens it produced.
-        stream_options: { include_usage: true },
-        // Thinking control: when on, ask the template to emit reasoning and have
-        // llama.cpp split it into reasoning_content (deepseek-style); when off,
-        // suppress it so the token budget goes to the answer.
-        ...thinkingPayload(!!opts.thinking, this.thinkingDialect),
-        ...reasoningBudgetPayload(!!opts.thinking, this.reasoningBudget)
-      }
+        thinking: opts.thinking,
+        reasoningControl: this.thinkingDialect,
+        reasoningBudget: this.reasoningBudget
+      })
       const body = JSON.stringify(payload)
 
       // Single SSE transport (llm/stream.ts). The plain chat path sends no tools, so
@@ -1435,26 +1392,27 @@ export class LLMService {
     await this.beginGeneration()
     try {
       await this.ensureReady()
-      const payload: Record<string, unknown> = {
+      const payload = llamaServerCompletionPayload({
         messages,
-        max_tokens: maxTokensForWire(resolveMaxTokens(opts.maxTokens, this.maxTokens)),
+        requestedMaxTokens: opts.maxTokens,
+        savedMaxTokens: this.maxTokens,
         temperature: opts.temperature ?? this.temperature,
-        ...this.samplingPayload(),
-        ...(opts.topP === undefined ? {} : { top_p: opts.topP }),
+        sampling: {
+          topP: this.topP,
+          topK: this.topK,
+          minP: this.minP,
+          repeatPenalty: this.repeatPenalty
+        },
+        topPOverride: opts.topP,
         stream: true,
-        // Ask for the token counts. Without this the final chunk carries no usage, so the app can
-        // report how long a generation took but never how many tokens it produced.
-        stream_options: { include_usage: true },
-        ...(opts.reasoningWire ?? {
-          ...thinkingPayload(!!opts.thinking, this.thinkingDialect),
-          ...reasoningBudgetPayload(!!opts.thinking, this.reasoningBudget)
-        })
-      }
-      if (opts.responseFormat) payload.response_format = opts.responseFormat
-      if (opts.tools && opts.tools.length) {
-        payload.tools = opts.tools
-        payload.tool_choice = opts.toolChoice ?? 'auto'
-      }
+        reasoningWire: opts.reasoningWire,
+        thinking: opts.thinking,
+        reasoningControl: this.thinkingDialect,
+        reasoningBudget: this.reasoningBudget,
+        responseFormat: opts.responseFormat,
+        tools: opts.tools,
+        toolChoice: opts.toolChoice
+      })
       const body = JSON.stringify(payload)
 
       // Single SSE transport (llm/stream.ts) — same path as chatStream, but the

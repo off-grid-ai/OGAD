@@ -1,6 +1,6 @@
 // Pure decision logic for the setup / "Configure for me" surface, extracted from
 // setup.ts so it's unit-testable WITHOUT Electron/os/http. No side effects, no IO.
-// The size/param math already lives in model-sizing.ts - this module reuses it and
+// The size/param math lives in @offgrid/models - this module reuses it and
 // never re-derives it.
 
 import type { RecMode } from './setup-types'
@@ -13,7 +13,7 @@ export function normalizeMode(raw?: string | null): RecMode {
 }
 
 /** The RAM-budget fraction "Configure for me" spends on chat weights per mode. This
- *  is the recommendChatModel budget knob (distinct from model-sizing.modeBudget,
+ *  is the recommendChatModel budget knob (distinct from the runtime context budget,
  *  which governs KV/context clamping). */
 export function recommendBudgetFraction(mode: RecMode): number {
   return mode === 'conservative' ? 0.3 : mode === 'extreme' ? 0.55 : 0.38

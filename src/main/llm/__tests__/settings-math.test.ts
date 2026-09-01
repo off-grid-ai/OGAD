@@ -6,13 +6,13 @@
 
 import { describe, it, expect } from 'vitest'
 import {
-  MODE_PRESETS,
-  samplingPayload,
-  launchArgsChanged,
-  buildLaunchArgs,
-  type LaunchArgsInput,
-  type LaunchState
-} from '../settings-math'
+  TEXT_RUNTIME_MODE_PRESETS as MODE_PRESETS,
+  llamaServerSamplingPayload as samplingPayload,
+  textRuntimeLaunchChanged as launchArgsChanged,
+  llamaServerLaunchArgs as buildLaunchArgs,
+  type LlamaServerLaunchPlan as LaunchArgsInput,
+  type TextRuntimeLaunchState as LaunchState
+} from '@offgrid/models'
 
 const baseArgs = (over: Partial<LaunchArgsInput> = {}): LaunchArgsInput => ({
   modelPath: '/m/model.gguf',

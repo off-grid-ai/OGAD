@@ -30,7 +30,7 @@ import {
   openModelSettingsPanel,
   supportsModelSettings
 } from '@renderer/lib/model-settings-panel'
-import { fitTier, type FitTier, fitLevel, FIT_OK_FRAC } from '../../../shared/model-fit'
+import { fitTier, type FitTier, fitLevel, FIT_OK_FRAC } from '@offgrid/models'
 import {
   filterAndSort,
   parseParamCount,

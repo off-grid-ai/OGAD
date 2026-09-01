@@ -14,7 +14,12 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { applyModePreset, MODE_PRESETS, type PresetState, type PresetField } from '../settings-math'
+import {
+  applyTextRuntimeModePreset as applyModePreset,
+  TEXT_RUNTIME_MODE_PRESETS as MODE_PRESETS,
+  type TextRuntimePresetState as PresetState,
+  type PresetField
+} from '@offgrid/models'
 
 const NONE = new Set<PresetField>()
 

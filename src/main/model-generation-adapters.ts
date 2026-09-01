@@ -1,13 +1,16 @@
-import { cleanTranscription, parseToolCallsFromText, reasoningWireForGeneration } from '@offgrid/models'
+import {
+  cleanTranscription,
+  finalGenerationChunk,
+  openAIProjectedMessages,
+  openAIProjectedResponseFormat,
+  openAIProjectedToolChoice,
+  reasoningWireForGeneration
+} from '@offgrid/models'
 import type {
   GenerationAdapter,
   GenerationChunk,
-  GenerationContentPart,
-  GenerationFinishReason,
-  GenerationMessage,
   GenerationRequest,
-  GenerationResponseFormat,
-  GenerationToolChoice,
+  OpenAIProjectedMessage,
   RuntimeModel
 } from '@offgrid/models'
 import { llm, type StreamChatOptions } from './llm'
@@ -41,18 +44,6 @@ export function registerDesktopVoiceProgress(
   return () => {
     if (voiceProgressObservers.get(turnId) === observer) voiceProgressObservers.delete(turnId)
   }
-}
-
-interface OpenAIMessage {
-  role: GenerationMessage['role']
-  content: string | Array<Record<string, unknown>>
-  name?: string
-  tool_call_id?: string
-  tool_calls?: Array<{
-    id: string
-    type: 'function'
-    function: { name: string; arguments: string }
-  }>
 }
 
 class GenerationChunkChannel {
@@ -94,73 +85,6 @@ class GenerationChunkChannel {
   }
 }
 
-function openAIContentPart(part: GenerationContentPart): Record<string, unknown> {
-  if (part.type === 'text') return { type: 'text', text: part.text }
-  if (part.type === 'image') {
-    const url = part.data
-      ? `data:${part.mimeType ?? 'image/png'};base64,${part.data}`
-      : (part.uri ?? '')
-    return { type: 'image_url', image_url: { url, detail: part.detail } }
-  }
-  if (part.type === 'audio') {
-    return {
-      type: 'input_audio',
-      input_audio: {
-        data: part.data ?? part.uri ?? '',
-        format: part.mimeType?.split('/').pop() ?? 'wav'
-      }
-    }
-  }
-  return {
-    type: 'file',
-    file: {
-      filename: part.name,
-      file_data: part.data ?? part.uri ?? '',
-      mime_type: part.mimeType
-    }
-  }
-}
-
-function openAIMessages(messages: GenerationMessage[]): OpenAIMessage[] {
-  return messages.map((message) => ({
-    role: message.role,
-    content: Array.isArray(message.content)
-      ? message.content.map(openAIContentPart)
-      : message.content,
-    ...(message.name ? { name: message.name } : {}),
-    ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
-    ...(message.toolCalls?.length
-      ? {
-          tool_calls: message.toolCalls.map((call) => ({
-            id: call.id,
-            type: 'function' as const,
-            function: { name: call.name, arguments: call.arguments }
-          }))
-        }
-      : {})
-  }))
-}
-
-function openAIResponseFormat(
-  value: GenerationResponseFormat | undefined
-): Record<string, unknown> | undefined {
-  if (!value || value.type === 'text') return undefined
-  if (value.type === 'json_object') return value
-  return {
-    type: 'json_schema',
-    json_schema: {
-      name: value.name,
-      schema: value.schema,
-      ...(value.strict === undefined ? {} : { strict: value.strict })
-    }
-  }
-}
-
-function openAIToolChoice(value: GenerationToolChoice | undefined): unknown {
-  if (!value || typeof value === 'string') return value
-  return { type: 'function', function: { name: value.name } }
-}
-
 function streamOptions(request: GenerationRequest): StreamChatOptions {
   return {
     temperature: request.sampling?.temperature,
@@ -168,7 +92,7 @@ function streamOptions(request: GenerationRequest): StreamChatOptions {
     reasoning: request.reasoning,
     signal: request.signal,
     maxTokens: request.maxTokens,
-    responseFormat: openAIResponseFormat(request.responseFormat),
+    responseFormat: openAIProjectedResponseFormat(request.responseFormat),
     tools: request.tools?.map((tool) => ({
       type: 'function',
       function: {
@@ -178,56 +102,7 @@ function streamOptions(request: GenerationRequest): StreamChatOptions {
         strict: tool.strict
       }
     })),
-    toolChoice: openAIToolChoice(request.toolChoice)
-  }
-}
-
-function finishReason(value: string | null): GenerationFinishReason {
-  if (value === 'stop' || value === 'length' || value === 'content_filter') return value
-  if (value === 'tool_calls' || value === 'function_call') return 'tool_calls'
-  return value ? 'unknown' : 'stop'
-}
-
-function finalChunk(result: StreamResult, request: GenerationRequest): GenerationChunk {
-  const promptTokens = result.metrics?.promptTokens
-  const outputTokens = result.metrics?.completionTokens
-  const toolCalls =
-    result.toolCalls.length || !request.tools?.length
-      ? result.toolCalls
-      : parseToolCallsFromText(result.content).map((call, index) => ({
-          id: `text-tool-${String(request.messages?.length ?? 0)}-${String(index)}`,
-          name: call.name,
-          arguments: JSON.stringify(call.arguments)
-        }))
-  return {
-    ...(toolCalls.length && request.operation?.type !== 'tool_selection'
-      ? {
-          toolCallDeltas: toolCalls.map((call, index) => ({
-            index,
-            id: call.id,
-            name: call.name,
-            argumentsDelta: call.arguments
-          }))
-        }
-      : {}),
-    ...(request.operation?.type === 'tool_selection'
-      ? {
-          output: {
-            type: 'tool_selection' as const,
-            toolCalls
-          }
-        }
-      : {}),
-    ...(promptTokens || outputTokens
-      ? {
-          usage: {
-            ...(promptTokens ? { inputTokens: promptTokens } : {}),
-            ...(outputTokens ? { outputTokens } : {}),
-            totalTokens: (promptTokens ?? 0) + (outputTokens ?? 0)
-          }
-        }
-      : {}),
-    finishReason: finishReason(result.finishReason)
+    toolChoice: openAIProjectedToolChoice(request.toolChoice)
   }
 }
 
@@ -240,14 +115,14 @@ abstract class DesktopGenerationAdapter implements GenerationAdapter {
     const channel = new GenerationChunkChannel()
     void this.run(
       model,
-      openAIMessages(request.messages ?? []),
+      openAIProjectedMessages(request.messages ?? []),
       (text, kind) => channel.push(kind === 'reasoning' ? { reasoning: text } : { content: text }),
       streamOptions(request),
       request.timeoutMs ?? 300_000
     ).then(
       (result) => {
         this.observations.record(request.identity?.turnId, result.metrics)
-        channel.push(finalChunk(result, request))
+        channel.push(finalGenerationChunk(result, request))
         channel.finish()
       },
       (error: unknown) => channel.fail(error)
@@ -265,7 +140,7 @@ abstract class DesktopGenerationAdapter implements GenerationAdapter {
 
   protected abstract run(
     model: RuntimeModel,
-    messages: OpenAIMessage[],
+    messages: OpenAIProjectedMessage[],
     onDelta: (text: string, kind: 'content' | 'reasoning') => void,
     options: StreamChatOptions,
     timeoutMs: number
@@ -313,7 +188,7 @@ export class DesktopLocalGenerationAdapter extends DesktopGenerationAdapter {
 
   protected run(
     model: RuntimeModel,
-    messages: OpenAIMessage[],
+    messages: OpenAIProjectedMessage[],
     onDelta: (text: string, kind: 'content' | 'reasoning') => void,
     options: StreamChatOptions,
     timeoutMs: number
@@ -345,7 +220,7 @@ export class DesktopRemoteGenerationAdapter extends DesktopGenerationAdapter {
 
   protected run(
     model: RuntimeModel,
-    messages: OpenAIMessage[],
+    messages: OpenAIProjectedMessage[],
     onDelta: (text: string, kind: 'content' | 'reasoning') => void,
     options: StreamChatOptions,
     timeoutMs: number
