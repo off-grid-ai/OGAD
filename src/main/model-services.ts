@@ -619,7 +619,7 @@ export function createDesktopModelServices(
       if (!adapter || !model.residentSizeMB) return false
       const routeId = model.routeId ?? runtimeModelRouteId(model)
       const key = `${model.modality}:${routeId}`
-      const admitted = await memory.ensureResident(
+      const lease = await memory.acquire(
         {
           key,
           modelId: routeId,
@@ -633,8 +633,9 @@ export function createDesktopModelServices(
           unload: () => adapter.unload()
         }
       )
-      if (!admitted.fits) throw new ModelAdmissionError(model)
-      return admitted.loaded
+      if (!lease.acquired) throw new ModelAdmissionError(model)
+      await lease.release()
+      return lease.loaded
     },
     async unload(modality) {
       const residents = memory.getResidents().filter((resident) => resident.type === modality)

@@ -105,7 +105,7 @@ describe('Computer Use specialist lifecycle', () => {
     const residency = new ModelResidencyManager({
       current: () => ({ totalMB: 16_384, availableMB: 16_384, platform: 'desktop' })
     })
-    await residency.ensureResident(
+    const chatLease = await residency.acquire(
       { key: `text:${chatRoute}`, modelId: chatRoute, type: 'text', sizeMB: 240 },
       {
         load: async () => {
@@ -116,6 +116,7 @@ describe('Computer Use specialist lifecycle', () => {
         }
       }
     )
+    await chatLease.release()
     const services = {
       llm: models,
       residency,
@@ -142,7 +143,7 @@ describe('Computer Use specialist lifecycle', () => {
         const model = models.active('text').model
         if (!model) return false
         const routeId = model.routeId ?? runtimeModelRouteId(model)
-        const admitted = await residency.ensureResident(
+        const lease = await residency.acquire(
           { key: `text:${routeId}`, modelId: routeId, type: 'text', sizeMB: 240 },
           {
             load: async () => {
@@ -153,7 +154,8 @@ describe('Computer Use specialist lifecycle', () => {
             }
           }
         )
-        return admitted.loaded
+        await lease.release()
+        return lease.loaded
       }
     }
     const lifecycle = createGrounderLifecycle(services, {

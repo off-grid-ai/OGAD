@@ -115,7 +115,7 @@ export function createGrounderLifecycle(
       // One llama-server process owns both chat and grounding. Remove a tracked
       // text resident before the native adapter projects different model files.
       if (!nativeAlreadyLoaded) await services.unload('text')
-      const admitted = await services.residency.ensureResident(
+      const lease = await services.residency.acquire(
         {
           key: `computer_use:${routeId}`,
           modelId: routeId,
@@ -135,7 +135,8 @@ export function createGrounderLifecycle(
           unload: () => native.unload()
         }
       )
-      if (!admitted.fits) throw new ModelAdmissionError(model)
+      if (!lease.acquired) throw new ModelAdmissionError(model)
+      await lease.release()
     },
     async restoreLocal(modelId) {
       await services.unload('computer_use')
