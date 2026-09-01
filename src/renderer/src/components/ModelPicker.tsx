@@ -111,16 +111,9 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     setBusy(m.id)
     clearUnloadStatus(mode) // re-selecting reloads this modality on next use
     try {
-      if (mode === 'text') {
-        const result = await api().activateModel?.(m.id)
-        if (result?.success !== false) {
-          setActive((current) => ({ ...current, text: m.remoteServerId ? null : m.id }))
-          setActiveIds(new Set((await api().getActiveModelIds?.()) ?? []))
-        }
-      } else {
-        const fname = primaryFile(m)
-        await api().setActiveModalModel?.(mode, fname)
-        setActive((a) => ({ ...a, [mode]: fname }))
+      const result = await api().activateModel?.(m.id, m.kind)
+      if (result?.success !== false) {
+        await load()
       }
     } finally {
       setBusy(null)
@@ -131,7 +124,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     if (!modelId) return
     setBusy(modelId)
     try {
-      const result = await api().setActiveModalModel?.('computer_use', modelId)
+      const result = await api().activateModel?.(modelId, 'computer_use')
       if (result?.success !== false) {
         setActive((current) => ({ ...current, computer_use: modelId }))
         await load()

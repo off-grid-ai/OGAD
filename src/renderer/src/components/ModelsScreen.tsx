@@ -30,7 +30,13 @@ import {
   openModelSettingsPanel,
   supportsModelSettings
 } from '@renderer/lib/model-settings-panel'
-import { fitTier, type FitTier, fitLevel, FIT_OK_FRAC } from '@offgrid/models'
+import {
+  fitTier,
+  type FitTier,
+  fitLevel,
+  FIT_OK_FRAC,
+  ModelActivationCommandService
+} from '@offgrid/models'
 import {
   filterAndSort,
   parseParamCount,
@@ -492,24 +498,24 @@ export function ModelsScreen({
   }
   const activateModel = async (id: string): Promise<void> => {
     if (switching) return
-    try {
-      const fit = await api.estimateModelFit?.(id)
-      if (fit && fit.level !== 'ok') {
-        if (!window.confirm(`${fit.message}\n\nLoad it anyway?`)) return
-      }
-    } catch {
-      /* best-effort */
-    }
     setSwitchError(null)
     setSwitching(id)
     try {
-      // Single activation seam — main process routes by kind (chat LLM vs modal default).
-      const res =
-        activeKind === 'computer_use'
-          ? await api.activateModel?.(id, activeKind)
-          : await api.activateModel?.(id)
-      if (res?.success) refreshActive()
-      else setSwitchError(res?.error ? `Couldn't switch: ${res.error}` : "Couldn't switch model")
+      const command = new ModelActivationCommandService({
+        assess: async (modelId) => (await api.estimateModelFit?.(modelId)) ?? null,
+        activate: async (modelId, requestedKind) =>
+          (await api.activateModel?.(modelId, requestedKind)) ?? {
+            success: false,
+            error: 'activation unavailable'
+          },
+        refresh: async () => refreshActive()
+      })
+      let result = await command.execute({ modelId: id, kind: activeKind })
+      if (result.status === 'confirmation_required') {
+        if (!window.confirm(`${result.message}\n\nLoad it anyway?`)) return
+        result = await command.execute({ modelId: id, kind: activeKind, overrideMemory: true })
+      }
+      if (result.status === 'failed') setSwitchError(`Couldn't switch: ${result.error}`)
     } catch (e) {
       setSwitchError(e instanceof Error ? e.message : "Couldn't switch model")
     } finally {

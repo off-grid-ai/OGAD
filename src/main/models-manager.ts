@@ -32,6 +32,7 @@ import {
   ModelLibraryDownloadService,
   ModelLibraryRemovalService,
   ModelTransferRegistrationService,
+  ModelMetadataRepairCommandService,
   type ModelLibraryRemovalTarget,
   modelDownloadFailureMessage,
   runSequentialArtifactDownload,
@@ -655,12 +656,16 @@ export async function reconcileActiveModelClassification(): Promise<boolean> {
  *  reloads — so vision turns on without a manual re-activate. Runs at startup and after
  *  every download completes, independent of which screen (if any) is open. Returns true
  *  when it healed something. */
-export async function reconcileActiveModelProjector(): Promise<boolean> {
+async function resolveActiveModelProjectorRepair(): Promise<{
+  id: string
+  primary: string
+  mmproj: string
+} | null> {
   let cfg: { id?: string; primary?: string; mmproj?: string | null } | null = null
   try {
     cfg = JSON.parse(fs.readFileSync(activeModelFile(), 'utf-8'))
   } catch {
-    return false // no active selection yet
+    return null // no active selection yet
   }
   const { CATALOG } = await import('@offgrid/models')
   const dir = llm.getModelsDir()
@@ -678,23 +683,30 @@ export async function reconcileActiveModelProjector(): Promise<boolean> {
       present: (name) => fileSizeOf(dir, name) > 0
     })
     if (repair) {
-      desktopModelSelectionPersistence.projectLegacyTextConfig(repair)
-      llm.reloadModel()
-      return true
+      return repair
     }
   }
   const entry = (CATALOG as unknown as CatalogEntry[]).find((m) => m.id === active.id)
   const projector = projectorToHeal(active, entry, (name) => fileSizeOf(dir, name) > 0)
   if (!projector) {
-    return false // already has one / no projector / not downloaded yet — leave as is
+    return null // already has one / no projector / not downloaded yet — leave as is
   }
-  desktopModelSelectionPersistence.projectLegacyTextConfig({
+  return {
     id: String(active.id),
     primary: String(active.primary),
     mmproj: projector
-  })
-  llm.reloadModel()
-  return true
+  }
+}
+
+const activeProjectorRepair = new ModelMetadataRepairCommandService({
+  resolve: resolveActiveModelProjectorRepair,
+  persist: repair => desktopModelSelectionPersistence.projectLegacyTextConfig(repair),
+  reload: () => llm.reloadModel(),
+  refresh: () => desktopModelServices.refresh().then(() => undefined)
+})
+
+export function reconcileActiveModelProjector(): Promise<boolean> {
+  return activeProjectorRepair.execute()
 }
 
 /**
