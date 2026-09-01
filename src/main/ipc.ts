@@ -68,6 +68,7 @@ import { sampleProgressRate, type ProgressRateSample } from '@offgrid/ui'
 import type { GenerationMessage } from '@offgrid/models'
 import { notifyRagConversationChanged } from './rag-conversation-events'
 import { readImages } from './llm/read-images'
+import { generateDesktopText } from './desktop-generation'
 // import { llm } from './llm'; // Moved to dynamic import to support ESM
 
 // Incrementally update master memory with a new conversation summary
@@ -262,7 +263,6 @@ async function classifyIntent(
   const controller = streamId ? new AbortController() : undefined
   if (streamId && controller) streamControllers.set(streamId, controller)
   try {
-    const { llm } = await import('./llm')
     const hist = (history ?? [])
       .slice(-4)
       .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${clipText(m.content, 200)}`)
@@ -279,14 +279,19 @@ async function classifyIntent(
     ]
       .filter(Boolean)
       .join('\n\n')
-    const raw = await llm.chat(prompt, [], 60000, 200, {
-      disableThinking: true,
-      responseFormat: {
-        type: 'json_schema',
-        json_schema: { name: 'intent', schema: INTENT_SCHEMA, strict: true }
-      },
-      signal: controller?.signal
-    })
+    const raw = (
+      await generateDesktopText(prompt, {
+        operation: { type: 'classifier', input: query, labels: ['build', 'image', 'chat'] },
+        timeoutMs: 60_000,
+        maxTokens: 200,
+        thinking: false,
+        responseFormat: {
+          type: 'json_schema',
+          json_schema: { name: 'intent', schema: INTENT_SCHEMA, strict: true }
+        },
+        signal: controller?.signal
+      })
+    ).content
     const j = JSON.parse(raw) as Partial<ChatIntent>
     const intent = j.intent === 'build' || j.intent === 'image' ? j.intent : 'chat'
     const urls = Array.isArray(j.urls) ? j.urls.filter((u) => /^https?:\/\//i.test(u)) : []
@@ -384,8 +389,7 @@ export async function evaluateAndStoreMemoryForMessage(params: {
   if (role === 'assistant' && text.length < 50) return
 
   try {
-    const { llm } = await import('./llm')
-    const response = await llm.chat(prompt)
+    const response = (await generateDesktopText(prompt)).content
     const parsed = safeParseJson<{ store: boolean; name?: string; memory?: string }>(response, {
       store: false
     })
@@ -441,8 +445,7 @@ async function extractEntitiesForSession(sessionId: string): Promise<void> {
   const prompt = getPrompt(`entityExtraction.${strictness}`, { MEMORY_TEXT: memoryText })
 
   try {
-    const { llm } = await import('./llm')
-    const response = await llm.chat(prompt)
+    const response = (await generateDesktopText(prompt)).content
     const parsed = safeParseJson<{ entities: { name: string; type?: string; facts?: string[] }[] }>(
       response,
       { entities: [] }
@@ -500,7 +503,7 @@ async function extractEntitiesForSession(sessionId: string): Promise<void> {
       })
 
       try {
-        const updatedSummary = await llm.chat(summaryPrompt)
+        const updatedSummary = (await generateDesktopText(summaryPrompt)).content
         if (updatedSummary && updatedSummary.trim()) {
           updateEntitySummary(entityId, updatedSummary.trim())
         }
@@ -523,8 +526,8 @@ export async function summarizeSession(sessionId: string): Promise<string | null
   const prompt = getPrompt('sessionSummary', { CONVERSATION_TEXT: conversationText })
 
   try {
-    const { llm } = await import('./llm')
-    const summary = await llm.chat(prompt, [], 120000, 2048)
+    const summary = (await generateDesktopText(prompt, { timeoutMs: 120_000, maxTokens: 2_048 }))
+      .content
     upsertChatSummary(sessionId, summary)
 
     // Extract and update entity memory (non-blocking — don't fail the summary if these error)
@@ -655,10 +658,11 @@ export function setupIPC() {
 
   ipcMain.handle('llm:extract', async (_, text: string) => {
     try {
-      const { llm } = await import('./llm')
-      const response = await llm.chat(
-        `Analyze the following text and extract a summary and key topics. Return JSON only with keys: summary, topic, entities. Text: "${text}"`
-      )
+      const response = (
+        await generateDesktopText(
+          `Analyze the following text and extract a summary and key topics. Return JSON only with keys: summary, topic, entities. Text: "${text}"`
+        )
+      ).content
 
       // Basic cleanup if the model returns markdown code blocks
       const cleanJson = response.replace(/```json\n?|\n?```/g, '').trim()
@@ -711,10 +715,12 @@ export function setupIPC() {
       if (intent === 'image') {
         const imgPrompt = `Write ONE vivid, detailed image-generation prompt (visual description only, no preamble) for this request:\n${query}`
         const desc = (
-          await (
-            await import('./llm')
-          ).llm.chat(imgPrompt, [], 60000, 200, { disableThinking: true })
-        )
+          await generateDesktopText(imgPrompt, {
+            timeoutMs: 60_000,
+            maxTokens: 200,
+            thinking: false
+          })
+        ).content
           .trim()
           .replace(/^["']|["']$/g, '')
         return { answer: '```image\n' + (desc || query) + '\n```', context: undefined }
