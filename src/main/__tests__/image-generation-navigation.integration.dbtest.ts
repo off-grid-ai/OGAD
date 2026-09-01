@@ -44,6 +44,10 @@ beforeAll(async () => {
   const models = path.join(fixture.dataDir, 'models')
   fs.mkdirSync(models, { recursive: true })
   fs.writeFileSync(path.join(models, IMAGE_MODEL), 'image checkpoint')
+  fs.writeFileSync(
+    path.join(models, 'active-modalities.json'),
+    JSON.stringify({ image: IMAGE_MODEL })
+  )
 
   const executable = path.join(fixture.binDir, 'sd', 'sd-cli')
   fs.mkdirSync(path.dirname(executable), { recursive: true })

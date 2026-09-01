@@ -229,6 +229,10 @@ beforeAll(async () => {
     path.join(modelsDir, 'active-model.json'),
     JSON.stringify({ id: 'runtime-fixture', primary: CHAT_MODEL })
   )
+  fs.writeFileSync(
+    path.join(modelsDir, 'active-modalities.json'),
+    JSON.stringify({ image: IMAGE_MODEL, speech: 'desktop-test-voice' })
+  )
   installFakeLlamaBoundary()
   installFakeImageBoundary()
   installFakeTtsBoundary()

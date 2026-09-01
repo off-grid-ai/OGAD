@@ -93,6 +93,10 @@ beforeAll(async () => {
   process.env.OFFGRID_BIN_DIR = fixture.binDir
   fs.mkdirSync(path.join(fixture.dataDir, 'models'), { recursive: true })
   fs.writeFileSync(path.join(fixture.dataDir, 'models', MODEL_NAME), 'fixture checkpoint')
+  fs.writeFileSync(
+    path.join(fixture.dataDir, 'models', 'active-modalities.json'),
+    JSON.stringify({ image: MODEL_NAME })
+  )
   installNativeRuntimeBoundary()
 
   const modelServer = await import('../model-server')

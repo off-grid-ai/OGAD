@@ -39,6 +39,9 @@ vi.mock('electron', () => ({
   }
 }))
 
+vi.spyOn(os, 'totalmem').mockReturnValue(64 * 1024 * 1024 * 1024)
+vi.spyOn(os, 'freemem').mockReturnValue(48 * 1024 * 1024 * 1024)
+
 interface CatalogFile {
   name: string
   url: string

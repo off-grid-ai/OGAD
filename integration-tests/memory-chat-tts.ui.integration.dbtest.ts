@@ -189,6 +189,10 @@ beforeAll(async () => {
   fs.mkdirSync(resourceDir, { recursive: true })
   fs.mkdirSync(path.join(dataDir, 'models'), { recursive: true })
   fs.writeFileSync(path.join(dataDir, 'models', 'ggml-base.bin'), 'synthetic whisper model')
+  fs.writeFileSync(
+    path.join(dataDir, 'models', 'active-model.json'),
+    JSON.stringify({ id: 'desktop-test-text', primary: 'desktop-test-text.gguf' })
+  )
   executable('ffmpeg', ['#!/bin/sh', 'for last; do :; done', 'printf RIFF > "$last"'].join('\n'))
   executable('whisper/whisper-cli', '#!/bin/sh\nprintf "Schedule the stable release review\\n"')
   resourceExecutable(

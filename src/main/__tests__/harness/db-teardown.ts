@@ -1,4 +1,16 @@
-import { afterAll } from 'vitest'
+import { afterAll, afterEach, beforeEach } from 'vitest'
+import { installCompatibleGenerationModel } from './compatible-generation-model'
+
+let removeCompatibleGenerationModel: (() => void) | null = null
+
+beforeEach(async () => {
+  removeCompatibleGenerationModel = await installCompatibleGenerationModel()
+})
+
+afterEach(() => {
+  removeCompatibleGenerationModel?.()
+  removeCompatibleGenerationModel = null
+})
 
 /**
  * Leave the model port free for the next file.
