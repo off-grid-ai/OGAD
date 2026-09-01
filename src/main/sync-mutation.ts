@@ -8,6 +8,8 @@ import {
   TASK_RUN_ENTITY,
   TASK_VISUAL_STEP_ENTITY
 } from '@offgrid/sync'
+import { SYNCABLE_LLM_SETTING_KEYS } from '@offgrid/models'
+export { SYNCABLE_COMPUTER_USE_SETTING_KEYS, SYNCABLE_LLM_SETTING_KEYS } from '@offgrid/models'
 
 /**
  * Stable desktop entity names shared by the core writers and the private sync materializer.
@@ -36,31 +38,6 @@ export interface SyncMutation {
   /** Optional canonical fields for a committed owner that is not backed by the core SQLite DB. */
   fields?: Record<string, unknown>
 }
-
-/** User-controlled LLM settings that are safe and meaningful on another device. */
-export const SYNCABLE_LLM_SETTING_KEYS = [
-  'performanceMode',
-  'temperature',
-  'ctxSize',
-  'topP',
-  'topK',
-  'minP',
-  'repeatPenalty',
-  'maxTokens',
-  'maxToolCalls',
-  'systemPrompt',
-  'kvCacheType',
-  'flashAttn',
-  'gpuLayers',
-  'threads',
-  'batchSize'
-] as const
-
-/** Cross-device Computer Use preferences that do not contain device-local paths or secrets. */
-export const SYNCABLE_COMPUTER_USE_SETTING_KEYS = [
-  'computerUseSettings',
-  'computerUseModelId'
-] as const
 
 export function emitChangedLlmSettings(
   before: Record<string, unknown>,
