@@ -58,6 +58,7 @@ import {
 } from '../shared/remote-vision-server'
 import { getRemoteVisionServerSettings } from './vision/remote-vision-server'
 import { desktopModelServices } from './model-services'
+import { desktopModelSelectionPersistence } from './model-selection-persistence'
 
 export interface DownloadProgress {
   modelId: string
@@ -467,11 +468,8 @@ function retainedTransferredFileNames(context: TransferredDeletionContext): Set<
 function clearTransferredModelSelections(target: DownloadedModel, requestedId: string): void {
   const activeId = getActiveModel()
   if (activeId === target.id || activeId === requestedId) {
-    try {
-      fs.rmSync(activeModelFile(), { force: true })
-    } catch {
-      /* already clear */
-    }
+    desktopModelSelectionPersistence.write('text', null)
+    desktopModelSelectionPersistence.clearLegacyTextConfig()
     llm.reloadModel()
   }
   const primary = downloadedPrimary(target)
@@ -538,11 +536,8 @@ export async function deleteModel(modelId: string): Promise<DeleteModelResult> {
     }
     saveLocalModels(list.filter((m) => m.id !== modelId))
     if (getActiveModel() === modelId) {
-      try {
-        fs.rmSync(activeModelFile(), { force: true })
-      } catch {
-        /* ignore */
-      }
+      desktopModelSelectionPersistence.write('text', null)
+      desktopModelSelectionPersistence.clearLegacyTextConfig()
       llm.reloadModel()
     }
     return { success: true, freedFiles: freedLocal }
@@ -593,11 +588,8 @@ export async function deleteModel(modelId: string): Promise<DeleteModelResult> {
 
   // If this was the active chat model, clear the selection so we don't point at gone files.
   if (getActiveModel() === modelId) {
-    try {
-      fs.rmSync(activeModelFile(), { force: true })
-    } catch {
-      /* ignore */
-    }
+    desktopModelSelectionPersistence.write('text', null)
+    desktopModelSelectionPersistence.clearLegacyTextConfig()
     llm.reloadModel()
   }
   // Clear any per-modality selection pointing at it — matching the id AND the
@@ -626,10 +618,11 @@ async function setActiveLlamaModel(
     if (!acceptsKind(lm.kind)) {
       return { success: false, error: `${lm.kind} models are not loadable as ${expectedKind}` }
     }
-    fs.writeFileSync(
-      activeModelFile(),
-      JSON.stringify({ id: modelId, primary: lm.primary, mmproj: lm.mmproj ?? null }, null, 2)
-    )
+    desktopModelSelectionPersistence.projectLegacyTextConfig({
+      id: modelId,
+      primary: lm.primary,
+      mmproj: lm.mmproj ?? null
+    })
     llm.reloadModel()
     return { success: true }
   }
@@ -654,10 +647,11 @@ async function setActiveLlamaModel(
     const primary = downloadedPrimary(transferred)
     if (!primary) return { success: false, error: 'transferred model has no primary file' }
     const mmproj = downloadedProjector(transferred) ?? null
-    fs.writeFileSync(
-      activeModelFile(),
-      JSON.stringify({ id: transferred.id, primary, mmproj }, null, 2)
-    )
+    desktopModelSelectionPersistence.projectLegacyTextConfig({
+      id: transferred.id,
+      primary,
+      mmproj
+    })
     llm.reloadModel()
     return { success: true }
   }
@@ -667,8 +661,9 @@ async function setActiveLlamaModel(
     return { success: false, error: `${entry.kind} models are not loadable as ${expectedKind}` }
   }
   const primary = primaryFileName(entry as unknown as CatalogEntry)
+  if (!primary) return { success: false, error: 'model has no primary file' }
   const mmproj = entry.files.find((f) => f.role === 'mmproj')?.name ?? null
-  fs.writeFileSync(activeModelFile(), JSON.stringify({ id: modelId, primary, mmproj }, null, 2))
+  desktopModelSelectionPersistence.projectLegacyTextConfig({ id: modelId, primary, mmproj })
   llm.reloadModel()
   return { success: true }
 }
@@ -693,11 +688,7 @@ export function loadComputerUseModel(
 }
 
 export function getActiveModel(): string | null {
-  try {
-    return JSON.parse(fs.readFileSync(activeModelFile(), 'utf-8')).id ?? null
-  } catch {
-    return null
-  }
+  return desktopModelSelectionPersistence.projectedModelId('text')
 }
 
 /**
@@ -757,10 +748,11 @@ export async function reconcileActiveModelProjector(): Promise<boolean> {
       fileSizeOf(dir, mmproj) > 0 &&
       (active.id !== transferred.id || active.primary !== primary || active.mmproj !== mmproj)
     ) {
-      fs.writeFileSync(
-        activeModelFile(),
-        JSON.stringify({ id: transferred.id, primary, mmproj }, null, 2)
-      )
+      desktopModelSelectionPersistence.projectLegacyTextConfig({
+        id: transferred.id,
+        primary,
+        mmproj
+      })
       llm.reloadModel()
       return true
     }
@@ -770,7 +762,11 @@ export async function reconcileActiveModelProjector(): Promise<boolean> {
   if (!projector) {
     return false // already has one / no projector / not downloaded yet — leave as is
   }
-  fs.writeFileSync(activeModelFile(), JSON.stringify({ ...cfg, mmproj: projector }, null, 2))
+  desktopModelSelectionPersistence.projectLegacyTextConfig({
+    id: String(active.id),
+    primary: String(active.primary),
+    mmproj: projector
+  })
   llm.reloadModel()
   return true
 }

@@ -2,6 +2,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { modelsDir } from '../runtime-env'
+import { decodeModelRouteId } from '@offgrid/models'
+import { desktopModelSelectionPersistence } from '../model-selection-persistence'
 import { deleteSecret, getSecret, setSecret } from '../secrets'
 import {
   REMOTE_VISION_PROVIDERS,
@@ -143,9 +145,23 @@ function publicServer(server: StoredRemoteVisionServer): RemoteVisionSavedServer
   return { ...server, hasApiKey: Boolean(serverApiKey(server.id)) }
 }
 
+function selectedRemoteServer(stored: StoredRemoteVisionConfig): StoredRemoteVisionServer | null {
+  const selected = desktopModelSelectionPersistence.readCanonical('text')
+  const route = selected ? decodeModelRouteId(selected) : null
+  if (route?.adapterId === 'desktop.remote-chat' && route.serverId) {
+    return (
+      stored.servers.find(
+        (server) => server.id === route.serverId && server.model === route.modelId
+      ) ?? null
+    )
+  }
+  if (selected) return null
+  return stored.servers.find((server) => server.id === stored.activeServerId) ?? null
+}
+
 export function getRemoteVisionServerSettings(): RemoteVisionServerSettings {
   const stored = readStored()
-  const active = stored.servers.find((server) => server.id === stored.activeServerId)
+  const active = selectedRemoteServer(stored)
   return {
     provider: active?.provider ?? 'local',
     endpoint: active?.endpoint ?? '',
@@ -160,7 +176,7 @@ export function getActiveRemoteVisionServer():
   | (StoredRemoteVisionServer & { apiKey: string })
   | null {
   const stored = readStored()
-  const active = stored.servers.find((server) => server.id === stored.activeServerId)
+  const active = selectedRemoteServer(stored)
   return active ? { ...active, apiKey: serverApiKey(active.id) } : null
 }
 
@@ -193,11 +209,12 @@ export async function setRemoteVisionServerSettings(
 ): Promise<RemoteVisionServerSettings> {
   const stored = readStored()
   if (update.provider === 'local') {
-    const [{ desktopModelServices }, { getActiveModel }] = await Promise.all([
-      import('../model-services'),
-      import('../models-manager')
-    ])
-    const selected = await desktopModelServices.select('text', getActiveModel())
+    const { desktopModelServices } = await import('../model-services')
+    const previousLocal = desktopModelSelectionPersistence.readLegacyTextConfig().id
+    const selected = await desktopModelServices.select(
+      'text',
+      typeof previousLocal === 'string' ? previousLocal : null
+    )
     if (!selected.success) throw new Error(selected.error)
     return getRemoteVisionServerSettings()
   }
@@ -232,6 +249,9 @@ export async function setRemoteVisionServerSettings(
 
 export function removeRemoteVisionServer(serverId: string): RemoteVisionServerSettings {
   const stored = readStored()
+  const selected = desktopModelSelectionPersistence.readCanonical('text')
+  const selectedRoute = selected ? decodeModelRouteId(selected) : null
+  if (selectedRoute?.serverId === serverId) desktopModelSelectionPersistence.write('text', null)
   deleteSecret(secretKey(serverId))
   writeStored({
     version: CONFIG_VERSION,

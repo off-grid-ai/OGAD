@@ -1,12 +1,9 @@
-import fs from 'node:fs'
 import os from 'node:os'
-import path from 'node:path'
 import {
   GenerationService as SharedGenerationService,
   LLMService as SharedLLMService,
   ModelResidencyManager,
   decodeModelRouteId,
-  encodeModelRouteId,
   runtimeModelRouteId,
   ModelAdmissionError,
   type ModelInventoryAdapter,
@@ -16,8 +13,10 @@ import {
   type ModelReasoningMetadata,
   type RuntimeModel
 } from '@offgrid/models'
-import { getActiveModal, setActiveModal } from './active-models'
-import { modelsDir } from './runtime-env'
+import {
+  DesktopModelSelectionPersistence,
+  desktopModelSelectionPersistence
+} from './model-selection-persistence'
 import {
   activateRemoteVisionModel,
   deactivateRemoteVisionModel,
@@ -68,16 +67,14 @@ interface DesktopModelServicesDependencies {
   residencyMode?(modality: 'image' | 'stt'): 'resident' | 'on-demand'
 }
 
-const SHARED_MODALITIES: readonly ModelModality[] = ['text', 'image', 'voice', 'transcription']
-
-function legacyModality(
-  modality: ModelModality
-): 'computer_use' | 'image' | 'speech' | 'transcription' | null {
-  if (modality === 'computer_use' || modality === 'image' || modality === 'transcription') {
-    return modality
-  }
-  return modality === 'voice' ? 'speech' : null
-}
+const SHARED_MODALITIES: readonly ModelModality[] = [
+  'text',
+  'computer_use',
+  'image',
+  'voice',
+  'transcription',
+  'embedding'
+]
 
 function modalityForKind(kind: string | undefined): ModelModality | null {
   if (kind === 'text' || kind === 'vision') return 'text'
@@ -108,27 +105,6 @@ function runtimeSizes(model: DesktopInventoryModel): {
   return {
     residentSizeMB: Math.ceil(weightsMB),
     peakSizeMB: Math.ceil(weightsMB * peakFactor)
-  }
-}
-
-function activeTextModelId(): string | null {
-  const remote = getRemoteVisionServerSettings()
-  const activeRemote = remote.servers.find((server) => server.id === remote.activeServerId)
-  if (activeRemote) {
-    return encodeModelRouteId({
-      adapterId: 'desktop.remote-chat',
-      providerId: activeRemote.provider,
-      serverId: activeRemote.id,
-      modelId: activeRemote.model
-    })
-  }
-  try {
-    const value = JSON.parse(
-      fs.readFileSync(path.join(modelsDir(), 'active-model.json'), 'utf8')
-    ) as { id?: unknown }
-    return typeof value.id === 'string' && value.id ? value.id : null
-  } catch {
-    return null
   }
 }
 
@@ -164,58 +140,25 @@ export class LegacyDesktopModelIdCodec {
   }
 }
 
-class DesktopRouteSelectionPersistence {
-  private file(): string {
-    return path.join(modelsDir(), 'model-selections.json')
-  }
-
-  read(modality: ModelModality): string | null {
-    try {
-      const value = JSON.parse(fs.readFileSync(this.file(), 'utf8')) as Record<string, unknown>
-      return typeof value[modality] === 'string' ? (value[modality] as string) : null
-    } catch {
-      return null
-    }
-  }
-
-  write(modality: ModelModality, routeId: string | null): void {
-    let value: Record<string, unknown> = {}
-    try {
-      value = JSON.parse(fs.readFileSync(this.file(), 'utf8')) as Record<string, unknown>
-    } catch {
-      /* first selection */
-    }
-    value[modality] = routeId
-    fs.mkdirSync(path.dirname(this.file()), { recursive: true })
-    fs.writeFileSync(this.file(), JSON.stringify(value, null, 2))
-  }
-}
-
 export class DesktopModelSelectionStore implements ModelSelectionStore {
   private readonly routeBySelection = new Map<string, string>()
 
   constructor(
     private readonly ids: LegacyDesktopModelIdCodec,
-    private readonly routes = new DesktopRouteSelectionPersistence()
+    private readonly routes: DesktopModelSelectionPersistence = desktopModelSelectionPersistence
   ) {}
 
   read(modality: ModelModality): string | null {
-    const routeId = this.routes.read(modality)
-    if (routeId) return routeId
-    const legacyId =
-      modality === 'text'
-        ? this.ids.canonical(activeTextModelId())
-        : (() => {
-            const legacy = legacyModality(modality)
-            return legacy ? this.ids.canonical(getActiveModal(legacy)) : null
-          })()
-    if (!legacyId) return null
-    const canonicalRoute = this.routeBySelection.get(`${modality}:${legacyId}`)
+    const stored = this.routes.readCanonical(modality)
+    if (stored && decodeModelRouteId(stored)) return stored
+    const candidate = this.ids.canonical(stored ?? this.routes.projectedModelId(modality))
+    if (!candidate) return null
+    const canonicalRoute = this.routeBySelection.get(`${modality}:${candidate}`)
     if (canonicalRoute) {
       this.routes.write(modality, canonicalRoute)
       return canonicalRoute
     }
-    return legacyId
+    return candidate
   }
 
   indexRoutes(models: readonly RuntimeModel[]): void {
@@ -232,7 +175,7 @@ export class DesktopModelSelectionStore implements ModelSelectionStore {
     if (modality === 'text') {
       if (!nativeModelId) {
         deactivateRemoteVisionModel()
-        fs.rmSync(path.join(modelsDir(), 'active-model.json'), { force: true })
+        this.routes.clearLegacyTextConfig()
         this.routes.write(modality, null)
         return
       }
@@ -247,16 +190,15 @@ export class DesktopModelSelectionStore implements ModelSelectionStore {
         this.routes.write(modality, modelId)
         return
       }
-      const result = await (await import('./models-manager')).projectActiveTextModelSelection(
-        nativeModelId
-      )
+      const result = await (
+        await import('./models-manager')
+      ).projectActiveTextModelSelection(nativeModelId)
       if (!result.success) throw new Error(result.error ?? 'The model could not be selected.')
       deactivateRemoteVisionModel()
       this.routes.write(modality, modelId)
       return
     }
-    const legacy = legacyModality(modality)
-    if (legacy) setActiveModal(legacy, nativeModelId)
+    this.routes.projectLegacyModality(modality, nativeModelId)
     this.routes.write(modality, modelId)
   }
 }
@@ -505,10 +447,11 @@ export interface DesktopModelServices {
 }
 
 export function createDesktopModelServices(
-  dependencies: DesktopModelServicesDependencies
+  dependencies: DesktopModelServicesDependencies,
+  selectionPersistence: DesktopModelSelectionPersistence = desktopModelSelectionPersistence
 ): DesktopModelServices {
   const ids = new LegacyDesktopModelIdCodec()
-  const selections = new DesktopModelSelectionStore(ids)
+  const selections = new DesktopModelSelectionStore(ids, selectionPersistence)
   const llm = new SharedLLMService(selections)
   const source = new DesktopInventorySource(dependencies, ids, selections)
   for (const adapterId of [
@@ -585,7 +528,7 @@ export function createDesktopModelServices(
 
   const activeModalities = (): ReturnType<DesktopModelServices['activeModalities']> => ({
     text: projectedId('text'),
-    computer_use: getActiveModal('computer_use'),
+    computer_use: projectedId('computer_use'),
     image: projectedId('image'),
     speech: projectedId('voice'),
     transcription: projectedId('transcription')
@@ -650,9 +593,8 @@ export function createDesktopModelServices(
           : remote
             ? llm
                 .list(modality)
-                .find(
-                  (model) => model.serverId === remote.serverId && model.id === remote.modelId
-                )?.routeId
+                .find((model) => model.serverId === remote.serverId && model.id === remote.modelId)
+                ?.routeId
             : this.routeIdFor(modality, canonicalModelId)
         if (!selectedRoute) return { success: false, error: 'unknown model' }
         await llm.select(modality, selectedRoute)
@@ -668,7 +610,9 @@ export function createDesktopModelServices(
       await llm.refresh()
       const model = llm.active('text').model
       if (!model) {
-        throw new Error('Models not downloaded. Please complete onboarding to download the AI model.')
+        throw new Error(
+          'Models not downloaded. Please complete onboarding to download the AI model.'
+        )
       }
       if (model.source !== 'local') return false
       const adapter = localGenerationAdapters.get(model.adapterId)
@@ -716,8 +660,7 @@ export function createDesktopModelServices(
         const id = projectedId(modality)
         return id ? [id] : []
       })
-      const computerUse = getActiveModal('computer_use')
-      return [...new Set(computerUse ? [...active, computerUse] : active)]
+      return [...new Set(active)]
     },
     activeModalities
   }
