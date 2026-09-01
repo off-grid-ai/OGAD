@@ -68,7 +68,10 @@ export function readPersistedChatSessionTurn(ctx: unknown): PersistedChatSession
   if (!raw || typeof raw !== 'object') return undefined
   const value = raw as Record<string, unknown>
   if (typeof value.turnId !== 'string' || !isChatTurnStatus(value.status)) return undefined
-  if (!Array.isArray(value.responseMessages) || !value.responseMessages.every(isGenerationMessage)) {
+  if (
+    !Array.isArray(value.responseMessages) ||
+    !value.responseMessages.every(isGenerationMessage)
+  ) {
     return undefined
   }
   return {

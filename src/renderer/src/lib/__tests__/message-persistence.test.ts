@@ -57,10 +57,6 @@ describe('message-persistence carrier', () => {
     const ctx = buildAssistantContext(base, { reasoning: 'because X' })
     expect(ctx).toMatchObject(base)
     expect(readReasoning(ctx)).toBe('because X')
-    // Mirror mapRagMessages' restore of the other fields.
-    expect((ctx as any).toolCalls).toEqual(base.toolCalls)
-    expect((ctx as any).image).toBe('img/123.png')
-    expect((ctx as any).attachments).toEqual(base.attachments)
   })
 
   it('keeps base context intact when no reasoning is provided', () => {

@@ -114,11 +114,13 @@ export class DesktopChatSession {
       .flatMap((entry) => {
         const execution = this.executions.get(entry.turnId)
         if (!execution) return []
-        return [{
-          turnId: entry.turnId,
-          text: execution.input.query,
-          attachmentCount: execution.input.images.length
-        }]
+        return [
+          {
+            turnId: entry.turnId,
+            text: execution.input.query,
+            attachmentCount: execution.input.images.length
+          }
+        ]
       })
   }
 
@@ -385,7 +387,7 @@ function generationMessageText(message: GenerationMessage): string {
   if (typeof message.content === 'string') return message.content
   return message.content
     .filter((part) => part.type === 'text')
-    .map((part) => (part.type === 'text' ? part.text : ''))
+    .map((part) => part.text)
     .join('\n')
 }
 
