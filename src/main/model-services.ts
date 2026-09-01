@@ -32,6 +32,9 @@ import {
   DesktopImageGenerationAdapter,
   DesktopVoiceGenerationAdapter,
   DesktopTranscriptionGenerationAdapter,
+  DesktopRemoteImageGenerationAdapter,
+  DesktopRemoteVoiceGenerationAdapter,
+  DesktopRemoteTranscriptionGenerationAdapter,
   DesktopEmbeddingGenerationAdapter
 } from './model-generation-adapters'
 import { desktopToolExecutor } from './desktop-tool-executor'
@@ -89,6 +92,19 @@ function modalityForKind(kind: string | undefined): ModelModality | null {
   )
     return kind
   return null
+}
+
+export function desktopAdapterId(source: 'local' | 'remote', modality: ModelModality): string {
+  const prefix = source === 'remote' ? 'desktop.remote-chat' : 'desktop.llama'
+  if (modality === 'text') return prefix
+  if (modality === 'computer_use') return `${prefix}.computer-use`
+  if (modality === 'image') return source === 'remote' ? 'desktop.remote-image' : 'desktop.image'
+  if (modality === 'voice') return source === 'remote' ? 'desktop.remote-voice' : 'desktop.tts'
+  if (modality === 'transcription') {
+    return source === 'remote' ? 'desktop.remote-transcription' : 'desktop.transcription'
+  }
+  if (modality === 'embedding') return 'desktop.embedding'
+  return `${prefix}.${modality.replace('_', '-')}`
 }
 
 function runtimeSizes(model: DesktopInventoryModel): {
@@ -298,21 +314,7 @@ class DesktopInventorySource {
           : modality === 'text' &&
             (activeTextRoute?.modelId ?? activeText) === model.id &&
             localTextState.loaded
-      const prefix = source === 'remote' ? 'desktop.remote-chat' : 'desktop.llama'
-      const adapterId =
-        modality === 'text'
-          ? prefix
-          : modality === 'computer_use'
-            ? `${prefix}.computer-use`
-            : modality === 'image'
-              ? 'desktop.image'
-              : modality === 'voice'
-                ? 'desktop.tts'
-                : modality === 'transcription'
-                  ? 'desktop.transcription'
-                  : modality === 'embedding'
-                    ? 'desktop.embedding'
-                    : `${prefix}.${modality.replace('_', '-')}`
+      const adapterId = desktopAdapterId(source, modality)
       const base: RuntimeModel = {
         id: remote && model.remoteModelId ? model.remoteModelId : model.id,
         name: model.name?.trim() || model.id,
@@ -466,8 +468,11 @@ export function createDesktopModelServices(
     'desktop.remote-chat.vision',
     'desktop.remote-chat.computer-use',
     'desktop.image',
+    'desktop.remote-image',
     'desktop.tts',
+    'desktop.remote-voice',
     'desktop.transcription',
+    'desktop.remote-transcription',
     'desktop.embedding'
   ]) {
     llm.registerAdapter(new DesktopModelInventoryAdapter(adapterId, source))
@@ -503,8 +508,11 @@ export function createDesktopModelServices(
     generation.registerAdapter(adapter)
   }
   generation.registerAdapter(new DesktopImageGenerationAdapter())
+  generation.registerAdapter(new DesktopRemoteImageGenerationAdapter())
   generation.registerAdapter(new DesktopVoiceGenerationAdapter())
+  generation.registerAdapter(new DesktopRemoteVoiceGenerationAdapter())
   generation.registerAdapter(new DesktopTranscriptionGenerationAdapter())
+  generation.registerAdapter(new DesktopRemoteTranscriptionGenerationAdapter())
   generation.registerAdapter(new DesktopEmbeddingGenerationAdapter())
   for (const adapterId of [
     'desktop.remote-chat',

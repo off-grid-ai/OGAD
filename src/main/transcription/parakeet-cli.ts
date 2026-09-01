@@ -12,7 +12,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { binRoots, modelsDir } from '../runtime-env'
-import { getActiveModal } from '../active-models'
+import { activeDesktopModelId } from '../desktop-generation'
 import { modelsByKind, transcriptionModelsByEngine } from '@offgrid/models'
 import { ffmpegBin } from './whisper-cli'
 import { existing } from './bin-resolution'
@@ -102,7 +102,7 @@ function downloadedCatalogModel(): ParakeetModel | null {
   // `m.engine === 'parakeet'` filter duplicated against whisper-cli's classification.
   const entries = transcriptionModelsByEngine('parakeet', modelsByKind('transcription'))
   if (!entries.length) return null
-  const active = getActiveModal('transcription')
+  const active = activeDesktopModelId('transcription')
   const ordered = active
     ? [...entries].sort((a, b) =>
         activeMatchesEntry(active, a) ? -1 : activeMatchesEntry(active, b) ? 1 : 0

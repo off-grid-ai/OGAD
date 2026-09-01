@@ -15,9 +15,8 @@ import {
 } from '@offgrid/models'
 import path from 'node:path'
 import { transcriptionLanguages, type SpeechLanguage } from '@offgrid/speech'
-import { getActiveModal } from '../active-models'
 import { getSetting } from '../database'
-import { generateDesktopOperation } from '../desktop-generation'
+import { activeDesktopModelId, generateDesktopOperation } from '../desktop-generation'
 import { desktopModelServices } from '../model-services'
 import type { ManagedRuntimePort as ManagedRuntime } from '@offgrid/models'
 import { modelsByKind } from '@offgrid/models'
@@ -68,7 +67,7 @@ export function resolveTranscription(
   return pickTranscription(requested, ALL)
 }
 
-export function getTranscription(engine: TranscriptionEngine = 'whisper'): TranscriptionService {
+function getTranscription(engine: TranscriptionEngine = 'whisper'): TranscriptionService {
   return resolveTranscription(engine).service
 }
 
@@ -166,22 +165,10 @@ export function getGenerationTranscription(
 
 export type TranscriptionSettingReader = (key: string, fallback: string) => string
 
-export function getActiveNativeTranscription(
-  readSetting: TranscriptionSettingReader = getSetting
-): TranscriptionService {
-  const active = getActiveModal('transcription')
-  const engine = transcriptionEngineForActiveModel(active, modelsByKind('transcription'))
-  const language = resolveSupportedTranscriptionLanguage(
-    readSetting('sttLanguage', 'auto'),
-    transcriptionLanguages(engine, active)
-  )
-  return withConfiguredTranscriptionLanguage(getTranscription(engine), language)
-}
-
 export function getActiveTranscription(
   readSetting: TranscriptionSettingReader = getSetting
 ): TranscriptionService {
-  const active = getActiveModal('transcription')
+  const active = activeDesktopModelId('transcription')
   const engine = transcriptionEngineForActiveModel(active, modelsByKind('transcription'))
   const language = resolveSupportedTranscriptionLanguage(
     readSetting('sttLanguage', 'auto'),
@@ -249,7 +236,7 @@ export function effectiveEngine(engine: TranscriptionEngine): TranscriptionEngin
 }
 
 export function getActiveTranscriptionInfo(): ActiveTranscriptionInfo {
-  const active = getActiveModal('transcription')
+  const active = activeDesktopModelId('transcription')
   const entries = modelsByKind('transcription')
   const engine = effectiveEngine(transcriptionEngineForActiveModel(active, entries))
   return transcriptionProvenance(engine, active, entries)

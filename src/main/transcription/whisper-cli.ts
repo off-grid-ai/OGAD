@@ -7,7 +7,7 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { getActiveModal } from '../active-models'
+import { activeDesktopModelId } from '../desktop-generation'
 import { binRoots, modelsDir, exe } from '../runtime-env'
 import {
   parseWhisperSegments,
@@ -68,7 +68,7 @@ export function whisperModel(): string | null {
     // User-chosen transcription model wins, when it's a whisper ggml file present on disk.
     // (The active-transcription slot is shared with Parakeet, whose ONNX files must never
     // be handed to whisper — hence the ggml guard.)
-    const chosen = getActiveModal('transcription')
+    const chosen = activeDesktopModelId('transcription')
     const chosenFile = chosen ? activeWhisperFile(chosen) : null
     if (chosenFile && fs.existsSync(path.join(dir, chosenFile))) return path.join(dir, chosenFile)
     const files = whisperModelFiles()
@@ -86,7 +86,7 @@ export function whisperModel(): string | null {
 export function smallWhisperModel(): string | null {
   const dir = modelsDir()
   try {
-    const chosen = getActiveModal('transcription')
+    const chosen = activeDesktopModelId('transcription')
     const chosenFile = chosen ? activeWhisperFile(chosen) : null
     if (chosenFile && fs.existsSync(path.join(dir, chosenFile))) return path.join(dir, chosenFile)
   } catch {

@@ -338,11 +338,11 @@ export class DesktopVoiceGenerationAdapter extends DesktopTypedGenerationAdapter
     if (request.operation?.type !== 'voice')
       throw new Error('The voice adapter needs a voice operation.')
     const { synthesizeNative } = await import('./tts')
-    const output = await synthesizeNative(
-      request.operation.text,
-      request.operation.voice,
-      (progress) => voiceProgressObservers.get(request.identity?.turnId ?? '')?.(progress)
-    )
+    const output = await synthesizeNative(request.operation.text, request.operation.voice, {
+      onProgress: (progress) =>
+        voiceProgressObservers.get(request.identity?.turnId ?? '')?.(progress),
+      signal: request.signal
+    })
     yield {
       output: {
         type: 'voice',
@@ -400,6 +400,68 @@ export class DesktopTranscriptionGenerationAdapter extends DesktopTypedGeneratio
         text: cleanTranscription(transcript.text),
         language: transcript.language,
         segments
+      },
+      finishReason: 'stop'
+    }
+  }
+}
+
+export class DesktopRemoteImageGenerationAdapter extends DesktopTypedGenerationAdapter {
+  readonly id = 'desktop.remote-image'
+
+  async *generate(model: RuntimeModel, request: GenerationRequest): AsyncIterable<GenerationChunk> {
+    const { remoteMediaRuntime } = await import('./remote-media-runtime')
+    const image = await remoteMediaRuntime.image(model, request)
+    yield {
+      output: {
+        type: 'image',
+        images: [
+          {
+            id: model.id,
+            mimeType: 'image/png',
+            ...(image.base64 ? { data: image.base64 } : {}),
+            ...(image.url ? { uri: image.url } : {})
+          }
+        ]
+      },
+      finishReason: 'stop'
+    }
+  }
+}
+
+export class DesktopRemoteVoiceGenerationAdapter extends DesktopTypedGenerationAdapter {
+  readonly id = 'desktop.remote-voice'
+
+  async *generate(model: RuntimeModel, request: GenerationRequest): AsyncIterable<GenerationChunk> {
+    const { remoteMediaRuntime } = await import('./remote-media-runtime')
+    const voice = await remoteMediaRuntime.voice(model, request)
+    yield {
+      output: {
+        type: 'voice',
+        text: request.operation?.type === 'voice' ? request.operation.text : undefined,
+        language: request.operation?.type === 'voice' ? request.operation.language : undefined,
+        audio: { mimeType: voice.mimeType, data: voice.data }
+      },
+      finishReason: 'stop'
+    }
+  }
+}
+
+export class DesktopRemoteTranscriptionGenerationAdapter extends DesktopTypedGenerationAdapter {
+  readonly id = 'desktop.remote-transcription'
+
+  async *generate(model: RuntimeModel, request: GenerationRequest): AsyncIterable<GenerationChunk> {
+    const { remoteMediaRuntime } = await import('./remote-media-runtime')
+    const transcript = await remoteMediaRuntime.transcription(model, request)
+    yield {
+      output: {
+        type: 'transcription',
+        text: cleanTranscription(transcript.text),
+        language: transcript.language,
+        segments: transcript.segments?.map((segment) => ({
+          ...segment,
+          text: cleanTranscription(segment.text)
+        }))
       },
       finishReason: 'stop'
     }

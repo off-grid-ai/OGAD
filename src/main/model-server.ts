@@ -55,7 +55,7 @@ import { getActiveTranscription } from './transcription/select'
 import * as tts from './tts'
 import { generateImage, imageGenStatus, activeImageModel, type ImageGenParams } from './imagegen'
 import { whisperModel } from './rag/extractors'
-import { getActiveModal } from './active-models'
+import { desktopModelServices } from './model-services'
 import { embeddings } from './embeddings'
 import { docsText, docsHtml, openApiSpec } from './api-docs'
 import { handleMcpRequest } from './mcp-server'
@@ -81,22 +81,20 @@ const MAX_UPLOAD = 200 * 1024 * 1024 // 200MB upload cap (audio / init image)
 let server: http.Server | null = null
 
 async function liveGatewayModalities(imageAvailable: boolean): Promise<GatewayModalities> {
-  let installed: string[] = []
   try {
-    const models = await import('./models-manager')
-    installed = await models.listInstalled()
+    await desktopModelServices.refresh()
   } catch {
     /* unavailable model registry means optional modalities are not ready */
   }
-  const transcription = getActiveModal('transcription')
-  const speech = getActiveModal('speech')
+  const transcription = desktopModelServices.llm.active('transcription').model
+  const speech = desktopModelServices.llm.active('voice').model
   const chat = llm.modelsExist()
   return buildGatewayModalities({
     chat,
     vision: chat && llm.hasVision(),
     embeddings: true,
-    transcription: !!whisperModel() || (!!transcription && installed.includes(transcription)),
-    speech: !!speech && installed.includes(speech),
+    transcription: transcription?.ready === true || !!whisperModel(),
+    speech: speech?.ready === true,
     image: imageAvailable
   })
 }
@@ -565,6 +563,7 @@ function fetchUpstreamModels(): Promise<Record<string, unknown>> {
 }
 
 async function handleModelsList(res: http.ServerResponse): Promise<void> {
+  await desktopModelServices.refresh()
   const now = Math.floor(Date.now() / 1000)
   const upstream = await fetchUpstreamModels()
   const upData = Array.isArray(upstream.data) ? (upstream.data as Record<string, unknown>[]) : []
@@ -629,13 +628,18 @@ async function handleModelsList(res: http.ServerResponse): Promise<void> {
   } catch {
     /* TTS may be unavailable */
   }
-  const speechId = getActiveModal('speech') || (voices.length ? 'kokoro' : null)
+  const speechModel =
+    desktopModelServices.llm.active('voice').model ??
+    desktopModelServices.llm.list('voice').find((model) => model.ready)
+  const speechId = speechModel?.id ?? (voices.length ? 'kokoro' : null)
   const speech = speechId ? [tag(speechId, 'speech', { voices })] : []
 
   // Active transcription (STT) model (chosen pick, else the resolved whisper model).
+  const transcriptionModel =
+    desktopModelServices.llm.active('transcription').model ??
+    desktopModelServices.llm.list('transcription').find((model) => model.ready)
   const sttId =
-    getActiveModal('transcription') ||
-    (whisperModel() ? path.basename(whisperModel() as string) : null)
+    transcriptionModel?.id ?? (whisperModel() ? path.basename(whisperModel() as string) : null)
   const transcription = sttId ? [tag(sttId, 'transcription')] : []
 
   const data: Record<string, unknown>[] = [...text, ...images, ...speech, ...transcription]

@@ -26,6 +26,16 @@ afterAll(() => {
 })
 
 describe('Desktop shared model-service composition', () => {
+  it('keeps remote media routes off local native engines', async () => {
+    const { desktopAdapterId } = await import('../model-services')
+    expect(desktopAdapterId('remote', 'image')).toBe('desktop.remote-image')
+    expect(desktopAdapterId('remote', 'transcription')).toBe('desktop.remote-transcription')
+    expect(desktopAdapterId('remote', 'voice')).toBe('desktop.remote-voice')
+    expect(desktopAdapterId('local', 'image')).toBe('desktop.image')
+    expect(desktopAdapterId('local', 'transcription')).toBe('desktop.transcription')
+    expect(desktopAdapterId('local', 'voice')).toBe('desktop.tts')
+  })
+
   it('uses one canonical inventory and active selection projection', async () => {
     const text = CATALOG.find(
       (model) =>
@@ -129,11 +139,9 @@ describe('Desktop shared model-service composition', () => {
     })
 
     const startupInventory = await startupServices.refresh()
-    expect(startupInventory.map((model) => [model.id, model.modality, model.ready])).toContainEqual([
-      text.id,
-      'text',
-      true
-    ])
+    expect(startupInventory.map((model) => [model.id, model.modality, model.ready])).toContainEqual(
+      [text.id, 'text', true]
+    )
     const startupTextRoute = startupInventory.find(
       (model) => model.id === text.id && model.modality === 'text'
     )?.routeId

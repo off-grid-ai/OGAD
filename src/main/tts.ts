@@ -12,7 +12,6 @@ import { kokoroVoiceLabel, speechLanguageLabel, type RuntimeSpeechVoice } from '
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { getActiveModal } from './active-models'
 import { writeDiagnosticLog } from './diagnostics-log'
 import { modelsDir, resourceDirs } from './runtime-env'
 import type { ManagedRuntimePort as ManagedRuntime } from '@offgrid/models'
@@ -95,13 +94,14 @@ export async function prepareVoiceAssets(
 export async function synthesizeNative(
   text: string,
   voice?: string,
-  onProgress?: (progress: DownloadProgress) => void
+  options: {
+    onProgress?: (progress: DownloadProgress) => void
+    signal?: AbortSignal
+  } = {}
 ): Promise<{ dataUrl: string }> {
-  const selected = getActiveModal('speech')
   // Shared owns voice selection and stale-persistence recovery. This adapter owns only ExecuTorch I/O.
   const chosenVoice = resolveSpeechVoice({
     requested: voice,
-    selected,
     supported: SUPPORTED_VOICES,
     fallback: DEFAULT_SPEECH_VOICE
   })
@@ -124,7 +124,8 @@ export async function synthesizeNative(
       text: input.slice(0, 2000),
       voiceId: chosenVoice,
       outputPath,
-      onDownloadProgress: onProgress
+      onDownloadProgress: options.onProgress,
+      signal: options.signal
     })
     const wav = await fs.promises.readFile(outputPath)
     if (wav.length <= 44) throw new Error('The local voice runtime returned empty audio.')
