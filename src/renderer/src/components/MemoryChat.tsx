@@ -92,6 +92,11 @@ import type { SearchHit } from '../types'
 import { navigateSearchHit } from '@renderer/lib/search-navigation'
 import { runningToolLabel } from '@renderer/lib/tool-display'
 import {
+  createDesktopChatSession,
+  subscribeDesktopChatStream,
+  type DesktopChatSession
+} from '@renderer/lib/desktop-chat-session'
+import {
   parseImageMemoryGuardError,
   type ImageGenerationJobContract,
   type ImageGenerationRequestContract
@@ -2413,6 +2418,11 @@ export function MemoryChat({
   onActiveConversationChange,
   onTaskDetailModeChange
 }: MemoryChatProps) {
+  const desktopChatSessionRef = useRef<DesktopChatSession | null>(null)
+  if (!desktopChatSessionRef.current) {
+    desktopChatSessionRef.current = createDesktopChatSession()
+  }
+  const desktopChatSession = desktopChatSessionRef.current
   const { isPro } = useRendererEntitlement()
   const { tasks: taskSessions } = useTaskSessions()
   // Messages are kept PER CONVERSATION so a background tab keeps its own thread and
@@ -4025,17 +4035,23 @@ export function MemoryChat({
           streaming: true
         }
       ])
-      const result = await window.api.ragChat(
-        modelQuery,
-        'All',
-        history,
+      const { response: result } = await desktopChatSession.send({
+        conversationId: convId,
+        turnId: streamId,
         projectId,
-        convId,
-        noMemory && !projectId,
-        streamId,
-        thinkingEnabled,
-        imagePaths
-      )
+        userMessage: {
+          role: 'user',
+          content: [
+            { type: 'text', text: modelQuery },
+            ...imagePaths.map((uri) => ({ type: 'image' as const, uri }))
+          ]
+        },
+        query: modelQuery,
+        history,
+        noMemory,
+        thinking: thinkingEnabled,
+        images: imagePaths
+      })
       const resultContext = result.context as RagContext | undefined
 
       // Stopped mid-stream — one owner decides what survives (finalizeStoppedTurn).
@@ -4364,7 +4380,10 @@ export function MemoryChat({
       setAttachWarn(null)
       cancelledRef.current.add(convId)
       const streamingId = (messagesByConv[convId] ?? []).find((m) => m.streaming)?.id
-      if (streamingId) window.api.cancelRag(streamingId)
+      const sharedStops = desktopChatSession.stopConversation(convId, 'User stopped generation')
+      // Streams restored after renderer navigation predate this renderer-owned session instance.
+      // Keep the IPC fallback only for those legacy live streams.
+      if (streamingId && sharedStops === 0) window.api.cancelRag(streamingId)
       if (queuedRef.current[convId]?.length) {
         queuedRef.current = clearQueue(queuedRef.current, convId)
         setQueuedByConv({ ...queuedRef.current })
@@ -4382,7 +4401,7 @@ export function MemoryChat({
       // on screen (the only conversation whose composer is visible).
       if (convId === activeConversationId) setLoading(false)
     },
-    [activeConversationId, messagesByConv, markGenerating, imageGenConv]
+    [activeConversationId, desktopChatSession, messagesByConv, markGenerating, imageGenConv]
   )
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -4586,7 +4605,7 @@ export function MemoryChat({
   // [] effect because it captures activeConversationId at mount time.
   useEffect(() => {
     let disposed = false
-    const off = window.api.onRagStream((data) => {
+    const off = subscribeDesktopChatStream(window.api, (data) => {
       const cid = streamConvRef.current.get(data.streamId)
       if (!cid) return
       if (data.type === 'done') {
