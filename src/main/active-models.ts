@@ -5,9 +5,9 @@
 import fs from 'fs'
 import path from 'path'
 import { modelsDir } from './runtime-env'
-import type { Modality } from './active-models-logic'
+import type { Modality } from '@offgrid/models'
 import { CORE_SYNC_ENTITIES, emitSyncMutation } from './sync-mutation'
-export { isModelActive, modalityForKind, type Modality } from './active-models-logic'
+export { isModelActive, modalityForKind, type Modality } from '@offgrid/models'
 
 export class ActiveModalityStore {
   constructor(private readonly directory: () => string = modelsDir) {}

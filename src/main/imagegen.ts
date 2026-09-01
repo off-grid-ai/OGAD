@@ -43,7 +43,7 @@ import { sdServer } from './sd-server'
 import { standardModelDefaults, taesdFilename } from '../shared/image-defaults'
 import { defaultImageModelFilename } from './image-default'
 import { hasMlmodelc, isZImageModel, isQuantizedModel } from './imagegen/runtime-detect'
-import { primaryFileName, type CatalogEntry } from './models/catalog-logic'
+import { primaryFileName, type CatalogEntry } from '@offgrid/models'
 import {
   buildCoreMLArgs,
   buildZImageArgs,

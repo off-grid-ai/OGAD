@@ -6,8 +6,7 @@ import fs from 'fs'
 import path from 'path'
 import { llm } from './llm'
 import { isValidGgufFile } from './models/gguf'
-import { pumpToFile } from './models/download-pump'
-import { downloadIntegrityError, sha256IntegrityError } from './models/download-verify'
+import { createNodeArtifactDownloadPorts } from './models/node-artifact-download-adapter'
 import {
   DOWNLOAD_INTERRUPTED_ERROR,
   modelDownloadQueue,
@@ -28,7 +27,14 @@ import {
   reconcileDownloadedModelRegistry,
   type DownloadedModel
 } from './downloaded-models'
+import { writeDiagnosticLog } from './diagnostics-log'
+import { modelPackageIdentity, type TransferredModelManifest } from '@offgrid/sync'
+import { sampleProgressRate, type ProgressRateSample } from '@offgrid/ui'
 import {
+  decodeModelRouteId,
+  DownloadStatusLedger,
+  modelDownloadFailureMessage,
+  runSequentialArtifactDownload,
   mergeCatalog,
   installedIds,
   buildDiskEntry,
@@ -42,18 +48,7 @@ import {
   projectorToHeal,
   isProjectorFileName,
   type CatalogEntry,
-  type VisionStatus
-} from './models/catalog-logic'
-import { writeDiagnosticLog } from './diagnostics-log'
-import { modelPackageIdentity, type TransferredModelManifest } from '@offgrid/sync'
-import { sampleProgressRate, type ProgressRateSample } from '@offgrid/ui'
-import {
-  decodeModelRouteId,
-  DownloadStatusLedger,
-  modelDownloadFailureMessage,
-  planResumedTransfer,
-  sequentialDownloadProgress,
-  shouldRemovePartialDownload,
+  type VisionStatus,
   type DownloadLedgerStorage
 } from '@offgrid/models'
 import {
@@ -348,16 +343,6 @@ export async function downloadModel(
     }
     // The shared ledger persists status transitions and skips high-frequency byte ticks.
   }
-  const interruptedResult = (
-    signal: AbortSignal,
-    activePartPath: string | null
-  ): { success: false; error: string } => {
-    const interrupted = signal.reason === DOWNLOAD_INTERRUPTED_ERROR
-    if (!interrupted && activePartPath) fs.rmSync(activePartPath, { force: true })
-    const error = interrupted ? DOWNLOAD_INTERRUPTED_ERROR : 'cancelled'
-    send(interrupted ? { status: 'failed', error } : { status: 'cancelled' })
-    return { success: false, error }
-  }
   return downloadQueue.enqueue(
     modelId,
     async (signal) => {
@@ -376,130 +361,50 @@ export async function downloadModel(
         }
       }
 
-      let activePartPath: string | null = null
-      let activePartRecoverable = true
-      try {
-        // Decide the JOB before reporting on it. A model is several files, and percent used to be
-        // per-file: a two-file download ran 0→100 for the weights and then 0→100 again for the
-        // projector, so the number reset halfway and meant something different each time. The job
-        // is the set of files this run must actually fetch (a file already on disk is not work),
-        // and one percent measures the whole of it.
-        const pending = entry.files.filter((file) => {
-          const dest = path.join(dir, file.name)
-          const present = fs.existsSync(dest) && fs.statSync(dest).size > 0
-          if (present) {
-            writeDiagnosticLog('models.download', 'file.skipped', {
-              modelId,
-              file: file.name,
-              reason: 'already_present'
-            })
-          }
-          return !present
-        })
-        // Catalog sizes plan the denominator; the file being fetched contributes its REAL
-        // content-length instead, so the total sharpens as the job proceeds rather than drifting.
-        const plannedBytes = pending.map((file) => file.sizeBytes ?? 0)
-        const laterBytes = (index: number): number =>
-          plannedBytes.slice(index + 1).reduce((sum, bytes) => sum + bytes, 0)
-        let jobDoneBytes = 0
-        let rateSample: ProgressRateSample | undefined
-        for (const [fileIndex, file] of pending.entries()) {
-          const dest = path.join(dir, file.name)
-          const partPath = `${dest}.part`
-          activePartPath = partPath
-          activePartRecoverable = true
-          // Resume from a partial .part if one exists (e.g. download interrupted by a
-          // quit/crash) via an HTTP Range request, so we don't re-fetch GBs.
-          let resumeFrom = 0
-          try {
-            if (fs.existsSync(partPath)) resumeFrom = fs.statSync(partPath).size
-          } catch {
-            /* fresh */
-          }
-          writeDiagnosticLog('models.download', 'file.started', {
+      let rateSample: ProgressRateSample | undefined
+      const result = await runSequentialArtifactDownload({
+        artifacts: entry.files.map((file) => ({ ...file, id: `${modelId}:${file.name}` })),
+        signal,
+        ports: createNodeArtifactDownloadPorts(dir),
+        interruptedError: DOWNLOAD_INTERRUPTED_ERROR,
+        hooks: {
+          skipped: (file) => writeDiagnosticLog('models.download', 'file.skipped', {
             modelId,
             file: file.name,
-            resumeBytes: resumeFrom
-          })
-          const res = await fetch(file.url, {
-            signal,
-            headers: resumeFrom > 0 ? { Range: `bytes=${resumeFrom}-` } : undefined
-          })
-          if (!res.ok || !res.body) throw new Error(`HTTP ${res.status} for ${file.name}`)
-          // Server honored the range (206) → append; otherwise (200) start over.
-          const remaining = Number(res.headers.get('content-length') ?? 0)
-          const transfer = planResumedTransfer({
-            partialBytes: resumeFrom,
-            responseStatus: res.status,
-            responseBytes: remaining
-          })
-          const total = transfer.totalBytes
-          const out = fs.createWriteStream(partPath, transfer.append ? { flags: 'a' } : {})
-          let written = transfer.writtenBytes
-          const reader = res.body.getReader()
-          // pumpToFile owns the write-stream error path: a disk-full/EIO 'error' becomes
-          // a rejection (caught below → status 'failed') instead of crashing the main
-          // process, and never hangs on a 'finish' that won't come.
-          await pumpToFile(reader, out, (n) => {
-            written += n
-            const aggregate = sequentialDownloadProgress({
-              completedBytes: jobDoneBytes,
-              currentBytes: written,
-              currentTotalBytes: total,
-              remainingPlannedBytes: laterBytes(fileIndex)
-            })
-            const jobDone = aggregate.downloadedBytes
-            const jobTotal = aggregate.totalBytes
+            reason: 'already_present'
+          }),
+          started: (file, resumeBytes) => writeDiagnosticLog('models.download', 'file.started', {
+            modelId,
+            file: file.name,
+            resumeBytes
+          }),
+          progress: (progress) => {
             const rate = sampleProgressRate(rateSample, {
-              currentBytes: jobDone,
+              currentBytes: progress.downloadedBytes,
               sampledAtMs: Date.now()
             })
             rateSample = rate.sample
             send({
-              currentFile: file.name,
-              fileIndex: fileIndex + 1,
-              fileCount: pending.length,
-              percent: Math.round(aggregate.fraction * 100),
-              downloadedMB: (jobDone / 1048576).toFixed(1),
-              totalMB: jobTotal ? (jobTotal / 1048576).toFixed(1) : '?',
-              downloadedBytes: jobDone,
-              totalBytes: jobTotal || undefined,
+              currentFile: progress.artifact.name,
+              fileIndex: progress.fileIndex,
+              fileCount: progress.fileCount,
+              percent: Math.round(progress.fraction * 100),
+              downloadedMB: (progress.downloadedBytes / 1048576).toFixed(1),
+              totalMB: progress.totalBytes ? (progress.totalBytes / 1048576).toFixed(1) : '?',
+              downloadedBytes: progress.downloadedBytes,
+              totalBytes: progress.totalBytes || undefined,
               bytesPerSecond: rate.bytesPerSecond,
               status: 'downloading'
             })
-          })
-          if (signal.aborted) {
-            return interruptedResult(signal, partPath)
-          }
-          // Verify the file is complete + valid BEFORE promoting it — never mark a
-          // truncated/corrupt download installed (it loads as a blank "Chat model Down").
-          const integrityErr = downloadIntegrityError(file.name, written, total, partPath)
-          if (integrityErr) {
-            activePartRecoverable = false
-            throw new Error(integrityErr)
-          }
-          // Content check: when the file carries an expected SHA-256 (e.g. HF's lfs
-          // oid), verify the bytes match — catches silent corruption the byte-count +
-          // magic check can't. Skipped when no hash is known.
-          const checksumErr = await sha256IntegrityError(
-            file.name,
-            partPath,
-            (file as { sha256?: string }).sha256
+          },
+          completed: (file, writtenBytes) => writeDiagnosticLog(
+            'models.download',
+            'file.completed',
+            { modelId, file: file.name, bytes: writtenBytes }
           )
-          if (checksumErr) {
-            activePartRecoverable = false
-            throw new Error(checksumErr)
-          }
-          fs.renameSync(partPath, dest)
-          activePartPath = null
-          jobDoneBytes += written // this file's real bytes now count toward the job, not a new 0%
-          writeDiagnosticLog('models.download', 'file.completed', {
-            modelId,
-            file: file.name,
-            bytes: written
-          })
         }
-        if (signal.aborted) return interruptedResult(signal, activePartPath)
+      })
+      if (result.success) {
         // Register a free-form Hugging Face download (not a catalog entry) so it counts
         // as installed + activatable and its files aren't flagged as "unused". Catalog
         // models are recognized by CATALOG membership already, so skip them.
@@ -516,27 +421,10 @@ export async function downloadModel(
         await reconcileActiveModelProjector().catch(() => false)
         send({ percent: 100, status: 'completed' })
         return { success: true }
-      } catch (err) {
-        // A capacity failure cannot resume until space is reclaimed. A file that failed byte or
-        // checksum validation must restart because the stored prefix is not trustworthy. Only a
-        // transport interruption keeps its partial file for a Range retry.
-        if (
-          activePartPath &&
-          shouldRemovePartialDownload({ artifactRecoverable: activePartRecoverable, error: err })
-        ) {
-          try {
-            fs.rmSync(activePartPath, { force: true })
-          } catch {
-            /* retain the original write failure */
-          }
-        }
-        if (signal.aborted || (err as Error).name === 'AbortError') {
-          return interruptedResult(signal, activePartPath)
-        }
-        const error = modelDownloadFailureMessage(err)
-        send({ status: 'failed', error })
-        return { success: false, error }
       }
+      const error = result.error ?? 'Model download failed.'
+      send(error === 'cancelled' ? { status: 'cancelled', error } : { status: 'failed', error })
+      return { success: false, error }
     },
     (state) => {
       if (state === 'interrupted') {

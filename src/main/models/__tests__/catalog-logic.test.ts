@@ -25,7 +25,7 @@ import {
   type CatalogEntry,
   type LocalModelLike,
   type DownloadedModelLike
-} from '../catalog-logic'
+} from '@offgrid/models'
 import { modalityForKind } from '../../active-models'
 
 const local: LocalModelLike = {
