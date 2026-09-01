@@ -147,7 +147,6 @@ async function streamAnswer(
 ): Promise<ResponseGenerationResult> {
   const { llm } = await import('./llm')
   const { desktopModelServices } = await import('./model-services')
-  const { modalityQueue, CHAT_JOB } = await import('./modality-queue/queue')
 
   await desktopModelServices.refresh()
   const turnId = streamId ?? `desktop-chat:${Date.now()}:${Math.random().toString(36).slice(2)}`
@@ -173,57 +172,45 @@ async function streamAnswer(
   // No-renderer fallback still uses the same streaming transport with a no-op
   // observer, so finish metadata and the configured cap cannot diverge by caller.
   if (!streamId || !event?.sender) {
-    // Interactive chat is foreground work - Tier 2, a peer of image gen. During
-    // image gen the LLM is evicted so this waits anyway (consistent); background
-    // screen-replay (Tier 3) defers to it. Chat runs ON the 'llm' engine, so it
-    // evicts nothing (evicting 'llm' would evict itself). run()'s finally releases
-    // the slot even if fn throws, so we let errors propagate from inside.
-    return modalityQueue.run(CHAT_JOB, async () =>
-      desktopModelServices.generation
-        .generate(request())
-        .then((result) => response(result.content, result.finishReason))
-    )
+    // Shared generation owns model admission, residency, and fallback for this turn.
+    return desktopModelServices.generation
+      .generate(request())
+      .then((result) => response(result.content, result.finishReason))
   }
 
   const sender = event.sender
-  // Register the abort controller BEFORE queuing so a rag:cancel that arrives while
-  // this turn is still WAITING in the queue is honored - the stream then starts with
-  // an already-aborted signal (and resolves immediately) rather than running in full.
+  // Register the abort controller before generation starts so cancellation is honored.
   const controller = new AbortController()
   streamControllers.set(streamId, controller)
   try {
-    // Interactive streaming chat = Tier 2 (see above). Await the full stream inside
-    // the run() callback so the queue slot is held for the whole generation; the
-    // cancel path aborts via the controller registered above.
-    return await modalityQueue.run(CHAT_JOB, async () => {
-      let partialContent = ''
-      try {
-        const result = await desktopModelServices.generation.generate(request(controller.signal), {
-          chunk: (chunk) => {
-            const deltas = [
-              ...(chunk.reasoning ? [{ text: chunk.reasoning, kind: 'reasoning' as const }] : []),
-              ...(chunk.content ? [{ text: chunk.content, kind: 'content' as const }] : [])
-            ]
-            for (const { text, kind } of deltas) {
-              if (kind === 'content') partialContent += text
-              noteChatStreamDelta(streamId, text, kind)
-              try {
-                sender.send('rag:stream', { streamId, type: kind, text })
-              } catch {
-                /* window gone */
-              }
+    // Keep the controller registered for the complete shared generation operation.
+    let partialContent = ''
+    try {
+      const result = await desktopModelServices.generation.generate(request(controller.signal), {
+        chunk: (chunk) => {
+          const deltas = [
+            ...(chunk.reasoning ? [{ text: chunk.reasoning, kind: 'reasoning' as const }] : []),
+            ...(chunk.content ? [{ text: chunk.content, kind: 'content' as const }] : [])
+          ]
+          for (const { text, kind } of deltas) {
+            if (kind === 'content') partialContent += text
+            noteChatStreamDelta(streamId, text, kind)
+            try {
+              sender.send('rag:stream', { streamId, type: kind, text })
+            } catch {
+              /* window gone */
             }
-          },
-          partialDiscarded: () => {
-            partialContent = ''
           }
-        })
-        return response(result.content, result.finishReason)
-      } catch (error) {
-        if (!controller.signal.aborted) throw error
-        return response(partialContent, 'cancelled')
-      }
-    })
+        },
+        partialDiscarded: () => {
+          partialContent = ''
+        }
+      })
+      return response(result.content, result.finishReason)
+    } catch (error) {
+      if (!controller.signal.aborted) throw error
+      return response(partialContent, 'cancelled')
+    }
   } finally {
     streamControllers.delete(streamId)
     endChatStream(streamId, controller.signal.aborted ? 'discarded' : 'record_pending')
@@ -807,61 +794,45 @@ export function setupIPC() {
         const { ragService } = await import('./rag')
         const { listProjects } = await import('./rag/store')
         const { getProjectChatHistory } = await import('./database')
-        const { formatForPrompt } = await import('@offgrid/rag')
-        const { llm } = await import('./llm')
+        const { PROJECT_CHAT_POLICY, runProjectChatTurn } = await import('@offgrid/rag')
         const project = listProjects().find((p) => p.id === projectId)
-        const sys = project?.systemPrompt.trim() || 'You are a helpful assistant for this project.'
-        const search = await ragService.searchProject(projectId, query, {
-          topK: 6,
-          contextLength: 4096
-        })
-        const ctx = formatForPrompt(search)
         // Cross-chat memory: recent messages from other chats in this project.
-        const siblings = getProjectChatHistory(projectId, conversationId ?? '', 12)
-        const siblingCtx = siblings.length
-          ? 'Related discussion from other chats in this project:\n' +
-            siblings
-              .map(
-                (m) =>
-                  `${m.role === 'assistant' ? 'Assistant' : 'User'}${m.title ? ` (${m.title})` : ''}: ${m.content}`
-              )
-              .join('\n')
-          : ''
-        const hist = (conversationHistory ?? [])
-          .slice(-8)
-          .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${m.content}`)
-          .join('\n')
-        const prompt = [
-          sys,
-          ctx,
-          siblingCtx,
-          hist ? `Conversation so far:\n${hist}` : '',
-          `User: ${query}`,
-          'Assistant:'
-        ]
-          .filter(Boolean)
-          .join('\n\n')
-        void llm // retained for non-stream fallback inside streamAnswer
-        if (streamId)
-          event.sender.send('rag:stream', {
-            streamId,
-            type: 'step',
-            step: {
-              kind: 'project',
-              counts: { sources: search.chunks.length, projectChats: siblings.length }
-            }
-          })
-        const completion = await streamAnswer(event, streamId, prompt, thinking, imgs)
+        const siblings = getProjectChatHistory(
+          projectId,
+          conversationId ?? '',
+          PROJECT_CHAT_POLICY.siblingHistoryLimit
+        )
+        const { generation: completion, context } = await runProjectChatTurn(
+          {
+            searchProject: (id, message, options) =>
+              ragService.searchProject(id, message, options),
+            generate: ({ prompt }) => streamAnswer(event, streamId, prompt, thinking, imgs)
+          },
+          {
+            projectId,
+            query,
+            systemPrompt: project?.systemPrompt,
+            conversationHistory,
+            siblingHistory: siblings
+          },
+          (prepared) => {
+            if (!streamId) return
+            event.sender.send('rag:stream', {
+              streamId,
+              type: 'step',
+              step: {
+                kind: 'project',
+                counts: {
+                  sources: prepared.context.sources.length,
+                  projectChats: prepared.context.projectChats
+                }
+              }
+            })
+          }
+        )
         return {
           ...completion,
-          context: {
-            sources: search.chunks.map((c) => ({
-              name: c.name,
-              position: c.position,
-              score: c.score
-            })),
-            projectChats: siblings.length
-          }
+          context
         }
       }
 
@@ -1976,62 +1947,59 @@ export function setupIPC() {
       }
     ) => {
       const { toolChat } = await import('./tools')
-      const { modalityQueue, CHAT_JOB } = await import('./modality-queue/queue')
       const streamId = opts?.streamId
       const sender = event.sender
       // Non-stream fallback (no streamId): buffer, no live deltas (matches streamAnswer).
       if (!streamId) {
-        return modalityQueue.run(CHAT_JOB, () => toolChat(query, history || [], opts || {}))
+        return toolChat(query, history || [], opts || {})
       }
-      // Streaming: same channel/queue/abort as streamAnswer, so a tools turn streams
+      // Streaming: same channel and abort path as streamAnswer, so a tools turn streams
       // thinking -> tool-call activity -> answer, and the stop button (rag:cancel) aborts it.
       const controller = new AbortController()
       streamControllers.set(streamId, controller)
       bindChatStream(streamId, opts.conversationId, opts.thinking ? 'thinking' : 'waiting')
       let continuesAsImage = false
       try {
-        const result = await modalityQueue.run(CHAT_JOB, () =>
-          toolChat(query, history || [], {
-            ...opts,
-            thinking: opts.thinking,
-            signal: controller.signal,
-            onDelta: (text, kind) => {
-              noteChatStreamDelta(streamId, text, kind)
-              try {
-                sender.send('rag:stream', { streamId, type: kind, text })
-              } catch {
-                /* window gone */
-              }
-            },
-            onStep: (call) => {
-              noteChatStreamToolStarted(streamId, call.name)
-              try {
-                sender.send('rag:stream', {
-                  streamId,
-                  type: 'step',
-                  step: { kind: 'running_tool', name: call.name }
-                })
-              } catch {
-                /* window gone */
-              }
-            },
-            onActivity: (activity) => {
-              try {
-                sender.send('rag:stream', { streamId, type: 'step', step: activity })
-              } catch {
-                /* window gone */
-              }
-            },
-            onToolResult: (call) => {
-              noteChatStreamToolCompleted(streamId, call.name, call.result, call.status)
-              try {
-                sender.send('rag:stream', { streamId, type: 'tool_result', call })
-              } catch {
-                /* window gone */
-              }
+        const result = await toolChat(query, history || [], {
+          ...opts,
+          thinking: opts.thinking,
+          signal: controller.signal,
+          onDelta: (text, kind) => {
+            noteChatStreamDelta(streamId, text, kind)
+            try {
+              sender.send('rag:stream', { streamId, type: kind, text })
+            } catch {
+              /* window gone */
             }
-          })
-        )
+          },
+          onStep: (call) => {
+            noteChatStreamToolStarted(streamId, call.name)
+            try {
+              sender.send('rag:stream', {
+                streamId,
+                type: 'step',
+                step: { kind: 'running_tool', name: call.name }
+              })
+            } catch {
+              /* window gone */
+            }
+          },
+          onActivity: (activity) => {
+            try {
+              sender.send('rag:stream', { streamId, type: 'step', step: activity })
+            } catch {
+              /* window gone */
+            }
+          },
+          onToolResult: (call) => {
+            noteChatStreamToolCompleted(streamId, call.name, call.result, call.status)
+            try {
+              sender.send('rag:stream', { streamId, type: 'tool_result', call })
+            } catch {
+              /* window gone */
+            }
+          }
+        })
         if (result.imageRequests.length > 0) {
           continuesAsImage = continueChatStreamWithImage(streamId)
         }
