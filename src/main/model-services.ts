@@ -1,7 +1,10 @@
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import {
+  GenerationService as SharedGenerationService,
   LLMService as SharedLLMService,
+  ModelResidencyManager,
   decodeModelRouteId,
   encodeModelRouteId,
   type ModelInventoryAdapter,
@@ -18,6 +21,10 @@ import {
   getRemoteVisionServerSettings
 } from './vision/remote-vision-server'
 import { parseRemoteVisionModelId, remoteVisionModelId } from '../shared/remote-vision-server'
+import {
+  DesktopLocalGenerationAdapter,
+  DesktopRemoteGenerationAdapter
+} from './model-generation-adapters'
 
 interface DesktopInventoryModel {
   id: string
@@ -199,6 +206,7 @@ class DesktopInventorySource {
     const remoteSettings = getRemoteVisionServerSettings()
     const remoteById = new Map(remoteSettings.servers.map((server) => [server.id, server] as const))
     const activeText = this.selections.read('text')
+    const activeTextRoute = activeText ? decodeModelRouteId(activeText) : null
 
     return catalog.flatMap((model): RuntimeModel[] => {
       const modality = modalityForKind(model.kind)
@@ -209,8 +217,11 @@ class DesktopInventorySource {
       const ready = isInstalled && model.availability !== 'coming_soon'
       const loaded =
         source === 'remote'
-          ? activeText === model.id
-          : modality === 'text' && activeText === model.id && localTextState.loaded
+          ? activeTextRoute?.serverId === remote?.id &&
+            activeTextRoute?.modelId === model.remoteModelId
+          : modality === 'text' &&
+            (activeTextRoute?.modelId ?? activeText) === model.id &&
+            localTextState.loaded
       const adapterId =
         source === 'remote'
           ? 'desktop.remote-chat'
@@ -236,10 +247,7 @@ class DesktopInventorySource {
             tools: modality === 'text'
           },
           installed: isInstalled,
-          ready:
-            source === 'local' && modality === 'text'
-              ? ready && (activeText !== model.id || localTextState.ready)
-              : ready,
+          ready,
           loaded
         }
       ]
@@ -260,6 +268,7 @@ class DesktopModelInventoryAdapter implements ModelInventoryAdapter {
 
 export interface DesktopModelServices {
   llm: SharedLLMService
+  generation: SharedGenerationService
   refresh(): Promise<RuntimeModel[]>
   activeModelIds(): Promise<string[]>
   activeModalities(): {
@@ -287,6 +296,18 @@ export function createDesktopModelServices(
   ]) {
     llm.registerAdapter(new DesktopModelInventoryAdapter(adapterId, source))
   }
+  const memory = new ModelResidencyManager({
+    current: () => ({
+      totalMB: os.totalmem() / (1024 * 1024),
+      availableMB: os.freemem() / (1024 * 1024),
+      platform: 'desktop'
+    })
+  })
+  const generation = new SharedGenerationService(llm, memory, {
+    generationTimeoutMs: 300_000
+  })
+  generation.registerAdapter(new DesktopLocalGenerationAdapter())
+  generation.registerAdapter(new DesktopRemoteGenerationAdapter())
 
   const projectedId = (modality: ModelModality): string | null => {
     const active = llm.active(modality)
@@ -306,6 +327,7 @@ export function createDesktopModelServices(
 
   return {
     llm,
+    generation,
     refresh: () => llm.refresh(),
     async activeModelIds(): Promise<string[]> {
       await llm.refresh()

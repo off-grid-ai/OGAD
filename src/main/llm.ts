@@ -98,7 +98,7 @@ export interface StreamChatOptions {
   thinking?: boolean
   signal?: AbortSignal
   tools?: unknown[]
-  toolChoice?: string
+  toolChoice?: unknown
   maxTokens?: number
   responseFormat?: unknown
 }
@@ -1096,7 +1096,7 @@ export class LLMService {
       signal?: AbortSignal
       responseFormat?: unknown
       tools?: unknown[]
-      toolChoice?: string
+      toolChoice?: unknown
     }
   ): Promise<StreamResult> {
     return streamRemoteChatCompletion({

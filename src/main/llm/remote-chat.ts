@@ -25,7 +25,7 @@ export interface RemoteChatRequest {
   reasoningBudget?: number
   responseFormat?: unknown
   tools?: unknown[]
-  toolChoice?: string
+  toolChoice?: unknown
 }
 
 export interface RemoteChatOptions {
