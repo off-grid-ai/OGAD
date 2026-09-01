@@ -61,6 +61,7 @@ import {
   formatRetrievalHistory,
   normalizeTextResponse as toResponseGenerationResult,
   parseChatIntentResponse,
+  selectableModelControlModality,
   type ChatIntent,
   type NormalizedTextResponse,
   type RetrievalEntity,
@@ -1446,9 +1447,10 @@ export function setupIPC() {
     import('./models-manager').then((m) => m.deleteModel(modelId))
   )
 
-  ipcMain.handle('models:set-active', (_, modelId: string) =>
-    import('./models-manager').then((m) => m.setActiveModel(modelId))
-  )
+  ipcMain.handle('models:set-active', async (_, modelId: string) => {
+    const { desktopModelServices } = await import('./model-services')
+    return desktopModelServices.select('text', modelId)
+  })
   // Single activation seam: route any model to the right backend by its kind.
   ipcMain.handle('models:activate', (_, modelId: string, requestedKind?: string) =>
     import('./models-manager').then((m) => m.activateModel(modelId, requestedKind))
@@ -1460,9 +1462,14 @@ export function setupIPC() {
   ipcMain.handle('models:active-ids', () =>
     import('./models-manager').then((m) => m.getActiveModelIds())
   )
-  ipcMain.handle('models:set-active-modal', (_, kind: string, modelId: string | null) =>
-    import('./models-manager').then((m) => m.setActiveModalChoice(kind, modelId))
-  )
+  ipcMain.handle('models:set-active-modal', async (_, kind: string, modelId: string | null) => {
+    const modality = selectableModelControlModality(kind)
+    if (!modality) {
+      return { success: false, error: 'use models:set-active for the chat LLM (text/vision)' }
+    }
+    const { desktopModelServices } = await import('./model-services')
+    return desktopModelServices.select(modality, modelId)
+  })
   ipcMain.handle('models:active-modalities', () =>
     import('./models-manager').then((m) => m.getActiveModalities())
   )

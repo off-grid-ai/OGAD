@@ -20,7 +20,12 @@ describe('<RemoteVisionSettingsTab/>', () => {
         { id: 'remote-image', name: 'Remote Image', modality: 'image' },
         { id: 'remote-stt', name: 'Remote STT', modality: 'transcription' },
         { id: 'remote-voice', name: 'Remote Voice', modality: 'voice' },
-        { id: 'remote-embedding', name: 'Remote Embedding', modality: 'embedding' }
+        { id: 'remote-embedding', name: 'Remote Embedding', modality: 'embedding' },
+        {
+          id: 'remote-vision:server-1:google%2Fgemini',
+          name: 'remote-vision:server-1:google%2Fgemini',
+          modality: 'text'
+        }
       ],
       catalog: {
         text: [
@@ -95,12 +100,14 @@ describe('<RemoteVisionSettingsTab/>', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Change model' }))
-    await screen.findByText('Connected in 42 ms. 6 models found.')
+    await screen.findByText('Connected in 42 ms. 7 models found.')
     expect(screen.getByLabelText('Image')).toBeTruthy()
     expect(screen.getByLabelText('Transcription')).toBeTruthy()
     expect(screen.getByLabelText('Voice')).toBeTruthy()
     expect(screen.getByLabelText('Embeddings')).toBeTruthy()
     expect(screen.queryByText(/remote-vision:/i)).toBeNull()
+    fireEvent.change(screen.getByPlaceholderText('Search models'), { target: { value: 'gemini' } })
+    expect(screen.getByText('google/gemini')).toBeTruthy()
     fireEvent.change(screen.getByPlaceholderText('Search models'), { target: { value: 'new' } })
     expect(screen.queryByText('Vision model')).toBeNull()
     fireEvent.click(screen.getByText('New vision model'))

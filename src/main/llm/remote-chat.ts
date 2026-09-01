@@ -7,6 +7,7 @@ import {
   publishedCompatibleReasoningMetadata,
   ollamaReasoningMetadata,
   openRouterNativeToolCapability,
+  remoteCapabilityDiscoveryPlan,
   nativeToolPlannerUnavailableMessage,
   type ModelReasoningMetadata,
   type OpenRouterPublishedReasoning,
@@ -129,10 +130,11 @@ export function remoteReasoningMetadata(
   const key = capabilityKey(remote)
   const cached = reasoningCapabilities.get(key)
   if (cached) return cached
+  const plan = remoteCapabilityDiscoveryPlan(remote.provider)
   const discovered =
-    remote.provider === 'openrouter'
+    plan.reasoning === 'openrouter'
       ? discoverOpenRouterReasoningMetadata(remote)
-      : remote.provider === 'ollama'
+      : plan.reasoning === 'ollama'
         ? discoverOllamaReasoningMetadata(remote)
         : discoverCompatibleReasoningMetadata(remote)
   reasoningCapabilities.set(key, discovered)
@@ -148,7 +150,7 @@ function capabilityKey(remote: RemoteTextModelConnection): string {
 async function discoverRemoteNativeToolCapability(
   remote: RemoteTextModelConnection
 ): Promise<RemoteNativeToolCapability> {
-  if (remote.provider !== 'openrouter') {
+  if (remoteCapabilityDiscoveryPlan(remote.provider).nativeTools === 'unknown') {
     return { status: 'unknown', modelName: remote.name || remote.model }
   }
 

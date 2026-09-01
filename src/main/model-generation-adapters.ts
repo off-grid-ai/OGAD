@@ -4,6 +4,7 @@ import {
   finalGenerationChunk,
   openAIProjectedMessages,
   openAIProjectedGenerationOptions,
+  projectedTextGenerationChunk,
   reasoningWireForGeneration
 } from '@offgrid/models'
 import type {
@@ -95,7 +96,7 @@ abstract class DesktopGenerationAdapter implements GenerationAdapter {
     void this.run(
       model,
       openAIProjectedMessages(request.messages ?? []),
-      (text, kind) => channel.push(kind === 'reasoning' ? { reasoning: text } : { content: text }),
+      (text, kind) => channel.push(projectedTextGenerationChunk(text, kind)),
       openAIProjectedGenerationOptions(request) as StreamChatOptions,
       request.timeoutMs ?? 300_000
     ).then(

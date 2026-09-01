@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import type {
-  RemoteModelCatalog,
-  RemoteModelModality,
-  RemoteModalitySelections
+import {
+  displayRemoteModelName,
+  type RemoteModelCatalog,
+  type RemoteModelModality,
+  type RemoteModalitySelections
 } from '@offgrid/models'
 import {
   remoteVisionApiBase,
@@ -557,18 +558,15 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                                 model: model.id,
                                 selections: { ...current.selections, text: model.id }
                               }))
-                              setModelQuery(model.name)
+                              setModelQuery(displayRemoteModelName(model.name || model.id))
                               setShowModels(false)
                               setStatus('Not saved.')
                             }}
                             className="block w-full px-2 py-1.5 text-left text-xs text-neutral-300 hover:bg-neutral-900 hover:text-white"
                           >
-                            <span className="block truncate">{model.name}</span>
-                            {model.name !== model.id ? (
-                              <span className="block truncate text-[9px] text-neutral-600">
-                                {model.id}
-                              </span>
-                            ) : null}
+                            <span className="block truncate">
+                              {displayRemoteModelName(model.name || model.id)}
+                            </span>
                           </button>
                         ))
                       ) : (

@@ -89,7 +89,12 @@ for (const file of files) {
           ? node.expression
           : node.condition
       const expression = nodeText(source, condition)
-      if (/(provider|reasoning|thinking|openrouter|gemini|ollama|lm.?studio)/i.test(expression)) {
+      const consumesSharedDiscoveryPlan =
+        /(?:remoteCapabilityDiscoveryPlan|plan\.reasoning|plan\.nativeTools)/.test(expression)
+      if (
+        !consumesSharedDiscoveryPlan &&
+        /(provider|reasoning|thinking|openrouter|gemini|ollama|lm.?studio)/i.test(expression)
+      ) {
         report('adapters-do-not-own-provider-or-reasoning-policy', fileName, source, condition, `branch:${expression}`)
       }
     }
