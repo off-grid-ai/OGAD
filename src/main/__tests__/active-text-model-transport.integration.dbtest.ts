@@ -81,7 +81,11 @@ function startRemoteServer(): Promise<http.Server> {
               {
                 id: 'openai/gpt-5.6',
                 name: 'GPT-5.6',
-                supported_parameters: ['tools', 'temperature', 'top_p']
+                supported_parameters: ['tools', 'temperature', 'top_p'],
+                reasoning: {
+                  supported_efforts: ['low', 'medium', 'high'],
+                  default_effort: 'medium'
+                }
               },
               {
                 id: 'bytedance-research/ui-tars-1.5-7b',
@@ -158,6 +162,19 @@ afterAll(async () => {
 
 describe('active text model transport', () => {
   it('uses the selected OpenRouter model for planner, chat, and tools', async () => {
+    const { desktopModelServices } = await import('../model-services')
+    const inventory = await desktopModelServices.refresh()
+    const remoteText = inventory.find(
+      (model) => model.serverId === remoteServerId && model.modality === 'text'
+    )
+    const remoteToolSelection = inventory.find(
+      (model) => model.serverId === remoteServerId && model.modality === 'tool_selection'
+    )
+    expect(remoteToolSelection?.capabilities.thinking).toBe(
+      remoteText?.capabilities.thinking
+    )
+    expect(remoteToolSelection?.capabilities.thinking).toBe(true)
+
     turns.push(
       { content: JSON.stringify({ steps: [] }) },
       { reasoning: 'Use the active remote model.', content: 'Remote chat answer.' },
