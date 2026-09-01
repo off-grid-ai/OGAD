@@ -6,7 +6,7 @@ import type {
   ComputerUseActiveModelProjection,
   ComputerUseModelStrategy
 } from '../../shared/computer-use-settings'
-import { remoteVisionModelId } from '../../shared/remote-vision-server'
+import { parseRemoteVisionModelId, remoteVisionModelId } from '../../shared/remote-vision-server'
 import { withGrounder, selectedGrounderModelId } from './grounder-loader'
 import { createHybridVisionGrounder, productionHybridReasoner } from './hybrid-vision-grounder'
 import {
@@ -24,6 +24,7 @@ import { createVisionGrounder } from './vision-policy-runner'
 import { getActiveRemoteVisionServer } from './remote-vision-server'
 import type { VisionGroundingInput, VisionGroundingResult } from './vision-agent'
 import { currentRemoteScreenTaskSession } from '../actions/remote-screen-session'
+import { desktopModelServices } from '../model-services'
 
 export interface VisionTaskModelSession {
   adapter: VisionModelAdapter
@@ -50,6 +51,7 @@ export interface VisionTaskModelStrategyDependencies {
   resolveIdentity(modelId: string): Promise<ModelIdentity>
   withSpecialist<T>(task: () => Promise<T>): Promise<{ result: T }>
   runReasoner: typeof productionHybridReasoner
+  resolveGenerationRoute?(modelId: string): Promise<string>
 }
 
 const productionDependencies: VisionTaskModelStrategyDependencies = {
@@ -64,7 +66,8 @@ const productionDependencies: VisionTaskModelStrategyDependencies = {
   selectedSpecialistId: selectedGrounderModelId,
   resolveIdentity: resolveModelIdentity,
   withSpecialist: withGrounder,
-  runReasoner: productionHybridReasoner
+  runReasoner: productionHybridReasoner,
+  resolveGenerationRoute: computerUseRouteId
 }
 
 async function projectedModel(
@@ -159,11 +162,28 @@ async function directSession(
   selection: VisionModelSelection,
   dependencies: VisionTaskModelStrategyDependencies
 ): Promise<VisionTaskModelSession> {
+  const routeId = await dependencies.resolveGenerationRoute?.(selection.modelId)
   return {
     adapter: selection.adapter,
     identity: await dependencies.resolveIdentity(selection.modelId),
-    decide: createVisionGrounder(selection.adapter, environment)
+    decide: createVisionGrounder(selection.adapter, environment, routeId)
   }
+}
+
+async function computerUseRouteId(modelId: string): Promise<string> {
+  await desktopModelServices.refresh()
+  const remote = parseRemoteVisionModelId(modelId)
+  const matches = desktopModelServices.llm
+    .list('computer_use')
+    .filter((model) =>
+      remote
+        ? model.serverId === remote.serverId && model.id === remote.modelId
+        : !model.serverId && model.id === modelId
+    )
+  if (matches.length !== 1 || !matches[0]?.routeId) {
+    throw new Error(`The Computer Use model route is unavailable: ${modelId}.`)
+  }
+  return matches[0].routeId
 }
 
 async function hybridSession(
@@ -176,6 +196,12 @@ async function hybridSession(
     dependencies.resolveIdentity(reasoner.modelId),
     dependencies.resolveIdentity(specialist.modelId)
   ])
+  const [reasonerRouteId, specialistRouteId] = dependencies.resolveGenerationRoute
+    ? await Promise.all([
+        dependencies.resolveGenerationRoute(reasoner.modelId),
+        dependencies.resolveGenerationRoute(specialist.modelId)
+      ])
+    : [undefined, undefined]
   return {
     adapter: specialist.adapter,
     identity: {
@@ -185,7 +211,9 @@ async function hybridSession(
     decide: createHybridVisionGrounder(environment, {
       runReasoner: dependencies.runReasoner,
       withSpecialist: dependencies.withSpecialist,
-      activeSpecialistAdapter: () => activeSpecialistSelection(dependencies).adapter
+      activeSpecialistAdapter: () => activeSpecialistSelection(dependencies).adapter,
+      reasonerRouteId,
+      specialistRouteId
     })
   }
 }

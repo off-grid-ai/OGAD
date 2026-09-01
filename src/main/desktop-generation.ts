@@ -7,6 +7,7 @@ import type {
   GenerationResult,
   GenerationToolChoice,
   GenerationToolDefinition,
+  GenerationToolHandling,
   ReasoningEffort
 } from '@offgrid/models'
 import { llm } from './llm'
@@ -20,6 +21,7 @@ export interface DesktopGenerationOptions {
   responseFormat?: unknown
   tools?: unknown[]
   toolChoice?: unknown
+  toolHandling?: GenerationToolHandling
   temperature?: number
   topP?: number
   thinking?: boolean
@@ -29,6 +31,7 @@ export interface DesktopGenerationOptions {
   timeoutMs?: number
   signal?: AbortSignal
   allowFallback?: boolean
+  routeId?: string
   identity?: GenerationRequest['identity']
   events?: GenerationEvents
   toolExecution?: DesktopToolExecutionSession
@@ -68,6 +71,7 @@ function toolDefinitions(value: unknown[] | undefined): GenerationToolDefinition
         ...(typeof definition.description === 'string'
           ? { description: definition.description }
           : {}),
+        ...(typeof definition.strict === 'boolean' ? { strict: definition.strict } : {}),
         inputSchema:
           definition.parameters && typeof definition.parameters === 'object'
             ? (definition.parameters as Record<string, unknown>)
@@ -121,6 +125,7 @@ export async function generateDesktopMessages(
     responseFormat: responseFormat(options.responseFormat),
     tools: toolDefinitions(options.tools),
     toolChoice: toolChoice(options.toolChoice),
+    toolHandling: options.toolHandling,
     sampling: {
       temperature: options.temperature,
       topP: options.topP
@@ -146,6 +151,7 @@ export async function generateDesktopMessages(
       ...(options.thinking === undefined ? {} : { thinking: options.thinking })
     },
     allowFallback: options.allowFallback ?? true,
+    routeId: options.routeId,
     partialOutputPolicy: 'discard-and-fallback'
   }
   const unregister = options.toolExecution

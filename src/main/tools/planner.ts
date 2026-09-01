@@ -58,7 +58,7 @@ export function makePlanner(complete: PlanComplete): PlanTask {
  * separated reasoning channel; the strict plan JSON remains internal. */
 export const planTask: PlanTask = makePlanner(async (prompt, schema, onReasoning, signal) => {
   const result = await generateDesktopMessages([{ role: 'user', content: prompt }], {
-    operation: { type: 'tool_selection' },
+    operation: { type: 'tool_selection', input: prompt, limit: 1 },
     responseFormat: schema,
     thinking: true,
     signal,

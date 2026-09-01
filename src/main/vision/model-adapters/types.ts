@@ -34,6 +34,8 @@ export interface VisionPolicyInput {
    * actions use the canonical 0-1000 normalized coordinate protocol and are
    * converted into encoded pixels before actuation. */
   coordinateFrame?: VisionPolicyCoordinateFrame
+  /** Exact shared generation route selected for this policy run. */
+  generationRouteId?: string
 }
 
 export interface VisionPolicyCoordinateFrame {
@@ -62,6 +64,8 @@ export interface VisionPolicyRequest {
   maxTokens: number
   timeoutMs: number
   maxAttempts: number
+  /** Exact shared generation route selected for this policy run. */
+  generationRouteId?: string
   /** Optional structured-output grammar for specialist text protocols. */
   responseFormat?: unknown
   /** OpenAI-compatible native tools. General/remote operators use this path. */

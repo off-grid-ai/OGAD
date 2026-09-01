@@ -1,7 +1,8 @@
 import fs from 'node:fs'
 import sharp from 'sharp'
 import { COLORS_DARK, COLORS_LIGHT } from '@offgrid/design'
-import { llm } from '../llm'
+import type { GenerationMessage } from '@offgrid/models'
+import { generateDesktopMessages } from '../desktop-generation'
 import { TASK_GUIDANCE_APPLIED_TRACE } from '../tasks/task-guide'
 import type { VisionGroundingInput, VisionGroundingResult } from './vision-agent'
 import type { VisionAction } from './vision-action'
@@ -117,41 +118,33 @@ export async function runVisionPolicyRequest(
       // Kept per attempt for two reasons: to tell a model that DECLINED to act (reasoned, called
       // nothing) from a genuinely empty response, and to hand its own reasoning back on the retry.
       let reasoningText = ''
-      const useStream = Boolean(
-        request.tools?.length || (onReasoningDelta && request.separateReasoning)
-      )
-      const rawResponse = useStream
-        ? await llm.streamChat(
-            messages,
-            (text, kind) => {
-              if (kind !== 'reasoning') return
-              reasoningText += text
-              onReasoningDelta?.(text)
-            },
-            {
-              temperature: request.temperature,
-              topP: request.topP,
-              thinking: request.enableThinking === true && request.disableThinking !== true,
-              responseFormat: request.responseFormat,
-              tools: request.tools,
-              toolChoice: request.toolChoice,
-              maxTokens: request.maxTokens,
-              signal
-            },
-            request.timeoutMs
-          )
-        : {
-            content: await llm.chatMessages(messages, request.timeoutMs, request.maxTokens, {
-              temperature: request.temperature,
-              topP: request.topP,
-              responseFormat: request.responseFormat,
-              enableThinking: request.enableThinking,
-              disableThinking: request.disableThinking,
-              separateReasoning: request.separateReasoning,
-              signal
-            }),
-            toolCalls: []
+      const rawResponse = await generateDesktopMessages(generationMessages(messages), {
+        operation: { type: 'computer_use' },
+        responseFormat: request.responseFormat,
+        tools: request.tools,
+        toolChoice: request.toolChoice,
+        toolHandling: 'return',
+        temperature: request.temperature,
+        topP: request.topP,
+        thinking:
+          request.disableThinking === true
+            ? false
+            : request.enableThinking === true
+              ? true
+              : undefined,
+        maxTokens: request.maxTokens,
+        timeoutMs: request.timeoutMs,
+        signal,
+        allowFallback: false,
+        routeId: request.generationRouteId,
+        events: {
+          chunk: (chunk) => {
+            if (!chunk.reasoning) return
+            reasoningText += chunk.reasoning
+            onReasoningDelta?.(chunk.reasoning)
           }
+        }
+      })
       if (!rawResponse.content.trim() && rawResponse.toolCalls.length === 0) {
         // Reasoning but no action is the model DECLINING to act, not a dead connection - a real
         // run reasoned 1,249 tokens to a full stop ("...all the visible information about this
@@ -205,6 +198,19 @@ export async function runVisionPolicyRequest(
     }
   }
   throw lastError instanceof Error ? lastError : new Error('Computer-use model request failed.')
+}
+
+function generationMessages(messages: VisionPolicyMessage[]): GenerationMessage[] {
+  return messages.map((message) => ({
+    role: message.role,
+    content: Array.isArray(message.content)
+      ? message.content.map((part) =>
+          part.type === 'text'
+            ? part
+            : { type: 'image' as const, uri: part.image_url.url, detail: 'high' as const }
+        )
+      : message.content
+  }))
 }
 
 /** Stable audit/history form. Tool arguments are already model output; this
@@ -412,6 +418,7 @@ export async function runPreparedVisionGrounder(
   policyInput: VisionPolicyInput = prepared.policyInput
 ): Promise<VisionGroundingResult> {
   const request = adapter.buildRequest(policyInput)
+  request.generationRouteId = policyInput.generationRouteId
   input.reportProgress?.('Reviewing direction, milestone, and next action')
   const policyResponse = await runVisionPolicyRequest(request, input.signal, input.reportReasoning)
   const response = serializeVisionPolicyResponse(policyResponse)
@@ -435,10 +442,14 @@ export async function runPreparedVisionGrounder(
  * specialist adapters keep their native one-call protocol. */
 export function createVisionGrounder(
   adapter: VisionModelAdapter,
-  operatorEnvironment: VisionPolicyInput['operatorEnvironment'] = 'desktop'
+  operatorEnvironment: VisionPolicyInput['operatorEnvironment'] = 'desktop',
+  routeId?: string
 ): (input: VisionGroundingInput) => Promise<VisionGroundingResult> {
   return async (input) => {
     const prepared = await prepareVisionGrounding(input, operatorEnvironment)
-    return runPreparedVisionGrounder(adapter, input, prepared)
+    return runPreparedVisionGrounder(adapter, input, prepared, {
+      ...prepared.policyInput,
+      generationRouteId: routeId
+    })
   }
 }

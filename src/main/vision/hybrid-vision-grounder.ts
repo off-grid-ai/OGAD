@@ -276,6 +276,8 @@ export interface HybridVisionGrounderDependencies {
   ): Promise<VisionPolicyResponse>
   withSpecialist<T>(task: () => Promise<T>): Promise<{ result: T }>
   activeSpecialistAdapter(): VisionModelAdapter
+  reasonerRouteId?: string
+  specialistRouteId?: string
 }
 
 /** Compose one text reasoner and one grounding specialist inside the existing
@@ -287,7 +289,11 @@ export function createHybridVisionGrounder(
   return async (input) => {
     const prepared = await prepareVisionGrounding(input, environment)
     const request = reasonerRequest(prepared.policyInput)
-    const response = await dependencies.runReasoner(request, input.signal, input.reportReasoning)
+    const response = await dependencies.runReasoner(
+      { ...request, generationRouteId: dependencies.reasonerRouteId },
+      input.signal,
+      input.reportReasoning
+    )
     const outcome = reasonerOutcome(response)
     const serializedReasoner = serializeVisionPolicyResponse(response)
     if ('error' in outcome) {
@@ -312,7 +318,10 @@ export function createHybridVisionGrounder(
         adapter,
         input,
         prepared,
-        specialistInput(prepared, outcome.delegation)
+        {
+          ...specialistInput(prepared, outcome.delegation),
+          generationRouteId: dependencies.specialistRouteId
+        }
       )
       if (result.decision?.kind !== 'actions') {
         return {

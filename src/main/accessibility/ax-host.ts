@@ -19,6 +19,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { globalShortcut, systemPreferences } from 'electron'
 import { llm } from '../llm'
+import { generateDesktopText } from '../desktop-generation'
 import { loadActuation, type ActuationPort } from '../input/actuation'
 import { parseAxElements, type AxElement, type AxSnapshot } from './ax-elements'
 import { windowsAxBackend, type AxBackend } from './ax-win'
@@ -325,11 +326,16 @@ class AxRailHost {
             currentStep: liveStep,
             currentAction: 'Choosing the next action'
           })
-          const raw = await llm.chat(prompt, [], 60_000, 400, {
+          const generation = await generateDesktopText(prompt, {
+            operation: { type: 'text' },
             responseFormat: ELEMENT_STEP_FORMAT,
-            disableThinking: true,
-            signal: request.signal
+            thinking: false,
+            timeoutMs: 60_000,
+            maxTokens: 400,
+            signal: request.signal,
+            allowFallback: false
           })
+          const raw = generation.content
           console.log(`[ax-rail] model reply: ${JSON.stringify(raw.slice(0, 400))}`)
           return raw
         },

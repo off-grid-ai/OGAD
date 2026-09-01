@@ -20,6 +20,7 @@ import { saveArtifact, listArtifacts, deleteArtifact } from './artifacts'
 import { saveSkill } from './skills'
 import { addConnector, listConnectors } from './mcp'
 import { llm } from './llm'
+import { generateDesktopText } from './desktop-generation'
 import { generateImage, listImageModels } from './imagegen'
 import { ragService } from './rag/index'
 
@@ -62,10 +63,15 @@ function extractCode(text: string): string | null {
 
 async function gen(prompt: string): Promise<string | null> {
   try {
-    const out = await llm.chat(prompt, [], 120_000, 1500, { disableThinking: true })
-    return out.trim() || null
+    const out = await generateDesktopText(prompt, {
+      timeoutMs: 120_000,
+      maxTokens: 1500,
+      thinking: false,
+      allowFallback: false
+    })
+    return out.content.trim() || null
   } catch (e) {
-    console.error('[seed] llm.chat failed', e)
+    console.error('[seed] generation failed', e)
     return null
   }
 }
