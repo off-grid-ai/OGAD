@@ -7,20 +7,14 @@
  */
 import { generateDesktopMessages } from '../desktop-generation'
 import {
-  PLAN_SCHEMA,
-  buildPlannerPrompt,
-  buildPlannerRetryPrompt,
-  parsePlanResult,
-  type Plan,
-  type ToolCatalogEntry
-} from './planner-logic'
+  DEFAULT_TOOL_PLAN_MAX_TOKENS,
+  DEFAULT_TOOL_PLAN_TIMEOUT_MS,
+  generateToolPlan,
+  type ToolPlan as Plan,
+  type ToolPlanCatalogEntry as ToolCatalogEntry
+} from '@offgrid/models'
 
-export class PlanValidationError extends Error {
-  constructor(readonly validationErrors: readonly string[]) {
-    super(`Invalid structured plan after retry: ${validationErrors.join('; ')}`)
-    this.name = 'PlanValidationError'
-  }
-}
+export { ToolPlanValidationError as PlanValidationError } from '@offgrid/models'
 
 export type PlanComplete = (
   prompt: string,
@@ -38,20 +32,15 @@ export type PlanTask = (
 ) => Promise<Plan>
 
 export function makePlanner(complete: PlanComplete): PlanTask {
-  return async (goal, history, catalog, onReasoning, signal) => {
-    const originalPrompt = buildPlannerPrompt(goal, history, catalog)
-    const toolNames = catalog.map((c) => c.name)
-    const validationErrors: string[] = []
-    let prompt = originalPrompt
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const raw = await complete(prompt, PLAN_SCHEMA, onReasoning, signal)
-      const result = parsePlanResult(raw, toolNames)
-      if (result.valid) return result.plan
-      validationErrors.push(result.error)
-      prompt = buildPlannerRetryPrompt(originalPrompt, result.error)
-    }
-    throw new PlanValidationError(validationErrors)
-  }
+  return (goal, history, catalog, onReasoning, signal) =>
+    generateToolPlan({
+      goal,
+      history,
+      catalog,
+      signal,
+      generate: (prompt, schema, currentSignal) =>
+        complete(prompt, schema, onReasoning, currentSignal)
+    })
 }
 
 /** Production planner over the active model. It streams only the provider's
@@ -62,8 +51,8 @@ export const planTask: PlanTask = makePlanner(async (prompt, schema, onReasoning
     responseFormat: schema,
     thinking: true,
     signal,
-    maxTokens: 600,
-    timeoutMs: 60_000,
+    maxTokens: DEFAULT_TOOL_PLAN_MAX_TOKENS,
+    timeoutMs: DEFAULT_TOOL_PLAN_TIMEOUT_MS,
     events: {
       chunk: (chunk) => {
         if (chunk.reasoning) onReasoning?.(chunk.reasoning)

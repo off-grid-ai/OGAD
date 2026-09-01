@@ -13,6 +13,7 @@ import { callHook, HOOKS } from './bootstrap/hookRegistry'
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import type { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import type { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { DEFAULT_CONNECTOR_OPERATION_TIMEOUT_MS, withOperationTimeout } from '@offgrid/models'
 
 // Provider-specific quirks (e.g. Google's MCP endpoints) are a Pro concern and
 // register these hooks; in the free build they return undefined → generic MCP.
@@ -330,7 +331,7 @@ export async function testConnector(
 // unreachable connector (no server / stalled OAuth) would otherwise block every
 // send. Bound each connect+list; on timeout the caller drops that connector's tools
 // (and marks it errored) and the turn proceeds.
-export const FETCH_TOOLS_TIMEOUT_MS = 8000
+export const FETCH_TOOLS_TIMEOUT_MS = DEFAULT_CONNECTOR_OPERATION_TIMEOUT_MS
 
 /** Full tool definitions (incl. inputSchema) for a connected connector. Rejects if
  *  the connect+list exceeds FETCH_TOOLS_TIMEOUT_MS. */
@@ -349,19 +350,10 @@ export async function fetchTools(id: number): Promise<ConnectorToolDefinition[]>
       await close()
     }
   })()
-  let timer: ReturnType<typeof setTimeout>
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`listing tools for ${c.name} timed out`)),
-      FETCH_TOOLS_TIMEOUT_MS
-    )
-    timer.unref()
+  return withOperationTimeout(op, {
+    timeoutMs: FETCH_TOOLS_TIMEOUT_MS,
+    message: `listing tools for ${c.name} timed out`
   })
-  try {
-    return await Promise.race([op, timeout])
-  } finally {
-    clearTimeout(timer!)
-  }
 }
 
 export function getConnectorMeta(
