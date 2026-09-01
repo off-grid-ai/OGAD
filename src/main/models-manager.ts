@@ -40,7 +40,10 @@ import {
   projectorToHeal,
   isProjectorFileName,
   deletedModelSelectionModalities,
+  modelSelectionRefusal,
   runtimeModalityForModelKind,
+  specialistReclassificationModality,
+  transferredProjectorRepair,
   type CatalogEntry,
   type ModelModality,
   type Modality,
@@ -606,20 +609,22 @@ export async function deleteModel(modelId: string): Promise<DeleteModelResult> {
   return { success: true, freedFiles: freed }
 }
 
-type LlamaModelKindGate = (kind: string) => boolean
-
 async function setActiveLlamaModel(
   modelId: string,
-  acceptsKind: LlamaModelKindGate,
+  allowedKinds: readonly string[],
   expectedKind: string
 ): Promise<{ success: boolean; error?: string }> {
   // Imported local model: resolve from the local registry (not the catalog).
   if (modelId.startsWith('local:')) {
     const lm = getLocalModels().find((m) => m.id === modelId)
     if (!lm) return { success: false, error: 'unknown local model' }
-    if (!acceptsKind(lm.kind)) {
-      return { success: false, error: `${lm.kind} models are not loadable as ${expectedKind}` }
-    }
+    const refusal = modelSelectionRefusal({
+      kind: lm.kind,
+      allowedKinds,
+      expectedKind,
+      hasPrimary: Boolean(lm.primary)
+    })
+    if (refusal) return { success: false, error: refusal }
     desktopModelSelectionPersistence.projectLegacyTextConfig({
       id: modelId,
       primary: lm.primary,
@@ -630,28 +635,25 @@ async function setActiveLlamaModel(
   }
   const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models')
   const catalogEntry = CATALOG.find((model) => model.id === modelId)
-  if (catalogEntry?.availability === 'coming_soon') {
-    return {
-      success: false,
-      error: catalogEntry.availabilityNote ?? 'This model is coming soon.'
-    }
-  }
   const dir = llm.getModelsDir()
   const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG as unknown as CatalogEntry[])
   const transferred = downloadedVariant(downloaded, modelId)
   if (transferred) {
-    if (!acceptsKind(transferred.kind)) {
-      return {
-        success: false,
-        error: `${transferred.kind} models are not loadable as ${expectedKind}`
-      }
-    }
     const primary = downloadedPrimary(transferred)
-    if (!primary) return { success: false, error: 'transferred model has no primary file' }
+    const refusal = modelSelectionRefusal({
+      kind: transferred.kind,
+      allowedKinds,
+      expectedKind,
+      availability: catalogEntry?.availability,
+      availabilityNote: catalogEntry?.availabilityNote,
+      hasPrimary: Boolean(primary),
+      transferred: true
+    })
+    if (refusal) return { success: false, error: refusal }
     const mmproj = downloadedProjector(transferred) ?? null
     desktopModelSelectionPersistence.projectLegacyTextConfig({
       id: transferred.id,
-      primary,
+      primary: primary!,
       mmproj
     })
     llm.reloadModel()
@@ -660,13 +662,22 @@ async function setActiveLlamaModel(
   const entry =
     catalogEntry ?? (await resolveHuggingFaceModel(modelId, { fetchImpl: platformFetch }))
   if (!entry) return { success: false, error: 'unknown model' }
-  if (!acceptsKind(entry.kind)) {
-    return { success: false, error: `${entry.kind} models are not loadable as ${expectedKind}` }
-  }
   const primary = primaryFileName(entry as unknown as CatalogEntry)
-  if (!primary) return { success: false, error: 'model has no primary file' }
+  const refusal = modelSelectionRefusal({
+    kind: entry.kind,
+    allowedKinds,
+    expectedKind,
+    availability: entry.availability,
+    availabilityNote: entry.availabilityNote,
+    hasPrimary: Boolean(primary)
+  })
+  if (refusal) return { success: false, error: refusal }
   const mmproj = entry.files.find((f) => f.role === 'mmproj')?.name ?? null
-  desktopModelSelectionPersistence.projectLegacyTextConfig({ id: modelId, primary, mmproj })
+  desktopModelSelectionPersistence.projectLegacyTextConfig({
+    id: modelId,
+    primary: primary!,
+    mmproj
+  })
   llm.reloadModel()
   return { success: true }
 }
@@ -675,7 +686,7 @@ async function setActiveLlamaModel(
 export function projectActiveTextModelSelection(
   modelId: string
 ): Promise<{ success: boolean; error?: string }> {
-  return setActiveLlamaModel(modelId, isChatLoadable, 'the chat LLM')
+  return setActiveLlamaModel(modelId, ['text', 'vision'], 'the chat LLM')
 }
 
 /** Set the chat LLM through the shared selection owner. */
@@ -687,7 +698,7 @@ export function setActiveModel(modelId: string): Promise<{ success: boolean; err
 export function loadComputerUseModel(
   modelId: string
 ): Promise<{ success: boolean; error?: string }> {
-  return setActiveLlamaModel(modelId, (kind) => kind === 'computer_use', 'Computer Use')
+  return setActiveLlamaModel(modelId, ['computer_use'], 'Computer Use')
 }
 
 export function getActiveModel(): string | null {
@@ -710,8 +721,8 @@ export async function reconcileActiveModelClassification(): Promise<boolean> {
   const entry = CATALOG.find((model) => model.id === activeId)
   if (!entry || isChatLoadable(entry.kind)) return false
 
-  const modality = runtimeModalityForModelKind(entry.kind)
-  if (!modality || modality === 'text') return false
+  const modality = specialistReclassificationModality(entry.kind)
+  if (!modality) return false
   const active = desktopModelServices.activeModalities()
   const activeForModality = modality === 'voice' ? active.speech : active[modality]
   if (!activeForModality) {
@@ -744,20 +755,17 @@ export async function reconcileActiveModelProjector(): Promise<boolean> {
   const active = cfg!
   const transferred = active.id ? downloadedVariant(downloaded, active.id) : undefined
   if (transferred) {
-    const primary = downloadedPrimary(transferred)
-    const mmproj = downloadedProjector(transferred)
-    if (
-      primary &&
-      mmproj &&
-      fileSizeOf(dir, primary) > 0 &&
-      fileSizeOf(dir, mmproj) > 0 &&
-      (active.id !== transferred.id || active.primary !== primary || active.mmproj !== mmproj)
-    ) {
-      desktopModelSelectionPersistence.projectLegacyTextConfig({
+    const repair = transferredProjectorRepair({
+      active,
+      transferred: {
         id: transferred.id,
-        primary,
-        mmproj
-      })
+        primary: downloadedPrimary(transferred),
+        projector: downloadedProjector(transferred)
+      },
+      present: (name) => fileSizeOf(dir, name) > 0
+    })
+    if (repair) {
+      desktopModelSelectionPersistence.projectLegacyTextConfig(repair)
       llm.reloadModel()
       return true
     }
