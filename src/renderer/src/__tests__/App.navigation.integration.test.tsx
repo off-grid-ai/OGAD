@@ -706,12 +706,19 @@ describe('<App/> desktop navigation integration', () => {
   it('gives each local Web Use attempt one collapsible detail reveal', async () => {
     let emitTaskChange: ((task: unknown) => void) | undefined
     let emitSessions: ((snapshot: unknown) => void) | undefined
+    let markConversationsLoaded: () => void = () => {}
+    const conversationsLoaded = new Promise<void>((resolve) => {
+      markConversationsLoaded = resolve
+    })
     window.history.replaceState(null, '', '/chat')
     installAppBoundary({
       isPro: true,
-      getRagConversations: async () => [
-        { id: 'chat-web-start', title: 'Web start', updated_at: '2026-08-25T00:00:00.000Z' }
-      ],
+      getRagConversations: async () => {
+        markConversationsLoaded()
+        return [
+          { id: 'chat-web-start', title: 'Web start', updated_at: '2026-08-25T00:00:00.000Z' }
+        ]
+      },
       getRagMessages: async () => [],
       getActiveRagStreams: async () => [],
       imageGenJobStatus: async () => ({}),
@@ -739,7 +746,9 @@ describe('<App/> desktop navigation integration', () => {
       </TooltipProvider>
     )
 
-    expect((await screen.findAllByText('Web start')).length).toBeGreaterThan(0)
+    await conversationsLoaded
+    await act(async () => Promise.resolve())
+    expect(screen.getAllByText('Web start').length).toBeGreaterThan(0)
     const navigation = screen.getByRole('navigation', { name: 'Primary navigation' })
     expect(navigation.getAttribute('aria-expanded')).toBe('false')
     await waitFor(() => {
