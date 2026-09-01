@@ -17,7 +17,7 @@ it does not define a second provider, fallback, budget, or model-selection polic
   ONNX variants.
 - **Download manager** — progress, cancel, and a per-modality **active model** that the
   gateway loads on demand.
-- **Voice** — Kokoro is the current supported Mobile TTS runtime. OuteTTS and Qwen3 TTS are removed
-  and are not valid shared catalog or parity targets.
+- **Voice** — Kokoro is the supported Mobile TTS runtime and the only Mobile voice runtime in the
+  shared catalog.
 - Off Grid AI publishes correctly-converted SDXL GGUFs under the
   [`offgrid-ai`](https://huggingface.co/offgrid-ai) org.
