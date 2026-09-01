@@ -1,5 +1,8 @@
 import { execFile } from 'node:child_process'
-import fs from 'node:fs'
+// Electron patches node:fs to treat app.asar as a virtual directory. Cleanup
+// must address the physical archive, or recursive removal reaches the archive
+// and then tries to rmdir the file itself (ENOTDIR).
+import fs from 'original-fs'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
