@@ -1,4 +1,4 @@
-import { llm } from '../llm'
+import { generateDesktopText } from '../desktop-generation'
 import { extractJsonObject } from '../json-extract'
 import {
   TASK_PLAN_RESPONSE_FORMAT,
@@ -25,12 +25,16 @@ export async function createTaskExecutionPlan(
   const prompt = taskPlanPrompt(request.goal, request.targetLabel, request.surface)
   const generate =
     request.generate ??
-    ((input: string, signal?: AbortSignal) =>
-      llm.chat(input, [], 45_000, 280, {
-        disableThinking: true,
-        responseFormat: TASK_PLAN_RESPONSE_FORMAT,
-        signal
-      }))
+    (async (input: string, signal?: AbortSignal) =>
+      (
+        await generateDesktopText(input, {
+          timeoutMs: 45_000,
+          maxTokens: 280,
+          thinking: false,
+          responseFormat: TASK_PLAN_RESPONSE_FORMAT,
+          signal
+        })
+      ).content)
   try {
     const raw = await generate(prompt, request.signal)
     const json = extractJsonObject(raw)
