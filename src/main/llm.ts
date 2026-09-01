@@ -14,7 +14,6 @@ import {
   type KvCacheType,
   type PerformanceMode
 } from './model-sizing'
-import { resolveMaxTokens, maxTokensForWire, MAX_TOKENS_AUTO } from './llm/gen-params'
 import { classifyLlamaError, modelPortConflictReason } from './llama-error'
 import type { ManagedRuntime } from './runtime-manager'
 import { LLAMA_SERVER_PORT } from '../shared/ports'
@@ -25,8 +24,13 @@ import {
 } from '../shared/llm-defaults'
 import {
   REASONING_BUDGET_AUTO,
+  MAX_TOKENS_AUTO,
+  maxTokensForLlamaServer as maxTokensForWire,
+  reasoningControlFromChatTemplate,
   reasoningBudgetPayload,
   reasoningMetadataFromChatTemplate,
+  resolveMaxTokens,
+  shouldAutoRecoverRuntime as shouldAutoRecover,
   type GenerationReasoning,
   type ModelReasoningMetadata,
   type ReasoningEffort,
@@ -42,14 +46,12 @@ import {
 } from './llm/settings-math'
 import { buildMessages, thinkingPayload, type ChatMessage } from './llm/chat-payload'
 import { readImages } from './llm/read-images'
-import { detectThinkingDialect, type ThinkingDialect } from './llm/thinking-dialect'
 import { isValidGgufFile } from './models/gguf'
 import { isGrounderModel } from '@offgrid/models'
 import { readGgufContextLength } from './models/gguf-metadata'
 import { pickFreePort, isPortFree } from './free-port'
 import { postCompletionOnce } from './llm/http-post'
 import { engineSpawnEnv } from './llm/spawn-env'
-import { shouldAutoRecover } from './llm/crash-policy'
 import { streamCompletion, type StreamResult } from './llm/stream'
 import {
   nativeToolPlannerUnavailableMessage,
@@ -1044,7 +1046,7 @@ export class LLMService {
   /** Which thinking controls the LOADED model understands. Resolved once per load from the
    *  template llama-server publishes at /props; 'enable-thinking' until then, which is the
    *  behaviour every model got before this was resolved at all. */
-  private thinkingDialect: ThinkingDialect = 'enable-thinking'
+  private thinkingDialect: ModelReasoningMetadata['control'] = 'enable-thinking'
   private reasoningMetadata: ModelReasoningMetadata | undefined
 
   getReasoningMetadata(): ModelReasoningMetadata | undefined {
@@ -1061,7 +1063,7 @@ export class LLMService {
       const res = await fetch(`http://127.0.0.1:${this.port}/props`)
       if (!res.ok) return
       const body = (await res.json()) as { chat_template?: string }
-      this.thinkingDialect = detectThinkingDialect(body.chat_template)
+      this.thinkingDialect = reasoningControlFromChatTemplate(body.chat_template)
       this.reasoningMetadata = reasoningMetadataFromChatTemplate(
         'llama-server',
         body.chat_template,

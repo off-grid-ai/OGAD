@@ -50,7 +50,11 @@ import {
 } from './permissions'
 import { setupSystemStatusIpc } from './system-status-ipc'
 import { CACHE_CLEANUP_CHANNEL } from '../shared/ipc-contracts'
-import { toResponseGenerationResult, type ResponseGenerationResult } from './llm/response-result'
+import {
+  normalizeTextResponse as toResponseGenerationResult,
+  type NormalizedTextResponse
+} from '@offgrid/models'
+import type { GenerationMetrics } from '../shared/generation-metrics'
 import { getAllPromptDefs } from './prompts'
 import { getPrompt, getPromptTemplate, resetPrompt } from './prompt-store'
 import { setupTtsIpc } from './tts-ipc'
@@ -70,6 +74,8 @@ import { notifyRagConversationChanged } from './rag-conversation-events'
 import { readImages } from './llm/read-images'
 import { generateDesktopText } from './desktop-generation'
 // import { llm } from './llm'; // Moved to dynamic import to support ESM
+
+type ResponseGenerationResult = NormalizedTextResponse<GenerationMetrics>
 
 // Incrementally update master memory with a new conversation summary
 // This approach keeps context bounded by only processing current master + new summary

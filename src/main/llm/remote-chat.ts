@@ -1,6 +1,6 @@
 import {
-  REASONING_BUDGET_AUTO,
-  openRouterReasoningPayload,
+  openAICompatibleCompletionPayload,
+  remoteProviderErrorMessage,
   reasoningMetadataForOllama,
   reasoningMetadataFromChatTemplate,
   reasoningMetadataFromOpenRouter,
@@ -265,14 +265,6 @@ export function nativeToolPlannerUnavailableMessage(
   return `${capability.modelName} cannot act as the Chat tool planner because OpenRouter reports that this model does not support native tools. Select it as the Computer Use specialist instead, then select a tool-capable text model for Chat.`
 }
 
-interface RemoteErrorBody {
-  error?: {
-    message?: string
-    code?: string | number
-    metadata?: { raw?: string; provider_name?: string }
-  }
-}
-
 /** Keep remote transport errors useful without exposing the endpoint, headers,
  * API key, or request body. */
 export function remoteTextModelTransportError(error: unknown): Error {
@@ -291,18 +283,7 @@ export function remoteTextModelTransportError(error: unknown): Error {
 
 /** Preserve the provider's useful, non-secret failure reason. */
 export function remoteTextModelProviderError(status: number, rawBody: string): Error {
-  let body: RemoteErrorBody = {}
-  try {
-    body = JSON.parse(rawBody) as RemoteErrorBody
-  } catch {
-    // Non-JSON provider errors use the bounded response text below.
-  }
-  const detail =
-    body.error?.metadata?.raw?.trim() || body.error?.message?.trim() || rawBody.trim().slice(0, 500)
-  const provider = body.error?.metadata?.provider_name?.trim()
-  return new Error(
-    `Remote text model returned HTTP ${status}${provider ? ` from ${provider}` : ''}${detail ? `: ${detail}` : '.'}`
-  )
+  return new Error(remoteProviderErrorMessage(status, rawBody))
 }
 
 /** The OpenAI-compatible request body. Pure: what we send, with nothing about how we send it. */
@@ -310,27 +291,23 @@ function completionRequestBody(
   remote: RemoteTextModelConnection,
   request: RemoteChatRequest
 ): string {
-  return JSON.stringify({
+  return JSON.stringify(openAICompatibleCompletionPayload({
     model: remote.model,
     messages: request.messages,
-    max_tokens: request.maxTokens,
+    maxTokens: request.maxTokens,
     temperature: request.temperature,
-    ...(request.topP === undefined ? {} : { top_p: request.topP }),
-    ...(request.responseFormat ? { response_format: request.responseFormat } : {}),
-    ...(request.tools?.length
-      ? { tools: request.tools, tool_choice: request.toolChoice ?? 'auto' }
-      : {}),
+    topP: request.topP,
+    responseFormat: request.responseFormat,
+    tools: request.tools,
+    toolChoice: request.toolChoice,
     // Carry the user's configured thinking cap, not just a coarse effort hint. Without this the
     // cap was dropped for every remote model and the budget setting did nothing.
-    ...(request.reasoningWire ??
-      (remote.provider === 'openrouter'
-        ? openRouterReasoningPayload(
-            request.thinking === true,
-            request.reasoningBudget ?? REASONING_BUDGET_AUTO
-          )
-        : {})),
+    reasoningWire: request.reasoningWire,
+    provider: remote.provider,
+    thinking: request.thinking,
+    reasoningBudget: request.reasoningBudget,
     stream: true
-  })
+  }))
 }
 
 interface IdleWatchdog {

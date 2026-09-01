@@ -7,7 +7,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { startFakeLlamaServer } from '../../__tests__/harness/fake-llama-server'
-import { toResponseGenerationResult } from '../response-result'
+import { normalizeTextResponse as toResponseGenerationResult } from '@offgrid/models'
 
 const OLD_MAX_TOKENS = 2048
 const RAISED_MAX_TOKENS = 4096
