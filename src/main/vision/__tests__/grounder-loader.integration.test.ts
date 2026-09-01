@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { createGrounderRunner, type GrounderRunnerDependencies } from '../grounder-loader'
+import {
+  LLMService,
+  ModelResidencyManager,
+  runtimeModelRouteId,
+  type ModelModality,
+  type RuntimeModel
+} from '@offgrid/models'
+import {
+  createGrounderLifecycle,
+  createGrounderRunner,
+  type GrounderRunnerDependencies
+} from '../grounder-loader'
 
 const CHAT_MODEL = 'google/gemini-3.7-flash'
 const SPECIALIST = 'tencent/UI-Mate-9B-GGUF'
@@ -26,7 +37,8 @@ function lifecycle(): {
       activeModelId: () => activeModel.id,
       activeRemote: () => activeRemote,
       isGrounder: (model) => model.id === SPECIALIST,
-      load: async (modelId) => {
+      load: async (modelId, nativeAlreadyLoaded) => {
+        if (nativeAlreadyLoaded) return
         events.push(`load:${modelId}`)
         activeModel = { id: modelId, vision: true }
       },
@@ -47,6 +59,134 @@ function lifecycle(): {
 }
 
 describe('Computer Use specialist lifecycle', () => {
+  it('uses shared selection and residency for the native specialist swap and restore', async () => {
+    const selections = new Map<ModelModality, string | null>()
+    const models = new LLMService({
+      read: (modality) => selections.get(modality) ?? null,
+      write: (modality, routeId) => {
+        selections.set(modality, routeId)
+      }
+    })
+    const runtimeModels: RuntimeModel[] = [
+      {
+        id: CHAT_MODEL,
+        name: 'Chat',
+        kind: 'text',
+        modality: 'text',
+        source: 'local',
+        adapterId: 'desktop.llama',
+        capabilities: { textGeneration: true },
+        installed: true,
+        ready: true,
+        loaded: true,
+        residentSizeMB: 200,
+        peakSizeMB: 240
+      },
+      {
+        id: SPECIALIST,
+        name: 'Grounder',
+        kind: 'computer_use',
+        modality: 'computer_use',
+        source: 'local',
+        adapterId: 'desktop.llama.computer-use',
+        capabilities: { vision: true, computerUse: true },
+        installed: true,
+        ready: true,
+        loaded: false,
+        residentSizeMB: 300,
+        peakSizeMB: 360
+      }
+    ]
+    models.registerAdapter({ id: 'desktop-test-inventory', listModels: async () => runtimeModels })
+    await models.refresh()
+    const chatRoute = runtimeModelRouteId(runtimeModels[0]!)
+    await models.select('text', chatRoute)
+    const events: string[] = []
+    const residency = new ModelResidencyManager({
+      current: () => ({ totalMB: 16_384, availableMB: 16_384, platform: 'desktop' })
+    })
+    await residency.ensureResident(
+      { key: `text:${chatRoute}`, modelId: chatRoute, type: 'text', sizeMB: 240 },
+      {
+        load: async () => {
+          events.push('load-chat')
+        },
+        unload: async () => {
+          events.push('unload-chat')
+        }
+      }
+    )
+    const services = {
+      llm: models,
+      residency,
+      refresh: () => models.refresh(),
+      routeIdFor: (modality: ModelModality, nativeModelId?: string) =>
+        models.list(modality).find((model) => !nativeModelId || model.id === nativeModelId)
+          ?.routeId,
+      select: async (modality: ModelModality, routeId: string | null) => {
+        try {
+          await models.select(modality, routeId)
+          return { success: true }
+        } catch (error) {
+          return { success: false, error: error instanceof Error ? error.message : String(error) }
+        }
+      },
+      unload: async (modality: ModelModality) => {
+        let unloaded = false
+        for (const resident of residency.getResidents().filter((item) => item.type === modality)) {
+          unloaded = (await residency.evictByKey(resident.key)) || unloaded
+        }
+        return unloaded
+      },
+      warmText: async () => {
+        const model = models.active('text').model
+        if (!model) return false
+        const routeId = model.routeId ?? runtimeModelRouteId(model)
+        const admitted = await residency.ensureResident(
+          { key: `text:${routeId}`, modelId: routeId, type: 'text', sizeMB: 240 },
+          {
+            load: async () => {
+              events.push('load-chat')
+            },
+            unload: async () => {
+              events.push('unload-chat')
+            }
+          }
+        )
+        return admitted.loaded
+      }
+    }
+    const lifecycle = createGrounderLifecycle(services, {
+      project: async (modelId) => {
+        events.push(`project:${modelId}`)
+        return { success: true }
+      },
+      restart: async () => {
+        events.push('restart-grounder')
+      },
+      unload: async () => {
+        events.push('unload-grounder')
+      }
+    })
+
+    await lifecycle.load(SPECIALIST)
+
+    expect(models.active('computer_use').model?.id).toBe(SPECIALIST)
+    expect(residency.getResidents().map((resident) => resident.type)).toEqual(['computer_use'])
+    expect(events).toEqual([
+      'load-chat',
+      'unload-chat',
+      `project:${SPECIALIST}`,
+      'restart-grounder'
+    ])
+
+    await lifecycle.restoreLocal(CHAT_MODEL)
+
+    expect(models.active('text').model?.id).toBe(CHAT_MODEL)
+    expect(residency.getResidents().map((resident) => resident.type)).toEqual(['text'])
+    expect(events.slice(-2)).toEqual(['unload-grounder', 'load-chat'])
+  })
+
   it('keeps the specialist resident between actions when the text reasoner is remote', async () => {
     const h = lifecycle()
     const run = createGrounderRunner({
@@ -157,11 +297,7 @@ describe('Computer Use specialist lifecycle', () => {
     })
 
     expect(h.activeModelId()).toBe(CHAT_MODEL)
-    expect(h.events).toEqual([
-      `load:${SPECIALIST}`,
-      'run',
-      `restore-local:${CHAT_MODEL}`
-    ])
+    expect(h.events).toEqual([`load:${SPECIALIST}`, 'run', `restore-local:${CHAT_MODEL}`])
   })
 
   it('suspends remote priority even when the selected specialist is already resident', async () => {

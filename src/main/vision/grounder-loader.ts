@@ -15,13 +15,15 @@
  * llama-server and needs a real model on disk, so it is excluded from in-process
  * coverage; the A/B run exercises it.
  */
-import { llm } from '../llm'
 import {
-  getActiveModel,
-  listInstalled,
-  loadComputerUseModel,
-  setActiveModel
-} from '../models-manager'
+  ModelAdmissionError,
+  runtimeModelRouteId,
+  type ModelModality,
+  type RuntimeModel
+} from '@offgrid/models'
+import { llm } from '../llm'
+import { getActiveModel, listInstalled, loadComputerUseModel } from '../models-manager'
+import { desktopModelServices, type DesktopModelServices } from '../model-services'
 import { getActiveModal } from '../active-models'
 import { isGrounderActive } from './vision-model-notice'
 import { resolveGrounderPlan } from './grounder-plan'
@@ -62,21 +64,96 @@ export function grounderSwapOverheadMs(t: GrounderTiming): number {
   return t.swapInMs + t.swapOutMs
 }
 
-async function loadGrounder(id: string): Promise<void> {
-  const loaded = await loadComputerUseModel(id)
-  if (!loaded.success) throw new Error(loaded.error ?? 'The Computer Use model could not load.')
-  // reloadModel() (inside setActiveModel) is lazy; restart() forces the new
-  // server up NOW so the load cost lands in the swap phase, not the first step.
-  await llm.restart()
+const LLAMA_RUNTIME_RESIDENCY_KEY = 'desktop:llama-server'
+
+export interface GrounderNativeRuntime {
+  project(modelId: string): Promise<{ success: boolean; error?: string }>
+  restart(): Promise<void>
+  unload(): Promise<void>
 }
 
-async function restoreChatModel(previousId: string): Promise<void> {
-  const restored = await setActiveModel(previousId)
-  if (!restored.success) {
-    throw new Error(restored.error ?? 'The chat model could not be restored.')
+type GrounderModelServices = Pick<
+  DesktopModelServices,
+  'llm' | 'refresh' | 'residency' | 'routeIdFor' | 'select' | 'unload' | 'warmText'
+>
+
+function requireLocalModel(
+  services: GrounderModelServices,
+  modality: ModelModality,
+  modelId: string
+): RuntimeModel {
+  const routeId = services.routeIdFor(modality, modelId)
+  const model = routeId
+    ? services.llm
+        .list(modality)
+        .find((candidate) => (candidate.routeId ?? runtimeModelRouteId(candidate)) === routeId)
+    : undefined
+  if (!model || model.source !== 'local' || !model.ready) {
+    throw new Error(`The selected Computer Use model is not ready: ${modelId}.`)
   }
-  await llm.restart()
+  return model
 }
+
+/** Shared model-control boundary around the Desktop llama-server adapter. */
+export function createGrounderLifecycle(
+  services: GrounderModelServices,
+  native: GrounderNativeRuntime
+): Pick<GrounderRunnerDependencies, 'load' | 'restoreLocal'> {
+  return {
+    async load(modelId, nativeAlreadyLoaded = false) {
+      await services.refresh()
+      const selected = await services.select('computer_use', modelId)
+      if (!selected.success) {
+        throw new Error(selected.error ?? 'The Computer Use model could not be selected.')
+      }
+      await services.refresh()
+      const model = requireLocalModel(services, 'computer_use', modelId)
+      const routeId = model.routeId ?? runtimeModelRouteId(model)
+      const sizeMB = model.peakSizeMB ?? model.residentSizeMB
+      if (!sizeMB) throw new Error(`The Computer Use model has no memory footprint: ${modelId}.`)
+
+      // One llama-server process owns both chat and grounding. Remove a tracked
+      // text resident before the native adapter projects different model files.
+      if (!nativeAlreadyLoaded) await services.unload('text')
+      const admitted = await services.residency.ensureResident(
+        {
+          key: `computer_use:${routeId}`,
+          modelId: routeId,
+          type: 'computer_use',
+          sizeMB,
+          residencyKey: LLAMA_RUNTIME_RESIDENCY_KEY
+        },
+        {
+          load: async () => {
+            if (nativeAlreadyLoaded) return
+            const projected = await native.project(modelId)
+            if (!projected.success) {
+              throw new Error(projected.error ?? 'The Computer Use model could not load.')
+            }
+            await native.restart()
+          },
+          unload: () => native.unload()
+        }
+      )
+      if (!admitted.fits) throw new ModelAdmissionError(model)
+    },
+    async restoreLocal(modelId) {
+      await services.unload('computer_use')
+      const selected = await services.select('text', modelId)
+      if (!selected.success)
+        throw new Error(selected.error ?? 'The chat model could not be restored.')
+      await services.warmText()
+    }
+  }
+}
+
+const productionGrounderLifecycle = createGrounderLifecycle(desktopModelServices, {
+  project: loadComputerUseModel,
+  restart: () => llm.restart(),
+  unload: async () => {
+    await llm.unload()
+  }
+})
 
 interface GrounderRemoteSelection {
   id: string
@@ -96,7 +173,7 @@ export interface GrounderRunnerDependencies {
   activeModelId(): string | null
   activeRemote(): GrounderRemoteSelection | null
   isGrounder(model: GrounderActiveModel): boolean
-  load(modelId: string): Promise<void>
+  load(modelId: string, nativeAlreadyLoaded?: boolean): Promise<void>
   restoreLocal(modelId: string): Promise<void>
   suspendRemote(): void
   restoreRemote(selection: GrounderRemoteSelection): void
@@ -114,8 +191,8 @@ const productionGrounderDependencies: GrounderRunnerDependencies = {
     return session ? session.activeServer : getActiveRemoteVisionServer()
   },
   isGrounder: isGrounderActive,
-  load: loadGrounder,
-  restoreLocal: restoreChatModel,
+  load: productionGrounderLifecycle.load,
+  restoreLocal: productionGrounderLifecycle.restoreLocal,
   suspendRemote: deactivateRemoteVisionModel,
   restoreRemote(selection) {
     if (!activateRemoteVisionModel(selection.id, selection.model)) {
@@ -162,12 +239,16 @@ export function createGrounderRunner(
     const loadSelected = plan === 'swap-in-grounder'
     const suspendRemote = previousRemote !== null
 
-    if (!loadSelected && !suspendRemote) return directRun(task, now)
+    if (!loadSelected && !suspendRemote) {
+      // Adopt a native model found after relaunch into the shared residency SSOT.
+      await dependencies.load(grounderId, true)
+      return directRun(task, now)
+    }
 
     const swapped = await runRestoredModelSwap({
       swapIn: async () => {
         if (suspendRemote) dependencies.suspendRemote()
-        if (loadSelected) await dependencies.load(grounderId)
+        await dependencies.load(grounderId, alreadyGrounder)
       },
       run: task,
       // With no prior resident model there is nothing to restore: the callback
