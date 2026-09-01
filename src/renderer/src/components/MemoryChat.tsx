@@ -3845,16 +3845,26 @@ export function MemoryChat({
             streaming: true
           }
         ])
-        const tr = await window.api.toolChat(modelQuery, history, {
+        const { response: tr } = await desktopChatSession.sendWithTools({
+          userMessage: {
+            role: 'user',
+            content: [
+              { type: 'text', text: modelQuery },
+              ...imagePaths.map((uri) => ({ type: 'image' as const, uri }))
+            ]
+          },
+          query: modelQuery,
+          history,
           connectors: connectorsOn,
           conversationId: convId,
           // Memory scope drives which memory tools the model gets: a project offers its
           // knowledge base; "All memory" offers search_memory; "No memory" offers neither.
-          projectId: projectId ?? undefined,
+          projectId,
           allMemory: !projectId && !noMemory,
           images: imagePaths,
           imageAvailable,
-          streamId: toolStreamId,
+          turnId: toolStreamId,
+          noMemory,
           thinking: thinkingEnabled
         })
         const toolCalls = (tr?.toolCalls || []).map(

@@ -10,6 +10,7 @@ import {
   type RuntimeModel
 } from '@offgrid/models'
 import type { RagChatResultContract } from '../../../shared/ipc-contracts'
+import type { SearchHit } from '../types'
 
 export interface DesktopChatStreamEvent {
   streamId: string
@@ -31,6 +32,45 @@ export interface DesktopChatSessionBoundary {
   ): Promise<RagChatResultContract>
   onRagStream(listener: (event: DesktopChatStreamEvent) => void): () => void
   cancelRag(streamId: string): void
+  toolChat?(
+    query: string,
+    history: { role: string; content: string }[],
+    options: DesktopToolChatOptions
+  ): Promise<DesktopToolChatResponse>
+}
+
+export interface DesktopToolChatOptions {
+  connectors: boolean
+  conversationId: string
+  projectId?: string
+  allMemory: boolean
+  images: string[]
+  imageAvailable: boolean
+  streamId: string
+  thinking: boolean
+}
+
+export interface DesktopToolChatResponse {
+  answer?: string
+  unified?: Array<
+    Omit<SearchHit, 'key' | 'refId' | 'url' | 'score'> & {
+      key?: string
+      refId?: number
+      url?: string | null
+      score?: number
+    }
+  >
+  toolCalls?: Array<{
+    name: string
+    result: string
+    status?: 'completed' | 'failed' | 'pending'
+  }>
+  imageRequest?: { prompt: string; proposal?: { conversationId: string; slide: number } }
+  imageRequests?: Array<{
+    prompt: string
+    proposal?: { conversationId: string; slide: number }
+  }>
+  [key: string]: unknown
 }
 
 export interface DesktopChatSessionInput {
@@ -49,10 +89,22 @@ export interface DesktopChatSessionResult {
   turn: ChatTurn
   response: RagChatResultContract
 }
+export interface DesktopToolChatSessionInput extends DesktopChatSessionInput {
+  connectors: boolean
+  allMemory: boolean
+  imageAvailable: boolean
+}
+
+export interface DesktopToolChatSessionResult {
+  turn: ChatTurn
+  response: DesktopToolChatResponse
+}
 
 interface TurnExecution {
   input: DesktopChatSessionInput
+  route: 'rag' | 'tools'
   response?: RagChatResultContract
+  toolResponse?: DesktopToolChatResponse
 }
 
 interface StreamHub {
@@ -151,7 +203,7 @@ export class DesktopChatSession {
   }
 
   async send(input: DesktopChatSessionInput): Promise<DesktopChatSessionResult> {
-    this.executions.set(input.turnId, { input })
+    this.executions.set(input.turnId, { input, route: 'rag' })
     try {
       const turn = await this.service.send({
         conversationId: input.conversationId,
@@ -165,6 +217,27 @@ export class DesktopChatSession {
       const response = this.executions.get(input.turnId)?.response
       if (!response && turn.status === 'stopped') return { turn, response: { answer: '' } }
       if (!response) throw new Error(`Desktop chat response is missing for turn ${input.turnId}`)
+      return { turn, response }
+    } finally {
+      this.executions.delete(input.turnId)
+    }
+  }
+
+  async sendWithTools(input: DesktopToolChatSessionInput): Promise<DesktopToolChatSessionResult> {
+    this.executions.set(input.turnId, { input, route: 'tools' })
+    try {
+      const turn = await this.service.send({
+        conversationId: input.conversationId,
+        turnId: input.turnId,
+        projectId: input.projectId ?? undefined,
+        userMessage: input.userMessage,
+        operation: input.images.length ? { type: 'vision' } : { type: 'text' },
+        allowFallback: true,
+        partialOutputPolicy: 'preserve-and-stop'
+      })
+      const response = this.executions.get(input.turnId)?.toolResponse
+      if (!response && turn.status === 'stopped') return { turn, response: {} }
+      if (!response) throw new Error(`Desktop tool response is missing for turn ${input.turnId}`)
       return { turn, response }
     } finally {
       this.executions.delete(input.turnId)
@@ -197,6 +270,42 @@ export class DesktopChatSession {
       if (event.type === 'reasoning' && event.text) events?.chunk?.({ reasoning: event.text })
     })
     try {
+      if (execution.route === 'tools') {
+        if (!this.boundary.toolChat) throw new Error('Desktop tool-chat boundary is unavailable')
+        const toolInput = input as DesktopToolChatSessionInput
+        const response = await this.boundary.toolChat(input.query, input.history, {
+          connectors: toolInput.connectors,
+          conversationId: input.conversationId,
+          ...(input.projectId ? { projectId: input.projectId } : {}),
+          allMemory: toolInput.allMemory,
+          images: input.images,
+          imageAvailable: toolInput.imageAvailable,
+          streamId: input.turnId,
+          thinking: input.thinking
+        })
+        execution.toolResponse = response
+        const calls = response.toolCalls ?? []
+        if (calls.length) {
+          events?.message?.({
+            role: 'assistant',
+            content: '',
+            toolCalls: calls.map((call, index) => ({
+              id: `${input.turnId}:tool:${index}`,
+              name: call.name,
+              arguments: '{}'
+            }))
+          })
+          calls.forEach((call, index) => {
+            events?.message?.({
+              role: 'tool',
+              content: call.result,
+              name: call.name,
+              toolCallId: `${input.turnId}:tool:${index}`
+            })
+          })
+        }
+        return this.textResult(response.answer ?? '', signal)
+      }
       const response = await this.boundary.ragChat(
         input.query,
         'All',
@@ -209,19 +318,23 @@ export class DesktopChatSession {
         input.images
       )
       execution.response = response
-      return {
-        model: DESKTOP_CHAT_ROUTE,
-        output: { type: 'text', content: response.answer },
-        content: response.answer,
-        reasoning: '',
-        toolCalls: [],
-        finishReason: signal?.aborted ? 'cancelled' : 'stop',
-        attemptedModelIds: [DESKTOP_CHAT_ROUTE.id],
-        attemptedRouteIds: []
-      }
+      return this.textResult(response.answer, signal)
     } finally {
       unsubscribe()
       signal?.removeEventListener('abort', cancel)
+    }
+  }
+
+  private textResult(content: string, signal: AbortSignal | undefined): GenerationResult {
+    return {
+      model: DESKTOP_CHAT_ROUTE,
+      output: { type: 'text', content },
+      content,
+      reasoning: '',
+      toolCalls: [],
+      finishReason: signal?.aborted ? 'cancelled' : 'stop',
+      attemptedModelIds: [DESKTOP_CHAT_ROUTE.id],
+      attemptedRouteIds: []
     }
   }
 

@@ -79,4 +79,35 @@ describe('DesktopChatSession', () => {
     await second
     expect(session.queueProjection().entries).toEqual([])
   })
+
+  it('keeps complete tool rounds in the shared canonical response transcript', async () => {
+    const boundary: DesktopChatSessionBoundary = {
+      ragChat: vi.fn(async () => ({ answer: '' })),
+      toolChat: vi.fn(async () => ({
+        answer: 'The weather is clear.',
+        toolCalls: [{ name: 'weather', result: 'Clear, 18 C', status: 'completed' }]
+      })),
+      onRagStream: () => () => undefined,
+      cancelRag: vi.fn()
+    }
+    const session = new DesktopChatSession(boundary)
+
+    const result = await session.sendWithTools({
+      ...input('turn-tools'),
+      connectors: true,
+      allMemory: true,
+      imageAvailable: false
+    })
+
+    expect(result.turn.responseMessages?.map((message) => message.role)).toEqual([
+      'assistant',
+      'tool',
+      'assistant'
+    ])
+    expect(result.turn.responseMessages?.[1]).toMatchObject({
+      role: 'tool',
+      name: 'weather',
+      content: 'Clear, 18 C'
+    })
+  })
 })
