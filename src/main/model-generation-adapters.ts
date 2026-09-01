@@ -158,11 +158,11 @@ function finishReason(value: string | null): GenerationFinishReason {
   return value ? 'unknown' : 'stop'
 }
 
-function finalChunk(result: StreamResult): GenerationChunk {
+function finalChunk(result: StreamResult, request: GenerationRequest): GenerationChunk {
   const promptTokens = result.metrics?.promptTokens
   const outputTokens = result.metrics?.completionTokens
   return {
-    ...(result.toolCalls.length
+    ...(result.toolCalls.length && request.operation?.type !== 'tool_selection'
       ? {
           toolCallDeltas: result.toolCalls.map((call, index) => ({
             index,
@@ -170,6 +170,14 @@ function finalChunk(result: StreamResult): GenerationChunk {
             name: call.name,
             argumentsDelta: call.arguments
           }))
+        }
+      : {}),
+    ...(request.operation?.type === 'tool_selection'
+      ? {
+          output: {
+            type: 'tool_selection' as const,
+            toolCalls: result.toolCalls
+          }
         }
       : {}),
     ...(promptTokens || outputTokens
@@ -201,7 +209,7 @@ abstract class DesktopGenerationAdapter implements GenerationAdapter {
     ).then(
       (result) => {
         this.observations.record(request.identity?.turnId, result.metrics)
-        channel.push(finalChunk(result))
+        channel.push(finalChunk(result, request))
         channel.finish()
       },
       (error: unknown) => channel.fail(error)
@@ -241,7 +249,12 @@ export class DesktopGenerationObservations {
 }
 
 export class DesktopLocalGenerationAdapter extends DesktopGenerationAdapter {
-  readonly id = 'desktop.llama'
+  constructor(
+    observations: DesktopGenerationObservations,
+    readonly id = 'desktop.llama'
+  ) {
+    super(observations)
+  }
 
   load(): Promise<void> {
     return llm.init()
@@ -263,7 +276,12 @@ export class DesktopLocalGenerationAdapter extends DesktopGenerationAdapter {
 }
 
 export class DesktopRemoteGenerationAdapter extends DesktopGenerationAdapter {
-  readonly id = 'desktop.remote-chat'
+  constructor(
+    observations: DesktopGenerationObservations,
+    readonly id = 'desktop.remote-chat'
+  ) {
+    super(observations)
+  }
 
   protected run(
     model: RuntimeModel,

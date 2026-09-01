@@ -37,6 +37,7 @@ interface DesktopInventoryModel {
   engine?: string
   remoteServerId?: string
   remoteModelId?: string
+  grounder?: boolean
 }
 
 interface DesktopModelServicesDependencies {
@@ -58,6 +59,7 @@ function legacyModality(
 
 function modalityForKind(kind: string | undefined): ModelModality | null {
   if (kind === 'text' || kind === 'vision') return 'text'
+  if (kind === 'computer_use') return 'computer_use'
   if (kind === 'image' || kind === 'voice' || kind === 'transcription') return kind
   return null
 }
@@ -221,7 +223,44 @@ class DesktopInventorySource {
     const activeText = this.selections.read('text')
     const activeTextRoute = activeText ? decodeModelRouteId(activeText) : null
 
-    return catalog.flatMap((model): RuntimeModel[] => {
+    const expandTextRoutes = (base: RuntimeModel): RuntimeModel[] => {
+      const route = (
+        routeModality: ModelModality,
+        adapterId: string,
+        capabilities: RuntimeModel['capabilities']
+      ): RuntimeModel => ({ ...base, modality: routeModality, adapterId, capabilities })
+      const prefix = base.source === 'remote' ? 'desktop.remote-chat' : 'desktop.llama'
+      return [
+        base,
+        route('classifier', `${prefix}.classifier`, { classification: true, streaming: true }),
+        route('tool_selection', `${prefix}.tool-selection`, {
+          tools: true,
+          toolSelection: true,
+          streaming: true,
+          structuredOutput: true
+        }),
+        ...(base.capabilities.vision
+          ? [
+              route('vision', `${prefix}.vision`, {
+                vision: true,
+                textGeneration: true,
+                streaming: true,
+                structuredOutput: true
+              }),
+              route('computer_use', `${prefix}.computer-use`, {
+                vision: true,
+                computerUse: true,
+                tools: true,
+                toolSelection: true,
+                streaming: true,
+                structuredOutput: true
+              })
+            ]
+          : [])
+      ]
+    }
+
+    const catalogRoutes = catalog.flatMap((model): RuntimeModel[] => {
       const modality = modalityForKind(model.kind)
       if (!modality) return []
       const remote = model.remoteServerId ? remoteById.get(model.remoteServerId) : undefined
@@ -235,37 +274,73 @@ class DesktopInventorySource {
           : modality === 'text' &&
             (activeTextRoute?.modelId ?? activeText) === model.id &&
             localTextState.loaded
+      const prefix = source === 'remote' ? 'desktop.remote-chat' : 'desktop.llama'
       const adapterId =
-        source === 'remote'
-          ? 'desktop.remote-chat'
-          : modality === 'text'
-            ? 'desktop.llama'
+        modality === 'text'
+          ? prefix
+          : modality === 'computer_use'
+            ? `${prefix}.computer-use`
             : modality === 'image'
               ? 'desktop.image'
               : modality === 'voice'
                 ? 'desktop.tts'
                 : 'desktop.transcription'
-      return [
-        {
-          id: remote && model.remoteModelId ? model.remoteModelId : model.id,
-          name: model.name?.trim() || model.id,
-          kind: (model.kind ?? 'text') as ModelKind,
-          modality,
-          source,
-          adapterId,
-          providerId: remote?.provider ?? model.runtime ?? model.engine,
-          serverId: remote?.id,
-          capabilities: {
-            vision: model.kind === 'vision' || source === 'remote',
-            tools: modality === 'text',
-            thinking: modality === 'text'
-          },
-          installed: isInstalled,
-          ready,
-          loaded
-        }
-      ]
+      const base: RuntimeModel = {
+        id: remote && model.remoteModelId ? model.remoteModelId : model.id,
+        name: model.name?.trim() || model.id,
+        kind: (model.kind ?? 'text') as ModelKind,
+        modality,
+        source,
+        adapterId,
+        providerId: remote?.provider ?? model.runtime ?? model.engine,
+        serverId: remote?.id,
+        capabilities: {
+          textGeneration: modality === 'text',
+          vision: model.kind === 'vision' || model.kind === 'computer_use' || source === 'remote',
+          computerUse: modality === 'computer_use',
+          imageGeneration: modality === 'image',
+          speechSynthesis: modality === 'voice',
+          transcription: modality === 'transcription',
+          tools: modality === 'text' || modality === 'computer_use',
+          toolSelection: modality === 'computer_use',
+          thinking: modality === 'text' || modality === 'computer_use',
+          streaming: modality === 'text' || modality === 'computer_use',
+          structuredOutput: modality === 'text' || modality === 'computer_use'
+        },
+        installed: isInstalled,
+        ready,
+        loaded
+      }
+      if (modality !== 'text') return [base]
+      return expandTextRoutes(base)
     })
+
+    const remoteRoutes = remoteSettings.servers.flatMap((server): RuntimeModel[] => {
+      const loaded =
+        activeTextRoute?.serverId === server.id && activeTextRoute.modelId === server.model
+      return expandTextRoutes({
+        id: server.model,
+        name: server.model,
+        kind: 'vision',
+        modality: 'text',
+        source: 'remote',
+        adapterId: 'desktop.remote-chat',
+        providerId: server.provider,
+        serverId: server.id,
+        capabilities: {
+          textGeneration: true,
+          vision: true,
+          tools: true,
+          thinking: true,
+          streaming: true,
+          structuredOutput: true
+        },
+        installed: true,
+        ready: true,
+        loaded
+      })
+    })
+    return [...catalogRoutes, ...remoteRoutes]
   }
 }
 
@@ -304,7 +379,15 @@ export function createDesktopModelServices(
   const source = new DesktopInventorySource(dependencies, ids, selections)
   for (const adapterId of [
     'desktop.llama',
+    'desktop.llama.classifier',
+    'desktop.llama.tool-selection',
+    'desktop.llama.vision',
+    'desktop.llama.computer-use',
     'desktop.remote-chat',
+    'desktop.remote-chat.classifier',
+    'desktop.remote-chat.tool-selection',
+    'desktop.remote-chat.vision',
+    'desktop.remote-chat.computer-use',
     'desktop.image',
     'desktop.tts',
     'desktop.transcription'
@@ -324,8 +407,26 @@ export function createDesktopModelServices(
     generationTimeoutMs: 24 * 60 * 60 * 1000
   })
   const generationObservations = new DesktopGenerationObservations()
-  generation.registerAdapter(new DesktopLocalGenerationAdapter(generationObservations))
-  generation.registerAdapter(new DesktopRemoteGenerationAdapter(generationObservations))
+  for (const adapterId of [
+    'desktop.llama',
+    'desktop.llama.classifier',
+    'desktop.llama.tool-selection',
+    'desktop.llama.vision',
+    'desktop.llama.computer-use'
+  ]) {
+    generation.registerAdapter(new DesktopLocalGenerationAdapter(generationObservations, adapterId))
+  }
+  for (const adapterId of [
+    'desktop.remote-chat',
+    'desktop.remote-chat.classifier',
+    'desktop.remote-chat.tool-selection',
+    'desktop.remote-chat.vision',
+    'desktop.remote-chat.computer-use'
+  ]) {
+    generation.registerAdapter(
+      new DesktopRemoteGenerationAdapter(generationObservations, adapterId)
+    )
+  }
 
   const projectedId = (modality: ModelModality): string | null => {
     const active = llm.active(modality)
