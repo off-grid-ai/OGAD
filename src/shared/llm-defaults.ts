@@ -1,35 +1,11 @@
-import { MAX_TOKENS_AUTO } from '@offgrid/models'
-
-export { MAX_TOKENS_AUTO }
-
-// Canonical LLM inference defaults - single source of truth shared by the
-// backend LLMService field defaults and the Settings UI (Reset to defaults).
-//
-// DEFAULT_CTX_SIZE is the context-window default. It matches the backend
-// LLMService ctxSize field and the `balanced` MODE_PRESET, so a fresh instance
-// and what the UI shows agree. Pure constants, no imports.
-
-export const DEFAULT_CTX_SIZE = 16384
-
-// Capture distillation combines the structured prompt, recent activity, accessibility text, and
-// vision tokens. An 8K window is the minimum supported runtime envelope; the 16K default above
-// leaves output headroom instead of consuming the whole window with input.
-export const MIN_CAPTURE_CTX_SIZE = 8192
-
-// Max-output sentinel: the setting value meaning "auto" — let a reply run until the model emits its
-// natural stop (EOS) or the context window fills, rather than a fixed token cap that truncated long
-// answers. Stored as 0 (a literal 0-token cap is meaningless) and mapped to the engine's unlimited
-// (n_predict = -1) at the wire. Single source of truth for the backend and the Settings UI.
-// Fresh-install / reset default for max output: auto (context is the limit, not a fixed number).
-export const DEFAULT_MAX_TOKENS = MAX_TOKENS_AUTO
-
-// Emergency ceiling for tool calls in one response. Keep this aligned with Off Grid AI Mobile so
-// a synced value has the same meaning on both products.
-export const MIN_MAX_TOOL_CALLS = 1
-export const MAX_MAX_TOOL_CALLS = 100
-export const DEFAULT_MAX_TOOL_CALLS = 25
-
-export function normalizeMaxToolCalls(value: number): number {
-  if (!Number.isFinite(value)) return DEFAULT_MAX_TOOL_CALLS
-  return Math.max(MIN_MAX_TOOL_CALLS, Math.min(MAX_MAX_TOOL_CALLS, Math.round(value)))
-}
+// Compatibility export for src/main/tools.ts. Remove this file after that consumer can move.
+export {
+  DEFAULT_CTX_SIZE,
+  DEFAULT_MAX_TOKENS,
+  DEFAULT_MAX_TOOL_CALLS,
+  MAX_MAX_TOOL_CALLS,
+  MAX_TOKENS_AUTO,
+  MIN_CAPTURE_CTX_SIZE,
+  MIN_MAX_TOOL_CALLS,
+  normalizeMaxToolCalls
+} from '@offgrid/models'

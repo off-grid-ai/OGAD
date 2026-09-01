@@ -5,14 +5,10 @@ import * as fs from 'fs'
 import { modelsDir as getModelsDir, binRoots, isPackaged, exe } from './runtime-env'
 import { reapOrphanProcessesOnPort, type PortReapResult } from './kill-orphan-port'
 import { classifyLlamaError, modelPortConflictReason } from './llama-error'
-import type { ManagedRuntimePort as ManagedRuntime } from '@offgrid/models'
 import { LLAMA_SERVER_PORT } from '../shared/ports'
 import {
   DEFAULT_CTX_SIZE,
   DEFAULT_MAX_TOOL_CALLS,
-  normalizeMaxToolCalls
-} from '../shared/llm-defaults'
-import {
   REASONING_BUDGET_AUTO,
   MAX_TOKENS_AUTO,
   maxTokensForLlamaServer as maxTokensForWire,
@@ -26,9 +22,12 @@ import {
   capContextToTrainedWindow,
   applyTextRuntimeModePreset,
   llamaServerCompletionPayload,
+  normalizeMaxToolCalls,
+  type ManagedRuntimePort as ManagedRuntime,
   llamaServerLaunchArgs,
   textRuntimeLaunchChanged,
   textRuntimeCrashRecoveryPlan,
+  isGrounderModel,
   isPerformanceMode,
   isReasoningEffort,
   type LlamaKvCacheType as KvCacheType,
@@ -41,7 +40,6 @@ import {
 } from '@offgrid/models'
 import { acceleratorForEngine, type EngineAccelerator } from '../shared/engine-accelerator'
 import { isValidGgufFile } from './models/gguf'
-import { isGrounderModel } from '@offgrid/models'
 import { readGgufContextLength } from './models/gguf-metadata'
 import { pickFreePort, isPortFree } from './free-port'
 import { engineSpawnEnv } from './llm/spawn-env'

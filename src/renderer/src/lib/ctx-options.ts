@@ -1,4 +1,4 @@
-import { DEFAULT_CTX_SIZE, MIN_CAPTURE_CTX_SIZE } from '@offgrid/core/shared/llm-defaults'
+import { DEFAULT_CTX_SIZE, MIN_CAPTURE_CTX_SIZE } from '@offgrid/models'
 
 // The context-window choices the Settings picker offers. We bound the base ladder by the model's
 // TRAINED maximum (from GGUF metadata, surfaced by the backend as modelMaxCtx): offering a window

@@ -6,9 +6,7 @@ import {
   MAX_MAX_TOOL_CALLS,
   MAX_TOKENS_AUTO,
   MIN_MAX_TOOL_CALLS,
-  MIN_CAPTURE_CTX_SIZE
-} from '@offgrid/core/shared/llm-defaults'
-import {
+  MIN_CAPTURE_CTX_SIZE,
   REASONING_BUDGET_AUTO,
   REASONING_BUDGET_OPTIONS,
   reasoningBudgetLabel,
