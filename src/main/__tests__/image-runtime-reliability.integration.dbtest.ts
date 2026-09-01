@@ -285,7 +285,7 @@ afterAll(async () => {
 })
 
 describe('multimodal runtime reliability', () => {
-  it('evicts a resident chat runtime for image generation and reloads it for the next chat', async () => {
+  it('keeps small text and image work within the balanced budget without restarting chat', async () => {
     expect(await llm.chat('before image')).toBe('chat recovered')
     expect(lineCount(fixture.llamaLog)).toBe(1)
 
@@ -300,7 +300,7 @@ describe('multimodal runtime reliability', () => {
     expect(image.dataUrl).toBe(`data:image/png;base64,${PNG_BASE64}`)
 
     expect(await llm.chat('after image')).toBe('chat recovered')
-    expect(lineCount(fixture.llamaLog)).toBe(2)
+    expect(lineCount(fixture.llamaLog)).toBe(1)
   })
 
   it('refuses an over-budget image before native execution and runs only after explicit override', async () => {
