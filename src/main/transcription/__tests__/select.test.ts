@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   pickTranscription,
   resolveTranscription,
+  transcriptionEngineForRoute,
   withConfiguredTranscriptionLanguage
 } from '../select'
 import type { TranscriptionService } from '../types'
@@ -20,6 +21,18 @@ describe('Desktop transcription adapter selection', () => {
     })
     expect(selected.engine).toBe('parakeet')
     expect(selected.fellBack).toBe(false)
+  })
+
+  it('keeps canonical and provider-backed route identity on the selected native engine', () => {
+    expect(
+      transcriptionEngineForRoute({
+        id: 'csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8'
+      })
+    ).toBe('parakeet')
+    expect(transcriptionEngineForRoute({ id: 'bundled-parakeet', providerId: 'parakeet' })).toBe(
+      'parakeet'
+    )
+    expect(transcriptionEngineForRoute({ id: 'ggerganov/whisper.cpp/base' })).toBe('whisper')
   })
 
   it('uses the real one-shot Whisper adapter when optional native runtimes are absent', () => {

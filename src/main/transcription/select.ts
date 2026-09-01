@@ -1,5 +1,6 @@
 import {
   buildTranscriptionModelOptions,
+  catalogTranscriptionEngine,
   residentAwareTranscriptionEngine,
   resolveSupportedTranscriptionLanguage,
   selectAvailableTranscriptionEngine,
@@ -11,10 +12,12 @@ import {
   type TranscriptionEngine,
   type TranscriptionResidencyMode
 } from '@offgrid/models'
+import path from 'node:path'
 import { transcriptionLanguages, type SpeechLanguage } from '@offgrid/speech'
 import { getActiveModal } from '../active-models'
 import { getSetting } from '../database'
 import { generateDesktopOperation } from '../desktop-generation'
+import { desktopModelServices } from '../model-services'
 import type { ManagedRuntimePort as ManagedRuntime } from '@offgrid/models'
 import { modelsByKind } from '@offgrid/models'
 import { parakeetTranscription as parakeet } from './parakeet-cli'
@@ -68,6 +71,96 @@ export function getTranscription(engine: TranscriptionEngine = 'whisper'): Trans
   return resolveTranscription(engine).service
 }
 
+export function transcriptionEngineForRoute(model: {
+  id: string
+  providerId?: string
+}): CatalogTranscriptionEngine {
+  const catalogEntry = modelsByKind('transcription').find((entry) => entry.id === model.id)
+  return catalogEntry
+    ? catalogTranscriptionEngine(catalogEntry)
+    : model.providerId === 'parakeet'
+      ? 'parakeet'
+      : 'whisper'
+}
+
+async function routeForTranscription(
+  engine: TranscriptionEngine,
+  nativeModelId?: string,
+  preferSmallModel: boolean = false
+): Promise<string | undefined> {
+  await desktopModelServices.refresh()
+  const requestedModel = nativeModelId ? path.basename(nativeModelId) : undefined
+  const explicitRoute = requestedModel
+    ? desktopModelServices.routeIdFor('transcription', requestedModel)
+    : undefined
+  if (explicitRoute) return explicitRoute
+
+  const requestedEngine: CatalogTranscriptionEngine = engine === 'parakeet' ? 'parakeet' : 'whisper'
+  const compatible = desktopModelServices.llm
+    .list('transcription')
+    .filter((model) => model.ready && transcriptionEngineForRoute(model) === requestedEngine)
+  if (preferSmallModel) {
+    return compatible
+      .sort(
+        (left, right) =>
+          (left.residentSizeMB ?? Number.MAX_SAFE_INTEGER) -
+          (right.residentSizeMB ?? Number.MAX_SAFE_INTEGER)
+      )[0]?.routeId
+  }
+  const active = desktopModelServices.llm.active('transcription').model
+  if (active?.ready && transcriptionEngineForRoute(active) === requestedEngine)
+    return active.routeId
+  return compatible[0]?.routeId
+}
+
+/**
+ * Run a caller-selected Desktop transcription engine through the shared generation owner.
+ * The native engine remains a platform port; shared routing, admission, cancellation,
+ * recovery, and result validation stay on the GenerationService path.
+ */
+export function getGenerationTranscription(
+  engine: TranscriptionEngine = 'whisper',
+  preferences: { preferSmallModel?: boolean } = {}
+): TranscriptionService {
+  return {
+    isAvailable: () => resolveTranscription(engine).service.isAvailable(),
+    async transcribe(input, options = {}) {
+      const selected = resolveTranscription(engine).engine
+      const routeId = await routeForTranscription(
+        selected,
+        options.model,
+        preferences.preferSmallModel === true
+      )
+      const result = await generateDesktopOperation(
+        {
+          type: 'transcription',
+          audio: { type: 'audio', uri: input.path },
+          modelId: options.model,
+          language: options.language,
+          suppressNonSpeech: options.suppressNonSpeech,
+          alreadyWav16k: options.alreadyWav16k,
+          prompt: options.prompt,
+          timestamps: options.timestamps
+        },
+        {
+          routeId,
+          signal: options.signal,
+          allowFallback: true,
+          timeoutMs: 30 * 60 * 1000
+        }
+      )
+      if (result.output.type !== 'transcription') {
+        throw new Error('The transcription engine returned no transcript.')
+      }
+      return {
+        text: result.output.text,
+        language: result.output.language,
+        segments: result.output.segments
+      }
+    }
+  }
+}
+
 export type TranscriptionSettingReader = (key: string, fallback: string) => string
 
 export function getActiveNativeTranscription(
@@ -85,33 +178,29 @@ export function getActiveNativeTranscription(
 export function getActiveTranscription(
   readSetting: TranscriptionSettingReader = getSetting
 ): TranscriptionService {
-  const native = getActiveNativeTranscription(readSetting)
-  return {
-    isAvailable: () => native.isAvailable(),
-    async transcribe(input, options = {}) {
-      const result = await generateDesktopOperation(
-        {
-          type: 'transcription',
-          audio: { type: 'audio', uri: input.path },
-          modelId: options.model,
-          language: options.language,
-          suppressNonSpeech: options.suppressNonSpeech,
-          alreadyWav16k: options.alreadyWav16k,
-          prompt: options.prompt,
-          timestamps: options.timestamps
-        },
-        { signal: options.signal, allowFallback: true, timeoutMs: 30 * 60 * 1000 }
-      )
-      if (result.output.type !== 'transcription') {
-        throw new Error('The transcription engine returned no transcript.')
-      }
-      return {
-        text: result.output.text,
-        language: result.output.language,
-        segments: result.output.segments
-      }
-    }
-  }
+  const active = getActiveModal('transcription')
+  const engine = transcriptionEngineForActiveModel(active, modelsByKind('transcription'))
+  const language = resolveSupportedTranscriptionLanguage(
+    readSetting('sttLanguage', 'auto'),
+    transcriptionLanguages(engine, active)
+  )
+  return withConfiguredTranscriptionLanguage(getGenerationTranscription(engine), language)
+}
+
+export function getNativeTranscriptionForRoute(
+  model: { id: string; providerId?: string; residencyMode?: string },
+  readSetting: TranscriptionSettingReader = getSetting
+): TranscriptionService {
+  const engine = transcriptionEngineForRoute(model)
+  const selected = resolveTranscription(
+    engine,
+    model.residencyMode === 'persistent' ? 'resident' : 'on-demand'
+  ).engine
+  const language = resolveSupportedTranscriptionLanguage(
+    readSetting('sttLanguage', 'auto'),
+    transcriptionLanguages(engine, model.id)
+  )
+  return withConfiguredTranscriptionLanguage(getTranscription(selected), language)
 }
 
 export function withConfiguredTranscriptionLanguage(

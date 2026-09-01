@@ -517,8 +517,8 @@ export class DesktopTranscriptionGenerationAdapter extends DesktopTypedGeneratio
     if (request.operation.audio.type !== 'audio' || !request.operation.audio.uri) {
       throw new Error('Desktop transcription needs an audio file URI.')
     }
-    const { getActiveNativeTranscription } = await import('./transcription/select')
-    const transcript = await getActiveNativeTranscription().transcribe(
+    const { getNativeTranscriptionForRoute } = await import('./transcription/select')
+    const transcript = await getNativeTranscriptionForRoute(_model).transcribe(
       { path: request.operation.audio.uri },
       {
         signal: request.signal,
