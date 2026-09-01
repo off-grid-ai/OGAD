@@ -38,6 +38,10 @@ for (const file of files) {
   const isUi = /^src\/(renderer\/src\/(components|hooks|screens)|.*\/(components|hooks|screens))\//.test(fileName)
   const isAdapter = /(^|\/)(adapters?|model-generation-adapters|remote-chat|remote-media-runtime)(\/|\.|$)/.test(fileName)
 
+  if (/^(?:src\/main\/tools\/(?:memory-scope|extension-select)|src\/shared\/llm-defaults)\.ts$/.test(fileName)) {
+    report('desktop-tool-policy-is-shared', fileName, source, source, `file:${path.basename(fileName)}`)
+  }
+
   const visit = node => {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
       const specifier = node.moduleSpecifier.text
@@ -69,6 +73,12 @@ for (const file of files) {
       }
       if (/^(generateResponse|generateResponseWithTools|generateWithMaxTokens|generateToolSelection)$/.test(rawName)) {
         report('generation-callers-use-shared-service', fileName, source, node, `call:${rawName}`)
+      }
+      if (
+        fileName === 'src/main/tools.ts' &&
+        /^(?:rankToolSchemas|rankToolSchemasByEmbedding|budgetToolSchemas|nativeToolPlannerUnavailableMessage|llm\.init|llm\.hasVision)$/.test(call)
+      ) {
+        report('desktop-tool-policy-is-shared', fileName, source, node, `call:${call}`)
       }
       if (
         isUi &&
@@ -117,6 +127,13 @@ for (const file of files) {
       node.name && /^(sendWithTools|sendImage)$/.test(node.name.getText(source))
     ) {
       report('desktop-chat-has-one-send-command', fileName, source, node.name, `declaration:${node.name.getText(source)}`)
+    }
+    if (
+      fileName === 'src/main/tools.ts' &&
+      (ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)) &&
+      node.name && /^(?:schemas|selectEffectiveSchemas|runToolLoop)$/.test(node.name.getText(source))
+    ) {
+      report('desktop-tool-policy-is-shared', fileName, source, node.name, `declaration:${node.name.getText(source)}`)
     }
 
     if (isAdapter && (ts.isIfStatement(node) || ts.isSwitchStatement(node) || ts.isConditionalExpression(node))) {

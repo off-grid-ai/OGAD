@@ -6,44 +6,32 @@
 // and loop until it answers. Built-in tools only (no network) for now — web
 // search + MCP connectors plug in here later.
 
-import { llm } from './llm'
 import { SEARCH_KB_TOOL, makeSearchKnowledgeBaseHandler } from '@offgrid/rag'
-import { isMemoryToolAllowed } from './tools/memory-scope'
 import { getSetting, saveSetting } from './database'
-import { readImages } from './llm/read-images'
 import {
   DeferredImageRequestCollector,
   boundedToolHistory,
   buildAgentToolMessages,
-  budgetToolSchemas,
   decodeSearchRedirect as decodeDdgHref,
+  definitionToOpenAITool,
   evaluateArithmetic,
   executePortableTool,
   htmlToReadableText as htmlToText,
   catalogEntryToDefinition,
   findToolCatalogEntry,
+  normalizeMaxToolCalls,
+  openAIToolToDefinition,
   parseToolArguments,
+  PersistentToolEmbeddingCache,
   prepareToolCallWithQueryFallback,
-  rankToolSchemas,
-  rankToolSchemasByEmbedding,
+  selectAvailableToolDefinitions,
+  selectToolExtensions,
   stripHtmlTags as stripTags,
-  nativeToolPlannerUnavailableMessage,
   toolSchemaTokenBudget,
-  ToolEmbeddingCache
+  ToolRoutingService
 } from '@offgrid/models'
 
-const toolEmbeddingCache = new ToolEmbeddingCache()
-
-const sharedToolDefinition = (
-  name: string
-): ReturnType<typeof catalogEntryToDefinition> =>
-  catalogEntryToDefinition(findToolCatalogEntry(name)!)
-const webSearchTool = sharedToolDefinition('web_search')
-const readUrlTool = sharedToolDefinition('read_url')
-const calculatorTool = sharedToolDefinition('calculator')
-const dateTimeTool = sharedToolDefinition('get_current_datetime')
 import type { SearchKind, SearchResult } from '../shared/search-contract'
-import { selectToolExtensions } from './tools/extension-select'
 import {
   PROPOSAL_DECK_TOOL,
   PROPOSAL_DECK_TOOL_NAME,
@@ -52,12 +40,31 @@ import {
 } from './proposal-deck/tool'
 import { proposalDeckSystemHint, proposalDeckService } from './proposal-deck/service'
 import { callHookAsync, HOOKS } from './bootstrap/hookRegistry'
-import { DEFAULT_MAX_TOOL_CALLS } from '../shared/llm-defaults'
+import { DEFAULT_MAX_TOOL_CALLS } from '@offgrid/models'
 import { generateDesktopMessages } from './desktop-generation'
-import type { GenerationToolCall } from '@offgrid/models'
-import { remoteNativeToolCapability } from './llm/remote-chat'
-import { currentRemoteScreenTaskSession } from './actions/remote-screen-session'
-import { getActiveRemoteVisionServer } from './vision/remote-vision-server'
+import {
+  desktopToolCallLimit,
+  desktopToolContextSize,
+  desktopToolEmbeddingPort,
+  readSupportedToolImages
+} from './tools/platform-ports'
+import type { GenerationToolCall, GenerationToolDefinition } from '@offgrid/models'
+
+const toolEmbeddingCache = new PersistentToolEmbeddingCache({
+  read: async () => undefined,
+  write: async () => undefined
+})
+const toolRoutingService = new ToolRoutingService({
+  embedding: desktopToolEmbeddingPort,
+  embeddingCache: toolEmbeddingCache
+})
+
+const sharedToolDefinition = (name: string): ReturnType<typeof catalogEntryToDefinition> =>
+  catalogEntryToDefinition(findToolCatalogEntry(name)!)
+const webSearchTool = sharedToolDefinition('web_search')
+const readUrlTool = sharedToolDefinition('read_url')
+const calculatorTool = sharedToolDefinition('calculator')
+const dateTimeTool = sharedToolDefinition('get_current_datetime')
 
 // Per-tool enable/disable, persisted as a list of disabled tool names.
 function disabledSet(): Set<string> {
@@ -410,22 +417,12 @@ const TOOLS: ToolDef[] = [
 
 // generate_image is gated on an image model being available and is never offered
 // otherwise; every other built-in obeys only the disabled-set.
-function schemas(
-  imageAvailable: boolean,
-  scope: { projectActive: boolean; allMemory: boolean; proposalDeck: boolean }
-): unknown[] {
-  const off = disabledSet()
-  return (
-    TOOLS.filter((t) => !off.has(t.name))
-      .filter((t) => t.name !== 'generate_image' || imageAvailable)
-      .filter((t) => t.name !== PROPOSAL_DECK_TOOL_NAME || scope.proposalDeck)
-      // Memory tools (search_knowledge_base / search_memory) follow the chat's memory scope.
-      .filter((t) => isMemoryToolAllowed(t.name, scope))
-      .map((t) => ({
-        type: 'function',
-        function: { name: t.name, description: t.description, parameters: t.parameters }
-      }))
-  )
+function builtInDefinitions(): GenerationToolDefinition[] {
+  return TOOLS.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    inputSchema: tool.parameters
+  }))
 }
 
 /** Normalize a tool's return (bare string or structured) to a ToolResult. */
@@ -563,24 +560,6 @@ export async function toolChat(
       }
     }
   }
-  const screenTask = currentRemoteScreenTaskSession()
-  const remoteTextModel = screenTask ? screenTask.activeServer : getActiveRemoteVisionServer()
-  const remoteToolCapability = remoteTextModel
-    ? await remoteNativeToolCapability(remoteTextModel)
-    : null
-  const plannerUnavailable =
-    remoteToolCapability?.status === 'unsupported'
-      ? nativeToolPlannerUnavailableMessage(remoteToolCapability)
-      : undefined
-  if (plannerUnavailable) {
-    return {
-      answer: plannerUnavailable,
-      toolCalls: [],
-      unified: [],
-      imageRequests: []
-    }
-  }
-  await llm.init() // respects pause; ensures the server is up
   const onDelta = opts.onDelta ?? ((): void => {})
   const toolContext: ToolContext = {
     conversationId: opts.conversationId,
@@ -590,36 +569,23 @@ export async function toolChat(
     onActivity: opts.onActivity
   }
 
-  // Offer generate_image only when an image model is available. The renderer passes
-  // this; fall back to the main-process check so a caller that omits it still gates
-  // correctly (single source of truth for "can we make an image right now").
-  let imageAvailable = opts.imageAvailable ?? false
-  if (opts.imageAvailable === undefined) {
-    try {
-      const { activeImageModel } = await import('./imagegen')
-      imageAvailable = !!activeImageModel()
-    } catch {
-      /* no image runtime -> stay false */
-    }
-  }
-
   // Opt-in: pull in tools from registered pro extensions (e.g. MCP connectors)
   // alongside the built-ins. Schemas are built once per turn; each extension
   // caches whatever per-turn state it needs for execute(). Free build registers
   // no extensions, so this is just the built-ins.
   const exts = selectToolExtensions(getToolExtensions(), { connectors: !!opts.connectors })
-  const extSchemas: unknown[] = []
+  const extDefinitions: GenerationToolDefinition[] = []
   const hints: string[] = []
   const disabled = disabledSet()
   for (const e of exts) {
     try {
       const s = await e.schemas()
-      const enabledSchemas = s.filter((schema) => {
-        const name = (schema as { function?: { name?: unknown } }).function?.name
-        return typeof name !== 'string' || !disabled.has(name)
+      const definitions = s.flatMap((schema) => {
+        const definition = openAIToolToDefinition(schema)
+        return definition ? [definition] : []
       })
-      if (enabledSchemas.length) {
-        extSchemas.push(...enabledSchemas)
+      if (definitions.length) {
+        extDefinitions.push(...definitions)
         if (e.systemHint) hints.push(e.systemHint())
       }
     } catch (err) {
@@ -629,46 +595,40 @@ export async function toolChat(
   const proposalDeckActive =
     /# Skill:\s*proposal-deck\b|\/proposal-deck\b/i.test(query) ||
     (!!opts.conversationId && !!proposalDeckService().get(opts.conversationId))
-  const builtins = schemas(imageAvailable, {
-    projectActive: !!opts.projectId,
-    allMemory: !!opts.allMemory,
-    proposalDeck: proposalDeckActive
+  const memoryScope = { projectActive: !!opts.projectId, allMemory: !!opts.allMemory }
+  const builtins = selectAvailableToolDefinitions(builtInDefinitions(), {
+    disabledToolNames: disabled,
+    memoryScope,
+    imageAvailable: opts.imageAvailable ?? false,
+    proposalDeckAvailable: proposalDeckActive,
+    proposalDeckToolName: PROPOSAL_DECK_TOOL_NAME
   })
-  const rawTools = extSchemas.length ? [...builtins, ...extSchemas] : builtins
-  // Keep the tool payload within the model's context. llama-server inlines every
-  // tool schema into the prompt AND compiles it to a grammar, so a big connector
-  // set can blow past the context window and 400 the whole turn. Budget to a
-  // fraction of the effective context (leaving room for system + history +
-  // answer); prune verbose schemas first, drop connector tools only if needed.
-  // Smart routing: rank connector tools by relevance to this turn's message BEFORE
-  // budgeting, so the budgeter (which drops from the end) keeps the tools that
-  // actually match the request rather than whichever were last. Built-ins keep
-  // their position. Prefer SEMANTIC ranking (embedding similarity — matches on
-  // meaning, e.g. "meetings" → a calendar tool); fall back to lexical term-overlap
-  // if the embeddings backend isn't ready. No-op with 0-1 connector tools.
-  let rankedTools = rawTools
-  if (rawTools.length - builtins.length > 1) {
-    try {
-      const { embeddings } = await import('./embeddings')
-      rankedTools = await rankToolSchemasByEmbedding(query, rawTools, builtins.length, {
-        embed: (t) => embeddings.generateEmbedding(t)
-      }, toolEmbeddingCache)
-    } catch {
-      rankedTools = rankToolSchemas(query, rawTools, builtins.length)
-    }
-  }
-  const toolBudget = toolSchemaTokenBudget(llm.effectiveContextSize())
-  const budgeted = budgetToolSchemas(rankedTools, toolBudget, builtins.length)
-  if (budgeted.pruned || budgeted.droppedCount) {
+  const extensions = selectAvailableToolDefinitions(extDefinitions, {
+    disabledToolNames: disabled,
+    memoryScope,
+    imageAvailable: false,
+    proposalDeckAvailable: false
+  })
+  const toolBudget = toolSchemaTokenBudget(desktopToolContextSize())
+  const routed = await toolRoutingService.select({
+    messages: buildAgentToolMessages({ query, history }),
+    builtInTools: builtins,
+    externalTools: extensions,
+    remoteModel: false,
+    embeddingRouting: true,
+    modelRouting: false,
+    lexicalFallback: true,
+    schemaTokenLimit: toolBudget
+  })
+  if (routed.droppedCount) {
     console.warn(
-      `[tools] context budget ${toolBudget} tok: pruned schemas${budgeted.droppedCount ? `, dropped ${budgeted.droppedCount} connector tool(s)` : ''} to fit (final ~${budgeted.estimatedTokens} tok)`
+      `[tools] context budget ${toolBudget} tok: dropped ${routed.droppedCount} connector tool(s) to fit (final ~${routed.estimatedTokens} tok)`
     )
-    if (budgeted.droppedCount)
-      hints.push(
-        `Note: ${budgeted.droppedCount} connector tool(s) were omitted this turn to fit the context window; ask the user to disable some connectors if a needed tool is missing.`
-      )
+    hints.push(
+      `Note: ${routed.droppedCount} connector tool(s) were omitted this turn to fit the context window; ask the user to disable some connectors if a needed tool is missing.`
+    )
   }
-  const tools = budgeted.tools
+  const tools = routed.tools.map(definitionToOpenAITool)
   if (proposalDeckActive) hints.push(proposalDeckSystemHint(opts.conversationId))
 
   // Attached images ride on the current user turn so the vision model can read
@@ -677,7 +637,7 @@ export async function toolChat(
   // of truth (the renderer's flag is fetched once per mount and can be stale). A
   // text-only model given image_url parts either ignores them (silent wrong answer)
   // or errors, so drop the attachments when there's no vision projector.
-  const decodedImages = opts.images?.length && llm.hasVision() ? readImages(opts.images) : []
+  const decodedImages = readSupportedToolImages(opts.images ?? [])
   const messages = buildAgentToolMessages({
     query,
     history,
@@ -698,7 +658,7 @@ export async function toolChat(
     ProposalDeferredImageRequest | { prompt: string }
   >()
 
-  const maxToolRounds = llm.getSettings().maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS
+  const maxToolRounds = normalizeMaxToolCalls(desktopToolCallLimit() ?? DEFAULT_MAX_TOOL_CALLS)
   let streamedContent = ''
   const turnId = `desktop-tools:${Date.now()}:${Math.random().toString(36).slice(2)}`
   try {

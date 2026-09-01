@@ -4,7 +4,7 @@
  * undeclared category fails closed as a connector.
  */
 import { describe, expect, it } from 'vitest'
-import { selectToolExtensions } from '../extension-select'
+import { selectToolExtensions } from '@offgrid/models'
 import { nativeActionToolExtension } from '../nativeActionToolExtension'
 import type { ToolExtension } from '../../tools'
 
@@ -17,7 +17,7 @@ const ext = (id: string, category?: 'tool' | 'connector'): ToolExtension => ({
 })
 
 describe('selectToolExtensions', () => {
-  it('the assistant\'s own tools ride every agentic turn', () => {
+  it("the assistant's own tools ride every agentic turn", () => {
     const picked = selectToolExtensions([ext('native', 'tool'), ext('mcp', 'connector')], {
       connectors: false
     })
