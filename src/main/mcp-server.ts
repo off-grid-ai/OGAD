@@ -15,7 +15,6 @@ import path from 'path'
 import { z } from 'zod'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
-import { llm } from './llm'
 import { generateImage, imageGenStatus } from './imagegen'
 import * as tts from './tts'
 import { embeddings } from './embeddings'
@@ -28,6 +27,8 @@ import { authorizeActionRequest } from './mcp-auth'
 import { taskOriginFromRequestMeta } from '@offgrid/sync'
 import { mayRunRemoteTask } from './remote-task-permission'
 import { getTaskExecutionDevice } from './tasks/task-history'
+import { promptMessages } from './desktop-generation'
+import { desktopModelServices } from './model-services'
 
 const EXECUTION_DEVICE_DESCRIPTION =
   'Exact paired Desktop name or alias. Omit to select any enabled connected Desktop.'
@@ -69,6 +70,30 @@ const TEXT = (t: string): { content: { type: 'text'; text: string }[] } => ({
   content: [{ type: 'text', text: t }]
 })
 
+async function generateMcpText(
+  requestId: string | number,
+  signal: AbortSignal,
+  prompt: string,
+  images: string[],
+  maxTokens: number,
+  operation: { type: 'text' } | { type: 'vision' }
+): Promise<string> {
+  await desktopModelServices.refresh()
+  const turnId = `mcp:${String(requestId)}`
+  const result = await desktopModelServices.generation.generate({
+    operation,
+    messages: promptMessages(prompt, images),
+    identity: { conversationId: turnId, turnId },
+    maxTokens,
+    timeoutMs: 300_000,
+    signal,
+    requiredCapabilities: { thinking: false },
+    allowFallback: true,
+    partialOutputPolicy: 'discard-and-fallback'
+  })
+  return result.content
+}
+
 /** Build a fresh MCP server. Model/inference tools are always registered (open);
  *  the ACTION tools are registered ONLY when the request is authorized with the
  *  desktop's action token, so an unpaired LAN device can't see or run them. */
@@ -98,9 +123,16 @@ export function buildMcpServer(
         max_tokens: z.number().int().positive().optional()
       }
     },
-    async ({ prompt, system, max_tokens }) => {
+    async ({ prompt, system, max_tokens }, extra) => {
       const msg = system ? `${system}\n\n${prompt}` : prompt
-      const text = await llm.chat(msg, [], 300000, max_tokens ?? 2048, { disableThinking: true })
+      const text = await generateMcpText(
+        extra.requestId,
+        extra.signal,
+        msg,
+        [],
+        max_tokens ?? 2_048,
+        { type: 'text' }
+      )
       return TEXT(text)
     }
   )
@@ -119,11 +151,16 @@ export function buildMcpServer(
           .describe('What to ask about the image. Defaults to a general description.')
       }
     },
-    async ({ image, prompt }) => {
+    async ({ image, prompt }, extra) => {
       const p = await materialize(image, 'png')
-      const text = await llm.chat(prompt || 'Describe this image in detail.', [p], 300000, 1024, {
-        disableThinking: true
-      })
+      const text = await generateMcpText(
+        extra.requestId,
+        extra.signal,
+        prompt || 'Describe this image in detail.',
+        [p],
+        1_024,
+        { type: 'vision' }
+      )
       return TEXT(text)
     }
   )
