@@ -11,6 +11,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import type { AddressInfo } from 'net'
+import { encodeModelRouteId } from '@offgrid/models'
 import { LLAMA_SERVER_PORT } from '../../shared/ports'
 
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-gateway-chat-'))
@@ -34,8 +35,6 @@ let upstream: http.Server
 let gatewayPort: number
 let releaseUpstream: (() => void) | undefined
 let upstreamRequest: Record<string, unknown> | undefined
-let upstreamHealthOk = true
-let directChatReply: string | null = null
 let startModelServer: typeof import('../model-server').startModelServer
 let stopModelServer: typeof import('../model-server').stopModelServer
 const previousDataDir = process.env.OFFGRID_DATA_DIR
@@ -47,6 +46,45 @@ function installLlamaBoundary(source: string): string {
   fs.writeFileSync(executable, `#!/usr/bin/env node\n${source}\n`)
   fs.chmodSync(executable, 0o755)
   return binRoot
+}
+
+function workingLlamaBoundary(reply = 'native model ready'): string {
+  return `
+const http = require('node:http')
+const portArg = process.argv.indexOf('--port')
+const port = Number(process.argv[portArg + 1])
+const server = http.createServer((request, response) => {
+  if (request.method === 'GET' && request.url === '/health') {
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify({ status: 'ok' }))
+    return
+  }
+  if (request.method === 'GET' && request.url === '/v1/models') {
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify({ data: [{ id: 'fixture-native-model' }] }))
+    return
+  }
+  if (request.method === 'POST' && request.url === '/v1/chat/completions') {
+    request.resume()
+    request.on('end', () => {
+      response.writeHead(200, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify({ choices: [{ message: { content: ${JSON.stringify(reply)} } }] }))
+    })
+    return
+  }
+  response.writeHead(404)
+  response.end()
+})
+server.listen(port, '127.0.0.1')
+process.on('SIGTERM', () => server.close(() => process.exit(0)))
+`
+}
+
+async function resetNativeJourney(llm: typeof import('../llm').llm): Promise<void> {
+  await llm.unload()
+  fs.rmSync(path.join(TMP_DIR, 'models'), { recursive: true, force: true })
+  fs.mkdirSync(path.join(TMP_DIR, 'models'), { recursive: true })
+  llm.reloadModel()
 }
 
 function fixtureDownload(url: string): Response {
@@ -85,13 +123,13 @@ beforeAll(async () => {
   ;({ startModelServer, stopModelServer } = await import('../model-server'))
   upstream = http.createServer((req, res) => {
     if (req.method === 'GET' && req.url === '/health') {
-      res.writeHead(upstreamHealthOk ? 200 : 503, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ status: upstreamHealthOk ? 'ok' : 'down' }))
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ status: 'ok' }))
       return
     }
     if (req.method === 'GET' && req.url === '/v1/models') {
-      res.writeHead(upstreamHealthOk ? 200 : 503, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ data: upstreamHealthOk ? [{ id: 'fixture-chat' }] : [] }))
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ data: [{ id: 'fixture-chat' }] }))
       return
     }
     if (req.method !== 'POST' || req.url !== '/v1/chat/completions') {
@@ -114,16 +152,6 @@ beforeAll(async () => {
           'X-Upstream-Internal': 'private'
         })
         res.end()
-        return
-      }
-      if (directChatReply !== null) {
-        res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(
-          JSON.stringify({
-            choices: [{ message: { content: directChatReply } }],
-            usage: { total_tokens: 3 }
-          })
-        )
         return
       }
       res.writeHead(200, { 'Content-Type': 'text/event-stream' })
@@ -157,10 +185,14 @@ afterAll(async () => {
 describe('model gateway chat streaming', () => {
   it('reports and activates the Desktop remote Chat model through the management API', async () => {
     const remote = await import('../vision/remote-vision-server')
-    const codec = await import('../../shared/remote-vision-server')
     const serverId = 'mobile-model-parity'
     const modelId = 'google/gemini-3.7-flash'
-    const inventoryId = codec.remoteVisionModelId(serverId, modelId)
+    const inventoryId = encodeModelRouteId({
+      adapterId: 'desktop.remote-chat',
+      providerId: 'custom',
+      serverId,
+      modelId
+    })
 
     try {
       remote.setRemoteVisionServerSettings({
@@ -208,7 +240,6 @@ describe('model gateway chat streaming', () => {
 
   it('routes a Mobile remote inventory id through its configured provider', async () => {
     const remote = await import('../vision/remote-vision-server')
-    const codec = await import('../../shared/remote-vision-server')
     const serverId = 'mobile-gemini-route'
     const modelId = 'google/gemini-3.7-flash'
     let providerBody: Record<string, unknown> | undefined
@@ -243,7 +274,12 @@ describe('model gateway chat streaming', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: codec.remoteVisionModelId(serverId, modelId),
+          model: encodeModelRouteId({
+            adapterId: 'desktop.remote-chat',
+            providerId: 'custom',
+            serverId,
+            modelId
+          }),
           stream: false,
           messages: [{ role: 'user', content: 'Do not echo me' }]
         })
@@ -336,23 +372,20 @@ describe('model gateway chat streaming', () => {
 
   it('downloads only the manually chosen model, activates it, and answers (#11)', async () => {
     const previousBinDir = process.env.OFFGRID_BIN_DIR
-    process.env.OFFGRID_BIN_DIR = installLlamaBoundary(
-      "setInterval(() => {}, 1000); process.on('SIGTERM', () => process.exit(0))"
-    )
+    process.env.OFFGRID_BIN_DIR = installLlamaBoundary(workingLlamaBoundary('manual model ready'))
     vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
       return url.startsWith('http://127.0.0.1:')
         ? hostFetch(input, init)
         : Promise.resolve(fixtureDownload(url))
     })
-    directChatReply = 'manual model ready'
-
     const [{ llm }, setup, manager] = await Promise.all([
       import('../llm'),
       import('../setup'),
       import('../models-manager')
     ])
     try {
+      await resetNativeJourney(llm)
       const chosen = await setup.getRecommendation('conservative')
       expect(chosen).not.toBeNull()
 
@@ -366,11 +399,8 @@ describe('model gateway chat streaming', () => {
       )
       expect(manager.getActiveModel()).toBe(chosen!.id)
     } finally {
-      llm.stop()
-      llm.reloadModel()
-      directChatReply = null
+      await resetNativeJourney(llm)
       vi.unstubAllGlobals()
-      fs.rmSync(path.join(TMP_DIR, 'models'), { recursive: true, force: true })
       if (previousBinDir === undefined) delete process.env.OFFGRID_BIN_DIR
       else process.env.OFFGRID_BIN_DIR = previousBinDir
     }
@@ -378,9 +408,7 @@ describe('model gateway chat streaming', () => {
 
   it('configures the recommended local baseline and activates every chosen model (#10)', async () => {
     const previousBinDir = process.env.OFFGRID_BIN_DIR
-    process.env.OFFGRID_BIN_DIR = installLlamaBoundary(
-      "setInterval(() => {}, 1000); process.on('SIGTERM', () => process.exit(0))"
-    )
+    process.env.OFFGRID_BIN_DIR = installLlamaBoundary(workingLlamaBoundary())
     vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
       return url.startsWith('http://127.0.0.1:')
@@ -394,6 +422,7 @@ describe('model gateway chat streaming', () => {
       import('../models-manager')
     ])
     try {
+      await resetNativeJourney(llm)
       // Conservative still installs the complete lightweight local baseline while
       // avoiding the heavyweight image-runtime download in this deterministic rig.
       await expect(llm.setSettings({ performanceMode: 'conservative' })).rejects.toThrow(
@@ -402,6 +431,9 @@ describe('model gateway chat streaming', () => {
       const plan = await setup.getSetupPlan()
       expect(plan.mode).toBe('conservative')
       expect(plan.items.map((item) => item.kind)).toEqual(['chat', 'transcription', 'voice'])
+      expect(await manager.listInstalled()).not.toEqual(
+        expect.arrayContaining(plan.items.map((item) => item.id))
+      )
 
       const progress: import('../setup').SetupProgress[] = []
       const result = await setup.autoConfigure((event) => progress.push(event))
@@ -418,7 +450,7 @@ describe('model gateway chat streaming', () => {
         speech: plan.items.find((item) => item.kind === 'voice')?.id
       })
     } finally {
-      llm.stop()
+      await resetNativeJourney(llm)
       vi.unstubAllGlobals()
       if (previousBinDir === undefined) delete process.env.OFFGRID_BIN_DIR
       else process.env.OFFGRID_BIN_DIR = previousBinDir
@@ -430,10 +462,25 @@ describe('model gateway chat streaming', () => {
     process.env.OFFGRID_BIN_DIR = installLlamaBoundary(
       'process.stderr.write("unknown model architecture: \'gemma4\'\\n"); setTimeout(() => process.exit(23), 20)'
     )
-    upstreamHealthOk = false
+    vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      return url.startsWith('http://127.0.0.1:')
+        ? hostFetch(input, init)
+        : Promise.resolve(fixtureDownload(url))
+    })
 
-    const [{ llm }, setup] = await Promise.all([import('../llm'), import('../setup')])
+    const [{ llm }, setup, manager] = await Promise.all([
+      import('../llm'),
+      import('../setup'),
+      import('../models-manager')
+    ])
     try {
+      await resetNativeJourney(llm)
+      const chosen = await setup.getRecommendation('conservative')
+      expect(chosen).not.toBeNull()
+      expect(await manager.downloadModel(chosen!.id)).toEqual({ success: true })
+      expect(await manager.activateModel(chosen!.id)).toEqual({ success: true })
+
       await expect(llm.restart()).rejects.toThrow(/did not come back up/i)
       // The crash handler has a delayed retry. Pausing is the real lifecycle intent
       // that prevents that recovery timer from leaking work beyond this journey.
@@ -446,8 +493,8 @@ describe('model gateway chat streaming', () => {
       expect(chat?.detail).toContain('gemma4')
       expect(chat?.detail).not.toBe('Model installed but server is not running')
     } finally {
-      llm.pause()
-      upstreamHealthOk = true
+      await resetNativeJourney(llm)
+      vi.unstubAllGlobals()
       if (previousBinDir === undefined) delete process.env.OFFGRID_BIN_DIR
       else process.env.OFFGRID_BIN_DIR = previousBinDir
     }

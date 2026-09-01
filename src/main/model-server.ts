@@ -31,6 +31,8 @@ import { randomUUID } from 'crypto'
 import {
   GatewayAsyncRequestStore,
   buildGatewayModalities,
+  decodeModelRouteId,
+  encodeModelRouteId,
   classifyGatewayImageReference as classifyRef,
   gatewayErrorBody as errBody,
   gatewayErrorMeta as errMeta,
@@ -66,7 +68,7 @@ import { guardProxyStreams } from './stream-guards'
 import { decodeDataUrl, mimeFromExt, toDataUrl } from './model-server/image-bytes'
 import { applyThinkingPayload } from './llm/chat-payload'
 import { writeDiagnosticLog } from './diagnostics-log'
-import { parseRemoteVisionModelId, remoteVisionModelId } from '../shared/remote-vision-server'
+import { parseRemoteVisionModelId } from '../shared/remote-vision-server'
 import { getActiveRemoteVisionServer } from './vision/remote-vision-server'
 
 const UPSTREAM_HOST = '127.0.0.1'
@@ -195,7 +197,12 @@ function proxyToLlama(
 /** Forward an inventory-selected remote model through the Desktop connection that owns it.
  * Mobile sees the stable inventory id, while the provider must receive its native model id. */
 function proxyToSelectedRemote(res: http.ServerResponse, body: Record<string, unknown>): boolean {
-  const requested = typeof body.model === 'string' ? parseRemoteVisionModelId(body.model) : null
+  const model = typeof body.model === 'string' ? body.model : ''
+  const route = decodeModelRouteId(model)
+  const requested =
+    route?.adapterId === 'desktop.remote-chat' && route.serverId
+      ? { serverId: route.serverId, modelId: route.modelId }
+      : parseRemoteVisionModelId(model)
   if (!requested) return false
   const remote = getActiveRemoteVisionServer()
   if (!remote || requested.serverId !== remote.id || requested.modelId !== remote.model) {
@@ -567,7 +574,12 @@ async function handleModelsList(res: http.ServerResponse): Promise<void> {
   if (activeRemote) {
     text = [
       {
-        id: remoteVisionModelId(activeRemote.id, activeRemote.model),
+        id: encodeModelRouteId({
+          adapterId: 'desktop.remote-chat',
+          providerId: activeRemote.provider,
+          serverId: activeRemote.id,
+          modelId: activeRemote.model
+        }),
         name: activeRemote.model,
         object: 'model',
         created: now,

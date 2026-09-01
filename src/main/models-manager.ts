@@ -48,6 +48,7 @@ import {
 import { writeDiagnosticLog } from './diagnostics-log'
 import { modelPackageIdentity, type TransferredModelManifest } from '@offgrid/sync'
 import { sampleProgressRate, type ProgressRateSample } from '@offgrid/ui'
+import { decodeModelRouteId } from '@offgrid/models'
 import {
   parseRemoteVisionModelId,
   remoteVisionInventoryModels,
@@ -837,7 +838,11 @@ export async function activateModel(
   modelId: string,
   requestedKind?: string
 ): Promise<{ success: boolean; error?: string }> {
-  const remote = parseRemoteVisionModelId(modelId)
+  const route = decodeModelRouteId(modelId)
+  const remote =
+    route?.adapterId === 'desktop.remote-chat' && route.serverId
+      ? { serverId: route.serverId, modelId: route.modelId }
+      : parseRemoteVisionModelId(modelId)
   if (remote) {
     return activateRemoteVisionModel(remote.serverId, remote.modelId)
       ? { success: true }
