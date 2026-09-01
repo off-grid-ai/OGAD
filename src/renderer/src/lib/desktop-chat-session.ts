@@ -3,28 +3,23 @@ import {
   type ChatQueueProjection,
   type ChatSessionEvent,
   type ChatTurn,
-  type GenerationEvents,
-  type GenerationMessage,
   type GenerationResult
 } from '@offgrid/models'
-import type { RagChatResultContract } from '../../../shared/ipc-contracts'
-import { subscribeDesktopChatStream } from './desktop-chat-stream-hub'
 import { DesktopTurnRepository } from './desktop-chat-session-repository'
 import { publishDesktopChatEvent } from './desktop-chat-session-events'
 import {
-  desktopHistory,
-  desktopImageResult,
-  desktopTextResult
-} from './desktop-chat-session-policy'
+  DesktopChatGenerationAdapter,
+  type DesktopGenerationContext,
+  type DesktopTurnExecution
+} from './desktop-chat-generation-adapter'
 import type {
   DesktopChatSessionBoundary,
+  DesktopAnyChatSessionInput,
   DesktopChatSessionInput,
   DesktopChatSessionResult,
   DesktopImageChatSessionInput,
   DesktopImageChatSessionResult,
-  DesktopImageGenerationResponse,
   DesktopQueuedTurnProjection,
-  DesktopToolChatResponse,
   DesktopToolChatSessionInput,
   DesktopToolChatSessionResult
 } from './desktop-chat-session-contract'
@@ -40,21 +35,15 @@ export type {
   DesktopToolChatSessionResult
 } from './desktop-chat-session-contract'
 
-interface TurnExecution {
-  input: DesktopChatSessionInput
-  route: 'rag' | 'tools' | 'image'
-  response?: RagChatResultContract
-  toolResponse?: DesktopToolChatResponse
-  imageResponse?: DesktopImageGenerationResponse
-}
-
 export class DesktopChatSession {
   private readonly repository = new DesktopTurnRepository()
-  private readonly executions = new Map<string, TurnExecution>()
+  private readonly executions = new Map<string, DesktopTurnExecution>()
   private readonly listeners = new Set<(event: ChatSessionEvent) => void>()
   private readonly service: ChatSessionService
+  private readonly generation: DesktopChatGenerationAdapter
 
   constructor(private readonly boundary: DesktopChatSessionBoundary) {
+    this.generation = new DesktopChatGenerationAdapter(boundary)
     this.service = new ChatSessionService(
       {
         generate: (request, events) =>
@@ -108,90 +97,112 @@ export class DesktopChatSession {
     this.repository.restore(conversationId, turns)
   }
 
-  async send(input: DesktopChatSessionInput): Promise<DesktopChatSessionResult> {
-    this.executions.set(input.turnId, { input, route: 'rag' })
+  async send(input: DesktopImageChatSessionInput): Promise<DesktopImageChatSessionResult>
+  async send(input: DesktopToolChatSessionInput): Promise<DesktopToolChatSessionResult>
+  async send(input: DesktopChatSessionInput): Promise<DesktopChatSessionResult>
+  async send(
+    input: DesktopAnyChatSessionInput
+  ): Promise<
+    DesktopChatSessionResult | DesktopToolChatSessionResult | DesktopImageChatSessionResult
+  > {
+    this.executions.set(input.turnId, {
+      input,
+      generatedImages: [],
+      imageActive: false
+    })
     try {
-      const turn = await this.run(input, {
-        conversationId: input.conversationId,
-        turnId: input.turnId,
-        projectId: input.projectId ?? undefined,
-        userMessage: input.userMessage,
-        operation: input.images.length ? { type: 'vision' } : { type: 'text' },
-        allowFallback: true,
-        partialOutputPolicy: 'preserve-and-stop'
-      })
-      const response = this.executions.get(input.turnId)?.response
-      if (!response && turn.status === 'stopped') return { turn, response: { answer: '' } }
-      if (!response) throw new Error(`Desktop chat response is missing for turn ${input.turnId}`)
-      return { turn, response }
+      const turn = await this.run(input, this.commandFor(input))
+      return this.resultFor(input, turn, this.executions.get(input.turnId))
     } finally {
       this.executions.delete(input.turnId)
     }
   }
 
-  async sendWithTools(input: DesktopToolChatSessionInput): Promise<DesktopToolChatSessionResult> {
-    this.executions.set(input.turnId, { input, route: 'tools' })
-    try {
-      const turn = await this.run(input, {
-        conversationId: input.conversationId,
-        turnId: input.turnId,
-        projectId: input.projectId ?? undefined,
-        userMessage: input.userMessage,
-        operation: input.images.length ? { type: 'vision' } : { type: 'text' },
-        allowFallback: true,
-        partialOutputPolicy: 'preserve-and-stop'
-      })
-      const response = this.executions.get(input.turnId)?.toolResponse
-      if (!response && turn.status === 'stopped') return { turn, response: {} }
-      if (!response) throw new Error(`Desktop tool response is missing for turn ${input.turnId}`)
-      return { turn, response }
-    } finally {
-      this.executions.delete(input.turnId)
+  private commandFor(input: DesktopAnyChatSessionInput): Parameters<ChatSessionService['send']>[0] {
+    return {
+      conversationId: input.conversationId,
+      turnId: input.turnId,
+      projectId: input.projectId ?? undefined,
+      userMessage: input.userMessage,
+      operation:
+        input.kind === 'image'
+          ? {
+              type: 'image',
+              prompt: input.request.prompt,
+              negativePrompt: input.request.negativePrompt,
+              width: input.request.width,
+              height: input.request.height,
+              steps: input.request.steps,
+              guidanceScale: input.request.cfgScale,
+              seed: input.request.seed,
+              strength: input.request.strength
+            }
+          : input.images.length
+            ? { type: 'vision' }
+            : { type: 'text' },
+      allowFallback: input.kind !== 'image',
+      partialOutputPolicy: 'preserve-and-stop'
     }
   }
 
-  async sendImage(input: DesktopImageChatSessionInput): Promise<DesktopImageChatSessionResult> {
-    this.executions.set(input.turnId, { input, route: 'image' })
-    try {
-      const turn = await this.run(input, {
-        conversationId: input.conversationId,
-        turnId: input.turnId,
-        projectId: input.projectId ?? undefined,
-        userMessage: input.userMessage,
-        operation: {
-          type: 'image',
-          prompt: input.request.prompt,
-          negativePrompt: input.request.negativePrompt,
-          width: input.request.width,
-          height: input.request.height,
-          steps: input.request.steps,
-          guidanceScale: input.request.cfgScale,
-          seed: input.request.seed,
-          strength: input.request.strength
-        },
-        allowFallback: false,
-        partialOutputPolicy: 'preserve-and-stop'
-      })
-      const response = this.executions.get(input.turnId)?.imageResponse
-      if (!response && turn.status === 'stopped') {
-        throw new Error('Desktop image generation cancelled')
-      }
-      if (!response) throw new Error(`Desktop image response is missing for turn ${input.turnId}`)
-      return { turn, response }
-    } finally {
-      this.executions.delete(input.turnId)
+  private resultFor(
+    input: DesktopAnyChatSessionInput,
+    turn: ChatTurn,
+    execution: DesktopTurnExecution | undefined
+  ): DesktopChatSessionResult | DesktopToolChatSessionResult | DesktopImageChatSessionResult {
+    if (input.kind === 'image') return this.imageResult(input, turn, execution)
+    if (input.kind === 'tools') return this.toolResult(input, turn, execution)
+    return this.chatResult(input, turn, execution)
+  }
+
+  private imageResult(
+    input: DesktopImageChatSessionInput,
+    turn: ChatTurn,
+    execution: DesktopTurnExecution | undefined
+  ): DesktopImageChatSessionResult {
+    const response = execution?.imageResponse
+    if (!response && turn.status === 'stopped') {
+      throw new Error('Desktop image generation cancelled')
     }
+    if (!response) throw new Error(`Desktop image response is missing for turn ${input.turnId}`)
+    return { turn, response, generatedImages: execution.generatedImages }
+  }
+
+  private toolResult(
+    input: DesktopToolChatSessionInput,
+    turn: ChatTurn,
+    execution: DesktopTurnExecution | undefined
+  ): DesktopToolChatSessionResult {
+    const response = execution?.toolResponse
+    const generatedImages = execution?.generatedImages ?? []
+    if (!response && turn.status === 'stopped') return { turn, response: {}, generatedImages }
+    if (!response) throw new Error(`Desktop tool response is missing for turn ${input.turnId}`)
+    return { turn, response, generatedImages }
+  }
+
+  private chatResult(
+    input: DesktopChatSessionInput,
+    turn: ChatTurn,
+    execution: DesktopTurnExecution | undefined
+  ): DesktopChatSessionResult {
+    const response = execution?.response
+    const generatedImages = execution?.generatedImages ?? []
+    if (!response && turn.status === 'stopped') {
+      return { turn, response: { answer: '' }, generatedImages }
+    }
+    if (!response) throw new Error(`Desktop chat response is missing for turn ${input.turnId}`)
+    return { turn, response, generatedImages }
   }
 
   stopConversation(conversationId: string, reason?: unknown): number {
     const pending = [...this.executions.values()].filter(
       (execution) => execution.input.conversationId === conversationId
     )
-    if (pending.some((execution) => execution.route === 'image')) {
+    if (pending.some((execution) => execution.imageActive)) {
       this.boundary.cancelImageGen?.()
     }
     for (const execution of pending) {
-      if (execution.route !== 'image') this.boundary.cancelRag(execution.input.turnId)
+      if (!execution.imageActive) this.boundary.cancelRag(execution.input.turnId)
     }
     return this.service.stopConversation(conversationId, reason)
   }
@@ -202,7 +213,7 @@ export class DesktopChatSession {
   }
 
   private run(
-    input: DesktopChatSessionInput,
+    input: DesktopAnyChatSessionInput,
     command: Parameters<ChatSessionService['send']>[0]
   ): Promise<ChatTurn> {
     if (input.replay === 'regenerate') {
@@ -220,110 +231,12 @@ export class DesktopChatSession {
 
   private async generate(
     turnId: string | undefined,
-    context: {
-      messages: readonly GenerationMessage[]
-      signal: AbortSignal | undefined
-      events?: GenerationEvents
-    }
+    context: DesktopGenerationContext
   ): Promise<GenerationResult> {
     if (!turnId) throw new Error('Desktop chat generation requires a turn identity')
     const execution = this.executions.get(turnId)
     if (!execution) throw new Error(`Desktop chat execution is missing for turn ${turnId}`)
-    const { input } = execution
-    const { messages, signal, events } = context
-    const unsubscribe = subscribeDesktopChatStream(this.boundary, (event) => {
-      if (event.streamId !== input.turnId) return
-      if (event.type === 'content' && event.text) events?.chunk?.({ content: event.text })
-      if (event.type === 'reasoning' && event.text) events?.chunk?.({ reasoning: event.text })
-    })
-    try {
-      if (execution.route === 'image') return this.generateImage(execution, signal)
-      if (execution.route === 'tools') {
-        return this.generateTools(execution, context)
-      }
-      return this.generateRag(execution, messages, signal)
-    } finally {
-      unsubscribe()
-    }
-  }
-
-  private async generateImage(
-    execution: TurnExecution,
-    signal: AbortSignal | undefined
-  ): Promise<GenerationResult> {
-    if (!this.boundary.generateImage) {
-      throw new Error('Desktop image-generation boundary is unavailable')
-    }
-    const imageInput = execution.input as DesktopImageChatSessionInput
-    const response = await this.boundary.generateImage(imageInput.request)
-    execution.imageResponse = response
-    return desktopImageResult(response, signal)
-  }
-
-  private async generateTools(
-    execution: TurnExecution,
-    context: {
-      messages: readonly GenerationMessage[]
-      signal: AbortSignal | undefined
-      events?: GenerationEvents
-    }
-  ): Promise<GenerationResult> {
-    if (!this.boundary.toolChat) throw new Error('Desktop tool-chat boundary is unavailable')
-    const input = execution.input as DesktopToolChatSessionInput
-    const { messages, signal, events } = context
-    const response = await this.boundary.toolChat(input.query, desktopHistory(messages), {
-      connectors: input.connectors,
-      conversationId: input.conversationId,
-      ...(input.projectId ? { projectId: input.projectId } : {}),
-      allMemory: input.allMemory,
-      images: input.images,
-      imageAvailable: input.imageAvailable,
-      streamId: input.turnId,
-      thinking: input.thinking
-    })
-    execution.toolResponse = response
-    const calls = response.toolCalls ?? []
-    if (calls.length) {
-      events?.message?.({
-        role: 'assistant',
-        content: '',
-        toolCalls: calls.map((call, index) => ({
-          id: `${input.turnId}:tool:${index}`,
-          name: call.name,
-          arguments: '{}'
-        }))
-      })
-      calls.forEach((call, index) => {
-        events?.message?.({
-          role: 'tool',
-          content: call.result,
-          name: call.name,
-          toolCallId: `${input.turnId}:tool:${index}`
-        })
-      })
-    }
-    return desktopTextResult(response.answer ?? '', signal)
-  }
-
-  private async generateRag(
-    execution: TurnExecution,
-    messages: readonly GenerationMessage[],
-    signal: AbortSignal | undefined
-  ): Promise<GenerationResult> {
-    const { input } = execution
-    const response = await this.boundary.ragChat(
-      input.query,
-      'All',
-      desktopHistory(messages),
-      input.projectId,
-      input.conversationId,
-      input.noMemory && !input.projectId,
-      input.turnId,
-      input.thinking,
-      input.images
-    )
-    execution.response = response
-    return desktopTextResult(response.answer, signal)
+    return this.generation.generate(execution, context)
   }
 
   private async publish(event: ChatSessionEvent): Promise<void> {

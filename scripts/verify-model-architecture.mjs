@@ -71,6 +71,15 @@ for (const file of files) {
         report('generation-callers-use-shared-service', fileName, source, node, `call:${rawName}`)
       }
       if (
+        isUi &&
+        /^(?:window\.api\.)?(?:generateImage|toolChat|ragChat|cancelRag|cancelImageGen)$/.test(call)
+      ) {
+        report('desktop-ui-uses-one-chat-command-boundary', fileName, source, node, `call:${call}`)
+      }
+      if (/^(sendWithTools|sendImage)$/.test(rawName)) {
+        report('desktop-chat-has-one-send-command', fileName, source, node, `call:${rawName}`)
+      }
+      if (
         fileName === 'src/main/ipc.ts' &&
         /^(m\.)?setActive(Model|ModalChoice)$/.test(call)
       ) {
@@ -102,6 +111,12 @@ for (const file of files) {
       node.name && /^(chat|chatMessages|chatStream|streamChat)$/.test(node.name.getText(source))
     ) {
       report('no-route-owning-llm-api', fileName, source, node.name, `declaration:${node.name.getText(source)}`)
+    }
+    if (
+      (ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)) &&
+      node.name && /^(sendWithTools|sendImage)$/.test(node.name.getText(source))
+    ) {
+      report('desktop-chat-has-one-send-command', fileName, source, node.name, `declaration:${node.name.getText(source)}`)
     }
 
     if (isAdapter && (ts.isIfStatement(node) || ts.isSwitchStatement(node) || ts.isConditionalExpression(node))) {

@@ -26,7 +26,11 @@ import {
   type SyncedTurnStatus
 } from '@offgrid/sync'
 import type { VoiceTurnMode } from '@offgrid/speech'
-import type { ChatTurn } from '@offgrid/models'
+import {
+  cleanImagePrompt,
+  shouldAutoRouteImage,
+  type ChatTurn
+} from '@offgrid/models'
 import ReactMarkdown, { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -75,7 +79,6 @@ import {
   readVoicePreferences,
   type VoicePreferences
 } from '@renderer/lib/voice-preferences'
-import { shouldAutoRouteImage, cleanImagePrompt } from '@renderer/lib/image-intent'
 import {
   buildAssistantContext,
   readReasoning,
@@ -3782,7 +3785,8 @@ export function MemoryChat({
         strength: imgInit ? imgStrength : undefined
       }
       try {
-        const { response: img, turn: sessionTurn } = await desktopChatSession.sendImage({
+        const { response: img, turn: sessionTurn } = await desktopChatSession.send({
+          kind: 'image',
           conversationId: convId,
           turnId: opts?.sessionReplay?.turnId ?? `image-${crypto.randomUUID()}`,
           projectId,
@@ -3914,7 +3918,12 @@ export function MemoryChat({
             streaming: true
           }
         ])
-        const { response: tr, turn: sessionTurn } = await desktopChatSession.sendWithTools({
+        const {
+          response: tr,
+          turn: sessionTurn,
+          generatedImages: toolGeneratedImages
+        } = await desktopChatSession.send({
+          kind: 'tools',
           userMessage: {
             role: 'user',
             content: [
@@ -3994,25 +4003,13 @@ export function MemoryChat({
               : m
           )
         )
-        // Deferred image generation: the tool loop only RECORDS prompts (it never generates inline,
-        // which would evict the LLM). Each completed request gets one generated file and one durable
-        // assistant image message. A message context has one imageRef by design; putting two results
-        // on one row would make the last context write replace the first association.
+        // The Shared session already completed every deferred image operation. This component only
+        // projects and persists the returned artifacts.
         let imageRequests = tr?.imageRequests ?? []
         if (imageRequests.length === 0 && tr?.imageRequest?.prompt) {
           imageRequests = [tr.imageRequest]
         }
-        if (
-          imageRequests.length > 0 &&
-          window.api.generateImage &&
-          !cancelledRef.current.has(convId)
-        ) {
-          // The tool loop has finished its text answer and handed ownership to the
-          // deferred image job. Mark that ownership exactly like explicit image mode
-          // so the rendered Stop control cancels imagegen (not the already-finished
-          // RAG stream) and remains scoped to this conversation.
-          setImgProgress(null)
-          setImageGenConv(convId)
+        if (toolGeneratedImages.length > 0 && !cancelledRef.current.has(convId)) {
           try {
             const stored = await window.api.addRagMessage(
               convId,
@@ -4030,65 +4027,36 @@ export function MemoryChat({
             /* The answer remains on screen; image rows can still be persisted independently. */
             if (voiceMode) setAutoPlayId(toolStreamId)
           }
-          try {
-            for (const imageRequest of imageRequests) {
-              if (cancelledRef.current.has(convId)) break
-              setImgProgress(null)
-              try {
-                const img = await window.api.generateImage({
-                  prompt: imageRequest.prompt,
-                  conversationId: convId,
-                  projectId: projectId
-                })
-                if (imageRequest.proposal) {
-                  await window.api.storeProposalIllustration(
-                    imageRequest.proposal.conversationId,
-                    imageRequest.proposal.slide,
-                    img.path
-                  )
-                }
-                const imageContent = `Generated for: ${imageRequest.prompt}`
-                const completedImage = completedImageMessage(
-                  imageContent,
-                  imageRequest.prompt,
-                  img.prompt
-                )
-                let imageMessageId: string = crypto.randomUUID()
-                try {
-                  const stored = await window.api.addRagMessage(
-                    convId,
-                    'assistant',
-                    completedImage.storedContent,
-                    withGeneratedImageReference(undefined, {
-                      id: img.syncId,
-                      path: img.path
-                    })
-                  )
-                  imageMessageId = stored.uuid
-                  await announceImageMessagePersisted(convId, stored.uuid)
-                } catch {
-                  /* Keep the generated file visible even if this database write fails. */
-                }
-                setConvMessages(convId, (prev) => [
-                  ...prev,
-                  {
-                    id: imageMessageId,
-                    role: 'assistant',
-                    ...completedImage,
-                    image: img.dataUrl,
-                    imagePath: img.path
-                  }
-                ])
-              } catch (error) {
-                // One failed image does not erase or block another completed tool request. Stop is
-                // the exception: it cancels the active runtime and ends the remaining local work.
-                if (cancelledRef.current.has(convId)) break
-                console.error('Deferred tool image generation failed', error)
-              }
+          for (const [index, img] of toolGeneratedImages.entries()) {
+            const prompt = imageRequests[index]?.prompt ?? img.prompt ?? modelQuery
+            const completedImage = completedImageMessage(
+              `Generated for: ${prompt}`,
+              prompt,
+              img.prompt
+            )
+            let imageMessageId: string = crypto.randomUUID()
+            try {
+              const stored = await window.api.addRagMessage(
+                convId,
+                'assistant',
+                completedImage.storedContent,
+                withGeneratedImageReference(undefined, { id: img.syncId, path: img.path })
+              )
+              imageMessageId = stored.uuid
+              await announceImageMessagePersisted(convId, stored.uuid)
+            } catch {
+              /* Keep the generated file visible even if this database write fails. */
             }
-          } finally {
-            setImgProgress(null)
-            setImageGenConv((owner) => (owner === convId ? null : owner))
+            setConvMessages(convId, (prev) => [
+              ...prev,
+              {
+                id: imageMessageId,
+                role: 'assistant',
+                ...completedImage,
+                image: img.dataUrl,
+                imagePath: img.path
+              }
+            ])
           }
           return
         }
@@ -4132,7 +4100,12 @@ export function MemoryChat({
           streaming: true
         }
       ])
-      const { response: result, turn: sessionTurn } = await desktopChatSession.send({
+      const {
+        response: result,
+        turn: sessionTurn,
+        generatedImages: ragGeneratedImages
+      } = await desktopChatSession.send({
+        kind: 'chat',
         conversationId: convId,
         turnId: streamId,
         projectId,
@@ -4166,11 +4139,10 @@ export function MemoryChat({
       }
       const assistantContent = result.answer || 'No response returned.'
 
-      // The model decided this is an image request — replace the streamed turn
-      // with on-device generation.
-      const imgMatch = assistantContent.match(/```image\s*\n([\s\S]*?)```/i)
-      if (imgMatch && window.api.generateImage) {
-        const imgPrompt = imgMatch[1]!.trim()
+      // Shared recognized and executed the model's image hand-off. This component projects it.
+      const ragImage = ragGeneratedImages[0]
+      if (ragImage) {
+        const imgPrompt = ragImage.prompt ?? assistantContent
         setConvMessages(convId, (prev) =>
           prev.map((m) =>
             m.id === streamId
@@ -4178,46 +4150,33 @@ export function MemoryChat({
               : m
           )
         )
+        const completedImage = completedImageMessage(
+          `Generated: ${imgPrompt.slice(0, 80)}`,
+          imgPrompt,
+          ragImage.prompt
+        )
+        setConvMessages(convId, (prev) =>
+          prev.map((m) =>
+            m.id === streamId
+              ? {
+                  ...m,
+                  ...completedImage,
+                  image: ragImage.dataUrl,
+                  imagePath: ragImage.path
+                }
+              : m
+          )
+        )
         try {
-          const img = await window.api.generateImage({
-            prompt: imgPrompt,
-            conversationId: convId,
-            projectId: projectId
-          })
-          const completedImage = completedImageMessage(
-            `Generated: ${imgPrompt.slice(0, 80)}`,
-            imgPrompt,
-            img.prompt
+          const stored = await window.api.addRagMessage(
+            convId,
+            'assistant',
+            completedImage.storedContent,
+            withGeneratedImageReference(undefined, { id: ragImage.syncId, path: ragImage.path })
           )
-          setConvMessages(convId, (prev) =>
-            prev.map((m) =>
-              m.id === streamId
-                ? {
-                    ...m,
-                    ...completedImage,
-                    image: img.dataUrl,
-                    imagePath: img.path
-                  }
-                : m
-            )
-          )
-          try {
-            const stored = await window.api.addRagMessage(
-              convId,
-              'assistant',
-              completedImage.storedContent,
-              withGeneratedImageReference(undefined, { id: img.syncId, path: img.path })
-            )
-            await announceImageMessagePersisted(convId, stored.uuid)
-          } catch {
-            /* ignore */
-          }
-        } catch (err) {
-          const msg = (err as Error).message || 'Image generation failed.'
-          if (!/cancel/i.test(msg))
-            setConvMessages(convId, (prev) =>
-              prev.map((m) => (m.id === streamId ? { ...m, content: msg, streaming: false } : m))
-            )
+          await announceImageMessagePersisted(convId, stored.uuid)
+        } catch {
+          /* ignore */
         }
       } else {
         // Finalize the streamed message — set authoritative text + context, clear streaming.
@@ -4488,17 +4447,12 @@ export function MemoryChat({
       }
       setAttachWarn(null)
       cancelledRef.current.add(convId)
-      const streamingId = (messagesByConv[convId] ?? []).find((m) => m.streaming)?.id
-      const sharedStops = desktopChatSession.stopConversation(convId, 'User stopped generation')
-      // Streams restored after renderer navigation predate this renderer-owned session instance.
-      // Keep the IPC fallback only for those legacy live streams.
-      if (streamingId && sharedStops === 0) window.api.cancelRag(streamingId)
+      desktopChatSession.stopConversation(convId, 'User stopped generation')
       markGenerating(convId, false)
       // Cancel + clear the image job ONLY if THIS conversation owns it, so stopping
       // one conversation never kills another's in-flight image (D9). imgProgress is a
       // shared stream buffer — clear it too when the owner stops.
       if (imageGenConv === convId) {
-        if (sharedStops === 0) window.api.cancelImageGen()
         setImageGenConv(null)
         setImgProgress(null)
       }

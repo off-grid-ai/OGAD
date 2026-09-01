@@ -186,8 +186,9 @@ describe('DesktopChatSession', () => {
     }
     const session = new DesktopChatSession(boundary)
 
-    const result = await session.sendWithTools({
+    const result = await session.send({
       ...input('turn-tools'),
+      kind: 'tools',
       connectors: true,
       allMemory: true,
       imageAvailable: false
@@ -205,6 +206,67 @@ describe('DesktopChatSession', () => {
     })
   })
 
+  it('executes deferred tool images inside the one session command', async () => {
+    const boundary: DesktopChatSessionBoundary = {
+      ragChat: vi.fn(async () => ({ answer: '' })),
+      toolChat: vi.fn(async () => ({
+        answer: 'I made the image.',
+        imageRequests: [{ prompt: 'A green bicycle' }]
+      })),
+      generateImage: vi.fn(async () => ({
+        dataUrl: 'data:image/png;base64,cG5n',
+        path: '/generated/bicycle.png',
+        syncId: 'bicycle-image'
+      })),
+      onRagStream: () => () => undefined,
+      cancelRag: vi.fn()
+    }
+    const session = new DesktopChatSession(boundary)
+
+    const result = await session.send({
+      ...input('turn-tool-image'),
+      kind: 'tools',
+      connectors: false,
+      allMemory: true,
+      imageAvailable: true
+    })
+
+    expect(boundary.generateImage).toHaveBeenCalledWith({
+      prompt: 'A green bicycle',
+      conversationId: 'conversation-a',
+      projectId: 'project-a'
+    })
+    expect(result.generatedImages).toHaveLength(1)
+    expect(result.turn.responseMessages?.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: 'I made the image.'
+    })
+  })
+
+  it('executes a text-model image hand-off inside the one session command', async () => {
+    const boundary: DesktopChatSessionBoundary = {
+      ragChat: vi.fn(async () => ({ answer: '```image\nA cabin at dawn\n```' })),
+      generateImage: vi.fn(async () => ({
+        dataUrl: 'data:image/png;base64,cG5n',
+        path: '/generated/cabin.png',
+        syncId: 'cabin-image'
+      })),
+      onRagStream: () => () => undefined,
+      cancelRag: vi.fn()
+    }
+    const session = new DesktopChatSession(boundary)
+
+    const result = await session.send(input('turn-rag-image'))
+
+    expect(boundary.generateImage).toHaveBeenCalledWith({
+      prompt: 'A cabin at dawn',
+      conversationId: 'conversation-a',
+      projectId: 'project-a'
+    })
+    expect(result.generatedImages[0]?.path).toBe('/generated/cabin.png')
+    expect(result.turn.result?.output.type).toBe('image')
+  })
+
   it('keeps generated image artifacts in the shared canonical response transcript', async () => {
     const boundary: DesktopChatSessionBoundary = {
       ragChat: vi.fn(async () => ({ answer: '' })),
@@ -220,8 +282,9 @@ describe('DesktopChatSession', () => {
     }
     const session = new DesktopChatSession(boundary)
 
-    const result = await session.sendImage({
+    const result = await session.send({
       ...input('turn-image'),
+      kind: 'image',
       request: {
         prompt: 'A cabin at dawn',
         conversationId: 'conversation-a',

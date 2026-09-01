@@ -1,12 +1,12 @@
 import type { ChatSessionEvent } from '@offgrid/models'
 import type {
   DesktopChatSessionBoundary,
-  DesktopChatSessionInput
+  DesktopAnyChatSessionInput
 } from './desktop-chat-session-contract'
 
 interface DesktopChatEventProjection {
   event: ChatSessionEvent
-  inputFor(turnId: string): DesktopChatSessionInput | undefined
+  inputFor(turnId: string): DesktopAnyChatSessionInput | undefined
   boundary: DesktopChatSessionBoundary
   listeners: ReadonlySet<(event: ChatSessionEvent) => void>
 }

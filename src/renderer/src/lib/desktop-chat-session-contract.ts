@@ -78,6 +78,11 @@ export interface DesktopChatSessionBoundary {
     options: DesktopToolChatOptions
   ): Promise<DesktopToolChatResponse>
   generateImage?(request: DesktopImageGenerationRequest): Promise<DesktopImageGenerationResponse>
+  storeProposalIllustration?(
+    conversationId: string,
+    slide: number,
+    imagePath: string
+  ): Promise<unknown>
   addRagMessage?(
     conversationId: string,
     role: 'user' | 'assistant',
@@ -87,7 +92,7 @@ export interface DesktopChatSessionBoundary {
   truncateRagMessages?(conversationId: string, keepCount: number): Promise<unknown>
 }
 
-export interface DesktopChatSessionInput {
+interface DesktopChatSessionCommonInput {
   conversationId: string
   turnId: string
   projectId: string | null
@@ -102,9 +107,14 @@ export interface DesktopChatSessionInput {
   invalidationKeepCount?: number
 }
 
+export interface DesktopChatSessionInput extends DesktopChatSessionCommonInput {
+  kind?: 'chat'
+}
+
 export interface DesktopChatSessionResult {
   turn: ChatTurn
   response: RagChatResultContract
+  generatedImages: readonly DesktopImageGenerationResponse[]
 }
 
 export interface DesktopQueuedTurnProjection {
@@ -113,7 +123,8 @@ export interface DesktopQueuedTurnProjection {
   attachmentCount: number
 }
 
-export interface DesktopToolChatSessionInput extends DesktopChatSessionInput {
+export interface DesktopToolChatSessionInput extends DesktopChatSessionCommonInput {
+  kind: 'tools'
   connectors: boolean
   allMemory: boolean
   imageAvailable: boolean
@@ -122,13 +133,21 @@ export interface DesktopToolChatSessionInput extends DesktopChatSessionInput {
 export interface DesktopToolChatSessionResult {
   turn: ChatTurn
   response: DesktopToolChatResponse
+  generatedImages: readonly DesktopImageGenerationResponse[]
 }
 
-export interface DesktopImageChatSessionInput extends DesktopChatSessionInput {
+export interface DesktopImageChatSessionInput extends DesktopChatSessionCommonInput {
+  kind: 'image'
   request: DesktopImageGenerationRequest
 }
 
 export interface DesktopImageChatSessionResult {
   turn: ChatTurn
   response: DesktopImageGenerationResponse
+  generatedImages: readonly DesktopImageGenerationResponse[]
 }
+
+export type DesktopAnyChatSessionInput =
+  | DesktopChatSessionInput
+  | DesktopToolChatSessionInput
+  | DesktopImageChatSessionInput
