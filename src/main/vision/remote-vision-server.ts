@@ -2,6 +2,18 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { modelsDir } from '../runtime-env'
+import {
+  REMOTE_FETCH_REDIRECT_POLICY,
+  canReconcileCredentialedEndpoint,
+  catalogFromDiscovery,
+  defaultRemoteSelections,
+  discoveryFromRemoteModelList,
+  mergeRemoteSelections,
+  remoteAuthorizationHeaders,
+  type ModelModality,
+  type RemoteModelCatalog,
+  type RemoteModalitySelections
+} from '@offgrid/models'
 import { decodeModelRouteId } from '@offgrid/models'
 import { desktopModelSelectionPersistence } from '../model-selection-persistence'
 import { deleteSecret, getSecret, setSecret } from '../secrets'
@@ -18,7 +30,7 @@ import {
 } from '../../shared/remote-vision-server'
 
 const LEGACY_API_KEY_SECRET = 'remote-vision-server:api-key'
-const CONFIG_VERSION = 3
+const CONFIG_VERSION = 4
 
 interface StoredRemoteVisionServer {
   id: string
@@ -26,11 +38,13 @@ interface StoredRemoteVisionServer {
   provider: Exclude<RemoteVisionProvider, 'local'>
   endpoint: string
   model: string
+  selections: RemoteModalitySelections
+  catalog: RemoteModelCatalog
   screenFramesAllowed: boolean
 }
 
 interface StoredRemoteVisionConfig {
-  version: 3
+  version: 4
   activeServerId: string | null
   servers: StoredRemoteVisionServer[]
 }
@@ -39,6 +53,10 @@ interface LegacyStoredRemoteVisionServer {
   provider: RemoteVisionProvider
   endpoint: string
   model: string
+}
+
+export type RemoteVisionServerConnection = Omit<RemoteVisionSavedServer, 'hasApiKey'> & {
+  apiKey: string
 }
 
 function configPath(): string {
@@ -67,13 +85,29 @@ function validProvider(provider: unknown): provider is RemoteVisionProvider {
 function normalizeServer(
   value: Partial<StoredRemoteVisionServer>
 ): StoredRemoteVisionServer | null {
-  if (!value.id || !value.endpoint || !value.model || !validProvider(value.provider)) return null
+  if (!value.id || !value.endpoint || !validProvider(value.provider)) return null
+  const legacyModel = value.model?.trim() ?? ''
+  const catalog =
+    value.catalog ??
+    (legacyModel
+      ? { text: [{ id: legacyModel, name: legacyModel, capabilities: { supportsVision: true } }] }
+      : {})
+  const selections = value.selections ?? (legacyModel ? { text: legacyModel } : {})
+  if (
+    !Object.values(selections).some(
+      (selection) => typeof selection === 'string' && selection.trim()
+    )
+  ) {
+    return null
+  }
   return {
     id: value.id,
     name: value.name?.trim() || defaultServerName(value.endpoint),
     provider: value.provider,
     endpoint: remoteVisionApiBase(remoteVisionEndpoint(value.provider, value.endpoint)),
-    model: value.model.trim(),
+    model: selections.text?.trim() || legacyModel,
+    selections,
+    catalog,
     screenFramesAllowed: value.screenFramesAllowed === true
   }
 }
@@ -141,6 +175,11 @@ function serverApiKey(serverId: string): string {
   )
 }
 
+function transportApiKey(server: StoredRemoteVisionServer): string {
+  const key = serverApiKey(server.id)
+  return key && canReconcileCredentialedEndpoint(server.endpoint, true) ? key : ''
+}
+
 function publicServer(server: StoredRemoteVisionServer): RemoteVisionSavedServer {
   return { ...server, hasApiKey: Boolean(serverApiKey(server.id)) }
 }
@@ -151,7 +190,7 @@ function selectedRemoteServer(stored: StoredRemoteVisionConfig): StoredRemoteVis
   if (route?.adapterId === 'desktop.remote-chat' && route.serverId) {
     return (
       stored.servers.find(
-        (server) => server.id === route.serverId && server.model === route.modelId
+        (server) => server.id === route.serverId && server.selections.text === route.modelId
       ) ?? null
     )
   }
@@ -172,26 +211,22 @@ export function getRemoteVisionServerSettings(): RemoteVisionServerSettings {
   }
 }
 
-export function getActiveRemoteVisionServer():
-  | (StoredRemoteVisionServer & { apiKey: string })
-  | null {
+export function getActiveRemoteVisionServer(): RemoteVisionServerConnection | null {
   const stored = readStored()
   const active = selectedRemoteServer(stored)
-  return active ? { ...active, apiKey: serverApiKey(active.id) } : null
+  return active ? { ...active, apiKey: transportApiKey(active) } : null
 }
 
 /** Resolve one persisted server for a route selected by the shared model service. */
-export function getRemoteVisionServer(
-  serverId: string
-): (StoredRemoteVisionServer & { apiKey: string }) | null {
+export function getRemoteVisionServer(serverId: string): RemoteVisionServerConnection | null {
   const server = readStored().servers.find((candidate) => candidate.id === serverId)
-  return server ? { ...server, apiKey: serverApiKey(server.id) } : null
+  return server ? { ...server, apiKey: transportApiKey(server) } : null
 }
 
 export function activateRemoteVisionModel(serverId: string, modelId: string): boolean {
   const stored = readStored()
   const server = stored.servers.find(
-    (candidate) => candidate.id === serverId && candidate.model === modelId
+    (candidate) => candidate.id === serverId && candidate.selections.text === modelId
   )
   if (!server) return false
   writeStored({ ...stored, activeServerId: server.id })
@@ -221,14 +256,33 @@ export async function setRemoteVisionServerSettings(
   if (!validProvider(update.provider)) throw new Error('Unknown model server.')
   const endpoint = remoteVisionApiBase(remoteVisionEndpoint(update.provider, update.endpoint))
   const model = update.model.trim()
-  if (!endpoint || !model) throw new Error('Remote model server and model are required.')
+  if (!endpoint) throw new Error('Remote model server is required.')
   const id = update.serverId || randomUUID()
+  const existing = stored.servers.find((server) => server.id === id)
+  const catalog =
+    update.catalog ??
+    existing?.catalog ??
+    (model ? { text: [{ id: model, name: model, capabilities: { supportsVision: true } }] } : {})
+  const selections = update.selections ?? existing?.selections ?? (model ? { text: model } : {})
+  if (
+    !Object.values(selections).some(
+      (selection) => typeof selection === 'string' && selection.trim()
+    )
+  ) {
+    throw new Error('Select at least one remote model.')
+  }
+  const requestedKey = update.apiKey?.trim() || (existing ? serverApiKey(id) : '')
+  if (requestedKey && !canReconcileCredentialedEndpoint(endpoint, true)) {
+    throw new Error('API keys require an HTTPS remote server.')
+  }
   const next: StoredRemoteVisionServer = {
     id,
     name: update.name?.trim() || defaultServerName(endpoint),
     provider: update.provider,
     endpoint,
-    model,
+    model: selections.text ?? model,
+    selections,
+    catalog,
     screenFramesAllowed: update.screenFramesAllowed === true
   }
   const servers = stored.servers.some((server) => server.id === id)
@@ -242,16 +296,38 @@ export async function setRemoteVisionServerSettings(
     servers
   })
   const { desktopModelServices } = await import('../model-services')
-  const selected = await desktopModelServices.select('text', remoteVisionModelId(id, model))
-  if (!selected.success) throw new Error(selected.error)
+  await desktopModelServices.refresh()
+  for (const [remoteModality, selectedModel] of Object.entries(selections)) {
+    if (!selectedModel) continue
+    const modality = remoteModality === 'voice' ? 'voice' : remoteModality
+    const selected = await desktopModelServices.select(
+      modality as 'text' | 'image' | 'transcription' | 'voice' | 'embedding',
+      remoteVisionModelId(id, selectedModel)
+    )
+    if (!selected.success) throw new Error(selected.error)
+  }
   return getRemoteVisionServerSettings()
 }
 
 export function removeRemoteVisionServer(serverId: string): RemoteVisionServerSettings {
   const stored = readStored()
-  const selected = desktopModelSelectionPersistence.readCanonical('text')
-  const selectedRoute = selected ? decodeModelRouteId(selected) : null
-  if (selectedRoute?.serverId === serverId) desktopModelSelectionPersistence.write('text', null)
+  const modalities: ModelModality[] = [
+    'text',
+    'vision',
+    'computer_use',
+    'image',
+    'transcription',
+    'voice',
+    'embedding',
+    'tool_selection'
+  ]
+  for (const modality of modalities) {
+    const selected = desktopModelSelectionPersistence.readCanonical(modality)
+    const selectedRoute = selected ? decodeModelRouteId(selected) : null
+    if (selectedRoute?.serverId !== serverId) continue
+    desktopModelSelectionPersistence.write(modality, null)
+    desktopModelSelectionPersistence.projectLegacyModality(modality, null)
+  }
   deleteSecret(secretKey(serverId))
   writeStored({
     version: CONFIG_VERSION,
@@ -270,23 +346,33 @@ export async function testRemoteVisionServer(
     if (update.provider === 'local') return { ok: true, latencyMs: 0 }
     if (!endpoint) throw new Error('Remote model server is required.')
     const key = update.apiKey?.trim() || (update.serverId ? serverApiKey(update.serverId) : '')
+    if (key && !canReconcileCredentialedEndpoint(endpoint, true)) {
+      throw new Error('API keys require an HTTPS remote server.')
+    }
     const response = await fetch(`${endpoint}/models`, {
-      headers: key ? { Authorization: `Bearer ${key}` } : undefined,
-      signal: AbortSignal.timeout(10_000)
+      headers: remoteAuthorizationHeaders(endpoint, key),
+      signal: AbortSignal.timeout(10_000),
+      redirect: REMOTE_FETCH_REDIRECT_POLICY
     })
     if (!response.ok) throw new Error(`Server returned HTTP ${response.status}.`)
-    const body = (await response.json()) as {
-      data?: Array<{ id?: unknown; name?: unknown }>
-      models?: Array<{ id?: unknown; name?: unknown; model?: unknown }>
+    const evidence = discoveryFromRemoteModelList(await response.json())
+    if (!evidence) throw new Error('The server returned an invalid model list.')
+    const catalog = catalogFromDiscovery(evidence)
+    const current = update.serverId
+      ? readStored().servers.find((server) => server.id === update.serverId)?.selections
+      : undefined
+    const selections = mergeRemoteSelections(
+      current,
+      defaultRemoteSelections(catalog),
+      update.provider === 'ogad'
+    )
+    return {
+      ok: true,
+      latencyMs: Date.now() - startedAt,
+      models: evidence.models,
+      catalog,
+      selections
     }
-    const entries: Array<{ id?: unknown; name?: unknown; model?: unknown }> =
-      body.data ?? body.models ?? []
-    const models = entries.flatMap((entry) => {
-      const id =
-        typeof entry.id === 'string' ? entry.id : typeof entry.model === 'string' ? entry.model : ''
-      return id ? [{ id, name: typeof entry.name === 'string' ? entry.name : id }] : []
-    })
-    return { ok: true, latencyMs: Date.now() - startedAt, models }
   } catch (error) {
     return {
       ok: false,

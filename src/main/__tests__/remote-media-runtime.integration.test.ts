@@ -59,6 +59,11 @@ beforeAll(async () => {
         outgoing.end(Buffer.from('voice'))
         return
       }
+      if (incoming.url === '/v1/embeddings') {
+        outgoing.writeHead(200, { 'Content-Type': 'application/json' })
+        outgoing.end(JSON.stringify({ data: [{ embedding: [0.1, 0.2] }] }))
+        return
+      }
       outgoing.writeHead(404).end()
     })
   })
@@ -107,12 +112,16 @@ describe('Desktop remote media transport', () => {
     await expect(
       runtime.voice(model('voice'), request({ type: 'voice', text: 'Hello', voice: 'alloy' }))
     ).resolves.toEqual({ data: Buffer.from('voice').toString('base64'), mimeType: 'audio/mpeg' })
+    await expect(
+      runtime.embedding(model('embedding'), request({ type: 'embedding', inputs: ['Hello'] }))
+    ).resolves.toEqual([[0.1, 0.2]])
 
     expect(requests.map(({ url }) => url)).toEqual([
       '/v1/images/generations',
       '/v1/images/edits',
       '/v1/audio/transcriptions',
-      '/v1/audio/speech'
+      '/v1/audio/speech',
+      '/v1/embeddings'
     ])
     expect(requests[0]?.body.toString()).toContain('"size":"768x512"')
     expect(requests[1]?.contentType).toContain('multipart/form-data')

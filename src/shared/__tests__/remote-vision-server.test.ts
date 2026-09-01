@@ -55,7 +55,7 @@ describe('remote model inventory ids', () => {
     expect(parseRemoteVisionModelId('remote-vision:only-one-part')).toBeNull()
   })
 
-  it('projects saved servers into available remote vision models', () => {
+  it('migrates a saved single-model server into the text inventory', () => {
     expect(
       remoteVisionInventoryModels([
         {
@@ -72,7 +72,7 @@ describe('remote model inventory ids', () => {
       expect.objectContaining({
         id: 'remote-vision:home:google%2Fgemma-4',
         name: 'google/gemma-4',
-        kind: 'vision',
+        kind: 'text',
         org: 'Home server',
         files: [],
         tags: ['Remote'],

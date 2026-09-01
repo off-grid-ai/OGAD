@@ -12,12 +12,7 @@ import {
   modelDownloadQueue,
   shutdownModelDownloads
 } from './models/download-queue'
-import {
-  getActiveModal,
-  getAllActiveModals,
-  setActiveModal as setModal,
-  type Modality
-} from './active-models'
+import { getAllActiveModals, setActiveModal as setModal, type Modality } from './active-models'
 import {
   recordDownloaded,
   removeDownloaded,
@@ -53,8 +48,7 @@ import {
 } from '@offgrid/models'
 import {
   parseRemoteVisionModelId,
-  remoteVisionInventoryModels,
-  remoteVisionModelId
+  remoteVisionInventoryModels
 } from '../shared/remote-vision-server'
 import { getRemoteVisionServerSettings } from './vision/remote-vision-server'
 import { desktopModelServices } from './model-services'
@@ -236,8 +230,8 @@ export async function listInstalled(): Promise<string[]> {
     present: (name) => fileSizeOf(dir, name) > 0,
     mfluxCached: (id) => isMfluxModelCached(id)
   })
-  const remoteInstalled = getRemoteVisionServerSettings().servers.map((server) =>
-    remoteVisionModelId(server.id, server.model)
+  const remoteInstalled = remoteVisionInventoryModels(getRemoteVisionServerSettings().servers).map(
+    (model) => model.id
   )
   return [...localInstalled, ...remoteInstalled]
 }
@@ -369,16 +363,18 @@ export async function downloadModel(
         ports: createNodeArtifactDownloadPorts(dir),
         interruptedError: DOWNLOAD_INTERRUPTED_ERROR,
         hooks: {
-          skipped: (file) => writeDiagnosticLog('models.download', 'file.skipped', {
-            modelId,
-            file: file.name,
-            reason: 'already_present'
-          }),
-          started: (file, resumeBytes) => writeDiagnosticLog('models.download', 'file.started', {
-            modelId,
-            file: file.name,
-            resumeBytes
-          }),
+          skipped: (file) =>
+            writeDiagnosticLog('models.download', 'file.skipped', {
+              modelId,
+              file: file.name,
+              reason: 'already_present'
+            }),
+          started: (file, resumeBytes) =>
+            writeDiagnosticLog('models.download', 'file.started', {
+              modelId,
+              file: file.name,
+              resumeBytes
+            }),
           progress: (progress) => {
             const rate = sampleProgressRate(rateSample, {
               currentBytes: progress.downloadedBytes,
@@ -398,11 +394,12 @@ export async function downloadModel(
               status: 'downloading'
             })
           },
-          completed: (file, writtenBytes) => writeDiagnosticLog(
-            'models.download',
-            'file.completed',
-            { modelId, file: file.name, bytes: writtenBytes }
-          )
+          completed: (file, writtenBytes) =>
+            writeDiagnosticLog('models.download', 'file.completed', {
+              modelId,
+              file: file.name,
+              bytes: writtenBytes
+            })
         }
       })
       if (result.success) {
@@ -709,7 +706,9 @@ export async function reconcileActiveModelClassification(): Promise<boolean> {
 
   const modality = modalityForModel(entry.kind)
   if (!modality) return false
-  if (!getActiveModal(modality)) {
+  const active = desktopModelServices.activeModalities()
+  const activeForModality = modality === 'speech' ? active.speech : active[modality]
+  if (!activeForModality) {
     const migrated = await setActiveModalChoice(modality, activeId)
     if (!migrated.success) return false
   }
@@ -792,12 +791,20 @@ export async function activateModel(
   requestedKind?: string
 ): Promise<{ success: boolean; error?: string }> {
   const route = decodeModelRouteId(modelId)
-  const remote =
-    route?.adapterId === 'desktop.remote-chat' && route.serverId
-      ? { serverId: route.serverId, modelId: route.modelId }
-      : parseRemoteVisionModelId(modelId)
+  const remote = route?.serverId
+    ? { serverId: route.serverId, modelId: route.modelId }
+    : parseRemoteVisionModelId(modelId)
   if (remote) {
-    return desktopModelServices.select('text', modelId)
+    const remoteModality =
+      requestedKind === 'image' ||
+      requestedKind === 'transcription' ||
+      requestedKind === 'embedding' ||
+      requestedKind === 'computer_use'
+        ? requestedKind
+        : requestedKind === 'voice' || requestedKind === 'speech'
+          ? 'voice'
+          : 'text'
+    return desktopModelServices.select(remoteModality, modelId)
   }
   let kind: string | undefined
   let requestedModal: Modality | null = null

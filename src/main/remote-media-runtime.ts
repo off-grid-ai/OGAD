@@ -3,13 +3,16 @@ import path from 'node:path'
 import {
   REMOTE_FETCH_REDIRECT_POLICY,
   parseRemoteImageGenerationResponse,
+  parseRemoteEmbeddingResponse,
   parseRemoteTranscriptionResponse,
   remoteAuthorizationHeaders,
   remoteImageEndpoint,
+  remoteEmbeddingEndpoint,
   remoteImageGenerationPayload,
   remoteMediaEndpoint,
   remoteProviderErrorMessage,
   remoteVoicePayload,
+  remoteEmbeddingPayload,
   type GenerationRequest,
   type RemoteImageArtifact,
   type RuntimeModel
@@ -107,6 +110,7 @@ export function createRemoteMediaRuntime(
     model: RuntimeModel,
     request: GenerationRequest
   ): Promise<{ data: string; mimeType: string }>
+  embedding(model: RuntimeModel, request: GenerationRequest): Promise<number[][]>
 } {
   return {
     async image(model: RuntimeModel, request: GenerationRequest) {
@@ -213,6 +217,29 @@ export function createRemoteMediaRuntime(
             data: Buffer.from(await response.arrayBuffer()).toString('base64'),
             mimeType: response.headers.get('content-type')?.split(';', 1)[0] || 'audio/mpeg'
           })
+        },
+        fetcher
+      )
+    },
+
+    async embedding(model: RuntimeModel, request: GenerationRequest) {
+      if (request.operation?.type !== 'embedding') {
+        throw new Error('An embedding operation is required.')
+      }
+      const connection = resolveConnection(model)
+      return remoteRequest(
+        {
+          connection,
+          url: remoteEmbeddingEndpoint(connection.endpoint),
+          init: {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(
+              remoteEmbeddingPayload({ model: model.id, inputs: request.operation.inputs })
+            )
+          },
+          request,
+          consume: async (response) => parseRemoteEmbeddingResponse(await response.json())
         },
         fetcher
       )

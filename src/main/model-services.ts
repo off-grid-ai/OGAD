@@ -35,6 +35,7 @@ import {
   DesktopRemoteImageGenerationAdapter,
   DesktopRemoteVoiceGenerationAdapter,
   DesktopRemoteTranscriptionGenerationAdapter,
+  DesktopRemoteEmbeddingGenerationAdapter,
   DesktopEmbeddingGenerationAdapter
 } from './model-generation-adapters'
 import { desktopToolExecutor } from './desktop-tool-executor'
@@ -51,6 +52,11 @@ interface DesktopInventoryModel {
   engine?: string
   remoteServerId?: string
   remoteModelId?: string
+  remoteCapabilities?: {
+    supportsVision?: boolean
+    supportsToolCalling?: boolean
+    supportsThinking?: boolean
+  }
   grounder?: boolean
 }
 
@@ -103,7 +109,9 @@ export function desktopAdapterId(source: 'local' | 'remote', modality: ModelModa
   if (modality === 'transcription') {
     return source === 'remote' ? 'desktop.remote-transcription' : 'desktop.transcription'
   }
-  if (modality === 'embedding') return 'desktop.embedding'
+  if (modality === 'embedding') {
+    return source === 'remote' ? 'desktop.remote-embedding' : 'desktop.embedding'
+  }
   return `${prefix}.${modality.replace('_', '-')}`
 }
 
@@ -272,13 +280,17 @@ class DesktopInventorySource {
       return [
         base,
         route('classifier', `${prefix}.classifier`, { classification: true, streaming: true }),
-        route('tool_selection', `${prefix}.tool-selection`, {
-          tools: true,
-          toolSelection: true,
-          thinking: base.capabilities.thinking,
-          streaming: true,
-          structuredOutput: true
-        }),
+        ...(base.capabilities.tools
+          ? [
+              route('tool_selection', `${prefix}.tool-selection`, {
+                tools: true,
+                toolSelection: true,
+                thinking: base.capabilities.thinking,
+                streaming: true,
+                structuredOutput: true
+              })
+            ]
+          : []),
         ...(base.capabilities.vision
           ? [
               route('vision', `${prefix}.vision`, {
@@ -287,14 +299,18 @@ class DesktopInventorySource {
                 streaming: true,
                 structuredOutput: true
               }),
-              route('computer_use', `${prefix}.computer-use`, {
-                vision: true,
-                computerUse: true,
-                tools: true,
-                toolSelection: true,
-                streaming: true,
-                structuredOutput: true
-              })
+              ...(base.capabilities.tools
+                ? [
+                    route('computer_use', `${prefix}.computer-use`, {
+                      vision: true,
+                      computerUse: true,
+                      tools: true,
+                      toolSelection: true,
+                      streaming: true,
+                      structuredOutput: true
+                    })
+                  ]
+                : [])
             ]
           : [])
       ]
@@ -345,15 +361,25 @@ class DesktopInventorySource {
                 : 'persistent',
         capabilities: {
           textGeneration: modality === 'text',
-          vision: model.kind === 'vision' || model.kind === 'computer_use' || source === 'remote',
+          vision:
+            model.kind === 'vision' ||
+            model.kind === 'computer_use' ||
+            model.remoteCapabilities?.supportsVision === true,
           computerUse: modality === 'computer_use',
           imageGeneration: modality === 'image',
           speechSynthesis: modality === 'voice',
           transcription: modality === 'transcription',
           audioInput: modality === 'transcription',
-          tools: modality === 'text' || modality === 'computer_use',
-          toolSelection: modality === 'computer_use',
-          thinking: modality === 'text' || modality === 'computer_use',
+          embeddings: modality === 'embedding',
+          tools:
+            modality === 'computer_use' ||
+            (modality === 'text' &&
+              (source === 'local' || model.remoteCapabilities?.supportsToolCalling === true)),
+          toolSelection:
+            modality === 'computer_use' || model.remoteCapabilities?.supportsToolCalling === true,
+          thinking:
+            (modality === 'text' || modality === 'computer_use') &&
+            (source === 'local' || model.remoteCapabilities?.supportsThinking === true),
           streaming: modality === 'text' || modality === 'computer_use',
           structuredOutput: modality === 'text' || modality === 'computer_use'
         },
@@ -365,32 +391,6 @@ class DesktopInventorySource {
       return expandTextRoutes(base)
     })
 
-    const remoteRoutes = remoteSettings.servers.flatMap((server): RuntimeModel[] => {
-      const loaded =
-        activeTextRoute?.serverId === server.id && activeTextRoute.modelId === server.model
-      return expandTextRoutes({
-        id: server.model,
-        name: server.model,
-        kind: 'vision',
-        modality: 'text',
-        source: 'remote',
-        adapterId: 'desktop.remote-chat',
-        providerId: server.provider,
-        serverId: server.id,
-        reasoning: remoteReasoningById.get(server.id),
-        capabilities: {
-          textGeneration: true,
-          vision: true,
-          tools: true,
-          thinking: true,
-          streaming: true,
-          structuredOutput: true
-        },
-        installed: true,
-        ready: true,
-        loaded
-      })
-    })
     const embeddingRoute: RuntimeModel = {
       id: 'all-MiniLM-L6-v2',
       name: 'MiniLM embeddings',
@@ -407,7 +407,7 @@ class DesktopInventorySource {
       peakSizeMB: 160,
       residencyMode: 'persistent'
     }
-    const routes = [...catalogRoutes, ...remoteRoutes, embeddingRoute]
+    const routes = [...catalogRoutes, embeddingRoute]
     this.selections.indexRoutes(routes)
     return routes
   }
@@ -473,7 +473,8 @@ export function createDesktopModelServices(
     'desktop.remote-voice',
     'desktop.transcription',
     'desktop.remote-transcription',
-    'desktop.embedding'
+    'desktop.embedding',
+    'desktop.remote-embedding'
   ]) {
     llm.registerAdapter(new DesktopModelInventoryAdapter(adapterId, source))
   }
@@ -514,6 +515,7 @@ export function createDesktopModelServices(
   generation.registerAdapter(new DesktopTranscriptionGenerationAdapter())
   generation.registerAdapter(new DesktopRemoteTranscriptionGenerationAdapter())
   generation.registerAdapter(new DesktopEmbeddingGenerationAdapter())
+  generation.registerAdapter(new DesktopRemoteEmbeddingGenerationAdapter())
   for (const adapterId of [
     'desktop.remote-chat',
     'desktop.remote-chat.classifier',

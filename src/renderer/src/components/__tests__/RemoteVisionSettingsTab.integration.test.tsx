@@ -15,9 +15,30 @@ describe('<RemoteVisionSettingsTab/>', () => {
       ok: true,
       latencyMs: 42,
       models: [
-        { id: 'vision-model', name: 'Vision model' },
-        { id: 'new-vision-model', name: 'New vision model' }
-      ]
+        { id: 'vision-model', name: 'Vision model', modality: 'text' },
+        { id: 'new-vision-model', name: 'New vision model', modality: 'text' },
+        { id: 'remote-image', name: 'Remote Image', modality: 'image' },
+        { id: 'remote-stt', name: 'Remote STT', modality: 'transcription' },
+        { id: 'remote-voice', name: 'Remote Voice', modality: 'voice' },
+        { id: 'remote-embedding', name: 'Remote Embedding', modality: 'embedding' }
+      ],
+      catalog: {
+        text: [
+          { id: 'vision-model', name: 'Vision model' },
+          { id: 'new-vision-model', name: 'New vision model' }
+        ],
+        image: [{ id: 'remote-image', name: 'Remote Image' }],
+        transcription: [{ id: 'remote-stt', name: 'Remote STT' }],
+        voice: [{ id: 'remote-voice', name: 'Remote Voice' }],
+        embedding: [{ id: 'remote-embedding', name: 'Remote Embedding' }]
+      },
+      selections: {
+        text: 'vision-model',
+        image: 'remote-image',
+        transcription: 'remote-stt',
+        voice: 'remote-voice',
+        embedding: 'remote-embedding'
+      }
     }))
     const setRemoteVisionServer = vi.fn(async (update) => ({
       provider: update.provider,
@@ -74,7 +95,12 @@ describe('<RemoteVisionSettingsTab/>', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Change model' }))
-    await screen.findByText('Connected in 42 ms. 2 models found.')
+    await screen.findByText('Connected in 42 ms. 6 models found.')
+    expect(screen.getByLabelText('Image')).toBeTruthy()
+    expect(screen.getByLabelText('Transcription')).toBeTruthy()
+    expect(screen.getByLabelText('Voice')).toBeTruthy()
+    expect(screen.getByLabelText('Embeddings')).toBeTruthy()
+    expect(screen.queryByText(/remote-vision:/i)).toBeNull()
     fireEvent.change(screen.getByPlaceholderText('Search models'), { target: { value: 'new' } })
     expect(screen.queryByText('Vision model')).toBeNull()
     fireEvent.click(screen.getByText('New vision model'))
@@ -98,7 +124,24 @@ describe('<RemoteVisionSettingsTab/>', () => {
         name: 'Models example',
         serverId: 'server-1',
         apiKey: 'private-key',
-        screenFramesAllowed: true
+        screenFramesAllowed: true,
+        catalog: {
+          text: [
+            { id: 'vision-model', name: 'Vision model' },
+            { id: 'new-vision-model', name: 'New vision model' }
+          ],
+          image: [{ id: 'remote-image', name: 'Remote Image' }],
+          transcription: [{ id: 'remote-stt', name: 'Remote STT' }],
+          voice: [{ id: 'remote-voice', name: 'Remote Voice' }],
+          embedding: [{ id: 'remote-embedding', name: 'Remote Embedding' }]
+        },
+        selections: {
+          text: 'new-vision-model',
+          image: 'remote-image',
+          transcription: 'remote-stt',
+          voice: 'remote-voice',
+          embedding: 'remote-embedding'
+        }
       })
     )
     expect((screen.getByLabelText('API key (optional)') as HTMLInputElement).value).toBe('')

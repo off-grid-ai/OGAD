@@ -1,3 +1,10 @@
+import type {
+  RemoteModelCapabilities,
+  RemoteModelCatalog,
+  RemoteModelModality,
+  RemoteModalitySelections
+} from '@offgrid/models'
+
 export const REMOTE_VISION_PROVIDERS = [
   'local',
   'ollama',
@@ -15,6 +22,8 @@ export interface RemoteVisionSavedServer {
   provider: Exclude<RemoteVisionProvider, 'local'>
   endpoint: string
   model: string
+  selections?: RemoteModalitySelections
+  catalog?: RemoteModelCatalog
   hasApiKey: boolean
   /** The user has confirmed that this remote server can receive screen images. */
   screenFramesAllowed: boolean
@@ -28,13 +37,14 @@ export interface RemoteVisionModelReference {
 export interface RemoteVisionInventoryModel {
   id: string
   name: string
-  kind: 'vision'
+  kind: 'text' | 'vision' | 'image' | 'transcription' | 'voice' | 'embedding'
   org: string
   description: string
   files: []
   tags: ['Remote']
   remoteServerId: string
   remoteModelId: string
+  remoteCapabilities?: Partial<RemoteModelCapabilities>
 }
 
 /** Stable inventory id for a model that belongs to a saved remote server. */
@@ -50,17 +60,34 @@ export function parseRemoteVisionModelId(value: string): RemoteVisionModelRefere
 export function remoteVisionInventoryModels(
   servers: RemoteVisionSavedServer[]
 ): RemoteVisionInventoryModel[] {
-  return servers.map((server) => ({
-    id: remoteVisionModelId(server.id, server.model),
-    name: server.model,
-    kind: 'vision',
-    org: server.name,
-    description: `Runs through ${server.name}.`,
-    files: [],
-    tags: ['Remote'],
-    remoteServerId: server.id,
-    remoteModelId: server.model
-  }))
+  const kindFor = (
+    modality: RemoteModelModality,
+    capabilities?: Partial<RemoteModelCapabilities>
+  ): RemoteVisionInventoryModel['kind'] =>
+    modality === 'text' ? (capabilities?.supportsVision ? 'vision' : 'text') : modality
+  return servers.flatMap((server) => {
+    const catalog = Object.entries(server.catalog ?? {}) as Array<
+      [RemoteModelModality, NonNullable<RemoteModelCatalog[RemoteModelModality]>]
+    >
+    const options = catalog.flatMap(([modality, models]) =>
+      models.map((model) => ({ modality, model }))
+    )
+    const discovered = options.length
+      ? options
+      : [{ modality: 'text' as const, model: { id: server.model, name: server.model } }]
+    return discovered.map(({ modality, model }) => ({
+      id: remoteVisionModelId(server.id, model.id),
+      name: model.name,
+      kind: kindFor(modality, model.capabilities),
+      org: server.name,
+      description: `Runs through ${server.name}.`,
+      files: [],
+      tags: ['Remote'],
+      remoteServerId: server.id,
+      remoteModelId: model.id,
+      remoteCapabilities: model.capabilities
+    }))
+  })
 }
 
 export interface RemoteVisionServerSettings {
@@ -81,13 +108,22 @@ export interface RemoteVisionServerUpdate {
   apiKey?: string
   clearApiKey?: boolean
   screenFramesAllowed?: boolean
+  selections?: RemoteModalitySelections
+  catalog?: RemoteModelCatalog
 }
 
 export interface RemoteVisionConnectionResult {
   ok: boolean
   latencyMs: number
   error?: string
-  models?: Array<{ id: string; name: string }>
+  models?: Array<{
+    id: string
+    name: string
+    modality: RemoteModelModality
+    capabilities?: Partial<RemoteModelCapabilities>
+  }>
+  selections?: RemoteModalitySelections
+  catalog?: RemoteModelCatalog
 }
 
 export const REMOTE_VISION_DEFAULTS: Record<
@@ -108,8 +144,11 @@ export function remoteVisionEndpoint(provider: RemoteVisionProvider, endpoint: s
 
 export function remoteVisionProviderForEndpoint(endpoint: string): RemoteVisionProvider {
   const provider = inferRemoteProvider(endpoint)
-  return provider === 'offgrid-desktop' ? 'ogad' :
-    provider === 'openai-compatible' || provider === 'anthropic' ? 'custom' : provider
+  return provider === 'offgrid-desktop'
+    ? 'ogad'
+    : provider === 'openai-compatible' || provider === 'anthropic'
+      ? 'custom'
+      : provider
 }
 
 export function remoteVisionApiBase(endpoint: string): string {

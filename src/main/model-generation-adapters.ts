@@ -468,6 +468,16 @@ export class DesktopRemoteTranscriptionGenerationAdapter extends DesktopTypedGen
   }
 }
 
+export class DesktopRemoteEmbeddingGenerationAdapter extends DesktopTypedGenerationAdapter {
+  readonly id = 'desktop.remote-embedding'
+
+  async *generate(model: RuntimeModel, request: GenerationRequest): AsyncIterable<GenerationChunk> {
+    const { remoteMediaRuntime } = await import('./remote-media-runtime')
+    const vectors = await remoteMediaRuntime.embedding(model, request)
+    yield { output: { type: 'embedding', vectors }, finishReason: 'stop' }
+  }
+}
+
 export class DesktopEmbeddingGenerationAdapter extends DesktopTypedGenerationAdapter {
   readonly id = 'desktop.embedding'
 

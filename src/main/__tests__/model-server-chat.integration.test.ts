@@ -245,7 +245,7 @@ describe('model gateway chat streaming', () => {
     }
   })
 
-  it('routes a Mobile remote inventory id through its configured provider', async () => {
+  it('routes a Mobile remote inventory id through its configured local provider', async () => {
     const remote = await import('../vision/remote-vision-server')
     const serverId = 'mobile-gemini-route'
     const modelId = 'google/gemini-3.7-flash'
@@ -279,8 +279,7 @@ describe('model gateway chat streaming', () => {
         endpoint: `http://127.0.0.1:${providerPort}/v1`,
         model: modelId,
         serverId,
-        name: 'Gemini provider',
-        apiKey: 'provider-secret'
+        name: 'Gemini provider'
       })
       const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/chat/completions`, {
         method: 'POST',
@@ -306,7 +305,7 @@ describe('model gateway chat streaming', () => {
         stream: false,
         messages: [{ role: 'user', content: 'Do not echo me' }]
       })
-      expect(providerAuthorization).toBe('Bearer provider-secret')
+      expect(providerAuthorization).toBeUndefined()
       expect(upstreamRequest).toBe(localRequestBefore)
     } finally {
       remote.removeRemoteVisionServer(serverId)

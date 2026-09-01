@@ -24,7 +24,6 @@ import {
 import { llm } from '../llm'
 import { getActiveModel, listInstalled, loadComputerUseModel } from '../models-manager'
 import { desktopModelServices, type DesktopModelServices } from '../model-services'
-import { getActiveModal } from '../active-models'
 import { isGrounderActive } from './vision-model-notice'
 import { resolveGrounderLoadPlan } from '@offgrid/models'
 import { runRestoredModelSwap } from './grounder-swap'
@@ -44,7 +43,7 @@ const DEFAULT_GROUNDER_MODEL_ID = 'mradermacher/UI-TARS-1.5-7B-GGUF'
 
 /** The saved Computer Use choice, or the current catalog default. */
 export function selectedGrounderModelId(): string {
-  return getActiveModal('computer_use') ?? DEFAULT_GROUNDER_MODEL_ID
+  return desktopModelServices.llm.active('computer_use').model?.id ?? DEFAULT_GROUNDER_MODEL_ID
 }
 
 async function grounderInstalled(modelId: string): Promise<boolean> {
