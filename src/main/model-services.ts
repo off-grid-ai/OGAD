@@ -25,7 +25,7 @@ import {
   getRemoteVisionServerSettings
 } from './vision/remote-vision-server'
 import { remoteReasoningMetadata } from './llm/remote-chat'
-import { parseRemoteVisionModelId, remoteVisionModelId } from '../shared/remote-vision-server'
+import { parseRemoteVisionModelId } from '../shared/remote-vision-server'
 import {
   DesktopLocalGenerationAdapter,
   DesktopGenerationObservations,
@@ -40,6 +40,7 @@ import { getResidencyMode } from './runtime-residency'
 
 interface DesktopInventoryModel {
   id: string
+  familyId?: string
   name?: string
   kind?: string
   files?: Array<{ name?: string; sizeBytes?: number; role?: string }>
@@ -63,6 +64,7 @@ interface DesktopModelServicesDependencies {
     load(): Promise<void>
     unload(): Promise<void>
   }
+  resolveLegacyModelId?(modelId: string): Promise<string>
   residencyMode?(modality: 'image' | 'stt'): 'resident' | 'on-demand'
 }
 
@@ -140,8 +142,17 @@ export class LegacyDesktopModelIdCodec {
 
   index(models: readonly DesktopInventoryModel[]): void {
     this.canonicalByStored.clear()
+    const familyCounts = new Map<string, number>()
+    for (const model of models) {
+      if (model.familyId) {
+        familyCounts.set(model.familyId, (familyCounts.get(model.familyId) ?? 0) + 1)
+      }
+    }
     for (const model of models) {
       this.canonicalByStored.set(model.id, model.id)
+      if (model.familyId && familyCounts.get(model.familyId) === 1) {
+        this.canonicalByStored.set(model.familyId, model.id)
+      }
       const primary = model.files?.find((file) => file.role !== 'mmproj')?.name
       if (!primary) continue
       this.canonicalByStored.set(primary, model.id)
@@ -181,6 +192,8 @@ class DesktopRouteSelectionPersistence {
 }
 
 export class DesktopModelSelectionStore implements ModelSelectionStore {
+  private readonly routeBySelection = new Map<string, string>()
+
   constructor(
     private readonly ids: LegacyDesktopModelIdCodec,
     private readonly routes = new DesktopRouteSelectionPersistence()
@@ -189,11 +202,28 @@ export class DesktopModelSelectionStore implements ModelSelectionStore {
   read(modality: ModelModality): string | null {
     const routeId = this.routes.read(modality)
     if (routeId) return routeId
-    if (modality === 'text') return this.ids.canonical(activeTextModelId())
-    const legacy = legacyModality(modality)
-    if (!legacy) return null
-    const stored = getActiveModal(legacy)
-    return this.ids.canonical(stored)
+    const legacyId =
+      modality === 'text'
+        ? this.ids.canonical(activeTextModelId())
+        : (() => {
+            const legacy = legacyModality(modality)
+            return legacy ? this.ids.canonical(getActiveModal(legacy)) : null
+          })()
+    if (!legacyId) return null
+    const canonicalRoute = this.routeBySelection.get(`${modality}:${legacyId}`)
+    if (canonicalRoute) {
+      this.routes.write(modality, canonicalRoute)
+      return canonicalRoute
+    }
+    return legacyId
+  }
+
+  indexRoutes(models: readonly RuntimeModel[]): void {
+    this.routeBySelection.clear()
+    for (const model of models) {
+      const routeId = model.routeId ?? runtimeModelRouteId(model)
+      this.routeBySelection.set(`${model.modality}:${model.id}`, routeId)
+    }
   }
 
   async write(modality: ModelModality, modelId: string | null): Promise<void> {
@@ -217,7 +247,9 @@ export class DesktopModelSelectionStore implements ModelSelectionStore {
         this.routes.write(modality, modelId)
         return
       }
-      const result = await (await import('./models-manager')).setActiveModel(nativeModelId)
+      const result = await (await import('./models-manager')).projectActiveTextModelSelection(
+        nativeModelId
+      )
       if (!result.success) throw new Error(result.error ?? 'The model could not be selected.')
       deactivateRemoteVisionModel()
       this.routes.write(modality, modelId)
@@ -431,7 +463,9 @@ class DesktopInventorySource {
       peakSizeMB: 160,
       residencyMode: 'persistent'
     }
-    return [...catalogRoutes, ...remoteRoutes, embeddingRoute]
+    const routes = [...catalogRoutes, ...remoteRoutes, embeddingRoute]
+    this.selections.indexRoutes(routes)
+    return routes
   }
 }
 
@@ -453,6 +487,10 @@ export interface DesktopModelServices {
   generationObservations: DesktopGenerationObservations
   refresh(): Promise<RuntimeModel[]>
   routeIdFor(modality: ModelModality, nativeModelId?: string): string | undefined
+  select(
+    modality: ModelModality,
+    modelId: string | null
+  ): Promise<{ success: boolean; error?: string }>
   warmText(): Promise<boolean>
   unload(modality: ModelModality): Promise<boolean>
   shutdown(): Promise<void>
@@ -540,7 +578,7 @@ export function createDesktopModelServices(
   const projectedId = (modality: ModelModality): string | null => {
     const active = llm.active(modality)
     if (active.model?.source === 'remote' && active.model.serverId) {
-      return remoteVisionModelId(active.model.serverId, active.model.id)
+      return active.model.routeId ?? runtimeModelRouteId(active.model)
     }
     return active.model?.id ?? ids.canonical(active.selectedId)
   }
@@ -595,6 +633,36 @@ export function createDesktopModelServices(
       }
       const canonical = ids.canonical(nativeModelId)
       return llm.list(modality).find((model) => model.id === canonical)?.routeId
+    },
+    async select(modality, modelId) {
+      try {
+        await llm.refresh()
+        if (modelId === null) {
+          await llm.select(modality, null)
+          return { success: true }
+        }
+        const remote = parseRemoteVisionModelId(modelId)
+        const canonicalModelId = dependencies.resolveLegacyModelId
+          ? await dependencies.resolveLegacyModelId(modelId)
+          : modelId
+        const selectedRoute = decodeModelRouteId(modelId)
+          ? modelId
+          : remote
+            ? llm
+                .list(modality)
+                .find(
+                  (model) => model.serverId === remote.serverId && model.id === remote.modelId
+                )?.routeId
+            : this.routeIdFor(modality, canonicalModelId)
+        if (!selectedRoute) return { success: false, error: 'unknown model' }
+        await llm.select(modality, selectedRoute)
+        return { success: true }
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'The model could not be selected.'
+        }
+      }
     },
     async warmText() {
       await llm.refresh()
@@ -669,6 +737,8 @@ export const desktopModelServices = createDesktopModelServices({
       reasoning: llm.getReasoningMetadata()
     }
   },
+  resolveLegacyModelId: async (modelId) =>
+    (await import('./models-manager')).resolveCanonicalModelSelectionId(modelId),
   residencyMode: (modality) => {
     try {
       return getResidencyMode(modality)

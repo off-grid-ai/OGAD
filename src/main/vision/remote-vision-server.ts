@@ -7,6 +7,7 @@ import {
   REMOTE_VISION_PROVIDERS,
   remoteVisionApiBase,
   remoteVisionEndpoint,
+  remoteVisionModelId,
   type RemoteVisionConnectionResult,
   type RemoteVisionProvider,
   type RemoteVisionSavedServer,
@@ -187,12 +188,17 @@ export function deactivateRemoteVisionModel(): void {
   writeStored({ ...stored, activeServerId: null })
 }
 
-export function setRemoteVisionServerSettings(
+export async function setRemoteVisionServerSettings(
   update: RemoteVisionServerUpdate
-): RemoteVisionServerSettings {
+): Promise<RemoteVisionServerSettings> {
   const stored = readStored()
   if (update.provider === 'local') {
-    writeStored({ ...stored, activeServerId: null })
+    const [{ desktopModelServices }, { getActiveModel }] = await Promise.all([
+      import('../model-services'),
+      import('../models-manager')
+    ])
+    const selected = await desktopModelServices.select('text', getActiveModel())
+    if (!selected.success) throw new Error(selected.error)
     return getRemoteVisionServerSettings()
   }
   if (!validProvider(update.provider)) throw new Error('Unknown model server.')
@@ -213,7 +219,14 @@ export function setRemoteVisionServerSettings(
     : [...stored.servers, next]
   if (update.clearApiKey) deleteSecret(secretKey(id))
   else if (update.apiKey?.trim()) setSecret(secretKey(id), update.apiKey.trim())
-  writeStored({ version: CONFIG_VERSION, activeServerId: id, servers })
+  writeStored({
+    version: CONFIG_VERSION,
+    activeServerId: stored.activeServerId === id ? null : stored.activeServerId,
+    servers
+  })
+  const { desktopModelServices } = await import('../model-services')
+  const selected = await desktopModelServices.select('text', remoteVisionModelId(id, model))
+  if (!selected.success) throw new Error(selected.error)
   return getRemoteVisionServerSettings()
 }
 

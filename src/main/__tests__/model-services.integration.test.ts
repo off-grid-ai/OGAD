@@ -96,8 +96,15 @@ describe('Desktop shared model-service composition', () => {
         (image.files.reduce((sum, file) => sum + (file.sizeBytes ?? 0), 0) / (1024 * 1024)) * 1.4
       )
     )
-    expect(desktopModelServices.llm.active('text').selectedId).toBe(text.id)
-    expect(desktopModelServices.llm.active('image').selectedId).toBe(image.id)
+    expect(desktopModelServices.llm.active('text').selectedId).toMatch(/^model-route:v1:/)
+    expect(desktopModelServices.llm.active('image').selectedId).toMatch(/^model-route:v1:/)
+    const migratedSelections = JSON.parse(
+      fs.readFileSync(path.join(modelDirectory, 'model-selections.json'), 'utf8')
+    ) as { text: string; image: string }
+    expect(migratedSelections).toMatchObject({
+      text: expect.stringMatching(/^model-route:v1:/),
+      image: expect.stringMatching(/^model-route:v1:/)
+    })
     expect(manager.getActiveModalities()).toMatchObject({ text: text.id, image: image.id })
     expect(await manager.getActiveModelIds()).toEqual(expect.arrayContaining([text.id, image.id]))
 
@@ -163,7 +170,7 @@ describe('Desktop shared model-service composition', () => {
     await expect(failingStartupServices.warmText()).rejects.toBe(startupError)
     expect(failingStartupServices.residency.getResidents()).toEqual([])
 
-    await desktopModelServices.llm.select('image', image.id)
+    await expect(manager.activateModel(image.id)).resolves.toEqual({ success: true })
     const persistedRoutes = JSON.parse(
       fs.readFileSync(path.join(modelDirectory, 'model-selections.json'), 'utf8')
     ) as { image: string }
@@ -176,10 +183,7 @@ describe('Desktop shared model-service composition', () => {
       JSON.parse(fs.readFileSync(path.join(modelDirectory, 'active-modalities.json'), 'utf8')).image
     ).toBe(image.id)
 
-    await manager.activateModel(image.id)
-    expect(
-      JSON.parse(fs.readFileSync(path.join(modelDirectory, 'active-modalities.json'), 'utf8')).image
-    ).toBe(image.id)
+    expect(desktopModelServices.llm.active('image').selectedId).toBe(persistedRoutes.image)
 
     vi.resetModules()
     const [{ desktopModelServices: relaunchedServices }, { activeImageModel }] = await Promise.all([

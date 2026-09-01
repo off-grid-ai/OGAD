@@ -54,11 +54,7 @@ import {
   remoteVisionInventoryModels,
   remoteVisionModelId
 } from '../shared/remote-vision-server'
-import {
-  activateRemoteVisionModel,
-  deactivateRemoteVisionModel,
-  getRemoteVisionServerSettings
-} from './vision/remote-vision-server'
+import { getRemoteVisionServerSettings } from './vision/remote-vision-server'
 import { desktopModelServices } from './model-services'
 
 export interface DownloadProgress {
@@ -112,6 +108,23 @@ function downloadedVariant(models: DownloadedModel[], id: string): DownloadedMod
   if (exact) return exact
   const family = models.filter((model) => model.familyId === id)
   return family.length === 1 ? family[0] : undefined
+}
+
+/** Resolve a stale family alias at the model-library adapter boundary. */
+export async function resolveCanonicalModelSelectionId(modelId: string): Promise<string> {
+  if (
+    modelId.startsWith('local:') ||
+    decodeModelRouteId(modelId) ||
+    parseRemoteVisionModelId(modelId)
+  ) {
+    return modelId
+  }
+  const { CATALOG } = await import('@offgrid/models')
+  const downloaded = reconcileDownloadedModelRegistry(
+    llm.getModelsDir(),
+    CATALOG as unknown as CatalogEntry[]
+  )
+  return downloadedVariant(downloaded, modelId)?.id ?? modelId
 }
 
 export async function getCatalog(): Promise<{ kinds: readonly string[]; models: unknown[] }> {
@@ -727,9 +740,16 @@ async function setActiveLlamaModel(
   return { success: true }
 }
 
-/** Set the chat LLM (text/vision). Writes active-model.json + reloads llama-server. */
-export function setActiveModel(modelId: string): Promise<{ success: boolean; error?: string }> {
+/** Raw native-runtime projection for the shared text selection store. */
+export function projectActiveTextModelSelection(
+  modelId: string
+): Promise<{ success: boolean; error?: string }> {
   return setActiveLlamaModel(modelId, isChatLoadable, 'the chat LLM')
+}
+
+/** Set the chat LLM through the shared selection owner. */
+export function setActiveModel(modelId: string): Promise<{ success: boolean; error?: string }> {
+  return desktopModelServices.select('text', modelId)
 }
 
 /** Load the selected Computer Use policy into the shared llama.cpp runtime for one supervised run. */
@@ -765,8 +785,12 @@ export async function reconcileActiveModelClassification(): Promise<boolean> {
 
   const modality = modalityForModel(entry.kind)
   if (!modality) return false
-  if (!getActiveModal(modality)) setModal(modality, activeId)
-  fs.rmSync(activeModelFile(), { force: true })
+  if (!getActiveModal(modality)) {
+    const migrated = await setActiveModalChoice(modality, activeId)
+    if (!migrated.success) return false
+  }
+  const cleared = await desktopModelServices.select('text', null)
+  if (!cleared.success) return false
   return true
 }
 
@@ -844,9 +868,7 @@ export async function activateModel(
       ? { serverId: route.serverId, modelId: route.modelId }
       : parseRemoteVisionModelId(modelId)
   if (remote) {
-    return activateRemoteVisionModel(remote.serverId, remote.modelId)
-      ? { success: true }
-      : { success: false, error: 'Remote model is no longer available.' }
+    return desktopModelServices.select('text', modelId)
   }
   let kind: string | undefined
   let requestedModal: Modality | null = null
@@ -868,9 +890,7 @@ export async function activateModel(
     }
   }
   const modal = requestedModal ?? modalityForModel(kind)
-  const result = modal ? await setActiveModalChoice(modal, modelId) : await setActiveModel(modelId)
-  if (result.success && kind && isChatLoadable(kind)) deactivateRemoteVisionModel()
-  return result
+  return modal ? setActiveModalChoice(modal, modelId) : setActiveModel(modelId)
 }
 
 export async function setActiveModalChoice(
@@ -883,8 +903,8 @@ export async function setActiveModalChoice(
   // to activate TTS (D26). One normalizer is the single source of truth.
   const modal = modalityForModel(kind)
   if (modal) {
-    setModal(modal, modelId)
-    return { success: true }
+    const modality = modal === 'speech' ? 'voice' : modal
+    return desktopModelServices.select(modality, modelId)
   }
   return { success: false, error: 'use setActiveModel for the chat LLM (text/vision)' }
 }

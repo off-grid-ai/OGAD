@@ -133,7 +133,7 @@ function startRemoteServer(): Promise<http.Server> {
 beforeAll(async () => {
   remoteServer = await startRemoteServer()
   const port = (remoteServer.address() as AddressInfo).port
-  const settings = setRemoteVisionServerSettings({
+  const settings = await setRemoteVisionServerSettings({
     provider: 'openrouter',
     name: 'Test OpenRouter',
     endpoint: `http://127.0.0.1:${port}`,
@@ -167,6 +167,10 @@ describe('active text model transport', () => {
     const remoteText = inventory.find(
       (model) => model.serverId === remoteServerId && model.modality === 'text'
     )
+    expect(desktopModelServices.llm.active('text')).toMatchObject({
+      selectedId: remoteText?.routeId,
+      model: { serverId: remoteServerId, id: 'openai/gpt-5.6' }
+    })
     const remoteToolSelection = inventory.find(
       (model) => model.serverId === remoteServerId && model.modality === 'tool_selection'
     )
@@ -261,7 +265,7 @@ describe('active text model transport', () => {
   })
 
   it('does not send tools to a selected OpenRouter model without native tool support', async () => {
-    setRemoteVisionServerSettings({
+    await setRemoteVisionServerSettings({
       serverId: remoteServerId,
       provider: 'openrouter',
       name: 'Test OpenRouter',
@@ -296,7 +300,7 @@ describe('active text model transport', () => {
       ).rejects.toThrow('UI-TARS 1.5 7B cannot act as the Chat tool planner')
       expect(requests).toHaveLength(0)
     } finally {
-      setRemoteVisionServerSettings({
+      await setRemoteVisionServerSettings({
         serverId: remoteServerId,
         provider: 'openrouter',
         name: 'Test OpenRouter',

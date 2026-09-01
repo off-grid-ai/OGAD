@@ -195,7 +195,7 @@ describe('model gateway chat streaming', () => {
     })
 
     try {
-      remote.setRemoteVisionServerSettings({
+      await remote.setRemoteVisionServerSettings({
         provider: 'custom',
         endpoint: 'https://openrouter.ai/api/v1',
         model: modelId,
@@ -245,6 +245,11 @@ describe('model gateway chat streaming', () => {
     let providerBody: Record<string, unknown> | undefined
     let providerAuthorization: string | undefined
     const provider = http.createServer((request, response) => {
+      if (request.method === 'GET' && request.url === '/v1/models') {
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify({ data: [{ id: modelId }] }))
+        return
+      }
       let raw = ''
       request.setEncoding('utf8')
       request.on('data', (chunk) => {
@@ -262,7 +267,7 @@ describe('model gateway chat streaming', () => {
     const localRequestBefore = upstreamRequest
 
     try {
-      remote.setRemoteVisionServerSettings({
+      await remote.setRemoteVisionServerSettings({
         provider: 'custom',
         endpoint: `http://127.0.0.1:${providerPort}/v1`,
         model: modelId,
