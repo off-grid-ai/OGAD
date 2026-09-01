@@ -29,7 +29,11 @@ import { getActiveRemoteVisionServer } from './remote-vision-server'
 import type { VisionGroundingInput, VisionGroundingResult } from './vision-agent'
 import { currentRemoteScreenTaskSession } from '../actions/remote-screen-session'
 import { desktopModelServices } from '../model-services'
-import { resolveComputerUseExecutionPlan } from '@offgrid/models'
+import {
+  resolveComputerUseExecutionPlan,
+  resolveComputerUseRoleProjection,
+  type ComputerUseRoleSelection
+} from '@offgrid/models'
 
 export interface VisionTaskModelSession {
   adapter: VisionModelAdapter
@@ -77,13 +81,11 @@ const productionDependencies: VisionTaskModelStrategyDependencies = {
 }
 
 async function projectedModel(
-  role: ComputerUseActiveModel['role'],
-  modelId: string,
-  remote: boolean,
+  selection: ComputerUseRoleSelection,
   dependencies: VisionTaskModelStrategyDependencies
 ): Promise<ComputerUseActiveModel> {
-  const identity = await dependencies.resolveIdentity(modelId)
-  return { role, ...identity, remote }
+  const identity = await dependencies.resolveIdentity(selection.modelId)
+  return { role: selection.role, ...identity, remote: selection.remote }
 }
 
 /** Canonical read-only model-role projection for Active Models. */
@@ -91,34 +93,23 @@ export async function getComputerUseActiveModelProjection(
   dependencies: VisionTaskModelStrategyDependencies = productionDependencies
 ): Promise<ComputerUseActiveModelProjection> {
   const strategy = dependencies.strategy()
-  const plan = resolveComputerUseExecutionPlan(strategy)
   const remote = dependencies.activeRemote()
   const chatModelId = remote
     ? remoteVisionModelId(remote.id, remote.model)
     : dependencies.selectedChatId()
-  const specialistModelId = dependencies.selectedSpecialistId()
-  if (plan.mode === 'direct' && plan.source === 'chat') {
-    return {
-      strategy,
-      strategyLabel: 'Same as Chat',
-      models: chatModelId
-        ? [await projectedModel('reasoner', chatModelId, Boolean(remote), dependencies)]
-        : []
-    }
+  const projection = resolveComputerUseRoleProjection({
+    strategy,
+    chatModelId,
+    chatRemote: Boolean(remote),
+    specialistModelId: dependencies.selectedSpecialistId()
+  })
+  return {
+    strategy: projection.strategy,
+    strategyLabel: projection.strategyLabel,
+    models: await Promise.all(
+      projection.models.map((selection) => projectedModel(selection, dependencies))
+    )
   }
-  if (plan.mode === 'direct') {
-    return {
-      strategy,
-      strategyLabel: 'Specialist',
-      models: [await projectedModel('grounding_specialist', specialistModelId, false, dependencies)]
-    }
-  }
-  const models: ComputerUseActiveModel[] = []
-  if (chatModelId) {
-    models.push(await projectedModel('reasoner', chatModelId, Boolean(remote), dependencies))
-  }
-  models.push(await projectedModel('grounding_specialist', specialistModelId, false, dependencies))
-  return { strategy, strategyLabel: 'Text + Specialist', models }
 }
 
 function activeChatSelection(

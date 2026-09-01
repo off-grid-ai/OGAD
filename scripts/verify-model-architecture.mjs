@@ -91,6 +91,85 @@ for (const file of files) {
   }
 
   if (
+    fileName === 'src/main/vision/vision-policy-runner.ts' &&
+    /\b(?:priorInvalidAnswer|priorValidationError|allowFallback\s*:\s*false|computerUseEmptyDecisionFeedback)\b/.test(
+      text
+    )
+  ) {
+    report(
+      'computer-use-request-policy-is-shared',
+      fileName,
+      source,
+      source,
+      'app-owned retry, validation, reasoning fallback, or generation profile'
+    )
+  }
+  if (
+    fileName === 'src/main/vision/vision-policy-runner.ts' &&
+    !/\brunComputerUsePolicy\s*\(/.test(text)
+  ) {
+    report(
+      'computer-use-request-policy-is-shared',
+      fileName,
+      source,
+      source,
+      'missing shared policy application service'
+    )
+  }
+
+  if (
+    fileName === 'src/main/vision/vision-task-model-strategy.ts' &&
+    /strategyLabel\s*:\s*['"]|role\s*:\s*['"](?:reasoner|grounding_specialist)['"]/.test(text)
+  ) {
+    report(
+      'computer-use-role-routing-is-shared',
+      fileName,
+      source,
+      source,
+      'app-owned model role or strategy label'
+    )
+  }
+  if (
+    fileName === 'src/main/vision/vision-task-model-strategy.ts' &&
+    !/\bresolveComputerUseRoleProjection\s*\(/.test(text)
+  ) {
+    report(
+      'computer-use-role-routing-is-shared',
+      fileName,
+      source,
+      source,
+      'missing shared role projection'
+    )
+  }
+
+  if (
+    fileName === 'src/main/vision/grounder-loader.ts' &&
+    /\b(?:resolveGrounderLoadPlan|runRestoredModelSwap|loadPlan\s*===|previousLocalId\s*=)\b/.test(
+      text
+    )
+  ) {
+    report(
+      'computer-use-model-swap-transaction-is-shared',
+      fileName,
+      source,
+      source,
+      'app-owned specialist swap or restoration transaction'
+    )
+  }
+  if (
+    fileName === 'src/main/vision/grounder-loader.ts' &&
+    !/\bcreateGrounderApplicationService\s*\(/.test(text)
+  ) {
+    report(
+      'computer-use-model-swap-transaction-is-shared',
+      fileName,
+      source,
+      source,
+      'missing shared grounder application service'
+    )
+  }
+
+  if (
     fileName === 'src/renderer/src/components/SettingsPanel.tsx' &&
     /(?:temperature:\s*0\.7|topP:\s*0\.95|topK:\s*40|repeatPenalty:\s*1\.1)/.test(text)
   ) {

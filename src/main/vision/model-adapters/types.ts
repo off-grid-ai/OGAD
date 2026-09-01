@@ -1,4 +1,8 @@
-import type { ContentPart } from '../../llm/chat-payload'
+import type {
+  ComputerUsePolicyRequest,
+  ComputerUsePolicyResponse,
+  ComputerUsePolicyToolCall
+} from '@offgrid/models'
 import type { Bounds, VisionAction } from '../vision-action'
 
 export interface VisionModelArtifacts {
@@ -43,47 +47,11 @@ export interface VisionPolicyCoordinateFrame {
   source: Bounds
 }
 
-export interface VisionPolicyMessage {
-  role: 'system' | 'user' | 'assistant'
-  content: string | ContentPart[]
-}
-
-export interface VisionPolicyToolCall {
-  id: string
-  name: string
-  arguments: string
-}
-
-export interface VisionPolicyResponse {
-  content: string
-  toolCalls: readonly VisionPolicyToolCall[]
-}
-
-export interface VisionPolicyRequest {
+export type VisionPolicyMessage = ComputerUsePolicyRequest['messages'][number]
+export type VisionPolicyToolCall = ComputerUsePolicyToolCall
+export type VisionPolicyResponse = ComputerUsePolicyResponse
+export type VisionPolicyRequest = Omit<ComputerUsePolicyRequest, 'messages'> & {
   messages: VisionPolicyMessage[]
-  maxTokens: number
-  timeoutMs: number
-  maxAttempts: number
-  /** Exact shared generation route selected for this policy run. */
-  generationRouteId?: string
-  /** Optional structured-output grammar for specialist text protocols. */
-  responseFormat?: unknown
-  /** OpenAI-compatible native tools. General/remote operators use this path. */
-  tools?: unknown[]
-  toolChoice?: string
-  temperature?: number
-  topP?: number
-  /** Preserve the model's inline <think> protocol while explicitly enabling its template mode. */
-  enableThinking?: boolean
-  disableThinking?: boolean
-  /** Ask llama.cpp to return reasoning separately from the final answer. */
-  separateReasoning?: boolean
-  /** Require a final answer outside the model's private reasoning channel. */
-  requireFinalAnswer?: boolean
-  /** Reject a malformed final answer so the request can use its normal retry budget. */
-  validateResponse?(response: VisionPolicyResponse): boolean
-  /** Explain which strict contract rule failed without exposing private reasoning. */
-  responseValidationError?(response: VisionPolicyResponse): string | undefined
 }
 
 export type VisionPolicyDecision = (

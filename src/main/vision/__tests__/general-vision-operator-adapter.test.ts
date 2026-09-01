@@ -3,7 +3,11 @@ import os from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
 import { describe, expect, it } from 'vitest'
-import type { GenerationRequest, RuntimeModel } from '@offgrid/models'
+import {
+  serializeComputerUsePolicyResponse,
+  type GenerationRequest,
+  type RuntimeModel
+} from '@offgrid/models'
 import type { TaskExecutionPlan } from '../../../shared/task-execution-plan'
 import { desktopModelServices } from '../../model-services'
 import {
@@ -14,16 +18,12 @@ import { parseGeneralVisionToolResponse } from '../model-adapters/general-vision
 import { resolveVisionModelAdapter } from '../model-adapters/registry'
 import type { VisionPolicyResponse } from '../model-adapters/types'
 import {
-  answerAfterThinking,
   createVisionGrounder,
   modelScreenshot,
-  normalizedPolicyAnswer,
   previousClickMarker,
   remoteVisionProviderError,
   remoteVisionTransportError,
-  runVisionPolicyRequest,
-  serializeVisionPolicyResponse,
-  visionPolicyMessagesForAttempt
+  runVisionPolicyRequest
 } from '../vision-policy-runner'
 import { VisionGuard } from '../vision-guard'
 import { runVisionTaskGraph } from '../vision-task-graph'
@@ -405,25 +405,12 @@ describe('general vision native tool policy', () => {
   })
 
   it('keeps native calls in audit history without using the serialization for routing', () => {
-    const serialized = serializeVisionPolicyResponse(perform())
+    const serialized = serializeComputerUsePolicyResponse(perform())
     expect(serialized).toContain('perform_action')
     const audit = JSON.parse(serialized) as { tool_calls: Array<{ arguments: string }> }
     expect(JSON.parse(audit.tool_calls[0]!.arguments)).toMatchObject({
       action: { type: 'click' }
     })
-  })
-
-  it('keeps final-answer and retry helpers for specialist text protocols', () => {
-    expect(answerAfterThinking('<think>private</think>\nAction: wait()')).toBe('Action: wait()')
-    expect(normalizedPolicyAnswer('```json\n{"safe":true}\n```')).toBe('{"safe":true}')
-    const messages = [{ role: 'system' as const, content: 'policy' }]
-    expect(visionPolicyMessagesForAttempt(messages, 2, 'bad', 'missing tool')).toEqual([
-      ...messages,
-      { role: 'assistant', content: 'bad' },
-      // A USER turn: templates that require system-first (Holo 3.1) raise on a later system
-      // message, which made every retry 500 instead of recovering.
-      expect.objectContaining({ role: 'user', content: expect.stringContaining('missing tool') })
-    ])
   })
 
   it('projects the previous click marker into the current frame', () => {

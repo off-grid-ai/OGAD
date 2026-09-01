@@ -1,4 +1,5 @@
 import { TASK_GUIDANCE_APPLIED_TRACE } from '../tasks/task-guide'
+import { serializeComputerUsePolicyResponse } from '@offgrid/models'
 import type { VisionGroundingInput, VisionGroundingResult } from './vision-agent'
 import type {
   VisionModelAdapter,
@@ -12,7 +13,6 @@ import {
   prepareVisionGrounding,
   runPreparedVisionGrounder,
   runVisionPolicyRequest,
-  serializeVisionPolicyResponse,
   type PreparedVisionGrounding
 } from './vision-policy-runner'
 
@@ -301,7 +301,7 @@ export function createHybridVisionGrounder(
       input.reportReasoning
     )
     const outcome = reasonerOutcome(response)
-    const serializedReasoner = serializeVisionPolicyResponse(response)
+    const serializedReasoner = serializeComputerUsePolicyResponse(response)
     if ('error' in outcome) {
       return {
         response: serializedReasoner,

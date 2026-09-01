@@ -30,7 +30,7 @@ function lifecycle(): {
     activeModelId: () => activeModel.id,
     activeRemote: () => activeRemote,
     dependencies: {
-      modelStrategy: () => 'separate_specialist',
+      strategy: () => 'separate_specialist',
       selectedModelId: () => SPECIALIST,
       installed: async () => true,
       activeModel: () => activeModel,
@@ -193,7 +193,7 @@ describe('Computer Use specialist lifecycle', () => {
     const h = lifecycle()
     const run = createGrounderRunner({
       ...h.dependencies,
-      modelStrategy: () => 'text_plus_specialist'
+      strategy: () => 'text_plus_specialist'
     })
 
     await run(async () => {
