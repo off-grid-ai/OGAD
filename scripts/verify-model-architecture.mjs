@@ -79,6 +79,18 @@ for (const file of files) {
     if (ts.isCallExpression(node)) {
       const call = nodeText(source, node.expression)
       const rawName = call.split('.').at(-1)
+      if (
+        call === 'llm.init' &&
+        fileName !== 'src/main/model-generation-adapters.ts'
+      ) {
+        report(
+          'native-text-loads-use-shared-residency',
+          fileName,
+          source,
+          node,
+          `call:${call}`
+        )
+      }
       if (/^(chat|chatMessages|chatStream|streamChat)$/.test(rawName)) {
         report('no-route-owning-llm-api', fileName, source, node, `call:${rawName}`)
       }

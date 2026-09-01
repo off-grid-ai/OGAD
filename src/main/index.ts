@@ -276,8 +276,10 @@ app.whenReady().then(async () => {
     // startModelServer is async (it scans for a free port); a try/catch can't catch its rejection,
     // so handle it on the promise itself.
     startModelServer().catch((e) => console.error('[gateway] start failed', e))
-    void import('./llm').then(({ llm }) =>
-      llm.init().catch((err) => console.error('[gateway] LLM init failed', err))
+    void import('./model-services').then(({ desktopModelServices }) =>
+      desktopModelServices
+        .warmText()
+        .catch((err) => console.error('[gateway] LLM init failed', err))
     )
     return // skip window, tray, IPC, capture, connectors — gateway only
   }
