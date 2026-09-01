@@ -46,13 +46,14 @@ describe('resource mode settings -> restart -> setup plan', () => {
   })
 
   it('applies every preset to persisted launch limits and settings-driven model plans', async () => {
-    const [{ llm, LLMService }, { TEXT_RUNTIME_MODE_PRESETS: MODE_PRESETS }, setupLogic, setup] =
-      await Promise.all([
-        import('../../llm'),
-        import('@offgrid/models'),
-        import('../../models/setup-logic'),
-        import('../../setup')
-      ])
+    const [
+      { llm, LLMService },
+      {
+        TEXT_RUNTIME_MODE_PRESETS: MODE_PRESETS,
+        GUIDED_SETUP_STT_MODEL_BY_MODE: STT_MODEL_BY_MODE
+      },
+      setup
+    ] = await Promise.all([import('../../llm'), import('@offgrid/models'), import('../../setup')])
 
     const recommendations = new Map<PerformanceMode, string>()
 
@@ -93,7 +94,7 @@ describe('resource mode settings -> restart -> setup plan', () => {
       expect(plan.mode).toBe(mode)
       expect(plan.items.find((item) => item.kind === 'chat')?.id).toBe(recommendation?.id)
       expect(plan.items.find((item) => item.kind === 'transcription')?.id).toBe(
-        setupLogic.STT_MODEL_BY_MODE[mode]
+        STT_MODEL_BY_MODE[mode]
       )
       expect(plan.items.some((item) => item.kind === 'image')).toBe(mode !== 'conservative')
       recommendations.set(mode, recommendation?.id ?? '')
