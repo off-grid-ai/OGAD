@@ -79,7 +79,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   const { removeRemoteVisionServer } = await import('../vision/remote-vision-server')
-  if (serverId) removeRemoteVisionServer(serverId)
+  if (serverId) await removeRemoteVisionServer(serverId)
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()))
   })

@@ -241,7 +241,7 @@ describe('model gateway chat streaming', () => {
       expect(await response.json()).toEqual({ success: true })
       expect(remote.getRemoteVisionServerSettings().activeServerId).toBe(serverId)
     } finally {
-      remote.removeRemoteVisionServer(serverId)
+      await remote.removeRemoteVisionServer(serverId)
     }
   })
 
@@ -308,7 +308,7 @@ describe('model gateway chat streaming', () => {
       expect(providerAuthorization).toBeUndefined()
       expect(upstreamRequest).toBe(localRequestBefore)
     } finally {
-      remote.removeRemoteVisionServer(serverId)
+      await remote.removeRemoteVisionServer(serverId)
       await new Promise<void>((resolve) => provider.close(() => resolve()))
     }
   })

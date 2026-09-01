@@ -201,7 +201,7 @@ beforeEach(() => {
 })
 
 afterAll(async () => {
-  if (remoteServerId) removeRemoteVisionServer(remoteServerId)
+  if (remoteServerId) await removeRemoteVisionServer(remoteServerId)
   vi.unstubAllGlobals()
   await new Promise<void>((resolve, reject) => {
     remoteServer.close((error) => (error ? reject(error) : resolve()))

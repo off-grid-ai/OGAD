@@ -213,6 +213,19 @@ for (const file of files) {
     )
   }
 
+  if (
+    fileName === 'src/main/vision/remote-vision-server.ts' &&
+    /\b(?:activateRemoteServerConfiguration|deactivateRemoteServerConfiguration|removeRemoteServerConfiguration|upsertRemoteServerConfiguration)\b/.test(text)
+  ) {
+    report(
+      'remote-server-workflow-is-shared',
+      fileName,
+      source,
+      source,
+      'adapter:direct-remote-configuration-mutation'
+    )
+  }
+
   const visit = (node) => {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
       const specifier = node.moduleSpecifier.text
