@@ -27,13 +27,16 @@ import {
   rankToolSchemas,
   rankToolSchemasByEmbedding,
   stripHtmlTags as stripTags,
+  toolCapabilityIssue,
   toolSchemaTokenBudget,
   ToolEmbeddingCache
 } from '@offgrid/models'
 
 const toolEmbeddingCache = new ToolEmbeddingCache()
 
-const sharedToolDefinition = (name: string) =>
+const sharedToolDefinition = (
+  name: string
+): ReturnType<typeof catalogEntryToDefinition> =>
   catalogEntryToDefinition(findToolCatalogEntry(name)!)
 const webSearchTool = sharedToolDefinition('web_search')
 const readUrlTool = sharedToolDefinition('read_url')
@@ -52,6 +55,9 @@ import { callHookAsync, HOOKS } from './bootstrap/hookRegistry'
 import { DEFAULT_MAX_TOOL_CALLS } from '../shared/llm-defaults'
 import { generateDesktopMessages } from './desktop-generation'
 import type { GenerationToolCall } from '@offgrid/models'
+import { remoteNativeToolCapability } from './llm/remote-chat'
+import { currentRemoteScreenTaskSession } from './actions/remote-screen-session'
+import { getActiveRemoteVisionServer } from './vision/remote-vision-server'
 
 // Per-tool enable/disable, persisted as a list of disabled tool names.
 function disabledSet(): Set<string> {
@@ -557,7 +563,15 @@ export async function toolChat(
       }
     }
   }
-  const plannerUnavailable = await llm.toolPlannerPreflight()
+  const screenTask = currentRemoteScreenTaskSession()
+  const remoteTextModel = screenTask ? screenTask.activeServer : getActiveRemoteVisionServer()
+  const remoteToolCapability = remoteTextModel
+    ? await remoteNativeToolCapability(remoteTextModel)
+    : null
+  const plannerUnavailable = toolCapabilityIssue(
+    1,
+    remoteToolCapability?.status === 'unsupported' ? { toolCalling: false } : undefined
+  )
   if (plannerUnavailable) {
     return {
       answer: plannerUnavailable,

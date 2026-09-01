@@ -1,9 +1,9 @@
 import {
   cleanTranscription,
+  classifyGenerationAdapterError,
   finalGenerationChunk,
   openAIProjectedMessages,
-  openAIProjectedResponseFormat,
-  openAIProjectedToolChoice,
+  openAIProjectedGenerationOptions,
   reasoningWireForGeneration
 } from '@offgrid/models'
 import type {
@@ -85,27 +85,6 @@ class GenerationChunkChannel {
   }
 }
 
-function streamOptions(request: GenerationRequest): StreamChatOptions {
-  return {
-    temperature: request.sampling?.temperature,
-    topP: request.sampling?.topP,
-    reasoning: request.reasoning,
-    signal: request.signal,
-    maxTokens: request.maxTokens,
-    responseFormat: openAIProjectedResponseFormat(request.responseFormat),
-    tools: request.tools?.map((tool) => ({
-      type: 'function',
-      function: {
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.inputSchema,
-        strict: tool.strict
-      }
-    })),
-    toolChoice: openAIProjectedToolChoice(request.toolChoice)
-  }
-}
-
 abstract class DesktopGenerationAdapter implements GenerationAdapter {
   abstract readonly id: string
 
@@ -117,7 +96,7 @@ abstract class DesktopGenerationAdapter implements GenerationAdapter {
       model,
       openAIProjectedMessages(request.messages ?? []),
       (text, kind) => channel.push(kind === 'reasoning' ? { reasoning: text } : { content: text }),
-      streamOptions(request),
+      openAIProjectedGenerationOptions(request) as StreamChatOptions,
       request.timeoutMs ?? 300_000
     ).then(
       (result) => {
@@ -131,11 +110,10 @@ abstract class DesktopGenerationAdapter implements GenerationAdapter {
   }
 
   classifyError(error: unknown): 'retryable' | 'unsupported' | 'fatal' {
-    const message =
-      error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
-    if (message.includes('does not support') || message.includes('unsupported'))
-      return 'unsupported'
-    return 'retryable'
+    return classifyGenerationAdapterError(error, {
+      unsupportedPatterns: ['does not support', 'unsupported'],
+      otherwise: 'retryable'
+    })
   }
 
   protected abstract run(
@@ -250,11 +228,10 @@ abstract class DesktopTypedGenerationAdapter implements GenerationAdapter {
   abstract readonly id: string
 
   classifyError(error: unknown): 'retryable' | 'unsupported' | 'fatal' {
-    const message =
-      error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
-    return message.includes('not installed') || message.includes('not available')
-      ? 'unsupported'
-      : 'fatal'
+    return classifyGenerationAdapterError(error, {
+      unsupportedPatterns: ['not installed', 'not available'],
+      otherwise: 'fatal'
+    })
   }
 
   abstract generate(model: RuntimeModel, request: GenerationRequest): AsyncIterable<GenerationChunk>

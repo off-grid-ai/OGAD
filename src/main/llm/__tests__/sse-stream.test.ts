@@ -10,13 +10,13 @@
 
 import { describe, it, expect } from 'vitest'
 import {
-  parseSseLine,
-  displayableReasoningDelta,
-  createThinkSplitter,
-  createToolCallAccumulator,
-  createToolMarkupFilter,
-  type StreamEvent
-} from '../sse-stream'
+  parseOpenAISseLine as parseSseLine,
+  displayableOpenAIReasoningDelta as displayableReasoningDelta,
+  createInlineThinkSplitter as createThinkSplitter,
+  createOpenAIToolCallAccumulator as createToolCallAccumulator,
+  createOpenAIToolMarkupFilter as createToolMarkupFilter,
+  type ReasoningStreamEvent as StreamEvent
+} from '@offgrid/models'
 
 describe('parseSseLine', () => {
   it('parses a normal content delta frame', () => {

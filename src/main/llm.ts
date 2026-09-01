@@ -31,7 +31,6 @@ import {
   llamaServerReasoningPayload,
   llamaServerLaunchArgs,
   localCompletionText,
-  nativeToolPlannerUnavailableMessage,
   textRuntimeLaunchChanged,
   textRuntimeCrashRecoveryPlan,
   isPerformanceMode,
@@ -54,11 +53,7 @@ import { pickFreePort, isPortFree } from './free-port'
 import { postCompletionOnce } from './llm/http-post'
 import { engineSpawnEnv } from './llm/spawn-env'
 import { streamCompletion, type StreamResult } from './llm/stream'
-import {
-  remoteNativeToolCapability,
-  streamRemoteChatCompletion,
-  type RemoteTextModelConnection
-} from './llm/remote-chat'
+import { streamRemoteChatCompletion, type RemoteTextModelConnection } from './llm/remote-chat'
 import {
   terminateEngine,
   ENGINE_TEARDOWN_GRACE_MS,
@@ -1086,16 +1081,6 @@ export class LLMService {
   private activeRemoteTextModel(): RemoteTextModelConnection | null {
     const screenTask = currentRemoteScreenTaskSession()
     return screenTask ? screenTask.activeServer : getActiveRemoteVisionServer()
-  }
-
-  /** A tool turn must fail before generation when the selected remote model cannot plan actions. */
-  async toolPlannerPreflight(): Promise<string | null> {
-    const remote = this.activeRemoteTextModel()
-    if (!remote) return null
-    const capability = await remoteNativeToolCapability(remote)
-    return capability.status === 'unsupported'
-      ? nativeToolPlannerUnavailableMessage(capability)
-      : null
   }
 
   private completeRemote(
