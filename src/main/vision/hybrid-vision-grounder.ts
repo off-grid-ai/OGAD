@@ -276,6 +276,12 @@ export interface HybridVisionGrounderDependencies {
   ): Promise<VisionPolicyResponse>
   withSpecialist<T>(task: () => Promise<T>): Promise<{ result: T }>
   activeSpecialistAdapter(): VisionModelAdapter
+  runSpecialist?(
+    adapter: VisionModelAdapter,
+    input: VisionGroundingInput,
+    prepared: PreparedVisionGrounding,
+    policyInput: VisionPolicyInput
+  ): Promise<VisionGroundingResult>
   reasonerRouteId?: string
   specialistRouteId?: string
 }
@@ -314,15 +320,13 @@ export function createHybridVisionGrounder(
     }
     const { result: grounded } = await dependencies.withSpecialist(async () => {
       const adapter = dependencies.activeSpecialistAdapter()
-      const result = await runPreparedVisionGrounder(
-        adapter,
-        input,
-        prepared,
-        {
-          ...specialistInput(prepared, outcome.delegation),
-          generationRouteId: dependencies.specialistRouteId
-        }
-      )
+      const policyInput = {
+        ...specialistInput(prepared, outcome.delegation),
+        generationRouteId: dependencies.specialistRouteId
+      }
+      const result = dependencies.runSpecialist
+        ? await dependencies.runSpecialist(adapter, input, prepared, policyInput)
+        : await runPreparedVisionGrounder(adapter, input, prepared, policyInput)
       if (result.decision?.kind !== 'actions') {
         return {
           ...result,

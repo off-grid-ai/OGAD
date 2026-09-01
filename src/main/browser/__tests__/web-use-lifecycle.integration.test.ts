@@ -4,29 +4,15 @@
  * boundaries are faked.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  parseSemanticDecision,
+  type BrowserSemanticDecisionRequest,
+  type SemanticDecision
+} from '../browser-playwright-policy'
 
-const model = vi.hoisted(() => ({
+const model = {
   replies: [] as Array<string | ((signal?: AbortSignal) => Promise<string>)>
-}))
-
-vi.mock('../../llm', () => ({
-  llm: {
-    chat: vi.fn(
-      async (
-        _prompt: string,
-        _images: unknown[],
-        _timeout: number,
-        _maxTokens: number,
-        options?: { signal?: AbortSignal }
-      ) => {
-        const reply = model.replies.shift()
-        if (typeof reply === 'function') return reply(options?.signal)
-        if (typeof reply === 'string') return reply
-        throw new Error('The model boundary has no queued reply.')
-      }
-    )
-  }
-}))
+}
 
 import { runBrowserPlaywrightTask } from '../browser-playwright-task'
 import type { PlaywrightMcpSession, PlaywrightToolResult } from '../playwright-mcp-session'
@@ -85,6 +71,15 @@ function abortableReply(
     })
 }
 
+async function decideAtBoundary(
+  request: BrowserSemanticDecisionRequest
+): Promise<SemanticDecision> {
+  const reply = model.replies.shift()
+  const raw = typeof reply === 'function' ? await reply(request.signal) : reply
+  if (typeof raw !== 'string') throw new Error('The model boundary has no queued reply.')
+  return parseSemanticDecision(JSON.parse(raw) as unknown, request.snapshot)
+}
+
 function boundarySession(snapshots: string[], calls: string[]): PlaywrightMcpSession {
   return {
     snapshot: async (): Promise<PlaywrightToolResult> => ({
@@ -117,6 +112,7 @@ describe('Web Use shared lifecycle', () => {
     )
     const observations: Array<{ step: number; phase: string; summary: string }> = []
     const result = await runBrowserPlaywrightTask({
+      decide: decideAtBoundary,
       goal: 'Submit the form',
       plan,
       session: boundarySession(
@@ -178,6 +174,7 @@ describe('Web Use shared lifecycle', () => {
     const guard = new VisionGuard({ taskId: 'web-snapshot-lease', kind: 'web_use' })
 
     const run = runBrowserPlaywrightTask({
+      decide: decideAtBoundary,
       goal: 'Submit the form',
       plan,
       session,
@@ -226,6 +223,7 @@ describe('Web Use shared lifecycle', () => {
     )
 
     const run = runBrowserPlaywrightTask({
+      decide: decideAtBoundary,
       goal: 'Submit the form',
       plan,
       session,
@@ -289,6 +287,7 @@ describe('Web Use shared lifecycle', () => {
     const guard = new VisionGuard({ taskId: 'web-action-lease', kind: 'web_use' })
 
     const run = runBrowserPlaywrightTask({
+      decide: decideAtBoundary,
       goal: 'Submit the form',
       plan,
       session,
@@ -328,6 +327,7 @@ describe('Web Use shared lifecycle', () => {
     let waiting = false
 
     const run = runBrowserPlaywrightTask({
+      decide: decideAtBoundary,
       goal: 'Sign in',
       plan,
       session,
@@ -368,6 +368,7 @@ describe('Web Use shared lifecycle', () => {
     )
 
     const result = await runBrowserPlaywrightTask({
+      decide: decideAtBoundary,
       goal: 'Complete the order',
       plan,
       session,

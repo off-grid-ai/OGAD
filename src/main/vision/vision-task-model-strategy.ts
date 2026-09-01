@@ -8,7 +8,11 @@ import type {
 } from '../../shared/computer-use-settings'
 import { parseRemoteVisionModelId, remoteVisionModelId } from '../../shared/remote-vision-server'
 import { withGrounder, selectedGrounderModelId } from './grounder-loader'
-import { createHybridVisionGrounder, productionHybridReasoner } from './hybrid-vision-grounder'
+import {
+  createHybridVisionGrounder,
+  productionHybridReasoner,
+  type HybridVisionGrounderDependencies
+} from './hybrid-vision-grounder'
 import {
   matchVisionModelAdapter,
   resolveVisionModelAdapter,
@@ -51,6 +55,7 @@ export interface VisionTaskModelStrategyDependencies {
   resolveIdentity(modelId: string): Promise<ModelIdentity>
   withSpecialist<T>(task: () => Promise<T>): Promise<{ result: T }>
   runReasoner: typeof productionHybridReasoner
+  runSpecialist?: HybridVisionGrounderDependencies['runSpecialist']
   resolveGenerationRoute?(modelId: string): Promise<string>
 }
 
@@ -212,6 +217,7 @@ async function hybridSession(
       runReasoner: dependencies.runReasoner,
       withSpecialist: dependencies.withSpecialist,
       activeSpecialistAdapter: () => activeSpecialistSelection(dependencies).adapter,
+      runSpecialist: dependencies.runSpecialist,
       reasonerRouteId,
       specialistRouteId
     })

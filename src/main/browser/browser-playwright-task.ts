@@ -113,7 +113,7 @@ async function runSemanticStep(
   const modelLease = input.guard.currentActionLease()
   let decision: SemanticDecision
   try {
-    decision = await decideBrowserSemanticAction({
+    decision = await (input.decide ?? decideBrowserSemanticAction)({
       goal: input.goal,
       plan: input.plan,
       snapshot: state.observation.text,

@@ -2,6 +2,10 @@ import type { TaskExecutionPlan } from '../../shared/task-execution-plan'
 import type { VisionGuard } from '../vision/vision-guard'
 import type { BrowserDriver } from './browser-driver'
 import type { PlaywrightMcpSession } from './playwright-mcp-session'
+import type {
+  BrowserSemanticDecisionRequest,
+  SemanticDecision
+} from './browser-playwright-policy'
 
 export interface BrowserPlaywrightTaskResult {
   ok: boolean
@@ -29,5 +33,6 @@ export interface BrowserPlaywrightTaskInput {
   onPhase: (phaseId: string) => void
   onProgress: (step: number, phase: 'observing' | 'thinking' | 'acting', action: string) => void
   onObservation?: (observation: BrowserSemanticObservation) => Promise<void>
+  decide?: (request: BrowserSemanticDecisionRequest) => Promise<SemanticDecision>
   signal?: AbortSignal
 }
