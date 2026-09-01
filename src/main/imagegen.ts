@@ -7,6 +7,7 @@ import { spawn, type ChildProcess } from 'child_process'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
+import { NodeDownloadBridge } from '@offgrid/models/node'
 import { getSetting } from './database'
 import {
   generatedImageSidecarPath,
@@ -246,25 +247,12 @@ export async function downloadLora(
   const dest = resolveOwnedDestination(dir, filename)
   if (!dest || !hasCheckpointExt(filename)) throw new Error('Invalid LoRA filename.')
   if (fs.existsSync(dest) && fs.statSync(dest).size > 0) return dest
-  const res = await fetch(url) // Electron main = Node 18+, follows redirects (HF → CDN)
-  if (!res.ok || !res.body) throw new Error(`Download failed: HTTP ${res.status}`)
-  const total = Number(res.headers.get('content-length') || 0)
-  const tmp = `${dest}.part`
-  const out = fs.createWriteStream(tmp)
-  let received = 0
-  const reader = (res.body as ReadableStream<Uint8Array>).getReader()
-  try {
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      out.write(Buffer.from(value))
-      received += value.length
-      if (total && onProgress) onProgress(Math.round((received / total) * 100))
+  const bridge = new NodeDownloadBridge(dir)
+  await bridge.download(url, dest, {
+    onProgress: (written, total) => {
+      if (total > 0) onProgress?.(Math.round((written / total) * 100))
     }
-  } finally {
-    await new Promise<void>((r) => out.end(r))
-  }
-  fs.renameSync(tmp, dest)
+  })
   return dest
 }
 
