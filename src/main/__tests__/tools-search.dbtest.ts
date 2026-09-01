@@ -11,9 +11,15 @@ import { describe, it, expect, afterAll, beforeAll, beforeEach, vi } from 'vites
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { startFakeLlamaServer, type FakeLlamaServer } from './harness/fake-llama-server'
+import {
+  installFakeActiveTextModel,
+  startFakeLlamaServer,
+  type FakeLlamaServer
+} from './harness/fake-llama-server'
 
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-search-it-'))
+const originalDataDir = process.env.OFFGRID_DATA_DIR
+process.env.OFFGRID_DATA_DIR = TMP_DIR
 vi.mock('electron', () => ({
   app: { getPath: () => TMP_DIR, isPackaged: false, getAppPath: () => process.cwd() },
   safeStorage: {
@@ -43,6 +49,7 @@ import { getDB } from '../database'
 let fake: FakeLlamaServer
 
 beforeAll(async () => {
+  installFakeActiveTextModel(TMP_DIR)
   fake = await startFakeLlamaServer()
   const svc = llm as unknown as { port: number; initialized: boolean; paused: boolean }
   svc.port = fake.port
@@ -90,6 +97,8 @@ afterAll(async () => {
   } catch {
     /* best effort */
   }
+  if (originalDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = originalDataDir
 })
 
 // Seed a real observation; its AFTER INSERT trigger populates observation_fts, so

@@ -10,7 +10,32 @@
 // (round 1 emits a tool_call, round 2 emits the final answer) exactly as llama-server
 // would. Requests beyond the queue get an empty-content turn (loop terminator).
 import * as http from 'http'
+import fs from 'node:fs'
+import path from 'node:path'
 import type { AddressInfo } from 'net'
+
+const FAKE_TEXT_MODEL_ID = 'unsloth/Qwen3.5-0.8B-GGUF'
+const FAKE_TEXT_MODEL_FILE = 'Qwen3.5-0.8B-Q4_K_M.gguf'
+const FAKE_TEXT_PROJECTOR_FILE = 'mmproj-Qwen3.5-0.8B-BF16.gguf'
+
+/**
+ * Install the minimum durable model selection needed by the real shared inventory.
+ * The socket remains the only inference fake; model discovery and routing stay real.
+ */
+export function installFakeActiveTextModel(profileDir: string): void {
+  const modelsDir = path.join(profileDir, 'models')
+  fs.mkdirSync(modelsDir, { recursive: true })
+  fs.writeFileSync(path.join(modelsDir, FAKE_TEXT_MODEL_FILE), 'fake native model boundary')
+  fs.writeFileSync(path.join(modelsDir, FAKE_TEXT_PROJECTOR_FILE), 'fake projector boundary')
+  fs.writeFileSync(
+    path.join(modelsDir, 'active-model.json'),
+    JSON.stringify({
+      id: FAKE_TEXT_MODEL_ID,
+      primary: FAKE_TEXT_MODEL_FILE,
+      mmproj: FAKE_TEXT_PROJECTOR_FILE
+    })
+  )
+}
 
 interface FakeToolCall {
   id?: string

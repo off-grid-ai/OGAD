@@ -10,7 +10,11 @@ import path from 'node:path'
 import JSZip from 'jszip'
 import sharp from 'sharp'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { startFakeLlamaServer, type FakeLlamaServer } from './harness/fake-llama-server'
+import {
+  installFakeActiveTextModel,
+  startFakeLlamaServer,
+  type FakeLlamaServer
+} from './harness/fake-llama-server'
 import { SYNTHETIC_PDF } from './fixtures/synthetic-pdf'
 
 interface IpcEvent {
@@ -170,6 +174,7 @@ function createNativeFixtures(): void {
 }
 
 beforeAll(async () => {
+  installFakeActiveTextModel(PROFILE_DIR)
   fs.mkdirSync(FIXTURES_DIR, { recursive: true })
   fs.mkdirSync(path.join(BIN_DIR, 'whisper'), { recursive: true })
   fs.mkdirSync(path.join(PROFILE_DIR, 'models'), { recursive: true })
