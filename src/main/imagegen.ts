@@ -8,7 +8,6 @@ import path from 'path'
 import fs from 'fs'
 import os from 'os'
 import { NodeDownloadBridge } from '@offgrid/models/node'
-import { getSetting } from './database'
 import {
   generatedImageSidecarPath,
   readGeneratedImageSidecar,
@@ -17,7 +16,6 @@ import {
 } from './imagegen/gallery-sidecar'
 import {
   CATALOG,
-  enhanceImagePrompt as enhancePrompt,
   ensureCheckpointExtension as ensureCheckpointExt,
   evaluateImageMemory as evaluateMemoryGuard,
   hasCheckpointExtension as hasCheckpointExt,
@@ -29,7 +27,6 @@ import {
   stripCheckpointExtension as stripCheckpointExt,
   type ManagedRuntimePort as ManagedRuntime,
   imageTaesdFilename,
-  selectInstalledImageModel,
   standardImageModelDefaults,
   applyImageLoras,
   normalizeImageLoras,
@@ -64,13 +61,11 @@ import {
   type ImageGenerationOutputContract,
   type ImageGenerationRequestContract
 } from '../shared/image-generation-contract'
-import type { GenerationOperation } from '@offgrid/models'
+import { desktopModelServices } from './model-service-access'
 import {
-  activeDesktopModelId,
-  generateDesktopOperation,
-  generateDesktopText
-} from './desktop-generation'
-import { registerDesktopImageProgress } from './generation-progress'
+  desktopImageApplication,
+  registerDesktopImageCancelBoundary
+} from './imagegen/application-service'
 
 function findSdCli(): string | null {
   for (const r of binRoots()) {
@@ -325,12 +320,11 @@ function ggufIsFullCheckpoint(p: string): boolean {
   return full
 }
 
-/** Pick a model: the requested filename if present, else prefer the higher-quality v2.1, else any. */
-/** The image model an incoming request would actually load (active pick, else the
- *  resolver's default), as a bare filename — or null if none installed. */
+/** The local image model selected by the shared control plane, as a native runtime id. */
 export function activeImageModel(): string | null {
-  const m = resolveModel()
-  return m ? path.basename(m) : null
+  const selected = desktopModelServices.llm.active('image').model
+  if (!selected || selected.source !== 'local') return null
+  return path.basename(imageRuntimeModelId(selected.id))
 }
 
 /** Translate a canonical catalog selection only at the native runtime boundary. */
@@ -340,19 +334,12 @@ function imageRuntimeModelId(selected: string): string {
   return primaryFileName(entry as unknown as CatalogEntry) ?? selected
 }
 
-function resolveModel(preferred?: string): string | null {
-  const dir = modelsDir()
-  const sd = listImageModels()
-  if (!sd.length) return null
-  const chosen = activeDesktopModelId('image')
-  const selected = selectInstalledImageModel({
-    installed: sd,
-    preferred: preferred ? imageRuntimeModelId(preferred) : null,
-    active: chosen ? imageRuntimeModelId(chosen) : null,
-    ramGb: os.totalmem() / 1e9
-  })
+function resolveNativeModel(selected?: string): string | null {
   if (!selected) return null
-  return resolveExistingOwnedEntry(dir, selected) ?? path.join(dir, selected)
+  const dir = modelsDir()
+  const runtimeId = imageRuntimeModelId(selected)
+  if (isMfluxModelId(runtimeId)) return runtimeId
+  return resolveExistingOwnedEntry(dir, runtimeId)
 }
 
 /** Whether image generation is usable right now (binary + at least one model). */
@@ -480,8 +467,8 @@ export async function exportGeneratedImage(imagePath: string, destination: strin
 let currentChild: ChildProcess | null = null
 const generationLifecycle = new ImageGenerationLifecycle()
 
-/** Kill an in-progress generation. Returns true if one was running. */
-export function cancelImageGen(): boolean {
+/** Kill the active native engine. Shared owns the public cancellation state machine. */
+export function cancelImageNative(): boolean {
   cancelMflux() // no-op if mflux isn't the active runtime
   void sdServer.cancelCurrent() // cancels the in-flight job on the resident server (no-op if idle)
   if (!generationLifecycle.cancel()) return false
@@ -493,6 +480,17 @@ export function cancelImageGen(): boolean {
     currentChild.kill('SIGKILL')
   }
   return true // mflux/persistent-server gen has no currentChild but still owns the lifecycle
+}
+
+registerDesktopImageCancelBoundary(() => {
+  cancelImageNative()
+})
+
+/** Cancel the shared image use case. Native cancellation runs through its boundary port. */
+export function cancelImageGen(): boolean {
+  const running = desktopImageApplication.isRunning()
+  if (running) void desktopImageApplication.cancel()
+  return running
 }
 
 /** Raw native image execution. Shared GenerationService owns routing, admission,
@@ -520,87 +518,7 @@ export async function generateImage(
   params: ImageGenParams,
   onUpdate?: (update: ImageGenerationPipelineUpdateContract) => void
 ): Promise<ImageGenOutput> {
-  const turnId = `desktop-image:${Date.now()}:${Math.random().toString(36).slice(2)}`
-  const enhancedPrompt = await maybeEnhancePrompt(params.prompt, onUpdate)
-  const effective =
-    enhancedPrompt === params.prompt ? params : { ...params, prompt: enhancedPrompt }
-  let effectivePrompt = enhancedPrompt
-  const observe = onUpdate
-    ? (update: ImageGenerationPipelineUpdateContract): void => {
-        if ('enhancedPrompt' in update && update.enhancedPrompt)
-          effectivePrompt = update.enhancedPrompt
-        onUpdate(update)
-      }
-    : undefined
-  const unregister = observe ? registerDesktopImageProgress(turnId, observe) : undefined
-  try {
-    const operation: Extract<GenerationOperation, { type: 'image' }> = {
-      type: 'image',
-      modelId: effective.model,
-      prompt: effective.prompt,
-      negativePrompt: effective.negativePrompt,
-      sourceImage: effective.initImage ? { type: 'image', uri: effective.initImage } : undefined,
-      strength: effective.strength,
-      width: effective.width,
-      height: effective.height,
-      steps: effective.steps,
-      guidanceScale: effective.cfgScale,
-      seed: effective.seed,
-      previewInterval: 1,
-      fastVae: effective.fastVae,
-      loras: effective.loras?.map((lora) => ({ id: lora.name, weight: lora.weight })),
-      allowUnsafeMemoryOverride: effective.allowUnsafeMemoryOverride
-    }
-    const result = await generateDesktopOperation(operation, {
-      identity: { conversationId: turnId, turnId },
-      timeoutMs: 24 * 60 * 60 * 1000,
-      allowFallback: false
-    })
-    if (result.output.type !== 'image' || !result.output.images[0]) {
-      throw new Error('The image engine returned no image artifact.')
-    }
-    const artifact = result.output.images[0]
-    return {
-      dataUrl: artifact.data
-        ? `data:${artifact.mimeType};base64,${artifact.data}`
-        : (artifact.uri ?? ''),
-      path: artifact.uri ?? '',
-      seed: artifact.seed ?? params.seed ?? -1,
-      model: artifact.id ?? result.model.name,
-      prompt: effectivePrompt
-    }
-  } finally {
-    unregister?.()
-  }
-}
-
-/** Expand the user's prompt into a richer generation prompt via the local text
- *  model, when `enhanceImagePrompts` is on. Runs through the queue as a foreground
- *  text job (tier 2, evicts a resident image server) so it's serialized with chat.
- *  Any failure returns the original prompt unchanged — enhancement is best-effort. */
-async function maybeEnhancePrompt(
-  prompt: string,
-  onUpdate?: (update: ImageGenerationPipelineUpdateContract) => void
-): Promise<string> {
-  const enabled = getSetting<boolean>('enhanceImagePrompts', true)
-  if (enabled) onUpdate?.({ stage: 'enhancing', enhancedPrompt: '' })
-  let streamed = ''
-  return enhancePrompt(prompt, {
-    enabled,
-    onText: (text) => {
-      streamed += text
-      onUpdate?.({ stage: 'enhancing', enhancedPrompt: streamed })
-    },
-    // Prompt generation uses the same shared text route before image admission begins.
-    generate: (instruction, onText) =>
-      generateDesktopText(instruction, {
-        temperature: 0.7,
-        thinking: false,
-        maxTokens: 200,
-        timeoutMs: 60_000,
-        events: { chunk: (chunk) => chunk.content && onText(chunk.content) }
-      }).then((result) => result.content)
-  })
+  return desktopImageApplication.start(params, onUpdate)
 }
 
 async function runImageGen(
@@ -618,8 +536,9 @@ async function runImageGen(
   // Self-contained: reuses the single-flight guard; the LLM is already evicted by the
   // queue (evicts: ['llm']) before we get here, then delegates the spawn to the mflux
   // module. Returns before the sd-cli path.
-  if (isMfluxModelId(params.model)) {
-    const def = getMfluxModel(params.model)!
+  const selectedModel = params.model ? imageRuntimeModelId(params.model) : undefined
+  if (selectedModel && isMfluxModelId(selectedModel)) {
+    const def = getMfluxModel(selectedModel)!
     const outDir = path.join(dataDir(), 'generated-images')
     fs.mkdirSync(outDir, { recursive: true })
     const outPath = path.join(outDir, `img-${String(Date.now())}.png`)
@@ -630,7 +549,7 @@ async function runImageGen(
       await runMflux(
         {
           prompt: params.prompt,
-          model: params.model!,
+          model: selectedModel,
           width: params.width,
           height: params.height,
           steps: params.steps,
@@ -683,8 +602,10 @@ async function runImageGen(
     }
   }
 
-  const model = resolveModel(params.model)
-  if (!model) throw new Error('No image model installed. Download one from Models.')
+  const model = resolveNativeModel(params.model)
+  if (!model) {
+    throw new Error('The selected image model is not installed. Download it from Models.')
+  }
   // Core ML models are directories of .mlmodelc resources → routed to the ANE
   // Swift helper; everything else (GGUF) runs on sd-cli.
   const coreml = isCoreMLModelDir(model)

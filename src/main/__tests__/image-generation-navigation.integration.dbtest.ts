@@ -8,6 +8,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { CATALOG, primaryFileName } from '@offgrid/models'
 
 const fixture = (() => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-image-navigation-'))
@@ -32,7 +33,8 @@ vi.mock('electron', () => ({
   }
 }))
 
-const IMAGE_MODEL = 'navigation-image-fixture.safetensors'
+const IMAGE_MODEL_ID = 'mzwing/SDXL-Lightning-GGUF'
+const IMAGE_MODEL = primaryFileName(CATALOG.find((model) => model.id === IMAGE_MODEL_ID)!)!
 const PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 
@@ -43,10 +45,13 @@ beforeAll(async () => {
   process.env.OFFGRID_BIN_DIR = fixture.binDir
   const models = path.join(fixture.dataDir, 'models')
   fs.mkdirSync(models, { recursive: true })
-  fs.writeFileSync(path.join(models, IMAGE_MODEL), 'image checkpoint')
+  fs.writeFileSync(
+    path.join(models, IMAGE_MODEL),
+    'GGUF fixture first_stage_model cond_stage_model'
+  )
   fs.writeFileSync(
     path.join(models, 'active-modalities.json'),
-    JSON.stringify({ image: IMAGE_MODEL })
+    JSON.stringify({ image: IMAGE_MODEL_ID })
   )
 
   const executable = path.join(fixture.binDir, 'sd', 'sd-cli')
@@ -64,6 +69,7 @@ setTimeout(() => fs.writeFileSync(output, Buffer.from('${PNG_BASE64}', 'base64')
 
   const database = await import('../database')
   database.saveSetting('enhanceImagePrompts', false)
+  await import('../model-services')
   jobs = (await import('../imagegen/job-service')).imageGenerationJobs
 })
 
@@ -83,7 +89,7 @@ describe('image generation across feature navigation', () => {
 
     const generation = jobs.start({
       prompt: 'A green cabin rendered while navigating',
-      model: IMAGE_MODEL,
+      model: IMAGE_MODEL_ID,
       conversationId: 'conversation-navigation',
       projectId: 'project-navigation',
       seed: 91,

@@ -63,6 +63,17 @@ for (const file of files) {
       if (/(?:^|\/)active-models$/.test(specifier)) {
         report('no-active-models-compatibility-facade', fileName, source, node, `import:${specifier}`)
       }
+      if (
+        fileName === 'src/main/imagegen.ts' &&
+        node.importClause?.namedBindings &&
+        ts.isNamedImports(node.importClause.namedBindings)
+      ) {
+        for (const element of node.importClause.namedBindings.elements) {
+          if (/^(?:selectInstalledImageModel|enhanceImagePrompt|ImageGenerationJobCoordinator)$/.test(element.name.text)) {
+            report('desktop-image-policy-is-shared', fileName, source, element, `import:${element.name.text}`)
+          }
+        }
+      }
     }
 
     if (ts.isCallExpression(node)) {
@@ -114,6 +125,19 @@ for (const file of files) {
           `call:${call}`
         )
       }
+      if (
+        fileName === 'src/main/imagegen.ts' &&
+        /^(?:generateDesktopOperation|generateDesktopText|registerDesktopImageProgress)$/.test(call)
+      ) {
+        report('desktop-image-policy-is-shared', fileName, source, node, `call:${call}`)
+      }
+    }
+
+    if (
+      ts.isNewExpression(node) &&
+      nodeText(source, node.expression) === 'ImageGenerationJobCoordinator'
+    ) {
+      report('desktop-image-lifecycle-is-shared', fileName, source, node, 'new:ImageGenerationJobCoordinator')
     }
 
     if (
@@ -127,6 +151,13 @@ for (const file of files) {
       node.name && /^(sendWithTools|sendImage)$/.test(node.name.getText(source))
     ) {
       report('desktop-chat-has-one-send-command', fileName, source, node.name, `declaration:${node.name.getText(source)}`)
+    }
+    if (
+      fileName === 'src/main/imagegen.ts' &&
+      (ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)) &&
+      node.name && /^(?:maybeEnhancePrompt|resolveModel)$/.test(node.name.getText(source))
+    ) {
+      report('desktop-image-policy-is-shared', fileName, source, node.name, `declaration:${node.name.getText(source)}`)
     }
     if (
       fileName === 'src/main/tools.ts' &&

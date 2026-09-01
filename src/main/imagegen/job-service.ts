@@ -1,20 +1,22 @@
 import { randomUUID } from 'node:crypto'
-import { canAcknowledgeImageConversation, ImageGenerationJobCoordinator } from '@offgrid/models'
+import {
+  canAcknowledgeImageConversation,
+  isImageApplicationInFlight,
+  type ImageApplicationSnapshot
+} from '@offgrid/models'
 import { generatedImageMetadataJson } from '@offgrid/sync'
 import type { ChatHome } from '@offgrid/sync'
 import {
   type ImageGenerationJobContract,
-  type ImageGenerationPipelineUpdateContract,
   type ImageGenerationRequestContract,
   type ImageGenerationResultContract
 } from '../../shared/image-generation-contract'
 import {
-  cancelImageGen,
-  generateImage,
   preserveGeneratedImageSource,
   saveGeneratedImageScope,
   type ImageGenOutput
 } from '../imagegen'
+import { desktopImageApplication, type DesktopImageApplicationRequest } from './application-service'
 import type { GeneratedImageSidecar } from './gallery-sidecar'
 import { noteGeneratedImageMessage, shareGeneratedImage } from './generated-image-share'
 
@@ -31,12 +33,7 @@ type ConversationListener = (conversationId: string) => void
 /** A finished image, and the name it answers to on every device. */
 export type ImageGenerationResult = ImageGenerationResultContract
 
-export interface ImageGenerationRuntime {
-  generate(
-    request: ImageGenerationJobRequest,
-    onUpdate: (update: ImageGenerationPipelineUpdateContract) => void
-  ): Promise<ImageGenOutput>
-  cancel(): boolean
+export interface ImageGenerationPersistencePort {
   /** The scope, not the whole request: the sidecar owns these facts and nothing else here. */
   saveScope(path: string, facts: GeneratedImageSidecar): void
   /** Offer the finished image to the mesh, described from the sidecar. */
@@ -47,36 +44,95 @@ export interface ImageGenerationRuntime {
   preserveSource(syncId: string, sourcePath: string): string | null
 }
 
-const nativeImageGenerationRuntime: ImageGenerationRuntime = {
-  generate: (request, onUpdate) => generateImage(request, onUpdate),
-  cancel: () => cancelImageGen(),
+export interface DesktopImageApplicationPort {
+  status(): ImageApplicationSnapshot<ImageGenOutput>
+  onChange(listener: (snapshot: ImageApplicationSnapshot<ImageGenOutput>) => void): () => void
+  isRunning(): boolean
+  start(request: DesktopImageApplicationRequest): Promise<ImageGenOutput>
+  cancel(): Promise<boolean>
+}
+
+const nativeImageGenerationPersistence: ImageGenerationPersistencePort = {
   saveScope: (path, facts) => saveGeneratedImageScope(path, facts),
   share: (path) => shareGeneratedImage(path),
   noteMessage: (path, shownIn) => noteGeneratedImageMessage({ ...shownIn, imagePath: path }),
   preserveSource: (syncId, sourcePath) => preserveGeneratedImageSource(syncId, sourcePath)
 }
 
+function jobPhase(
+  snapshot: ImageApplicationSnapshot<ImageGenOutput>
+): ImageGenerationJobContract['phase'] {
+  if (isImageApplicationInFlight(snapshot.phase)) return 'running'
+  if (snapshot.phase === 'done') return 'succeeded'
+  if (snapshot.phase === 'error') return 'failed'
+  if (snapshot.phase === 'cancelled') return 'cancelled'
+  return 'idle'
+}
+
+function jobStage(
+  snapshot: ImageApplicationSnapshot<ImageGenOutput>
+): ImageGenerationJobContract['stage'] {
+  if (snapshot.phase === 'enhancing') return 'enhancing'
+  if (snapshot.phase === 'loading') return 'preparing'
+  if (snapshot.phase === 'generating' && snapshot.progress?.stage === 'decoding') return 'decoding'
+  if (snapshot.phase === 'generating' || snapshot.phase === 'saving') return 'generating'
+  return null
+}
+
+function projectSnapshot(
+  snapshot: ImageApplicationSnapshot<ImageGenOutput>
+): ImageGenerationJobContract {
+  return {
+    id: snapshot.requestId,
+    phase: jobPhase(snapshot),
+    conversationId: snapshot.conversationId,
+    projectId: snapshot.projectId,
+    stage: jobStage(snapshot),
+    enhancedPrompt: snapshot.prompt ?? '',
+    progress: snapshot.progress
+      ? {
+          step: snapshot.progress.step,
+          total: snapshot.progress.totalSteps,
+          secPerStep: snapshot.progress.secondsPerStep ?? 0,
+          preview: snapshot.progress.previewUri,
+          phase: snapshot.progress.stage
+        }
+      : null,
+    outputPath: snapshot.result?.path ?? null,
+    error: snapshot.error,
+    startedAt: snapshot.startedAt,
+    finishedAt: snapshot.finishedAt
+  }
+}
+
 /** Main-process owner for renderer-started image jobs. The native runtime remains
  * in imagegen.ts; this service adds durable identity/observation across renderer
  * navigation without introducing a second generation state machine. */
 export class ImageGenerationJobService {
-  private readonly jobs: ImageGenerationJobCoordinator<ImageGenerationJobRequest, ImageGenOutput>
   private readonly conversationListeners = new Set<ConversationListener>()
 
-  constructor(private readonly runtime: ImageGenerationRuntime = nativeImageGenerationRuntime) {
-    this.jobs = new ImageGenerationJobCoordinator(runtime, {
-      createId: randomUUID,
-      outputPath: (output) => output.path,
-      finalize: (context) => this.finalize(context)
-    })
-  }
+  constructor(
+    private readonly persistence: ImageGenerationPersistencePort = nativeImageGenerationPersistence,
+    private readonly application: DesktopImageApplicationPort = desktopImageApplication
+  ) {}
 
   status(): ImageGenerationJobContract {
-    return this.jobs.status()
+    return projectSnapshot(this.application.status())
   }
 
   onChange(listener: JobListener): () => void {
-    return this.jobs.onChange(listener)
+    return this.application.onChange((snapshot) => {
+      try {
+        listener(projectSnapshot(snapshot))
+      } catch (error) {
+        console.error(
+          `[image-job] ${JSON.stringify({
+            event: 'job-observer-failed',
+            error: error instanceof Error ? error.message : String(error)
+          })}`
+        )
+      }
+    })
   }
 
   onConversationUpdated(listener: ConversationListener): () => void {
@@ -86,15 +142,24 @@ export class ImageGenerationJobService {
 
   /** Reject before a caller reserves related state for a job this service cannot accept. */
   assertCanStart(): void {
-    this.jobs.assertCanStart()
+    if (this.application.isRunning()) {
+      throw new Error('An image is already generating — please wait for it to finish.')
+    }
   }
 
   async start(request: ImageGenerationJobRequest): Promise<ImageGenerationResult> {
-    return this.jobs.start(request)
+    this.assertCanStart()
+    const id = randomUUID()
+    const output = await this.application.start({ ...request, requestId: id })
+    const startedAt = this.application.status().startedAt ?? Date.now()
+    this.finalize({ id, request, output, startedAt })
+    return { ...output, syncId: id }
   }
 
   cancel(): boolean {
-    return this.jobs.cancel()
+    const running = this.application.isRunning()
+    if (running) void this.application.cancel()
+    return running
   }
 
   /**
@@ -106,10 +171,10 @@ export class ImageGenerationJobService {
    * an idempotent acknowledgement, so it does not publish or transfer the same image a second time.
    */
   acknowledgeConversation(conversationId: string, messageId?: string): boolean {
-    const snapshot = this.jobs.status()
+    const snapshot = this.status()
     if (!canAcknowledgeImageConversation(snapshot, conversationId)) return false
     if (messageId && snapshot.outputPath) {
-      this.runtime.noteMessage(snapshot.outputPath, { conversationId, messageId })
+      this.persistence.noteMessage(snapshot.outputPath, { conversationId, messageId })
     }
     for (const listener of this.conversationListeners) {
       try {
@@ -134,10 +199,12 @@ export class ImageGenerationJobService {
     startedAt: number
   }): void {
     const { id, request, output, startedAt } = context
-    const keptSource = request.initImage ? this.runtime.preserveSource(id, request.initImage) : null
+    const keptSource = request.initImage
+      ? this.persistence.preserveSource(id, request.initImage)
+      : null
     if (output.path) {
       try {
-        this.runtime.saveScope(output.path, {
+        this.persistence.saveScope(output.path, {
           syncId: id,
           ...(keptSource ? { initImage: keptSource } : {}),
           ...(request.conversationId ? { conversationId: request.conversationId } : {}),
@@ -165,7 +232,7 @@ export class ImageGenerationJobService {
           })}`
         )
       }
-      this.runtime.share(output.path)
+      this.persistence.share(output.path)
     }
   }
 }

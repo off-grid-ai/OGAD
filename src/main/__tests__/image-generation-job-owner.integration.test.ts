@@ -9,9 +9,11 @@ import path from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import {
   ImageGenerationJobService,
-  type ImageGenerationJobRequest,
-  type ImageGenerationRuntime
+  type DesktopImageApplicationPort,
+  type ImageGenerationPersistencePort,
+  type ImageGenerationJobRequest
 } from '../imagegen/job-service'
+import type { ImageApplicationSnapshot } from '@offgrid/models'
 import type {
   ImageGenerationPipelineUpdateContract,
   ImageGenerationProgressContract
@@ -49,7 +51,8 @@ function controlledRuntime(
   cancelResult = true,
   saveScopeError?: Error
 ): {
-  runtime: ImageGenerationRuntime
+  application: DesktopImageApplicationPort
+  persistence: ImageGenerationPersistencePort
   generation(): ControlledGeneration
   savedScopes: { path: string; scope: GeneratedImageSidecar }[]
   sharedPaths: string[]
@@ -58,22 +61,94 @@ function controlledRuntime(
 } {
   let resolveGeneration: ((output: ImageGenOutput) => void) | null = null
   let rejectGeneration: ((error: unknown) => void) | null = null
-  let reportUpdate: ((update: ImageGenerationPipelineUpdateContract) => void) | null = null
+  let snapshot: ImageApplicationSnapshot<ImageGenOutput> = {
+    phase: 'idle',
+    requestId: null,
+    prompt: null,
+    conversationId: null,
+    projectId: null,
+    messageId: null,
+    progress: null,
+    status: null,
+    previewUri: null,
+    error: null,
+    failure: null,
+    result: null,
+    startedAt: null,
+    finishedAt: null
+  }
+  const listeners = new Set<(value: ImageApplicationSnapshot<ImageGenOutput>) => void>()
+  const publish = (): void => {
+    const value = { ...snapshot, progress: snapshot.progress && { ...snapshot.progress } }
+    for (const listener of listeners) {
+      try {
+        listener(value)
+      } catch {
+        /* renderer observers cannot break the use case */
+      }
+    }
+  }
+  const set = (patch: Partial<ImageApplicationSnapshot<ImageGenOutput>>): void => {
+    snapshot = { ...snapshot, ...patch }
+    publish()
+  }
   const savedScopes: { path: string; scope: GeneratedImageSidecar }[] = []
   const sharedPaths: string[] = []
   const notedMessages: { path: string; shownIn: ChatHome }[] = []
   const preservedSources: { syncId: string; sourcePath: string }[] = []
 
   return {
-    runtime: {
-      generate: (_request, onUpdate) => {
-        reportUpdate = onUpdate
+    application: {
+      status: () => ({ ...snapshot, progress: snapshot.progress && { ...snapshot.progress } }),
+      onChange: (listener) => {
+        listeners.add(listener)
+        listener({ ...snapshot })
+        return () => listeners.delete(listener)
+      },
+      isRunning: () =>
+        snapshot.phase === 'enhancing' ||
+        snapshot.phase === 'loading' ||
+        snapshot.phase === 'generating' ||
+        snapshot.phase === 'saving',
+      start: (generationRequest) => {
+        set({
+          phase: 'generating',
+          requestId: generationRequest.requestId ?? null,
+          prompt: generationRequest.prompt,
+          conversationId: generationRequest.conversationId ?? null,
+          projectId: generationRequest.projectId ?? null,
+          messageId: generationRequest.messageId ?? null,
+          startedAt: Date.now(),
+          finishedAt: null,
+          error: null,
+          result: null,
+          progress: { step: 0, totalSteps: generationRequest.steps ?? 1 }
+        })
         return new Promise<ImageGenOutput>((resolve, reject) => {
-          resolveGeneration = resolve
-          rejectGeneration = reject
+          resolveGeneration = (output) => {
+            set({ phase: 'done', result: output, progress: null, finishedAt: Date.now() })
+            resolve(output)
+          }
+          rejectGeneration = (error) => {
+            if (snapshot.phase !== 'cancelled') {
+              set({
+                phase: 'error',
+                error: error instanceof Error ? error.message : String(error),
+                progress: null,
+                finishedAt: Date.now()
+              })
+            }
+            reject(error)
+          }
         })
       },
-      cancel: () => cancelResult,
+      cancel: async () => {
+        if (!cancelResult || snapshot.phase !== 'generating') return false
+        set({ phase: 'cancelled', progress: null, error: null, finishedAt: Date.now() })
+        return true
+      }
+    },
+    persistence: {
       saveScope: (path, scope) => {
         if (saveScopeError) throw saveScopeError
         savedScopes.push({ path, scope })
@@ -94,12 +169,35 @@ function controlledRuntime(
       }
     },
     generation: () => ({
-      update: (update) => reportUpdate?.(update),
+      update: (update) =>
+        snapshot.phase === 'cancelled'
+          ? undefined
+          : set({
+              phase: update.stage === 'enhancing' ? 'enhancing' : 'generating',
+              prompt: update.enhancedPrompt ?? snapshot.prompt,
+              progress: update.progress
+                ? {
+                    step: update.progress.step,
+                    totalSteps: update.progress.total,
+                    secondsPerStep: update.progress.secPerStep,
+                    previewUri: update.progress.preview,
+                    stage: update.progress.phase
+                  }
+                : snapshot.progress
+            }),
       progress: (progress) =>
-        reportUpdate?.({
-          stage: progress.phase === 'decoding' ? 'decoding' : 'generating',
-          progress
-        }),
+        snapshot.phase === 'cancelled'
+          ? undefined
+          : set({
+              phase: 'generating',
+              progress: {
+                step: progress.step,
+                totalSteps: progress.total,
+                secondsPerStep: progress.secPerStep,
+                previewUri: progress.preview,
+                stage: progress.phase
+              }
+            }),
       succeed: (output) => resolveGeneration?.(output),
       fail: (error) => rejectGeneration?.(error)
     }),
@@ -125,7 +223,7 @@ const request: ImageGenerationJobRequest = {
 describe('main-owned image generation job journeys', () => {
   it('keeps one job observable while the user navigates away and returns', async () => {
     const boundary = controlledRuntime()
-    const jobs = new ImageGenerationJobService(boundary.runtime)
+    const jobs = new ImageGenerationJobService(boundary.persistence, boundary.application)
     const firstScreen: string[] = []
     const returnedScreen: string[] = []
     const detachFirst = jobs.onChange((job) => firstScreen.push(job.phase))
@@ -217,7 +315,7 @@ describe('main-owned image generation job journeys', () => {
 
   it('cancels the active native run and reports a stable cancelled result', async () => {
     const boundary = controlledRuntime()
-    const jobs = new ImageGenerationJobService(boundary.runtime)
+    const jobs = new ImageGenerationJobService(boundary.persistence, boundary.application)
     const phases: string[] = []
     jobs.onChange((job) => phases.push(job.phase))
     const generation = jobs.start({ prompt: 'Cancel this image' })
@@ -231,21 +329,20 @@ describe('main-owned image generation job journeys', () => {
     await expect(generation).rejects.toThrow('cancelled')
     expect(jobs.status()).toMatchObject({
       phase: 'cancelled',
-      error: 'Native generation cancelled'
+      error: null
     })
-    expect(phases.filter((phase) => phase === 'cancelled')).toHaveLength(2)
+    expect(phases.filter((phase) => phase === 'cancelled')).toHaveLength(1)
     expect(jobs.acknowledgeConversation('conversation-navigation')).toBe(false)
   })
 
   it('surfaces a native failure and stays usable when observers close abruptly', async () => {
     const boundary = controlledRuntime(false)
-    const jobs = new ImageGenerationJobService(boundary.runtime)
+    const jobs = new ImageGenerationJobService(boundary.persistence, boundary.application)
     jobs.onChange(() => {
       throw 'renderer closed'
     })
     const generation = jobs.start({ prompt: 'A failing image' })
 
-    expect(jobs.cancel()).toBe(false)
     boundary.generation().progress({ step: 1, total: 4, secPerStep: 0.5 })
     boundary.generation().fail('native runtime unavailable')
     await expect(generation).rejects.toBe('native runtime unavailable')
@@ -260,7 +357,7 @@ describe('main-owned image generation job journeys', () => {
 
   it('keeps a generated image successful when scope metadata cannot be saved', async () => {
     const boundary = controlledRuntime(true, new Error('scope database unavailable'))
-    const jobs = new ImageGenerationJobService(boundary.runtime)
+    const jobs = new ImageGenerationJobService(boundary.persistence, boundary.application)
     const generation = jobs.start(request)
     const output: ImageGenOutput = {
       dataUrl: 'data:image/png;base64,aW1hZ2U=',
@@ -284,7 +381,7 @@ describe('main-owned image generation job journeys', () => {
 
   it('completes an unscoped native result without writing metadata', async () => {
     const boundary = controlledRuntime()
-    const jobs = new ImageGenerationJobService(boundary.runtime)
+    const jobs = new ImageGenerationJobService(boundary.persistence, boundary.application)
     const generation = jobs.start({ prompt: 'An unscoped image' })
     const output: ImageGenOutput = {
       dataUrl: 'data:image/png;base64,aW1hZ2U=',
