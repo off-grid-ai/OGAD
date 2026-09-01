@@ -2,8 +2,8 @@
  * The planner shell: turns a goal + the tool catalog into a plan through a
  * grammar-constrained model call, with one validation-guided repair call when
  * needed. The completion is injected (DIP) so makePlanner is unit-testable with
- * a fake; production binds it to llm.chat with PLAN_SCHEMA as the response
- * format. Pure decisions live in planner-logic.ts.
+ * a fake; production uses the shared tool-selection route with PLAN_SCHEMA as
+ * the response format. Pure decisions live in planner-logic.ts.
  */
 import { generateDesktopMessages } from '../desktop-generation'
 import {
