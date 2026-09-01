@@ -1,9 +1,9 @@
-import fs from 'node:fs'
+import fs from 'original-fs'
 import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import {
   ALLOWED_ASAR_ROOTS,
   ALLOWED_ASAR_OUT_ROOTS,
@@ -23,6 +23,17 @@ const ASAR_CLI = path.join(REPO_ROOT, 'node_modules', '@electron', 'asar', 'bin'
 const tempRoots: string[] = []
 const FRAMEWORK_EXECUTABLE =
   'Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework'
+const originalNoAsar = process.noAsar
+
+beforeAll(() => {
+  // These checks inspect the archive file itself. Electron's patched fs otherwise
+  // treats every app.asar path as a virtual directory before the verifier sees it.
+  process.noAsar = true
+})
+
+afterAll(() => {
+  process.noAsar = originalNoAsar
+})
 
 function tempBundle(prefix: string): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
@@ -32,13 +43,18 @@ function tempBundle(prefix: string): string {
 
 function writeBundleFixture(bundle: string): void {
   for (const relative of REQUIRED_MAC_BUNDLE_FILES) {
+    if (relative === 'Contents/Resources/app.asar') continue
     const file = path.join(bundle, relative)
     fs.mkdirSync(path.dirname(file), { recursive: true })
     fs.writeFileSync(file, `fixture:${relative}`)
-    if (relative !== 'Contents/Info.plist' && relative !== 'Contents/Resources/app.asar') {
+    if (relative !== 'Contents/Info.plist') {
       fs.chmodSync(file, 0o755)
     }
   }
+  writeAsarArchive(path.join(bundle, 'Contents/Resources/app.asar'), [
+    'package.json',
+    'out/main/index.js'
+  ])
 }
 
 function matchingBundles(): { packagedBundle: string; candidateBundle: string } {
@@ -51,6 +67,7 @@ function matchingBundles(): { packagedBundle: string; candidateBundle: string } 
 
 function writeAsarArchive(archive: string, relativeFiles: string[]): void {
   fs.mkdirSync(path.dirname(archive), { recursive: true })
+  if (fs.existsSync(archive)) fs.unlinkSync(archive)
   const source = fs.mkdtempSync(path.join(path.dirname(archive), 'asar-source-'))
   for (const relative of relativeFiles) {
     const file = path.join(source, relative)
@@ -58,7 +75,8 @@ function writeAsarArchive(archive: string, relativeFiles: string[]): void {
     fs.writeFileSync(file, `fixture:${relative}`)
   }
 
-  const result = spawnSync(process.execPath, [ASAR_CLI, 'pack', source, archive], {
+  const nodeExecutable = process.env.npm_node_execpath ?? process.execPath
+  const result = spawnSync(nodeExecutable, [ASAR_CLI, 'pack', source, archive], {
     encoding: 'utf8'
   })
   fs.rmSync(source, { recursive: true, force: true })
