@@ -37,26 +37,14 @@ export interface RemoteVisionInventoryModel {
   remoteModelId: string
 }
 
-const REMOTE_VISION_MODEL_PREFIX = 'remote-vision:'
-
 /** Stable inventory id for a model that belongs to a saved remote server. */
 export function remoteVisionModelId(serverId: string, modelId: string): string {
-  return `${REMOTE_VISION_MODEL_PREFIX}${encodeURIComponent(serverId)}:${encodeURIComponent(modelId)}`
+  return sharedRemoteVisionModelId(serverId, modelId)
 }
 
 /** Parse only ids created by remoteVisionModelId. */
 export function parseRemoteVisionModelId(value: string): RemoteVisionModelReference | null {
-  if (!value.startsWith(REMOTE_VISION_MODEL_PREFIX)) return null
-  const encoded = value.slice(REMOTE_VISION_MODEL_PREFIX.length)
-  const separator = encoded.indexOf(':')
-  if (separator < 1 || separator === encoded.length - 1) return null
-  try {
-    const serverId = decodeURIComponent(encoded.slice(0, separator))
-    const modelId = decodeURIComponent(encoded.slice(separator + 1))
-    return serverId && modelId ? { serverId, modelId } : null
-  } catch {
-    return null
-  }
+  return parseSharedRemoteVisionModelId(value)
 }
 
 export function remoteVisionInventoryModels(
@@ -114,21 +102,23 @@ export const REMOTE_VISION_DEFAULTS: Record<
 
 export function remoteVisionEndpoint(provider: RemoteVisionProvider, endpoint: string): string {
   if (provider === 'local') return ''
-  if (provider === 'custom') return endpoint.trim().replace(/\/+$/, '')
-  return endpoint.trim().replace(/\/+$/, '') || REMOTE_VISION_DEFAULTS[provider] || ''
+  if (provider === 'custom') return trimRemoteEndpoint(endpoint)
+  return trimRemoteEndpoint(endpoint) || REMOTE_VISION_DEFAULTS[provider] || ''
 }
 
 export function remoteVisionProviderForEndpoint(endpoint: string): RemoteVisionProvider {
-  const normalized = endpoint.trim().toLowerCase()
-  if (normalized.includes('openrouter.ai')) return 'openrouter'
-  if (/:(?:11434)(?:\/|$)/.test(normalized)) return 'ollama'
-  if (/:(?:1234)(?:\/|$)/.test(normalized)) return 'lmstudio'
-  if (/:(?:7878)(?:\/|$)/.test(normalized)) return 'ogad'
-  return 'custom'
+  const provider = inferRemoteProvider(endpoint)
+  return provider === 'offgrid-desktop' ? 'ogad' :
+    provider === 'openai-compatible' || provider === 'anthropic' ? 'custom' : provider
 }
 
 export function remoteVisionApiBase(endpoint: string): string {
-  const normalized = endpoint.trim().replace(/\/+$/, '')
-  if (!normalized || /\/v1$/i.test(normalized)) return normalized
-  return `${normalized}/v1`
+  return remoteApiBase(endpoint)
 }
+import {
+  inferRemoteProvider,
+  parseRemoteVisionModelId as parseSharedRemoteVisionModelId,
+  remoteApiBase,
+  remoteVisionModelId as sharedRemoteVisionModelId,
+  trimRemoteEndpoint
+} from '@offgrid/models'
