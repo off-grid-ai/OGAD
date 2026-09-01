@@ -113,6 +113,7 @@ export async function decideBrowserSemanticAction(
   request: BrowserSemanticDecisionRequest
 ): Promise<SemanticDecision> {
   const { llm } = await import('../llm')
+  const { desktopModelServices } = await import('../model-services')
   const phases = request.plan.phases.map((phase) => `${phase.id}: ${phase.title}`).join('\n')
   const prompt = `You control one visible browser page with Playwright accessibility references.
 
@@ -136,11 +137,28 @@ Rules:
 <untrusted_page_snapshot>
 ${boundedSnapshot(request.snapshot)}
 </untrusted_page_snapshot>`
-  const raw = await llm.chat(prompt, [], 60_000, 420, {
-    disableThinking: true,
-    responseFormat: PLAYWRIGHT_STEP_FORMAT,
+  await desktopModelServices.refresh()
+  const systemPrompt = llm.getSettings().systemPrompt?.trim()
+  const result = await desktopModelServices.generation.generate({
+    operation: { type: 'text' },
+    messages: [
+      ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
+      { role: 'user', content: prompt }
+    ],
+    responseFormat: {
+      type: 'json_schema',
+      name: PLAYWRIGHT_STEP_FORMAT.json_schema.name,
+      schema: PLAYWRIGHT_STEP_FORMAT.json_schema.schema,
+      strict: PLAYWRIGHT_STEP_FORMAT.json_schema.strict
+    },
+    maxTokens: 420,
+    timeoutMs: 60_000,
+    requiredCapabilities: { thinking: false },
+    allowFallback: true,
+    partialOutputPolicy: 'discard-and-fallback',
     signal: request.signal
   })
+  const raw = result.content
   const json = extractJsonObject(raw)
   if (!json) throw new Error('The text model returned no Web Use action.')
   return parseSemanticDecision(JSON.parse(json) as unknown, request.snapshot)
