@@ -12,7 +12,6 @@ import {
   modelDownloadQueue,
   shutdownModelDownloads
 } from './models/download-queue'
-import { getAllActiveModals, setActiveModal as setModal, type Modality } from './active-models'
 import {
   recordDownloaded,
   removeDownloaded,
@@ -36,13 +35,15 @@ import {
   primaryFileName,
   protectedNames,
   scanModelDir,
-  modalityForModel,
-  modalSelectionMatches,
   isChatLoadable,
   visionStatus,
   projectorToHeal,
   isProjectorFileName,
+  deletedModelSelectionModalities,
+  runtimeModalityForModelKind,
   type CatalogEntry,
+  type ModelModality,
+  type Modality,
   type VisionStatus,
   type DownloadLedgerStorage
 } from '@offgrid/models'
@@ -467,26 +468,35 @@ function retainedTransferredFileNames(context: TransferredDeletionContext): Set<
   return retained
 }
 
-function clearTransferredModelSelections(target: DownloadedModel, requestedId: string): void {
-  const activeId = getActiveModel()
-  if (activeId === target.id || activeId === requestedId) {
-    desktopModelSelectionPersistence.write('text', null)
-    desktopModelSelectionPersistence.clearLegacyTextConfig()
-    llm.reloadModel()
+async function clearDeletedModelSelections(
+  modelId: string,
+  requestedId: string,
+  primary: string | null | undefined
+): Promise<void> {
+  const active = desktopModelServices.activeModalities()
+  const selected: Partial<Record<ModelModality, string | null>> = {
+    text: active.text,
+    computer_use: active.computer_use,
+    image: active.image,
+    voice: active.speech,
+    transcription: active.transcription
   }
-  const primary = downloadedPrimary(target)
-  const modals = getAllActiveModals()
-  ;(Object.keys(modals) as Modality[]).forEach((kind) => {
-    if (
-      modalSelectionMatches(modals[kind], target.id, primary) ||
-      modalSelectionMatches(modals[kind], requestedId, primary)
-    ) {
-      setModal(kind, null)
+  for (const modality of deletedModelSelectionModalities({
+    selected,
+    modelId,
+    requestedId,
+    primaryFile: primary
+  })) {
+    const cleared = await desktopModelServices.select(modality, null)
+    if (!cleared.success) {
+      throw new Error(cleared.error ?? 'The model selection could not be cleared.')
     }
-  })
+  }
 }
 
-function deleteTransferredModel(context: TransferredDeletionContext): DeleteModelResult {
+async function deleteTransferredModel(
+  context: TransferredDeletionContext
+): Promise<DeleteModelResult> {
   const { dir, requestedId, target } = context
   // A projector can be shared by two installed quants. Delete only files that no other installed
   // model owns, then remove this exact package from the registry projection.
@@ -515,7 +525,7 @@ function deleteTransferredModel(context: TransferredDeletionContext): DeleteMode
     }
   }
   removeDownloaded(dir, target.id)
-  clearTransferredModelSelections(target, requestedId)
+  await clearDeletedModelSelections(target.id, requestedId, downloadedPrimary(target))
   return { success: true, freedFiles }
 }
 
@@ -537,11 +547,7 @@ export async function deleteModel(modelId: string): Promise<DeleteModelResult> {
       }
     }
     saveLocalModels(list.filter((m) => m.id !== modelId))
-    if (getActiveModel() === modelId) {
-      desktopModelSelectionPersistence.write('text', null)
-      desktopModelSelectionPersistence.clearLegacyTextConfig()
-      llm.reloadModel()
-    }
+    await clearDeletedModelSelections(modelId, modelId, lm.primary)
     return { success: true, freedFiles: freedLocal }
   }
   const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models')
@@ -591,20 +597,12 @@ export async function deleteModel(modelId: string): Promise<DeleteModelResult> {
   }
 
   // If this was the active chat model, clear the selection so we don't point at gone files.
-  if (getActiveModel() === modelId) {
-    desktopModelSelectionPersistence.write('text', null)
-    desktopModelSelectionPersistence.clearLegacyTextConfig()
-    llm.reloadModel()
-  }
   // Clear any per-modality selection pointing at it — matching the id AND the
   // primary filename, because image picks are stored by filename (D6: without the
   // filename match, deleting the active image model left a dangling pointer).
   const primaryFile =
     entry.runtime === 'mflux' ? null : primaryFileName(entry as unknown as CatalogEntry)
-  const modals = getAllActiveModals()
-  ;(Object.keys(modals) as Modality[]).forEach((k) => {
-    if (modalSelectionMatches(modals[k], modelId, primaryFile)) setModal(k, null)
-  })
+  await clearDeletedModelSelections(modelId, modelId, primaryFile)
   return { success: true, freedFiles: freed }
 }
 
@@ -712,10 +710,10 @@ export async function reconcileActiveModelClassification(): Promise<boolean> {
   const entry = CATALOG.find((model) => model.id === activeId)
   if (!entry || isChatLoadable(entry.kind)) return false
 
-  const modality = modalityForModel(entry.kind)
-  if (!modality) return false
+  const modality = runtimeModalityForModelKind(entry.kind)
+  if (!modality || modality === 'text') return false
   const active = desktopModelServices.activeModalities()
-  const activeForModality = modality === 'speech' ? active.speech : active[modality]
+  const activeForModality = modality === 'voice' ? active.speech : active[modality]
   if (!activeForModality) {
     const migrated = await setActiveModalChoice(modality, activeId)
     if (!migrated.success) return false
@@ -815,7 +813,7 @@ export async function activateModel(
     return desktopModelServices.select(remoteModality, modelId)
   }
   let kind: string | undefined
-  let requestedModal: Modality | null = null
+  let requestedModal: ModelModality | null = null
   if (modelId.startsWith('local:')) {
     kind = getLocalModels().find((m) => m.id === modelId)?.kind
   } else {
@@ -827,15 +825,14 @@ export async function activateModel(
     const catalogEntry = CATALOG.find((m) => m.id === modelId)
     kind =
       downloadedVariant(downloaded, modelId)?.kind ??
-      (catalogEntry ??
-        (await resolveHuggingFaceModel(modelId, { fetchImpl: platformFetch })))?.kind
+      (catalogEntry ?? (await resolveHuggingFaceModel(modelId, { fetchImpl: platformFetch })))?.kind
     const requested = requestedKind as Parameters<typeof modelSupportsKind>[1]
     if (catalogEntry && requestedKind && modelSupportsKind(catalogEntry, requested)) {
-      requestedModal = modalityForModel(requestedKind)
+      requestedModal = runtimeModalityForModelKind(requestedKind)
     }
   }
-  const modal = requestedModal ?? modalityForModel(kind)
-  return modal ? setActiveModalChoice(modal, modelId) : setActiveModel(modelId)
+  const modal = requestedModal ?? runtimeModalityForModelKind(kind)
+  return modal ? desktopModelServices.select(modal, modelId) : setActiveModel(modelId)
 }
 
 export async function setActiveModalChoice(
@@ -846,9 +843,8 @@ export async function setActiveModalChoice(
   // passes 'voice', the UI/dispatch pass 'speech'. Before this, the guard only
   // accepted 'speech', so "Configure for me" (which passes 'voice') silently failed
   // to activate TTS (D26). One normalizer is the single source of truth.
-  const modal = modalityForModel(kind)
-  if (modal) {
-    const modality = modal === 'speech' ? 'voice' : modal
+  const modality = runtimeModalityForModelKind(kind)
+  if (modality && modality !== 'text') {
     return desktopModelServices.select(modality, modelId)
   }
   return { success: false, error: 'use setActiveModel for the chat LLM (text/vision)' }
@@ -1223,7 +1219,13 @@ export async function getStorageInfo(): Promise<StorageInfo> {
   // chosen FILENAME, not the catalog id — so an image/voice/STT model is "active"
   // when its primary file matches. Without this, only the chat LLM ever shows
   // active and image models can't be activated from the UI.
-  const modals = getAllActiveModals()
+  const selected = desktopModelServices.activeModalities()
+  const modals: Record<Modality, string | null> = {
+    computer_use: selected.computer_use,
+    image: selected.image,
+    speech: selected.speech,
+    transcription: selected.transcription
+  }
   const locals = getLocalModels()
   const installed = (await listInstalled()).filter((id) => !parseRemoteVisionModelId(id))
   const sizeOf = (name: string): number => fileSizeOf(dir, name)

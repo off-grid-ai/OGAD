@@ -6,8 +6,10 @@ import {
   decodeModelRouteId,
   runtimeModelRouteId,
   ModelAdmissionError,
+  inventoryModelCapabilities,
+  inventoryModelMemoryProfile,
+  runtimeModalityForModelKind,
   type ModelInventoryAdapter,
-  type ModelKind,
   type ModelModality,
   type ModelSelectionStore,
   type ModelReasoningMetadata,
@@ -85,21 +87,6 @@ const SHARED_MODALITIES: readonly ModelModality[] = [
   'embedding'
 ]
 
-function modalityForKind(kind: string | undefined): ModelModality | null {
-  if (kind === 'text' || kind === 'vision') return 'text'
-  if (kind === 'computer_use') return 'computer_use'
-  if (
-    kind === 'image' ||
-    kind === 'voice' ||
-    kind === 'transcription' ||
-    kind === 'embedding' ||
-    kind === 'classifier' ||
-    kind === 'tool_selection'
-  )
-    return kind
-  return null
-}
-
 export function desktopAdapterId(source: 'local' | 'remote', modality: ModelModality): string {
   const prefix = source === 'remote' ? 'desktop.remote-chat' : 'desktop.llama'
   if (modality === 'text') return prefix
@@ -120,16 +107,11 @@ function runtimeSizes(model: DesktopInventoryModel): {
   peakSizeMB?: number
 } {
   const bytes = (model.files ?? []).reduce((sum, file) => sum + (file.sizeBytes ?? 0), 0)
-  if (bytes <= 0 || model.remoteServerId) return {}
-  const weightsMB = bytes / (1024 * 1024)
-  // Catalog files are the durable resident weights. Native image/text runtimes need
-  // additional graph, cache, and decode buffers while a request is running.
-  const peakFactor =
-    model.kind === 'image' ? 1.4 : model.kind === 'text' || model.kind === 'vision' ? 1.2 : 1.1
-  return {
-    residentSizeMB: Math.ceil(weightsMB),
-    peakSizeMB: Math.ceil(weightsMB * peakFactor)
-  }
+  return inventoryModelMemoryProfile({
+    artifactBytes: bytes,
+    kind: model.kind,
+    remote: Boolean(model.remoteServerId)
+  })
 }
 
 /**
@@ -317,7 +299,7 @@ class DesktopInventorySource {
     }
 
     const catalogRoutes = catalog.flatMap((model): RuntimeModel[] => {
-      const modality = modalityForKind(model.kind)
+      const modality = runtimeModalityForModelKind(model.kind)
       if (!modality) return []
       const remote = model.remoteServerId ? remoteById.get(model.remoteServerId) : undefined
       const source = remote ? 'remote' : 'local'
@@ -334,7 +316,7 @@ class DesktopInventorySource {
       const base: RuntimeModel = {
         id: remote && model.remoteModelId ? model.remoteModelId : model.id,
         name: model.name?.trim() || model.id,
-        kind: (model.kind ?? 'text') as ModelKind,
+        kind: (model.kind ?? 'text') as RuntimeModel['kind'],
         modality,
         source,
         adapterId,
@@ -359,30 +341,11 @@ class DesktopInventorySource {
               : modality === 'voice'
                 ? 'operation'
                 : 'persistent',
-        capabilities: {
-          textGeneration: modality === 'text',
-          vision:
-            model.kind === 'vision' ||
-            model.kind === 'computer_use' ||
-            model.remoteCapabilities?.supportsVision === true,
-          computerUse: modality === 'computer_use',
-          imageGeneration: modality === 'image',
-          speechSynthesis: modality === 'voice',
-          transcription: modality === 'transcription',
-          audioInput: modality === 'transcription',
-          embeddings: modality === 'embedding',
-          tools:
-            modality === 'computer_use' ||
-            (modality === 'text' &&
-              (source === 'local' || model.remoteCapabilities?.supportsToolCalling === true)),
-          toolSelection:
-            modality === 'computer_use' || model.remoteCapabilities?.supportsToolCalling === true,
-          thinking:
-            (modality === 'text' || modality === 'computer_use') &&
-            (source === 'local' || model.remoteCapabilities?.supportsThinking === true),
-          streaming: modality === 'text' || modality === 'computer_use',
-          structuredOutput: modality === 'text' || modality === 'computer_use'
-        },
+        capabilities: inventoryModelCapabilities({
+          kind: model.kind,
+          source,
+          remoteCapabilities: model.remoteCapabilities
+        }),
         installed: isInstalled,
         ready,
         loaded
@@ -533,7 +496,9 @@ export function createDesktopModelServices(
     if (active.model?.source === 'remote' && active.model.serverId) {
       return active.model.routeId ?? runtimeModelRouteId(active.model)
     }
-    return active.model?.id ?? ids.canonical(active.selectedId)
+    const selectedRoute = active.selectedId ? decodeModelRouteId(active.selectedId) : null
+    if (selectedRoute?.serverId) return active.selectedId
+    return active.model?.id ?? selectedRoute?.modelId ?? ids.canonical(active.selectedId)
   }
 
   const activeModalities = (): ReturnType<DesktopModelServices['activeModalities']> => ({

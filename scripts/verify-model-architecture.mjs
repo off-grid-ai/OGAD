@@ -7,7 +7,7 @@ import ts from 'typescript'
 import { temporaryModelArchitectureAllowlist } from './model-architecture-allowlist.mjs'
 
 const repoRoot = path.resolve(import.meta.dirname, '..')
-const roots = [path.join(repoRoot, 'src')]
+const roots = [path.join(repoRoot, 'src'), path.join(repoRoot, 'pro')]
 
 function sourceFiles(directory) {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
@@ -56,6 +56,9 @@ for (const file of files) {
           }
         }
       }
+      if (/(?:^|\/)active-models$/.test(specifier)) {
+        report('no-active-models-compatibility-facade', fileName, source, node, `import:${specifier}`)
+      }
     }
 
     if (ts.isCallExpression(node)) {
@@ -72,6 +75,12 @@ for (const file of files) {
         /^(m\.)?setActive(Model|ModalChoice)$/.test(call)
       ) {
         report('active-model-writes-use-canonical-selection-port', fileName, source, node, `call:${call}`)
+      }
+      if (
+        fileName === 'src/main/models-manager.ts' &&
+        /^(?:getAllActiveModals|setActiveModal|setModal|desktopModelSelectionPersistence\.write)$/.test(call)
+      ) {
+        report('models-manager-does-not-own-selection-persistence', fileName, source, node, `call:${call}`)
       }
     }
 

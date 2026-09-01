@@ -22,11 +22,11 @@ import {
   projectorFileName,
   visionStatus,
   projectorToHeal,
+  modalityForKind,
   type CatalogEntry,
   type LocalModelLike,
   type DownloadedModelLike
 } from '@offgrid/models'
-import { modalityForKind } from '../../active-models'
 
 const local: LocalModelLike = {
   id: 'local:my.gguf',
