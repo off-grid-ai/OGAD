@@ -7,7 +7,7 @@ import {
   type SequentialDownloadPorts
 } from '@offgrid/models'
 import { pumpToFile } from './download-pump'
-import { downloadIntegrityError, sha256IntegrityError } from './download-verify'
+import { verifyDownloadedPart } from './download-verify'
 
 export interface DesktopDownloadArtifact extends SequentialDownloadArtifact {
   role?: string
@@ -59,15 +59,14 @@ export function createNodeArtifactDownloadPorts(
     },
     verifyAndPromote: async (artifact, transfer) => {
       const partPath = partial(artifact)
-      const integrityError = downloadIntegrityError(
+      const integrityError = await verifyDownloadedPart(
         artifact.name,
         transfer.writtenBytes,
         transfer.totalBytes,
-        partPath
+        partPath,
+        artifact.sha256
       )
       if (integrityError) throw new NonRecoverableDownloadError(integrityError)
-      const checksumError = await sha256IntegrityError(artifact.name, partPath, artifact.sha256)
-      if (checksumError) throw new NonRecoverableDownloadError(checksumError)
       fs.renameSync(partPath, destination(artifact))
     },
     removePartial: async (artifact) => {

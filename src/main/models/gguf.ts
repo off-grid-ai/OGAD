@@ -1,26 +1,11 @@
-// Single source of truth for the cheap GGUF integrity check. A real GGUF file
-// starts with the ASCII magic "GGUF" and is more than a few bytes; this catches
-// truncated/corrupt downloads before the file is handed to llama-server (which
-// would otherwise crash on load). The byte-inspection is split from the fs read
-// so the decision is pure + unit-testable, while both call sites (models-manager
-// import + LLMService.validateGguf) share one implementation instead of two
-// hand-kept copies that could drift.
-
-/** The GGUF file-format magic number, as the first four bytes. */
-const GGUF_MAGIC = 'GGUF'
-
-/** Minimum plausible size for a real model file; anything smaller is a stub or a
- *  truncated download. */
-export const GGUF_MIN_BYTES = 1024
-
-/**
- * Decide whether a file's size + first four bytes identify a valid GGUF model.
- * Pure: the caller reads the size and the leading bytes; this judges them.
- */
-export function isValidGgufHeader(sizeBytes: number, firstFourBytes: Buffer): boolean {
-  if (sizeBytes < GGUF_MIN_BYTES) return false
-  return firstFourBytes.toString('ascii') === GGUF_MAGIC
-}
+import type fs from 'fs'
+import path from 'path'
+import {
+  ArtifactVerificationService,
+  type ArtifactOrigin,
+  type ArtifactVerification,
+  type ArtifactVerificationFilePort
+} from '@offgrid/models'
 
 /** The subset of `fs` this check needs — injected so the read path is testable
  *  against a real temp file (or a fake) without importing node fs into callers'
@@ -32,26 +17,49 @@ export interface GgufFs {
   closeSync(fd: number): void
 }
 
-/**
- * Read a file's size + leading magic and judge whether it is a valid GGUF model.
- * Returns false on any fs error (missing/unreadable file). This is the single
- * implementation both call sites (models-manager import + LLMService) share.
- */
-export function isValidGgufFile(p: string, fs: GgufFs): boolean {
-  try {
-    const size = fs.statSync(p).size
-    if (size < GGUF_MIN_BYTES) return false
-    const fd = fs.openSync(p, 'r')
-    const buf = Buffer.alloc(4)
-    // try/finally so a readSync throw can't leak the descriptor (the outer catch
-    // swallows the error, so without this the fd would never be closed).
-    try {
-      fs.readSync(fd, buf, 0, 4, 0)
-    } finally {
-      fs.closeSync(fd)
+/** Node filesystem adapter. It contains no artifact-validity decisions. */
+export function desktopArtifactVerificationFiles(nativeFs: typeof fs): ArtifactVerificationFilePort {
+  return {
+    async stat(candidate) {
+      try {
+        const value = nativeFs.lstatSync(candidate)
+        return {
+          exists: true,
+          isFile: value.isFile() && !value.isSymbolicLink(),
+          sizeBytes: value.size
+        }
+      } catch {
+        return { exists: false, isFile: false, sizeBytes: 0 }
+      }
+    },
+    async readPrefix(candidate, bytes) {
+      const handle = nativeFs.openSync(candidate, 'r')
+      const prefix = Buffer.alloc(bytes)
+      try {
+        const read = nativeFs.readSync(handle, prefix, 0, bytes, 0)
+        return Uint8Array.from(prefix.subarray(0, read))
+      } finally {
+        nativeFs.closeSync(handle)
+      }
+    },
+    async remove(candidate) {
+      nativeFs.rmSync(candidate, { force: true })
     }
-    return isValidGgufHeader(size, buf)
-  } catch {
-    return false
   }
+}
+
+export function verifyArtifactFile(
+  candidate: string,
+  nativeFs: typeof fs,
+  origin: ArtifactOrigin,
+  removeInvalid = false,
+  expectedBytes?: number
+): Promise<ArtifactVerification> {
+  return new ArtifactVerificationService(desktopArtifactVerificationFiles(nativeFs)).verify({
+    path: candidate,
+    name: path.basename(candidate),
+    origin,
+    removeInvalid,
+    expectedBytes
+  })
 }

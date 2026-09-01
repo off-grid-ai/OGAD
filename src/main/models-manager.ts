@@ -5,7 +5,7 @@
 import fs from 'fs'
 import path from 'path'
 import { llm } from './llm'
-import { isValidGgufFile } from './models/gguf'
+import { verifyArtifactFile } from './models/gguf'
 import { createNodeArtifactDownloadPorts } from './models/node-artifact-download-adapter'
 import {
   DOWNLOAD_INTERRUPTED_ERROR,
@@ -25,6 +25,7 @@ import { modelPackageIdentity, type TransferredModelManifest } from '@offgrid/sy
 import { sampleProgressRate, type ProgressRateSample } from '@offgrid/ui'
 import {
   decodeModelRouteId,
+  artifactVerificationError,
   DownloadStatusLedger,
   LocalModelImportService,
   ModelActivationService,
@@ -817,29 +818,23 @@ function saveLocalModels(list: LocalModel[], dir = llm.getModelsDir()): void {
   }
 }
 
-function transferredFilesOnDisk(
+async function transferredFilesOnDisk(
   dir: string,
   files: Array<{ name: string; sizeBytes: number }>
-): { error?: string; files?: TransferableModelFile[] } {
+): Promise<{ error?: string; files?: TransferableModelFile[] }> {
   if (files.length === 0) return { error: 'model has no transferable files' }
   const resolved: TransferableModelFile[] = []
   for (const file of files) {
     const filePath = path.join(dir, file.name)
-    let actualSize = 0
-    try {
-      const stat = fs.lstatSync(filePath)
-      if (!stat.isFile() || stat.isSymbolicLink()) {
-        return { error: `${file.name}: transferred file is not a regular file` }
-      }
-      actualSize = stat.size
-    } catch {
-      return { error: `${file.name}: transferred file is missing` }
-    }
-    if (actualSize !== file.sizeBytes) {
-      return { error: `${file.name}: transferred file size does not match the manifest` }
-    }
-    if (/\.gguf$/i.test(file.name) && !isValidGgufFile(filePath, fs)) {
-      return { error: `${file.name}: transferred file is not a valid GGUF model` }
+    const verification = await verifyArtifactFile(filePath, fs, 'transfer', false, file.sizeBytes)
+    if (!verification.valid) return {
+      error: artifactVerificationError({
+        path: filePath,
+        name: file.name,
+        origin: 'transfer',
+        expectedBytes: file.sizeBytes,
+        removeInvalid: false
+      }, verification)
     }
     resolved.push({ ...file, path: filePath })
   }
@@ -847,10 +842,10 @@ function transferredFilesOnDisk(
 }
 
 const transferredModelRegistration = new ModelTransferRegistrationService({
-  validateFiles: async manifest => transferredFilesOnDisk(
+  validateFiles: async manifest => (await transferredFilesOnDisk(
     llm.getModelsDir(),
     manifest.files.map(file => ({ name: file.name, sizeBytes: file.sizeBytes }))
-  ).error ?? null,
+  )).error ?? null,
   async catalogFiles(modelId) {
     const { CATALOG } = await import('@offgrid/models')
     return CATALOG.find(model => model.id === modelId)?.files.map(file => file.name) ?? null
@@ -893,10 +888,10 @@ export async function getTransferableModel(
     : downloaded
       ? downloaded.files
       : (catalog?.files.map((file) => file.name) ?? [])
-  const files = transferredFilesOnDisk(
+  const files = (await transferredFilesOnDisk(
     dir,
     names.map((name) => ({ name, sizeBytes: fileSizeOf(dir, name) }))
-  ).files
+  )).files
   if (!files) return null
 
   return {
@@ -921,9 +916,9 @@ export async function registerTransferredModel(
 ): Promise<{ success: boolean; error?: string; id?: string }> {
   if (dir === llm.getModelsDir()) return transferredModelRegistration.register(manifest)
   const scoped = new ModelTransferRegistrationService({
-    validateFiles: async input => transferredFilesOnDisk(
+    validateFiles: async input => (await transferredFilesOnDisk(
       dir, input.files.map(file => ({ name: file.name, sizeBytes: file.sizeBytes }))
-    ).error ?? null,
+    )).error ?? null,
     async catalogFiles(modelId) {
       const { CATALOG } = await import('@offgrid/models')
       return CATALOG.find(model => model.id === modelId)?.files.map(file => file.name) ?? null
@@ -953,7 +948,7 @@ const localModelImports = new LocalModelImportService({
     if (!source || !source.toLowerCase().endsWith('.gguf')) {
       return { fileName: '', sizeBytes: 0, valid: false, error: 'Not a .gguf file' }
     }
-    if (!isValidGgufFile(source, fs)) {
+    if (!(await verifyArtifactFile(source, fs, 'import')).valid) {
       return {
         fileName: path.basename(source), sizeBytes: 0, valid: false,
         error: 'File is not a valid GGUF model (corrupt or wrong format)'
