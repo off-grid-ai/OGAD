@@ -23,6 +23,14 @@ import fs from 'fs'
 import os from 'os'
 import { binRoots, isPackaged, exe } from './runtime-env'
 import { killOrphansOnPort as reapOrphansOnPort } from './kill-orphan-port'
+import {
+  desktopEngineIdleMs,
+  engineReadinessAction,
+  idleEvictionAction,
+  modelReadinessIssue,
+  residentEngineAction,
+  residentEngineKey
+} from '@offgrid/models'
 
 /** Off the LLM's 8439 so both engines can bind (they never run at once, but a
  *  lingering LLM shouldn't block the image server's port either). */
@@ -74,7 +82,7 @@ export function buildSdServerContextArgs(ctx: SdServerContext): string[] {
 /** A stable key identifying a resident configuration — the server is restarted
  *  when this changes (model swap, flag change). Pure. */
 export function contextKey(ctx: SdServerContext): string {
-  return JSON.stringify([
+  return residentEngineKey([
     ctx.modelPath,
     ctx.diffusionFa ?? false,
     ctx.taesdPath ?? null,
@@ -173,7 +181,7 @@ class SdServerService {
   private activeKey: string | null = null // contextKey of the loaded model, null when down
   private startPromise: Promise<void> | null = null
   private idleTimer: ReturnType<typeof setTimeout> | null = null
-  private idleMs = 60_000 // keep the model hot for a minute of inactivity, then evict
+  private idleMs = desktopEngineIdleMs('image')
   private evictionHook: (() => void) | null = null
   private stderrTail: string[] = []
   private currentJobId: string | null = null
@@ -219,11 +227,21 @@ class SdServerService {
   /** Ensure a server is up with EXACTLY this context; restart on a model/flag
    *  swap. Cancels any pending idle-eviction (we're about to be busy). */
   async ensureUp(ctx: SdServerContext): Promise<void> {
-    this.clearIdleTimer()
+    if (
+      idleEvictionAction({ event: 'activity-started', processAlive: this.server !== null }) ===
+      'cancel'
+    )
+      this.clearIdleTimer()
     const key = contextKey({ ...ctx, port: this.port })
-    if (this.server && this.activeKey === key) return // already the right model
-    if (this.server && this.activeKey !== key) this.stopProcess() // swap → restart
-    if (this.startPromise !== null) return this.startPromise
+    const action = residentEngineAction({
+      processAlive: this.server !== null,
+      activeKey: this.activeKey,
+      requestedKey: key,
+      startInFlight: this.startPromise !== null
+    })
+    if (action === 'reuse') return
+    if (action === 'join-start') return this.startPromise!
+    if (action === 'restart') this.stopProcess()
     this.startPromise = this.spawn(ctx, key).finally(() => {
       this.startPromise = null
     })
@@ -233,7 +251,13 @@ class SdServerService {
   private async spawn(ctx: SdServerContext, key: string): Promise<void> {
     const bin = this.findBinary()
     if (!bin) throw new Error('Image server binary (sd-server) not found in resources/bin/sd.')
-    if (!fs.existsSync(ctx.modelPath)) throw new Error(`Image model not found: ${ctx.modelPath}`)
+    const readinessIssue = modelReadinessIssue({
+      primaryExists: fs.existsSync(ctx.modelPath),
+      projectorRequired: false,
+      projectorExists: false
+    })
+    if (readinessIssue === 'primary-missing')
+      throw new Error(`Image model not found: ${ctx.modelPath}`)
     const binDir = path.dirname(bin)
 
     // Downloaded DMGs are quarantined; clear it on packaged builds (mirrors llm.ts).
@@ -283,18 +307,26 @@ class SdServerService {
 
   private async waitForReady(timeoutMs = 90_000): Promise<void> {
     const start = Date.now()
-    while (Date.now() - start < timeoutMs) {
-      if (!this.server)
-        throw new Error(`sd-server exited during startup: ${this.stderrTail.slice(-6).join(' | ')}`)
+    for (;;) {
+      let probeReady = false
       try {
         const res = await fetch(`${this.base()}/sdcpp/v1/capabilities`)
-        if (res.ok) return
+        probeReady = res.ok
       } catch {
         /* not up yet */
       }
+      const action = engineReadinessAction({
+        processAlive: this.server !== null,
+        probeReady,
+        elapsedMs: Date.now() - start,
+        timeoutMs
+      })
+      if (action === 'ready') return
+      if (action === 'failed')
+        throw new Error(`sd-server exited during startup: ${this.stderrTail.slice(-6).join(' | ')}`)
+      if (action === 'timed-out') throw new Error('sd-server failed to become ready in time.')
       await new Promise((r) => setTimeout(r, 500))
     }
-    throw new Error('sd-server failed to become ready in time.')
   }
 
   /** Generate one image on the resident server. Assumes ensureUp() already ran
@@ -391,9 +423,17 @@ class SdServerService {
 
   private armIdleTimer(): void {
     this.clearIdleTimer()
+    if (
+      idleEvictionAction({ event: 'activity-finished', processAlive: this.server !== null }) !==
+      'arm'
+    )
+      return
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null
-      this.stop()
+      if (
+        idleEvictionAction({ event: 'timer-fired', processAlive: this.server !== null }) === 'evict'
+      )
+        this.stop()
     }, this.idleMs)
     // Don't let the eviction timer keep the Node event loop (or a test) alive.
     ;(this.idleTimer as unknown as { unref?: () => void }).unref?.()

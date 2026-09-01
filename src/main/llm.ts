@@ -17,10 +17,12 @@ import {
   reasoningMetadataFromChatTemplate,
   resolveMaxTokens,
   shouldAutoRecoverRuntime as shouldAutoRecover,
-  safeTextContext,
-  textRuntimeModeBudget,
+  desktopTextContext,
+  engineReadinessAction,
+  modelReadinessIssue,
   textRuntimeLoadAttempts,
-  capContextToTrainedWindow,
+  textRuntimeLoadFailureAction,
+  textRuntimeAdmissionAction,
   applyTextRuntimeModePreset,
   llamaServerCompletionPayload,
   normalizeMaxToolCalls,
@@ -274,12 +276,12 @@ export class LLMService {
   }
 
   private safeCtxSize(requestedRaw: number): number {
-    // First cap to the model's trained window (pure), THEN clamp to what RAM can hold.
     const trained = this.trainedContext()
-    const requested = capContextToTrainedWindow(requestedRaw, trained)
+    let totalGb: number | undefined
+    let weightsGb: number | undefined
     try {
-      const totalGb = os.totalmem() / 1e9
-      let weightsGb = 0
+      totalGb = os.totalmem() / 1e9
+      weightsGb = 0
       try {
         weightsGb += fs.statSync(this.modelPath).size / 1e9
       } catch {
@@ -290,27 +292,24 @@ export class LLMService {
       } catch {
         /* unknown */
       }
-      const { frac, reserveGb } = textRuntimeModeBudget(this.performanceMode)
-      const rounded = safeTextContext({
-        requested,
-        totalGb,
-        weightsGb,
-        kvType: this.kvCacheType,
-        frac,
-        reserveGb
-      })
-      if (rounded < requested) {
-        console.warn(
-          `[LLMService] Clamping context ${requested} -> ${rounded} (RAM ${totalGb.toFixed(0)}GB, weights ${weightsGb.toFixed(1)}GB) to avoid memory overcommit`
-        )
-      }
-      // The shared safe-context policy has a 2048-token floor; re-cap to the trained window so a
-      // model trained BELOW that floor (e.g. 1024) is never run past its context.
-      return capContextToTrainedWindow(rounded, trained)
     } catch {
-      // If anything goes wrong reading sizes, fall back to a universally-safe value.
-      return capContextToTrainedWindow(Math.min(requested, 8192), trained)
+      totalGb = undefined
+      weightsGb = undefined
     }
+    const effective = desktopTextContext({
+      requested: requestedRaw,
+      trainedContext: trained,
+      totalGb,
+      weightsGb,
+      kvType: this.kvCacheType,
+      performanceMode: this.performanceMode
+    })
+    if (typeof totalGb === 'number' && typeof weightsGb === 'number' && effective < requestedRaw) {
+      console.warn(
+        `[LLMService] Clamping context ${requestedRaw} -> ${effective} (RAM ${totalGb.toFixed(0)}GB, weights ${weightsGb.toFixed(1)}GB) to avoid memory overcommit`
+      )
+    }
+    return effective
   }
 
   /** The EFFECTIVE (RAM-clamped) context window the server is actually running
@@ -653,8 +652,14 @@ export class LLMService {
 
     this.resolveModel()
 
-    // Check if models exist
-    if (!this.modelsExist()) {
+    const primaryExists = this.modelsExist()
+    if (
+      modelReadinessIssue({
+        primaryExists,
+        projectorRequired: false,
+        projectorExists: false
+      }) === 'primary-missing'
+    ) {
       console.error(`[LLMService] Models not found. Please download them first.`)
       console.error(`[LLMService] Expected model: ${this.modelPath}`)
       console.error(`[LLMService] Expected mmproj: ${this.mmProjPath}`)
@@ -663,7 +668,15 @@ export class LLMService {
 
     // Integrity check: a corrupt/truncated weights file would crash llama-server
     // on load. Fail with a clear message so the UI can prompt a re-download.
-    if (!(await this.validateGguf(this.modelPath))) {
+    const primaryValid = await this.validateGguf(this.modelPath)
+    if (
+      modelReadinessIssue({
+        primaryExists,
+        primaryValid,
+        projectorRequired: false,
+        projectorExists: false
+      }) === 'primary-invalid'
+    ) {
       console.error(
         `[LLMService] Model file failed GGUF validation (corrupt/truncated): ${this.modelPath}`
       )
@@ -677,7 +690,17 @@ export class LLMService {
       // UI-Mate is a screenshot policy, not a text fallback. The exact paired
       // projector is mandatory at the engine boundary.
       loadGatedAdapter.assertCapabilities(activeArtifacts)
-      if (!this.mmProjPath || !(await this.validateGguf(this.mmProjPath))) {
+      const projectorExists = !!this.mmProjPath && fs.existsSync(this.mmProjPath)
+      const projectorValid = projectorExists ? await this.validateGguf(this.mmProjPath) : false
+      if (
+        modelReadinessIssue({
+          primaryExists,
+          primaryValid,
+          projectorRequired: true,
+          projectorExists,
+          projectorValid
+        }) !== null
+      ) {
         throw new Error('The UI-Mate mmproj file is corrupt or incomplete. Re-download it.')
       }
     }
@@ -759,7 +782,14 @@ export class LLMService {
         await this.prepareModelPort()
         // Advance down the ladder ONLY for a memory failure; anything else means a
         // smaller context won't help, so give up on this engine and try the next.
-        if (classifyLlamaError(this.stderrTail.join('\n'))?.code !== 'out_of_memory') break
+        const failureCode = classifyLlamaError(this.stderrTail.join('\n'))?.code
+        if (
+          textRuntimeLoadFailureAction({
+            failureCode,
+            hasNextAttempt: a + 1 < attempts.length
+          }) === 'next-engine'
+        )
+          break
       }
     }
     return false
@@ -895,10 +925,13 @@ export class LLMService {
    *  init, and fail loudly if init didn't take. Single source of truth so the
    *  three chat methods don't each re-implement it. */
   private async ensureReady(): Promise<void> {
-    if (this.paused) throw new Error('LLM paused during image generation — deferred')
-    if (!this.initialized) {
+    const action = textRuntimeAdmissionAction({
+      paused: this.paused,
+      initialized: this.initialized
+    })
+    if (action === 'reject-paused') throw new Error('LLM paused during image generation — deferred')
+    if (action === 'initialize') {
       await this.init()
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- init() flips `initialized` across the await; TS narrows the field to its pre-await `false` and can't see the mutation.
       if (!this.initialized) throw new Error('LLM Service not ready')
     }
   }
@@ -1016,9 +1049,8 @@ export class LLMService {
   private async waitForReady(timeout = 60000): Promise<void> {
     const start = Date.now()
     let healthOk = false
-    while (Date.now() - start < timeout) {
-      // The server died during startup (e.g. model load failure) — stop waiting.
-      if (!this.server) throw new Error('llama-server exited during startup — model failed to load')
+    for (;;) {
+      let modelReady = false
       try {
         if (!healthOk) {
           const res = await fetch(`http://127.0.0.1:${this.port}/health`)
@@ -1029,17 +1061,29 @@ export class LLMService {
           if (res.ok) {
             const body = await res.json().catch(() => null)
             if (Array.isArray(body?.data) && body.data.length > 0) {
-              await this.resolveThinkingDialect()
-              return
+              modelReady = true
             }
           }
         }
       } catch {
         /* not up yet */
       }
+      const action = engineReadinessAction({
+        processAlive: this.server !== null,
+        probeReady: modelReady,
+        elapsedMs: Date.now() - start,
+        timeoutMs: timeout
+      })
+      if (action === 'ready') {
+        await this.resolveThinkingDialect()
+        return
+      }
+      if (action === 'failed')
+        throw new Error('llama-server exited during startup — model failed to load')
+      if (action === 'timed-out')
+        throw new Error('Server started but no model was loaded within the timeout')
       await new Promise((r) => setTimeout(r, 500))
     }
-    throw new Error('Server started but no model was loaded within the timeout')
   }
 
   private completeRemote(

@@ -27,7 +27,13 @@ import { killOrphansOnPort as reapOrphansOnPort } from '../kill-orphan-port'
 import { Mutex } from 'async-mutex'
 import {
   buildWhisperInferenceFields,
+  desktopEngineIdleMs,
+  engineReadinessAction,
+  idleEvictionAction,
+  modelReadinessIssue,
   parseWhisperInferenceResponse,
+  residentEngineAction,
+  residentEngineKey,
   transcriptLanguage
 } from '@offgrid/models'
 
@@ -76,7 +82,7 @@ export function buildWhisperServerArgs(ctx: WhisperServerContext): string[] {
 /** A stable key identifying a resident configuration - the server is restarted
  *  when this changes (model swap, thread change). Pure. */
 export function whisperContextKey(ctx: WhisperServerContext): string {
-  return JSON.stringify([ctx.modelPath, ctx.threads ?? null, ctx.port ?? WHISPER_SERVER_PORT])
+  return residentEngineKey([ctx.modelPath, ctx.threads ?? null, ctx.port ?? WHISPER_SERVER_PORT])
 }
 
 /** The multipart form fields for POST /inference. whisper-server takes the audio
@@ -91,7 +97,7 @@ export class WhisperServerService {
   private activeKey: string | null = null // whisperContextKey of the loaded model, null when down
   private startPromise: Promise<void> | null = null
   private idleTimer: ReturnType<typeof setTimeout> | null = null
-  private idleMs = 5 * 60_000 // keep the model hot for 5 min of inactivity, then evict
+  private idleMs = desktopEngineIdleMs('transcription')
   private stderrTail: string[] = []
 
   constructor(private readonly port = WHISPER_SERVER_PORT) {}
@@ -119,11 +125,21 @@ export class WhisperServerService {
   /** Ensure a server is up with EXACTLY this context; restart on a model/thread
    *  swap. Cancels any pending idle-eviction (we're about to be busy). */
   async ensureUp(ctx: WhisperServerContext): Promise<void> {
-    this.clearIdleTimer()
+    if (
+      idleEvictionAction({ event: 'activity-started', processAlive: this.server !== null }) ===
+      'cancel'
+    )
+      this.clearIdleTimer()
     const key = whisperContextKey({ ...ctx, port: this.port })
-    if (this.server && this.activeKey === key) return // already the right model
-    if (this.server && this.activeKey !== key) this.stopProcess() // swap -> restart
-    if (this.startPromise !== null) return this.startPromise
+    const action = residentEngineAction({
+      processAlive: this.server !== null,
+      activeKey: this.activeKey,
+      requestedKey: key,
+      startInFlight: this.startPromise !== null
+    })
+    if (action === 'reuse') return
+    if (action === 'join-start') return this.startPromise!
+    if (action === 'restart') this.stopProcess()
     this.startPromise = this.spawn(ctx, key).finally(() => {
       this.startPromise = null
     })
@@ -136,7 +152,12 @@ export class WhisperServerService {
       throw new Error(
         'Resident STT engine (whisper-server) not found in resources/bin/whisper-server.'
       )
-    if (!fs.existsSync(ctx.modelPath))
+    const readinessIssue = modelReadinessIssue({
+      primaryExists: fs.existsSync(ctx.modelPath),
+      projectorRequired: false,
+      projectorExists: false
+    })
+    if (readinessIssue === 'primary-missing')
       throw new Error(`Transcription model not found: ${ctx.modelPath}`)
     const binDir = path.dirname(bin)
 
@@ -188,23 +209,30 @@ export class WhisperServerService {
 
   private async waitForReady(timeoutMs = 60_000): Promise<void> {
     const start = Date.now()
-    while (Date.now() - start < timeoutMs) {
-      if (!this.server) {
-        throw new Error(
-          `whisper-server exited during startup: ${this.stderrTail.slice(-6).join(' | ')}`
-        )
-      }
+    for (;;) {
+      let probeReady = false
       try {
         // whisper-server serves an HTML page at / once the model is loaded and it's
         // listening. A 2xx means the socket is up and the model finished loading.
         const res = await fetch(`${this.base()}/`)
-        if (res.ok) return
+        probeReady = res.ok
       } catch {
         /* not up yet */
       }
+      const action = engineReadinessAction({
+        processAlive: this.server !== null,
+        probeReady,
+        elapsedMs: Date.now() - start,
+        timeoutMs
+      })
+      if (action === 'ready') return
+      if (action === 'failed')
+        throw new Error(
+          `whisper-server exited during startup: ${this.stderrTail.slice(-6).join(' | ')}`
+        )
+      if (action === 'timed-out') throw new Error('whisper-server failed to become ready in time.')
       await new Promise((r) => setTimeout(r, 300))
     }
-    throw new Error('whisper-server failed to become ready in time.')
   }
 
   /** Run one request against the shared resident process. whisper-server has no
@@ -275,9 +303,17 @@ export class WhisperServerService {
 
   private armIdleTimer(): void {
     this.clearIdleTimer()
+    if (
+      idleEvictionAction({ event: 'activity-finished', processAlive: this.server !== null }) !==
+      'arm'
+    )
+      return
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null
-      this.stop()
+      if (
+        idleEvictionAction({ event: 'timer-fired', processAlive: this.server !== null }) === 'evict'
+      )
+        this.stop()
     }, this.idleMs)
     // Don't let the eviction timer keep the Node event loop (or a test) alive.
     ;(this.idleTimer as unknown as { unref?: () => void }).unref?.()
