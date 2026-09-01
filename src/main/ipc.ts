@@ -1313,14 +1313,25 @@ export function setupIPC() {
   // Per-modality runtime residency (on-demand vs in-memory/resident). The full map
   // drives the queue's mode-aware re-warm and each engine's job path.
   ipcMain.handle('runtime:residency:get', () => getResidency())
-  ipcMain.handle('runtime:residency:set', (_e, modality: Modality, mode: ResidencyMode) =>
-    setResidencyMode(modality, mode)
-  )
+  ipcMain.handle('runtime:residency:set', async (_e, modality: Modality, mode: ResidencyMode) => {
+    const residency = setResidencyMode(modality, mode)
+    const { desktopModelServices } = await import('./model-services')
+    await desktopModelServices.refresh()
+    return residency
+  })
   // Unload one modality's model from memory now (the "free RAM" button). Goes through
   // the same evict() seam as residency/shutdown; the engine reloads on next use.
   ipcMain.handle('runtime:unload', async (_e, modality: Modality) => {
-    const { unloadRuntime } = await import('./runtime-manager')
-    const freed = await unloadRuntime(modality)
+    const { desktopModelServices } = await import('./model-services')
+    const sharedModality =
+      modality === 'llm'
+        ? 'text'
+        : modality === 'stt'
+          ? 'transcription'
+          : modality === 'tts'
+            ? 'voice'
+            : modality
+    const freed = await desktopModelServices.unload(sharedModality)
     console.log(`[runtime] unload ${modality}: ${freed ? 'freed' : 'nothing registered'}`)
     return freed
   })
@@ -2074,8 +2085,8 @@ export function setupIPC() {
   // Cleanly unload the chat engine so it stops holding the model port (frees it for LM Studio /
   // another tool without force-quitting the app). Returns whether the port was actually freed.
   ipcMain.handle('llm:unload', async () => {
-    const { llm } = await import('./llm')
-    return llm.unload()
+    const { desktopModelServices } = await import('./model-services')
+    return desktopModelServices.unload('text')
   })
 
   // --- Canvas / artifacts sandbox runtime ---------------------------------

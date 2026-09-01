@@ -7,9 +7,6 @@ import { spawn, type ChildProcess } from 'child_process'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
-import { modalityQueue, IMAGE_JOB, CHAT_JOB } from './modality-queue/queue'
-import { getResidencyMode } from './runtime-residency'
-import { llm } from './llm'
 import { getSetting } from './database'
 import {
   generatedImageSidecarPath,
@@ -60,7 +57,7 @@ import {
   type ImageGenerationRequestContract
 } from '../shared/image-generation-contract'
 import type { GenerationOperation } from '@offgrid/models'
-import { generateDesktopOperation } from './desktop-generation'
+import { generateDesktopOperation, generateDesktopText } from './desktop-generation'
 import { registerDesktopImageProgress } from './model-generation-adapters'
 
 function findSdCli(): string | null {
@@ -508,23 +505,14 @@ export function cancelImageGen(): boolean {
   return true // mflux/persistent-server gen has no currentChild but still owns the lifecycle
 }
 
-/**
- * Public entry: run image generation through the ModalityQueue so the image model
- * can't be resident alongside the chat model on unified memory. `evicts: ['llm']`
- * frees the llama-server before generation starts — the exact guard the old inline
- * llm.pause() did, now owned by the queue (see modality-queue/queue.ts). When the
- * queue is disabled it just runs immediately (prior concurrent behavior).
- */
+/** Raw native image execution. Shared GenerationService owns routing, admission,
+ * serialization, cancellation fencing, and residency before this function runs. */
 export async function generateImageNative(
   params: ImageGenParams,
-  onUpdate?: (update: ImageGenerationPipelineUpdateContract) => void
+  onUpdate?: (update: ImageGenerationPipelineUpdateContract) => void,
+  residencyMode: 'persistent' | 'operation' = 'operation'
 ): Promise<ImageGenOutput> {
-  // Prompt enhancement runs FIRST, while the chat model is still resident — the
-  // image job below evicts the LLM, so the text pass must precede it. Gated by a
-  // setting; failure/timeout silently keeps the original prompt.
-  const enhanced = await maybeEnhancePrompt(params.prompt, onUpdate)
-  const effective = enhanced === params.prompt ? params : { ...params, prompt: enhanced }
-  onUpdate?.({ stage: 'preparing', enhancedPrompt: enhanced })
+  onUpdate?.({ stage: 'preparing', enhancedPrompt: params.prompt })
   const progressObserver = onUpdate
     ? (progress: ImageGenProgress & { preview?: string }) =>
         onUpdate({
@@ -532,10 +520,8 @@ export async function generateImageNative(
           progress
         })
     : undefined
-  // The queue evicts 'llm' before this runs AND re-warms it (mode-aware) when the
-  // job finishes — so the image path no longer touches llm.pause/resume itself.
-  const output = await modalityQueue.run(IMAGE_JOB, () => runImageGen(effective, progressObserver))
-  return { ...output, prompt: effective.prompt }
+  const output = await runImageGen(params, progressObserver, residencyMode)
+  return { ...output, prompt: params.prompt }
 }
 
 /** Public image execution uses the shared route and residency owner. The adapter
@@ -545,7 +531,10 @@ export async function generateImage(
   onUpdate?: (update: ImageGenerationPipelineUpdateContract) => void
 ): Promise<ImageGenOutput> {
   const turnId = `desktop-image:${Date.now()}:${Math.random().toString(36).slice(2)}`
-  let effectivePrompt = params.prompt
+  const enhancedPrompt = await maybeEnhancePrompt(params.prompt, onUpdate)
+  const effective =
+    enhancedPrompt === params.prompt ? params : { ...params, prompt: enhancedPrompt }
+  let effectivePrompt = enhancedPrompt
   const observe = onUpdate
     ? (update: ImageGenerationPipelineUpdateContract): void => {
         if ('enhancedPrompt' in update && update.enhancedPrompt)
@@ -557,20 +546,20 @@ export async function generateImage(
   try {
     const operation: Extract<GenerationOperation, { type: 'image' }> = {
       type: 'image',
-      modelId: params.model,
-      prompt: params.prompt,
-      negativePrompt: params.negativePrompt,
-      sourceImage: params.initImage ? { type: 'image', uri: params.initImage } : undefined,
-      strength: params.strength,
-      width: params.width,
-      height: params.height,
-      steps: params.steps,
-      guidanceScale: params.cfgScale,
-      seed: params.seed,
+      modelId: effective.model,
+      prompt: effective.prompt,
+      negativePrompt: effective.negativePrompt,
+      sourceImage: effective.initImage ? { type: 'image', uri: effective.initImage } : undefined,
+      strength: effective.strength,
+      width: effective.width,
+      height: effective.height,
+      steps: effective.steps,
+      guidanceScale: effective.cfgScale,
+      seed: effective.seed,
       previewInterval: 1,
-      fastVae: params.fastVae,
-      loras: params.loras?.map((lora) => ({ id: lora.name, weight: lora.weight })),
-      allowUnsafeMemoryOverride: params.allowUnsafeMemoryOverride
+      fastVae: effective.fastVae,
+      loras: effective.loras?.map((lora) => ({ id: lora.name, weight: lora.weight })),
+      allowUnsafeMemoryOverride: effective.allowUnsafeMemoryOverride
     }
     const result = await generateDesktopOperation(operation, {
       identity: { conversationId: turnId, turnId },
@@ -612,29 +601,22 @@ async function maybeEnhancePrompt(
       streamed += text
       onUpdate?.({ stage: 'enhancing', enhancedPrompt: streamed })
     },
-    // Foreground text job (tier 2, evicts a resident image server), serialized with
-    // chat. Runs while the chat model is still resident — the image job evicts it after.
+    // Prompt generation uses the same shared text route before image admission begins.
     chat: (instruction, onText) =>
-      modalityQueue.run(CHAT_JOB, () =>
-        llm
-          .chatStream(
-            instruction,
-            [],
-            (text, kind) => {
-              if (kind === 'content') onText(text)
-            },
-            { temperature: 0.7, thinking: false },
-            200,
-            60_000
-          )
-          .then((result) => result.content)
-      )
+      generateDesktopText(instruction, {
+        temperature: 0.7,
+        thinking: false,
+        maxTokens: 200,
+        timeoutMs: 60_000,
+        events: { chunk: (chunk) => chunk.content && onText(chunk.content) }
+      }).then((result) => result.content)
   })
 }
 
 async function runImageGen(
   params: ImageGenParams,
-  onProgress?: (p: ImageGenProgress & { preview?: string }) => void
+  onProgress?: (p: ImageGenProgress & { preview?: string }) => void,
+  residencyMode: 'persistent' | 'operation' = 'operation'
 ): Promise<NativeImageGenOutput> {
   if (generationLifecycle.isRunning()) {
     throw new Error('An image is already generating — please wait for it to finish.')
@@ -791,9 +773,8 @@ async function runImageGen(
   // M4), same steps/quality. This was previously removed for causing memory
   // contention on 16GB — now SAFE because the ModalityQueue evicts the LLM before
   // image gen (evicts:['llm']) AND evicts this server when another modality needs
-  // the RAM (image is registered as a ManagedRuntime). Default is 'on-demand',
-  // which skips this entirely and uses the one-shot sd-cli path below (unchanged).
-  const residentImage = getResidencyMode('image') === 'resident'
+  // the RAM. Operation residency skips this path and uses the one-shot sd-cli.
+  const residentImage = residencyMode === 'persistent'
   const eligibleForServer =
     residentImage &&
     !onProgress &&

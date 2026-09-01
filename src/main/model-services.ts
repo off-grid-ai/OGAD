@@ -451,8 +451,13 @@ class DesktopModelInventoryAdapter implements ModelInventoryAdapter {
 export interface DesktopModelServices {
   llm: SharedLLMService
   generation: SharedGenerationService
+  residency: ModelResidencyManager
   generationObservations: DesktopGenerationObservations
   refresh(): Promise<RuntimeModel[]>
+  routeIdFor(modality: ModelModality, nativeModelId?: string): string | undefined
+  trackLoaded(modality: ModelModality): Promise<boolean>
+  unload(modality: ModelModality): Promise<boolean>
+  shutdown(): Promise<void>
   activeModelIds(): Promise<string[]>
   activeModalities(): {
     text: string | null
@@ -543,11 +548,88 @@ export function createDesktopModelServices(
     transcription: projectedId('transcription')
   })
 
+  const unloadNative = async (modality: ModelModality): Promise<void> => {
+    if (
+      modality === 'text' ||
+      modality === 'vision' ||
+      modality === 'classifier' ||
+      modality === 'tool_selection'
+    ) {
+      await (await import('./llm')).llm.unload()
+      return
+    }
+    if (modality === 'image') {
+      await (await import('./imagegen')).imageRuntime.evict()
+      return
+    }
+    if (modality === 'transcription') {
+      await (await import('./transcription/select')).sttRuntime.evict()
+      return
+    }
+    if (modality === 'voice') {
+      await (await import('./tts')).ttsRuntime.evict()
+      return
+    }
+    if (modality === 'embedding') {
+      await (await import('./embeddings')).embeddings.unloadNative()
+    }
+  }
+
   return {
     llm,
     generation,
+    residency: memory,
     generationObservations,
     refresh: () => llm.refresh(),
+    routeIdFor(modality, nativeModelId) {
+      if (!nativeModelId) {
+        return (
+          llm.active(modality).selectedRouteId ??
+          llm.list(modality).find((model) => model.ready)?.routeId
+        )
+      }
+      const canonical = ids.canonical(nativeModelId)
+      return llm.list(modality).find((model) => model.id === canonical)?.routeId
+    },
+    async trackLoaded(modality) {
+      await llm.refresh()
+      const model = llm.active(modality).model
+      if (!model || model.source !== 'local' || !model.loaded || !model.residentSizeMB) return false
+      const key = `${model.modality}:${model.routeId}`
+      if (memory.isResident(key)) {
+        memory.markUsed(key)
+        return false
+      }
+      memory.register(
+        {
+          key,
+          modelId: model.routeId,
+          type: model.modality,
+          sizeMB: model.peakSizeMB ?? model.residentSizeMB,
+          dirtyMemory: model.dirtyMemory
+        },
+        () => unloadNative(model.modality)
+      )
+      return true
+    },
+    async unload(modality) {
+      const residents = memory.getResidents().filter((resident) => resident.type === modality)
+      let freed = false
+      for (const resident of residents) {
+        freed = (await memory.evictByKey(resident.key)) || freed
+      }
+      return freed
+    },
+    async shutdown() {
+      for (const resident of memory.getResidents()) await memory.evictByKey(resident.key)
+      await Promise.allSettled([
+        unloadNative('text'),
+        unloadNative('image'),
+        unloadNative('transcription'),
+        unloadNative('voice'),
+        unloadNative('embedding')
+      ])
+    },
     async activeModelIds(): Promise<string[]> {
       await llm.refresh()
       const active = SHARED_MODALITIES.flatMap((modality) => {

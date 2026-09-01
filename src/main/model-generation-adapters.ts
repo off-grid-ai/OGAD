@@ -390,10 +390,7 @@ export class DesktopImageGenerationAdapter extends DesktopTypedGenerationAdapter
     await imageRuntime.evict()
   }
 
-  async *generate(
-    _model: RuntimeModel,
-    request: GenerationRequest
-  ): AsyncIterable<GenerationChunk> {
+  async *generate(model: RuntimeModel, request: GenerationRequest): AsyncIterable<GenerationChunk> {
     if (request.operation?.type !== 'image')
       throw new Error('The image adapter needs an image operation.')
     const operation = request.operation
@@ -432,7 +429,8 @@ export class DesktopImageGenerationAdapter extends DesktopTypedGenerationAdapter
             }
           })
         }
-      }
+      },
+      model.residencyMode
     ).then(
       (output) => {
         channel.push({

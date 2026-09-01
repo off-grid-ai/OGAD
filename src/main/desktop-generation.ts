@@ -179,13 +179,16 @@ export async function generateDesktopOperation(
   > & { routeId?: string } = {}
 ): Promise<GenerationResult> {
   await desktopModelServices.refresh()
+  const modality = operation.type === 'classifier' ? 'classifier' : operation.type
+  const modelId = 'modelId' in operation ? operation.modelId : undefined
+  const routeId = options.routeId ?? desktopModelServices.routeIdFor(modality, modelId)
   const turnId =
     options.identity?.turnId ?? `desktop:${Date.now()}:${Math.random().toString(36).slice(2)}`
   return desktopModelServices.generation.generate(
     {
       operation,
       identity: options.identity ?? { conversationId: turnId, turnId },
-      routeId: options.routeId,
+      routeId,
       allowFallback: options.allowFallback ?? false,
       signal: options.signal,
       timeoutMs: options.timeoutMs
