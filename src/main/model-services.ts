@@ -288,6 +288,7 @@ class DesktopInventorySource {
         route('tool_selection', `${prefix}.tool-selection`, {
           tools: true,
           toolSelection: true,
+          thinking: base.capabilities.thinking,
           streaming: true,
           structuredOutput: true
         }),
