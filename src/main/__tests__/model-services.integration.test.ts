@@ -62,7 +62,7 @@ describe('Desktop shared model-service composition', () => {
     )
 
     const manager = await import('../models-manager')
-    const { desktopModelServices } = await import('../model-services')
+    const { createDesktopModelServices, desktopModelServices } = await import('../model-services')
     const inventory = await desktopModelServices.refresh()
 
     expect(inventory.find((model) => model.id === text.id)).toMatchObject({
@@ -100,6 +100,68 @@ describe('Desktop shared model-service composition', () => {
     expect(desktopModelServices.llm.active('image').selectedId).toBe(image.id)
     expect(manager.getActiveModalities()).toMatchObject({ text: text.id, image: image.id })
     expect(await manager.getActiveModelIds()).toEqual(expect.arrayContaining([text.id, image.id]))
+
+    let nativeReady = false
+    let nativeLoads = 0
+    let nativeUnloads = 0
+    const startupServices = createDesktopModelServices({
+      listCatalog: async () => [text],
+      listInstalled: async () => [text.id],
+      localTextRuntimeState: async () => ({ ready: nativeReady, loaded: nativeReady }),
+      localTextLifecycle: {
+        async load() {
+          expect(startupServices.residency.getResidents()).toEqual([])
+          nativeLoads += 1
+          nativeReady = true
+        },
+        async unload() {
+          nativeUnloads += 1
+          nativeReady = false
+        }
+      }
+    })
+
+    const startupInventory = await startupServices.refresh()
+    expect(startupInventory.map((model) => [model.id, model.modality, model.ready])).toContainEqual([
+      text.id,
+      'text',
+      true
+    ])
+    const startupTextRoute = startupInventory.find(
+      (model) => model.id === text.id && model.modality === 'text'
+    )?.routeId
+    if (!startupTextRoute) throw new Error('The startup text fixture needs a canonical route.')
+    await startupServices.llm.select('text', startupTextRoute)
+    await expect(startupServices.warmText()).resolves.toBe(true)
+    await expect(startupServices.warmText()).resolves.toBe(false)
+    expect(nativeLoads).toBe(1)
+    expect(startupServices.residency.getResidents()).toEqual([
+      expect.objectContaining({
+        key: expect.stringMatching(/^text:model-route:v1:/),
+        modelId: expect.stringMatching(/^model-route:v1:/),
+        type: 'text'
+      })
+    ])
+    await expect(startupServices.unload('text')).resolves.toBe(true)
+    expect(nativeUnloads).toBe(1)
+    expect(startupServices.residency.getResidents()).toEqual([])
+
+    const startupError = new Error('Native text runtime failed to start.')
+    const failingStartupServices = createDesktopModelServices({
+      listCatalog: async () => [text],
+      listInstalled: async () => [text.id],
+      localTextRuntimeState: async () => ({ ready: false, loaded: false }),
+      localTextLifecycle: {
+        load: async () => {
+          throw startupError
+        },
+        unload: async () => undefined
+      }
+    })
+    await failingStartupServices.refresh()
+    await failingStartupServices.llm.select('text', startupTextRoute)
+    await expect(failingStartupServices.warmText()).rejects.toBe(startupError)
+    expect(failingStartupServices.residency.getResidents()).toEqual([])
 
     await desktopModelServices.llm.select('image', image.id)
     const persistedRoutes = JSON.parse(

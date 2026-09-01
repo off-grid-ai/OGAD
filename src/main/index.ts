@@ -461,14 +461,9 @@ app.whenReady().then(async () => {
 
   // 3. Initialize LLM (Async)
   // We don't await this to avoid blocking window creation
-  import('./llm').then(({ llm }) => {
-    llm
-      .init()
-      .then(() =>
-        import('./model-services').then(({ desktopModelServices }) =>
-          desktopModelServices.trackLoaded('text')
-        )
-      )
+  import('./model-services').then(({ desktopModelServices }) => {
+    desktopModelServices
+      .warmText()
       .catch((err) => console.error('Failed to init LLM:', err))
   })
 

@@ -289,17 +289,26 @@ export class DesktopGenerationObservations {
 export class DesktopLocalGenerationAdapter extends DesktopGenerationAdapter {
   constructor(
     observations: DesktopGenerationObservations,
-    readonly id = 'desktop.llama'
+    readonly id = 'desktop.llama',
+    private readonly lifecycle: {
+      load(): Promise<void>
+      unload(): Promise<void>
+    } = {
+      load: () => llm.init(),
+      unload: async () => {
+        await llm.unload()
+      }
+    }
   ) {
     super(observations)
   }
 
   load(): Promise<void> {
-    return llm.init()
+    return this.lifecycle.load()
   }
 
   async unload(): Promise<void> {
-    await llm.unload()
+    await this.lifecycle.unload()
   }
 
   protected run(

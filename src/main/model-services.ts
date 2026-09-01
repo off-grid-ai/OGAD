@@ -7,6 +7,8 @@ import {
   ModelResidencyManager,
   decodeModelRouteId,
   encodeModelRouteId,
+  runtimeModelRouteId,
+  ModelAdmissionError,
   type ModelInventoryAdapter,
   type ModelKind,
   type ModelModality,
@@ -57,6 +59,10 @@ interface DesktopModelServicesDependencies {
     loaded: boolean
     reasoning?: ModelReasoningMetadata
   }>
+  localTextLifecycle?: {
+    load(): Promise<void>
+    unload(): Promise<void>
+  }
   residencyMode?(modality: 'image' | 'stt'): 'resident' | 'on-demand'
 }
 
@@ -447,7 +453,7 @@ export interface DesktopModelServices {
   generationObservations: DesktopGenerationObservations
   refresh(): Promise<RuntimeModel[]>
   routeIdFor(modality: ModelModality, nativeModelId?: string): string | undefined
-  trackLoaded(modality: ModelModality): Promise<boolean>
+  warmText(): Promise<boolean>
   unload(modality: ModelModality): Promise<boolean>
   shutdown(): Promise<void>
   activeModelIds(): Promise<string[]>
@@ -499,6 +505,7 @@ export function createDesktopModelServices(
     tools: desktopToolExecutor
   })
   const generationObservations = new DesktopGenerationObservations()
+  const localGenerationAdapters = new Map<string, DesktopLocalGenerationAdapter>()
   for (const adapterId of [
     'desktop.llama',
     'desktop.llama.classifier',
@@ -506,7 +513,13 @@ export function createDesktopModelServices(
     'desktop.llama.vision',
     'desktop.llama.computer-use'
   ]) {
-    generation.registerAdapter(new DesktopLocalGenerationAdapter(generationObservations, adapterId))
+    const adapter = new DesktopLocalGenerationAdapter(
+      generationObservations,
+      adapterId,
+      dependencies.localTextLifecycle
+    )
+    localGenerationAdapters.set(adapterId, adapter)
+    generation.registerAdapter(adapter)
   }
   generation.registerAdapter(new DesktopImageGenerationAdapter())
   generation.registerAdapter(new DesktopVoiceGenerationAdapter())
@@ -583,26 +596,33 @@ export function createDesktopModelServices(
       const canonical = ids.canonical(nativeModelId)
       return llm.list(modality).find((model) => model.id === canonical)?.routeId
     },
-    async trackLoaded(modality) {
+    async warmText() {
       await llm.refresh()
-      const model = llm.active(modality).model
-      if (!model || model.source !== 'local' || !model.loaded || !model.residentSizeMB) return false
-      const key = `${model.modality}:${model.routeId}`
-      if (memory.isResident(key)) {
-        memory.markUsed(key)
-        return false
+      const model = llm.active('text').model
+      if (!model) {
+        throw new Error('Models not downloaded. Please complete onboarding to download the AI model.')
       }
-      memory.register(
+      if (model.source !== 'local') return false
+      const adapter = localGenerationAdapters.get(model.adapterId)
+      if (!adapter || !model.residentSizeMB) return false
+      const routeId = model.routeId ?? runtimeModelRouteId(model)
+      const key = `${model.modality}:${routeId}`
+      const admitted = await memory.ensureResident(
         {
           key,
-          modelId: model.routeId,
+          modelId: routeId,
           type: model.modality,
           sizeMB: model.peakSizeMB ?? model.residentSizeMB,
-          dirtyMemory: model.dirtyMemory
+          dirtyMemory: model.dirtyMemory,
+          residencyKey: model.residencyKey
         },
-        () => unloadNative(model.modality)
+        {
+          load: () => adapter.load(),
+          unload: () => adapter.unload()
+        }
       )
-      return true
+      if (!admitted.fits) throw new ModelAdmissionError(model)
+      return admitted.loaded
     },
     async unload(modality) {
       const residents = memory.getResidents().filter((resident) => resident.type === modality)
