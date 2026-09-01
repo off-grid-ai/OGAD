@@ -46,6 +46,20 @@ for (const file of files) {
     )
 
   if (
+    fileName === 'src/renderer/src/components/ModelsScreen.tsx' &&
+    (!/ModelActivationCommandService/.test(text) ||
+      /activeKind\s*===\s*['"]computer_use['"]/.test(text))
+  ) {
+    report(
+      'desktop-model-activation-command-is-shared',
+      fileName,
+      source,
+      source,
+      'screen-owned memory admission or activation dispatch'
+    )
+  }
+
+  if (
     fileName === 'src/main/rag/index.ts' &&
     /(?:chunkSize\s*:\s*600|overlap\s*:\s*120|minChunkLength\s*:\s*20|dimension\s*:\s*384)/.test(
       text
