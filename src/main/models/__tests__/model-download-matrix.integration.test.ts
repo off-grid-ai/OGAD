@@ -56,7 +56,7 @@ const visionModel = byKind('vision', 2)
 const holoGrounder = CATALOG.find(
   (candidate) => candidate.id === 'mradermacher/Holo-3.1-4B-GGUF'
 )
-if (!holoGrounder) throw new Error('Model catalog needs the dual-capability Holo3.1-4B fixture')
+if (!holoGrounder) throw new Error('Model catalog needs the Computer Use Holo3.1-4B fixture')
 const imageModel = byKind('image', 3)
 const speechModel = CATALOG.find(
   (candidate) => candidate.kind === 'transcription' && candidate.engine === 'parakeet'
@@ -225,16 +225,17 @@ describe('model download release matrix', () => {
   it('activates Holo 4B for the product rail that the user selected', async () => {
     // The immutable catalog checksums are proven by the shared package tests.
     // This journey starts at the installed-model boundary and proves which
-    // active slot receives the same dual-capability package.
+    // active slot receives the specialist package.
     seedInstalledCatalogModel(holoGrounder)
     expect(await manager.listInstalled()).toContain(holoGrounder.id)
 
     expect(await manager.activateModel(holoGrounder.id)).toEqual({ success: true })
-    expect(manager.getActiveModalities().text).toBe(holoGrounder.id)
+    expect(manager.getActiveModalities().computer_use).toBe(holoGrounder.id)
+    expect(manager.getActiveModalities().text).not.toBe(holoGrounder.id)
 
     expect(await manager.activateModel(holoGrounder.id, 'computer_use')).toEqual({ success: true })
     expect(manager.getActiveModalities().computer_use).toBe(holoGrounder.id)
-    expect(manager.getActiveModalities().text).toBe(holoGrounder.id)
+    expect(manager.getActiveModalities().text).not.toBe(holoGrounder.id)
   })
 
   it('makes a complete Parakeet download selectable by the real dictation service (#19)', async () => {

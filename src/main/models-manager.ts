@@ -14,7 +14,12 @@ import {
   modelDownloadQueue,
   shutdownModelDownloads
 } from './models/download-queue'
-import { getAllActiveModals, setActiveModal as setModal, type Modality } from './active-models'
+import {
+  getActiveModal,
+  getAllActiveModals,
+  setActiveModal as setModal,
+  type Modality
+} from './active-models'
 import {
   recordDownloaded,
   removeDownloaded,
@@ -739,6 +744,29 @@ export function getActiveModel(): string | null {
   } catch {
     return null
   }
+}
+
+/**
+ * Move a legacy chat selection into its canonical specialist slot.
+ *
+ * Older catalogs exposed some specialist models as chat/vision models. After a catalog
+ * correction, their old active-model.json entry must not keep routing normal chat to the
+ * specialist. Preserve the user's choice in the proper modality, then remove the invalid
+ * chat selection before llama-server starts.
+ */
+export async function reconcileActiveModelClassification(): Promise<boolean> {
+  const activeId = getActiveModel()
+  if (!activeId) return false
+
+  const { CATALOG } = await import('@offgrid/models')
+  const entry = CATALOG.find((model) => model.id === activeId)
+  if (!entry || isChatLoadable(entry.kind)) return false
+
+  const modality = modalityForModel(entry.kind)
+  if (!modality) return false
+  if (!getActiveModal(modality)) setModal(modality, activeId)
+  fs.rmSync(activeModelFile(), { force: true })
+  return true
 }
 
 /** Heal a stale active-model.json that predates its model gaining a vision projector.

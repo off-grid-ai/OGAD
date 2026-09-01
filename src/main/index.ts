@@ -433,14 +433,15 @@ app.whenReady().then(async () => {
     const { registerTaskHistoryIpc } = await import('./tasks/task-history-ipc')
     registerTaskHistoryIpc() // one durable Web Use + Computer Use history
     setupDesktopBackupIPC()
+    // Repair legacy catalog classifications before any runtime reads the active chat model.
+    // A specialist such as Holo must never start as the normal text model after an upgrade.
+    const modelManager = await import('./models-manager')
+    await modelManager.reconcileActiveModelClassification().catch(() => false)
+    await modelManager.reconcileActiveModelProjector().catch(() => false)
     // one OpenAI-compatible local gateway (LLM + STT); auto-picks a free port. Async, so handle a
     // rejection on the promise (a try/catch around a fire-and-forget async call can't catch it).
     startModelServer().catch((e) => console.error('[model-server] start failed', e))
     startMediaServer() // loopback HTTP for seekable local media (meeting videos)
-    // Heal a stale active-model.json whose model gained a vision projector after it was
-    // activated (e.g. Gemma 4 E2B) — turns vision on at launch if the projector is now
-    // on disk, without waiting for a re-activate.
-    void import('./models-manager').then((m) => m.reconcileActiveModelProjector()).catch(() => {})
     ipcMain.handle('media:url', (_e, absPath: string) => mediaUrlFor(absPath))
     // (clipboard is now a pro feature — setupClipboard runs in pro's activateMain)
     // Pro features (capture, CRM, meetings, connectors, secretary, proactive,
