@@ -7,7 +7,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { CATALOG } from '@offgrid/models'
 
 const previousDataDir = process.env.OFFGRID_DATA_DIR
@@ -112,6 +112,20 @@ describe('Desktop shared model-service composition', () => {
     })
     expect(
       JSON.parse(fs.readFileSync(path.join(modelDirectory, 'active-modalities.json'), 'utf8')).image
-    ).toBe(imagePrimary)
+    ).toBe(image.id)
+
+    await manager.activateModel(image.id)
+    expect(
+      JSON.parse(fs.readFileSync(path.join(modelDirectory, 'active-modalities.json'), 'utf8')).image
+    ).toBe(image.id)
+
+    vi.resetModules()
+    const [{ desktopModelServices: relaunchedServices }, { activeImageModel }] = await Promise.all([
+      import('../model-services'),
+      import('../imagegen')
+    ])
+    await relaunchedServices.refresh()
+    expect(relaunchedServices.activeModalities().image).toBe(image.id)
+    expect(activeImageModel()).toBe(imagePrimary)
   })
 })

@@ -125,33 +125,25 @@ function activeTextModelId(): string | null {
 }
 
 /**
- * Desktop persistence uses catalog ids for most models, but older image and STT
- * selections can contain a primary filename. This codec keeps that compatibility
- * at the adapter boundary. The shared service sees only canonical inventory ids.
+ * Older Desktop selections can contain a primary filename. This read codec keeps
+ * that compatibility at the adapter boundary. New writes use canonical inventory
+ * ids; runtime adapters resolve those ids to their platform files.
  */
 export class LegacyDesktopModelIdCodec {
   private readonly canonicalByStored = new Map<string, string>()
-  private readonly storedByCanonical = new Map<string, string>()
 
   index(models: readonly DesktopInventoryModel[]): void {
     this.canonicalByStored.clear()
-    this.storedByCanonical.clear()
     for (const model of models) {
       this.canonicalByStored.set(model.id, model.id)
       const primary = model.files?.find((file) => file.role !== 'mmproj')?.name
       if (!primary) continue
       this.canonicalByStored.set(primary, model.id)
-      this.storedByCanonical.set(model.id, primary)
     }
   }
 
   canonical(stored: string | null): string | null {
     return stored ? (this.canonicalByStored.get(stored) ?? stored) : null
-  }
-
-  stored(modality: ModelModality, canonical: string | null): string | null {
-    if (!canonical || modality !== 'image') return canonical
-    return this.storedByCanonical.get(canonical) ?? canonical
   }
 }
 
@@ -225,9 +217,8 @@ export class DesktopModelSelectionStore implements ModelSelectionStore {
       this.routes.write(modality, modelId)
       return
     }
-    const stored = this.ids.stored(modality, nativeModelId)
     const legacy = legacyModality(modality)
-    if (legacy) setActiveModal(legacy, stored)
+    if (legacy) setActiveModal(legacy, nativeModelId)
     this.routes.write(modality, modelId)
   }
 }

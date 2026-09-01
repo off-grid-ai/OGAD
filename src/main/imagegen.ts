@@ -15,6 +15,7 @@ import {
   type GeneratedImageSidecar
 } from './imagegen/gallery-sidecar'
 import {
+  CATALOG,
   enhanceImagePrompt as enhancePrompt,
   ensureCheckpointExtension as ensureCheckpointExt,
   evaluateImageMemory as evaluateMemoryGuard,
@@ -41,6 +42,7 @@ import { sdServer } from './sd-server'
 import { standardModelDefaults, taesdFilename } from '../shared/image-defaults'
 import { defaultImageModelFilename } from './image-default'
 import { hasMlmodelc, isZImageModel, isQuantizedModel } from './imagegen/runtime-detect'
+import { primaryFileName, type CatalogEntry } from './models/catalog-logic'
 import {
   buildCoreMLArgs,
   buildZImageArgs,
@@ -336,10 +338,17 @@ export function activeImageModel(): string | null {
   return m ? path.basename(m) : null
 }
 
+/** Translate a canonical catalog selection only at the native runtime boundary. */
+function imageRuntimeModelId(selected: string): string {
+  const entry = CATALOG.find((model) => model.id === selected)
+  if (!entry || entry.runtime === 'mflux') return selected
+  return primaryFileName(entry as unknown as CatalogEntry) ?? selected
+}
+
 function resolveModel(preferred?: string): string | null {
   const dir = modelsDir()
   if (preferred) {
-    const preferredPath = resolveExistingOwnedEntry(dir, preferred)
+    const preferredPath = resolveExistingOwnedEntry(dir, imageRuntimeModelId(preferred))
     if (preferredPath) return preferredPath
   }
   const sd = listImageModels()
@@ -347,9 +356,10 @@ function resolveModel(preferred?: string): string | null {
   // User-chosen image model is the default when the caller didn't request one.
   const chosen = getActiveModal('image')
   if (chosen) {
-    const chosenPath = resolveExistingOwnedEntry(dir, chosen)
+    const runtimeModelId = imageRuntimeModelId(chosen)
+    const chosenPath = resolveExistingOwnedEntry(dir, runtimeModelId)
     if (chosenPath) return chosenPath
-    if (sd.includes(chosen)) return path.join(dir, chosen) // mlx/virtual id
+    if (sd.includes(runtimeModelId)) return path.join(dir, runtimeModelId) // mlx/virtual id
   }
   // Smart default: DreamShaper XL v2 Turbo (the versatile default), RAM-aware —
   // a fresh user on <=16GB gets the Light (Q4) quant, >16GB gets the full (Q8).

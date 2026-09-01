@@ -850,20 +850,7 @@ export async function setActiveModalChoice(
   // to activate TTS (D26). One normalizer is the single source of truth.
   const modal = modalityForModel(kind)
   if (modal) {
-    let stored = modelId
-    // The image resolver loads by FILENAME, but the UI passes a catalog id — map it
-    // to the entry's primary filename so an in-app pick (e.g. Juggernaut) takes effect.
-    if (modelId && modal === 'image') {
-      try {
-        const { CATALOG } = await import('@offgrid/models')
-        const e = CATALOG.find((m) => m.id === modelId)
-        const fname = e ? primaryFileName(e as unknown as CatalogEntry) : undefined
-        if (fname) stored = fname
-      } catch {
-        /* keep modelId as-is */
-      }
-    }
-    setModal(modal, stored)
+    setModal(modal, modelId)
     return { success: true }
   }
   return { success: false, error: 'use setActiveModel for the chat LLM (text/vision)' }
