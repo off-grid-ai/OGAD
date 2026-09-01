@@ -1,3 +1,4 @@
+import { reasoningWireForGeneration } from '@offgrid/models'
 import type {
   GenerationAdapter,
   GenerationChunk,
@@ -136,7 +137,7 @@ function streamOptions(request: GenerationRequest): StreamChatOptions {
   return {
     temperature: request.sampling?.temperature,
     topP: request.sampling?.topP,
-    thinking: request.requiredCapabilities?.thinking,
+    reasoning: request.reasoning,
     signal: request.signal,
     maxTokens: request.maxTokens,
     responseFormat: openAIResponseFormat(request.responseFormat),
@@ -265,13 +266,26 @@ export class DesktopLocalGenerationAdapter extends DesktopGenerationAdapter {
   }
 
   protected run(
-    _model: RuntimeModel,
+    model: RuntimeModel,
     messages: OpenAIMessage[],
     onDelta: (text: string, kind: 'content' | 'reasoning') => void,
     options: StreamChatOptions,
     timeoutMs: number
   ): Promise<StreamResult> {
-    return llm.streamChatLocal(messages, onDelta, options, timeoutMs)
+    return llm.streamChatLocal(
+      messages,
+      onDelta,
+      {
+        ...options,
+        reasoningWire: reasoningWireForGeneration(
+          { reasoning: options.reasoning },
+          {
+            reasoning: llm.getReasoningMetadata() ?? model.reasoning
+          }
+        )
+      },
+      timeoutMs
+    )
   }
 }
 
@@ -295,6 +309,15 @@ export class DesktopRemoteGenerationAdapter extends DesktopGenerationAdapter {
     if (!remote || remote.model !== model.id) {
       throw new Error('The selected remote model route is no longer available.')
     }
-    return llm.streamChatRemote(remote, messages, onDelta, options, timeoutMs)
+    return llm.streamChatRemote(
+      remote,
+      messages,
+      onDelta,
+      {
+        ...options,
+        reasoningWire: reasoningWireForGeneration({ reasoning: options.reasoning }, model)
+      },
+      timeoutMs
+    )
   }
 }

@@ -23,7 +23,15 @@ import {
   DEFAULT_MAX_TOOL_CALLS,
   normalizeMaxToolCalls
 } from '../shared/llm-defaults'
-import { REASONING_BUDGET_AUTO, reasoningBudgetPayload } from '@offgrid/models'
+import {
+  REASONING_BUDGET_AUTO,
+  reasoningBudgetPayload,
+  reasoningMetadataFromChatTemplate,
+  type GenerationReasoning,
+  type ModelReasoningMetadata,
+  type ReasoningEffort,
+  type ReasoningWireFragment
+} from '@offgrid/models'
 import { acceleratorForEngine, type EngineAccelerator } from '../shared/engine-accelerator'
 import {
   applyModePreset,
@@ -62,6 +70,17 @@ import { currentRemoteScreenTaskSession } from './actions/remote-screen-session'
 
 export type { KvCacheType, PerformanceMode }
 
+function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return (
+    value === 'minimal' ||
+    value === 'low' ||
+    value === 'medium' ||
+    value === 'high' ||
+    value === 'xhigh' ||
+    value === 'max'
+  )
+}
+
 export interface LlmSettings {
   performanceMode?: PerformanceMode
   temperature?: number
@@ -73,6 +92,7 @@ export interface LlmSettings {
   maxTokens?: number
   maxToolCalls?: number
   reasoningBudget?: number
+  reasoningEffort?: ReasoningEffort
   systemPrompt?: string
   // Launch-time (require a server respawn to take effect):
   kvCacheType?: KvCacheType // quantize the KV cache to cut memory (needs flash-attn)
@@ -96,6 +116,8 @@ export interface StreamChatOptions {
   temperature?: number
   topP?: number
   thinking?: boolean
+  reasoning?: GenerationReasoning
+  reasoningWire?: ReasoningWireFragment
   signal?: AbortSignal
   tools?: unknown[]
   toolChoice?: unknown
@@ -165,6 +187,7 @@ export class LLMService {
   // Thinking budget: caps the tokens a reasoning model spends thinking before it answers.
   // Auto (0) = unrestricted. Applied per request; no reload needed.
   private reasoningBudget = REASONING_BUDGET_AUTO
+  private reasoningEffort: ReasoningEffort | undefined
   private systemPrompt = ''
   // Resource-usage preset. Governs the RAM budget the context clamp targets and
   // the default ctx/KV preset. 'balanced' preserves prior behavior.
@@ -211,6 +234,7 @@ export class LLMService {
       if (typeof s.maxToolCalls === 'number')
         this.maxToolCalls = normalizeMaxToolCalls(s.maxToolCalls)
       if (typeof s.reasoningBudget === 'number') this.reasoningBudget = s.reasoningBudget
+      if (isReasoningEffort(s.reasoningEffort)) this.reasoningEffort = s.reasoningEffort
       if (typeof s.systemPrompt === 'string') this.systemPrompt = s.systemPrompt
       if (s.kvCacheType === 'f16' || s.kvCacheType === 'q8_0' || s.kvCacheType === 'q4_0')
         this.kvCacheType = s.kvCacheType
@@ -352,6 +376,7 @@ export class LLMService {
       maxTokens: this.maxTokens,
       maxToolCalls: this.maxToolCalls,
       reasoningBudget: this.reasoningBudget,
+      reasoningEffort: this.reasoningEffort,
       systemPrompt: this.systemPrompt,
       kvCacheType: this.kvCacheType,
       flashAttn: this.flashAttn,
@@ -494,6 +519,7 @@ export class LLMService {
     if (typeof s.maxToolCalls === 'number')
       this.maxToolCalls = normalizeMaxToolCalls(s.maxToolCalls)
     if (typeof s.reasoningBudget === 'number') this.reasoningBudget = s.reasoningBudget
+    if (isReasoningEffort(s.reasoningEffort)) this.reasoningEffort = s.reasoningEffort
     if (typeof s.systemPrompt === 'string') this.systemPrompt = s.systemPrompt
     if (s.kvCacheType === 'f16' || s.kvCacheType === 'q8_0' || s.kvCacheType === 'q4_0')
       this.kvCacheType = s.kvCacheType
@@ -547,6 +573,7 @@ export class LLMService {
       this.server = null
     }
     this.initialized = false
+    this.reasoningMetadata = undefined
     this.restartTimes = [] // new model — start its crash budget fresh
     this.resolveModel()
     this.invalidateHealth()
@@ -873,6 +900,7 @@ export class LLMService {
       this.intentionalStop = false
       this.server = null
       this.initialized = false
+      this.reasoningMetadata = undefined
       // If it died on its own (not our stop/swap), translate the stderr into a
       // human reason so the Health panel can say WHY instead of a blank "Down".
       const deliberateClose = wasIntentional || signal === 'SIGKILL' || signal === 'SIGTERM'
@@ -1017,17 +1045,28 @@ export class LLMService {
    *  template llama-server publishes at /props; 'enable-thinking' until then, which is the
    *  behaviour every model got before this was resolved at all. */
   private thinkingDialect: ThinkingDialect = 'enable-thinking'
+  private reasoningMetadata: ModelReasoningMetadata | undefined
+
+  getReasoningMetadata(): ModelReasoningMetadata | undefined {
+    return this.reasoningMetadata
+  }
 
   /** Read the loaded model's chat template and remember which thinking dialect it speaks.
    *  Best-effort: a server that will not answer /props keeps the safe default rather than
    *  retaining the dialect of the model that was loaded before it. */
   private async resolveThinkingDialect(): Promise<void> {
     this.thinkingDialect = 'enable-thinking'
+    this.reasoningMetadata = undefined
     try {
       const res = await fetch(`http://127.0.0.1:${this.port}/props`)
       if (!res.ok) return
       const body = (await res.json()) as { chat_template?: string }
       this.thinkingDialect = detectThinkingDialect(body.chat_template)
+      this.reasoningMetadata = reasoningMetadataFromChatTemplate(
+        'llama-server',
+        body.chat_template,
+        { supportsTokenBudget: true, reasoningFormat: 'deepseek' }
+      )
       console.log(`[LLMService] thinking dialect: ${this.thinkingDialect}`)
     } catch (e) {
       console.warn('[LLMService] could not read /props for the thinking dialect:', e)
@@ -1098,6 +1137,7 @@ export class LLMService {
       temperature?: number
       topP?: number
       thinking?: boolean
+      reasoningWire?: ReasoningWireFragment
       signal?: AbortSignal
       responseFormat?: unknown
       tools?: unknown[]
@@ -1112,6 +1152,7 @@ export class LLMService {
         temperature: options.temperature ?? this.temperature,
         topP: options.topP ?? this.topP,
         thinking: options.thinking,
+        reasoningWire: options.reasoningWire,
         // Same setting the local engine gets — one remote seam, so every remote caller
         // (chat, Web Use, Computer Use) honours the configured thinking cap.
         reasoningBudget: this.reasoningBudget,
@@ -1374,6 +1415,7 @@ export class LLMService {
       temperature: opts.temperature,
       topP: opts.topP,
       thinking: opts.thinking,
+      reasoningWire: opts.reasoningWire,
       signal: opts.signal,
       responseFormat: opts.responseFormat,
       tools: opts.tools,
@@ -1401,8 +1443,10 @@ export class LLMService {
         // Ask for the token counts. Without this the final chunk carries no usage, so the app can
         // report how long a generation took but never how many tokens it produced.
         stream_options: { include_usage: true },
-        ...thinkingPayload(!!opts.thinking, this.thinkingDialect),
-        ...reasoningBudgetPayload(!!opts.thinking, this.reasoningBudget)
+        ...(opts.reasoningWire ?? {
+          ...thinkingPayload(!!opts.thinking, this.thinkingDialect),
+          ...reasoningBudgetPayload(!!opts.thinking, this.reasoningBudget)
+        })
       }
       if (opts.responseFormat) payload.response_format = opts.responseFormat
       if (opts.tools && opts.tools.length) {

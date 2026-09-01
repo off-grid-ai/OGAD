@@ -11,6 +11,7 @@ import {
   type ModelKind,
   type ModelModality,
   type ModelSelectionStore,
+  type ModelReasoningMetadata,
   type RuntimeModel
 } from '@offgrid/models'
 import { getActiveModal, setActiveModal } from './active-models'
@@ -18,8 +19,10 @@ import { modelsDir } from './runtime-env'
 import {
   activateRemoteVisionModel,
   deactivateRemoteVisionModel,
+  getRemoteVisionServer,
   getRemoteVisionServerSettings
 } from './vision/remote-vision-server'
+import { remoteReasoningMetadata } from './llm/remote-chat'
 import { parseRemoteVisionModelId, remoteVisionModelId } from '../shared/remote-vision-server'
 import {
   DesktopLocalGenerationAdapter,
@@ -43,7 +46,11 @@ interface DesktopInventoryModel {
 interface DesktopModelServicesDependencies {
   listCatalog(): Promise<DesktopInventoryModel[]>
   listInstalled(): Promise<string[]>
-  localTextRuntimeState(): Promise<{ ready: boolean; loaded: boolean }>
+  localTextRuntimeState(): Promise<{
+    ready: boolean
+    loaded: boolean
+    reasoning?: ModelReasoningMetadata
+  }>
 }
 
 const SHARED_MODALITIES: readonly ModelModality[] = ['text', 'image', 'voice', 'transcription']
@@ -220,6 +227,17 @@ class DesktopInventorySource {
     const installed = new Set(installedIds)
     const remoteSettings = getRemoteVisionServerSettings()
     const remoteById = new Map(remoteSettings.servers.map((server) => [server.id, server] as const))
+    const remoteReasoningById = new Map(
+      await Promise.all(
+        remoteSettings.servers.map(async (server) => {
+          const connection = getRemoteVisionServer(server.id)
+          return [
+            server.id,
+            connection ? await remoteReasoningMetadata(connection) : undefined
+          ] as const
+        })
+      )
+    )
     const activeText = this.selections.read('text')
     const activeTextRoute = activeText ? decodeModelRouteId(activeText) : null
 
@@ -294,6 +312,11 @@ class DesktopInventorySource {
         adapterId,
         providerId: remote?.provider ?? model.runtime ?? model.engine,
         serverId: remote?.id,
+        reasoning: remote
+          ? remoteReasoningById.get(remote.id)
+          : modality === 'text' || modality === 'computer_use'
+            ? localTextState.reasoning
+            : undefined,
         capabilities: {
           textGeneration: modality === 'text',
           vision: model.kind === 'vision' || model.kind === 'computer_use' || source === 'remote',
@@ -327,6 +350,7 @@ class DesktopInventorySource {
         adapterId: 'desktop.remote-chat',
         providerId: server.provider,
         serverId: server.id,
+        reasoning: remoteReasoningById.get(server.id),
         capabilities: {
           textGeneration: true,
           vision: true,
@@ -470,6 +494,10 @@ export const desktopModelServices = createDesktopModelServices({
   listInstalled: async () => (await import('./models-manager')).listInstalled(),
   localTextRuntimeState: async () => {
     const { llm } = await import('./llm')
-    return { ready: llm.isReady(), loaded: llm.isReady() }
+    return {
+      ready: llm.isReady(),
+      loaded: llm.isReady(),
+      reasoning: llm.getReasoningMetadata()
+    }
   }
 })

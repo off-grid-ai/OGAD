@@ -5,7 +5,8 @@ import type {
   GenerationResponseFormat,
   GenerationResult,
   GenerationToolChoice,
-  GenerationToolDefinition
+  GenerationToolDefinition,
+  ReasoningEffort
 } from '@offgrid/models'
 import { llm } from './llm'
 import { readImages } from './llm/read-images'
@@ -20,6 +21,7 @@ export interface DesktopGenerationOptions {
   temperature?: number
   topP?: number
   thinking?: boolean
+  reasoningEffort?: ReasoningEffort
   maxTokens?: number
   maxToolRounds?: number
   timeoutMs?: number
@@ -104,6 +106,7 @@ export async function generateDesktopMessages(
   options: DesktopGenerationOptions = {}
 ): Promise<GenerationResult> {
   await desktopModelServices.refresh()
+  const settings = llm.getSettings()
   const turnId = `desktop:${Date.now()}:${Math.random().toString(36).slice(2)}`
   const request: GenerationRequest = {
     operation: options.operation ?? { type: 'text' },
@@ -120,6 +123,19 @@ export async function generateDesktopMessages(
     maxToolRounds: options.maxToolRounds,
     timeoutMs: options.timeoutMs,
     signal: options.signal,
+    ...(options.thinking === undefined
+      ? {}
+      : {
+          reasoning: {
+            enabled: options.thinking,
+            ...(settings.reasoningBudget && settings.reasoningBudget > 0
+              ? { budgetTokens: settings.reasoningBudget }
+              : {}),
+            ...((options.reasoningEffort ?? settings.reasoningEffort)
+              ? { effort: options.reasoningEffort ?? settings.reasoningEffort }
+              : {})
+          }
+        }),
     requiredCapabilities: {
       ...(options.thinking === undefined ? {} : { thinking: options.thinking })
     },

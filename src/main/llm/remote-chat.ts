@@ -1,4 +1,14 @@
-import { REASONING_BUDGET_AUTO, openRouterReasoningPayload } from '@offgrid/models'
+import {
+  REASONING_BUDGET_AUTO,
+  openRouterReasoningPayload,
+  reasoningMetadataForOllama,
+  reasoningMetadataFromChatTemplate,
+  reasoningMetadataFromOpenRouter,
+  type ModelReasoningMetadata,
+  type OpenRouterPublishedReasoning,
+  type ReasoningEffort,
+  type ReasoningWireFragment
+} from '@offgrid/models'
 import type { RemoteVisionProvider } from '../../shared/remote-vision-server'
 import {
   createCompletionStreamAccumulator,
@@ -23,6 +33,7 @@ export interface RemoteChatRequest {
   thinking?: boolean
   /** The user's thinking cap in tokens (REASONING_BUDGET_AUTO for unrestricted). */
   reasoningBudget?: number
+  reasoningWire?: ReasoningWireFragment
   responseFormat?: unknown
   tools?: unknown[]
   toolChoice?: unknown
@@ -42,9 +53,157 @@ interface OpenRouterModelMetadata {
   id?: unknown
   name?: unknown
   supported_parameters?: unknown
+  reasoning?: OpenRouterPublishedReasoning
 }
 
 const nativeToolCapabilities = new Map<string, Promise<RemoteNativeToolCapability>>()
+const reasoningCapabilities = new Map<string, Promise<ModelReasoningMetadata>>()
+
+function ollamaApiBase(endpoint: string): string {
+  return endpoint.replace(/\/v1\/?$/i, '')
+}
+
+async function discoverOllamaReasoningMetadata(
+  remote: RemoteTextModelConnection
+): Promise<ModelReasoningMetadata> {
+  try {
+    const response = await fetch(`${ollamaApiBase(remote.endpoint)}/api/show`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: remote.model }),
+      signal: AbortSignal.timeout(5_000)
+    })
+    if (!response.ok) return reasoningMetadataForOllama('unsupported')
+    const body = (await response.json()) as { capabilities?: unknown; template?: unknown }
+    if (!Array.isArray(body.capabilities) || !body.capabilities.includes('thinking')) {
+      return reasoningMetadataForOllama('no-control')
+    }
+    const template = typeof body.template === 'string' ? body.template : ''
+    const supportsEffort =
+      /(?:low|medium|high).{0,160}(?:\.Think|think)/is.test(template) ||
+      /(?:\.Think|think).{0,160}(?:low|medium|high)/is.test(template)
+    return supportsEffort
+      ? reasoningMetadataForOllama('effort', {
+          supportedEfforts: ['low', 'medium', 'high'],
+          defaultEffort: 'medium',
+          mandatory: true
+        })
+      : reasoningMetadataForOllama('boolean')
+  } catch {
+    return reasoningMetadataForOllama('unsupported')
+  }
+}
+
+async function discoverOpenRouterReasoningMetadata(
+  remote: RemoteTextModelConnection
+): Promise<ModelReasoningMetadata> {
+  try {
+    const response = await fetch(`${remote.endpoint}/models`, {
+      headers: remote.apiKey ? { Authorization: `Bearer ${remote.apiKey}` } : {},
+      signal: AbortSignal.timeout(5_000)
+    })
+    if (!response.ok) return reasoningMetadataFromOpenRouter(undefined)
+    const body = (await response.json()) as { data?: unknown }
+    if (!Array.isArray(body.data)) return reasoningMetadataFromOpenRouter(undefined)
+    const selected = (body.data as OpenRouterModelMetadata[]).find(
+      (candidate) => candidate.id === remote.model
+    )
+    return reasoningMetadataFromOpenRouter(selected?.reasoning)
+  } catch {
+    return reasoningMetadataFromOpenRouter(undefined)
+  }
+}
+
+const REASONING_TRANSPORTS = new Set([
+  'llama-server',
+  'llama-rn',
+  'openrouter',
+  'ollama',
+  'openai-compatible'
+])
+const REASONING_CONTROLS = new Set([
+  'enable-thinking',
+  'reasoning-strength',
+  'boolean',
+  'effort',
+  'provider-native',
+  'no-control',
+  'unsupported'
+])
+
+function publishedReasoningMetadata(value: unknown): ModelReasoningMetadata | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const metadata = value as Record<string, unknown>
+  if (
+    typeof metadata.transport !== 'string' ||
+    !REASONING_TRANSPORTS.has(metadata.transport) ||
+    typeof metadata.control !== 'string' ||
+    !REASONING_CONTROLS.has(metadata.control)
+  ) {
+    return undefined
+  }
+  const effort = (candidate: unknown): candidate is ReasoningEffort =>
+    candidate === 'minimal' ||
+    candidate === 'low' ||
+    candidate === 'medium' ||
+    candidate === 'high' ||
+    candidate === 'xhigh' ||
+    candidate === 'max'
+  const supportedEfforts = Array.isArray(metadata.supportedEfforts)
+    ? metadata.supportedEfforts.filter(effort)
+    : undefined
+  return {
+    transport: metadata.transport as ModelReasoningMetadata['transport'],
+    control: metadata.control as ModelReasoningMetadata['control'],
+    ...(metadata.supportsTokenBudget === true ? { supportsTokenBudget: true } : {}),
+    ...(supportedEfforts ? { supportedEfforts } : {}),
+    ...(effort(metadata.defaultEffort) ? { defaultEffort: metadata.defaultEffort } : {}),
+    ...(metadata.mandatory === true ? { mandatory: true } : {}),
+    ...(metadata.reasoningFormat === 'auto' || metadata.reasoningFormat === 'deepseek'
+      ? { reasoningFormat: metadata.reasoningFormat }
+      : {})
+  }
+}
+
+async function discoverCompatibleReasoningMetadata(
+  remote: RemoteTextModelConnection
+): Promise<ModelReasoningMetadata> {
+  try {
+    const response = await fetch(`${remote.endpoint}/models`, {
+      headers: remote.apiKey ? { Authorization: `Bearer ${remote.apiKey}` } : {},
+      signal: AbortSignal.timeout(5_000)
+    })
+    if (!response.ok) throw new Error('metadata unavailable')
+    const body = (await response.json()) as { data?: unknown }
+    if (!Array.isArray(body.data)) throw new Error('metadata unavailable')
+    const selected = (body.data as Array<Record<string, unknown>>).find(
+      (candidate) => candidate.id === remote.model
+    )
+    const published = publishedReasoningMetadata(selected?.reasoning)
+    if (published) return published
+    const template =
+      typeof selected?.chat_template === 'string' ? selected.chat_template : undefined
+    return reasoningMetadataFromChatTemplate('openai-compatible', template)
+  } catch {
+    return { transport: 'openai-compatible', control: 'unsupported' }
+  }
+}
+
+export function remoteReasoningMetadata(
+  remote: RemoteTextModelConnection
+): Promise<ModelReasoningMetadata> {
+  const key = capabilityKey(remote)
+  const cached = reasoningCapabilities.get(key)
+  if (cached) return cached
+  const discovered =
+    remote.provider === 'openrouter'
+      ? discoverOpenRouterReasoningMetadata(remote)
+      : remote.provider === 'ollama'
+        ? discoverOllamaReasoningMetadata(remote)
+        : discoverCompatibleReasoningMetadata(remote)
+  reasoningCapabilities.set(key, discovered)
+  return discovered
+}
 
 function capabilityKey(remote: RemoteTextModelConnection): string {
   return `${remote.provider}\n${remote.endpoint}\n${remote.model}`
@@ -163,12 +322,13 @@ function completionRequestBody(
       : {}),
     // Carry the user's configured thinking cap, not just a coarse effort hint. Without this the
     // cap was dropped for every remote model and the budget setting did nothing.
-    ...(remote.provider === 'openrouter'
-      ? openRouterReasoningPayload(
-          request.thinking === true,
-          request.reasoningBudget ?? REASONING_BUDGET_AUTO
-        )
-      : {}),
+    ...(request.reasoningWire ??
+      (remote.provider === 'openrouter'
+        ? openRouterReasoningPayload(
+            request.thinking === true,
+            request.reasoningBudget ?? REASONING_BUDGET_AUTO
+          )
+        : {})),
     stream: true
   })
 }
