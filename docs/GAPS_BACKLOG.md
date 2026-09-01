@@ -7,6 +7,34 @@ how to reproduce, and the fix direction. Close with evidence; never hide.
 
 ## OPEN
 
+### MOD-001 (P0) - Shared model consolidation needs final live and release proof
+
+**Code and wired evidence (2026-09-01):** the Shared image application, Desktop model-library
+transactions, and Mobile transcription and residency workflows now own the portable decisions.
+Desktop keeps filesystem, Electron, process, and native-engine ports. Mobile keeps React Native,
+filesystem, Whisper, and platform-engine ports. A source scan found no test replacement for
+`@offgrid/models`; both apps load the real local Shared package.
+
+The follow-up sweep passed the full `@offgrid/models` package gate: build, type declarations,
+architecture, and 371 tests. The Desktop model architecture gate passed with zero temporary items.
+Fourteen focused Desktop image and model-library files passed 130 tests. Four focused database files
+passed four tests through the Electron-ABI database runner. One first attempt collided with another
+test process on port 8439; the affected first-use journey passed alone after the port was released.
+Both Mobile model architecture gates passed. The focused Mobile transcription, download, and
+residency group passed 331 tests, and its one batch-timeout case passed alone in 2.8 seconds with
+open-handle detection.
+
+**Open release evidence:** run the complete Shared, Desktop, Mobile, and Pro command matrices on one
+candidate head. Then verify local and remote text, vision, image, transcription, speech, download,
+repair, transfer, load, force-load, co-residency, eviction, unload, eject, Stop, Resend, Edit, and
+Regenerate in the packaged Desktop app and on physical iOS and Android devices. Reproduce the earlier
+iPhone Resend freeze with native logs. Verify that the selected model shown in the UI is the exact
+route that executes. Do not close this entry from focused tests or static gates.
+
+Some older Mobile unit tests replace Mobile services above the native boundary. They are not valid
+end-to-end evidence under the current testing standard. The release decision must use the rendered,
+cross-service, native, and live journeys.
+
 ### CU-004 (P1) - The current vision-first paths lack complete live control proof
 
 **Earlier Web Use evidence (2026-08-25):** `scripts/qa-agentic-studio.mjs` ran a deterministic Web
