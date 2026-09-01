@@ -6,7 +6,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { Writable } from 'stream'
-import { NETWORK_UNAVAILABLE_MESSAGE } from '../download-error'
+import { NETWORK_UNAVAILABLE_MESSAGE } from '@offgrid/models'
 
 const originalDataDir = process.env.OFFGRID_DATA_DIR
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-model-integrity-'))

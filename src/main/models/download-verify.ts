@@ -8,7 +8,7 @@
 // on load with a blank "Chat model Down" (the exact class CLAUDE.md warns about).
 import fs from 'fs'
 import crypto from 'crypto'
-import { isValidGgufFile } from './gguf'
+import { downloadedArtifactChecksumError, transferredArtifactIntegrityError } from '@offgrid/models'
 
 /** Reason a just-downloaded file must NOT be promoted to installed, or null if it
  *  passes. Checks the byte count (when the server reported a length) and, for a
@@ -19,13 +19,30 @@ export function downloadIntegrityError(
   total: number,
   partPath: string
 ): string | null {
-  if (total > 0 && written < total) {
-    return `${name}: incomplete download (${written}/${total} bytes) — the connection closed early`
+  let storedBytes = 0
+  let firstFourBytes: Uint8Array | undefined
+  try {
+    storedBytes = fs.statSync(partPath).size
+    if (/\.gguf$/i.test(name)) {
+      const fd = fs.openSync(partPath, 'r')
+      const prefix = Buffer.alloc(4)
+      try {
+        fs.readSync(fd, prefix, 0, 4, 0)
+      } finally {
+        fs.closeSync(fd)
+      }
+      firstFourBytes = prefix
+    }
+  } catch {
+    // The shared policy reports a missing/truncated artifact from these empty probes.
   }
-  if (/\.gguf$/i.test(name) && !isValidGgufFile(partPath, fs)) {
-    return `${name}: downloaded file is not a valid GGUF (corrupt or truncated)`
-  }
-  return null
+  return transferredArtifactIntegrityError({
+    name,
+    writtenBytes: written,
+    responseTotalBytes: total,
+    storedBytes,
+    firstFourBytes
+  })
 }
 
 /** Stream a file through SHA-256 and return the lowercase hex digest. */
@@ -49,17 +66,16 @@ export async function sha256IntegrityError(
   partPath: string,
   expectedSha256: string | undefined
 ): Promise<string | null> {
-  if (!expectedSha256) {
-    return null // no known hash → nothing to verify against
-  }
+  if (!expectedSha256) return null
   let actual: string
   try {
     actual = await sha256File(partPath)
   } catch (e) {
-    return `${name}: could not read the file to verify its checksum (${(e as Error).message})`
+    return downloadedArtifactChecksumError({
+      name,
+      expectedSha256,
+      readError: (e as Error).message
+    })
   }
-  if (actual.toLowerCase() !== expectedSha256.toLowerCase()) {
-    return `${name}: checksum mismatch — the download is corrupt (expected ${expectedSha256.slice(0, 12)}…, got ${actual.slice(0, 12)}…)`
-  }
-  return null
+  return downloadedArtifactChecksumError({ name, expectedSha256, actualSha256: actual })
 }

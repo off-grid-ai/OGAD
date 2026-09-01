@@ -8,7 +8,6 @@ import { llm } from './llm'
 import { isValidGgufFile } from './models/gguf'
 import { pumpToFile } from './models/download-pump'
 import { downloadIntegrityError, sha256IntegrityError } from './models/download-verify'
-import { downloadFailureMessage, isStorageCapacityError } from './models/download-error'
 import {
   DOWNLOAD_INTERRUPTED_ERROR,
   modelDownloadQueue,
@@ -48,7 +47,15 @@ import {
 import { writeDiagnosticLog } from './diagnostics-log'
 import { modelPackageIdentity, type TransferredModelManifest } from '@offgrid/sync'
 import { sampleProgressRate, type ProgressRateSample } from '@offgrid/ui'
-import { decodeModelRouteId } from '@offgrid/models'
+import {
+  decodeModelRouteId,
+  DownloadStatusLedger,
+  modelDownloadFailureMessage,
+  planResumedTransfer,
+  sequentialDownloadProgress,
+  shouldRemovePartialDownload,
+  type DownloadLedgerStorage
+} from '@offgrid/models'
 import {
   parseRemoteVisionModelId,
   remoteVisionInventoryModels,
@@ -76,7 +83,33 @@ export interface DownloadProgress {
 export type ProgressCb = (p: DownloadProgress) => void
 
 const downloadQueue = modelDownloadQueue
-const lastProgress = new Map<string, DownloadProgress>()
+
+function downloadsFile(): string {
+  return path.join(llm.getModelsDir(), 'downloads.json')
+}
+
+const downloadLedgerStorage: DownloadLedgerStorage<DownloadProgress> = {
+  read: () => {
+    try {
+      const parsed: unknown = JSON.parse(fs.readFileSync(downloadsFile(), 'utf-8'))
+      return Array.isArray(parsed) ? (parsed as DownloadProgress[]) : []
+    } catch {
+      return []
+    }
+  },
+  write: (records) => {
+    try {
+      if (records.length > 0) fs.writeFileSync(downloadsFile(), JSON.stringify(records))
+      else fs.rmSync(downloadsFile(), { force: true })
+    } catch {
+      /* best effort: download execution must not fail because status persistence failed */
+    }
+  }
+}
+
+const downloadLedger = new DownloadStatusLedger(downloadLedgerStorage, {
+  interruptedError: DOWNLOAD_INTERRUPTED_ERROR
+})
 
 export { DOWNLOAD_INTERRUPTED_ERROR, shutdownModelDownloads }
 
@@ -224,7 +257,7 @@ export async function searchModels(query: string, kind?: string): Promise<unknow
 }
 
 export function downloadStatus(modelId: string): DownloadProgress | null {
-  return lastProgress.get(modelId) ?? null
+  return downloadLedger.get(modelId) ?? null
 }
 
 export function cancelDownload(modelId: string): boolean {
@@ -243,8 +276,11 @@ function publishRefusal(
   error: string,
   onProgress?: ProgressCb
 ): { success: false; error: string } {
-  const p: DownloadProgress = { modelId, status: 'failed', percent: 0, error }
-  lastProgress.set(modelId, p)
+  const p = downloadLedger.update(
+    modelId,
+    { status: 'failed', percent: 0, error },
+    { persist: false }
+  )
   onProgress?.(p)
   return { success: false, error }
 }
@@ -285,7 +321,7 @@ export async function downloadModel(
 
   const dir = llm.getModelsDir()
   fs.mkdirSync(dir, { recursive: true })
-  ensureRegistryLoaded()
+  downloadLedger.list()
   // Re-entrancy guard (before any status emit / queue registration): a second
   // download of the same id would write into the SAME .part (interleaved writes →
   // corrupt file). The queue tracks both waiting and active ids, so double-clicking
@@ -299,8 +335,7 @@ export async function downloadModel(
   }
   let loggedStatus: DownloadProgress['status'] | undefined
   const send = (data: Partial<DownloadProgress>): void => {
-    const p: DownloadProgress = { ...lastProgress.get(modelId), modelId, ...data }
-    lastProgress.set(modelId, p)
+    const p = downloadLedger.update(modelId, data)
     onProgress?.(p)
     if (p.status && p.status !== loggedStatus) {
       loggedStatus = p.status
@@ -311,9 +346,7 @@ export async function downloadModel(
         p.status === 'failed' ? 'error' : 'info'
       )
     }
-    // Queue/start persistence happens in the lifecycle callback below. Persist
-    // terminal transitions here, but skip high-frequency transfer ticks.
-    if (p.status && p.status !== 'queued' && p.status !== 'downloading') persistRegistry()
+    // The shared ledger persists status transitions and skips high-frequency byte ticks.
   }
   const interruptedResult = (
     signal: AbortSignal,
@@ -337,7 +370,7 @@ export async function downloadModel(
           send({ percent: 100, status: 'completed' })
           return { success: true }
         } catch (err) {
-          const error = downloadFailureMessage(err)
+          const error = modelDownloadFailureMessage(err)
           send({ status: 'failed', error })
           return { success: false, error }
         }
@@ -394,19 +427,29 @@ export async function downloadModel(
           })
           if (!res.ok || !res.body) throw new Error(`HTTP ${res.status} for ${file.name}`)
           // Server honored the range (206) → append; otherwise (200) start over.
-          const append = resumeFrom > 0 && res.status === 206
           const remaining = Number(res.headers.get('content-length') ?? 0)
-          const total = (append ? resumeFrom : 0) + remaining
-          const out = fs.createWriteStream(partPath, append ? { flags: 'a' } : {})
-          let written = append ? resumeFrom : 0
+          const transfer = planResumedTransfer({
+            partialBytes: resumeFrom,
+            responseStatus: res.status,
+            responseBytes: remaining
+          })
+          const total = transfer.totalBytes
+          const out = fs.createWriteStream(partPath, transfer.append ? { flags: 'a' } : {})
+          let written = transfer.writtenBytes
           const reader = res.body.getReader()
           // pumpToFile owns the write-stream error path: a disk-full/EIO 'error' becomes
           // a rejection (caught below → status 'failed') instead of crashing the main
           // process, and never hangs on a 'finish' that won't come.
           await pumpToFile(reader, out, (n) => {
             written += n
-            const jobDone = jobDoneBytes + written
-            const jobTotal = jobDoneBytes + total + laterBytes(fileIndex)
+            const aggregate = sequentialDownloadProgress({
+              completedBytes: jobDoneBytes,
+              currentBytes: written,
+              currentTotalBytes: total,
+              remainingPlannedBytes: laterBytes(fileIndex)
+            })
+            const jobDone = aggregate.downloadedBytes
+            const jobTotal = aggregate.totalBytes
             const rate = sampleProgressRate(rateSample, {
               currentBytes: jobDone,
               sampledAtMs: Date.now()
@@ -416,7 +459,7 @@ export async function downloadModel(
               currentFile: file.name,
               fileIndex: fileIndex + 1,
               fileCount: pending.length,
-              percent: jobTotal ? Math.round((jobDone / jobTotal) * 100) : 0,
+              percent: Math.round(aggregate.fraction * 100),
               downloadedMB: (jobDone / 1048576).toFixed(1),
               totalMB: jobTotal ? (jobTotal / 1048576).toFixed(1) : '?',
               downloadedBytes: jobDone,
@@ -477,7 +520,10 @@ export async function downloadModel(
         // A capacity failure cannot resume until space is reclaimed. A file that failed byte or
         // checksum validation must restart because the stored prefix is not trustworthy. Only a
         // transport interruption keeps its partial file for a Range retry.
-        if (activePartPath && (!activePartRecoverable || isStorageCapacityError(err))) {
+        if (
+          activePartPath &&
+          shouldRemovePartialDownload({ artifactRecoverable: activePartRecoverable, error: err })
+        ) {
           try {
             fs.rmSync(activePartPath, { force: true })
           } catch {
@@ -487,7 +533,7 @@ export async function downloadModel(
         if (signal.aborted || (err as Error).name === 'AbortError') {
           return interruptedResult(signal, activePartPath)
         }
-        const error = downloadFailureMessage(err)
+        const error = modelDownloadFailureMessage(err)
         send({ status: 'failed', error })
         return { success: false, error }
       }
@@ -498,7 +544,6 @@ export async function downloadModel(
       } else {
         send({ status: state, percent: 0 })
       }
-      if (state === 'queued' || state === 'downloading') persistRegistry()
     }
   )
 }
@@ -1352,43 +1397,9 @@ export async function deleteOrphans(): Promise<{
 // survive an app restart (an interrupted download becomes resumable).
 // ---------------------------------------------------------------------------
 
-function downloadsFile(): string {
-  return path.join(llm.getModelsDir(), 'downloads.json')
-}
-let registryLoaded = false
-function ensureRegistryLoaded(): void {
-  if (registryLoaded) return
-  registryLoaded = true
-  try {
-    const arr = JSON.parse(fs.readFileSync(downloadsFile(), 'utf-8')) as DownloadProgress[]
-    for (const p of arr) {
-      // Anything still active/queued when we last wrote was cut off by a quit/crash.
-      // Surface it as explicitly retryable instead of leaving a queue row that can
-      // never drain in this fresh process.
-      if (p.status === 'downloading' || p.status === 'queued') {
-        p.status = 'failed'
-        p.error = DOWNLOAD_INTERRUPTED_ERROR
-      }
-      lastProgress.set(p.modelId, p)
-    }
-  } catch {
-    /* no registry yet */
-  }
-}
-function persistRegistry(): void {
-  try {
-    const arr = Array.from(lastProgress.values()).filter((p) => p.status !== 'completed')
-    if (arr.length) fs.writeFileSync(downloadsFile(), JSON.stringify(arr))
-    else fs.rmSync(downloadsFile(), { force: true })
-  } catch {
-    /* best effort */
-  }
-}
-
 /** All known downloads (active, failed, interrupted) for a download-manager view. */
 export function listDownloads(): DownloadProgress[] {
-  ensureRegistryLoaded()
-  return Array.from(lastProgress.values())
+  return downloadLedger.list()
 }
 
 /** Retry (resumes from the partial .part) a failed/interrupted download. */
@@ -1428,9 +1439,7 @@ export async function clearDownload(
   } catch {
     /* best effort */
   }
-  ensureRegistryLoaded()
-  lastProgress.delete(modelId)
-  persistRegistry()
+  downloadLedger.remove(modelId)
   return { success: true, freedBytes }
 }
 
@@ -1440,10 +1449,7 @@ export async function clearInactiveDownloads(): Promise<{
   count: number
   freedBytes: number
 }> {
-  ensureRegistryLoaded()
-  const ids = Array.from(lastProgress.values())
-    .filter((p) => p.status === 'failed' || p.status === 'cancelled')
-    .map((p) => p.modelId)
+  const ids = downloadLedger.inactiveIds()
   let freedBytes = 0
   for (const id of ids) {
     const r = await clearDownload(id)
