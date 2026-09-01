@@ -9,6 +9,8 @@ import {
   openRouterNativeToolCapability,
   remoteCapabilityDiscoveryPlan,
   nativeToolPlannerUnavailableMessage,
+  RemoteCapabilityCache,
+  remoteCapabilityCacheKey,
   type ModelReasoningMetadata,
   type OpenRouterPublishedReasoning,
   type ReasoningWireFragment,
@@ -56,8 +58,8 @@ interface OpenRouterModelMetadata {
   reasoning?: OpenRouterPublishedReasoning
 }
 
-const nativeToolCapabilities = new Map<string, Promise<RemoteNativeToolCapability>>()
-const reasoningCapabilities = new Map<string, Promise<ModelReasoningMetadata>>()
+const nativeToolCapabilities = new RemoteCapabilityCache<RemoteNativeToolCapability>()
+const reasoningCapabilities = new RemoteCapabilityCache<ModelReasoningMetadata>()
 
 function ollamaApiBase(endpoint: string): string {
   return endpoint.replace(/\/v1\/?$/i, '')
@@ -128,21 +130,22 @@ export function remoteReasoningMetadata(
   remote: RemoteTextModelConnection
 ): Promise<ModelReasoningMetadata> {
   const key = capabilityKey(remote)
-  const cached = reasoningCapabilities.get(key)
-  if (cached) return cached
-  const plan = remoteCapabilityDiscoveryPlan(remote.provider)
-  const discovered =
-    plan.reasoning === 'openrouter'
+  return reasoningCapabilities.getOrLoad(key, () => {
+    const plan = remoteCapabilityDiscoveryPlan(remote.provider)
+    return plan.reasoning === 'openrouter'
       ? discoverOpenRouterReasoningMetadata(remote)
       : plan.reasoning === 'ollama'
         ? discoverOllamaReasoningMetadata(remote)
         : discoverCompatibleReasoningMetadata(remote)
-  reasoningCapabilities.set(key, discovered)
-  return discovered
+  })
 }
 
 function capabilityKey(remote: RemoteTextModelConnection): string {
-  return `${remote.provider}\n${remote.endpoint}\n${remote.model}`
+  return remoteCapabilityCacheKey({
+    provider: remote.provider,
+    endpoint: remote.endpoint,
+    modelId: remote.model
+  })
 }
 
 /** OpenRouter is the authority for native request features. A missing metadata response stays
@@ -175,11 +178,7 @@ export function remoteNativeToolCapability(
   remote: RemoteTextModelConnection
 ): Promise<RemoteNativeToolCapability> {
   const key = capabilityKey(remote)
-  const cached = nativeToolCapabilities.get(key)
-  if (cached) return cached
-  const discovered = discoverRemoteNativeToolCapability(remote)
-  nativeToolCapabilities.set(key, discovered)
-  return discovered
+  return nativeToolCapabilities.getOrLoad(key, () => discoverRemoteNativeToolCapability(remote))
 }
 
 /** Keep remote transport errors useful without exposing the endpoint, headers,

@@ -8,6 +8,12 @@ import {
   catalogFromDiscovery,
   defaultRemoteSelections,
   discoveryFromRemoteModelList,
+  activateRemoteServerConfiguration,
+  deactivateRemoteServerConfiguration,
+  migrateRemoteServerConfiguration,
+  normalizeRemoteServerConfiguration,
+  removeRemoteServerConfiguration,
+  upsertRemoteServerConfiguration,
   mergeRemoteSelections,
   remoteAuthorizationHeaders,
   type RemoteModelCatalog,
@@ -85,37 +91,48 @@ function validProvider(provider: unknown): provider is RemoteVisionProvider {
 function normalizeServer(
   value: Partial<StoredRemoteVisionServer>
 ): StoredRemoteVisionServer | null {
-  if (!value.id || !value.endpoint || !validProvider(value.provider)) return null
-  const legacyModel = value.model?.trim() ?? ''
-  const catalog =
-    value.catalog ??
-    (legacyModel
-      ? { text: [{ id: legacyModel, name: legacyModel, capabilities: { supportsVision: true } }] }
-      : {})
-  const selections = value.selections ?? (legacyModel ? { text: legacyModel } : {})
+  if (!validProvider(value.provider)) return null
+  const normalized = normalizeRemoteServerConfiguration({
+    ...value,
+    provider: value.provider === 'ogad' ? 'offgrid-desktop' : value.provider
+  })
   if (
-    !Object.values(selections).some(
+    !normalized ||
+    !Object.values(normalized.selections ?? {}).some(
       (selection) => typeof selection === 'string' && selection.trim()
     )
-  ) {
+  )
     return null
-  }
+  const desktopProvider =
+    normalized.provider === 'offgrid-desktop'
+      ? 'ogad'
+      : normalized.provider === 'openai-compatible' || normalized.provider === 'anthropic'
+        ? 'custom'
+        : normalized.provider
+  if (!validProvider(desktopProvider)) return null
   return {
-    id: value.id,
-    name: value.name?.trim() || defaultServerName(value.endpoint),
-    provider: value.provider,
-    endpoint: remoteVisionApiBase(remoteVisionEndpoint(value.provider, value.endpoint)),
-    model: selections.text?.trim() || legacyModel,
-    selections,
-    catalog,
-    screenFramesAllowed: value.screenFramesAllowed === true
+    id: normalized.id,
+    name: normalized.name,
+    provider: desktopProvider,
+    endpoint: normalized.endpoint,
+    model: normalized.selections?.text?.trim() || '',
+    selections: normalized.selections ?? {},
+    catalog: normalized.catalog ?? {},
+    screenFramesAllowed: normalized.screenFramesAllowed === true
   }
 }
 
-function isStoredConfig(
-  value: StoredRemoteVisionConfig | LegacyStoredRemoteVisionServer
-): value is StoredRemoteVisionConfig {
-  return 'servers' in value && Array.isArray(value.servers)
+function sharedConfiguration(
+  stored: StoredRemoteVisionConfig
+): ReturnType<typeof migrateRemoteServerConfiguration> {
+  return {
+    version: 1,
+    activeServerId: stored.activeServerId,
+    servers: stored.servers.map((server) => ({
+      ...server,
+      provider: server.provider === 'ogad' ? 'offgrid-desktop' : server.provider
+    }))
+  }
 }
 
 function readStored(): StoredRemoteVisionConfig {
@@ -123,39 +140,26 @@ function readStored(): StoredRemoteVisionConfig {
     const value = JSON.parse(fs.readFileSync(configPath(), 'utf8')) as
       | StoredRemoteVisionConfig
       | LegacyStoredRemoteVisionServer
-    if (isStoredConfig(value)) {
-      const servers = value.servers.flatMap((server) => {
-        const normalized = normalizeServer(server)
-        return normalized ? [normalized] : []
+    const migrated = migrateRemoteServerConfiguration(value)
+    const servers = migrated.servers.flatMap((server) => {
+      const normalized = normalizeServer({
+        ...server,
+        provider:
+          server.provider === 'offgrid-desktop'
+            ? 'ogad'
+            : server.provider === 'openai-compatible' || server.provider === 'anthropic'
+              ? 'custom'
+              : server.provider,
+        model: server.selections?.text ?? ''
       })
-      return {
-        version: CONFIG_VERSION,
-        activeServerId: servers.some((server) => server.id === value.activeServerId)
-          ? value.activeServerId
-          : null,
-        servers
-      }
-    }
-    if (
-      !validProvider(value.provider) ||
-      value.provider === 'local' ||
-      !value.endpoint ||
-      !value.model
-    ) {
-      return { version: CONFIG_VERSION, activeServerId: null, servers: [] }
-    }
-    const id = 'migrated-server'
-    const server = normalizeServer({
-      id,
-      name: defaultServerName(value.endpoint),
-      provider: value.provider,
-      endpoint: value.endpoint,
-      model: value.model
+      return normalized ? [normalized] : []
     })
     return {
       version: CONFIG_VERSION,
-      activeServerId: server ? id : null,
-      servers: server ? [server] : []
+      activeServerId: servers.some((server) => server.id === migrated.activeServerId)
+        ? migrated.activeServerId
+        : null,
+      servers
     }
   } catch {
     return { version: CONFIG_VERSION, activeServerId: null, servers: [] }
@@ -225,18 +229,21 @@ export function getRemoteVisionServer(serverId: string): RemoteVisionServerConne
 
 export function activateRemoteVisionModel(serverId: string, modelId: string): boolean {
   const stored = readStored()
-  const server = stored.servers.find(
-    (candidate) => candidate.id === serverId && candidate.selections.text === modelId
+  const activated = activateRemoteServerConfiguration(
+    sharedConfiguration(stored),
+    serverId,
+    modelId
   )
-  if (!server) return false
-  writeStored({ ...stored, activeServerId: server.id })
+  if (!activated) return false
+  writeStored({ ...stored, activeServerId: activated.activeServerId })
   return true
 }
 
 export function deactivateRemoteVisionModel(): void {
   const stored = readStored()
   if (stored.activeServerId === null) return
-  writeStored({ ...stored, activeServerId: null })
+  const deactivated = deactivateRemoteServerConfiguration(sharedConfiguration(stored))
+  writeStored({ ...stored, activeServerId: deactivated.activeServerId })
 }
 
 export async function setRemoteVisionServerSettings(
@@ -284,9 +291,23 @@ export async function setRemoteVisionServerSettings(
     catalog,
     screenFramesAllowed: update.screenFramesAllowed === true
   }
-  const servers = stored.servers.some((server) => server.id === id)
-    ? stored.servers.map((server) => (server.id === id ? next : server))
-    : [...stored.servers, next]
+  const configured = upsertRemoteServerConfiguration(sharedConfiguration(stored), {
+    ...next,
+    provider: next.provider === 'ogad' ? 'offgrid-desktop' : next.provider
+  })
+  const servers = configured.servers.flatMap((server) => {
+    const normalized = normalizeServer({
+      ...server,
+      provider:
+        server.provider === 'offgrid-desktop'
+          ? 'ogad'
+          : server.provider === 'openai-compatible' || server.provider === 'anthropic'
+            ? 'custom'
+            : server.provider,
+      model: server.selections?.text ?? ''
+    })
+    return normalized ? [normalized] : []
+  })
   if (update.clearApiKey) deleteSecret(secretKey(id))
   else if (update.apiKey?.trim()) setSecret(secretKey(id), update.apiKey.trim())
   writeStored({
@@ -311,9 +332,10 @@ export function removeRemoteVisionServer(serverId: string): RemoteVisionServerSe
   const stored = readStored()
   desktopModelServices.clearRemoteServerSelections(serverId)
   deleteSecret(secretKey(serverId))
+  const removed = removeRemoteServerConfiguration(sharedConfiguration(stored), serverId)
   writeStored({
-    version: CONFIG_VERSION,
-    activeServerId: stored.activeServerId === serverId ? null : stored.activeServerId,
+    ...stored,
+    activeServerId: removed.activeServerId,
     servers: stored.servers.filter((server) => server.id !== serverId)
   })
   return getRemoteVisionServerSettings()
