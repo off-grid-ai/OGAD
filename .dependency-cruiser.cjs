@@ -16,7 +16,9 @@ module.exports = {
       comment: 'A broken/typo/moved import must fail the build, not surface at runtime.',
       severity: 'error',
       from: { path: '^src/' },
-      to: { couldNotResolve: true }
+      // Electron provides `original-fs` at runtime. It is not a resolvable npm package, and the
+      // two importers are packaging tests that must exercise Electron's unpatched filesystem.
+      to: { couldNotResolve: true, pathNot: '^original-fs$' }
     },
     {
       name: 'no-circular',
