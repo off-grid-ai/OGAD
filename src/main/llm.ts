@@ -9,6 +9,7 @@ import { LLAMA_SERVER_PORT } from '../shared/ports'
 import {
   DEFAULT_CTX_SIZE,
   DEFAULT_MAX_TOOL_CALLS,
+  DESKTOP_TEXT_SETTINGS_DEFAULTS,
   REASONING_BUDGET_AUTO,
   MAX_TOKENS_AUTO,
   maxTokensForLlamaServer as maxTokensForWire,
@@ -39,7 +40,7 @@ import {
   type ReasoningWireFragment
 } from '@offgrid/models'
 import { acceleratorForEngine, type EngineAccelerator } from '../shared/engine-accelerator'
-import { isValidGgufFile } from './models/gguf'
+import { verifyArtifactFile } from './models/gguf'
 import { readGgufContextLength } from './models/gguf-metadata'
 import { pickFreePort, isPortFree } from './free-port'
 import { engineSpawnEnv } from './llm/spawn-env'
@@ -138,17 +139,17 @@ export class LLMService {
   }
   // User-tunable inference settings (persisted). Context window needs a server
   // respawn to take effect (it's a launch arg); temperature is per-request.
-  private temperature = 0.7
+  private temperature: number = DESKTOP_TEXT_SETTINGS_DEFAULTS.temperature
   private ctxSize = DEFAULT_CTX_SIZE // modest default — context is a ceiling, not a fill-RAM target (KV cache is the bulk of memory). Raise it or use Extreme for more.
   // ONE local gemma server, but many callers (capture distill, day-plan, the
   // secretary, action extraction…). Concurrent requests contend and time out.
   // Serialize them so each gets the server to itself; the per-call timeout sits
   // INSIDE the lock, so it measures execution, not time spent waiting in line.
   // Advanced sampling (LM Studio-style). undefined = let llama.cpp use its default.
-  private topP: number | undefined
-  private topK: number | undefined
-  private minP: number | undefined
-  private repeatPenalty: number | undefined
+  private topP: number | undefined = DESKTOP_TEXT_SETTINGS_DEFAULTS.topP
+  private topK: number | undefined = DESKTOP_TEXT_SETTINGS_DEFAULTS.topK
+  private minP: number | undefined = DESKTOP_TEXT_SETTINGS_DEFAULTS.minP
+  private repeatPenalty: number | undefined = DESKTOP_TEXT_SETTINGS_DEFAULTS.repeatPenalty
   // Auto by default: a reply runs until the model stops (EOS) or the window fills, instead of a
   // fixed 2048-token cap that truncated long answers regardless of the (large) context window.
   private maxTokens = MAX_TOKENS_AUTO
@@ -619,8 +620,8 @@ export class LLMService {
    *  than a few bytes. Catches truncated/corrupt downloads before we hand the file
    *  to llama-server (which would otherwise crash on load). Delegates to the shared
    *  models/gguf implementation (single source of truth with models-manager). */
-  private validateGguf(p: string): boolean {
-    return isValidGgufFile(p, fs)
+  private async validateGguf(p: string): Promise<boolean> {
+    return (await verifyArtifactFile(p, fs, 'runtime')).valid
   }
 
   async init(): Promise<void> {
@@ -662,7 +663,7 @@ export class LLMService {
 
     // Integrity check: a corrupt/truncated weights file would crash llama-server
     // on load. Fail with a clear message so the UI can prompt a re-download.
-    if (!this.validateGguf(this.modelPath)) {
+    if (!(await this.validateGguf(this.modelPath))) {
       console.error(
         `[LLMService] Model file failed GGUF validation (corrupt/truncated): ${this.modelPath}`
       )
@@ -676,12 +677,12 @@ export class LLMService {
       // UI-Mate is a screenshot policy, not a text fallback. The exact paired
       // projector is mandatory at the engine boundary.
       loadGatedAdapter.assertCapabilities(activeArtifacts)
-      if (!this.mmProjPath || !this.validateGguf(this.mmProjPath)) {
+      if (!this.mmProjPath || !(await this.validateGguf(this.mmProjPath))) {
         throw new Error('The UI-Mate mmproj file is corrupt or incomplete. Re-download it.')
       }
     }
     // Other model families keep the existing optional-projector behavior.
-    if (this.mmProjPath && !this.validateGguf(this.mmProjPath)) {
+    if (this.mmProjPath && !(await this.validateGguf(this.mmProjPath))) {
       console.warn(`[LLMService] mmproj failed validation; loading text-only: ${this.mmProjPath}`)
       this.mmProjPath = ''
     }
