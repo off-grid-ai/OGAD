@@ -42,7 +42,7 @@
     "smoke": "bash scripts/smoke-api.sh",
     "smoke:packaged": "bash scripts/smoke-packaged.sh",
     "smoke:dmg": "bash scripts/smoke-dmg-install.sh",
-    "test:swift": "cd swift-tests/TextExtractorKit && swift test",
+    "test:swift": "cd swift-tests/TextExtractorKit && swift test --enable-xctest --disable-swift-testing",
     "test:db": "bash scripts/test-db.sh",
     "depcruise": "depcruise --config .dependency-cruiser.cjs \"src/**/*.ts\" \"src/**/*.tsx\"",
     "knip": "knip --no-gitignore",
