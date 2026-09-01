@@ -163,6 +163,14 @@ export function getActiveRemoteVisionServer():
   return active ? { ...active, apiKey: serverApiKey(active.id) } : null
 }
 
+/** Resolve one persisted server for a route selected by the shared model service. */
+export function getRemoteVisionServer(
+  serverId: string
+): (StoredRemoteVisionServer & { apiKey: string }) | null {
+  const server = readStored().servers.find((candidate) => candidate.id === serverId)
+  return server ? { ...server, apiKey: serverApiKey(server.id) } : null
+}
+
 export function activateRemoteVisionModel(serverId: string, modelId: string): boolean {
   const stored = readStored()
   const server = stored.servers.find(
