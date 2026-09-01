@@ -3,6 +3,7 @@ import { persistToggle } from '@renderer/lib/persist-toggle'
 import {
   DEFAULT_CTX_SIZE,
   DEFAULT_MAX_TOOL_CALLS,
+  DESKTOP_TEXT_SETTINGS_DEFAULTS,
   MAX_MAX_TOOL_CALLS,
   MAX_TOKENS_AUTO,
   MIN_MAX_TOOL_CALLS,
@@ -123,14 +124,14 @@ const DEFAULT_TRANSCRIPTION_MODEL = '__default-transcription-model__'
 const CTX_OPTIONS = [4096, 8192, 16384, 32768, 65536, 131072]
 // Defaults mirror the backend's LLMService field defaults (for "Reset to defaults").
 const DEFAULTS: LlmSettings = {
-  temperature: 0.7,
-  topP: 0.95,
-  topK: 40,
-  minP: 0.05,
-  repeatPenalty: 1.1,
-  maxTokens: MAX_TOKENS_AUTO,
-  maxToolCalls: DEFAULT_MAX_TOOL_CALLS,
-  ctxSize: DEFAULT_CTX_SIZE,
+  temperature: DESKTOP_TEXT_SETTINGS_DEFAULTS.temperature,
+  topP: DESKTOP_TEXT_SETTINGS_DEFAULTS.topP,
+  topK: DESKTOP_TEXT_SETTINGS_DEFAULTS.topK,
+  minP: DESKTOP_TEXT_SETTINGS_DEFAULTS.minP,
+  repeatPenalty: DESKTOP_TEXT_SETTINGS_DEFAULTS.repeatPenalty,
+  maxTokens: DESKTOP_TEXT_SETTINGS_DEFAULTS.maxTokens,
+  maxToolCalls: DESKTOP_TEXT_SETTINGS_DEFAULTS.maxToolCalls,
+  ctxSize: DESKTOP_TEXT_SETTINGS_DEFAULTS.contextLength,
   systemPrompt: '',
   kvCacheType: 'f16',
   flashAttn: false,

@@ -43,6 +43,13 @@ for (const file of files) {
   }
 
   if (
+    fileName === 'src/renderer/src/components/SettingsPanel.tsx' &&
+    /(?:temperature:\s*0\.7|topP:\s*0\.95|topK:\s*40|repeatPenalty:\s*1\.1)/.test(text)
+  ) {
+    report('model-configuration-defaults-are-shared', fileName, source, source, 'local:text-default')
+  }
+
+  if (
     /^(?:src\/main\/models\/(?:gguf|download-verify)|src\/main\/models-manager)\.ts$/.test(fileName) &&
     /\b(?:GGUF_MAGIC|GGUF_MIN_BYTES|isValidGgufHeader|isValidGgufFile)\b|\.corruption\b|toString\(['"]ascii['"]\)\s*===?\s*['"]GGUF/.test(text)
   ) {
