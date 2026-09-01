@@ -8,7 +8,7 @@ import {
   TASK_RUN_ENTITY,
   TASK_VISUAL_STEP_ENTITY
 } from '@offgrid/sync'
-import { SYNCABLE_LLM_SETTING_KEYS } from '@offgrid/models'
+import { encodeChangedModelSettings } from '@offgrid/models'
 export { SYNCABLE_COMPUTER_USE_SETTING_KEYS, SYNCABLE_LLM_SETTING_KEYS } from '@offgrid/models'
 
 /**
@@ -43,14 +43,12 @@ export function emitChangedLlmSettings(
   before: Record<string, unknown>,
   after: Record<string, unknown>
 ): void {
-  for (const key of SYNCABLE_LLM_SETTING_KEYS) {
-    const value = after[key]
-    if (value === undefined || Object.is(value, before[key])) continue
+  for (const setting of encodeChangedModelSettings('desktop', before, after)) {
     emitSyncMutation({
       entity: CORE_SYNC_ENTITIES.modelSetting,
-      entityId: key,
+      entityId: setting.wireKey,
       kind: 'put',
-      fields: { value }
+      fields: { version: setting.version, value: JSON.parse(setting.valueJson) }
     })
   }
 }
