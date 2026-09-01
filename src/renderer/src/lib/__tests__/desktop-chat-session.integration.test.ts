@@ -107,6 +107,73 @@ describe('DesktopChatSession', () => {
     expect(boundary.ragChat).toHaveBeenCalledOnce()
   })
 
+  it('restores a canonical turn and regenerates it through shared invalidation', async () => {
+    const boundary: DesktopChatSessionBoundary = {
+      ragChat: vi.fn(async () => ({ answer: 'Updated answer' })),
+      onRagStream: () => () => undefined,
+      cancelRag: vi.fn(),
+      truncateRagMessages: vi.fn(async () => 1)
+    }
+    const session = new DesktopChatSession(boundary)
+    session.restoreConversation('conversation-a', [
+      {
+        id: 'turn-a',
+        conversationId: 'conversation-a',
+        projectId: 'project-a',
+        userMessage: { role: 'user', content: 'Question turn-a' },
+        assistantMessage: { role: 'assistant', content: 'Original answer' },
+        responseMessages: [{ role: 'assistant', content: 'Original answer' }],
+        status: 'completed',
+        request: {
+          operation: { type: 'text' },
+          partialOutputPolicy: 'preserve-and-stop',
+          request: {}
+        }
+      }
+    ])
+
+    const result = await session.send({
+      ...input('turn-a'),
+      replay: 'regenerate',
+      invalidationKeepCount: 1
+    })
+
+    expect(result.turn.status).toBe('completed')
+    expect(result.response.answer).toBe('Updated answer')
+    expect(boundary.truncateRagMessages).toHaveBeenCalledWith('conversation-a', 1)
+  })
+
+  it('edits a canonical turn and persists the replacement user message when it starts', async () => {
+    const boundary: DesktopChatSessionBoundary = {
+      ragChat: vi.fn(async () => ({ answer: 'Edited answer' })),
+      onRagStream: () => () => undefined,
+      cancelRag: vi.fn(),
+      truncateRagMessages: vi.fn(async () => 0),
+      addRagMessage: vi.fn(async () => ({ id: 2, uuid: 'edited-user' }))
+    }
+    const session = new DesktopChatSession(boundary)
+    const original = await session.send(input('turn-a'))
+    expect(original.turn.status).toBe('completed')
+
+    const edited = await session.send({
+      ...input('turn-a'),
+      userMessage: { role: 'user', content: 'Edited question' },
+      query: 'Edited question',
+      replay: 'edit',
+      invalidationKeepCount: 0,
+      userPersistence: { content: 'Edited question' }
+    })
+
+    expect(edited.turn.userMessage).toEqual({ role: 'user', content: 'Edited question' })
+    expect(boundary.truncateRagMessages).toHaveBeenCalledWith('conversation-a', 0)
+    expect(boundary.addRagMessage).toHaveBeenCalledWith(
+      'conversation-a',
+      'user',
+      'Edited question',
+      undefined
+    )
+  })
+
   it('keeps complete tool rounds in the shared canonical response transcript', async () => {
     const boundary: DesktopChatSessionBoundary = {
       ragChat: vi.fn(async () => ({ answer: '' })),

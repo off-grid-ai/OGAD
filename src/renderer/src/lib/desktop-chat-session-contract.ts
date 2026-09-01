@@ -84,6 +84,7 @@ export interface DesktopChatSessionBoundary {
     content: string,
     context?: unknown
   ): Promise<{ id: number; uuid: string }>
+  truncateRagMessages?(conversationId: string, keepCount: number): Promise<unknown>
 }
 
 export interface DesktopChatSessionInput {
@@ -97,6 +98,8 @@ export interface DesktopChatSessionInput {
   thinking: boolean
   images: string[]
   userPersistence?: { content: string; context?: unknown }
+  replay?: 'regenerate' | 'edit'
+  invalidationKeepCount?: number
 }
 
 export interface DesktopChatSessionResult {

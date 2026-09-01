@@ -2,15 +2,20 @@ import {
   ChatSessionService,
   type ChatQueueProjection,
   type ChatSessionEvent,
-  type ChatSessionRepositoryPort,
   type ChatTurn,
   type GenerationEvents,
   type GenerationMessage,
-  type GenerationResult,
-  type RuntimeModel
+  type GenerationResult
 } from '@offgrid/models'
 import type { RagChatResultContract } from '../../../shared/ipc-contracts'
 import { subscribeDesktopChatStream } from './desktop-chat-stream-hub'
+import { DesktopTurnRepository } from './desktop-chat-session-repository'
+import { publishDesktopChatEvent } from './desktop-chat-session-events'
+import {
+  desktopHistory,
+  desktopImageResult,
+  desktopTextResult
+} from './desktop-chat-session-policy'
 import type {
   DesktopChatSessionBoundary,
   DesktopChatSessionInput,
@@ -43,42 +48,6 @@ interface TurnExecution {
   imageResponse?: DesktopImageGenerationResponse
 }
 
-const DESKTOP_CHAT_ROUTE: RuntimeModel = {
-  id: 'active-text',
-  name: 'Active text model',
-  kind: 'text',
-  modality: 'text',
-  source: 'local',
-  adapterId: 'desktop-chat-ipc',
-  capabilities: {},
-  installed: true,
-  ready: true,
-  loaded: true
-}
-
-class DesktopTurnRepository implements ChatSessionRepositoryPort {
-  private readonly conversations = new Map<string, ChatTurn[]>()
-
-  async read(conversationId: string): Promise<readonly ChatTurn[]> {
-    return this.conversations.get(conversationId) ?? []
-  }
-
-  async write(conversationId: string, turns: readonly ChatTurn[]): Promise<void> {
-    this.conversations.set(conversationId, [...turns])
-  }
-
-  invalidate(conversationId: string): void {
-    this.conversations.delete(conversationId)
-  }
-}
-
-/**
- * Desktop composition adapter for the shared chat lifecycle.
- *
- * The shared service owns queueing, cancellation, partial-output rules, and turn state. Electron
- * remains a transport boundary: the legacy `rag:chat` IPC handler still projects Desktop RAG and
- * the real main-process GenerationService until that handler becomes a first-class generation port.
- */
 export class DesktopChatSession {
   private readonly repository = new DesktopTurnRepository()
   private readonly executions = new Map<string, TurnExecution>()
@@ -89,7 +58,11 @@ export class DesktopChatSession {
     this.service = new ChatSessionService(
       {
         generate: (request, events) =>
-          this.generate(request.identity?.turnId, request.messages ?? [], request.signal, events)
+          this.generate(request.identity?.turnId, {
+            messages: request.messages ?? [],
+            signal: request.signal,
+            events
+          })
       },
       this.repository,
       { events: { publish: (event) => this.publish(event) } }
@@ -124,10 +97,21 @@ export class DesktopChatSession {
       })
   }
 
+  restoreConversation(conversationId: string, turns: readonly ChatTurn[]): void {
+    if (
+      this.service
+        .queueProjection()
+        .entries.some((entry) => entry.conversationId === conversationId)
+    ) {
+      return
+    }
+    this.repository.restore(conversationId, turns)
+  }
+
   async send(input: DesktopChatSessionInput): Promise<DesktopChatSessionResult> {
     this.executions.set(input.turnId, { input, route: 'rag' })
     try {
-      const turn = await this.service.send({
+      const turn = await this.run(input, {
         conversationId: input.conversationId,
         turnId: input.turnId,
         projectId: input.projectId ?? undefined,
@@ -148,7 +132,7 @@ export class DesktopChatSession {
   async sendWithTools(input: DesktopToolChatSessionInput): Promise<DesktopToolChatSessionResult> {
     this.executions.set(input.turnId, { input, route: 'tools' })
     try {
-      const turn = await this.service.send({
+      const turn = await this.run(input, {
         conversationId: input.conversationId,
         turnId: input.turnId,
         projectId: input.projectId ?? undefined,
@@ -169,7 +153,7 @@ export class DesktopChatSession {
   async sendImage(input: DesktopImageChatSessionInput): Promise<DesktopImageChatSessionResult> {
     this.executions.set(input.turnId, { input, route: 'image' })
     try {
-      const turn = await this.service.send({
+      const turn = await this.run(input, {
         conversationId: input.conversationId,
         turnId: input.turnId,
         projectId: input.projectId ?? undefined,
@@ -217,16 +201,36 @@ export class DesktopChatSession {
     this.repository.invalidate(conversationId)
   }
 
+  private run(
+    input: DesktopChatSessionInput,
+    command: Parameters<ChatSessionService['send']>[0]
+  ): Promise<ChatTurn> {
+    if (input.replay === 'regenerate') {
+      return this.service.regenerate({ conversationId: input.conversationId, turnId: input.turnId })
+    }
+    if (input.replay === 'edit') {
+      return this.service.edit({
+        conversationId: input.conversationId,
+        turnId: input.turnId,
+        userMessage: input.userMessage
+      })
+    }
+    return this.service.send(command)
+  }
+
   private async generate(
     turnId: string | undefined,
-    messages: readonly GenerationMessage[],
-    signal: AbortSignal | undefined,
-    events?: GenerationEvents
+    context: {
+      messages: readonly GenerationMessage[]
+      signal: AbortSignal | undefined
+      events?: GenerationEvents
+    }
   ): Promise<GenerationResult> {
     if (!turnId) throw new Error('Desktop chat generation requires a turn identity')
     const execution = this.executions.get(turnId)
     if (!execution) throw new Error(`Desktop chat execution is missing for turn ${turnId}`)
     const { input } = execution
+    const { messages, signal, events } = context
     const unsubscribe = subscribeDesktopChatStream(this.boundary, (event) => {
       if (event.streamId !== input.turnId) return
       if (event.type === 'content' && event.text) events?.chunk?.({ content: event.text })
@@ -235,7 +239,7 @@ export class DesktopChatSession {
     try {
       if (execution.route === 'image') return this.generateImage(execution, signal)
       if (execution.route === 'tools') {
-        return this.generateTools(execution, messages, signal, events)
+        return this.generateTools(execution, context)
       }
       return this.generateRag(execution, messages, signal)
     } finally {
@@ -253,41 +257,20 @@ export class DesktopChatSession {
     const imageInput = execution.input as DesktopImageChatSessionInput
     const response = await this.boundary.generateImage(imageInput.request)
     execution.imageResponse = response
-    return {
-      model: {
-        ...DESKTOP_CHAT_ROUTE,
-        id: response.model ?? 'active-image',
-        kind: 'image',
-        modality: 'image'
-      },
-      output: {
-        type: 'image',
-        images: [
-          {
-            id: response.syncId,
-            uri: response.path,
-            mimeType: 'image/png',
-            seed: response.seed
-          }
-        ]
-      },
-      content: '',
-      reasoning: '',
-      toolCalls: [],
-      finishReason: signal?.aborted ? 'cancelled' : 'stop',
-      attemptedModelIds: [response.model ?? 'active-image'],
-      attemptedRouteIds: []
-    }
+    return desktopImageResult(response, signal)
   }
 
   private async generateTools(
     execution: TurnExecution,
-    messages: readonly GenerationMessage[],
-    signal: AbortSignal | undefined,
-    events?: GenerationEvents
+    context: {
+      messages: readonly GenerationMessage[]
+      signal: AbortSignal | undefined
+      events?: GenerationEvents
+    }
   ): Promise<GenerationResult> {
     if (!this.boundary.toolChat) throw new Error('Desktop tool-chat boundary is unavailable')
     const input = execution.input as DesktopToolChatSessionInput
+    const { messages, signal, events } = context
     const response = await this.boundary.toolChat(input.query, desktopHistory(messages), {
       connectors: input.connectors,
       conversationId: input.conversationId,
@@ -319,7 +302,7 @@ export class DesktopChatSession {
         })
       })
     }
-    return this.textResult(response.answer ?? '', signal)
+    return desktopTextResult(response.answer ?? '', signal)
   }
 
   private async generateRag(
@@ -340,55 +323,17 @@ export class DesktopChatSession {
       input.images
     )
     execution.response = response
-    return this.textResult(response.answer, signal)
-  }
-
-  private textResult(content: string, signal: AbortSignal | undefined): GenerationResult {
-    return {
-      model: DESKTOP_CHAT_ROUTE,
-      output: { type: 'text', content },
-      content,
-      reasoning: '',
-      toolCalls: [],
-      finishReason: signal?.aborted ? 'cancelled' : 'stop',
-      attemptedModelIds: [DESKTOP_CHAT_ROUTE.id],
-      attemptedRouteIds: []
-    }
+    return desktopTextResult(response.answer, signal)
   }
 
   private async publish(event: ChatSessionEvent): Promise<void> {
-    if (event.type === 'started') {
-      const execution = this.executions.get(event.turn.id)
-      const persistence = execution?.input.userPersistence
-      if (execution && persistence && this.boundary.addRagMessage) {
-        await this.boundary.addRagMessage(
-          execution.input.conversationId,
-          'user',
-          persistence.content,
-          persistence.context
-        )
-      }
-    }
-    for (const listener of this.listeners) listener(event)
+    await publishDesktopChatEvent({
+      event,
+      inputFor: (turnId) => this.executions.get(turnId)?.input,
+      boundary: this.boundary,
+      listeners: this.listeners
+    })
   }
-}
-
-function desktopHistory(messages: readonly GenerationMessage[]): Array<{
-  role: string
-  content: string
-}> {
-  return messages.slice(0, -1).flatMap((message) => {
-    if (message.role !== 'user' && message.role !== 'assistant') return []
-    return [{ role: message.role, content: generationMessageText(message) }]
-  })
-}
-
-function generationMessageText(message: GenerationMessage): string {
-  if (typeof message.content === 'string') return message.content
-  return message.content
-    .filter((part) => part.type === 'text')
-    .map((part) => part.text)
-    .join('\n')
 }
 
 export function createDesktopChatSession(

@@ -26,6 +26,7 @@ import {
   type SyncedTurnStatus
 } from '@offgrid/sync'
 import type { VoiceTurnMode } from '@offgrid/speech'
+import type { ChatTurn } from '@offgrid/models'
 import ReactMarkdown, { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -79,7 +80,8 @@ import {
   buildAssistantContext,
   readReasoning,
   readResponseCutoff,
-  readGenerationMetrics
+  readGenerationMetrics,
+  readPersistedChatSessionTurn
 } from '../lib/message-persistence'
 import { formatGenerationMetrics, type GenerationMetrics } from '../../../shared/generation-metrics'
 import {
@@ -578,6 +580,47 @@ function mapRagMessage(message: RawRagMessage): ChatMessage[] {
 
 function mapRagMessages(raw: RawRagMessage[]): ChatMessage[] {
   return raw.flatMap<ChatMessage>(mapRagMessage)
+}
+
+function restoredChatSessionTurns(
+  conversationId: string,
+  raw: readonly RawRagMessage[]
+): ChatTurn[] {
+  let userMessage: RawRagMessage | undefined
+  return raw.flatMap((message) => {
+    if (message.role === 'user') {
+      userMessage = message
+      return []
+    }
+    if (message.role !== 'assistant' || !userMessage) return []
+    const session = readPersistedChatSessionTurn(parseRagContext(message.context))
+    if (!session) return []
+    const imageOperation = session.responseMessages.some(
+      (response) =>
+        Array.isArray(response.content) &&
+        response.content.some((part) => part.type === 'image')
+    )
+    return [
+      {
+        id: session.turnId,
+        conversationId,
+        userMessage: { role: 'user', content: userMessage.content },
+        responseMessages: session.responseMessages,
+        assistantMessage: session.responseMessages.findLast(
+          (response) => response.role === 'assistant'
+        ),
+        status: session.status,
+        request: {
+          operation: imageOperation
+            ? { type: 'image', prompt: userMessage.content }
+            : { type: 'text' },
+          allowFallback: !imageOperation,
+          partialOutputPolicy: 'preserve-and-stop',
+          request: {}
+        }
+      }
+    ]
+  })
 }
 
 /** Durable reloads replace durable rows but cannot erase a main-owned active stream. */
@@ -2460,9 +2503,13 @@ export function MemoryChat({
       conversationMessageLoadVersionRef.current.set(conversationId, nextVersion)
       const rawMessages = await window.api.getRagMessages(conversationId)
       if (conversationMessageLoadVersionRef.current.get(conversationId) !== nextVersion) return null
+      desktopChatSession.restoreConversation(
+        conversationId,
+        restoredChatSessionTurns(conversationId, rawMessages)
+      )
       return mapRagMessages(rawMessages)
     },
-    []
+    [desktopChatSession]
   )
   const refreshConversationMessages = useCallback(
     async (conversationId: string): Promise<void> => {
@@ -3485,6 +3532,7 @@ export function MemoryChat({
       conversationId?: string
       imageRequest?: ImageGenerationRequestContract
       projectIdOverride?: string | null
+      sessionReplay?: { type: 'regenerate' | 'edit'; turnId: string; keepCount: number }
       /** A form submission is user input even though its text is supplied as an argument. */
       asUserInput?: boolean
     }
@@ -3657,7 +3705,7 @@ export function MemoryChat({
     const persistedAttachments = initAttachment
       ? [...attachmentMetadata, initAttachment]
       : attachmentMetadata
-    const userPersistence = regen
+    const userPersistence = regen && opts?.sessionReplay?.type !== 'edit'
       ? undefined
       : {
           content: trimmed,
@@ -3736,7 +3784,7 @@ export function MemoryChat({
       try {
         const { response: img, turn: sessionTurn } = await desktopChatSession.sendImage({
           conversationId: convId,
-          turnId: `image-${crypto.randomUUID()}`,
+          turnId: opts?.sessionReplay?.turnId ?? `image-${crypto.randomUUID()}`,
           projectId,
           userMessage: { role: 'user', content: trimmed },
           query: imageRequest.prompt,
@@ -3745,6 +3793,8 @@ export function MemoryChat({
           thinking: false,
           images: [],
           userPersistence,
+          replay: opts?.sessionReplay?.type,
+          invalidationKeepCount: opts?.sessionReplay?.keepCount,
           request: {
             ...imageRequest,
             conversationId: convId, // the turn's own conversation (activeConversationId can lag for a fresh/queued chat)
@@ -3767,13 +3817,24 @@ export function MemoryChat({
           imageRequest.prompt,
           img.prompt
         )
+        const imageContext = buildAssistantContext(
+          withGeneratedImageReference({ imageMetadata }, { id: img.syncId, path: img.path }),
+          {
+            session: {
+              turnId: sessionTurn.id,
+              status: sessionTurn.status,
+              responseMessages: sessionTurn.responseMessages ?? []
+            }
+          }
+        )
         const assistantMessage: ChatMessage = {
           id: `a-${Date.now()}`,
           role: 'assistant',
           ...completedImage,
           image: img.dataUrl,
           imagePath: img.path,
-          imageMetadata
+          imageMetadata,
+          context: imageContext
         }
         setConvMessages(convId, (prev) => [...prev, assistantMessage])
         try {
@@ -3781,16 +3842,7 @@ export function MemoryChat({
             convId,
             'assistant',
             completedImage.storedContent,
-            buildAssistantContext(
-              withGeneratedImageReference({ imageMetadata }, { id: img.syncId, path: img.path }),
-              {
-                session: {
-                  turnId: sessionTurn.id,
-                  status: sessionTurn.status,
-                  responseMessages: sessionTurn.responseMessages ?? []
-                }
-              }
-            )
+            imageContext
           )
           await announceImageMessagePersisted(convId, stored.uuid)
         } catch {
@@ -3848,7 +3900,7 @@ export function MemoryChat({
       // step, then the answer - and the stop button aborts it via rag:cancel.
       if (agenticActive) {
         if (cancelledRef.current.has(convId)) return
-        const toolStreamId = `a-${Date.now()}`
+        const toolStreamId = opts?.sessionReplay?.turnId ?? `a-${Date.now()}`
         activeStreamId = toolStreamId
         streamConvRef.current.set(toolStreamId, convId!)
         setConvMessages(convId, (prev) => [
@@ -3883,6 +3935,8 @@ export function MemoryChat({
           turnId: toolStreamId,
           noMemory,
           userPersistence,
+          replay: opts?.sessionReplay?.type,
+          invalidationKeepCount: opts?.sessionReplay?.keepCount,
           thinking: thinkingEnabled
         })
         const toolCalls = (tr?.toolCalls || []).map(
@@ -3917,14 +3971,6 @@ export function MemoryChat({
         const toolReasoning = reasoningByStream.current[toolStreamId]
         delete reasoningByStream.current[toolStreamId] // done with this stream — free it
         delete answerByStream.current[toolStreamId]
-        // Finalize the streamed placeholder in place (never append a second bubble).
-        setConvMessages(convId, (prev) =>
-          prev.map((m) =>
-            m.id === toolStreamId
-              ? { ...m, content: answer, context, toolCalls, activity: undefined, streaming: false }
-              : m
-          )
-        )
         const toolCtxWithReasoning = buildAssistantContext(toolCtx, {
           reasoning: toolReasoning,
           session: {
@@ -3933,6 +3979,21 @@ export function MemoryChat({
             responseMessages: sessionTurn.responseMessages ?? []
           }
         })
+        // Finalize the streamed placeholder in place (never append a second bubble).
+        setConvMessages(convId, (prev) =>
+          prev.map((m) =>
+            m.id === toolStreamId
+              ? {
+                  ...m,
+                  content: answer,
+                  context: toolCtxWithReasoning,
+                  toolCalls,
+                  activity: undefined,
+                  streaming: false
+                }
+              : m
+          )
+        )
         // Deferred image generation: the tool loop only RECORDS prompts (it never generates inline,
         // which would evict the LLM). Each completed request gets one generated file and one durable
         // assistant image message. A message context has one imageRef by design; putting two results
@@ -4057,7 +4118,7 @@ export function MemoryChat({
 
       // Placeholder message that fills in live as tokens/reasoning stream in
       // (matched by streamId in the onRagStream subscription).
-      const streamId = `a-${Date.now()}`
+      const streamId = opts?.sessionReplay?.turnId ?? `a-${Date.now()}`
       activeStreamId = streamId // expose to finally for cleanup
       streamConvRef.current.set(streamId, convId!)
       setConvMessages(convId, (prev) => [
@@ -4087,7 +4148,9 @@ export function MemoryChat({
         noMemory,
         thinking: thinkingEnabled,
         images: imagePaths,
-        userPersistence
+        userPersistence,
+        replay: opts?.sessionReplay?.type,
+        invalidationKeepCount: opts?.sessionReplay?.keepCount
       })
       const resultContext = result.context as RagContext | undefined
 
@@ -4167,13 +4230,23 @@ export function MemoryChat({
         const ragReasoning = reasoningByStream.current[streamId]
         delete reasoningByStream.current[streamId] // done with this stream — free it
         delete answerByStream.current[streamId]
+        const assistantContext = buildAssistantContext(resultContext, {
+          reasoning: ragReasoning,
+          cutoff: result.cutoff,
+          metrics: result.metrics,
+          session: {
+            turnId: sessionTurn.id,
+            status: sessionTurn.status,
+            responseMessages: sessionTurn.responseMessages ?? []
+          }
+        })
         setConvMessages(convId, (prev) =>
           prev.map((m) =>
             m.id === streamId
               ? {
                   ...m,
                   content: assistantContent,
-                  context: resultContext,
+                  context: assistantContext,
                   cutoff: result.cutoff,
                   // On the LIVE message too, not only in the persisted context: the numbers are
                   // about the turn that just finished, so waiting for a reload to show them defeats
@@ -4207,16 +4280,7 @@ export function MemoryChat({
             convId,
             'assistant',
             assistantContent,
-            buildAssistantContext(resultContext, {
-              reasoning: ragReasoning,
-              cutoff: result.cutoff,
-              metrics: result.metrics,
-              session: {
-                turnId: sessionTurn.id,
-                status: sessionTurn.status,
-                responseMessages: sessionTurn.responseMessages ?? []
-              }
-            })
+            assistantContext
           )
           setConvMessages(convId, (previous) =>
             previous.map((message) =>
@@ -4736,6 +4800,7 @@ export function MemoryChat({
       if (idx < 0) return
       // Regenerating an assistant answer keeps prior answers as navigable variants.
       const target = messages[idx]! // idx >= 0 checked above
+      const sessionTurn = readPersistedChatSessionTurn(target.context)
       if (target.role === 'assistant' && target.content.trim()) {
         pendingVariantsRef.current =
           target.variants && target.variants.length ? target.variants : [target.content]
@@ -4751,11 +4816,23 @@ export function MemoryChat({
           void (async () => {
             await stopLiveWebUseForConversation(activeConversationId)
             setMessages((prev) => prev.slice(0, i + 1))
-            if (activeConversationId)
+            if (activeConversationId && !sessionTurn)
               await window.api.truncateRagMessages(activeConversationId, i + 1)
             // The turn's own attachments, not the composer's - the composer was cleared when this
             // turn was first sent, so regenerating without them re-asks the question WITHOUT its image.
-            await sendMessage(content, { regen: true, atts: attachmentsOf(mi) })
+            await sendMessage(content, {
+              regen: true,
+              atts: attachmentsOf(mi),
+              ...(sessionTurn
+                ? {
+                    sessionReplay: {
+                      type: 'regenerate' as const,
+                      turnId: sessionTurn.turnId,
+                      keepCount: i + 1
+                    }
+                  }
+                : {})
+            })
           })()
           return
         }
@@ -4782,6 +4859,10 @@ export function MemoryChat({
     // record of it - so the chip vanished from the thread and every later regenerate lost it too.
     const cid = activeConversationId
     const edited = messages[idx]
+    const sessionTurn = messages
+      .slice(idx + 1)
+      .map((message) => readPersistedChatSessionTurn(message.context))
+      .find((turn) => turn !== undefined)
     const keptAtts = edited ? attachmentsOf(edited) : []
     const persisted = keptAtts.length
       ? {
@@ -4799,8 +4880,10 @@ export function MemoryChat({
       await stopLiveWebUseForConversation(cid)
       try {
         if (cid) {
-          await window.api.truncateRagMessages(cid, idx)
-          await window.api.addRagMessage(cid, 'user', text, persisted)
+          if (!sessionTurn) {
+            await window.api.truncateRagMessages(cid, idx)
+            await window.api.addRagMessage(cid, 'user', text, persisted)
+          }
         }
       } catch (error) {
         console.error('Failed to persist the edited user message:', error)
@@ -4814,7 +4897,19 @@ export function MemoryChat({
         return
       }
       try {
-        await sendMessage(text, { regen: true, atts: keptAtts })
+        await sendMessage(text, {
+          regen: true,
+          atts: keptAtts,
+          ...(sessionTurn
+            ? {
+                sessionReplay: {
+                  type: 'edit' as const,
+                  turnId: sessionTurn.turnId,
+                  keepCount: idx
+                }
+              }
+            : {})
+        })
       } catch (error) {
         console.error('Failed to regenerate the edited message:', error)
       }
