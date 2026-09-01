@@ -34,6 +34,7 @@ import {
   fitMessage,
   type SetupItemKind
 } from './models/setup-logic'
+import { platformFetch } from '@offgrid/models/fetch'
 
 export type ComponentStatus = SystemHealthComponentStatusContract
 export type HealthComponent = SystemHealthComponentContract
@@ -229,7 +230,9 @@ export async function estimateModelFit(modelId: string): Promise<FitEstimate> {
   const gb = ramGb()
   try {
     const { CATALOG, resolveHuggingFaceModel, fitLevel } = await import('@offgrid/models')
-    const entry = CATALOG.find((m) => m.id === modelId) ?? (await resolveHuggingFaceModel(modelId))
+    const entry =
+      CATALOG.find((m) => m.id === modelId) ??
+      (await resolveHuggingFaceModel(modelId, { fetchImpl: platformFetch }))
     const weightsGb =
       (entry?.files.reduce((s: number, f: { sizeBytes?: number }) => s + (f.sizeBytes ?? 0), 0) ??
         0) / 1e9

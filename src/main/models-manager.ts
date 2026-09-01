@@ -53,6 +53,7 @@ import {
 import { getRemoteVisionServerSettings } from './vision/remote-vision-server'
 import { desktopModelServices } from './model-services'
 import { desktopModelSelectionPersistence } from './model-selection-persistence'
+import { platformFetch } from '@offgrid/models/fetch'
 
 export interface DownloadProgress {
   modelId: string
@@ -239,7 +240,11 @@ export async function listInstalled(): Promise<string[]> {
 export async function searchModels(query: string, kind?: string): Promise<unknown[]> {
   try {
     const { searchHuggingFace } = await import('@offgrid/models')
-    return await searchHuggingFace(query, { limit: 30, kind: kind as never })
+    return await searchHuggingFace(query, {
+      limit: 30,
+      kind: kind as never,
+      fetchImpl: platformFetch
+    })
   } catch (err) {
     console.error('[models] HF search failed:', err)
     return []
@@ -290,7 +295,7 @@ export async function downloadModel(
   }
   const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models')
   const inCatalog = CATALOG.find((m) => m.id === modelId)
-  const entry = inCatalog ?? (await resolveHuggingFaceModel(modelId))
+  const entry = inCatalog ?? (await resolveHuggingFaceModel(modelId, { fetchImpl: platformFetch }))
   if (!entry) {
     writeDiagnosticLog('models.download', 'request.rejected', { modelId, reason: 'unknown_model' })
     return publishRefusal(modelId, 'unknown model', onProgress)
@@ -553,7 +558,9 @@ export async function deleteModel(modelId: string): Promise<DeleteModelResult> {
     })
   }
 
-  const entry = CATALOG.find((m) => m.id === modelId) ?? (await resolveHuggingFaceModel(modelId))
+  const entry =
+    CATALOG.find((m) => m.id === modelId) ??
+    (await resolveHuggingFaceModel(modelId, { fetchImpl: platformFetch }))
   if (!entry) return { success: false, error: 'unknown model' }
   let freed = 0
 
@@ -652,7 +659,8 @@ async function setActiveLlamaModel(
     llm.reloadModel()
     return { success: true }
   }
-  const entry = catalogEntry ?? (await resolveHuggingFaceModel(modelId))
+  const entry =
+    catalogEntry ?? (await resolveHuggingFaceModel(modelId, { fetchImpl: platformFetch }))
   if (!entry) return { success: false, error: 'unknown model' }
   if (!acceptsKind(entry.kind)) {
     return { success: false, error: `${entry.kind} models are not loadable as ${expectedKind}` }
@@ -819,7 +827,8 @@ export async function activateModel(
     const catalogEntry = CATALOG.find((m) => m.id === modelId)
     kind =
       downloadedVariant(downloaded, modelId)?.kind ??
-      (catalogEntry ?? (await resolveHuggingFaceModel(modelId)))?.kind
+      (catalogEntry ??
+        (await resolveHuggingFaceModel(modelId, { fetchImpl: platformFetch })))?.kind
     const requested = requestedKind as Parameters<typeof modelSupportsKind>[1]
     if (catalogEntry && requestedKind && modelSupportsKind(catalogEntry, requested)) {
       requestedModal = modalityForModel(requestedKind)
@@ -1313,7 +1322,7 @@ export async function clearDownload(
     const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models')
     const entry =
       CATALOG.find((m) => m.id === modelId) ??
-      (await resolveHuggingFaceModel(modelId).catch(() => null))
+      (await resolveHuggingFaceModel(modelId, { fetchImpl: platformFetch }).catch(() => null))
     for (const f of entry?.files ?? []) {
       const part = path.join(dir, `${f.name}.part`)
       try {
