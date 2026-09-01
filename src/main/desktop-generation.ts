@@ -28,6 +28,7 @@ export interface DesktopGenerationOptions {
   reasoningEffort?: ReasoningEffort
   maxTokens?: number
   maxToolRounds?: number
+  maxToolCalls?: number
   timeoutMs?: number
   signal?: AbortSignal
   allowFallback?: boolean
@@ -132,6 +133,7 @@ export async function generateDesktopMessages(
     },
     maxTokens: options.maxTokens,
     maxToolRounds: options.maxToolRounds,
+    maxToolCalls: options.maxToolCalls,
     timeoutMs: options.timeoutMs,
     signal: options.signal,
     ...(options.thinking === undefined

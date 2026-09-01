@@ -721,6 +721,7 @@ export async function toolChat(
       thinking: opts.thinking,
       signal: opts.signal,
       maxToolRounds,
+      maxToolCalls: maxToolRounds,
       identity: {
         conversationId: opts.conversationId ?? turnId,
         turnId,
