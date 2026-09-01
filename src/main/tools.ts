@@ -21,8 +21,11 @@ import {
   findToolCatalogEntry,
   rankToolSchemas,
   rankToolSchemasByEmbedding,
-  stripHtmlTags as stripTags
+  stripHtmlTags as stripTags,
+  ToolEmbeddingCache
 } from '@offgrid/models'
+
+const toolEmbeddingCache = new ToolEmbeddingCache()
 
 const sharedToolDefinition = (name: string) =>
   catalogEntryToDefinition(findToolCatalogEntry(name)!)
@@ -629,7 +632,7 @@ export async function toolChat(
       const { embeddings } = await import('./embeddings')
       rankedTools = await rankToolSchemasByEmbedding(query, rawTools, builtins.length, {
         embed: (t) => embeddings.generateEmbedding(t)
-      })
+      }, toolEmbeddingCache)
     } catch {
       rankedTools = rankToolSchemas(query, rawTools, builtins.length)
     }
