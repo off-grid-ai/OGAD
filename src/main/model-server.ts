@@ -28,8 +28,28 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { randomUUID } from 'crypto'
+import {
+  GatewayAsyncRequestStore,
+  buildGatewayModalities,
+  classifyGatewayImageReference as classifyRef,
+  gatewayErrorBody as errBody,
+  gatewayErrorMeta as errMeta,
+  gatewayImageExtensionForMime as extForMime,
+  gatewayModelEntry as modelEntry,
+  gatewayOllamaModelMirror as ollamaMirror,
+  matchGatewayPollRoute as matchPollRoute,
+  parseGatewayMultipart as parseMultipart,
+  parseGatewayTranscriptionOptions as transcriptionRequestOptions,
+  requestsAsyncResponse as isAsync,
+  resolveGatewayImageDimensions as resolveDims,
+  safeGatewayProxyResponse as safeProxyResponse,
+  sanitizeGatewayChatMessages as sanitizeChatMessages,
+  stripGatewayFileScheme as stripFileScheme,
+  tagGatewayLlmModels as tagLlmEntries,
+  type GatewayAsyncRequest,
+  type GatewayModalities
+} from '@offgrid/models'
 import { getActiveTranscription } from './transcription/select'
-import { transcriptionRequestOptions } from './model-server/transcription-request'
 import * as tts from './tts'
 import { generateImage, imageGenStatus, activeImageModel, type ImageGenParams } from './imagegen'
 import { whisperModel } from './rag/extractors'
@@ -42,24 +62,9 @@ import { llm, type LlmSettings } from './llm'
 import { GATEWAY_HOST, GATEWAY_BIND_HOST, GATEWAY_PORT } from '../shared/ports'
 import { pickFreePort } from './free-port'
 import { retryWithDeadline } from './lib/retry'
-import { resolveDims } from './model-server/dimensions'
 import { guardProxyStreams } from './stream-guards'
-import {
-  classifyRef,
-  decodeDataUrl,
-  stripFileScheme,
-  mimeFromExt,
-  extForMime,
-  toDataUrl
-} from './model-server/data-url'
-import { errBody, errMeta } from './model-server/errors'
-import { isAsync, matchPollRoute } from './model-server/async-request'
-import { sanitizeChatMessages } from './model-server/chat-messages'
+import { decodeDataUrl, mimeFromExt, toDataUrl } from './model-server/image-bytes'
 import { applyThinkingPayload } from './llm/chat-payload'
-import { parseMultipart } from './model-server/multipart'
-import { tagLlmEntries, modelEntry, ollamaMirror } from './model-server/models-list'
-import { buildGatewayModalities, type GatewayModalities } from './model-server/health'
-import { safeProxyResponse } from './model-server/proxy-response'
 import { writeDiagnosticLog } from './diagnostics-log'
 import { parseRemoteVisionModelId, remoteVisionModelId } from '../shared/remote-vision-server'
 import { getActiveRemoteVisionServer } from './vision/remote-vision-server'
@@ -110,66 +115,13 @@ function json(res: http.ServerResponse, status: number, body: unknown): void {
 // We model the long operation as a *resource you read*, not a `/poll` verb —
 // that's the RESTful async request-reply pattern.
 
-type ReqStatus = 'queued' | 'running' | 'completed' | 'failed'
-
-interface ApiRequest {
-  id: string
-  kind: string // chat | embedding | transcription | speech | image
-  collection: string // RESTful base path the resource lives under
-  status: ReqStatus
-  created_at: number
-  updated_at: number
-  result?: unknown
-  error?: { message: string; type: string }
-}
-
-const requests = new Map<string, ApiRequest>()
-const REQUESTS_MAX = 500
-
-function createRequest(id: string, kind: string, collection: string): ApiRequest {
-  if (requests.size >= REQUESTS_MAX) {
-    const oldest = requests.keys().next().value
-    if (oldest) requests.delete(oldest)
-  }
-  const now = Date.now()
-  const r: ApiRequest = { id, kind, collection, status: 'queued', created_at: now, updated_at: now }
-  requests.set(id, r)
-  return r
-}
-
-/** Move a request through running → completed/failed around the work promise. */
-function settle<T>(r: ApiRequest, work: Promise<T>): Promise<T> {
-  r.status = 'running'
-  r.updated_at = Date.now()
-  return work.then(
-    (result) => {
-      r.status = 'completed'
-      r.result = result
-      r.updated_at = Date.now()
-      return result
-    },
-    (e) => {
-      const { type, message } = errMeta(e)
-      r.status = 'failed'
-      r.error = { message, type }
-      r.updated_at = Date.now()
-      throw e
-    }
-  )
-}
+const requests = new GatewayAsyncRequestStore()
 
 /** 202 Accepted with the request resource + Location for polling. */
-function dispatchAsync(res: http.ServerResponse, r: ApiRequest): void {
+function dispatchAsync(res: http.ServerResponse, r: GatewayAsyncRequest): void {
   const pollUrl = `${r.collection}/${r.id}`
   res.setHeader('Location', pollUrl)
-  json(res, 202, {
-    request_id: r.id,
-    object: 'request',
-    kind: r.kind,
-    status: r.status,
-    poll_url: pollUrl,
-    created_at: r.created_at
-  })
+  json(res, 202, requests.accepted(r))
 }
 
 /** GET a request resource — the RESTful poll. */
@@ -179,18 +131,7 @@ function handlePoll(res: http.ServerResponse, id: string): void {
     json(res, 404, errBody(`No request with id '${id}'.`, 'not_found'))
     return
   }
-  const body: Record<string, unknown> = {
-    request_id: r.id,
-    object: 'request',
-    kind: r.kind,
-    status: r.status,
-    created_at: r.created_at,
-    updated_at: r.updated_at,
-    poll_url: `${r.collection}/${r.id}`
-  }
-  if (r.status === 'completed') body.result = r.result
-  if (r.status === 'failed') body.error = r.error
-  json(res, 200, body)
+  json(res, 200, requests.polled(r))
 }
 
 // Proxy a request to the local llama-server (response streaming preserved).
@@ -402,14 +343,14 @@ async function serve(
   run: () => Promise<unknown>,
   syncRespond: (result: unknown) => void
 ): Promise<void> {
-  const r = createRequest(rid, kind, collection)
+  const r = requests.create(rid, kind, collection)
   if (asyncFlag) {
-    settle(r, run()).catch(() => {}) // errors captured on the request resource
+    requests.settle(r, run()).catch(() => {}) // errors captured on the request resource
     dispatchAsync(res, r)
     return
   }
   try {
-    const result = await settle(r, run())
+    const result = await requests.settle(r, run())
     syncRespond(result)
   } catch (e) {
     const { status, type, message } = errMeta(e)
