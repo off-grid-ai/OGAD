@@ -17,20 +17,16 @@ import {
 import {
   CATALOG,
   ensureCheckpointExtension as ensureCheckpointExt,
-  evaluateImageMemory as evaluateMemoryGuard,
   hasCheckpointExtension as hasCheckpointExt,
   IMAGE_CANCELLED_MESSAGE,
-  ImageGenerationLifecycle,
   initialImageProgress as initialProgressState,
   isImageModelFile,
   reduceImageProgress as reduceProgress,
   stripCheckpointExtension as stripCheckpointExt,
   type ManagedRuntimePort as ManagedRuntime,
-  imageTaesdFilename,
-  standardImageModelDefaults,
-  applyImageLoras,
-  normalizeImageLoras,
-  resolveImageToImageDimensions
+  type ImageExecutionPlan,
+  type ImageNativeExecutionFacts,
+  imageTaesdFilename
 } from '@offgrid/models'
 import {
   isMfluxModelId,
@@ -44,19 +40,13 @@ import { binRoots, dataDir, modelsDir, resourceDirs, exe } from './runtime-env'
 import { sdServer } from './sd-server'
 import { hasMlmodelc, isZImageModel, isQuantizedModel } from './imagegen/runtime-detect'
 import { primaryFileName, type CatalogEntry } from '@offgrid/models'
-import {
-  buildCoreMLArgs,
-  buildZImageArgs,
-  buildStandardArgs,
-  DEFAULT_NEGATIVE
-} from './imagegen/args'
+import { buildCoreMLArgs, buildZImageArgs, buildStandardArgs } from './imagegen/args'
 import {
   resolveExistingOwnedEntry,
   resolveExistingOwnedPath,
   resolveOwnedDestination
 } from './imagegen/owned-path'
 import {
-  imageMemoryGuardErrorMessage,
   type ImageGenerationPipelineUpdateContract,
   type ImageGenerationOutputContract,
   type ImageGenerationRequestContract
@@ -64,7 +54,8 @@ import {
 import { desktopModelServices } from './model-service-access'
 import {
   desktopImageApplication,
-  registerDesktopImageCancelBoundary
+  registerDesktopImageCancelBoundary,
+  registerDesktopImageInspectionBoundary
 } from './imagegen/application-service'
 
 function findSdCli(): string | null {
@@ -73,6 +64,10 @@ function findSdCli(): string | null {
     if (fs.existsSync(p)) return p
   }
   return null
+}
+
+function hasSdServer(): boolean {
+  return binRoots().some((root) => fs.existsSync(path.join(root, 'sd', exe('sd-server'))))
 }
 
 /** The Core ML (ANE) image-gen Swift helper, if bundled. */
@@ -342,6 +337,115 @@ function resolveNativeModel(selected?: string): string | null {
   return resolveExistingOwnedEntry(dir, runtimeId)
 }
 
+function fileSizeGb(filePath: string | null | undefined): number {
+  try {
+    return filePath ? fs.statSync(filePath).size / 1e9 : 0
+  } catch {
+    return 0
+  }
+}
+
+async function inspectSourceDimensions(
+  sourceImageUri: string | undefined
+): Promise<{ width: number; height: number } | undefined> {
+  if (!sourceImageUri) return undefined
+  try {
+    const { default: sharp } = await import('sharp')
+    const metadata = await sharp(sourceImageUri).metadata()
+    return metadata.width && metadata.height
+      ? { width: metadata.width, height: metadata.height }
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function inspectMfluxFacts(
+  runtimeId: string,
+  persistentRequested: boolean
+): ImageNativeExecutionFacts {
+  if (!mfluxAvailable()) throw new Error('The selected MLX image runtime is not available.')
+  return {
+    modelIdentity: runtimeId,
+    modelName: getMfluxModel(runtimeId)?.label ?? runtimeId,
+    runtime: 'mflux',
+    totalMemoryGb: os.totalmem() / 1e9,
+    modelSizeGb: 0,
+    zImage: false,
+    fullCheckpoint: true,
+    quantized: false,
+    persistentRequested,
+    sdServerAvailable: false,
+    companions: {}
+  }
+}
+
+/** Probe filesystem and native capability only. Shared owns every decision made from these facts. */
+export async function inspectImageNativeExecution(input: {
+  modelId: string
+  sourceImageUri?: string
+  persistentRequested: boolean
+}): Promise<ImageNativeExecutionFacts> {
+  const runtimeId = imageRuntimeModelId(input.modelId)
+  if (isMfluxModelId(runtimeId)) {
+    return inspectMfluxFacts(runtimeId, input.persistentRequested)
+  }
+
+  const model = resolveNativeModel(input.modelId)
+  if (!model) throw new Error('The selected image model is not installed. Download it from Models.')
+  const coreml = isCoreMLModelDir(model)
+  if (coreml && !findCoreMLBin()) {
+    throw new Error('Core ML helper (coreml-sd) not found in resources/bin/coreml-sd.')
+  }
+  if (!coreml && !findSdCli()) {
+    throw new Error('Image generation binary (sd-cli) not found in resources/bin/sd.')
+  }
+
+  const zImage = !coreml && isZImageModel(path.basename(model))
+  const zImageTextEncoder = zImage
+    ? (findInModels(/qwen3-4b-instruct.*\.gguf$/i) ?? undefined)
+    : undefined
+  const zImageVae = zImage
+    ? (findInModels(/^ae\.(safetensors|sft)$|^ae.*\.gguf$/i) ?? undefined)
+    : undefined
+  const fullCheckpoint = coreml || zImage || ggufIsFullCheckpoint(model)
+  const sourceDimensions = await inspectSourceDimensions(input.sourceImageUri)
+
+  return {
+    modelIdentity: model,
+    modelName: path.basename(model),
+    runtime: coreml ? 'coreml' : 'stable-diffusion',
+    totalMemoryGb: os.totalmem() / 1e9,
+    modelSizeGb: fileSizeGb(model),
+    zImage,
+    fullCheckpoint,
+    quantized: isQuantizedModel(path.basename(model)),
+    persistentRequested: input.persistentRequested,
+    sdServerAvailable: hasSdServer(),
+    sourceDimensions,
+    companions: {
+      zImageTextEncoder,
+      zImageVae,
+      sdxlClipL: !fullCheckpoint
+        ? (findInModels(/clip[_-]?l.*\.(safetensors|gguf)$/i) ?? undefined)
+        : undefined,
+      sdxlClipG: !fullCheckpoint
+        ? (findInModels(/clip[_-]?g.*\.(safetensors|gguf)$/i) ?? undefined)
+        : undefined,
+      sdxlVae: !fullCheckpoint
+        ? (findInModels(/(sdxl[_-]?vae|vae[_-]?sdxl|sdxl.*vae).*\.(safetensors|gguf)$/i) ??
+          undefined)
+        : undefined
+    },
+    companionSizeGb: {
+      zImageTextEncoder: fileSizeGb(zImageTextEncoder),
+      zImageVae: fileSizeGb(zImageVae)
+    }
+  }
+}
+
+registerDesktopImageInspectionBoundary(inspectImageNativeExecution)
+
 /** Whether image generation is usable right now (binary + at least one model). */
 export function imageGenStatus(): {
   available: boolean
@@ -465,21 +569,15 @@ export async function exportGeneratedImage(imagePath: string, destination: strin
 }
 
 let currentChild: ChildProcess | null = null
-const generationLifecycle = new ImageGenerationLifecycle()
+let nativeExecutionActive = false
 
 /** Kill the active native engine. Shared owns the public cancellation state machine. */
 export function cancelImageNative(): boolean {
+  const active = nativeExecutionActive
   cancelMflux() // no-op if mflux isn't the active runtime
   void sdServer.cancelCurrent() // cancels the in-flight job on the resident server (no-op if idle)
-  if (!generationLifecycle.cancel()) return false
-  // Cancellation owns the whole generation lifecycle, including the memory-reclaim
-  // delay and native-server startup windows before a child/request exists. Recording
-  // intent only when currentChild was set let Stop return true, then launch sd-cli
-  // after the user had already cancelled.
-  if (currentChild) {
-    currentChild.kill('SIGKILL')
-  }
-  return true // mflux/persistent-server gen has no currentChild but still owns the lifecycle
+  currentChild?.kill('SIGKILL')
+  return active
 }
 
 registerDesktopImageCancelBoundary(() => {
@@ -496,11 +594,11 @@ export function cancelImageGen(): boolean {
 /** Raw native image execution. Shared GenerationService owns routing, admission,
  * serialization, cancellation fencing, and residency before this function runs. */
 export async function generateImageNative(
-  params: ImageGenParams,
+  plan: ImageExecutionPlan,
   onUpdate?: (update: ImageGenerationPipelineUpdateContract) => void,
-  residencyMode: 'persistent' | 'operation' = 'operation'
+  signal?: AbortSignal
 ): Promise<ImageGenOutput> {
-  onUpdate?.({ stage: 'preparing', enhancedPrompt: params.prompt })
+  onUpdate?.({ stage: 'preparing', enhancedPrompt: plan.prompt })
   const progressObserver = onUpdate
     ? (progress: ImageGenProgress & { preview?: string }) =>
         onUpdate({
@@ -508,8 +606,8 @@ export async function generateImageNative(
           progress
         })
     : undefined
-  const output = await runImageGen(params, progressObserver, residencyMode)
-  return { ...output, prompt: params.prompt }
+  const output = await runImageGen(plan, progressObserver, signal ?? new AbortController().signal)
+  return { ...output, prompt: plan.prompt }
 }
 
 /** Public image execution uses the shared route and residency owner. The adapter
@@ -522,42 +620,39 @@ export async function generateImage(
 }
 
 async function runImageGen(
-  params: ImageGenParams,
+  plan: ImageExecutionPlan,
   onProgress?: (p: ImageGenProgress & { preview?: string }) => void,
-  residencyMode: 'persistent' | 'operation' = 'operation'
+  signal: AbortSignal = new AbortController().signal
 ): Promise<NativeImageGenOutput> {
-  if (generationLifecycle.isRunning()) {
-    throw new Error('An image is already generating — please wait for it to finish.')
+  if (signal.aborted) throw new Error(IMAGE_CANCELLED_MESSAGE)
+  nativeExecutionActive = true
+  const cancelOnAbort = (): void => {
+    cancelImageNative()
   }
-  if (!params.prompt.trim()) throw new Error('A prompt is required.')
-  params = { ...params, loras: normalizeImageLoras(params.loras) }
-
-  // --- MLX / mflux runtime branch (FLUX / Z-Image with native LoRA) ----------
-  // Self-contained: reuses the single-flight guard; the LLM is already evicted by the
-  // queue (evicts: ['llm']) before we get here, then delegates the spawn to the mflux
-  // module. Returns before the sd-cli path.
-  const selectedModel = params.model ? imageRuntimeModelId(params.model) : undefined
-  if (selectedModel && isMfluxModelId(selectedModel)) {
-    const def = getMfluxModel(selectedModel)!
-    const outDir = path.join(dataDir(), 'generated-images')
-    fs.mkdirSync(outDir, { recursive: true })
-    const outPath = path.join(outDir, `img-${String(Date.now())}.png`)
-    generationLifecycle.start()
-    // Give the OS a moment to reclaim the freed LLM pages before the image load spike.
-    try {
-      await generationLifecycle.waitForMemoryReclaim()
+  signal.addEventListener('abort', cancelOnAbort, { once: true })
+  try {
+    // --- MLX / mflux runtime branch (FLUX / Z-Image with native LoRA) ----------
+    // Self-contained: reuses the single-flight guard; the LLM is already evicted by the
+    // queue (evicts: ['llm']) before we get here, then delegates the spawn to the mflux
+    // module. Returns before the sd-cli path.
+    const selectedModel = plan.modelIdentity
+    if (plan.engine === 'mflux') {
+      const def = getMfluxModel(selectedModel)!
+      const outDir = path.join(dataDir(), 'generated-images')
+      fs.mkdirSync(outDir, { recursive: true })
+      const outPath = path.join(outDir, `img-${String(Date.now())}.png`)
       await runMflux(
         {
-          prompt: params.prompt,
+          prompt: plan.prompt,
           model: selectedModel,
-          width: params.width,
-          height: params.height,
-          steps: params.steps,
-          seed: params.seed,
+          width: plan.width,
+          height: plan.height,
+          steps: plan.steps,
+          seed: plan.seed,
           // mflux --lora-paths wants a full path or HF repo (not a bare name like
           // sd-cli's --lora-model-dir). Resolve a bare filename to the loras dir;
           // pass absolute paths and HF repo ids (contain '/') through unchanged.
-          loras: (params.loras ?? []).map((l) => {
+          loras: plan.loras.map((l) => {
             if (path.isAbsolute(l.name) || l.name.includes('/')) return l
             const local = resolveExistingOwnedEntry(loraDir(), ensureCheckpointExt(l.name))
             return local ? { ...l, name: local } : l
@@ -571,149 +666,59 @@ async function runImageGen(
       return {
         dataUrl: `data:image/png;base64,${b64}`,
         path: outPath,
-        seed: params.seed ?? -1,
+        seed: plan.seed ?? -1,
         model: def.label
       }
-    } finally {
-      generationLifecycle.finish()
-      currentChild = null
-      // LLM warm-back-up happens once in the generateImage() wrapper's finally.
     }
-  }
-
-  // img2img: if the caller didn't pin a size, match the init image's dimensions
-  // (rounded to /64). Avoids silently upscaling a 512px input to the model's 1024
-  // default — which is much slower and can blow past client timeouts.
-  if (params.initImage && (!params.width || !params.height)) {
-    try {
-      const sharp = (await import('sharp')).default
-      const meta = await sharp(params.initImage).metadata()
-      if (meta.width && meta.height) {
-        const dimensions = resolveImageToImageDimensions({
-          width: params.width,
-          height: params.height,
-          sourceWidth: meta.width,
-          sourceHeight: meta.height
-        })
-        params = { ...params, ...dimensions }
-      }
-    } catch {
-      /* fall back to model defaults */
-    }
-  }
-
-  const model = resolveNativeModel(params.model)
-  if (!model) {
-    throw new Error('The selected image model is not installed. Download it from Models.')
-  }
-  // Core ML models are directories of .mlmodelc resources → routed to the ANE
-  // Swift helper; everything else (GGUF) runs on sd-cli.
-  const coreml = isCoreMLModelDir(model)
-  const cli = coreml ? findCoreMLBin() : findSdCli()
-  if (!cli) {
-    throw new Error(
-      coreml
-        ? 'Core ML helper (coreml-sd) not found in resources/bin/coreml-sd.'
-        : 'Image generation binary (sd-cli) not found in resources/bin/sd.'
-    )
-  }
-
-  // Memory guard (GGUF only) — on Apple Silicon unified memory, an oversized
-  // model swaps to disk and FREEZES the machine. Refuse rather than freeze.
-  // Core ML runs on the ANE with its own streaming, so it's exempt.
-  // Reserve scales with RAM so an 8GB machine isn't blocked outright (a flat
-  // 7GB reserve would leave it ~1GB and reject everything).
-  const totalGb = os.totalmem() / 1e9
-  const safeSizeGb = (p: string | null | undefined): number => {
-    try {
-      return p && fs.existsSync(p) ? fs.statSync(p).size / 1e9 : 0
-    } catch {
-      return 0
-    }
-  }
-  // Z-Image is a 3-model stack (diffusion transformer + Qwen3-4B text encoder +
-  // FLUX VAE) all resident at once — the diffusion file alone wildly understates
-  // its footprint. Count the encoder + VAE too, or the guard waves through a
-  // combo that then overflows unified memory and freezes the box.
-  const zImageStack = isZImageModel(path.basename(model))
-  const guard = evaluateMemoryGuard({
-    totalGb,
-    modelSizeGb: safeSizeGb(model),
-    coreml,
-    zImageStack,
-    zEncoderGb: zImageStack ? safeSizeGb(findInModels(/qwen3-4b-instruct.*\.gguf$/i)) : 0,
-    zVaeGb: zImageStack ? safeSizeGb(findInModels(/^ae\.(safetensors|sft)$|^ae.*\.gguf$/i)) : 0
-  })
-  if (guard.overBudget && !params.allowUnsafeMemoryOverride) {
-    throw new Error(
-      imageMemoryGuardErrorMessage(
-        `Not enough memory to run ${path.basename(model)} (~${guard.modelGb.toFixed(1)}GB resident) on this ${totalGb.toFixed(0)}GB machine. ` +
-          `Pick a lighter image model (e.g. SDXL-Lightning or SD 1.5) in the image options.`
+    const model = plan.modelIdentity
+    // Core ML models are directories of .mlmodelc resources → routed to the ANE
+    // Swift helper; everything else (GGUF) runs on sd-cli.
+    const coreml = plan.engine === 'coreml'
+    const cli = coreml ? findCoreMLBin() : findSdCli()
+    if (!cli) {
+      throw new Error(
+        coreml
+          ? 'Core ML helper (coreml-sd) not found in resources/bin/coreml-sd.'
+          : 'Image generation binary (sd-cli) not found in resources/bin/sd.'
       )
-    )
-  }
+    }
 
-  // LoRA adapters: inject <lora:NAME:WEIGHT> into the prompt (Core ML helper
-  // doesn't support LoRA, so skip there). The --lora-model-dir flag is added to
-  // the sd-cli args below.
-  const preparedLoras = applyImageLoras({
-    prompt: params.prompt,
-    loras: params.loras ?? [],
-    supportsLoras: !coreml,
-    quantizedModel: isQuantizedModel(path.basename(model)),
-    modelName: path.basename(model)
-  })
-  const loras = preparedLoras.loras
-  params = { ...params, prompt: preparedLoras.prompt }
+    const loras = plan.loras
 
-  const outDir = path.join(dataDir(), 'generated-images')
-  fs.mkdirSync(outDir, { recursive: true })
-  const seed = params.seed ?? -1
-  const stamp = String(Date.now())
-  const outPath = path.join(outDir, `img-${stamp}.png`)
-  const previewPath = path.join(outDir, `preview-${stamp}.png`)
+    const outDir = path.join(dataDir(), 'generated-images')
+    fs.mkdirSync(outDir, { recursive: true })
+    const seed = plan.seed ?? -1
+    const stamp = String(Date.now())
+    const outPath = path.join(outDir, `img-${stamp}.png`)
+    const previewPath = path.join(outDir, `preview-${stamp}.png`)
 
-  const base = path.basename(model)
-  const isZImage = isZImageModel(base)
+    const base = path.basename(model)
+    const isZImage = Boolean(plan.companions.zImageTextEncoder)
 
-  // --- RESIDENT fast path (opt-in) --------------------------------------------
-  // When the user sets image residency to 'resident', a plain full-checkpoint
-  // txt2img (no LoRA, no init image, not Z-Image, not Core ML) runs on the warm
-  // sd-server: it keeps the model loaded across images (~45s cold -> ~7s warm on
-  // M4), same steps/quality. This was previously removed for causing memory
-  // contention on 16GB — now SAFE because the ModalityQueue evicts the LLM before
-  // image gen (evicts:['llm']) AND evicts this server when another modality needs
-  // the RAM. Operation residency skips this path and uses the one-shot sd-cli.
-  const residentImage = residencyMode === 'persistent'
-  const eligibleForServer =
-    residentImage &&
-    !onProgress &&
-    !coreml &&
-    !isZImage &&
-    !loras.length &&
-    !params.initImage &&
-    ggufIsFullCheckpoint(model)
-  if (eligibleForServer) {
-    const { defaultSize, defaultSteps, defaultCfg, sampler, scheduler } =
-      standardImageModelDefaults(base)
-    const taesd = params.fastVae ? resolveTaesd(base) : undefined
-    generationLifecycle.start()
-    try {
+    // --- RESIDENT fast path (opt-in) --------------------------------------------
+    // When the user sets image residency to 'resident', a plain full-checkpoint
+    // txt2img (no LoRA, no init image, not Z-Image, not Core ML) runs on the warm
+    // sd-server: it keeps the model loaded across images (~45s cold -> ~7s warm on
+    // M4), same steps/quality. This was previously removed for causing memory
+    // contention on 16GB — now SAFE because the ModalityQueue evicts the LLM before
+    // image gen (evicts:['llm']) AND evicts this server when another modality needs
+    // the RAM. Operation residency skips this path and uses the one-shot sd-cli.
+    if (plan.engine === 'sd-server') {
+      const taesd = plan.fastVae ? resolveTaesd(base) : undefined
       await sdServer.ensureUp({
         modelPath: model,
         diffusionFa: true,
         taesdPath: taesd ?? undefined
       })
-      generationLifecycle.throwIfCancelled()
       const { png, seed: usedSeed } = await sdServer.generate({
-        prompt: params.prompt,
-        negativePrompt: params.negativePrompt?.trim() || DEFAULT_NEGATIVE,
-        width: params.width ?? defaultSize,
-        height: params.height ?? defaultSize,
-        steps: params.steps ?? defaultSteps,
-        cfgScale: params.cfgScale ?? defaultCfg,
-        sampleMethod: sampler,
-        scheduler,
+        prompt: plan.prompt,
+        negativePrompt: plan.negativePrompt,
+        width: plan.width,
+        height: plan.height,
+        steps: plan.steps,
+        cfgScale: plan.guidanceScale,
+        sampleMethod: plan.sampleMethod,
+        scheduler: plan.scheduler,
         seed
       })
       await fs.promises.writeFile(outPath, png)
@@ -723,213 +728,190 @@ async function runImageGen(
         seed: usedSeed,
         model: base
       }
-    } finally {
-      generationLifecycle.finish()
-      currentChild = null
     }
-  }
 
-  // --- Persistent sd-server fast path -----------------------------------------
-  // A plain full-pipeline checkpoint doing txt2img (no LoRA, no init image) runs
-  // on the RESIDENT sd-server, which keeps the model loaded across images: the
-  // first image pays the ~13s Metal shader warmup + model load, but every image
-  // after skips BOTH (measured ~45s cold -> ~7s warm on an M4). The step count /
-  // resolution / quality are UNCHANGED — this only removes per-image warmup and
-  // reload. Special stacks stay on one-shot sd-cli below: Z-Image (3-file stack),
-  // Core ML (ANE), UNET-only checkpoints needing separate CLIP+VAE, img2img, and
-  // LoRA (sd.cpp can't merge a LoRA into quantized weights anyway).
-  // NOTE: a persistent sd-server fast path once lived here but is removed — it kept
-  // ~4GB of image weights resident alongside the ~5GB chat model, causing memory
-  // contention -> hangs + corrupted output on 16GB machines, and was never verified
-  // end-to-end in-app. All full-checkpoint txt2img goes through the one-shot sd-cli
-  // path below: it loads the model, generates with the karras/defaults, and FREES it
-  // on exit (no resident pressure). sdServer.cancelCurrent() above stays a harmless
-  // no-op. Re-introduce a resident server only if proven safe on 16GB + good output.
+    // --- Persistent sd-server fast path -----------------------------------------
+    // A plain full-pipeline checkpoint doing txt2img (no LoRA, no init image) runs
+    // on the RESIDENT sd-server, which keeps the model loaded across images: the
+    // first image pays the ~13s Metal shader warmup + model load, but every image
+    // after skips BOTH (measured ~45s cold -> ~7s warm on an M4). The step count /
+    // resolution / quality are UNCHANGED — this only removes per-image warmup and
+    // reload. Special stacks stay on one-shot sd-cli below: Z-Image (3-file stack),
+    // Core ML (ANE), UNET-only checkpoints needing separate CLIP+VAE, img2img, and
+    // LoRA (sd.cpp can't merge a LoRA into quantized weights anyway).
+    // NOTE: a persistent sd-server fast path once lived here but is removed — it kept
+    // ~4GB of image weights resident alongside the ~5GB chat model, causing memory
+    // contention -> hangs + corrupted output on 16GB machines, and was never verified
+    // end-to-end in-app. All full-checkpoint txt2img goes through the one-shot sd-cli
+    // path below: it loads the model, generates with the karras/defaults, and FREES it
+    // on exit (no resident pressure). sdServer.cancelCurrent() above stays a harmless
+    // no-op. Re-introduce a resident server only if proven safe on 16GB + good output.
 
-  const threads = String(Math.max(1, os.cpus().length - 2))
-  // Live preview: write a rough partial image every step ('proj' needs no extra
-  // model) so the UI can show the image forming step-by-step.
-  const previewArgs = [
-    '--preview',
-    'proj',
-    '--preview-path',
-    previewPath,
-    '--preview-interval',
-    '1'
-  ]
+    const threads = String(Math.max(1, os.cpus().length - 2))
+    // Live preview: write a rough partial image every step ('proj' needs no extra
+    // model) so the UI can show the image forming step-by-step.
+    const previewArgs = [
+      '--preview',
+      'proj',
+      '--preview-path',
+      previewPath,
+      '--preview-interval',
+      '1'
+    ]
 
-  let args: string[]
-  if (coreml) {
-    // Core ML (ANE) helper — directory model, prompt to PNG. No preview file.
-    args = buildCoreMLArgs({
-      model,
-      prompt: params.prompt,
-      outPath,
-      steps: params.steps,
-      seed,
-      negativePrompt: params.negativePrompt
-    })
-  } else if (isZImage) {
-    // Z-Image is a separate stack: diffusion transformer + Qwen3-4B text encoder
-    // (--llm) + FLUX VAE (--vae). Resolve the companion files here (I/O); the
-    // pure builder assembles the flags with the turbo defaults.
-    const llm = findInModels(/qwen3-4b-instruct.*\.gguf$/i)
-    const vae = findInModels(/^ae\.(safetensors|sft)$|^ae.*\.gguf$/i)
-    if (!llm)
-      throw new Error(
-        'Z-Image text encoder (Qwen3-4B-Instruct) not found — download it from Models.'
-      )
-    if (!vae) throw new Error('Z-Image VAE (ae.safetensors) not found — download it from Models.')
-    args = buildZImageArgs({
-      model,
-      llm,
-      vae,
-      prompt: params.prompt,
-      outPath,
-      width: params.width,
-      height: params.height,
-      steps: params.steps,
-      cfgScale: params.cfgScale,
-      seed,
-      threads,
-      previewArgs
-    })
-  } else {
-    // Full checkpoint → load with -m. UNET-only quant → load the diffusion model
-    // separately and supply SDXL CLIP-L/CLIP-G + VAE; if those companions aren't
-    // installed, fail with a clear message instead of the cryptic sd.cpp abort.
-    let modelFlags: string[]
-    if (ggufIsFullCheckpoint(model)) {
-      modelFlags = ['-m', model]
+    let args: string[]
+    if (coreml) {
+      // Core ML (ANE) helper — directory model, prompt to PNG. No preview file.
+      args = buildCoreMLArgs({
+        model,
+        prompt: plan.prompt,
+        outPath,
+        steps: plan.steps,
+        seed,
+        negativePrompt: plan.negativePrompt
+      })
+    } else if (isZImage) {
+      // Z-Image is a separate stack: diffusion transformer + Qwen3-4B text encoder
+      // (--llm) + FLUX VAE (--vae). Resolve the companion files here (I/O); the
+      // pure builder assembles the flags with the turbo defaults.
+      const llm = plan.companions.zImageTextEncoder!
+      const vae = plan.companions.zImageVae!
+      args = buildZImageArgs({
+        model,
+        llm,
+        vae,
+        prompt: plan.prompt,
+        outPath,
+        width: plan.width,
+        height: plan.height,
+        steps: plan.steps,
+        cfgScale: plan.guidanceScale,
+        seed,
+        threads,
+        previewArgs,
+        sampleMethod: plan.sampleMethod
+      })
     } else {
-      const clipL = findInModels(/clip[_-]?l.*\.(safetensors|gguf)$/i)
-      const clipG = findInModels(/clip[_-]?g.*\.(safetensors|gguf)$/i)
-      const sdxlVae = findInModels(/(sdxl[_-]?vae|vae[_-]?sdxl|sdxl.*vae).*\.(safetensors|gguf)$/i)
-      if (clipL && clipG && sdxlVae) {
+      // Full checkpoint → load with -m. UNET-only quant → load the diffusion model
+      // separately and supply SDXL CLIP-L/CLIP-G + VAE; if those companions aren't
+      // installed, fail with a clear message instead of the cryptic sd.cpp abort.
+      let modelFlags: string[]
+      if (!plan.companions.sdxlClipL) {
+        modelFlags = ['-m', model]
+      } else {
         modelFlags = [
           '--diffusion-model',
           model,
           '--clip_l',
-          clipL,
+          plan.companions.sdxlClipL,
           '--clip_g',
-          clipG,
+          plan.companions.sdxlClipG!,
           '--vae',
-          sdxlVae
+          plan.companions.sdxlVae!
         ]
-      } else {
-        const dir = modelsDir()
-        const usable = listImageModels()
-          .filter(
-            (f) => /z[-_]?image|lightning/i.test(f) || ggufIsFullCheckpoint(path.join(dir, f))
-          )
-          .map((f) => path.basename(f))
-        throw new Error(
-          `"${base}" is a UNET-only model — it has no built-in text encoder or VAE, so it can't generate on its own ` +
-            `(it needs SDXL CLIP-L, CLIP-G and a VAE, which aren't installed). ` +
-            (usable.length
-              ? `Pick a complete model instead: ${usable.slice(0, 4).join(', ')}.`
-              : `Download a complete checkpoint (e.g. SDXL-Lightning) or Z-Image.`)
-        )
       }
-    }
-    // Per-model defaults (steps/cfg/schedule/size) come from the shared
-    // standardModelDefaults inside the pure builder — single source of truth.
-    // TAESD decode is OFF by default; resolve it here (I/O) only when fastVae is
-    // set, and the builder decides taesd-vs-vae-tiling.
-    const cliTaesd = params.fastVae ? resolveTaesd(base) : null
-    args = buildStandardArgs({
-      base,
-      modelFlags,
-      prompt: params.prompt,
-      outPath,
-      width: params.width,
-      height: params.height,
-      steps: params.steps,
-      cfgScale: params.cfgScale,
-      seed,
-      threads,
-      previewArgs,
-      taesdPath: cliTaesd,
-      negativePrompt: params.negativePrompt,
-      initImage: params.initImage,
-      strength: params.strength
-    })
-  }
-
-  // Point sd-cli at the LoRA folder so the <lora:NAME:weight> tags resolve.
-  if (!coreml && loras.length) {
-    args.push('--lora-model-dir', loraDir())
-  }
-
-  generationLifecycle.start()
-  // CRITICAL on Apple Silicon (unified memory): the LLM (gemma) and the image
-  // model can't both be resident — together they overflow RAM and the whole
-  // system swaps/hangs. The ModalityQueue has already evicted the LLM (evicts:
-  // ['llm']) AND blocks the capture pipeline from respawning it while this heavy
-  // tier-2 job holds the slot.
-  // Give the OS time to actually reclaim the freed LLM pages before the image
-  // model's load spike — otherwise the brief overlap causes a short stutter.
-  try {
-    await generationLifecycle.waitForMemoryReclaim()
-    await new Promise<void>((resolve, reject) => {
-      // cwd at the binary dir so @executable_path rpath resolves libstable-diffusion.dylib.
-      const child = spawn(cli, args, { cwd: path.dirname(cli) })
-      currentChild = child
-      let log = ''
-      // Pure progress reducer owns the seed parse + the denoise->decode phase
-      // transition; the shell only handles the preview PNG read + the callback.
-      let progress = initialProgressState(seed)
-      let progressBuffer = ''
-      const capture = (d: Buffer): void => {
-        const s = d.toString()
-        log += s
-        // Terminal progress lines can arrive across multiple data chunks. Keep a
-        // short rolling buffer so "12/" and "42" still become step 12 of 42.
-        progressBuffer = `${progressBuffer}${s}`.slice(-2048)
-        const { state, event } = reduceProgress(progress, progressBuffer, params.steps)
-        progress = state
-        if (onProgress && event) {
-          let preview: string | undefined
-          try {
-            if (fs.existsSync(previewPath))
-              preview = `data:image/png;base64,${fs.readFileSync(previewPath).toString('base64')}`
-          } catch {
-            /* preview not ready */
-          }
-          onProgress({ ...event, preview })
-        }
-      }
-      child.stdout.on('data', capture)
-      child.stderr.on('data', capture)
-      child.on('error', reject)
-      child.on('close', (code) => {
-        if (generationLifecycle.isCancelled()) {
-          reject(new Error(IMAGE_CANCELLED_MESSAGE))
-        } else if (code === 0) {
-          // stash the resolved seed for the caller via closure
-          ;(params as ImageGenParams & { _seed?: number })._seed = progress.resolvedSeed
-          resolve()
-        } else {
-          reject(new Error(`Image generation failed (exit ${String(code)}): ${log.slice(-400)}`))
-        }
+      // Per-model defaults (steps/cfg/schedule/size) come from the shared
+      // standardModelDefaults inside the pure builder — single source of truth.
+      // TAESD decode is OFF by default; resolve it here (I/O) only when fastVae is
+      // set, and the builder decides taesd-vs-vae-tiling.
+      const cliTaesd = plan.fastVae ? resolveTaesd(base) : null
+      args = buildStandardArgs({
+        base,
+        modelFlags,
+        prompt: plan.prompt,
+        outPath,
+        width: plan.width,
+        height: plan.height,
+        steps: plan.steps,
+        cfgScale: plan.guidanceScale,
+        seed,
+        threads,
+        previewArgs,
+        taesdPath: cliTaesd,
+        negativePrompt: plan.negativePrompt,
+        initImage: plan.sourceImageUri,
+        strength: plan.strength,
+        sampleMethod: plan.sampleMethod,
+        scheduler: plan.scheduler
       })
-    })
+    }
 
-    if (!fs.existsSync(outPath)) throw new Error('Image generation produced no output file.')
-    const b64 = fs.readFileSync(outPath).toString('base64')
-    const finalSeed = (params as ImageGenParams & { _seed?: number })._seed ?? seed
-    return {
-      dataUrl: `data:image/png;base64,${b64}`,
-      path: outPath,
-      seed: finalSeed,
-      model: path.basename(model)
+    // Point sd-cli at the LoRA folder so the <lora:NAME:weight> tags resolve.
+    if (!coreml && loras.length) {
+      args.push('--lora-model-dir', loraDir())
+    }
+
+    // CRITICAL on Apple Silicon (unified memory): the LLM (gemma) and the image
+    // model can't both be resident — together they overflow RAM and the whole
+    // system swaps/hangs. The ModalityQueue has already evicted the LLM (evicts:
+    // ['llm']) AND blocks the capture pipeline from respawning it while this heavy
+    // tier-2 job holds the slot.
+    // Give the OS time to actually reclaim the freed LLM pages before the image
+    // model's load spike — otherwise the brief overlap causes a short stutter.
+    try {
+      let resolvedSeed = seed
+      await new Promise<void>((resolve, reject) => {
+        // cwd at the binary dir so @executable_path rpath resolves libstable-diffusion.dylib.
+        const child = spawn(cli, args, { cwd: path.dirname(cli) })
+        currentChild = child
+        let log = ''
+        // Pure progress reducer owns the seed parse + the denoise->decode phase
+        // transition; the shell only handles the preview PNG read + the callback.
+        let progress = initialProgressState(seed)
+        let progressBuffer = ''
+        const capture = (d: Buffer): void => {
+          const s = d.toString()
+          log += s
+          // Terminal progress lines can arrive across multiple data chunks. Keep a
+          // short rolling buffer so "12/" and "42" still become step 12 of 42.
+          progressBuffer = `${progressBuffer}${s}`.slice(-2048)
+          const { state, event } = reduceProgress(progress, progressBuffer, plan.steps)
+          progress = state
+          if (onProgress && event) {
+            let preview: string | undefined
+            try {
+              if (fs.existsSync(previewPath))
+                preview = `data:image/png;base64,${fs.readFileSync(previewPath).toString('base64')}`
+            } catch {
+              /* preview not ready */
+            }
+            onProgress({ ...event, preview })
+          }
+        }
+        child.stdout.on('data', capture)
+        child.stderr.on('data', capture)
+        child.on('error', reject)
+        child.on('close', (code) => {
+          if (signal.aborted) {
+            reject(new Error(IMAGE_CANCELLED_MESSAGE))
+          } else if (code === 0) {
+            // stash the resolved seed for the caller via closure
+            resolvedSeed = progress.resolvedSeed
+            resolve()
+          } else {
+            reject(new Error(`Image generation failed (exit ${String(code)}): ${log.slice(-400)}`))
+          }
+        })
+      })
+
+      if (!fs.existsSync(outPath)) throw new Error('Image generation produced no output file.')
+      const b64 = fs.readFileSync(outPath).toString('base64')
+      return {
+        dataUrl: `data:image/png;base64,${b64}`,
+        path: outPath,
+        seed: resolvedSeed,
+        model: path.basename(model)
+      }
+    } finally {
+      currentChild = null
+      fs.promises.unlink(previewPath).catch(() => {})
+      // LLM warm-back-up happens once in the generateImage() wrapper's finally
+      // (covers both this sd-cli path and the mflux path).
     }
   } finally {
-    generationLifecycle.finish()
+    signal.removeEventListener('abort', cancelOnAbort)
+    nativeExecutionActive = false
     currentChild = null
-    fs.promises.unlink(previewPath).catch(() => {})
-    // LLM warm-back-up happens once in the generateImage() wrapper's finally
-    // (covers both this sd-cli path and the mflux path).
   }
 }
 

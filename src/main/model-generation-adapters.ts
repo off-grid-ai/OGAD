@@ -225,28 +225,20 @@ export class DesktopImageGenerationAdapter extends DesktopTypedGenerationAdapter
     await imageRuntime.evict()
   }
 
-  async *generate(model: RuntimeModel, request: GenerationRequest): AsyncIterable<GenerationChunk> {
+  async *generate(
+    _model: RuntimeModel,
+    request: GenerationRequest
+  ): AsyncIterable<GenerationChunk> {
     if (request.operation?.type !== 'image')
       throw new Error('The image adapter needs an image operation.')
     const operation = request.operation
+    if (!operation.executionPlan) {
+      throw new Error('Shared did not provide an image execution plan.')
+    }
     const { generateImageNative } = await import('./imagegen')
     const channel = new GenerationChunkChannel()
     void generateImageNative(
-      {
-        prompt: operation.prompt,
-        negativePrompt: operation.negativePrompt,
-        width: operation.width,
-        height: operation.height,
-        steps: operation.steps,
-        seed: operation.seed,
-        model: operation.modelId,
-        initImage: operation.sourceImage?.uri,
-        strength: operation.strength,
-        cfgScale: operation.guidanceScale,
-        fastVae: operation.fastVae,
-        loras: operation.loras?.map((lora) => ({ name: lora.id, weight: lora.weight })),
-        allowUnsafeMemoryOverride: operation.allowUnsafeMemoryOverride
-      },
+      operation.executionPlan,
       (update) => {
         reportDesktopImageProgress(request.identity?.turnId ?? '', update)
         const progress = 'progress' in update ? update.progress : undefined
@@ -265,7 +257,7 @@ export class DesktopImageGenerationAdapter extends DesktopTypedGenerationAdapter
           })
         }
       },
-      model.residencyMode
+      request.signal
     ).then(
       (output) => {
         channel.push({

@@ -299,6 +299,25 @@ afterAll(async () => {
 })
 
 describe('multimodal runtime reliability', () => {
+  it('rejects a blank prompt in Shared before native execution and admits the next request', async () => {
+    const imageRunsBefore = lineCount(fixture.imageLog)
+    await expect(generateImage({ prompt: '   ', model: IMAGE_MODEL })).rejects.toThrow(
+      'A prompt is required.'
+    )
+    expect(lineCount(fixture.imageLog)).toBe(imageRunsBefore)
+
+    const image = await generateImage({
+      prompt: 'A real prompt after admission refusal',
+      model: IMAGE_MODEL,
+      seed: 313,
+      width: 512,
+      height: 512,
+      steps: 4
+    })
+    expect(image.dataUrl).toBe(`data:image/png;base64,${PNG_BASE64}`)
+    expect(lineCount(fixture.imageLog)).toBe(imageRunsBefore + 1)
+  })
+
   it('keeps small text and image work within the balanced budget without restarting chat', async () => {
     expect(await rawLocalText('before image')).toBe('chat recovered')
     expect(lineCount(fixture.llamaLog)).toBe(1)

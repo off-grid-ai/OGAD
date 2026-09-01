@@ -145,17 +145,31 @@ for (const file of files) {
       }
       if (
         fileName === 'src/main/imagegen.ts' &&
-        /^(?:generateDesktopOperation|generateDesktopText|registerDesktopImageProgress)$/.test(call)
+        /^(?:generateDesktopOperation|generateDesktopText|registerDesktopImageProgress|evaluateImageMemory|applyImageLoras|normalizeImageLoras|resolveImageToImageDimensions)$/.test(call)
       ) {
         report('desktop-image-policy-is-shared', fileName, source, node, `call:${call}`)
+      }
+      if (
+        fileName === 'src/main/model-generation-adapters.ts' &&
+        call === 'generateImageNative' &&
+        node.arguments[0] &&
+        nodeText(source, node.arguments[0]) !== 'operation.executionPlan'
+      ) {
+        report(
+          'desktop-image-adapter-executes-shared-plan',
+          fileName,
+          source,
+          node.arguments[0],
+          `argument:${nodeText(source, node.arguments[0])}`
+        )
       }
     }
 
     if (
       ts.isNewExpression(node) &&
-      nodeText(source, node.expression) === 'ImageGenerationJobCoordinator'
+      /^(?:ImageGenerationJobCoordinator|ImageGenerationLifecycle)$/.test(nodeText(source, node.expression))
     ) {
-      report('desktop-image-lifecycle-is-shared', fileName, source, node, 'new:ImageGenerationJobCoordinator')
+      report('desktop-image-lifecycle-is-shared', fileName, source, node, `new:${nodeText(source, node.expression)}`)
     }
 
     if (

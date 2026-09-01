@@ -55,6 +55,7 @@ export interface ZImageArgsInput {
   seed: number
   threads: string
   previewArgs: string[]
+  sampleMethod?: string
 }
 
 /** Z-Image is a separate stack: diffusion transformer + Qwen3-4B text encoder
@@ -85,7 +86,7 @@ export function buildZImageArgs(i: ZImageArgsInput): string[] {
     '--cfg-scale',
     String(i.cfgScale ?? 1.0),
     '--sampling-method',
-    'euler',
+    i.sampleMethod ?? 'euler',
     // Keep weights + VAE off the Metal device between/at use so the resident
     // footprint (DiT + 4B encoder + VAE) doesn't spike past unified memory.
     '--offload-to-cpu',
@@ -122,6 +123,8 @@ export interface StandardArgsInput {
   /** Init image path for img2img (undefined for txt2img). */
   initImage?: string
   strength?: number
+  sampleMethod?: string
+  scheduler?: string
 }
 
 /** Standard sd-cli checkpoint. Per-model defaults come from the shared
@@ -146,9 +149,9 @@ export function buildStandardArgs(i: StandardArgsInput): string[] {
     '--cfg-scale',
     String(i.cfgScale ?? defaultCfg),
     '--sampling-method',
-    sampler,
+    i.sampleMethod ?? sampler,
     '--scheduler',
-    scheduler,
+    i.scheduler ?? scheduler,
     '--diffusion-fa',
     '-t',
     i.threads,

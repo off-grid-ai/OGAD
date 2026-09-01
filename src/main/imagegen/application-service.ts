@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import {
   ImageGenerationApplicationService,
+  ImageExecutionPlanError,
   IMAGE_CANCELLED_MESSAGE,
   imageGenerationOperation,
   isImageApplicationInFlight,
@@ -11,6 +12,7 @@ import {
   standardImageModelDefaults,
   type ImageApplicationSnapshot,
   type ImageGenerationApplicationPorts,
+  type ImageNativeExecutionFacts,
   type ImageRuntimeInspection,
   type RuntimeModel
 } from '@offgrid/models'
@@ -20,7 +22,10 @@ import type {
   ImageGenerationRequestContract,
   ImageGenerationOutputContract
 } from '../../shared/image-generation-contract'
-import { parseImageMemoryGuardError } from '../../shared/image-generation-contract'
+import {
+  imageMemoryGuardErrorMessage,
+  parseImageMemoryGuardError
+} from '../../shared/image-generation-contract'
 import { generateDesktopOperation, generateDesktopText } from '../desktop-generation'
 import { getSetting } from '../database'
 import { desktopModelServices } from '../model-service-access'
@@ -28,10 +33,23 @@ import { dataDir } from '../runtime-env'
 import { enhanceImagePrompt } from '@offgrid/models'
 
 let nativeCancelBoundary: () => void | Promise<void> = () => undefined
+let nativeInspectionBoundary: (input: {
+  modelId: string
+  sourceImageUri?: string
+  persistentRequested: boolean
+}) => Promise<ImageNativeExecutionFacts> = async () => {
+  throw new Error('The Desktop image native inspection boundary is not registered.')
+}
 
 /** Composition-root registration keeps the Shared use case independent of its native engine. */
 export function registerDesktopImageCancelBoundary(boundary: () => void | Promise<void>): void {
   nativeCancelBoundary = boundary
+}
+
+export function registerDesktopImageInspectionBoundary(
+  boundary: typeof nativeInspectionBoundary
+): void {
+  nativeInspectionBoundary = boundary
 }
 
 export interface DesktopImageApplicationRequest extends ImageGenerationRequestContract {
@@ -148,6 +166,12 @@ function applicationPorts(): ImageGenerationApplicationPorts<
       })
     },
     inspectRuntime: async (model, settings) => localRuntimeInspection(model, settings.threads),
+    inspectExecution: (input) =>
+      nativeInspectionBoundary({
+        modelId: input.model.id,
+        sourceImageUri: input.request.sourceImageUri,
+        persistentRequested: input.model.residencyMode === 'persistent'
+      }),
     async ensureLoaded() {
       // GenerationService acquires the exact residency lease with the selected adapter.
     },
@@ -157,7 +181,8 @@ function applicationPorts(): ImageGenerationApplicationPorts<
         modelId: input.model.id,
         prompt: input.prompt,
         settings: input.settings,
-        force: input.force
+        force: input.force,
+        executionPlan: input.plan
       })
       const turnId = input.request.requestId ?? randomUUID()
       const result = await generateDesktopOperation(operation, {
@@ -196,7 +221,9 @@ function applicationPorts(): ImageGenerationApplicationPorts<
     persist: ({ output }) => persistRemoteOutput(output),
     cancelBoundary: async () => nativeCancelBoundary(),
     ejectForRetry: () => desktopModelServices.unload('image').then(() => undefined),
-    isForceLoadError: (error) => parseImageMemoryGuardError(error) !== null,
+    isForceLoadError: (error) =>
+      parseImageMemoryGuardError(error) !== null ||
+      (error instanceof ImageExecutionPlanError && error.code === 'memory-limit'),
     retainCancelledState: true
   }
 }
@@ -261,6 +288,12 @@ export const desktopImageApplication = {
       if (result) return result
       const snapshot = application.status()
       if (snapshot.phase === 'error') {
+        if (
+          snapshot.failure?.cause instanceof ImageExecutionPlanError &&
+          snapshot.failure.cause.code === 'memory-limit'
+        ) {
+          throw new Error(imageMemoryGuardErrorMessage(snapshot.failure.cause.message))
+        }
         if (snapshot.failure?.cause instanceof Error) throw snapshot.failure.cause
         throw new Error(snapshot.error ?? 'Image generation failed.')
       }
