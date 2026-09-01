@@ -15,7 +15,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { ExtractionBridges } from '@offgrid/rag'
-import { llm } from '../llm'
+import { generateDesktopText } from '../desktop-generation'
 import { ffmpegBin } from '../transcription/whisper-cli'
 import { getActiveTranscription } from '../transcription/select'
 
@@ -82,6 +82,13 @@ export const desktopExtraction: ExtractionBridges = {
 
   async captionImage(imagePath) {
     // Reuse the local vision model. Requires an active vision (mmproj) model.
-    return (await llm.chat(IMAGE_PROMPT, [imagePath], 300000, 1024)).trim()
+    return (
+      await generateDesktopText(IMAGE_PROMPT, {
+        operation: { type: 'vision' },
+        images: [imagePath],
+        timeoutMs: 300_000,
+        maxTokens: 1_024
+      })
+    ).content.trim()
   }
 }
