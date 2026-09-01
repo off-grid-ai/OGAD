@@ -5,139 +5,40 @@ import {
   type ChatSessionRepositoryPort,
   type ChatTurn,
   type GenerationEvents,
-  type GenerationMessage,
   type GenerationResult,
   type RuntimeModel
 } from '@offgrid/models'
 import type { RagChatResultContract } from '../../../shared/ipc-contracts'
-import type { SearchHit } from '../types'
+import { subscribeDesktopChatStream } from './desktop-chat-stream-hub'
+import type {
+  DesktopChatSessionBoundary,
+  DesktopChatSessionInput,
+  DesktopChatSessionResult,
+  DesktopImageChatSessionInput,
+  DesktopImageChatSessionResult,
+  DesktopImageGenerationResponse,
+  DesktopToolChatResponse,
+  DesktopToolChatSessionInput,
+  DesktopToolChatSessionResult
+} from './desktop-chat-session-contract'
 
-export interface DesktopChatStreamEvent {
-  streamId: string
-  type: 'content' | 'reasoning' | 'step' | 'tool_result' | 'done'
-  text?: string
-}
-
-export interface DesktopChatSessionBoundary {
-  ragChat(
-    query: string,
-    appName: string,
-    history: { role: string; content: string }[],
-    projectId: string | null,
-    conversationId: string,
-    noMemory: boolean,
-    streamId: string,
-    thinking: boolean,
-    images: string[]
-  ): Promise<RagChatResultContract>
-  onRagStream(listener: (event: DesktopChatStreamEvent) => void): () => void
-  cancelRag(streamId: string): void
-  toolChat?(
-    query: string,
-    history: { role: string; content: string }[],
-    options: DesktopToolChatOptions
-  ): Promise<DesktopToolChatResponse>
-}
-
-export interface DesktopToolChatOptions {
-  connectors: boolean
-  conversationId: string
-  projectId?: string
-  allMemory: boolean
-  images: string[]
-  imageAvailable: boolean
-  streamId: string
-  thinking: boolean
-}
-
-export interface DesktopToolChatResponse {
-  answer?: string
-  unified?: Array<
-    Omit<SearchHit, 'key' | 'refId' | 'url' | 'score'> & {
-      key?: string
-      refId?: number
-      url?: string | null
-      score?: number
-    }
-  >
-  toolCalls?: Array<{
-    name: string
-    result: string
-    status?: 'completed' | 'failed' | 'pending'
-  }>
-  imageRequest?: { prompt: string; proposal?: { conversationId: string; slide: number } }
-  imageRequests?: Array<{
-    prompt: string
-    proposal?: { conversationId: string; slide: number }
-  }>
-  [key: string]: unknown
-}
-
-export interface DesktopChatSessionInput {
-  conversationId: string
-  turnId: string
-  projectId: string | null
-  userMessage: GenerationMessage
-  query: string
-  history: { role: string; content: string }[]
-  noMemory: boolean
-  thinking: boolean
-  images: string[]
-}
-
-export interface DesktopChatSessionResult {
-  turn: ChatTurn
-  response: RagChatResultContract
-}
-export interface DesktopToolChatSessionInput extends DesktopChatSessionInput {
-  connectors: boolean
-  allMemory: boolean
-  imageAvailable: boolean
-}
-
-export interface DesktopToolChatSessionResult {
-  turn: ChatTurn
-  response: DesktopToolChatResponse
-}
+export { subscribeDesktopChatStream } from './desktop-chat-stream-hub'
+export type {
+  DesktopChatSessionBoundary,
+  DesktopChatSessionInput,
+  DesktopChatSessionResult,
+  DesktopImageChatSessionInput,
+  DesktopImageChatSessionResult,
+  DesktopToolChatSessionInput,
+  DesktopToolChatSessionResult
+} from './desktop-chat-session-contract'
 
 interface TurnExecution {
   input: DesktopChatSessionInput
-  route: 'rag' | 'tools'
+  route: 'rag' | 'tools' | 'image'
   response?: RagChatResultContract
   toolResponse?: DesktopToolChatResponse
-}
-
-interface StreamHub {
-  listeners: Set<(event: DesktopChatStreamEvent) => void>
-  stop?: () => void
-}
-
-const STREAM_HUBS = new WeakMap<object, StreamHub>()
-
-/** One IPC subscription fans out to the shared session and the renderer projection. */
-export function subscribeDesktopChatStream(
-  boundary: DesktopChatSessionBoundary,
-  listener: (event: DesktopChatStreamEvent) => void
-): () => void {
-  let hub = STREAM_HUBS.get(boundary)
-  if (!hub) {
-    hub = { listeners: new Set() }
-    STREAM_HUBS.set(boundary, hub)
-  }
-  hub.listeners.add(listener)
-  if (!hub.stop) {
-    hub.stop = boundary.onRagStream((event) => {
-      for (const subscriber of hub!.listeners) subscriber(event)
-    })
-  }
-  return () => {
-    hub!.listeners.delete(listener)
-    if (hub!.listeners.size === 0) {
-      hub!.stop?.()
-      hub!.stop = undefined
-      STREAM_HUBS.delete(boundary)
-    }
-  }
+  imageResponse?: DesktopImageGenerationResponse
 }
 
 const DESKTOP_CHAT_ROUTE: RuntimeModel = {
@@ -244,7 +145,49 @@ export class DesktopChatSession {
     }
   }
 
+  async sendImage(input: DesktopImageChatSessionInput): Promise<DesktopImageChatSessionResult> {
+    this.executions.set(input.turnId, { input, route: 'image' })
+    try {
+      const turn = await this.service.send({
+        conversationId: input.conversationId,
+        turnId: input.turnId,
+        projectId: input.projectId ?? undefined,
+        userMessage: input.userMessage,
+        operation: {
+          type: 'image',
+          prompt: input.request.prompt,
+          negativePrompt: input.request.negativePrompt,
+          width: input.request.width,
+          height: input.request.height,
+          steps: input.request.steps,
+          guidanceScale: input.request.cfgScale,
+          seed: input.request.seed,
+          strength: input.request.strength
+        },
+        allowFallback: false,
+        partialOutputPolicy: 'preserve-and-stop'
+      })
+      const response = this.executions.get(input.turnId)?.imageResponse
+      if (!response && turn.status === 'stopped') {
+        throw new Error('Desktop image generation cancelled')
+      }
+      if (!response) throw new Error(`Desktop image response is missing for turn ${input.turnId}`)
+      return { turn, response }
+    } finally {
+      this.executions.delete(input.turnId)
+    }
+  }
+
   stopConversation(conversationId: string, reason?: unknown): number {
+    const pending = [...this.executions.values()].filter(
+      (execution) => execution.input.conversationId === conversationId
+    )
+    if (pending.some((execution) => execution.route === 'image')) {
+      this.boundary.cancelImageGen?.()
+    }
+    for (const execution of pending) {
+      if (execution.route !== 'image') this.boundary.cancelRag(execution.input.turnId)
+    }
     return this.service.stopConversation(conversationId, reason)
   }
 
@@ -262,67 +205,116 @@ export class DesktopChatSession {
     const execution = this.executions.get(turnId)
     if (!execution) throw new Error(`Desktop chat execution is missing for turn ${turnId}`)
     const { input } = execution
-    const cancel = (): void => this.boundary.cancelRag(input.turnId)
-    signal?.addEventListener('abort', cancel, { once: true })
     const unsubscribe = subscribeDesktopChatStream(this.boundary, (event) => {
       if (event.streamId !== input.turnId) return
       if (event.type === 'content' && event.text) events?.chunk?.({ content: event.text })
       if (event.type === 'reasoning' && event.text) events?.chunk?.({ reasoning: event.text })
     })
     try {
-      if (execution.route === 'tools') {
-        if (!this.boundary.toolChat) throw new Error('Desktop tool-chat boundary is unavailable')
-        const toolInput = input as DesktopToolChatSessionInput
-        const response = await this.boundary.toolChat(input.query, input.history, {
-          connectors: toolInput.connectors,
-          conversationId: input.conversationId,
-          ...(input.projectId ? { projectId: input.projectId } : {}),
-          allMemory: toolInput.allMemory,
-          images: input.images,
-          imageAvailable: toolInput.imageAvailable,
-          streamId: input.turnId,
-          thinking: input.thinking
-        })
-        execution.toolResponse = response
-        const calls = response.toolCalls ?? []
-        if (calls.length) {
-          events?.message?.({
-            role: 'assistant',
-            content: '',
-            toolCalls: calls.map((call, index) => ({
-              id: `${input.turnId}:tool:${index}`,
-              name: call.name,
-              arguments: '{}'
-            }))
-          })
-          calls.forEach((call, index) => {
-            events?.message?.({
-              role: 'tool',
-              content: call.result,
-              name: call.name,
-              toolCallId: `${input.turnId}:tool:${index}`
-            })
-          })
-        }
-        return this.textResult(response.answer ?? '', signal)
-      }
-      const response = await this.boundary.ragChat(
-        input.query,
-        'All',
-        input.history,
-        input.projectId,
-        input.conversationId,
-        input.noMemory && !input.projectId,
-        input.turnId,
-        input.thinking,
-        input.images
-      )
-      execution.response = response
-      return this.textResult(response.answer, signal)
+      if (execution.route === 'image') return this.generateImage(execution, signal)
+      if (execution.route === 'tools') return this.generateTools(execution, signal, events)
+      return this.generateRag(execution, signal)
     } finally {
       unsubscribe()
-      signal?.removeEventListener('abort', cancel)
     }
+  }
+
+  private async generateImage(
+    execution: TurnExecution,
+    signal: AbortSignal | undefined
+  ): Promise<GenerationResult> {
+    if (!this.boundary.generateImage) {
+      throw new Error('Desktop image-generation boundary is unavailable')
+    }
+    const imageInput = execution.input as DesktopImageChatSessionInput
+    const response = await this.boundary.generateImage(imageInput.request)
+    execution.imageResponse = response
+    return {
+      model: {
+        ...DESKTOP_CHAT_ROUTE,
+        id: response.model ?? 'active-image',
+        kind: 'image',
+        modality: 'image'
+      },
+      output: {
+        type: 'image',
+        images: [
+          {
+            id: response.syncId,
+            uri: response.path,
+            mimeType: 'image/png',
+            seed: response.seed
+          }
+        ]
+      },
+      content: '',
+      reasoning: '',
+      toolCalls: [],
+      finishReason: signal?.aborted ? 'cancelled' : 'stop',
+      attemptedModelIds: [response.model ?? 'active-image'],
+      attemptedRouteIds: []
+    }
+  }
+
+  private async generateTools(
+    execution: TurnExecution,
+    signal: AbortSignal | undefined,
+    events?: GenerationEvents
+  ): Promise<GenerationResult> {
+    if (!this.boundary.toolChat) throw new Error('Desktop tool-chat boundary is unavailable')
+    const input = execution.input as DesktopToolChatSessionInput
+    const response = await this.boundary.toolChat(input.query, input.history, {
+      connectors: input.connectors,
+      conversationId: input.conversationId,
+      ...(input.projectId ? { projectId: input.projectId } : {}),
+      allMemory: input.allMemory,
+      images: input.images,
+      imageAvailable: input.imageAvailable,
+      streamId: input.turnId,
+      thinking: input.thinking
+    })
+    execution.toolResponse = response
+    const calls = response.toolCalls ?? []
+    if (calls.length) {
+      events?.message?.({
+        role: 'assistant',
+        content: '',
+        toolCalls: calls.map((call, index) => ({
+          id: `${input.turnId}:tool:${index}`,
+          name: call.name,
+          arguments: '{}'
+        }))
+      })
+      calls.forEach((call, index) => {
+        events?.message?.({
+          role: 'tool',
+          content: call.result,
+          name: call.name,
+          toolCallId: `${input.turnId}:tool:${index}`
+        })
+      })
+    }
+    return this.textResult(response.answer ?? '', signal)
+  }
+
+  private async generateRag(
+    execution: TurnExecution,
+    signal: AbortSignal | undefined
+  ): Promise<GenerationResult> {
+    const { input } = execution
+    const response = await this.boundary.ragChat(
+      input.query,
+      'All',
+      input.history,
+      input.projectId,
+      input.conversationId,
+      input.noMemory && !input.projectId,
+      input.turnId,
+      input.thinking,
+      input.images
+    )
+    execution.response = response
+    return this.textResult(response.answer, signal)
   }
 
   private textResult(content: string, signal: AbortSignal | undefined): GenerationResult {

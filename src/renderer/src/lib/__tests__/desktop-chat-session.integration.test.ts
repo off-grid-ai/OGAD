@@ -85,7 +85,7 @@ describe('DesktopChatSession', () => {
       ragChat: vi.fn(async () => ({ answer: '' })),
       toolChat: vi.fn(async () => ({
         answer: 'The weather is clear.',
-        toolCalls: [{ name: 'weather', result: 'Clear, 18 C', status: 'completed' }]
+        toolCalls: [{ name: 'weather', result: 'Clear, 18 C', status: 'completed' as const }]
       })),
       onRagStream: () => () => undefined,
       cancelRag: vi.fn()
@@ -109,5 +109,46 @@ describe('DesktopChatSession', () => {
       name: 'weather',
       content: 'Clear, 18 C'
     })
+  })
+
+  it('keeps generated image artifacts in the shared canonical response transcript', async () => {
+    const boundary: DesktopChatSessionBoundary = {
+      ragChat: vi.fn(async () => ({ answer: '' })),
+      generateImage: vi.fn(async () => ({
+        dataUrl: 'data:image/png;base64,cG5n',
+        path: '/generated/image.png',
+        syncId: 'image-sync-id',
+        seed: 42,
+        model: 'DreamShaper'
+      })),
+      onRagStream: () => () => undefined,
+      cancelRag: vi.fn()
+    }
+    const session = new DesktopChatSession(boundary)
+
+    const result = await session.sendImage({
+      ...input('turn-image'),
+      request: {
+        prompt: 'A cabin at dawn',
+        conversationId: 'conversation-a',
+        projectId: 'project-a'
+      }
+    })
+
+    expect(result.turn.responseMessages).toEqual([
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'image',
+            id: 'image-sync-id',
+            uri: '/generated/image.png',
+            mimeType: 'image/png',
+            seed: 42
+          }
+        ],
+        reasoning: undefined
+      }
+    ])
   })
 })

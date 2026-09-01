@@ -3742,10 +3742,21 @@ export function MemoryChat({
         strength: imgInit ? imgStrength : undefined
       }
       try {
-        const img = await window.api.generateImage({
-          ...imageRequest,
-          conversationId: convId, // the turn's own conversation (activeConversationId can lag for a fresh/queued chat)
-          projectId: projectId
+        const { response: img } = await desktopChatSession.sendImage({
+          conversationId: convId,
+          turnId: `image-${crypto.randomUUID()}`,
+          projectId,
+          userMessage: { role: 'user', content: trimmed },
+          query: imageRequest.prompt,
+          history: [],
+          noMemory,
+          thinking: false,
+          images: [],
+          request: {
+            ...imageRequest,
+            conversationId: convId, // the turn's own conversation (activeConversationId can lag for a fresh/queued chat)
+            projectId: projectId
+          }
         })
         const imageMetadata: ImageGenerationMetadata = {
           width: imageRequest.width ?? imgSize,
@@ -4403,7 +4414,7 @@ export function MemoryChat({
       // one conversation never kills another's in-flight image (D9). imgProgress is a
       // shared stream buffer — clear it too when the owner stops.
       if (imageGenConv === convId) {
-        window.api.cancelImageGen()
+        if (sharedStops === 0) window.api.cancelImageGen()
         setImageGenConv(null)
         setImgProgress(null)
       }
