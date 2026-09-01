@@ -113,6 +113,12 @@ for (const file of files) {
         report('models-manager-does-not-own-selection-persistence', fileName, source, node, `call:${call}`)
       }
       if (
+        fileName === 'src/main/models-manager.ts' &&
+        /^(?:downloadQueue\.(?:enqueue|has|isAccepting|cancel|shutdown)|downloadLedger\.(?:update|inactiveIds|remove))$/.test(call)
+      ) {
+        report('desktop-model-library-workflow-is-shared', fileName, source, node, `call:${call}`)
+      }
+      if (
         fileName !== 'src/main/model-selection-persistence.ts' &&
         fileName !== 'src/main/model-services.ts' &&
         /^desktopModelSelectionPersistence\.(?:write|projectLegacyModality)$/.test(call)
@@ -165,6 +171,13 @@ for (const file of files) {
       node.name && /^(?:schemas|selectEffectiveSchemas|runToolLoop)$/.test(node.name.getText(source))
     ) {
       report('desktop-tool-policy-is-shared', fileName, source, node.name, `declaration:${node.name.getText(source)}`)
+    }
+    if (
+      fileName === 'src/main/models-manager.ts' &&
+      (ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)) &&
+      node.name && /^(?:publishRefusal|clearDeletedModelSelections|deleteTransferredModel)$/.test(node.name.getText(source))
+    ) {
+      report('desktop-model-library-workflow-is-shared', fileName, source, node.name, `declaration:${node.name.getText(source)}`)
     }
 
     if (isAdapter && (ts.isIfStatement(node) || ts.isSwitchStatement(node) || ts.isConditionalExpression(node))) {
