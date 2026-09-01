@@ -15,7 +15,7 @@ import {
   type PerformanceMode
 } from './model-sizing'
 import { classifyLlamaError, modelPortConflictReason } from './llama-error'
-import type { ManagedRuntime } from './runtime-manager'
+import type { ManagedRuntimePort as ManagedRuntime } from '@offgrid/models'
 import { LLAMA_SERVER_PORT } from '../shared/ports'
 import {
   DEFAULT_CTX_SIZE,
@@ -1583,7 +1583,7 @@ export class LLMService {
     this.paused = false
   }
 
-  /** This engine as a ManagedRuntime for the shared residency seam (runtime-manager),
+  /** This engine as a raw runtime port for the shared residency service,
    *  so the chat model is managed identically to image/STT/TTS — one code path. */
   get runtime(): ManagedRuntime {
     return {

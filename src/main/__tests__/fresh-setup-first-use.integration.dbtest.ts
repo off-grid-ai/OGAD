@@ -403,14 +403,7 @@ describe('fresh setup to first use', () => {
     const transcriptionModel = models.find((model) => model.kind === 'transcription')!
     const voiceModel = models.find((model) => model.kind === 'voice')!
 
-    const { registerRuntime } = await import('../runtime-manager')
-    const { generateImage, imageRuntime } = await import('../imagegen')
-    const { ttsRuntime } = await import('../tts')
-    const { sttRuntime } = await import('../transcription/select')
-    registerRuntime(resumedLlm.runtime)
-    registerRuntime(imageRuntime)
-    registerRuntime(sttRuntime)
-    registerRuntime(ttsRuntime)
+    const { generateImage } = await import('../imagegen')
 
     await expect(resumedManager.activateModel(textModel.id)).resolves.toEqual({ success: true })
     expect(await resumedLlm.chat('Prove the fresh chat model can answer')).toBe(
@@ -471,23 +464,13 @@ describe('fresh setup to first use', () => {
       { llm: relaunchedLlm },
       relaunchedSetup,
       relaunchedManager,
-      relaunchedRuntimeManager,
-      relaunchedImage,
-      relaunchedTts,
-      relaunchedTranscription
+      relaunchedImage
     ] = await Promise.all([
       import('../llm'),
       import('../setup'),
       import('../models-manager'),
-      import('../runtime-manager'),
-      import('../imagegen'),
-      import('../tts'),
-      import('../transcription/select')
+      import('../imagegen')
     ])
-    relaunchedRuntimeManager.registerRuntime(relaunchedLlm.runtime)
-    relaunchedRuntimeManager.registerRuntime(relaunchedImage.imageRuntime)
-    relaunchedRuntimeManager.registerRuntime(relaunchedTranscription.sttRuntime)
-    relaunchedRuntimeManager.registerRuntime(relaunchedTts.ttsRuntime)
     const relaunchedPlan = await relaunchedSetup.getSetupPlan()
     expect(relaunchedPlan.items.every((item) => item.installed)).toBe(true)
     expect(relaunchedPlan.totalDownloadGb).toBe(0)

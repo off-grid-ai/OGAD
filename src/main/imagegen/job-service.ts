@@ -1,4 +1,12 @@
 import { randomUUID } from 'node:crypto'
+import {
+  canAcknowledgeImageConversation,
+  finishImageJob,
+  idleImageJob,
+  ImageGenerationLifecycle,
+  startImageJob,
+  updateImageJob
+} from '@offgrid/models'
 import { generatedImageMetadataJson } from '@offgrid/sync'
 import type { ChatHome } from '@offgrid/sync'
 import {
@@ -55,26 +63,12 @@ const nativeImageGenerationRuntime: ImageGenerationRuntime = {
   preserveSource: (syncId, sourcePath) => preserveGeneratedImageSource(syncId, sourcePath)
 }
 
-const idleSnapshot = (): ImageGenerationJobContract => ({
-  id: null,
-  phase: 'idle',
-  conversationId: null,
-  projectId: null,
-  stage: null,
-  enhancedPrompt: '',
-  progress: null,
-  outputPath: null,
-  error: null,
-  startedAt: null,
-  finishedAt: null
-})
-
 /** Main-process owner for renderer-started image jobs. The native runtime remains
  * in imagegen.ts; this service adds durable identity/observation across renderer
  * navigation without introducing a second generation state machine. */
 export class ImageGenerationJobService {
-  private snapshot: ImageGenerationJobContract = idleSnapshot()
-  private active = false
+  private snapshot: ImageGenerationJobContract = idleImageJob()
+  private readonly lifecycle = new ImageGenerationLifecycle()
   private readonly listeners = new Set<JobListener>()
   private readonly conversationListeners = new Set<ConversationListener>()
 
@@ -96,28 +90,15 @@ export class ImageGenerationJobService {
 
   /** Reject before a caller reserves related state for a job this service cannot accept. */
   assertCanStart(): void {
-    if (this.active) {
+    if (this.lifecycle.isRunning()) {
       throw new Error('An image is already generating - please wait for it to finish.')
     }
   }
 
   async start(request: ImageGenerationJobRequest): Promise<ImageGenerationResult> {
-    this.assertCanStart()
-    this.active = true
+    this.lifecycle.start()
     const id = randomUUID()
-    this.snapshot = {
-      id,
-      phase: 'running',
-      conversationId: request.conversationId ?? null,
-      projectId: request.projectId ?? null,
-      stage: 'enhancing',
-      enhancedPrompt: '',
-      progress: null,
-      outputPath: null,
-      error: null,
-      startedAt: Date.now(),
-      finishedAt: null
-    }
+    this.snapshot = startImageJob(id, request)
     this.publish()
     console.log(
       `[image-job] ${JSON.stringify({
@@ -172,14 +153,10 @@ export class ImageGenerationJobService {
           )
         }
       }
-      this.snapshot = {
-        ...this.snapshot,
+      this.snapshot = finishImageJob(this.snapshot, id, {
         phase: 'succeeded',
-        stage: null,
-        outputPath: result.path,
-        progress: null,
-        finishedAt: Date.now()
-      }
+        outputPath: result.path
+      })
       // Described from the sidecar just written, by the one function the chat link also calls, so a
       // picture offered when it is made and the same picture offered once its message exists cannot
       // be described two different ways.
@@ -190,21 +167,18 @@ export class ImageGenerationJobService {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       const cancelled = this.snapshot.id === id && this.snapshot.phase === 'cancelled'
-      this.snapshot = {
-        ...this.snapshot,
-        phase: cancelled ? 'cancelled' : 'failed',
-        stage: null,
-        error: message,
-        progress: null,
-        finishedAt: Date.now()
-      }
+      this.snapshot = finishImageJob(
+        this.snapshot,
+        id,
+        cancelled ? { phase: 'cancelled', error: message } : { phase: 'failed', error: message }
+      )
       this.publish()
       console.error(
         `[image-job] ${JSON.stringify({ event: this.snapshot.phase, id, error: message })}`
       )
       throw error
     } finally {
-      this.active = false
+      this.lifecycle.finish()
     }
   }
 
@@ -212,13 +186,8 @@ export class ImageGenerationJobService {
     if (this.snapshot.phase !== 'running') return false
     const cancelled = this.runtime.cancel()
     if (!cancelled) return false
-    this.snapshot = {
-      ...this.snapshot,
-      phase: 'cancelled',
-      stage: null,
-      progress: null,
-      finishedAt: Date.now()
-    }
+    this.lifecycle.cancel()
+    this.snapshot = finishImageJob(this.snapshot, this.snapshot.id!, { phase: 'cancelled' })
     this.publish()
     return true
   }
@@ -232,12 +201,7 @@ export class ImageGenerationJobService {
    * an idempotent acknowledgement, so it does not publish or transfer the same image a second time.
    */
   acknowledgeConversation(conversationId: string, messageId?: string): boolean {
-    if (
-      !conversationId ||
-      this.snapshot.phase !== 'succeeded' ||
-      this.snapshot.conversationId !== conversationId
-    )
-      return false
+    if (!canAcknowledgeImageConversation(this.snapshot, conversationId)) return false
     if (messageId && this.snapshot.outputPath) {
       this.runtime.noteMessage(this.snapshot.outputPath, { conversationId, messageId })
     }
@@ -258,13 +222,9 @@ export class ImageGenerationJobService {
   }
 
   private update(id: string, update: ImageGenerationPipelineUpdateContract): void {
-    if (this.snapshot.id !== id || this.snapshot.phase !== 'running') return
-    this.snapshot = {
-      ...this.snapshot,
-      stage: update.stage,
-      ...(update.enhancedPrompt === undefined ? {} : { enhancedPrompt: update.enhancedPrompt }),
-      progress: update.progress === undefined ? this.snapshot.progress : update.progress
-    }
+    const next = updateImageJob(this.snapshot, id, update)
+    if (next === this.snapshot) return
+    this.snapshot = next
     this.publish()
   }
 

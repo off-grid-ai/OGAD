@@ -1314,17 +1314,17 @@ export function setupIPC() {
   })
 
   // Pipeline queue config — the user-facing controls for the shared scheduler.
-  // Reads/writes go through modality-queue/config (single source for the keys) and
+  // Reads/writes go through the Node composition for the shared scheduler and
   // apply to the live queue immediately, so a toggle takes effect without a restart.
   ipcMain.handle('queue:config:get', async () => {
-    const { readQueueConfig } = await import('./modality-queue/config')
+    const { readQueueConfig } = await import('./modality-queue/queue')
     return readQueueConfig(getSetting)
   })
   ipcMain.handle(
     'queue:config:set',
     async (_e, patch: { enabled?: boolean; tier1Coexists?: boolean }) => {
       const { readQueueConfig, applyQueueConfig, QUEUE_ENABLED_KEY, TIER1_COEXIST_KEY } =
-        await import('./modality-queue/config')
+        await import('./modality-queue/queue')
       const { modalityQueue } = await import('./modality-queue/queue')
       if (typeof patch.enabled === 'boolean') {
         saveSetting(QUEUE_ENABLED_KEY, patch.enabled)

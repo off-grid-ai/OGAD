@@ -1,7 +1,7 @@
 /**
  * Real multimodal-runtime reliability integration.
  *
- * Production LLMService, imagegen, TTS, ModalityQueue, runtime-manager, SQLite
+ * Production LLMService, imagegen, TTS, shared residency, SQLite
  * residency, argument building, process lifecycle, and HTTP transports remain real.
  * Only the bundled native executables and reported host RAM are controlled.
  */
@@ -238,14 +238,12 @@ beforeAll(async () => {
   const [
     { llm: productionLlm },
     { generateImage: productionGenerateImage },
-    { synthesize: productionSynthesize, ttsRuntime },
-    runtimeManager,
+    { synthesize: productionSynthesize },
     modelServer
   ] = await Promise.all([
     import('../llm'),
     import('../imagegen'),
     import('../tts'),
-    import('../runtime-manager'),
     import('../model-server')
   ])
   llm = productionLlm
@@ -253,8 +251,6 @@ beforeAll(async () => {
   synthesize = productionSynthesize
   startModelServer = modelServer.startModelServer
   stopModelServer = modelServer.stopModelServer
-  runtimeManager.registerRuntime(llm.runtime)
-  runtimeManager.registerRuntime(ttsRuntime)
   await llm.init()
   gatewayPort = await unusedPort()
 })

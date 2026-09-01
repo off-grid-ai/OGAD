@@ -14,8 +14,19 @@ import {
   writeGeneratedImageSidecar,
   type GeneratedImageSidecar
 } from './imagegen/gallery-sidecar'
-import { enhancePrompt } from './imagegen/prompt-enhance'
-import type { ManagedRuntime } from './runtime-manager'
+import {
+  enhanceImagePrompt as enhancePrompt,
+  ensureCheckpointExtension as ensureCheckpointExt,
+  evaluateImageMemory as evaluateMemoryGuard,
+  hasCheckpointExtension as hasCheckpointExt,
+  IMAGE_CANCELLED_MESSAGE,
+  ImageGenerationLifecycle,
+  initialImageProgress as initialProgressState,
+  isImageModelFile,
+  reduceImageProgress as reduceProgress,
+  stripCheckpointExtension as stripCheckpointExt,
+  type ManagedRuntimePort as ManagedRuntime
+} from '@offgrid/models'
 import {
   isMfluxModelId,
   mfluxAvailable,
@@ -31,25 +42,16 @@ import { standardModelDefaults, taesdFilename } from '../shared/image-defaults'
 import { defaultImageModelFilename } from './image-default'
 import { hasMlmodelc, isZImageModel, isQuantizedModel } from './imagegen/runtime-detect'
 import {
-  isImageModelFile,
-  hasCheckpointExt,
-  stripCheckpointExt,
-  ensureCheckpointExt
-} from './imagegen/model-filter'
-import { evaluateMemoryGuard } from './imagegen/memory-guard'
-import {
   buildCoreMLArgs,
   buildZImageArgs,
   buildStandardArgs,
   DEFAULT_NEGATIVE
 } from './imagegen/args'
-import { initialProgressState, reduceProgress } from './imagegen/progress'
 import {
   resolveExistingOwnedEntry,
   resolveExistingOwnedPath,
   resolveOwnedDestination
 } from './imagegen/owned-path'
-import { IMAGE_CANCELLED_MESSAGE, ImageGenerationLifecycle } from './imagegen/generation-lifecycle'
 import {
   imageMemoryGuardErrorMessage,
   type ImageGenerationPipelineUpdateContract,
@@ -602,7 +604,7 @@ async function maybeEnhancePrompt(
       onUpdate?.({ stage: 'enhancing', enhancedPrompt: streamed })
     },
     // Prompt generation uses the same shared text route before image admission begins.
-    chat: (instruction, onText) =>
+    generate: (instruction, onText) =>
       generateDesktopText(instruction, {
         temperature: 0.7,
         thinking: false,
