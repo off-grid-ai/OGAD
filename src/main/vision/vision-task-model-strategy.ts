@@ -29,6 +29,7 @@ import { getActiveRemoteVisionServer } from './remote-vision-server'
 import type { VisionGroundingInput, VisionGroundingResult } from './vision-agent'
 import { currentRemoteScreenTaskSession } from '../actions/remote-screen-session'
 import { desktopModelServices } from '../model-services'
+import { resolveComputerUseExecutionPlan } from '@offgrid/models'
 
 export interface VisionTaskModelSession {
   adapter: VisionModelAdapter
@@ -90,12 +91,13 @@ export async function getComputerUseActiveModelProjection(
   dependencies: VisionTaskModelStrategyDependencies = productionDependencies
 ): Promise<ComputerUseActiveModelProjection> {
   const strategy = dependencies.strategy()
+  const plan = resolveComputerUseExecutionPlan(strategy)
   const remote = dependencies.activeRemote()
   const chatModelId = remote
     ? remoteVisionModelId(remote.id, remote.model)
     : dependencies.selectedChatId()
   const specialistModelId = dependencies.selectedSpecialistId()
-  if (strategy === 'same_as_chat') {
+  if (plan.mode === 'direct' && plan.source === 'chat') {
     return {
       strategy,
       strategyLabel: 'Same as Chat',
@@ -104,7 +106,7 @@ export async function getComputerUseActiveModelProjection(
         : []
     }
   }
-  if (strategy === 'separate_specialist') {
+  if (plan.mode === 'direct') {
     return {
       strategy,
       strategyLabel: 'Specialist',
@@ -232,10 +234,11 @@ export async function withVisionTaskModelStrategy<T>(
   dependencies: VisionTaskModelStrategyDependencies = productionDependencies
 ): Promise<T> {
   const strategy = dependencies.strategy()
-  if (strategy === 'text_plus_specialist') {
+  const plan = resolveComputerUseExecutionPlan(strategy)
+  if (plan.mode === 'hybrid') {
     return task(await hybridSession(environment, dependencies))
   }
-  if (strategy === 'same_as_chat') {
+  if (plan.source === 'chat') {
     return task(await directSession(environment, activeChatSelection(dependencies), dependencies))
   }
   const { result } = await dependencies.withSpecialist(async () => {

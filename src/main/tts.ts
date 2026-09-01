@@ -16,7 +16,7 @@ import { getActiveModal } from './active-models'
 import { writeDiagnosticLog } from './diagnostics-log'
 import { modelsDir, resourceDirs } from './runtime-env'
 import type { ManagedRuntimePort as ManagedRuntime } from '@offgrid/models'
-import { chooseVoice, DEFAULT_VOICE } from './tts-logic'
+import { DEFAULT_SPEECH_VOICE, resolveSpeechVoice } from '@offgrid/models'
 import { generateDesktopOperation } from './desktop-generation'
 import { registerDesktopVoiceProgress } from './model-generation-adapters'
 
@@ -98,10 +98,13 @@ export async function synthesizeNative(
   onProgress?: (progress: DownloadProgress) => void
 ): Promise<{ dataUrl: string }> {
   const selected = getActiveModal('speech')
-  const requestedVoice = chooseVoice(voice, selected) || DEFAULT_VOICE
-  // Older releases persisted Kokoro voices that the ExecuTorch catalogue does not contain.
-  // Keep those profiles able to speak after upgrade; the runtime manifest remains the voice SSOT.
-  const chosenVoice = SUPPORTED_VOICES.has(requestedVoice) ? requestedVoice : DEFAULT_VOICE
+  // Shared owns voice selection and stale-persistence recovery. This adapter owns only ExecuTorch I/O.
+  const chosenVoice = resolveSpeechVoice({
+    requested: voice,
+    selected,
+    supported: SUPPORTED_VOICES,
+    fallback: DEFAULT_SPEECH_VOICE
+  })
   const input = (text || '').trim()
   if (!input) throw new Error('Nothing to speak.')
   if (busy) throw new Error('Already generating speech. Please wait.')

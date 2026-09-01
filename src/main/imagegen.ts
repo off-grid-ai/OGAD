@@ -27,7 +27,10 @@ import {
   isImageModelFile,
   reduceImageProgress as reduceProgress,
   stripCheckpointExtension as stripCheckpointExt,
-  type ManagedRuntimePort as ManagedRuntime
+  type ManagedRuntimePort as ManagedRuntime,
+  imageTaesdFilename,
+  selectInstalledImageModel,
+  standardImageModelDefaults
 } from '@offgrid/models'
 import {
   isMfluxModelId,
@@ -40,8 +43,6 @@ import {
 import { getActiveModal } from './active-models'
 import { binRoots, dataDir, modelsDir, resourceDirs, exe } from './runtime-env'
 import { sdServer } from './sd-server'
-import { standardModelDefaults, taesdFilename } from '../shared/image-defaults'
-import { defaultImageModelFilename } from './image-default'
 import { hasMlmodelc, isZImageModel, isQuantizedModel } from './imagegen/runtime-detect'
 import { primaryFileName, type CatalogEntry } from '@offgrid/models'
 import {
@@ -260,7 +261,7 @@ export async function downloadLora(
  *  Returns null (so callers just skip taesd) when it isn't — the feature is a
  *  no-op until the tiny decoder is downloaded into the models dir. */
 export function resolveTaesd(base: string): string | null {
-  return resolveExistingOwnedEntry(modelsDir(), taesdFilename(base))
+  return resolveExistingOwnedEntry(modelsDir(), imageTaesdFilename(base))
 }
 
 /** Find a companion file (text encoder / vae) in the models dir by pattern. */
@@ -335,34 +336,17 @@ function imageRuntimeModelId(selected: string): string {
 
 function resolveModel(preferred?: string): string | null {
   const dir = modelsDir()
-  if (preferred) {
-    const preferredPath = resolveExistingOwnedEntry(dir, imageRuntimeModelId(preferred))
-    if (preferredPath) return preferredPath
-  }
   const sd = listImageModels()
   if (!sd.length) return null
-  // User-chosen image model is the default when the caller didn't request one.
   const chosen = getActiveModal('image')
-  if (chosen) {
-    const runtimeModelId = imageRuntimeModelId(chosen)
-    const chosenPath = resolveExistingOwnedEntry(dir, runtimeModelId)
-    if (chosenPath) return chosenPath
-    if (sd.includes(runtimeModelId)) return path.join(dir, runtimeModelId) // mlx/virtual id
-  }
-  // Smart default: DreamShaper XL v2 Turbo (the versatile default), RAM-aware —
-  // a fresh user on <=16GB gets the Light (Q4) quant, >16GB gets the full (Q8).
-  // Only when the user hasn't picked (getActiveModal above). Falls through to the
-  // generic heuristic below when no DreamShaper quant is installed.
-  const dreamshaper = defaultImageModelFilename(sd, os.totalmem() / 1e9)
-  if (dreamshaper) return path.join(dir, dreamshaper)
-  // Preference: Juggernaut XL v9 (default photoreal) > Z-Image-Turbo >
-  // SDXL-Lightning > SDXL > SD 2.1 > anything else.
-  const juggernaut = sd.find((f) => /juggernaut/i.test(f))
-  const zimage = sd.find((f) => /z[-_]?image/i.test(f))
-  const lightning = sd.find((f) => /lightning/i.test(f))
-  const xl = sd.find((f) => /sdxl|xl/i.test(f))
-  const v21 = sd.find((f) => /v2-1|v2\.1/i.test(f))
-  return path.join(dir, juggernaut ?? zimage ?? lightning ?? xl ?? v21 ?? sd[0]!) // sd.length checked above
+  const selected = selectInstalledImageModel({
+    installed: sd,
+    preferred: preferred ? imageRuntimeModelId(preferred) : null,
+    active: chosen ? imageRuntimeModelId(chosen) : null,
+    ramGb: os.totalmem() / 1e9
+  })
+  if (!selected) return null
+  return resolveExistingOwnedEntry(dir, selected) ?? path.join(dir, selected)
 }
 
 /** Whether image generation is usable right now (binary + at least one model). */
@@ -592,7 +576,7 @@ async function maybeEnhancePrompt(
   prompt: string,
   onUpdate?: (update: ImageGenerationPipelineUpdateContract) => void
 ): Promise<string> {
-  const enabled = getSetting('enhanceImagePrompts', true)
+  const enabled = getSetting<boolean>('enhanceImagePrompts', true)
   if (enabled) onUpdate?.({ stage: 'enhancing', enhancedPrompt: '' })
   let streamed = ''
   return enhancePrompt(prompt, {
@@ -785,7 +769,7 @@ async function runImageGen(
     ggufIsFullCheckpoint(model)
   if (eligibleForServer) {
     const { defaultSize, defaultSteps, defaultCfg, sampler, scheduler } =
-      standardModelDefaults(base)
+      standardImageModelDefaults(base)
     const taesd = params.fastVae ? resolveTaesd(base) : undefined
     generationLifecycle.start()
     try {

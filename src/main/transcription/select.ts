@@ -3,6 +3,7 @@ import {
   catalogTranscriptionEngine,
   residentAwareTranscriptionEngine,
   resolveSupportedTranscriptionLanguage,
+  selectTranscriptionRoute,
   selectAvailableTranscriptionEngine,
   transcriptionEngineForActiveModel,
   transcriptionEntryMatches,
@@ -96,21 +97,23 @@ async function routeForTranscription(
   if (explicitRoute) return explicitRoute
 
   const requestedEngine: CatalogTranscriptionEngine = engine === 'parakeet' ? 'parakeet' : 'whisper'
-  const compatible = desktopModelServices.llm
-    .list('transcription')
-    .filter((model) => model.ready && transcriptionEngineForRoute(model) === requestedEngine)
-  if (preferSmallModel) {
-    return compatible
-      .sort(
-        (left, right) =>
-          (left.residentSizeMB ?? Number.MAX_SAFE_INTEGER) -
-          (right.residentSizeMB ?? Number.MAX_SAFE_INTEGER)
-      )[0]?.routeId
-  }
   const active = desktopModelServices.llm.active('transcription').model
-  if (active?.ready && transcriptionEngineForRoute(active) === requestedEngine)
-    return active.routeId
-  return compatible[0]?.routeId
+  const candidates = desktopModelServices.llm
+    .list('transcription')
+    .filter((model): model is typeof model & { routeId: string } => Boolean(model.routeId))
+    .map((model) => ({
+      routeId: model.routeId,
+      engine: transcriptionEngineForRoute(model),
+      ready: model.ready,
+      residentSizeMB: model.residentSizeMB
+    }))
+  return selectTranscriptionRoute({
+    engine: requestedEngine,
+    candidates,
+    explicitRouteId: explicitRoute,
+    activeRouteId: active?.routeId,
+    preferSmallModel
+  })
 }
 
 /**

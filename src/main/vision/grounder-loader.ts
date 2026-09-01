@@ -26,7 +26,7 @@ import { getActiveModel, listInstalled, loadComputerUseModel } from '../models-m
 import { desktopModelServices, type DesktopModelServices } from '../model-services'
 import { getActiveModal } from '../active-models'
 import { isGrounderActive } from './vision-model-notice'
-import { resolveGrounderPlan } from './grounder-plan'
+import { resolveGrounderLoadPlan } from '@offgrid/models'
 import { runRestoredModelSwap } from './grounder-swap'
 import { getComputerUseSettings } from '../computer-use-settings'
 import {
@@ -228,7 +228,10 @@ export function createGrounderRunner(
     const grounderId = dependencies.selectedModelId()
     const active = dependencies.activeModel()
     const alreadyGrounder = active?.id === grounderId && dependencies.isGrounder(active)
-    const plan = resolveGrounderPlan(alreadyGrounder, await dependencies.installed(grounderId))
+    const plan = resolveGrounderLoadPlan({
+      activeIsGrounder: alreadyGrounder,
+      specialistInstalled: await dependencies.installed(grounderId)
+    })
     if (plan === 'missing-grounder') {
       throw new Error(
         `The selected Computer Use model is not downloaded: ${grounderId}. Download it before starting Web Use.`

@@ -5,7 +5,7 @@
 // binary expects. The standard builder CALLS standardModelDefaults from the
 // shared single-source-of-truth module — it never re-implements the defaults.
 
-import { standardModelDefaults } from '../../shared/image-defaults'
+import { standardImageModelDefaults } from '@offgrid/models'
 
 /** A general-purpose negative prompt that meaningfully lifts quality when the
  *  caller doesn't supply one. Kept conservative so it doesn't fight most prompts. */
@@ -127,9 +127,8 @@ export interface StandardArgsInput {
 /** Standard sd-cli checkpoint. Per-model defaults come from the shared
  *  standardModelDefaults (single source of truth) — NOT re-derived here. */
 export function buildStandardArgs(i: StandardArgsInput): string[] {
-  const { defaultSize, defaultSteps, defaultCfg, sampler, scheduler, isXL } = standardModelDefaults(
-    i.base
-  )
+  const { defaultSize, defaultSteps, defaultCfg, sampler, scheduler, isXL } =
+    standardImageModelDefaults(i.base)
   const args = [
     '-M',
     'img_gen',

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildCoreMLArgs, buildZImageArgs, buildStandardArgs, DEFAULT_NEGATIVE } from '../args'
-import { standardModelDefaults } from '../../../shared/image-defaults'
+import { standardImageModelDefaults } from '@offgrid/models'
 
 // A helper: value that follows a flag in the argv (or undefined if the flag is absent).
 function flagVal(args: string[], flag: string): string | undefined {
@@ -97,7 +97,7 @@ describe('buildStandardArgs', () => {
 
   it('reflects the SHARED defaults for a full SDXL checkpoint (no duplication)', () => {
     const base = 'animagine-xl-4.0-Q8_0.gguf'
-    const d = standardModelDefaults(base) // single source of truth
+    const d = standardImageModelDefaults(base) // single source of truth
     const args = buildStandardArgs({ ...common, base })
     expect(flagVal(args, '-W')).toBe(String(d.defaultSize))
     expect(flagVal(args, '-H')).toBe(String(d.defaultSize))
@@ -111,7 +111,7 @@ describe('buildStandardArgs', () => {
 
   it('reflects the SHARED few-step defaults for a distilled Lightning model', () => {
     const base = 'sdxl-lightning-4step.gguf'
-    const d = standardModelDefaults(base)
+    const d = standardImageModelDefaults(base)
     const args = buildStandardArgs({ ...common, base })
     expect(flagVal(args, '--steps')).toBe(String(d.defaultSteps)) // 10, not 28
     expect(flagVal(args, '--cfg-scale')).toBe(String(d.defaultCfg)) // 2
