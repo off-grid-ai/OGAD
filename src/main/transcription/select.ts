@@ -178,13 +178,13 @@ export function getActiveTranscription(
 }
 
 export function getNativeTranscriptionForRoute(
-  model: { id: string; providerId?: string; residencyMode?: string },
+  model: { id: string; providerId?: string; residencyLifecycle?: string },
   readSetting: TranscriptionSettingReader = getSetting
 ): TranscriptionService {
   const engine = transcriptionEngineForRoute(model)
   const selected = resolveTranscription(
     engine,
-    model.residencyMode === 'persistent' ? 'resident' : 'on-demand'
+    model.residencyLifecycle === 'persistent' ? 'resident' : 'on-demand'
   ).engine
   const language = resolveSupportedTranscriptionLanguage(
     readSetting('sttLanguage', 'auto'),

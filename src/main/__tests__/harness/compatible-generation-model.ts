@@ -48,7 +48,7 @@ function compatibleModels(): RuntimeModel[] {
       installed: true,
       ready: true,
       loaded: true,
-      residencyMode: 'persistent'
+      residencyLifecycle: 'persistent'
     }
     routes.push(
       base,
@@ -87,7 +87,7 @@ function compatibleModels(): RuntimeModel[] {
       ready: true,
       loaded: false,
       dirtyMemory: true,
-      residencyMode: 'operation'
+      residencyLifecycle: 'operation'
     })
   }
 
@@ -103,7 +103,7 @@ function compatibleModels(): RuntimeModel[] {
     installed: true,
     ready: true,
     loaded: false,
-    residencyMode: 'operation'
+    residencyLifecycle: 'operation'
   })
 
   const transcriptionId = selectedId(activeModalities.transcription)
@@ -119,7 +119,7 @@ function compatibleModels(): RuntimeModel[] {
       installed: true,
       ready: true,
       loaded: false,
-      residencyMode: 'operation'
+      residencyLifecycle: 'operation'
     })
   }
 

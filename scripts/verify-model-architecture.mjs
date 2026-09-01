@@ -38,6 +38,23 @@ for (const file of files) {
   const isUi = /^src\/(renderer\/src\/(components|hooks|screens)|.*\/(components|hooks|screens))\//.test(fileName)
   const isAdapter = /(^|\/)(adapters?|model-generation-adapters|remote-chat|remote-media-runtime)(\/|\.|$)/.test(fileName)
 
+  if (/\bresidencyMode\b/.test(text)) {
+    report('runtime-model-has-one-lifecycle-vocabulary', fileName, source, source, 'deprecated:residencyMode')
+  }
+
+  if (
+    /^(?:src\/main\/models\/(?:gguf|download-verify)|src\/main\/models-manager)\.ts$/.test(fileName) &&
+    /\b(?:GGUF_MAGIC|GGUF_MIN_BYTES|isValidGgufHeader|isValidGgufFile)\b|\.corruption\b|toString\(['"]ascii['"]\)\s*===?\s*['"]GGUF/.test(text)
+  ) {
+    report(
+      'artifact-verification-policy-is-shared',
+      fileName,
+      source,
+      source,
+      'app-owned format, size, or corruption branch'
+    )
+  }
+
   if (/^(?:src\/main\/tools\/(?:memory-scope|extension-select)|src\/shared\/llm-defaults)\.ts$/.test(fileName)) {
     report('desktop-tool-policy-is-shared', fileName, source, source, `file:${path.basename(fileName)}`)
   }

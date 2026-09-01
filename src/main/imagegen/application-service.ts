@@ -170,7 +170,7 @@ function applicationPorts(): ImageGenerationApplicationPorts<
       nativeInspectionBoundary({
         modelId: input.model.id,
         sourceImageUri: input.request.sourceImageUri,
-        persistentRequested: input.model.residencyMode === 'persistent'
+        persistentRequested: input.model.residencyLifecycle === 'persistent'
       }),
     async ensureLoaded() {
       // GenerationService acquires the exact residency lease with the selected adapter.

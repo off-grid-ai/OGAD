@@ -9,6 +9,7 @@ import {
   inventoryModelCapabilities,
   inventoryModelMemoryProfile,
   runtimeModalityForModelKind,
+  runtimeResidencyLifecycle,
   type ModelInventoryAdapter,
   type ModelModality,
   type ModelSelectionStore,
@@ -80,7 +81,7 @@ interface DesktopModelServicesDependencies {
   }
   resolveLegacyModelId?(modelId: string): Promise<string>
   projectTextSelection?(modelId: string): Promise<{ success: boolean; error?: string }>
-  residencyMode?(modality: 'image' | 'stt'): 'resident' | 'on-demand'
+  residencySetting?(modality: 'image' | 'stt'): 'resident' | 'on-demand'
 }
 
 const SHARED_MODALITIES: readonly ModelModality[] = [
@@ -257,8 +258,8 @@ class DesktopInventorySource {
     )
     const activeText = this.selections.read('text')
     const activeTextRoute = activeText ? decodeModelRouteId(activeText) : null
-    const residencyMode = (modality: 'image' | 'stt'): 'resident' | 'on-demand' =>
-      this.dependencies.residencyMode?.(modality) ?? 'on-demand'
+    const residencyLifecycle = (modality: 'image' | 'stt') =>
+      runtimeResidencyLifecycle(this.dependencies.residencySetting?.(modality) ?? 'on-demand')
 
     const expandTextRoutes = (base: RuntimeModel): RuntimeModel[] => {
       const route = (
@@ -337,15 +338,11 @@ class DesktopInventorySource {
             : undefined,
         ...runtimeSizes(model),
         dirtyMemory: modality === 'image',
-        residencyMode:
+        residencyLifecycle:
           modality === 'image'
-            ? residencyMode('image') === 'resident'
-              ? 'persistent'
-              : 'operation'
+            ? residencyLifecycle('image')
             : modality === 'transcription'
-              ? residencyMode('stt') === 'resident'
-                ? 'persistent'
-                : 'operation'
+              ? residencyLifecycle('stt')
               : modality === 'voice'
                 ? 'operation'
                 : 'persistent',
@@ -376,7 +373,7 @@ class DesktopInventorySource {
       loaded: false,
       residentSizeMB: 96,
       peakSizeMB: 160,
-      residencyMode: 'persistent'
+      residencyLifecycle: 'persistent'
     }
     const routes = [...catalogRoutes, embeddingRoute]
     this.selections.indexRoutes(routes)
@@ -666,7 +663,7 @@ export const desktopModelServices = createDesktopModelServices({
     desktopModelManagerPorts.resolveCanonicalModelSelectionId(modelId),
   projectTextSelection: (modelId) =>
     desktopModelManagerPorts.projectActiveTextModelSelection(modelId),
-  residencyMode: (modality) => {
+  residencySetting: (modality) => {
     try {
       return getResidencyMode(modality)
     } catch {
