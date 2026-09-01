@@ -17,17 +17,19 @@ import {
   evaluateArithmetic,
   executePortableTool,
   htmlToReadableText as htmlToText,
-  PORTABLE_TOOL_CATALOG,
   catalogEntryToDefinition,
+  findToolCatalogEntry,
   rankToolSchemas,
   rankToolSchemasByEmbedding,
   stripHtmlTags as stripTags
 } from '@offgrid/models'
 
-const portableToolDefinition = (name: string) =>
-  catalogEntryToDefinition(PORTABLE_TOOL_CATALOG.find((tool) => tool.name === name)!)
-const calculatorTool = portableToolDefinition('calculator')
-const dateTimeTool = portableToolDefinition('get_current_datetime')
+const sharedToolDefinition = (name: string) =>
+  catalogEntryToDefinition(findToolCatalogEntry(name)!)
+const webSearchTool = sharedToolDefinition('web_search')
+const readUrlTool = sharedToolDefinition('read_url')
+const calculatorTool = sharedToolDefinition('calculator')
+const dateTimeTool = sharedToolDefinition('get_current_datetime')
 import type { SearchKind, SearchResult } from '../shared/search-contract'
 import { selectToolExtensions } from './tools/extension-select'
 import {
@@ -167,14 +169,9 @@ export async function readUrlText(url: string): Promise<string> {
 // --- Built-in tools --------------------------------------------------------
 const TOOLS: ToolDef[] = [
   {
-    name: 'web_search',
-    description:
-      "Search the web via DuckDuckGo and return the top results (title, URL, snippet). Use for current events or facts not in the user's memory. Requires network.",
-    parameters: {
-      type: 'object',
-      properties: { query: { type: 'string', description: 'the search query' } },
-      required: ['query']
-    },
+    name: webSearchTool.name,
+    description: webSearchTool.description ?? '',
+    parameters: webSearchTool.inputSchema,
     run: async (a) => {
       const q = String(a.query ?? '').trim()
       if (!q) return 'Error: empty query.'
@@ -245,14 +242,9 @@ const TOOLS: ToolDef[] = [
     }
   },
   {
-    name: 'read_url',
-    description:
-      'Fetch a web page and return its readable text. Use to read a specific URL (e.g. one from web_search). Requires network.',
-    parameters: {
-      type: 'object',
-      properties: { url: { type: 'string', description: 'the page URL' } },
-      required: ['url']
-    },
+    name: readUrlTool.name,
+    description: readUrlTool.description ?? '',
+    parameters: readUrlTool.inputSchema,
     run: async (a) => {
       let url = String(a.url ?? '').trim()
       if (!url) return 'Error: empty url.'
