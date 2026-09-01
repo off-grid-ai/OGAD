@@ -53,6 +53,7 @@ import {
   deactivateRemoteVisionModel,
   getRemoteVisionServerSettings
 } from './vision/remote-vision-server'
+import { desktopModelServices } from './model-services'
 
 export interface DownloadProgress {
   modelId: string
@@ -795,14 +796,7 @@ export async function reconcileActiveModelProjector(): Promise<boolean> {
  * per-entry active computation in getStorageInfo (one definition of "active").
  */
 export async function getActiveModelIds(): Promise<string[]> {
-  const info = await getStorageInfo()
-  const settings = getRemoteVisionServerSettings()
-  const remote = settings.servers.find((server) => server.id === settings.activeServerId)
-  const activeChatId = getActiveModel()
-  const localIds = info.models
-    .filter((model) => model.active && (!remote || model.id !== activeChatId))
-    .map((model) => model.id)
-  return remote ? [...localIds, remoteVisionModelId(remote.id, remote.model)] : localIds
+  return desktopModelServices.activeModelIds()
 }
 
 /**
@@ -876,12 +870,7 @@ export async function setActiveModalChoice(
 }
 
 export function getActiveModalities(): { text: string | null } & Record<Modality, string | null> {
-  const settings = getRemoteVisionServerSettings()
-  const remote = settings.servers.find((server) => server.id === settings.activeServerId)
-  return {
-    text: remote ? remoteVisionModelId(remote.id, remote.model) : getActiveModel(),
-    ...getAllActiveModals()
-  }
+  return desktopModelServices.activeModalities()
 }
 
 // ---------------------------------------------------------------------------
