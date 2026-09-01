@@ -45,6 +45,15 @@ for (const file of files) {
       fileName
     )
 
+  if (
+    fileName === 'src/main/rag/index.ts' &&
+    /(?:chunkSize\s*:\s*600|overlap\s*:\s*120|minChunkLength\s*:\s*20|dimension\s*:\s*384)/.test(
+      text
+    )
+  ) {
+    report('rag-profile-is-shared', fileName, source, source, 'local:rag-profile-default')
+  }
+
   if (/\bresidencyMode\b/.test(text)) {
     report(
       'runtime-model-has-one-lifecycle-vocabulary',

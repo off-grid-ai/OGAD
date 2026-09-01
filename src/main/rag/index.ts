@@ -3,7 +3,7 @@
 // runs through the main rag_conversations path (ipc.ts); the old project_threads
 // backend was removed as dead code.
 
-import { RagService } from '@offgrid/rag'
+import { DEFAULT_RAG_EMBEDDING_DIMENSION, RagService } from '@offgrid/rag'
 import type {
   EmbeddingProvider,
   ExtractionBridges,
@@ -26,7 +26,7 @@ import {
 } from '../sync-knowledge-document'
 
 const embeddingProvider: EmbeddingProvider = {
-  dimension: 384,
+  dimension: DEFAULT_RAG_EMBEDDING_DIMENSION,
   embed: (text) => embeddings.generateEmbedding(text)
 }
 
@@ -128,8 +128,7 @@ export function createDesktopRagService(
   return new DesktopRagService({
     store: desktopVectorStore,
     embeddings: options.embeddings ?? embeddingProvider,
-    extraction: options.extraction ?? desktopExtraction,
-    chunkOptions: { chunkSize: 600, overlap: 120, minChunkLength: 20 }
+    extraction: options.extraction ?? desktopExtraction
   })
 }
 
