@@ -11,8 +11,23 @@ import { SEARCH_KB_TOOL, makeSearchKnowledgeBaseHandler } from '@offgrid/rag'
 import { isMemoryToolAllowed } from './tools/memory-scope'
 import { getSetting, saveSetting } from './database'
 import { readImages } from './llm/read-images'
-import { stripTags, htmlToText, decodeDdgHref } from './tools-parsers'
-import { evaluateArithmetic } from './calculator'
+import {
+  budgetToolSchemas,
+  decodeSearchRedirect as decodeDdgHref,
+  evaluateArithmetic,
+  executePortableTool,
+  htmlToReadableText as htmlToText,
+  PORTABLE_TOOL_CATALOG,
+  catalogEntryToDefinition,
+  rankToolSchemas,
+  rankToolSchemasByEmbedding,
+  stripHtmlTags as stripTags
+} from '@offgrid/models'
+
+const portableToolDefinition = (name: string) =>
+  catalogEntryToDefinition(PORTABLE_TOOL_CATALOG.find((tool) => tool.name === name)!)
+const calculatorTool = portableToolDefinition('calculator')
+const dateTimeTool = portableToolDefinition('get_current_datetime')
 import type { SearchKind, SearchResult } from '../shared/search-contract'
 import { selectToolExtensions } from './tools/extension-select'
 import {
@@ -253,13 +268,9 @@ const TOOLS: ToolDef[] = [
     }
   },
   {
-    name: 'calculator',
-    description: 'Evaluate a basic arithmetic expression and return the numeric result.',
-    parameters: {
-      type: 'object',
-      properties: { expression: { type: 'string', description: 'e.g. "(3+4)*2/7"' } },
-      required: ['expression']
-    },
+    name: calculatorTool.name,
+    description: calculatorTool.description ?? '',
+    parameters: calculatorTool.inputSchema,
     run: (a) => {
       const expr = String(a.expression ?? '')
       try {
@@ -349,9 +360,9 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'get_datetime',
-    description: 'Get the current local date and time.',
-    parameters: { type: 'object', properties: {} },
-    run: () => new Date().toString()
+    description: dateTimeTool.description ?? '',
+    parameters: dateTimeTool.inputSchema,
+    run: () => executePortableTool('get_datetime', {}) ?? new Date().toString()
   },
   {
     // generate_image is DEFERRED: run() never generates. It records the requested
@@ -624,16 +635,13 @@ export async function toolChat(
   if (rawTools.length - builtins.length > 1) {
     try {
       const { embeddings } = await import('./embeddings')
-      const { rankConnectorToolsSemantic } = await import('./tools/tool-embedding-ranking')
-      rankedTools = await rankConnectorToolsSemantic(query, rawTools, builtins.length, {
+      rankedTools = await rankToolSchemasByEmbedding(query, rawTools, builtins.length, {
         embed: (t) => embeddings.generateEmbedding(t)
       })
     } catch {
-      const { rankConnectorTools } = await import('./tools/tool-ranking')
-      rankedTools = rankConnectorTools(query, rawTools, builtins.length)
+      rankedTools = rankToolSchemas(query, rawTools, builtins.length)
     }
   }
-  const { budgetTools } = await import('./tools/tool-budget')
   const ctx = llm.effectiveContextSize()
   // Cap tool tokens in ABSOLUTE terms too, not just as a fraction of context:
   // llama-server re-processes the entire tool prompt every tool round (gemma-4's
@@ -642,10 +650,10 @@ export async function toolChat(
   // roughly halving per-round prompt cost vs the old 45%-of-a-big-context budget.
   const MAX_TOOL_TOKENS = 4000
   const toolBudget = Math.max(1024, Math.min(Math.floor(ctx * 0.4), MAX_TOOL_TOKENS))
-  const budgeted = budgetTools(rankedTools, toolBudget, builtins.length)
+  const budgeted = budgetToolSchemas(rankedTools, toolBudget, builtins.length)
   if (budgeted.pruned || budgeted.droppedCount) {
     console.warn(
-      `[tools] context budget ${toolBudget} tok: pruned schemas${budgeted.droppedCount ? `, dropped ${budgeted.droppedCount} connector tool(s)` : ''} to fit (final ~${budgeted.estTokens} tok)`
+      `[tools] context budget ${toolBudget} tok: pruned schemas${budgeted.droppedCount ? `, dropped ${budgeted.droppedCount} connector tool(s)` : ''} to fit (final ~${budgeted.estimatedTokens} tok)`
     )
     if (budgeted.droppedCount)
       hints.push(

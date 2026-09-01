@@ -1,4 +1,4 @@
-import { cleanTranscription, reasoningWireForGeneration } from '@offgrid/models'
+import { cleanTranscription, parseToolCallsFromText, reasoningWireForGeneration } from '@offgrid/models'
 import type {
   GenerationAdapter,
   GenerationChunk,
@@ -14,7 +14,6 @@ import { llm, type StreamChatOptions } from './llm'
 import type { StreamResult } from './llm/stream'
 import type { GenerationMetrics } from '../shared/generation-metrics'
 import { getRemoteVisionServer } from './vision/remote-vision-server'
-import { parseToolCallsFromText } from './tools/tool-call-parse'
 import type { ImageGenerationPipelineUpdateContract } from '../shared/image-generation-contract'
 import type { DownloadProgress } from '@offgrid/executorch-speech'
 
@@ -198,7 +197,7 @@ function finalChunk(result: StreamResult, request: GenerationRequest): Generatio
       : parseToolCallsFromText(result.content).map((call, index) => ({
           id: `text-tool-${String(request.messages?.length ?? 0)}-${String(index)}`,
           name: call.name,
-          arguments: JSON.stringify(call.args)
+          arguments: JSON.stringify(call.arguments)
         }))
   return {
     ...(toolCalls.length && request.operation?.type !== 'tool_selection'
