@@ -29,6 +29,7 @@ import {
   DesktopGenerationObservations,
   DesktopRemoteGenerationAdapter
 } from './model-generation-adapters'
+import { desktopToolExecutor } from './desktop-tool-executor'
 
 interface DesktopInventoryModel {
   id: string
@@ -428,7 +429,8 @@ export function createDesktopModelServices(
   const generation = new SharedGenerationService(llm, memory, {
     // Native transports enforce an idle timeout. Keep this outer safety fence long
     // enough that a healthy long stream is not stopped while it is still producing.
-    generationTimeoutMs: 24 * 60 * 60 * 1000
+    generationTimeoutMs: 24 * 60 * 60 * 1000,
+    tools: desktopToolExecutor
   })
   const generationObservations = new DesktopGenerationObservations()
   for (const adapterId of [

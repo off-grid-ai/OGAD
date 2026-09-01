@@ -9,9 +9,7 @@
 import { llm } from './llm'
 import { SEARCH_KB_TOOL, makeSearchKnowledgeBaseHandler } from '@offgrid/rag'
 import { isMemoryToolAllowed } from './tools/memory-scope'
-import { parseToolCallsFromText } from './tools/tool-call-parse'
 import { getSetting, saveSetting } from './database'
-import { buildContentParts } from './llm/chat-payload'
 import { readImages } from './llm/read-images'
 import { stripTags, htmlToText, decodeDdgHref } from './tools-parsers'
 import { evaluateArithmetic } from './calculator'
@@ -26,6 +24,8 @@ import {
 import { proposalDeckSystemHint, proposalDeckService } from './proposal-deck/service'
 import { callHookAsync, HOOKS } from './bootstrap/hookRegistry'
 import { DEFAULT_MAX_TOOL_CALLS } from '../shared/llm-defaults'
+import { generateDesktopMessages } from './desktop-generation'
+import type { GenerationMessage, GenerationToolCall } from '@offgrid/models'
 
 // Per-tool enable/disable, persisted as a list of disabled tool names.
 function disabledSet(): Set<string> {
@@ -665,11 +665,23 @@ export async function toolChat(
   // text-only model given image_url parts either ignores them (silent wrong answer)
   // or errors, so drop the attachments when there's no vision projector.
   const decodedImages = opts.images?.length && llm.hasVision() ? readImages(opts.images) : []
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const messages: any[] = [
+  const messages: GenerationMessage[] = [
     { role: 'system', content: sys },
-    ...history.slice(-10).map((m) => ({ role: m.role, content: m.content })),
-    { role: 'user', content: buildContentParts(query, decodedImages) }
+    ...history.slice(-10).map((m) => ({
+      role: m.role === 'assistant' ? ('assistant' as const) : ('user' as const),
+      content: m.content
+    })),
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: query },
+        ...decodedImages.map((image) => ({
+          type: 'image' as const,
+          mimeType: image.mime,
+          data: image.base64
+        }))
+      ]
+    }
   ]
   const toolCalls: ToolCall[] = []
   const unified: UnifiedSource[] = []
@@ -697,121 +709,76 @@ export async function toolChat(
     }
   }
 
-  const maxToolCalls = llm.getSettings().maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS
-  let round = 0
-  while (toolCalls.length < maxToolCalls) {
-    // Stream this round: reasoning + any answer text flow through onDelta live; tool_calls
-    // are accumulated and returned. A tool-calling round streams thinking (and no content);
-    // the final round streams the answer. tool temperature stays 0.3 (was the blocking path).
-    const { content, toolCalls: calls } = await llm.streamChat(messages, onDelta, {
+  const maxToolRounds = llm.getSettings().maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS
+  let streamedContent = ''
+  const turnId = `desktop-tools:${Date.now()}:${Math.random().toString(36).slice(2)}`
+  try {
+    const result = await generateDesktopMessages(messages, {
+      operation: { type: 'text' },
       tools,
       toolChoice: 'auto',
       temperature: 0.3,
-      // No hardcoded output cap: the round that produces the FINAL answer (no tool calls) must be
-      // free to write a long response. Inherit the user's Max-output setting (auto by default →
-      // until EOS / window fills). A tool-selection round stays short on its own (it emits a call).
       thinking: opts.thinking,
-      signal: opts.signal
-    })
-
-    // Stop pressed during the round: streamCompletion resolves with the partial
-    // tool_calls it assembled (it doesn't reject on abort), so we MUST NOT execute
-    // them — a cancelled turn fires no side effects (e.g. an MCP send/create).
-    // Return what we have; the renderer treats the turn as cancelled.
-    if (opts.signal?.aborted)
-      return resultWithImages({ answer: content.trim(), toolCalls, unified })
-
-    // Native tool_calls are preferred; but small on-device models (the gemma-4 we
-    // ship) often emit a call as TEXT instead of on the tool_calls channel. When
-    // the native channel is empty, recover any text-form call so the turn isn't a
-    // dead narration ("I would search for…"). Normalize both into one shape with
-    // args already parsed to an object.
-    const effective =
-      calls.length > 0
-        ? calls.map((c) => ({
-            id: c.id,
-            name: c.name,
-            args: safeParseArgs(c.arguments),
-            rawArgs: c.arguments || '{}'
-          }))
-        : parseToolCallsFromText(content).map((c, i) => ({
-            id: `txt-${String(round)}-${String(i)}`,
-            name: c.name,
-            args: c.args,
-            rawArgs: JSON.stringify(c.args)
-          }))
-
-    if (effective.length) {
-      // One model round can request several tools in parallel. Count the actual calls, as Mobile
-      // does, and execute only the remaining allowance so the configured ceiling stays truthful.
-      const remaining = maxToolCalls - toolCalls.length
-      const callsToRun = effective.slice(0, remaining)
-      // Re-add the assistant turn (with its tool_calls) so the model sees what it invoked.
-      messages.push({
-        role: 'assistant',
-        content: content || null,
-        tool_calls: callsToRun.map((c) => ({
-          id: c.id,
-          type: 'function',
-          function: { name: c.name, arguments: c.rawArgs }
-        }))
-      })
-      for (const c of callsToRun) {
-        // Small models sometimes call a search tool with no query — backfill the
-        // user's message so the search isn't empty (rather than erroring out).
-        if (
-          (c.name === 'web_search' || c.name === 'brave_search') &&
-          !String((c.args as { query?: unknown }).query ?? '').trim()
-        ) {
-          c.args = { ...c.args, query }
+      signal: opts.signal,
+      maxToolRounds,
+      identity: {
+        conversationId: opts.conversationId ?? turnId,
+        turnId,
+        projectId: opts.projectId
+      },
+      events: {
+        chunk: (chunk) => {
+          if (chunk.reasoning) onDelta(chunk.reasoning, 'reasoning')
+          if (chunk.content) {
+            streamedContent += chunk.content
+            onDelta(chunk.content, 'content')
+          }
         }
-        opts.onStep?.({ name: c.name, args: c.args }) // surface the tool activity BEFORE running it
-        // Uniform dispatch — every tool owns its own result. Merge any structured
-        // side channels: sources are deduped into `unified` across rounds; image requests retain
-        // call order for deferred generation after the turn.
-        const res = await runTool(c.name, c.args, toolContext, exts)
-        for (const s of res.sources ?? []) {
-          if (unifiedKeys.has(s.key)) continue
-          unifiedKeys.add(s.key)
-          unified.push(s)
-        }
-        if (res.imageRequests?.length) imageRequests.push(...res.imageRequests)
-        else if (res.imageRequest) imageRequests.push(res.imageRequest)
-        const status = res.status ?? 'completed'
-        toolCalls.push({ name: c.name, args: c.args, result: res.text, status })
-        // Surface the COMPLETED call (with its result) live, so the UI can show each
-        // tool call + result as it lands, not only in the final batch.
-        opts.onToolResult?.({ name: c.name, result: res.text, status })
-        messages.push({ role: 'tool', tool_call_id: c.id, content: res.text })
-        if (res.authoritative) {
-          onDelta(res.text, 'content')
-          return resultWithImages({ answer: res.text, toolCalls, unified })
+      },
+      toolExecution: {
+        execute: async (call: GenerationToolCall) => {
+          if (opts.signal?.aborted) throw opts.signal.reason
+          let args = safeParseArgs(call.arguments)
+          if (
+            (call.name === 'web_search' || call.name === 'brave_search') &&
+            !String(args.query ?? '').trim()
+          ) {
+            args = { ...args, query }
+          }
+          opts.onStep?.({ name: call.name, args })
+          const res = await runTool(call.name, args, toolContext, exts)
+          for (const source of res.sources ?? []) {
+            if (unifiedKeys.has(source.key)) continue
+            unifiedKeys.add(source.key)
+            unified.push(source)
+          }
+          if (res.imageRequests?.length) imageRequests.push(...res.imageRequests)
+          else if (res.imageRequest) imageRequests.push(res.imageRequest)
+          const status = res.status ?? 'completed'
+          toolCalls.push({ name: call.name, args, result: res.text, status })
+          opts.onToolResult?.({ name: call.name, result: res.text, status })
+          if (res.authoritative) onDelta(res.text, 'content')
+          return {
+            content: res.text,
+            isError: status === 'failed',
+            terminal: res.authoritative,
+            metadata: {
+              status,
+              sources: res.sources,
+              imageRequest: res.imageRequest,
+              imageRequests: res.imageRequests
+            }
+          }
         }
       }
-      round += 1
-      continue // let the model use the results
+    })
+    return resultWithImages({ answer: result.content.trim(), toolCalls, unified })
+  } catch (error) {
+    if (opts.signal?.aborted) {
+      return resultWithImages({ answer: streamedContent.trim(), toolCalls, unified })
     }
-    // No tool calls this round: `content` is the final answer (already streamed via onDelta).
-    return resultWithImages({ answer: content.trim(), toolCalls, unified })
+    throw error
   }
-  // The configured emergency cap was reached with the model still calling tools. Instead of dead-ending
-  // with a canned "stopped" message, FORCE one final answer WITHOUT tools, so the
-  // user gets a real response built from the results gathered so far.
-  if (opts.signal?.aborted) {
-    return resultWithImages({ answer: '', toolCalls, unified })
-  }
-  const final = await llm.streamChat(messages, onDelta, {
-    temperature: 0.3,
-    // Forced final answer — inherit the user's Max-output setting (auto by default), never a fixed
-    // 1024 cap that truncated the response mid-sentence.
-    thinking: false,
-    signal: opts.signal
-  })
-  return resultWithImages({
-    answer: final.content.trim() || 'Stopped after too many tool steps.',
-    toolCalls,
-    unified
-  })
 }
 
 const TOOL_HISTORY_TURNS = 8

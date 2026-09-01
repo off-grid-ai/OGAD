@@ -5,7 +5,7 @@
  * a fake; production binds it to llm.chat with PLAN_SCHEMA as the response
  * format. Pure decisions live in planner-logic.ts.
  */
-import { llm } from '../llm'
+import { generateDesktopMessages } from '../desktop-generation'
 import {
   PLAN_SCHEMA,
   buildPlannerPrompt,
@@ -57,18 +57,18 @@ export function makePlanner(complete: PlanComplete): PlanTask {
 /** Production planner over the active model. It streams only the provider's
  * separated reasoning channel; the strict plan JSON remains internal. */
 export const planTask: PlanTask = makePlanner(async (prompt, schema, onReasoning, signal) => {
-  const result = await llm.streamChat(
-    [{ role: 'user', content: prompt }],
-    (text, kind) => {
-      if (kind === 'reasoning') onReasoning?.(text)
-    },
-    {
-      responseFormat: schema,
-      thinking: true,
-      signal,
-      maxTokens: 600
-    },
-    60_000
-  )
+  const result = await generateDesktopMessages([{ role: 'user', content: prompt }], {
+    operation: { type: 'tool_selection' },
+    responseFormat: schema,
+    thinking: true,
+    signal,
+    maxTokens: 600,
+    timeoutMs: 60_000,
+    events: {
+      chunk: (chunk) => {
+        if (chunk.reasoning) onReasoning?.(chunk.reasoning)
+      }
+    }
+  })
   return result.content
 })

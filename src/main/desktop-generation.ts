@@ -1,5 +1,6 @@
 import type {
   GenerationMessage,
+  GenerationEvents,
   GenerationOperation,
   GenerationRequest,
   GenerationResponseFormat,
@@ -11,6 +12,7 @@ import type {
 import { llm } from './llm'
 import { readImages } from './llm/read-images'
 import { desktopModelServices } from './model-services'
+import { desktopToolExecutor, type DesktopToolExecutionSession } from './desktop-tool-executor'
 
 export interface DesktopGenerationOptions {
   operation?: GenerationOperation
@@ -27,6 +29,9 @@ export interface DesktopGenerationOptions {
   timeoutMs?: number
   signal?: AbortSignal
   allowFallback?: boolean
+  identity?: GenerationRequest['identity']
+  events?: GenerationEvents
+  toolExecution?: DesktopToolExecutionSession
 }
 
 function responseFormat(value: unknown): GenerationResponseFormat | undefined {
@@ -107,11 +112,12 @@ export async function generateDesktopMessages(
 ): Promise<GenerationResult> {
   await desktopModelServices.refresh()
   const settings = llm.getSettings()
-  const turnId = `desktop:${Date.now()}:${Math.random().toString(36).slice(2)}`
+  const turnId =
+    options.identity?.turnId ?? `desktop:${Date.now()}:${Math.random().toString(36).slice(2)}`
   const request: GenerationRequest = {
     operation: options.operation ?? { type: 'text' },
     messages,
-    identity: { conversationId: turnId, turnId },
+    identity: options.identity ?? { conversationId: turnId, turnId },
     responseFormat: responseFormat(options.responseFormat),
     tools: toolDefinitions(options.tools),
     toolChoice: toolChoice(options.toolChoice),
@@ -142,7 +148,14 @@ export async function generateDesktopMessages(
     allowFallback: options.allowFallback ?? true,
     partialOutputPolicy: 'discard-and-fallback'
   }
-  return desktopModelServices.generation.generate(request)
+  const unregister = options.toolExecution
+    ? desktopToolExecutor.register(turnId, options.toolExecution)
+    : undefined
+  try {
+    return await desktopModelServices.generation.generate(request, options.events)
+  } finally {
+    unregister?.()
+  }
 }
 
 export function generateDesktopText(

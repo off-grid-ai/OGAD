@@ -14,6 +14,7 @@ import { llm, type StreamChatOptions } from './llm'
 import type { StreamResult } from './llm/stream'
 import type { GenerationMetrics } from '../shared/generation-metrics'
 import { getRemoteVisionServer } from './vision/remote-vision-server'
+import { parseToolCallsFromText } from './tools/tool-call-parse'
 
 interface OpenAIMessage {
   role: GenerationMessage['role']
@@ -162,10 +163,18 @@ function finishReason(value: string | null): GenerationFinishReason {
 function finalChunk(result: StreamResult, request: GenerationRequest): GenerationChunk {
   const promptTokens = result.metrics?.promptTokens
   const outputTokens = result.metrics?.completionTokens
+  const toolCalls =
+    result.toolCalls.length || !request.tools?.length
+      ? result.toolCalls
+      : parseToolCallsFromText(result.content).map((call, index) => ({
+          id: `text-tool-${String(request.messages?.length ?? 0)}-${String(index)}`,
+          name: call.name,
+          arguments: JSON.stringify(call.args)
+        }))
   return {
-    ...(result.toolCalls.length && request.operation?.type !== 'tool_selection'
+    ...(toolCalls.length && request.operation?.type !== 'tool_selection'
       ? {
-          toolCallDeltas: result.toolCalls.map((call, index) => ({
+          toolCallDeltas: toolCalls.map((call, index) => ({
             index,
             id: call.id,
             name: call.name,
@@ -177,7 +186,7 @@ function finalChunk(result: StreamResult, request: GenerationRequest): Generatio
       ? {
           output: {
             type: 'tool_selection' as const,
-            toolCalls: result.toolCalls
+            toolCalls
           }
         }
       : {}),
