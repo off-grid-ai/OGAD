@@ -1,7 +1,5 @@
 import { spawn, execSync, ChildProcess } from 'child_process'
 import os from 'os'
-import { Mutex } from 'async-mutex'
-import { callHook } from './bootstrap/hookRegistry'
 import path from 'path'
 import * as fs from 'fs'
 import { modelsDir as getModelsDir, binRoots, isPackaged, exe } from './runtime-env'
@@ -28,9 +26,7 @@ import {
   capContextToTrainedWindow,
   applyTextRuntimeModePreset,
   llamaServerCompletionPayload,
-  llamaServerReasoningPayload,
   llamaServerLaunchArgs,
-  localCompletionText,
   textRuntimeLaunchChanged,
   textRuntimeCrashRecoveryPlan,
   isPerformanceMode,
@@ -44,13 +40,10 @@ import {
   type ReasoningWireFragment
 } from '@offgrid/models'
 import { acceleratorForEngine, type EngineAccelerator } from '../shared/engine-accelerator'
-import { buildMessages, type ChatMessage } from './llm/chat-payload'
-import { readImages } from './llm/read-images'
 import { isValidGgufFile } from './models/gguf'
 import { isGrounderModel } from '@offgrid/models'
 import { readGgufContextLength } from './models/gguf-metadata'
 import { pickFreePort, isPortFree } from './free-port'
-import { postCompletionOnce } from './llm/http-post'
 import { engineSpawnEnv } from './llm/spawn-env'
 import { streamCompletion, type StreamResult } from './llm/stream'
 import { streamRemoteChatCompletion, type RemoteTextModelConnection } from './llm/remote-chat'
@@ -62,8 +55,6 @@ import {
 import { emitChangedLlmSettings } from './sync-mutation'
 import { loadGatedVisionModelAdapter } from './vision/model-adapters/registry'
 import type { VisionModelArtifacts } from './vision/model-adapters/types'
-import { getActiveRemoteVisionServer } from './vision/remote-vision-server'
-import { currentRemoteScreenTaskSession } from './actions/remote-screen-session'
 
 export type { KvCacheType, PerformanceMode }
 
@@ -91,11 +82,6 @@ export interface LlmSettings {
 export interface LlmSettingsUpdateOptions {
   /** Remote sync applies the winning value without creating a new local op. */
   emitSync?: boolean
-}
-
-export interface ChatStreamResult extends StreamResult {
-  /** The resolved request cap, included so callers never duplicate settings lookup. */
-  maxTokens: number
 }
 
 export interface StreamChatOptions {
@@ -160,7 +146,6 @@ export class LLMService {
   // secretary, action extraction…). Concurrent requests contend and time out.
   // Serialize them so each gets the server to itself; the per-call timeout sits
   // INSIDE the lock, so it measures execution, not time spent waiting in line.
-  private chatMutex = new Mutex()
   // Advanced sampling (LM Studio-style). undefined = let llama.cpp use its default.
   private topP: number | undefined
   private topK: number | undefined
@@ -577,16 +562,6 @@ export class LLMService {
   hasVision(): boolean {
     this.resolveModel()
     return !!this.mmProjPath && fs.existsSync(this.mmProjPath)
-  }
-
-  /** Refuse image-bearing work before starting or contacting llama-server when the
-   *  active model has no projector. Callers may choose a text-only fallback before
-   *  invoking chat; this remains the engine-boundary invariant that protects every
-   *  explicit image entry point if selection changes between capability check and use. */
-  private assertImageInputSupported(images: string[]): void {
-    if (images.length > 0 && !this.hasVision()) {
-      throw new Error('Active chat model does not support image input (no vision projector)')
-    }
   }
 
   modelsExist(): boolean {
@@ -1068,21 +1043,6 @@ export class LLMService {
     throw new Error('Server started but no model was loaded within the timeout')
   }
 
-  // Use Node http module instead of fetch to avoid undici's headersTimeout (300s)
-  // which kills long-running LLM requests before they can respond. Delegates to the
-  // electron-free postCompletionOnce so the fresh-connection contract lives in one place
-  // (see llm/http-post.ts) and is integration-tested against a real socket-closing server.
-  private httpPost(body: string, timeoutMs: number, signal?: AbortSignal): Promise<string> {
-    return postCompletionOnce(this.port, body, timeoutMs, signal)
-  }
-
-  /** Resolve the selected text model once at request admission. Every text
-   * method uses this seam, so no caller needs local/remote branches. */
-  private activeRemoteTextModel(): RemoteTextModelConnection | null {
-    const screenTask = currentRemoteScreenTaskSession()
-    return screenTask ? screenTask.activeServer : getActiveRemoteVisionServer()
-  }
-
   private completeRemote(
     remote: RemoteTextModelConnection,
     messages: unknown[],
@@ -1119,230 +1079,6 @@ export class LLMService {
       onDelta,
       options: { signal: options.signal, timeoutMs: options.timeoutMs }
     })
-  }
-
-  async chat(
-    message: string,
-    images: string[] = [],
-    timeoutMs: number = 300000,
-    maxTokens?: number,
-    opts: {
-      responseFormat?: unknown
-      temperature?: number
-      disableThinking?: boolean
-      signal?: AbortSignal
-    } = {}
-  ): Promise<string> {
-    const messages = buildMessages(message, readImages(images), this.systemPrompt)
-    const remote = this.activeRemoteTextModel()
-    if (remote) {
-      return (
-        await this.completeRemote(remote, messages, () => {}, {
-          timeoutMs,
-          maxTokens,
-          temperature: opts.temperature,
-          signal: opts.signal,
-          responseFormat: opts.responseFormat
-        })
-      ).content
-    }
-    await this.beginGeneration()
-    try {
-      this.assertImageInputSupported(images)
-      return await this.completeMessages(messages, timeoutMs, maxTokens, opts)
-    } finally {
-      this.finishGeneration()
-    }
-  }
-
-  /** Send an exact OpenAI-style message history for model-family policy adapters. */
-  async chatMessages(
-    messages: ChatMessage[],
-    timeoutMs = 300000,
-    maxTokens?: number,
-    opts: {
-      responseFormat?: unknown
-      temperature?: number
-      topP?: number
-      enableThinking?: boolean
-      disableThinking?: boolean
-      separateReasoning?: boolean
-      signal?: AbortSignal
-    } = {}
-  ): Promise<string> {
-    const remote = this.activeRemoteTextModel()
-    if (remote) {
-      return (
-        await this.completeRemote(remote, messages, () => {}, {
-          timeoutMs,
-          maxTokens,
-          temperature: opts.temperature,
-          topP: opts.topP,
-          thinking: opts.enableThinking === true && opts.disableThinking !== true,
-          signal: opts.signal,
-          responseFormat: opts.responseFormat
-        })
-      ).content
-    }
-    await this.beginGeneration()
-    try {
-      const hasImages = messages.some(
-        (message) =>
-          Array.isArray(message.content) &&
-          message.content.some((part) => part.type === 'image_url')
-      )
-      this.assertImageInputSupported(hasImages ? ['message-image'] : [])
-      return await this.completeMessages(messages, timeoutMs, maxTokens, opts)
-    } finally {
-      this.finishGeneration()
-    }
-  }
-
-  private async completeMessages(
-    messages: ChatMessage[],
-    timeoutMs: number,
-    maxTokens: number | undefined,
-    opts: {
-      responseFormat?: unknown
-      temperature?: number
-      topP?: number
-      enableThinking?: boolean
-      disableThinking?: boolean
-      separateReasoning?: boolean
-      signal?: AbortSignal
-    }
-  ): Promise<string> {
-    await this.ensureReady()
-    return this.chatMutex.runExclusive(async () => {
-      try {
-        const payload = llamaServerCompletionPayload({
-          messages,
-          requestedMaxTokens: maxTokens,
-          savedMaxTokens: this.maxTokens,
-          temperature: opts.temperature ?? this.temperature,
-          sampling: {
-            topP: this.topP,
-            topK: this.topK,
-            minP: this.minP,
-            repeatPenalty: this.repeatPenalty
-          },
-          topPOverride: opts.topP,
-          responseFormat: opts.responseFormat,
-          reasoningWire: llamaServerReasoningPayload({
-            enableThinking: opts.enableThinking,
-            disableThinking: opts.disableThinking,
-            separateReasoning: opts.separateReasoning,
-            control: this.thinkingDialect,
-            budget: this.reasoningBudget
-          })
-        })
-        const body = JSON.stringify(payload)
-
-        console.log(
-          `[LLMService] Starting LLM request (timeout: ${timeoutMs / 1000}s, body: ${body.length} chars)...`
-        )
-
-        const raw = await this.httpPost(body, timeoutMs, opts.signal)
-        const data = JSON.parse(raw) as {
-          usage?: { total_tokens?: number }
-          choices?: { message?: { content?: string; reasoning_content?: string } }[]
-        }
-        console.log('[LLMService] LLM request completed')
-        // Best-effort fleet audit: record the local model call if enrolled in a
-        // console. The fleet console is a pro feature — it registers this hook in
-        // its activation; the free build has no hook and this is a no-op.
-        try {
-          const tokens = data.usage?.total_tokens ?? 0
-          const modelName = path.basename(this.modelPath) || 'local-llm'
-          callHook('console.recordModelCall', modelName, tokens, 'ok', false)
-        } catch {
-          /* audit is never load-bearing */
-        }
-        return localCompletionText(data.choices?.[0]?.message, opts.enableThinking === true)
-      } catch (e: unknown) {
-        console.error('[LLMService] Chat error:', e instanceof Error ? e.message : e)
-        throw e
-      }
-    })
-  }
-
-  // Streaming variant of chat(): posts with stream:true and invokes `onDelta`
-  // for each token as it arrives. Separates the model's reasoning channel
-  // (delta.reasoning_content, or text inside <think>…</think>) from the answer
-  // (delta.content). Returns the full answer text when the stream ends.
-  async chatStream(
-    message: string,
-    images: string[] = [],
-    onDelta: (text: string, kind: 'content' | 'reasoning') => void,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    opts: { temperature?: number; thinking?: boolean; signal?: AbortSignal } = {},
-    maxTokens?: number,
-    timeoutMs: number = 300000
-  ): Promise<ChatStreamResult> {
-    const messages = buildMessages(message, readImages(images), this.systemPrompt)
-    const resolvedMaxTokens = resolveMaxTokens(maxTokens, this.maxTokens)
-    const remote = this.activeRemoteTextModel()
-    if (remote) {
-      const result = await this.completeRemote(remote, messages, onDelta, {
-        timeoutMs,
-        maxTokens: resolvedMaxTokens,
-        temperature: opts.temperature,
-        thinking: opts.thinking,
-        signal: opts.signal
-      })
-      return { ...result, maxTokens: resolvedMaxTokens }
-    }
-    await this.beginGeneration()
-    try {
-      this.assertImageInputSupported(images)
-      await this.ensureReady()
-      const payload = llamaServerCompletionPayload({
-        messages,
-        requestedMaxTokens: resolvedMaxTokens,
-        savedMaxTokens: this.maxTokens,
-        temperature: opts.temperature ?? this.temperature,
-        sampling: {
-          topP: this.topP,
-          topK: this.topK,
-          minP: this.minP,
-          repeatPenalty: this.repeatPenalty
-        },
-        stream: true,
-        thinking: opts.thinking,
-        reasoningControl: this.thinkingDialect,
-        reasoningBudget: this.reasoningBudget
-      })
-      const body = JSON.stringify(payload)
-
-      // Single SSE transport (llm/stream.ts). The plain chat path sends no tools, so
-      // the returned toolCalls are always empty — take only the answer text.
-      const result = await streamCompletion(this.port, body, onDelta, {
-        signal: opts.signal,
-        timeoutMs
-      })
-      return { ...result, maxTokens: resolvedMaxTokens }
-    } finally {
-      this.finishGeneration()
-    }
-  }
-
-  // Lower-level streaming turn over a RAW messages array with optional tool-calling.
-  // Powers the agentic tool loop (tools.ts): streams reasoning + answer via `onDelta`
-  // (same channels as chatStream) AND accumulates any tool_calls the model emits, so a
-  // tools turn streams thinking -> (the loop surfaces the tool step) -> the answer, all
-  // through one path. Returns the streamed answer text + the assembled tool calls for
-  // this round (empty when the model answered instead of calling a tool).
-  async streamChat(
-    messages: unknown[],
-    onDelta: (text: string, kind: 'content' | 'reasoning') => void,
-    opts: StreamChatOptions = {},
-    timeoutMs: number = 300000
-  ): Promise<StreamResult> {
-    const remote = this.activeRemoteTextModel()
-    if (remote) {
-      return this.streamChatRemote(remote, messages, onDelta, opts, timeoutMs)
-    }
-    return this.streamChatLocal(messages, onDelta, opts, timeoutMs)
   }
 
   /** Raw remote-engine boundary. Routing policy belongs to the shared model service. */

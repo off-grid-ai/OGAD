@@ -65,6 +65,11 @@ const resumedRanges = new Map<string, string>()
 let interruptDownloads = true
 let remoteRequests = 0
 
+async function generatedText(prompt: string, images: string[] = []): Promise<string> {
+  const { generateDesktopText } = await import('../desktop-generation')
+  return (await generateDesktopText(prompt, { images, allowFallback: false })).content
+}
+
 function executable(file: string, source: string): void {
   fs.mkdirSync(path.dirname(file), { recursive: true })
   fs.writeFileSync(file, source, { mode: 0o755 })
@@ -95,9 +100,14 @@ function installRuntimeBoundaries(): void {
       "    req.setEncoding('utf8')",
       "    req.on('data', chunk => { body += chunk })",
       "    req.on('end', () => {",
-      '      JSON.parse(body)',
-      "      res.writeHead(200, { 'content-type': 'application/json', connection: 'close' })",
+      '      const request = JSON.parse(body)',
       "      const content = body.includes('image_url') ? 'fresh setup vision ready' : 'fresh setup chat ready'",
+      '      if (request.stream === true) {',
+      "        res.writeHead(200, { 'content-type': 'text/event-stream', connection: 'close' })",
+      "        res.end('data: ' + JSON.stringify({ choices: [{ delta: { content }, finish_reason: 'stop' }] }) + '\\n\\ndata: [DONE]\\n\\n')",
+      '        return',
+      '      }',
+      "      res.writeHead(200, { 'content-type': 'application/json', connection: 'close' })",
       '      res.end(JSON.stringify({ choices: [{ message: { content } }], usage: { total_tokens: 4 } }))',
       '    })',
       '    return',
@@ -409,7 +419,7 @@ describe('fresh setup to first use', () => {
     const { generateImage } = await import('../imagegen')
 
     await expect(resumedManager.activateModel(textModel.id)).resolves.toEqual({ success: true })
-    expect(await resumedLlm.chat('Prove the fresh chat model can answer')).toBe(
+    expect(await generatedText('Prove the fresh chat model can answer')).toBe(
       'fresh setup chat ready'
     )
     const { getActiveTranscription } = await import('../transcription/select')
@@ -425,7 +435,7 @@ describe('fresh setup to first use', () => {
     fs.writeFileSync(visionInput, Buffer.from(PNG_BASE64, 'base64'))
     await expect(resumedManager.activateModel(visionModel.id)).resolves.toEqual({ success: true })
     expect(resumedLlm.hasVision()).toBe(true)
-    await expect(resumedLlm.chat('Describe this image', [visionInput])).resolves.toBe(
+    await expect(generatedText('Describe this image', [visionInput])).resolves.toBe(
       'fresh setup vision ready'
     )
 
@@ -463,17 +473,13 @@ describe('fresh setup to first use', () => {
     // A second relaunch must consume the exact persisted install and selections.
     // It must not repair or redownload anything to make first use work again.
     vi.resetModules()
-    const [
-      { llm: relaunchedLlm },
-      relaunchedSetup,
-      relaunchedManager,
-      relaunchedImage
-    ] = await Promise.all([
-      import('../llm'),
-      import('../setup'),
-      import('../models-manager'),
-      import('../imagegen')
-    ])
+    const [{ llm: relaunchedLlm }, relaunchedSetup, relaunchedManager, relaunchedImage] =
+      await Promise.all([
+        import('../llm'),
+        import('../setup'),
+        import('../models-manager'),
+        import('../imagegen')
+      ])
     const relaunchedPlan = await relaunchedSetup.getSetupPlan()
     expect(relaunchedPlan.items.every((item) => item.installed)).toBe(true)
     expect(relaunchedPlan.totalDownloadGb).toBe(0)
@@ -484,11 +490,11 @@ describe('fresh setup to first use', () => {
     expect(await relaunchedManager.getActiveModelIds()).toEqual(
       expect.arrayContaining([visionModel.id, imageModel.id, transcriptionModel.id, voiceModel.id])
     )
-    await expect(relaunchedLlm.chat('Describe this persisted image', [visionInput])).resolves.toBe(
+    await expect(generatedText('Describe this persisted image', [visionInput])).resolves.toBe(
       'fresh setup vision ready'
     )
     await expect(relaunchedManager.activateModel(textModel.id)).resolves.toEqual({ success: true })
-    expect(await relaunchedLlm.chat('Prove the persisted text model can answer')).toBe(
+    expect(await generatedText('Prove the persisted text model can answer')).toBe(
       'fresh setup chat ready'
     )
     await expect(relaunchedManager.activateModel(visionModel.id)).resolves.toEqual({

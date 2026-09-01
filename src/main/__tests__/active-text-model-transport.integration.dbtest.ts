@@ -18,11 +18,13 @@ vi.mock('electron', () => ({
 
 import { llm } from '../llm'
 import {
+  getActiveRemoteVisionServer,
   removeRemoteVisionServer,
   setRemoteVisionServerSettings
 } from '../vision/remote-vision-server'
 import { planTask } from '../tools/planner'
 import { toolChat } from '../tools'
+import { generateDesktopMessages } from '../desktop-generation'
 
 interface RecordedRequest {
   body: Record<string, unknown>
@@ -174,9 +176,7 @@ describe('active text model transport', () => {
     const remoteToolSelection = inventory.find(
       (model) => model.serverId === remoteServerId && model.modality === 'tool_selection'
     )
-    expect(remoteToolSelection?.capabilities.thinking).toBe(
-      remoteText?.capabilities.thinking
-    )
+    expect(remoteToolSelection?.capabilities.thinking).toBe(remoteText?.capabilities.thinking)
     expect(remoteToolSelection?.capabilities.thinking).toBe(true)
 
     turns.push(
@@ -191,13 +191,19 @@ describe('active text model transport', () => {
     await expect(planTask('Answer directly.', [], [])).resolves.toEqual({ steps: [] })
 
     const deltas: Array<{ text: string; kind: 'content' | 'reasoning' }> = []
-    const chatResult = await llm.chatStream(
-      'Use the selected model.',
-      [],
-      (text, kind) => deltas.push({ text, kind }),
-      { thinking: true },
-      700,
-      5_000
+    const chatResult = await generateDesktopMessages(
+      [{ role: 'user', content: 'Use the selected model.' }],
+      {
+        thinking: true,
+        maxTokens: 700,
+        timeoutMs: 5_000,
+        events: {
+          chunk: (chunk) => {
+            if (chunk.reasoning) deltas.push({ text: chunk.reasoning, kind: 'reasoning' })
+            if (chunk.content) deltas.push({ text: chunk.content, kind: 'content' })
+          }
+        }
+      }
     )
     expect(chatResult.content).toBe('Remote chat answer.')
     expect(deltas).toEqual([
@@ -205,9 +211,8 @@ describe('active text model transport', () => {
       { text: 'Remote chat answer.', kind: 'content' }
     ])
 
-    const toolResult = await llm.streamChat(
+    const toolResult = await generateDesktopMessages(
       [{ role: 'user', content: 'What time is it?' }],
-      () => {},
       {
         thinking: true,
         topP: 0.8,
@@ -218,9 +223,10 @@ describe('active text model transport', () => {
             function: { name: 'get_datetime', parameters: { type: 'object' } }
           }
         ],
-        toolChoice: 'auto'
-      },
-      5_000
+        toolChoice: 'auto',
+        toolHandling: 'return',
+        timeoutMs: 5_000
+      }
     )
     expect(toolResult.toolCalls).toEqual([
       { id: 'call_time', name: 'get_datetime', arguments: '{}' }
@@ -284,19 +290,17 @@ describe('active text model transport', () => {
       expect(requests).toHaveLength(0)
 
       await expect(
-        llm.streamChat(
-          [{ role: 'user', content: 'Send a message.' }],
-          () => {},
-          {
-            tools: [
-              {
-                type: 'function',
-                function: { name: 'send_message', parameters: { type: 'object' } }
-              }
-            ]
-          },
-          5_000
-        )
+        generateDesktopMessages([{ role: 'user', content: 'Send a message.' }], {
+          tools: [
+            {
+              type: 'function',
+              function: { name: 'send_message', parameters: { type: 'object' } }
+            }
+          ],
+          toolHandling: 'return',
+          timeoutMs: 5_000,
+          allowFallback: false
+        })
       ).rejects.toThrow('UI-TARS 1.5 7B cannot act as the Chat tool planner')
       expect(requests).toHaveLength(0)
     } finally {
@@ -315,14 +319,15 @@ describe('active text model transport', () => {
     turns.push({ content: 'Partial remote answer.', hold: true })
     const controller = new AbortController()
 
-    const result = await llm.chatStream(
-      'Stop this request.',
-      [],
+    const remote = getActiveRemoteVisionServer()
+    expect(remote).not.toBeNull()
+    const result = await llm.streamChatRemote(
+      remote!,
+      [{ role: 'user', content: 'Stop this request.' }],
       (_text, kind) => {
         if (kind === 'content') controller.abort()
       },
       { signal: controller.signal },
-      500,
       5_000
     )
 
@@ -344,7 +349,11 @@ describe('active text model transport', () => {
     })
 
     await expect(
-      llm.chatMessages([{ role: 'user', content: 'Use the selected model.' }], 5_000, 200)
+      generateDesktopMessages([{ role: 'user', content: 'Use the selected model.' }], {
+        timeoutMs: 5_000,
+        maxTokens: 200,
+        allowFallback: false
+      })
     ).rejects.toThrow('Remote text model returned HTTP 429 from OpenRouter: Try again later.')
     expect(requests).toHaveLength(1)
   })

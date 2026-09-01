@@ -65,8 +65,15 @@ const server = http.createServer((request, response) => {
     return
   }
   if (request.method === 'POST' && request.url === '/v1/chat/completions') {
-    request.resume()
+    let body = ''
+    request.setEncoding('utf8')
+    request.on('data', chunk => { body += chunk })
     request.on('end', () => {
+      if (JSON.parse(body).stream === true) {
+        response.writeHead(200, { 'Content-Type': 'text/event-stream' })
+        response.end('data: ' + JSON.stringify({ choices: [{ delta: { content: ${JSON.stringify(reply)} }, finish_reason: 'stop' }] }) + '\\n\\ndata: [DONE]\\n\\n')
+        return
+      }
       response.writeHead(200, { 'Content-Type': 'application/json' })
       response.end(JSON.stringify({ choices: [{ message: { content: ${JSON.stringify(reply)} } }] }))
     })
@@ -399,9 +406,14 @@ describe('model gateway chat streaming', () => {
       expect(await manager.activateModel(chosen!.id)).toEqual({ success: true })
       await llm.restart()
 
-      expect(await llm.chat('Confirm this manually selected model is usable')).toBe(
-        'manual model ready'
-      )
+      expect(
+        (
+          await llm.streamChatLocal(
+            [{ role: 'user', content: 'Confirm this manually selected model is usable' }],
+            () => {}
+          )
+        ).content
+      ).toBe('manual model ready')
       expect(manager.getActiveModel()).toBe(chosen!.id)
     } finally {
       await resetNativeJourney(llm)

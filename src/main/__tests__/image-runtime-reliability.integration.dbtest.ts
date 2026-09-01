@@ -12,6 +12,8 @@ import os from 'node:os'
 import path from 'node:path'
 import type { AddressInfo } from 'node:net'
 import { createOfflineFetchBoundary, type OfflineFetchBoundary } from './harness/offline-fetch'
+import { buildMessages } from '../llm/chat-payload'
+import { readImages } from '../llm/read-images'
 
 const hostFetch = globalThis.fetch.bind(globalThis)
 
@@ -56,6 +58,11 @@ let stopModelServer: typeof import('../model-server').stopModelServer
 let gatewayPort: number
 let offlineNetwork: OfflineFetchBoundary
 
+async function rawLocalText(prompt: string, images: string[] = []): Promise<string> {
+  const messages = buildMessages(prompt, readImages(images), llm.getSettings().systemPrompt ?? '')
+  return (await llm.streamChatLocal(messages, () => {})).content
+}
+
 function executablePath(...parts: string[]): string {
   return path.join(fixture.binDir, ...parts)
 }
@@ -88,8 +95,15 @@ const server = http.createServer((req, res) => {
     return
   }
   if (req.method === 'POST' && req.url === '/v1/chat/completions') {
-    req.resume()
+    let body = ''
+    req.setEncoding('utf8')
+    req.on('data', chunk => { body += chunk })
     req.on('end', () => {
+      if (JSON.parse(body).stream === true) {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+        res.end('data: {"choices":[{"delta":{"content":"chat recovered"},"finish_reason":"stop"}]}\\n\\ndata: [DONE]\\n\\n')
+        return
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end('{"choices":[{"message":{"content":"chat recovered"}}],"usage":{"total_tokens":2}}')
     })
@@ -286,7 +300,7 @@ afterAll(async () => {
 
 describe('multimodal runtime reliability', () => {
   it('keeps small text and image work within the balanced budget without restarting chat', async () => {
-    expect(await llm.chat('before image')).toBe('chat recovered')
+    expect(await rawLocalText('before image')).toBe('chat recovered')
     expect(lineCount(fixture.llamaLog)).toBe(1)
 
     const image = await generateImage({
@@ -299,7 +313,7 @@ describe('multimodal runtime reliability', () => {
     })
     expect(image.dataUrl).toBe(`data:image/png;base64,${PNG_BASE64}`)
 
-    expect(await llm.chat('after image')).toBe('chat recovered')
+    expect(await rawLocalText('after image')).toBe('chat recovered')
     expect(lineCount(fixture.llamaLog)).toBe(1)
   })
 
@@ -338,7 +352,7 @@ describe('multimodal runtime reliability', () => {
       fs.writeFileSync(imagePath, 'safe image checkpoint')
     }
 
-    expect(await llm.chat('after guarded refusal and explicit override')).toBe('chat recovered')
+    expect(await rawLocalText('after guarded refusal and explicit override')).toBe('chat recovered')
   }, 20_000)
 
   it('keeps local chat usable when external network reachability is unavailable', async () => {
@@ -403,7 +417,7 @@ describe('multimodal runtime reliability', () => {
         content: expect.stringContaining('LOCAL_SESSION_AURORA')
       })
     ])
-    expect(await llm.chat(localRag.formatForPrompt(retrieval))).toBe('chat recovered')
+    expect(await rawLocalText(localRag.formatForPrompt(retrieval))).toBe('chat recovered')
 
     const image = await generateImage({
       prompt: 'An emerald privacy diagram',
@@ -419,7 +433,7 @@ describe('multimodal runtime reliability', () => {
       path.join(modelDir, 'active-model.json'),
       JSON.stringify({ id: 'runtime-fixture', primary: CHAT_MODEL, mmproj: 'mmproj.gguf' })
     )
-    expect(await llm.chat('Describe the private diagram.', [image.path])).toBe('chat recovered')
+    expect(await rawLocalText('Describe the private diagram.', [image.path])).toBe('chat recovered')
 
     const artifacts = await import('../artifacts')
     const saved = artifacts.saveArtifact({
@@ -447,7 +461,7 @@ describe('multimodal runtime reliability', () => {
   })
 
   it('recovers chat and TTS after native runtime failures', async () => {
-    const initialAnswer = await llm.chat('Give me a reply that can be spoken')
+    const initialAnswer = await rawLocalText('Give me a reply that can be spoken')
     expect(initialAnswer).toBe('chat recovered')
 
     const startsBefore = lineCount(fixture.llamaLog)

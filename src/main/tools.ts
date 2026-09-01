@@ -27,7 +27,7 @@ import {
   rankToolSchemas,
   rankToolSchemasByEmbedding,
   stripHtmlTags as stripTags,
-  toolCapabilityIssue,
+  nativeToolPlannerUnavailableMessage,
   toolSchemaTokenBudget,
   ToolEmbeddingCache
 } from '@offgrid/models'
@@ -568,10 +568,10 @@ export async function toolChat(
   const remoteToolCapability = remoteTextModel
     ? await remoteNativeToolCapability(remoteTextModel)
     : null
-  const plannerUnavailable = toolCapabilityIssue(
-    1,
-    remoteToolCapability?.status === 'unsupported' ? { toolCalling: false } : undefined
-  )
+  const plannerUnavailable =
+    remoteToolCapability?.status === 'unsupported'
+      ? nativeToolPlannerUnavailableMessage(remoteToolCapability)
+      : undefined
   if (plannerUnavailable) {
     return {
       answer: plannerUnavailable,

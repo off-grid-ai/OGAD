@@ -117,6 +117,10 @@ export async function generateDesktopMessages(
 ): Promise<GenerationResult> {
   await desktopModelServices.refresh()
   const settings = llm.getSettings()
+  const needsVision = messages.some(
+    (message) =>
+      Array.isArray(message.content) && message.content.some((part) => part.type === 'image')
+  )
   const turnId =
     options.identity?.turnId ?? `desktop:${Date.now()}:${Math.random().toString(36).slice(2)}`
   const request: GenerationRequest = {
@@ -150,6 +154,7 @@ export async function generateDesktopMessages(
           }
         }),
     requiredCapabilities: {
+      ...(needsVision ? { vision: true } : {}),
       ...(options.thinking === undefined ? {} : { thinking: options.thinking })
     },
     allowFallback: options.allowFallback ?? true,
