@@ -12,6 +12,7 @@ const originalDataDir = process.env.OFFGRID_DATA_DIR
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-model-integrity-'))
 process.env.OFFGRID_DATA_DIR = dataDir
 
+await import('../../model-services')
 const manager = await import('../../models-manager')
 const { CATALOG } = await import('@offgrid/models')
 
@@ -295,6 +296,7 @@ describe('model-manager GGUF integrity', () => {
     expect(fs.existsSync(interrupted.filePath)).toBe(false)
 
     vi.resetModules()
+    await import('../../model-services')
     const restartedManager = await import('../../models-manager')
     expect(restartedManager.listDownloads()).toContainEqual(
       expect.objectContaining({
@@ -313,6 +315,7 @@ describe('model-manager GGUF integrity', () => {
     expect(await restartedManager.listInstalled()).toContain(interrupted.entry.id)
 
     vi.resetModules()
+    await import('../../model-services')
     const finalRestart = await import('../../models-manager')
     expect(finalRestart.listDownloads().map((download) => download.modelId)).not.toContain(
       interrupted.entry.id
@@ -395,6 +398,7 @@ describe('active model deletion', () => {
       }
 
       vi.resetModules()
+      await import('../../model-services')
       const restartedManager = await import('../../models-manager')
       expect(restartedManager.getActiveModalities()).toEqual({
         text: null,
@@ -423,6 +427,7 @@ describe('active model persistence', () => {
     expect(await manager.getActiveModelIds()).toContain(text.entry.id)
 
     vi.resetModules()
+    await import('../../model-services')
     const restartedManager = await import('../../models-manager')
 
     expect(restartedManager.getActiveModalities().text).toBe(text.entry.id)
@@ -457,6 +462,7 @@ describe('active model persistence', () => {
     })
 
     vi.resetModules()
+    await import('../../model-services')
     const restartedManager = await import('../../models-manager')
 
     expect(await restartedManager.getActiveModelIds()).toEqual(expect.arrayContaining(selectedIds))

@@ -23,7 +23,7 @@ import {
 } from '@offgrid/models'
 import { llm } from '../llm'
 import { getActiveModel, listInstalled, loadComputerUseModel } from '../models-manager'
-import { desktopModelServices, type DesktopModelServices } from '../model-services'
+import { desktopModelServices, type DesktopModelServices } from '../model-service-access'
 import { isGrounderActive } from './vision-model-notice'
 import { resolveGrounderLoadPlan } from '@offgrid/models'
 import { runRestoredModelSwap } from './grounder-swap'

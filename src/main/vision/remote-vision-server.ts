@@ -10,12 +10,12 @@ import {
   discoveryFromRemoteModelList,
   mergeRemoteSelections,
   remoteAuthorizationHeaders,
-  type ModelModality,
   type RemoteModelCatalog,
   type RemoteModalitySelections
 } from '@offgrid/models'
 import { decodeModelRouteId } from '@offgrid/models'
 import { desktopModelSelectionPersistence } from '../model-selection-persistence'
+import { desktopModelServices } from '../model-service-access'
 import { deleteSecret, getSecret, setSecret } from '../secrets'
 import {
   REMOTE_VISION_PROVIDERS,
@@ -244,7 +244,6 @@ export async function setRemoteVisionServerSettings(
 ): Promise<RemoteVisionServerSettings> {
   const stored = readStored()
   if (update.provider === 'local') {
-    const { desktopModelServices } = await import('../model-services')
     const previousLocal = desktopModelSelectionPersistence.readLegacyTextConfig().id
     const selected = await desktopModelServices.select(
       'text',
@@ -295,10 +294,9 @@ export async function setRemoteVisionServerSettings(
     activeServerId: stored.activeServerId === id ? null : stored.activeServerId,
     servers
   })
-  const { desktopModelServices } = await import('../model-services')
   await desktopModelServices.refresh()
   for (const [remoteModality, selectedModel] of Object.entries(selections)) {
-    if (!selectedModel) continue
+    if (typeof selectedModel !== 'string' || !selectedModel) continue
     const modality = remoteModality === 'voice' ? 'voice' : remoteModality
     const selected = await desktopModelServices.select(
       modality as 'text' | 'image' | 'transcription' | 'voice' | 'embedding',
@@ -311,23 +309,7 @@ export async function setRemoteVisionServerSettings(
 
 export function removeRemoteVisionServer(serverId: string): RemoteVisionServerSettings {
   const stored = readStored()
-  const modalities: ModelModality[] = [
-    'text',
-    'vision',
-    'computer_use',
-    'image',
-    'transcription',
-    'voice',
-    'embedding',
-    'tool_selection'
-  ]
-  for (const modality of modalities) {
-    const selected = desktopModelSelectionPersistence.readCanonical(modality)
-    const selectedRoute = selected ? decodeModelRouteId(selected) : null
-    if (selectedRoute?.serverId !== serverId) continue
-    desktopModelSelectionPersistence.write(modality, null)
-    desktopModelSelectionPersistence.projectLegacyModality(modality, null)
-  }
+  desktopModelServices.clearRemoteServerSelections(serverId)
   deleteSecret(secretKey(serverId))
   writeStored({
     version: CONFIG_VERSION,

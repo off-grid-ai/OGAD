@@ -30,6 +30,7 @@ vi.mock('electron', () => ({
   }
 }))
 
+await import('../../model-services')
 const manager = await import('../../models-manager')
 const { CATALOG } = await import('@offgrid/models')
 
@@ -53,9 +54,7 @@ const byKind = (kind: CatalogModel['kind'], fileCount?: number): CatalogModel =>
 const singleFileModels = CATALOG.filter((m) => m.files.length === 1)
 const chatModel = byKind('vision', 2)
 const visionModel = byKind('vision', 2)
-const holoGrounder = CATALOG.find(
-  (candidate) => candidate.id === 'mradermacher/Holo-3.1-4B-GGUF'
-)
+const holoGrounder = CATALOG.find((candidate) => candidate.id === 'mradermacher/Holo-3.1-4B-GGUF')
 if (!holoGrounder) throw new Error('Model catalog needs the Computer Use Holo3.1-4B fixture')
 const imageModel = byKind('image', 3)
 const speechModel = CATALOG.find(
@@ -243,7 +242,7 @@ describe('model download release matrix', () => {
     // No app database in this runner (it cannot load the native DB module — see
     // vitest.config.ts), and this journey has no language preference to honor: the reader
     // is the boundary, so it answers with the same default a fresh profile would.
-    const noStoredPreferences = <T,>(_key: string, fallback: T): T => fallback
+    const noStoredPreferences = <T>(_key: string, fallback: T): T => fallback
     expect(getActiveTranscription(noStoredPreferences).isAvailable()).toBe(false)
 
     await downloadEveryRequiredFile(speechModel)

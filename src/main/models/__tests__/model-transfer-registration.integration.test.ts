@@ -10,6 +10,7 @@ const originalDataDir = process.env.OFFGRID_DATA_DIR
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-model-transfer-registration-'))
 process.env.OFFGRID_DATA_DIR = dataDir
 
+await import('../../model-services')
 const manager = await import('../../models-manager')
 const downloaded = await import('../../downloaded-models')
 

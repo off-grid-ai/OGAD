@@ -8,6 +8,7 @@ const originalDataDir = process.env.OFFGRID_DATA_DIR
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-transferred-vision-'))
 process.env.OFFGRID_DATA_DIR = dataDir
 
+await import('../../model-services')
 const manager = await import('../../models-manager')
 
 const FAMILY_ID = 'unsloth/Qwen3.5-0.8B-GGUF'

@@ -55,7 +55,8 @@ import {
   remoteVisionInventoryModels
 } from '../shared/remote-vision-server'
 import { getRemoteVisionServerSettings } from './vision/remote-vision-server'
-import { desktopModelServices } from './model-services'
+import { desktopModelServices } from './model-service-access'
+import { registerDesktopModelManagerPorts } from './model-manager-ports'
 import { desktopModelSelectionPersistence } from './model-selection-persistence'
 import { platformFetch } from '@offgrid/models/fetch'
 
@@ -1367,3 +1368,10 @@ export async function clearInactiveDownloads(): Promise<{
   }
   return { success: true, count: ids.length, freedBytes }
 }
+
+registerDesktopModelManagerPorts({
+  getCatalog,
+  listInstalled,
+  resolveCanonicalModelSelectionId,
+  projectActiveTextModelSelection
+})

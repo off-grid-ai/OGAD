@@ -6,6 +6,8 @@ import {
   CATALOG,
   LLMService,
   decodeModelRouteId,
+  encodeModelRouteId,
+  type CatalogEntry,
   type ModelModality,
   type RuntimeModel
 } from '@offgrid/models'
@@ -27,7 +29,7 @@ afterAll(() => {
 
 describe('Desktop active-model authority', () => {
   it('uses the persisted route for inventory, runtime state, UI projection, and execution', async () => {
-    const byKind = (kind: string) => {
+    const byKind = (kind: string): CatalogEntry => {
       const model = CATALOG.find(
         (candidate) => candidate.kind === kind && candidate.availability !== 'coming_soon'
       )
@@ -168,6 +170,54 @@ describe('Desktop active-model authority', () => {
       )
     } finally {
       fs.rmSync(remoteDirectory, { recursive: true, force: true })
+    }
+  })
+
+  it('clears every route for a removed remote server through the synchronous service port', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-remote-clear-'))
+    try {
+      const [{ createDesktopModelServices }, { DesktopModelSelectionPersistence }] =
+        await Promise.all([import('../model-services'), import('../model-selection-persistence')])
+      const persistence = new DesktopModelSelectionPersistence(() => directory)
+      const removedText = encodeModelRouteId({
+        adapterId: 'desktop.remote-chat',
+        providerId: 'openai',
+        serverId: 'removed',
+        modelId: 'text-model'
+      })
+      const removedImage = encodeModelRouteId({
+        adapterId: 'desktop.remote-image',
+        providerId: 'openai',
+        serverId: 'removed',
+        modelId: 'image-model'
+      })
+      const retained = encodeModelRouteId({
+        adapterId: 'desktop.remote-voice',
+        providerId: 'openai',
+        serverId: 'retained',
+        modelId: 'voice-model'
+      })
+      persistence.write('text', removedText)
+      persistence.write('image', removedImage)
+      persistence.write('voice', retained)
+      persistence.projectLegacyModality('image', 'image-model')
+
+      const services = createDesktopModelServices(
+        {
+          listCatalog: async () => [],
+          listInstalled: async () => [],
+          localTextRuntimeState: async () => ({ ready: false, loaded: false })
+        },
+        persistence
+      )
+      services.clearRemoteServerSelections('removed')
+
+      expect(persistence.readCanonical('text')).toBeNull()
+      expect(persistence.readCanonical('image')).toBeNull()
+      expect(persistence.projectedModelId('image')).toBeNull()
+      expect(persistence.readCanonical('voice')).toBe(retained)
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true })
     }
   })
 })

@@ -82,6 +82,19 @@ for (const file of files) {
       ) {
         report('models-manager-does-not-own-selection-persistence', fileName, source, node, `call:${call}`)
       }
+      if (
+        fileName !== 'src/main/model-selection-persistence.ts' &&
+        fileName !== 'src/main/model-services.ts' &&
+        /^desktopModelSelectionPersistence\.(?:write|projectLegacyModality)$/.test(call)
+      ) {
+        report(
+          'selection-writes-use-canonical-model-service',
+          fileName,
+          source,
+          node,
+          `call:${call}`
+        )
+      }
     }
 
     if (

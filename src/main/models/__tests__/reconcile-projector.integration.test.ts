@@ -21,6 +21,7 @@ vi.mock('electron', () => ({
   }
 }))
 
+await import('../../model-services')
 const manager = await import('../../models-manager')
 const { llm } = await import('../../llm')
 
@@ -108,9 +109,7 @@ describe('reconcileActiveModelClassification', () => {
 
     expect(await manager.reconcileActiveModelClassification()).toBe(true)
 
-    expect(manager.getActiveModalities().computer_use).toBe(
-      'mradermacher/Holo-3.1-0.8B-GGUF'
-    )
+    expect(manager.getActiveModalities().computer_use).toBe('mradermacher/Holo-3.1-0.8B-GGUF')
     expect(manager.getActiveModalities().text).toBeNull()
   })
 })

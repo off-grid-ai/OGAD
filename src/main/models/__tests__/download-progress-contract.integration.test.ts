@@ -31,6 +31,7 @@ vi.mock('electron', () => ({
   }
 }))
 
+await import('../../model-services')
 const manager = await import('../../models-manager')
 const { CATALOG } = await import('@offgrid/models')
 type ModelDownloadProgress = import('../../models-manager').DownloadProgress

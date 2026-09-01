@@ -18,34 +18,8 @@ import { llm, type StreamChatOptions } from './llm'
 import type { StreamResult } from './llm/stream'
 import type { GenerationMetrics } from '../shared/generation-metrics'
 import { getRemoteVisionServer } from './vision/remote-vision-server'
-import type { ImageGenerationPipelineUpdateContract } from '../shared/image-generation-contract'
-import type { DownloadProgress } from '@offgrid/executorch-speech'
-
-const imageProgressObservers = new Map<
-  string,
-  (update: ImageGenerationPipelineUpdateContract) => void
->()
-const voiceProgressObservers = new Map<string, (progress: DownloadProgress) => void>()
-
-export function registerDesktopImageProgress(
-  turnId: string,
-  observer: (update: ImageGenerationPipelineUpdateContract) => void
-): () => void {
-  imageProgressObservers.set(turnId, observer)
-  return () => {
-    if (imageProgressObservers.get(turnId) === observer) imageProgressObservers.delete(turnId)
-  }
-}
-
-export function registerDesktopVoiceProgress(
-  turnId: string,
-  observer: (progress: DownloadProgress) => void
-): () => void {
-  voiceProgressObservers.set(turnId, observer)
-  return () => {
-    if (voiceProgressObservers.get(turnId) === observer) voiceProgressObservers.delete(turnId)
-  }
-}
+import { reportDesktopImageProgress, reportDesktopVoiceProgress } from './generation-progress'
+export { registerDesktopImageProgress, registerDesktopVoiceProgress } from './generation-progress'
 
 class GenerationChunkChannel {
   private readonly values: GenerationChunk[] = []
@@ -274,7 +248,7 @@ export class DesktopImageGenerationAdapter extends DesktopTypedGenerationAdapter
         allowUnsafeMemoryOverride: operation.allowUnsafeMemoryOverride
       },
       (update) => {
-        imageProgressObservers.get(request.identity?.turnId ?? '')?.(update)
+        reportDesktopImageProgress(request.identity?.turnId ?? '', update)
         const progress = 'progress' in update ? update.progress : undefined
         const enhancedPrompt = 'enhancedPrompt' in update ? update.enhancedPrompt : undefined
         if (progress || enhancedPrompt !== undefined) {
@@ -341,7 +315,7 @@ export class DesktopVoiceGenerationAdapter extends DesktopTypedGenerationAdapter
     const { synthesizeNative } = await import('./tts')
     const output = await synthesizeNative(request.operation.text, request.operation.voice, {
       onProgress: (progress) =>
-        voiceProgressObservers.get(request.identity?.turnId ?? '')?.(progress),
+        reportDesktopVoiceProgress(request.identity?.turnId ?? '', progress),
       signal: request.signal
     })
     yield {

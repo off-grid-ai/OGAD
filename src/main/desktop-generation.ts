@@ -12,7 +12,7 @@ import type {
 } from '@offgrid/models'
 import { llm } from './llm'
 import { readImages } from './llm/read-images'
-import { desktopModelServices } from './model-services'
+import { desktopModelServices } from './model-service-access'
 import { desktopToolExecutor, type DesktopToolExecutionSession } from './desktop-tool-executor'
 
 export interface DesktopGenerationOptions {

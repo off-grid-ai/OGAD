@@ -42,6 +42,10 @@ import {
 } from './model-generation-adapters'
 import { desktopToolExecutor } from './desktop-tool-executor'
 import { getResidencyMode } from './runtime-residency'
+import './models-manager'
+import { registerDesktopModelServices, type DesktopModelServices } from './model-service-access'
+import { desktopModelManagerPorts } from './model-manager-ports'
+export type { DesktopModelServices } from './model-service-access'
 
 interface DesktopInventoryModel {
   id: string
@@ -75,6 +79,7 @@ interface DesktopModelServicesDependencies {
     unload(): Promise<void>
   }
   resolveLegacyModelId?(modelId: string): Promise<string>
+  projectTextSelection?(modelId: string): Promise<{ success: boolean; error?: string }>
   residencyMode?(modality: 'image' | 'stt'): 'resident' | 'on-demand'
 }
 
@@ -151,7 +156,10 @@ export class DesktopModelSelectionStore implements ModelSelectionStore {
 
   constructor(
     private readonly ids: LegacyDesktopModelIdCodec,
-    private readonly routes: DesktopModelSelectionPersistence = desktopModelSelectionPersistence
+    private readonly routes: DesktopModelSelectionPersistence = desktopModelSelectionPersistence,
+    private readonly projectTextSelection?: (
+      modelId: string
+    ) => Promise<{ success: boolean; error?: string }>
   ) {}
 
   read(modality: ModelModality): string | null {
@@ -196,10 +204,10 @@ export class DesktopModelSelectionStore implements ModelSelectionStore {
         this.routes.write(modality, modelId)
         return
       }
-      const result = await (
-        await import('./models-manager')
-      ).projectActiveTextModelSelection(nativeModelId)
-      if (!result.success) throw new Error(result.error ?? 'The model could not be selected.')
+      if (this.projectTextSelection) {
+        const result = await this.projectTextSelection(nativeModelId)
+        if (!result.success) throw new Error(result.error ?? 'The model could not be selected.')
+      }
       deactivateRemoteVisionModel()
       this.routes.write(modality, modelId)
       return
@@ -387,36 +395,16 @@ class DesktopModelInventoryAdapter implements ModelInventoryAdapter {
   }
 }
 
-export interface DesktopModelServices {
-  llm: SharedLLMService
-  generation: SharedGenerationService
-  residency: ModelResidencyManager
-  generationObservations: DesktopGenerationObservations
-  refresh(): Promise<RuntimeModel[]>
-  routeIdFor(modality: ModelModality, nativeModelId?: string): string | undefined
-  select(
-    modality: ModelModality,
-    modelId: string | null
-  ): Promise<{ success: boolean; error?: string }>
-  warmText(): Promise<boolean>
-  unload(modality: ModelModality): Promise<boolean>
-  shutdown(): Promise<void>
-  activeModelIds(): Promise<string[]>
-  activeModalities(): {
-    text: string | null
-    computer_use: string | null
-    image: string | null
-    speech: string | null
-    transcription: string | null
-  }
-}
-
 export function createDesktopModelServices(
   dependencies: DesktopModelServicesDependencies,
   selectionPersistence: DesktopModelSelectionPersistence = desktopModelSelectionPersistence
 ): DesktopModelServices {
   const ids = new LegacyDesktopModelIdCodec()
-  const selections = new DesktopModelSelectionStore(ids, selectionPersistence)
+  const selections = new DesktopModelSelectionStore(
+    ids,
+    selectionPersistence,
+    dependencies.projectTextSelection
+  )
   const llm = new SharedLLMService(selections)
   const source = new DesktopInventorySource(dependencies, ids, selections)
   for (const adapterId of [
@@ -581,6 +569,24 @@ export function createDesktopModelServices(
         }
       }
     },
+    clearRemoteServerSelections(serverId) {
+      for (const modality of [
+        'text',
+        'vision',
+        'computer_use',
+        'image',
+        'transcription',
+        'voice',
+        'embedding',
+        'tool_selection'
+      ] satisfies ModelModality[]) {
+        const selected = selectionPersistence.readCanonical(modality)
+        const route = selected ? decodeModelRouteId(selected) : null
+        if (route?.serverId !== serverId) continue
+        selectionPersistence.write(modality, null)
+        selectionPersistence.projectLegacyModality(modality, null)
+      }
+    },
     async warmText() {
       await llm.refresh()
       const model = llm.active('text').model
@@ -644,10 +650,10 @@ export function createDesktopModelServices(
 
 export const desktopModelServices = createDesktopModelServices({
   listCatalog: async () => {
-    const catalog = await (await import('./models-manager')).getCatalog()
+    const catalog = await desktopModelManagerPorts.getCatalog()
     return catalog.models as DesktopInventoryModel[]
   },
-  listInstalled: async () => (await import('./models-manager')).listInstalled(),
+  listInstalled: () => desktopModelManagerPorts.listInstalled(),
   localTextRuntimeState: async () => {
     const { llm } = await import('./llm')
     return {
@@ -656,8 +662,10 @@ export const desktopModelServices = createDesktopModelServices({
       reasoning: llm.getReasoningMetadata()
     }
   },
-  resolveLegacyModelId: async (modelId) =>
-    (await import('./models-manager')).resolveCanonicalModelSelectionId(modelId),
+  resolveLegacyModelId: (modelId) =>
+    desktopModelManagerPorts.resolveCanonicalModelSelectionId(modelId),
+  projectTextSelection: (modelId) =>
+    desktopModelManagerPorts.projectActiveTextModelSelection(modelId),
   residencyMode: (modality) => {
     try {
       return getResidencyMode(modality)
@@ -666,3 +674,5 @@ export const desktopModelServices = createDesktopModelServices({
     }
   }
 })
+
+registerDesktopModelServices(desktopModelServices)

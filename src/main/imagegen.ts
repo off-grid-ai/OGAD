@@ -70,7 +70,7 @@ import {
   generateDesktopOperation,
   generateDesktopText
 } from './desktop-generation'
-import { registerDesktopImageProgress } from './model-generation-adapters'
+import { registerDesktopImageProgress } from './generation-progress'
 
 function findSdCli(): string | null {
   for (const r of binRoots()) {

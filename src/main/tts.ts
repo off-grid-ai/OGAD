@@ -17,7 +17,7 @@ import { modelsDir, resourceDirs } from './runtime-env'
 import type { ManagedRuntimePort as ManagedRuntime } from '@offgrid/models'
 import { DEFAULT_SPEECH_VOICE, resolveSpeechVoice } from '@offgrid/models'
 import { generateDesktopOperation } from './desktop-generation'
-import { registerDesktopVoiceProgress } from './model-generation-adapters'
+import { registerDesktopVoiceProgress } from './generation-progress'
 
 const LANGUAGE_TAGS: Readonly<Record<string, string>> = {
   'en-us': 'en-US',
