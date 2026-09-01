@@ -2,16 +2,17 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import type { GenerationRequest, RuntimeModel } from '@offgrid/models'
 import type { TaskExecutionPlan } from '../../../shared/task-execution-plan'
-import { llm } from '../../llm'
+import { desktopModelServices } from '../../model-services'
 import {
   generalVisionOperatorAdapter,
   generalVisionPolicyFailure
 } from '../model-adapters/general-vision-operator'
 import { parseGeneralVisionToolResponse } from '../model-adapters/general-vision-tools'
 import { resolveVisionModelAdapter } from '../model-adapters/registry'
-import type { VisionPolicyMessage, VisionPolicyResponse } from '../model-adapters/types'
+import type { VisionPolicyResponse } from '../model-adapters/types'
 import {
   answerAfterThinking,
   createVisionGrounder,
@@ -26,6 +27,86 @@ import {
 } from '../vision-policy-runner'
 import { VisionGuard } from '../vision-guard'
 import { runVisionTaskGraph } from '../vision-task-graph'
+
+interface ScriptedVisionResponse extends VisionPolicyResponse {
+  reasoning?: string
+  finishReason?: 'stop' | 'tool_calls'
+}
+
+let runtimeNumber = 0
+
+async function scriptedVisionRuntime(responses: ScriptedVisionResponse[]): Promise<{
+  routeId: string
+  requests: GenerationRequest[]
+  calls(): number
+  dispose(): void
+}> {
+  runtimeNumber += 1
+  const adapterId = `vision-test-runtime-${runtimeNumber}`
+  const model: RuntimeModel = {
+    id: adapterId,
+    name: 'Vision test runtime',
+    kind: 'computer_use',
+    modality: 'computer_use',
+    source: 'remote',
+    adapterId,
+    capabilities: {
+      vision: true,
+      computerUse: true,
+      tools: true,
+      toolSelection: true,
+      thinking: true,
+      streaming: true,
+      structuredOutput: true
+    },
+    installed: true,
+    ready: true,
+    loaded: true
+  }
+  const unregisterInventory = desktopModelServices.llm.registerAdapter({
+    id: adapterId,
+    listModels: async () => [model]
+  })
+  const requests: GenerationRequest[] = []
+  let callCount = 0
+  const unregisterGeneration = desktopModelServices.generation.registerAdapter({
+    id: adapterId,
+    async *generate(_model, request) {
+      const response = responses[Math.min(callCount, responses.length - 1)]!
+      callCount += 1
+      requests.push(request)
+      if (response.reasoning) yield { reasoning: response.reasoning }
+      if (response.content) yield { content: response.content }
+      if (response.toolCalls.length) {
+        yield {
+          toolCallDeltas: response.toolCalls.map((call, index) => ({
+            index,
+            id: call.id,
+            name: call.name,
+            argumentsDelta: call.arguments
+          }))
+        }
+      }
+      yield {
+        finishReason: response.finishReason ?? (response.toolCalls.length ? 'tool_calls' : 'stop')
+      }
+    }
+  })
+  await desktopModelServices.refresh()
+  const routeId = desktopModelServices.llm
+    .list('computer_use')
+    .find((candidate) => candidate.adapterId === adapterId)?.routeId
+  if (!routeId) throw new Error('The scripted vision route was not registered.')
+  return {
+    routeId,
+    requests,
+    calls: () => callCount,
+    dispose() {
+      unregisterGeneration()
+      unregisterInventory()
+    }
+  }
+}
 
 const model = {
   id: 'unsloth/gemma-4-E4B-it-GGUF',
@@ -79,8 +160,6 @@ async function writeFrame(name: string): Promise<string> {
 }
 
 describe('general vision native tool policy', () => {
-  afterEach(() => vi.restoreAllMocks())
-
   it('builds one required native-tool request with no JSON final-answer grammar', () => {
     const adapter = resolveVisionModelAdapter(model)
     const request = adapter.buildRequest({
@@ -193,20 +272,19 @@ describe('general vision native tool policy', () => {
     const imagePath = await writeFrame('native-tools')
     const actuated: unknown[] = []
     const reasoning: string[] = []
-    vi.spyOn(llm, 'streamChat')
-      .mockImplementationOnce(async (_messages, onDelta) => {
-        onDelta('The control is visible.', 'reasoning')
-        return {
-          content: '{"command":{"name":"complete_milestone"}}',
-          toolCalls: [...perform().toolCalls],
-          finishReason: 'tool_calls'
-        }
-      })
-      .mockResolvedValueOnce({
+    const runtime = await scriptedVisionRuntime([
+      {
+        content: '{"command":{"name":"complete_milestone"}}',
+        toolCalls: [...perform().toolCalls],
+        reasoning: 'The control is visible.',
+        finishReason: 'tool_calls'
+      },
+      {
         content: '',
         toolCalls: [...complete().toolCalls],
         finishReason: 'tool_calls'
-      })
+      }
+    ])
 
     try {
       const result = await runVisionTaskGraph('Open the visible result.', {
@@ -217,7 +295,11 @@ describe('general vision native tool policy', () => {
           }
         },
         guard: new VisionGuard({ taskId: 'operator-adapter-test', kind: 'computer_use' }),
-        decide: createVisionGrounder(generalVisionOperatorAdapter, 'embedded_browser'),
+        decide: createVisionGrounder(
+          generalVisionOperatorAdapter,
+          'embedded_browser',
+          runtime.routeId
+        ),
         parseResponse: generalVisionOperatorAdapter.parseResponse,
         waitForUser: async () => undefined,
         plan,
@@ -231,6 +313,7 @@ describe('general vision native tool policy', () => {
       expect(actuated).toEqual([{ type: 'click', point: { x: 287, y: 227 } }])
       expect(reasoning).toContain('The control is visible.')
     } finally {
+      runtime.dispose()
       fs.rmSync(imagePath, { force: true })
     }
   })
@@ -238,20 +321,20 @@ describe('general vision native tool policy', () => {
   it('re-observes after the bounded native-tool retry returns no transition', async () => {
     const imagePath = await writeFrame('native-tool-retry')
     const invalid = { content: 'I think the milestone is complete.', toolCalls: [] }
-    const stream = vi
-      .spyOn(llm, 'streamChat')
-      .mockResolvedValueOnce({ ...invalid, finishReason: 'stop' })
-      .mockResolvedValueOnce({ ...invalid, finishReason: 'stop' })
-      .mockResolvedValueOnce({
+    const runtime = await scriptedVisionRuntime([
+      { ...invalid, finishReason: 'stop' },
+      { ...invalid, finishReason: 'stop' },
+      {
         content: '',
         toolCalls: [...complete().toolCalls],
         finishReason: 'tool_calls'
-      })
-      .mockResolvedValueOnce({
+      },
+      {
         content: '',
         toolCalls: [...complete().toolCalls],
         finishReason: 'tool_calls'
-      })
+      }
+    ])
     let captures = 0
 
     try {
@@ -266,7 +349,7 @@ describe('general vision native tool policy', () => {
           }
         },
         guard: new VisionGuard({ taskId: 'operator-adapter-test', kind: 'computer_use' }),
-        decide: createVisionGrounder(generalVisionOperatorAdapter),
+        decide: createVisionGrounder(generalVisionOperatorAdapter, 'desktop', runtime.routeId),
         parseResponse: generalVisionOperatorAdapter.parseResponse,
         waitForUser: async () => undefined,
         plan
@@ -274,21 +357,19 @@ describe('general vision native tool policy', () => {
 
       expect(result).toMatchObject({ ok: true, summary: 'The requested result is visible.' })
       expect(captures).toBe(3)
-      expect(stream).toHaveBeenCalledTimes(4)
+      expect(runtime.calls()).toBe(4)
       expect(result.steps).toContain(
         'the model returned 0 tool calls; exactly one is required; re-observing'
       )
     } finally {
+      runtime.dispose()
       fs.rmSync(imagePath, { force: true })
     }
   })
 
   it('returns the final invalid native response after the bounded retry', async () => {
     const invalid = { content: 'text is not a transition', toolCalls: [] }
-    const stream = vi.spyOn(llm, 'streamChat').mockResolvedValue({
-      ...invalid,
-      finishReason: 'stop'
-    })
+    const runtime = await scriptedVisionRuntime([{ ...invalid, finishReason: 'stop' }])
     const request = generalVisionOperatorAdapter.buildRequest({
       goal: 'Open the control.',
       currentScreenshotDataUrl: 'data:image/png;base64,current',
@@ -297,9 +378,14 @@ describe('general vision native tool policy', () => {
       recentSteps: [],
       olderVisualFacts: []
     })
+    request.generationRouteId = runtime.routeId
 
-    await expect(runVisionPolicyRequest(request)).resolves.toEqual(invalid)
-    expect(stream).toHaveBeenCalledTimes(2)
+    try {
+      await expect(runVisionPolicyRequest(request)).resolves.toEqual(invalid)
+      expect(runtime.calls()).toBe(2)
+    } finally {
+      runtime.dispose()
+    }
   })
 
   it('uses the application launcher instead of guessing an unidentified Dock icon', () => {
@@ -445,23 +531,20 @@ describe('general vision native tool policy', () => {
         .png()
         .toBuffer()
     )
-    let modelImageUrl = ''
-    vi.spyOn(llm, 'streamChat').mockImplementationOnce(async (messages) => {
-      const policyMessages = messages as VisionPolicyMessage[]
-      const userContent = policyMessages.find((message) => message.role === 'user')?.content
-      if (Array.isArray(userContent)) {
-        const image = userContent.find((part) => part.type === 'image_url')
-        if (image?.type === 'image_url') modelImageUrl = image.image_url.url
-      }
-      return {
+    const runtime = await scriptedVisionRuntime([
+      {
         content: '',
         toolCalls: [...complete().toolCalls],
         finishReason: 'tool_calls'
       }
-    })
+    ])
 
     try {
-      const grounding = await createVisionGrounder(generalVisionOperatorAdapter)({
+      const grounding = await createVisionGrounder(
+        generalVisionOperatorAdapter,
+        'desktop',
+        runtime.routeId
+      )({
         goal: 'Confirm the visible result.',
         image: file,
         history: [],
@@ -471,10 +554,17 @@ describe('general vision native tool policy', () => {
         coordinateFrame: { encoded: bounds, source: bounds }
       })
       const persistedDataUrl = `data:image/png;base64,${fs.readFileSync(file).toString('base64')}`
+      const userContent = runtime.requests[0]?.messages?.find(
+        (message) => message.role === 'user'
+      )?.content
+      const modelImageUrl = Array.isArray(userContent)
+        ? userContent.find((part) => part.type === 'image')?.uri
+        : undefined
 
       expect(modelImageUrl).toBe(persistedDataUrl)
       expect(grounding.screenshotDataUrl).toBe(persistedDataUrl)
     } finally {
+      runtime.dispose()
       fs.rmSync(file, { force: true })
     }
   })
