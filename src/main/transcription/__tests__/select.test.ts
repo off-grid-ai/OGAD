@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   pickTranscription,
   resolveTranscription,
@@ -10,6 +10,12 @@ import type { TranscriptionService } from '../types'
 const service = (available: boolean, text: string): TranscriptionService => ({
   isAvailable: () => available,
   transcribe: async () => ({ text })
+})
+
+beforeAll(async () => {
+  // Production registers Shared LLM, generation, and residency services at the
+  // application composition root. Keep the real services in this adapter test.
+  await import('../../model-services')
 })
 
 describe('Desktop transcription adapter selection', () => {

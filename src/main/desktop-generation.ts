@@ -10,6 +10,7 @@ import type {
   GenerationToolHandling,
   ReasoningEffort
 } from '@offgrid/models'
+import { ModelCapabilityError, nativeToolPlannerUnavailableMessage } from '@offgrid/models'
 import { llm } from './llm'
 import { readImages } from './llm/read-images'
 import { desktopModelServices } from './model-service-access'
@@ -111,6 +112,18 @@ export function promptMessages(prompt: string, images: string[] = []): Generatio
   return messages
 }
 
+function throwDesktopGenerationError(error: unknown): never {
+  if (error instanceof ModelCapabilityError && error.unsupportedCapabilities.includes('tools')) {
+    throw new Error(
+      nativeToolPlannerUnavailableMessage({
+        status: 'unsupported',
+        modelName: error.model.name
+      })
+    )
+  }
+  throw error
+}
+
 export async function generateDesktopMessages(
   messages: GenerationMessage[],
   options: DesktopGenerationOptions = {}
@@ -166,6 +179,8 @@ export async function generateDesktopMessages(
     : undefined
   try {
     return await desktopModelServices.generation.generate(request, options.events)
+  } catch (error) {
+    return throwDesktopGenerationError(error)
   } finally {
     unregister?.()
   }

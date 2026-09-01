@@ -43,6 +43,27 @@ const turns: RemoteTurn[] = []
 const requests: RecordedRequest[] = []
 let remoteServer: http.Server
 let remoteServerId = ''
+const platformFetch = globalThis.fetch.bind(globalThis)
+
+/**
+ * The test server is a plain loopback socket, while the stored credentialed endpoint
+ * must remain HTTPS. This boundary represents local TLS termination and forwards only
+ * this test origin to the loopback server. All Off Grid URL policy, authorization,
+ * routing, request shaping, and response parsing remain production code.
+ */
+function installLoopbackTlsBoundary(port: number): void {
+  vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
+    const raw =
+      typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+    const url = new URL(raw)
+    if (url.protocol === 'https:' && url.hostname === '127.0.0.1' && url.port === String(port)) {
+      url.protocol = 'http:'
+      if (input instanceof Request) return platformFetch(new Request(url, input), init)
+      return platformFetch(url, init)
+    }
+    return platformFetch(input, init)
+  })
+}
 
 function completionFrames(turn: RemoteTurn): string[] {
   const frame = (delta: Record<string, unknown>, finishReason: string | null = null): string =>
@@ -133,13 +154,42 @@ function startRemoteServer(): Promise<http.Server> {
 }
 
 beforeAll(async () => {
+  const { configureRuntime } = await import('../runtime-env')
+  configureRuntime({ dataDir: TMP_DIR })
   remoteServer = await startRemoteServer()
   const port = (remoteServer.address() as AddressInfo).port
+  installLoopbackTlsBoundary(port)
+  // Boot the same composition root as Desktop before a remote selection projects
+  // into Shared LLMService.
+  await import('../model-services')
   const settings = await setRemoteVisionServerSettings({
     provider: 'openrouter',
     name: 'Test OpenRouter',
-    endpoint: `http://127.0.0.1:${port}`,
+    endpoint: `https://127.0.0.1:${port}`,
     model: 'openai/gpt-5.6',
+    selections: { text: 'openai/gpt-5.6' },
+    catalog: {
+      text: [
+        {
+          id: 'openai/gpt-5.6',
+          name: 'GPT-5.6',
+          capabilities: {
+            supportsVision: true,
+            supportsToolCalling: true,
+            supportsThinking: true
+          }
+        },
+        {
+          id: 'bytedance-research/ui-tars-1.5-7b',
+          name: 'UI-TARS 1.5 7B',
+          capabilities: {
+            supportsVision: true,
+            supportsToolCalling: false,
+            supportsThinking: false
+          }
+        }
+      ]
+    },
     apiKey: 'test-api-key'
   })
   remoteServerId = settings.activeServerId ?? ''
@@ -152,6 +202,7 @@ beforeEach(() => {
 
 afterAll(async () => {
   if (remoteServerId) removeRemoteVisionServer(remoteServerId)
+  vi.unstubAllGlobals()
   await new Promise<void>((resolve, reject) => {
     remoteServer.close((error) => (error ? reject(error) : resolve()))
   })
@@ -275,8 +326,9 @@ describe('active text model transport', () => {
       serverId: remoteServerId,
       provider: 'openrouter',
       name: 'Test OpenRouter',
-      endpoint: `http://127.0.0.1:${(remoteServer.address() as AddressInfo).port}`,
+      endpoint: `https://127.0.0.1:${(remoteServer.address() as AddressInfo).port}`,
       model: 'bytedance-research/ui-tars-1.5-7b',
+      selections: { text: 'bytedance-research/ui-tars-1.5-7b' },
       apiKey: 'test-api-key'
     })
 
@@ -308,8 +360,9 @@ describe('active text model transport', () => {
         serverId: remoteServerId,
         provider: 'openrouter',
         name: 'Test OpenRouter',
-        endpoint: `http://127.0.0.1:${(remoteServer.address() as AddressInfo).port}`,
+        endpoint: `https://127.0.0.1:${(remoteServer.address() as AddressInfo).port}`,
         model: 'openai/gpt-5.6',
+        selections: { text: 'openai/gpt-5.6' },
         apiKey: 'test-api-key'
       })
     }

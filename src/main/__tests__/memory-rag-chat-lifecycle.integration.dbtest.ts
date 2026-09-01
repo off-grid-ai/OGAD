@@ -83,7 +83,10 @@ async function bootApplicationModules(): Promise<void> {
   const [{ setupIPC }, { setupRagIPC }, { llm }] = await Promise.all([
     import('../ipc'),
     import('../rag-ipc'),
-    import('../llm')
+    import('../llm'),
+    // The real app registers Shared LLM, generation, residency, and embedding
+    // services at its composition root before it accepts IPC work.
+    import('../model-services')
   ])
   const service = llm as unknown as { port: number; initialized: boolean; paused: boolean }
   service.port = fake.port

@@ -1,31 +1,44 @@
-// D26 — "Configure for me" never activated TTS. autoConfigure passes the setup
-// vocab kind 'voice' to setActiveModalChoice, but that function gated on
-// isModalKind, which accepts only 'speech'/'image'/'transcription' — so the 'voice'
-// call returned { success: false } (swallowed) and Kokoro was never set active.
-//
-// The fix normalizes the kind through modalityForModel (the single dispatch, now
-// idempotent on 'speech'), so both the setup 'voice' and the dispatched 'speech'
-// activate TTS. This is a source-contract guard that the buggy gate can't return:
-// setActiveModalChoice no longer branches on isModalKind and normalizes instead.
-// (The full "run Configure-for-me → Kokoro shows Active" flow is the on-device
-// check in DEVICE_TEST_LOG — setActiveModalChoice sits behind the heavy llm import.)
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
-import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'fs'
-import { join } from 'path'
+const PROFILE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-modal-choice-'))
 
-const src = readFileSync(join(__dirname, '..', '..', 'models-manager.ts'), 'utf8')
-const fn = src.slice(
-  src.indexOf('export async function setActiveModalChoice'),
-  src.indexOf('export function getActiveModalities')
-)
+vi.mock('electron', () => ({
+  app: { getPath: () => PROFILE_DIR, isPackaged: false, getAppPath: () => process.cwd() },
+  safeStorage: {
+    isEncryptionAvailable: () => false,
+    encryptString: (value: string) => Buffer.from(value),
+    decryptString: (value: Buffer) => value.toString()
+  }
+}))
+
+beforeAll(async () => {
+  // The application composition root registers the real shared model services.
+  const { configureRuntime } = await import('../../runtime-env')
+  configureRuntime({ dataDir: PROFILE_DIR })
+  await import('../../model-services')
+})
+
+afterAll(() => {
+  fs.rmSync(PROFILE_DIR, { recursive: true, force: true })
+})
 
 describe('setActiveModalChoice normalizes the modality (D26)', () => {
-  it('no longer gates on isModalKind (which rejected the setup "voice" kind)', () => {
-    expect(fn).not.toMatch(/isModalKind\(/)
-  })
+  it.each(['voice', 'speech'])(
+    'accepts the %s vocabulary and clears the same speech selection',
+    async (kind) => {
+      const { setActiveModalChoice } = await import('../../models-manager')
+      await expect(setActiveModalChoice(kind, null)).resolves.toEqual({ success: true })
+    }
+  )
 
-  it('normalizes the kind through modalityForModel so voice + speech both activate', () => {
-    expect(fn).toMatch(/modalityForModel\(kind\)/)
+  it('keeps text selection under the dedicated chat-model operation', async () => {
+    const { setActiveModalChoice } = await import('../../models-manager')
+    await expect(setActiveModalChoice('text', null)).resolves.toEqual({
+      success: false,
+      error: 'use setActiveModel for the chat LLM (text/vision)'
+    })
   })
 })

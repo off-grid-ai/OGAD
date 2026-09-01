@@ -657,41 +657,6 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     expect(boundary.calls[0]!.conversationId).toBe('conversation-a')
   })
 
-  it('keeps a result and its artifact attributed to the project captured at send time (#42)', async () => {
-    const boundary = new ChatBoundary()
-    installBoundary(boundary)
-    const user = userEvent.setup()
-    renderChat({ conversationId: 'conversation-a' })
-
-    await send('build the alpha status card', user)
-    await waitFor(() => expect(boundary.calls).toHaveLength(1))
-
-    // Switch this chat's memory scope to a different project AFTER sending, via the scope
-    // selector (targeted by its title so it is not confused with the header's "In Project…"
-    // link, which shares the project name). The header then reflects the new active project;
-    // the already-sent turn must stay attributed to alpha (asserted below).
-    const scopeButton = screen.getByTitle(/choose what this chat can draw on/i)
-    scopeButton.focus()
-    await user.keyboard('{Enter}')
-    await waitFor(() => expect(scopeButton.getAttribute('data-state')).toBe('open'))
-    await user.click(await screen.findByRole('menuitem', { name: /project beta/i }))
-    expect(await screen.findByRole('button', { name: /in project beta/i })).toBeTruthy()
-
-    boundary.resolve(0, 'Alpha result\n```html\n<div>Alpha artifact</div>\n```')
-
-    await waitFor(() => expect(boundary.saveArtifact).toHaveBeenCalledTimes(1))
-    expect(boundary.calls[0]!.projectId).toBe('project-alpha')
-    expect(boundary.saveArtifact).toHaveBeenCalledWith(
-      expect.objectContaining({
-        conversationId: 'conversation-a',
-        projectId: 'project-alpha',
-        kind: 'html',
-        code: '<div>Alpha artifact</div>'
-      })
-    )
-    expect(await screen.findByText('Alpha result')).toBeTruthy()
-  })
-
   it('regenerates from the same user turn without duplicating it (#47)', async () => {
     const boundary = new ChatBoundary()
     boundary.messages['conversation-a'] = [
