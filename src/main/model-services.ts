@@ -27,9 +27,14 @@ import { parseRemoteVisionModelId, remoteVisionModelId } from '../shared/remote-
 import {
   DesktopLocalGenerationAdapter,
   DesktopGenerationObservations,
-  DesktopRemoteGenerationAdapter
+  DesktopRemoteGenerationAdapter,
+  DesktopImageGenerationAdapter,
+  DesktopVoiceGenerationAdapter,
+  DesktopTranscriptionGenerationAdapter,
+  DesktopEmbeddingGenerationAdapter
 } from './model-generation-adapters'
 import { desktopToolExecutor } from './desktop-tool-executor'
+import { getResidencyMode } from './runtime-residency'
 
 interface DesktopInventoryModel {
   id: string
@@ -52,6 +57,7 @@ interface DesktopModelServicesDependencies {
     loaded: boolean
     reasoning?: ModelReasoningMetadata
   }>
+  residencyMode?(modality: 'image' | 'stt'): 'resident' | 'on-demand'
 }
 
 const SHARED_MODALITIES: readonly ModelModality[] = ['text', 'image', 'voice', 'transcription']
@@ -68,8 +74,33 @@ function legacyModality(
 function modalityForKind(kind: string | undefined): ModelModality | null {
   if (kind === 'text' || kind === 'vision') return 'text'
   if (kind === 'computer_use') return 'computer_use'
-  if (kind === 'image' || kind === 'voice' || kind === 'transcription') return kind
+  if (
+    kind === 'image' ||
+    kind === 'voice' ||
+    kind === 'transcription' ||
+    kind === 'embedding' ||
+    kind === 'classifier' ||
+    kind === 'tool_selection'
+  )
+    return kind
   return null
+}
+
+function runtimeSizes(model: DesktopInventoryModel): {
+  residentSizeMB?: number
+  peakSizeMB?: number
+} {
+  const bytes = (model.files ?? []).reduce((sum, file) => sum + (file.sizeBytes ?? 0), 0)
+  if (bytes <= 0 || model.remoteServerId) return {}
+  const weightsMB = bytes / (1024 * 1024)
+  // Catalog files are the durable resident weights. Native image/text runtimes need
+  // additional graph, cache, and decode buffers while a request is running.
+  const peakFactor =
+    model.kind === 'image' ? 1.4 : model.kind === 'text' || model.kind === 'vision' ? 1.2 : 1.1
+  return {
+    residentSizeMB: Math.ceil(weightsMB),
+    peakSizeMB: Math.ceil(weightsMB * peakFactor)
+  }
 }
 
 function activeTextModelId(): string | null {
@@ -241,6 +272,8 @@ class DesktopInventorySource {
     )
     const activeText = this.selections.read('text')
     const activeTextRoute = activeText ? decodeModelRouteId(activeText) : null
+    const residencyMode = (modality: 'image' | 'stt'): 'resident' | 'on-demand' =>
+      this.dependencies.residencyMode?.(modality) ?? 'on-demand'
 
     const expandTextRoutes = (base: RuntimeModel): RuntimeModel[] => {
       const route = (
@@ -303,7 +336,11 @@ class DesktopInventorySource {
               ? 'desktop.image'
               : modality === 'voice'
                 ? 'desktop.tts'
-                : 'desktop.transcription'
+                : modality === 'transcription'
+                  ? 'desktop.transcription'
+                  : modality === 'embedding'
+                    ? 'desktop.embedding'
+                    : `${prefix}.${modality.replace('_', '-')}`
       const base: RuntimeModel = {
         id: remote && model.remoteModelId ? model.remoteModelId : model.id,
         name: model.name?.trim() || model.id,
@@ -318,6 +355,20 @@ class DesktopInventorySource {
           : modality === 'text' || modality === 'computer_use'
             ? localTextState.reasoning
             : undefined,
+        ...runtimeSizes(model),
+        dirtyMemory: modality === 'image',
+        residencyMode:
+          modality === 'image'
+            ? residencyMode('image') === 'resident'
+              ? 'persistent'
+              : 'operation'
+            : modality === 'transcription'
+              ? residencyMode('stt') === 'resident'
+                ? 'persistent'
+                : 'operation'
+              : modality === 'voice'
+                ? 'operation'
+                : 'persistent',
         capabilities: {
           textGeneration: modality === 'text',
           vision: model.kind === 'vision' || model.kind === 'computer_use' || source === 'remote',
@@ -325,6 +376,7 @@ class DesktopInventorySource {
           imageGeneration: modality === 'image',
           speechSynthesis: modality === 'voice',
           transcription: modality === 'transcription',
+          audioInput: modality === 'transcription',
           tools: modality === 'text' || modality === 'computer_use',
           toolSelection: modality === 'computer_use',
           thinking: modality === 'text' || modality === 'computer_use',
@@ -365,7 +417,23 @@ class DesktopInventorySource {
         loaded
       })
     })
-    return [...catalogRoutes, ...remoteRoutes]
+    const embeddingRoute: RuntimeModel = {
+      id: 'all-MiniLM-L6-v2',
+      name: 'MiniLM embeddings',
+      kind: 'embedding',
+      modality: 'embedding',
+      source: 'local',
+      adapterId: 'desktop.embedding',
+      providerId: 'transformers.js',
+      capabilities: { embeddings: true },
+      installed: true,
+      ready: true,
+      loaded: false,
+      residentSizeMB: 96,
+      peakSizeMB: 160,
+      residencyMode: 'persistent'
+    }
+    return [...catalogRoutes, ...remoteRoutes, embeddingRoute]
   }
 }
 
@@ -415,7 +483,8 @@ export function createDesktopModelServices(
     'desktop.remote-chat.computer-use',
     'desktop.image',
     'desktop.tts',
-    'desktop.transcription'
+    'desktop.transcription',
+    'desktop.embedding'
   ]) {
     llm.registerAdapter(new DesktopModelInventoryAdapter(adapterId, source))
   }
@@ -442,6 +511,10 @@ export function createDesktopModelServices(
   ]) {
     generation.registerAdapter(new DesktopLocalGenerationAdapter(generationObservations, adapterId))
   }
+  generation.registerAdapter(new DesktopImageGenerationAdapter())
+  generation.registerAdapter(new DesktopVoiceGenerationAdapter())
+  generation.registerAdapter(new DesktopTranscriptionGenerationAdapter())
+  generation.registerAdapter(new DesktopEmbeddingGenerationAdapter())
   for (const adapterId of [
     'desktop.remote-chat',
     'desktop.remote-chat.classifier',
@@ -500,6 +573,13 @@ export const desktopModelServices = createDesktopModelServices({
       ready: llm.isReady(),
       loaded: llm.isReady(),
       reasoning: llm.getReasoningMetadata()
+    }
+  },
+  residencyMode: (modality) => {
+    try {
+      return getResidencyMode(modality)
+    } catch {
+      return 'on-demand'
     }
   }
 })

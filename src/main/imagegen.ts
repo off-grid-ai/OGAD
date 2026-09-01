@@ -59,6 +59,9 @@ import {
   type ImageGenerationOutputContract,
   type ImageGenerationRequestContract
 } from '../shared/image-generation-contract'
+import type { GenerationOperation } from '@offgrid/models'
+import { generateDesktopOperation } from './desktop-generation'
+import { registerDesktopImageProgress } from './model-generation-adapters'
 
 function findSdCli(): string | null {
   for (const r of binRoots()) {
@@ -512,7 +515,7 @@ export function cancelImageGen(): boolean {
  * llm.pause() did, now owned by the queue (see modality-queue/queue.ts). When the
  * queue is disabled it just runs immediately (prior concurrent behavior).
  */
-export async function generateImage(
+export async function generateImageNative(
   params: ImageGenParams,
   onUpdate?: (update: ImageGenerationPipelineUpdateContract) => void
 ): Promise<ImageGenOutput> {
@@ -533,6 +536,63 @@ export async function generateImage(
   // job finishes — so the image path no longer touches llm.pause/resume itself.
   const output = await modalityQueue.run(IMAGE_JOB, () => runImageGen(effective, progressObserver))
   return { ...output, prompt: effective.prompt }
+}
+
+/** Public image execution uses the shared route and residency owner. The adapter
+ * above this boundary calls generateImageNative, so no generation path recurses. */
+export async function generateImage(
+  params: ImageGenParams,
+  onUpdate?: (update: ImageGenerationPipelineUpdateContract) => void
+): Promise<ImageGenOutput> {
+  const turnId = `desktop-image:${Date.now()}:${Math.random().toString(36).slice(2)}`
+  let effectivePrompt = params.prompt
+  const observe = onUpdate
+    ? (update: ImageGenerationPipelineUpdateContract): void => {
+        if ('enhancedPrompt' in update && update.enhancedPrompt)
+          effectivePrompt = update.enhancedPrompt
+        onUpdate(update)
+      }
+    : undefined
+  const unregister = observe ? registerDesktopImageProgress(turnId, observe) : undefined
+  try {
+    const operation: Extract<GenerationOperation, { type: 'image' }> = {
+      type: 'image',
+      modelId: params.model,
+      prompt: params.prompt,
+      negativePrompt: params.negativePrompt,
+      sourceImage: params.initImage ? { type: 'image', uri: params.initImage } : undefined,
+      strength: params.strength,
+      width: params.width,
+      height: params.height,
+      steps: params.steps,
+      guidanceScale: params.cfgScale,
+      seed: params.seed,
+      previewInterval: 1,
+      fastVae: params.fastVae,
+      loras: params.loras?.map((lora) => ({ id: lora.name, weight: lora.weight })),
+      allowUnsafeMemoryOverride: params.allowUnsafeMemoryOverride
+    }
+    const result = await generateDesktopOperation(operation, {
+      identity: { conversationId: turnId, turnId },
+      timeoutMs: 24 * 60 * 60 * 1000,
+      allowFallback: false
+    })
+    if (result.output.type !== 'image' || !result.output.images[0]) {
+      throw new Error('The image engine returned no image artifact.')
+    }
+    const artifact = result.output.images[0]
+    return {
+      dataUrl: artifact.data
+        ? `data:${artifact.mimeType};base64,${artifact.data}`
+        : (artifact.uri ?? ''),
+      path: artifact.uri ?? '',
+      seed: artifact.seed ?? params.seed ?? -1,
+      model: artifact.id ?? result.model.name,
+      prompt: effectivePrompt
+    }
+  } finally {
+    unregister?.()
+  }
 }
 
 /** Expand the user's prompt into a richer generation prompt via the local text

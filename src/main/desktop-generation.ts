@@ -170,3 +170,26 @@ export function generateDesktopText(
 ): Promise<GenerationResult> {
   return generateDesktopMessages(promptMessages(prompt, options.images), options)
 }
+
+export async function generateDesktopOperation(
+  operation: GenerationOperation,
+  options: Pick<
+    DesktopGenerationOptions,
+    'identity' | 'events' | 'signal' | 'timeoutMs' | 'allowFallback'
+  > & { routeId?: string } = {}
+): Promise<GenerationResult> {
+  await desktopModelServices.refresh()
+  const turnId =
+    options.identity?.turnId ?? `desktop:${Date.now()}:${Math.random().toString(36).slice(2)}`
+  return desktopModelServices.generation.generate(
+    {
+      operation,
+      identity: options.identity ?? { conversationId: turnId, turnId },
+      routeId: options.routeId,
+      allowFallback: options.allowFallback ?? false,
+      signal: options.signal,
+      timeoutMs: options.timeoutMs
+    },
+    options.events
+  )
+}

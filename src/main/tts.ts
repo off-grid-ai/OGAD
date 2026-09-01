@@ -17,6 +17,8 @@ import { writeDiagnosticLog } from './diagnostics-log'
 import { modelsDir, resourceDirs } from './runtime-env'
 import type { ManagedRuntime } from './runtime-manager'
 import { chooseVoice, DEFAULT_VOICE } from './tts-logic'
+import { generateDesktopOperation } from './desktop-generation'
+import { registerDesktopVoiceProgress } from './model-generation-adapters'
 
 const LANGUAGE_TAGS: Readonly<Record<string, string>> = {
   'en-us': 'en-US',
@@ -90,7 +92,7 @@ export async function prepareVoiceAssets(
 }
 
 /** Synthesize speech for `text`; returns a WAV data URL. */
-export async function synthesize(
+export async function synthesizeNative(
   text: string,
   voice?: string,
   onProgress?: (progress: DownloadProgress) => void
@@ -140,5 +142,31 @@ export async function synthesize(
   } finally {
     busy = false
     void fs.promises.unlink(outputPath).catch(() => {})
+  }
+}
+
+export async function synthesize(
+  text: string,
+  voice?: string,
+  onProgress?: (progress: DownloadProgress) => void
+): Promise<{ dataUrl: string }> {
+  const turnId = `desktop-voice:${Date.now()}:${Math.random().toString(36).slice(2)}`
+  const unregister = onProgress ? registerDesktopVoiceProgress(turnId, onProgress) : undefined
+  try {
+    const result = await generateDesktopOperation(
+      { type: 'voice', text, voice },
+      {
+        identity: { conversationId: turnId, turnId },
+        timeoutMs: 10 * 60 * 1000,
+        allowFallback: false
+      }
+    )
+    if (result.output.type !== 'voice') throw new Error('The voice engine returned no audio.')
+    const audio = result.output.audio
+    return {
+      dataUrl: audio.data ? `data:${audio.mimeType};base64,${audio.data}` : (audio.uri ?? '')
+    }
+  } finally {
+    unregister?.()
   }
 }

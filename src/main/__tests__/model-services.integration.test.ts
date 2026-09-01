@@ -69,14 +69,33 @@ describe('Desktop shared model-service composition', () => {
       modality: 'text',
       source: 'local',
       installed: true,
-      adapterId: 'desktop.llama'
+      adapterId: 'desktop.llama',
+      residentSizeMB: Math.ceil(
+        text.files.reduce((sum, file) => sum + (file.sizeBytes ?? 0), 0) / (1024 * 1024)
+      )
     })
     expect(inventory.find((model) => model.id === image.id)).toMatchObject({
       modality: 'image',
       source: 'local',
       installed: true,
-      adapterId: 'desktop.image'
+      adapterId: 'desktop.image',
+      residentSizeMB: Math.ceil(
+        image.files.reduce((sum, file) => sum + (file.sizeBytes ?? 0), 0) / (1024 * 1024)
+      )
     })
+    const embedding = inventory.find((model) => model.modality === 'embedding')
+    expect(embedding).toMatchObject({
+      id: 'all-MiniLM-L6-v2',
+      adapterId: 'desktop.embedding',
+      ready: true,
+      residentSizeMB: 96,
+      peakSizeMB: 160
+    })
+    expect(inventory.find((model) => model.id === image.id)?.peakSizeMB).toBe(
+      Math.ceil(
+        (image.files.reduce((sum, file) => sum + (file.sizeBytes ?? 0), 0) / (1024 * 1024)) * 1.4
+      )
+    )
     expect(desktopModelServices.llm.active('text').selectedId).toBe(text.id)
     expect(desktopModelServices.llm.active('image').selectedId).toBe(image.id)
     expect(manager.getActiveModalities()).toMatchObject({ text: text.id, image: image.id })

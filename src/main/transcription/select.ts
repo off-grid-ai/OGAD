@@ -17,6 +17,7 @@ import { modelsByKind } from '@offgrid/models'
 import { transcriptionLanguages, type SpeechLanguage } from '@offgrid/speech'
 import type { ManagedRuntime } from '../runtime-manager'
 import { getSetting } from '../database'
+import { generateDesktopOperation } from '../desktop-generation'
 // The pure engine classifiers live in a LEAF module (classify.ts) so the CLIs can import
 // them without forming a load-time cycle back through select (which reads the CLI
 // singletons at module scope). Re-exported here so existing importers/tests keep working.
@@ -120,7 +121,7 @@ export type TranscriptionSettingReader = (key: string, fallback: string) => stri
  * database at all, and coupling it to one made every caller — including a runner that cannot
  * load the native DB module — pay for a single string lookup.
  */
-export function getActiveTranscription(
+export function getActiveNativeTranscription(
   readSetting: TranscriptionSettingReader = getSetting
 ): TranscriptionService {
   const active = getActiveModal('transcription')
@@ -130,6 +131,40 @@ export function getActiveTranscription(
     transcriptionLanguages(engine, active)
   )
   return withConfiguredTranscriptionLanguage(getTranscription(engine), language)
+}
+
+/** Public transcription execution goes through the shared model route and
+ * residency owner. Engine selection and native fallback remain in the adapter. */
+export function getActiveTranscription(
+  readSetting: TranscriptionSettingReader = getSetting
+): TranscriptionService {
+  const native = getActiveNativeTranscription(readSetting)
+  return {
+    isAvailable: () => native.isAvailable(),
+    async transcribe(input, options = {}) {
+      const result = await generateDesktopOperation(
+        {
+          type: 'transcription',
+          audio: { type: 'audio', uri: input.path },
+          modelId: options.model,
+          language: options.language,
+          suppressNonSpeech: options.suppressNonSpeech,
+          alreadyWav16k: options.alreadyWav16k,
+          prompt: options.prompt,
+          timestamps: options.timestamps
+        },
+        { signal: options.signal, allowFallback: true, timeoutMs: 30 * 60 * 1000 }
+      )
+      if (result.output.type !== 'transcription') {
+        throw new Error('The transcription engine returned no transcript.')
+      }
+      return {
+        text: result.output.text,
+        language: result.output.language,
+        segments: result.output.segments
+      }
+    }
+  }
 }
 
 /** Apply the user's language hint at the shared transcription seam. An explicit

@@ -4,6 +4,7 @@ import { Worker } from 'worker_threads'
 import { modelsDir } from './runtime-env'
 import { embedText } from './embeddings-core'
 import type { EmbeddingRequest, EmbeddingResponse } from './embeddings-worker'
+import { generateDesktopOperation } from './desktop-generation'
 
 /**
  * The built worker, when there is one.
@@ -72,7 +73,28 @@ class EmbeddingService {
     await this.generateEmbedding('')
   }
 
+  async initNative(): Promise<void> {
+    await this.generateEmbeddingNative('')
+  }
+
+  async unloadNative(): Promise<void> {
+    const worker = this.worker
+    this.worker = null
+    if (worker) await worker.terminate()
+  }
+
   async generateEmbedding(text: string): Promise<number[]> {
+    const result = await generateDesktopOperation(
+      { type: 'embedding', inputs: [text] },
+      { allowFallback: true, timeoutMs: 120_000 }
+    )
+    if (result.output.type !== 'embedding' || !result.output.vectors[0]) {
+      throw new Error('The embedding engine returned no vector.')
+    }
+    return result.output.vectors[0]
+  }
+
+  async generateEmbeddingNative(text: string): Promise<number[]> {
     const run = (): Promise<number[]> => {
       const entry = builtWorkerEntry()
       // No built worker means we are running from source. Embed here rather than failing: a failed
