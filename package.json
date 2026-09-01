@@ -44,7 +44,8 @@
     "smoke:dmg": "bash scripts/smoke-dmg-install.sh",
     "test:swift": "cd swift-tests/TextExtractorKit && swift test --enable-xctest --disable-swift-testing",
     "test:db": "bash scripts/test-db.sh",
-    "depcruise": "depcruise --config .dependency-cruiser.cjs \"src/**/*.ts\" \"src/**/*.tsx\"",
+    "depcruise": "npm run test:architecture:models && depcruise --config .dependency-cruiser.cjs \"src/**/*.ts\" \"src/**/*.tsx\"",
+    "test:architecture:models": "node scripts/verify-model-architecture.mjs",
     "knip": "knip --no-gitignore",
     "coverage:all": "bash scripts/coverage-all.sh"
   },
