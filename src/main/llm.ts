@@ -92,6 +92,17 @@ export interface ChatStreamResult extends StreamResult {
   maxTokens: number
 }
 
+export interface StreamChatOptions {
+  temperature?: number
+  topP?: number
+  thinking?: boolean
+  signal?: AbortSignal
+  tools?: unknown[]
+  toolChoice?: string
+  maxTokens?: number
+  responseFormat?: unknown
+}
+
 export class LLMService {
   private readonly healthInvalidationListeners = new Set<() => void>()
   private server: ChildProcess | null = null
@@ -1334,32 +1345,44 @@ export class LLMService {
   async streamChat(
     messages: unknown[],
     onDelta: (text: string, kind: 'content' | 'reasoning') => void,
-    opts: {
-      temperature?: number
-      topP?: number
-      thinking?: boolean
-      signal?: AbortSignal
-      tools?: unknown[]
-      toolChoice?: string
-      maxTokens?: number
-      responseFormat?: unknown
-    } = {},
+    opts: StreamChatOptions = {},
     timeoutMs: number = 300000
   ): Promise<StreamResult> {
     const remote = this.activeRemoteTextModel()
     if (remote) {
-      return this.completeRemote(remote, messages, onDelta, {
-        timeoutMs,
-        maxTokens: opts.maxTokens,
-        temperature: opts.temperature,
-        topP: opts.topP,
-        thinking: opts.thinking,
-        signal: opts.signal,
-        responseFormat: opts.responseFormat,
-        tools: opts.tools,
-        toolChoice: opts.toolChoice
-      })
+      return this.streamChatRemote(remote, messages, onDelta, opts, timeoutMs)
     }
+    return this.streamChatLocal(messages, onDelta, opts, timeoutMs)
+  }
+
+  /** Raw remote-engine boundary. Routing policy belongs to the shared model service. */
+  streamChatRemote(
+    remote: RemoteTextModelConnection,
+    messages: unknown[],
+    onDelta: (text: string, kind: 'content' | 'reasoning') => void,
+    opts: StreamChatOptions = {},
+    timeoutMs: number = 300000
+  ): Promise<StreamResult> {
+    return this.completeRemote(remote, messages, onDelta, {
+      timeoutMs,
+      maxTokens: opts.maxTokens,
+      temperature: opts.temperature,
+      topP: opts.topP,
+      thinking: opts.thinking,
+      signal: opts.signal,
+      responseFormat: opts.responseFormat,
+      tools: opts.tools,
+      toolChoice: opts.toolChoice
+    })
+  }
+
+  /** Raw local-engine boundary. Routing policy belongs to the shared model service. */
+  async streamChatLocal(
+    messages: unknown[],
+    onDelta: (text: string, kind: 'content' | 'reasoning') => void,
+    opts: StreamChatOptions = {},
+    timeoutMs: number = 300000
+  ): Promise<StreamResult> {
     await this.beginGeneration()
     try {
       await this.ensureReady()
