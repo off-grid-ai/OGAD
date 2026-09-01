@@ -81,5 +81,18 @@ describe('Desktop shared model-service composition', () => {
     expect(desktopModelServices.llm.active('image').selectedId).toBe(image.id)
     expect(manager.getActiveModalities()).toMatchObject({ text: text.id, image: image.id })
     expect(await manager.getActiveModelIds()).toEqual(expect.arrayContaining([text.id, image.id]))
+
+    await desktopModelServices.llm.select('image', image.id)
+    const persistedRoutes = JSON.parse(
+      fs.readFileSync(path.join(modelDirectory, 'model-selections.json'), 'utf8')
+    ) as { image: string }
+    expect(persistedRoutes.image).toMatch(/^model-route:v1:/)
+    expect(desktopModelServices.llm.active('image')).toMatchObject({
+      selectedId: persistedRoutes.image,
+      model: { id: image.id, adapterId: 'desktop.image' }
+    })
+    expect(
+      JSON.parse(fs.readFileSync(path.join(modelDirectory, 'active-modalities.json'), 'utf8')).image
+    ).toBe(imagePrimary)
   })
 })

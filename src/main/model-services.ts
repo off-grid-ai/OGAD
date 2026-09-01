@@ -71,7 +71,7 @@ function activeTextModelId(): string | null {
  * selections can contain a primary filename. This codec keeps that compatibility
  * at the adapter boundary. The shared service sees only canonical inventory ids.
  */
-export class DesktopModelIdCodec {
+export class LegacyDesktopModelIdCodec {
   private readonly canonicalByStored = new Map<string, string>()
   private readonly storedByCanonical = new Map<string, string>()
 
@@ -97,10 +97,42 @@ export class DesktopModelIdCodec {
   }
 }
 
-export class DesktopModelSelectionStore implements ModelSelectionStore {
-  constructor(private readonly ids: DesktopModelIdCodec) {}
+class DesktopRouteSelectionPersistence {
+  private file(): string {
+    return path.join(modelsDir(), 'model-selections.json')
+  }
 
   read(modality: ModelModality): string | null {
+    try {
+      const value = JSON.parse(fs.readFileSync(this.file(), 'utf8')) as Record<string, unknown>
+      return typeof value[modality] === 'string' ? (value[modality] as string) : null
+    } catch {
+      return null
+    }
+  }
+
+  write(modality: ModelModality, routeId: string | null): void {
+    let value: Record<string, unknown> = {}
+    try {
+      value = JSON.parse(fs.readFileSync(this.file(), 'utf8')) as Record<string, unknown>
+    } catch {
+      /* first selection */
+    }
+    value[modality] = routeId
+    fs.mkdirSync(path.dirname(this.file()), { recursive: true })
+    fs.writeFileSync(this.file(), JSON.stringify(value, null, 2))
+  }
+}
+
+export class DesktopModelSelectionStore implements ModelSelectionStore {
+  constructor(
+    private readonly ids: LegacyDesktopModelIdCodec,
+    private readonly routes = new DesktopRouteSelectionPersistence()
+  ) {}
+
+  read(modality: ModelModality): string | null {
+    const routeId = this.routes.read(modality)
+    if (routeId) return routeId
     if (modality === 'text') return this.ids.canonical(activeTextModelId())
     const stored = getActiveModal(modality === 'voice' ? 'speech' : modality)
     return this.ids.canonical(stored)
@@ -113,6 +145,7 @@ export class DesktopModelSelectionStore implements ModelSelectionStore {
       if (!nativeModelId) {
         deactivateRemoteVisionModel()
         fs.rmSync(path.join(modelsDir(), 'active-model.json'), { force: true })
+        this.routes.write(modality, null)
         return
       }
       const legacyRemote = parseRemoteVisionModelId(nativeModelId)
@@ -123,15 +156,18 @@ export class DesktopModelSelectionStore implements ModelSelectionStore {
         if (!activateRemoteVisionModel(remote.serverId, remote.modelId)) {
           throw new Error('Remote model is no longer available.')
         }
+        this.routes.write(modality, modelId)
         return
       }
       const result = await (await import('./models-manager')).setActiveModel(nativeModelId)
       if (!result.success) throw new Error(result.error ?? 'The model could not be selected.')
       deactivateRemoteVisionModel()
+      this.routes.write(modality, modelId)
       return
     }
     const stored = this.ids.stored(modality, nativeModelId)
     setActiveModal(modality === 'voice' ? 'speech' : modality, stored)
+    this.routes.write(modality, modelId)
   }
 }
 
@@ -139,7 +175,7 @@ class DesktopInventorySource {
   private inFlight: Promise<RuntimeModel[]> | null = null
   constructor(
     private readonly dependencies: DesktopModelServicesDependencies,
-    private readonly ids: DesktopModelIdCodec,
+    private readonly ids: LegacyDesktopModelIdCodec,
     private readonly selections: DesktopModelSelectionStore
   ) {}
 
@@ -238,7 +274,7 @@ export interface DesktopModelServices {
 export function createDesktopModelServices(
   dependencies: DesktopModelServicesDependencies
 ): DesktopModelServices {
-  const ids = new DesktopModelIdCodec()
+  const ids = new LegacyDesktopModelIdCodec()
   const selections = new DesktopModelSelectionStore(ids)
   const llm = new SharedLLMService(selections)
   const source = new DesktopInventorySource(dependencies, ids, selections)
