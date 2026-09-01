@@ -372,6 +372,11 @@ export class LLMService {
     }
   }
 
+  /** Resolve the configured output cap for a shared generation request. */
+  generationMaxTokens(requested?: number): number {
+    return resolveMaxTokens(requested, this.maxTokens)
+  }
+
   /** The exact argv handed to `llama-server` for the CURRENT settings — the terminal
    *  artifact of the whole settings→persist→reload path. Delegates to the pure
    *  `buildLaunchArgs` (single source of truth) after applying the impure RAM clamp,

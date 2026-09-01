@@ -65,7 +65,9 @@ import {
 } from './ipc-query-logic'
 import { requestApplicationRelaunch } from './shutdown'
 import { sampleProgressRate, type ProgressRateSample } from '@offgrid/ui'
+import type { GenerationMessage } from '@offgrid/models'
 import { notifyRagConversationChanged } from './rag-conversation-events'
+import { readImages } from './llm/read-images'
 // import { llm } from './llm'; // Moved to dynamic import to support ESM
 
 // Incrementally update master memory with a new conversation summary
@@ -112,6 +114,29 @@ import {
 
 const streamControllers = new Map<string, AbortController>()
 
+function generationMessages(
+  prompt: string,
+  images: string[],
+  systemPrompt: string
+): GenerationMessage[] {
+  const decoded = readImages(images)
+  const messages: GenerationMessage[] = [
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: prompt },
+        ...decoded.map((image) => ({
+          type: 'image' as const,
+          mimeType: image.mime,
+          data: image.base64
+        }))
+      ]
+    }
+  ]
+  if (systemPrompt.trim()) messages.unshift({ role: 'system', content: systemPrompt })
+  return messages
+}
+
 async function streamAnswer(
   event: { sender?: { send: (channel: string, payload: unknown) => void } } | undefined,
   streamId: string | undefined,
@@ -120,7 +145,29 @@ async function streamAnswer(
   images: string[] = []
 ): Promise<ResponseGenerationResult> {
   const { llm } = await import('./llm')
+  const { desktopModelServices } = await import('./model-services')
   const { modalityQueue, CHAT_JOB } = await import('./modality-queue/queue')
+
+  await desktopModelServices.refresh()
+  const turnId = streamId ?? `desktop-chat:${Date.now()}:${Math.random().toString(36).slice(2)}`
+  const request = (signal?: AbortSignal) => ({
+    messages: generationMessages(prompt, images, llm.getSettings().systemPrompt ?? ''),
+    identity: { conversationId: streamId ?? turnId, turnId },
+    requiredCapabilities: {
+      ...(images.length ? { vision: true } : {}),
+      ...(thinking ? { thinking: true } : {})
+    },
+    allowFallback: true,
+    partialOutputPolicy: 'discard-and-fallback' as const,
+    ...(signal ? { signal } : {})
+  })
+  const response = (content: string, finishReason: string): ResponseGenerationResult =>
+    toResponseGenerationResult({
+      content,
+      finishReason,
+      maxTokens: llm.generationMaxTokens(),
+      metrics: desktopModelServices.generationObservations.takeMetrics(turnId)
+    })
 
   // No-renderer fallback still uses the same streaming transport with a no-op
   // observer, so finish metadata and the configured cap cannot diverge by caller.
@@ -131,7 +178,9 @@ async function streamAnswer(
     // evicts nothing (evicting 'llm' would evict itself). run()'s finally releases
     // the slot even if fn throws, so we let errors propagate from inside.
     return modalityQueue.run(CHAT_JOB, async () =>
-      toResponseGenerationResult(await llm.chatStream(prompt, images, () => {}, { thinking }))
+      desktopModelServices.generation
+        .generate(request())
+        .then((result) => response(result.content, result.finishReason))
     )
   }
 
@@ -146,20 +195,33 @@ async function streamAnswer(
     // the run() callback so the queue slot is held for the whole generation; the
     // cancel path aborts via the controller registered above.
     return await modalityQueue.run(CHAT_JOB, async () => {
-      const result = await llm.chatStream(
-        prompt,
-        images,
-        (text, kind) => {
-          noteChatStreamDelta(streamId, text, kind)
-          try {
-            sender.send('rag:stream', { streamId, type: kind, text })
-          } catch {
-            /* window gone */
+      let partialContent = ''
+      try {
+        const result = await desktopModelServices.generation.generate(request(controller.signal), {
+          chunk: (chunk) => {
+            const deltas = [
+              ...(chunk.reasoning ? [{ text: chunk.reasoning, kind: 'reasoning' as const }] : []),
+              ...(chunk.content ? [{ text: chunk.content, kind: 'content' as const }] : [])
+            ]
+            for (const { text, kind } of deltas) {
+              if (kind === 'content') partialContent += text
+              noteChatStreamDelta(streamId, text, kind)
+              try {
+                sender.send('rag:stream', { streamId, type: kind, text })
+              } catch {
+                /* window gone */
+              }
+            }
+          },
+          partialDiscarded: () => {
+            partialContent = ''
           }
-        },
-        { thinking, signal: controller.signal }
-      )
-      return toResponseGenerationResult(result)
+        })
+        return response(result.content, result.finishReason)
+      } catch (error) {
+        if (!controller.signal.aborted) throw error
+        return response(partialContent, 'cancelled')
+      }
     })
   } finally {
     streamControllers.delete(streamId)

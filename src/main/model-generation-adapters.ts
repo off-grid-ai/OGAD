@@ -11,6 +11,7 @@ import type {
 } from '@offgrid/models'
 import { llm, type StreamChatOptions } from './llm'
 import type { StreamResult } from './llm/stream'
+import type { GenerationMetrics } from '../shared/generation-metrics'
 import { getRemoteVisionServer } from './vision/remote-vision-server'
 
 interface OpenAIMessage {
@@ -69,7 +70,7 @@ function openAIContentPart(part: GenerationContentPart): Record<string, unknown>
   if (part.type === 'image') {
     const url = part.data
       ? `data:${part.mimeType ?? 'image/png'};base64,${part.data}`
-      : part.uri ?? ''
+      : (part.uri ?? '')
     return { type: 'image_url', image_url: { url, detail: part.detail } }
   }
   if (part.type === 'audio') {
@@ -187,24 +188,32 @@ function finalChunk(result: StreamResult): GenerationChunk {
 abstract class DesktopGenerationAdapter implements GenerationAdapter {
   abstract readonly id: string
 
+  constructor(private readonly observations: DesktopGenerationObservations) {}
+
   async *generate(model: RuntimeModel, request: GenerationRequest): AsyncIterable<GenerationChunk> {
     const channel = new GenerationChunkChannel()
     void this.run(
       model,
-      openAIMessages(request.messages),
+      openAIMessages(request.messages ?? []),
       (text, kind) => channel.push(kind === 'reasoning' ? { reasoning: text } : { content: text }),
       streamOptions(request),
       request.timeoutMs ?? 300_000
-    ).then((result) => {
-      channel.push(finalChunk(result))
-      channel.finish()
-    }, (error: unknown) => channel.fail(error))
+    ).then(
+      (result) => {
+        this.observations.record(request.identity?.turnId, result.metrics)
+        channel.push(finalChunk(result))
+        channel.finish()
+      },
+      (error: unknown) => channel.fail(error)
+    )
     yield* channel.stream()
   }
 
   classifyError(error: unknown): 'retryable' | 'unsupported' | 'fatal' {
-    const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
-    if (message.includes('does not support') || message.includes('unsupported')) return 'unsupported'
+    const message =
+      error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
+    if (message.includes('does not support') || message.includes('unsupported'))
+      return 'unsupported'
     return 'retryable'
   }
 
@@ -215,6 +224,20 @@ abstract class DesktopGenerationAdapter implements GenerationAdapter {
     options: StreamChatOptions,
     timeoutMs: number
   ): Promise<StreamResult>
+}
+
+export class DesktopGenerationObservations {
+  private readonly metricsByTurn = new Map<string, GenerationMetrics>()
+
+  record(turnId: string | undefined, metrics: GenerationMetrics | undefined): void {
+    if (turnId && metrics) this.metricsByTurn.set(turnId, metrics)
+  }
+
+  takeMetrics(turnId: string): GenerationMetrics | undefined {
+    const metrics = this.metricsByTurn.get(turnId)
+    this.metricsByTurn.delete(turnId)
+    return metrics
+  }
 }
 
 export class DesktopLocalGenerationAdapter extends DesktopGenerationAdapter {
