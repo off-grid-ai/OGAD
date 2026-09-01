@@ -83,7 +83,7 @@ export class DesktopRagService extends RagService {
     return listAllRagDocuments().map(snapshot)
   }
 
-  getDocumentBySyncId(syncId: string): RagDocument | undefined {
+  async getDocumentBySyncId(syncId: string): Promise<RagDocument | undefined> {
     return getRagDocumentBySyncId(syncId)
   }
 
