@@ -25,6 +25,11 @@ import { existing } from './bin-resolution'
 import type { Transcript } from './types'
 import { killOrphansOnPort as reapOrphansOnPort } from '../kill-orphan-port'
 import { Mutex } from 'async-mutex'
+import {
+  buildWhisperInferenceFields,
+  parseWhisperInferenceResponse,
+  transcriptLanguage
+} from '@offgrid/models'
 
 // Off the LLM (8439) and image (8440) ports so the resident STT engine can bind
 // alongside them - they may all be warm at once (chat + dictation together).
@@ -79,42 +84,6 @@ export function whisperContextKey(ctx: WhisperServerContext): string {
  *  deterministic. The audio file itself is attached by the caller (it can't live
  *  in a pure builder). `language` is omitted when 'auto' so the server detects.
  *  Pure - returns the field map, not a wire body. */
-export function buildInferenceFields(req: WhisperInferenceRequest): Record<string, string> {
-  const fields: Record<string, string> = { response_format: 'json' }
-  const lang = (req.language ?? 'auto').trim()
-  if (lang && lang !== 'auto') fields.language = lang
-  const prompt = (req.prompt ?? '').trim()
-  if (prompt) fields.prompt = prompt.slice(0, 800)
-  return fields
-}
-
-/** Parse whisper-server's /inference JSON response into a Transcript-shaped
- *  { text }. The server returns { "text": "..." } for response_format=json; some
- *  builds nest it or return an OpenAI-style { text }. A malformed/empty body
- *  yields empty text rather than throwing, so a bad interim tick degrades to
- *  "no text yet" instead of erroring the dictation loop. Pure. */
-export function parseInferenceResponse(body: unknown): { text: string } {
-  if (typeof body === 'string') {
-    // Non-JSON (plain text) response: use it verbatim.
-    return { text: body.trim() }
-  }
-  const b = (body ?? {}) as Record<string, unknown>
-  // Direct { text } (the json/verbose_json shapes).
-  if (typeof b.text === 'string') return { text: b.text.trim() }
-  // Some builds return segments only; join their texts.
-  if (Array.isArray(b.segments)) {
-    const text = b.segments
-      .map((s) =>
-        s && typeof s === 'object' ? String((s as Record<string, unknown>).text ?? '') : ''
-      )
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-    return { text }
-  }
-  return { text: '' }
-}
-
 /** The resident whisper server. One instance (the exported `whisperServer`). */
 export class WhisperServerService {
   private server: ChildProcess | null = null
@@ -262,7 +231,7 @@ export class WhisperServerService {
   private async inference(req: WhisperInferenceRequest): Promise<Transcript> {
     this.clearIdleTimer()
     try {
-      const fields = buildInferenceFields(req)
+      const fields = buildWhisperInferenceFields(req)
       const form = new FormData()
       const bytes = await fs.promises.readFile(req.wavPath, { signal: req.signal })
       // FormData wants a Blob; the audio part is named `file` (whisper-server's field).
@@ -278,8 +247,8 @@ export class WhisperServerService {
       // Prefer JSON; fall back to raw text so a plain-text build still parses.
       const ctype = res.headers.get('content-type') ?? ''
       const body: unknown = ctype.includes('application/json') ? await res.json() : await res.text()
-      const { text } = parseInferenceResponse(body)
-      const lang = req.language && req.language !== 'auto' ? req.language : undefined
+      const { text } = parseWhisperInferenceResponse(body)
+      const lang = transcriptLanguage(req.language ?? 'auto')
       return { text, language: lang }
     } finally {
       this.armIdleTimer()

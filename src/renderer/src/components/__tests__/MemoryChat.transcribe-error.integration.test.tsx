@@ -10,7 +10,7 @@ import { cleanup, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatBoundary, installBoundary, renderChat } from './harness/chat-boundary'
-import { HINDI_SCRIPT_RECOVERY_MESSAGE } from '../../../../shared/transcription-recovery'
+import { HINDI_SCRIPT_RECOVERY_MESSAGE } from '@offgrid/models'
 
 // Emits a non-empty chunk on start so the recording isn't treated as "no audio".
 class DataRecorder {

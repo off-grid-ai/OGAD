@@ -1,4 +1,4 @@
-import { reasoningWireForGeneration } from '@offgrid/models'
+import { cleanTranscription, reasoningWireForGeneration } from '@offgrid/models'
 import type {
   GenerationAdapter,
   GenerationChunk,
@@ -531,12 +531,15 @@ export class DesktopTranscriptionGenerationAdapter extends DesktopTypedGeneratio
         timestamps: request.operation.timestamps
       }
     )
+    const segments = transcript.segments
+      ?.map((segment) => ({ ...segment, text: cleanTranscription(segment.text) }))
+      .filter((segment) => segment.text.length > 0)
     yield {
       output: {
         type: 'transcription',
-        text: transcript.text,
+        text: cleanTranscription(transcript.text),
         language: transcript.language,
-        segments: transcript.segments
+        segments
       },
       finishReason: 'stop'
     }

@@ -13,9 +13,9 @@ import os from 'os'
 import path from 'path'
 import { binRoots, modelsDir } from '../runtime-env'
 import { getActiveModal } from '../active-models'
+import { modelsByKind, transcriptionModelsByEngine } from '@offgrid/models'
 import { ffmpegBin } from './whisper-cli'
 import { existing } from './bin-resolution'
-import { modelsByEngine } from './classify'
 import { decodeToWavArgs, DECODE_TIMEOUT_MS } from './ffmpeg-decode'
 import type { TranscriptionService, Transcript, TranscribeOptions } from './types'
 import { runNativeTranscriptionProcess } from './native-process'
@@ -100,7 +100,7 @@ function downloadedCatalogModel(): ParakeetModel | null {
   const dir = modelsDir()
   // Partition the catalog by engine in ONE place (select.modelsByEngine), not a local
   // `m.engine === 'parakeet'` filter duplicated against whisper-cli's classification.
-  const entries = modelsByEngine('parakeet')
+  const entries = transcriptionModelsByEngine('parakeet', modelsByKind('transcription'))
   if (!entries.length) return null
   const active = getActiveModal('transcription')
   const ordered = active

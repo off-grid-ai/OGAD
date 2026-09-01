@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { transcriptionRecoveryMessage } from '../../../shared/transcription-recovery'
+import { transcriptionRecoveryMessage } from '@offgrid/models'
 import {
   SpeechEndpointTimer,
   audioFilename,
