@@ -60,6 +60,19 @@ for (const file of files) {
   }
 
   if (
+    fileName === 'src/main/tools/planner-logic.ts' &&
+    /\b(?:function\s+(?:shouldPlan|buildPlannerPrompt|parsePlanResult|backfillGoals|resolveContactHandle)|const\s+(?:PLAN_SCHEMA|WEBSITE_HINTS))\b/.test(
+      text
+    )
+  ) {
+    report('desktop-tool-planning-is-shared', fileName, source, source, 'local:planner-policy')
+  }
+
+  if (fileName === 'src/main/mcp.ts' && /Promise\.race\s*\(|setTimeout\s*\(/.test(text)) {
+    report('connector-timeout-policy-is-shared', fileName, source, source, 'local:timeout-race')
+  }
+
+  if (
     fileName === 'src/main/rag/index.ts' &&
     /(?:chunkSize\s*:\s*600|overlap\s*:\s*120|minChunkLength\s*:\s*20|dimension\s*:\s*384)/.test(
       text
