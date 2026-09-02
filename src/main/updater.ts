@@ -13,12 +13,7 @@ import { valid } from 'semver'
 import { getSetting, saveSetting } from './database'
 import { resolveChannelConfig, type UpdateChannel } from './update-channel'
 import { listPreviousUpdateReleases } from './update-release-history'
-
-const GITHUB_UPDATE_PROVIDER = {
-  provider: 'github' as const,
-  owner: 'off-grid-ai',
-  repo: 'off-grid-ai-desktop'
-}
+import { GITHUB_UPDATE_PROVIDER } from '../shared/update-provider'
 
 // Version of an update that finished downloading and is staged for install
 // (null = none). Held in main so a window created AFTER the download finished
