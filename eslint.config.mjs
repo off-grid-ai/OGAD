@@ -34,6 +34,32 @@ const typedDeadBranchWarn = {
   rules: { '@typescript-eslint/no-unnecessary-condition': 'error' }
 }
 
+// Hexagonal boundary (warn ratchet, see shared/docs/MODEL_FACADE_PLAN.md): app code composes its
+// model layer from the ONE shared facade, `@offgrid/models/workspace`, plus pure catalog constants
+// from `@offgrid/models/catalog`. Value imports from the package root are the second pipeline being
+// removed; each warning is one migration item. Types stay free. Ratchets to `error` at zero.
+const modelBoundaryWarn = {
+  name: 'model facade boundary (warn ratchet)',
+  files: ['src/**/*.{ts,tsx}', 'pro/**/*.{ts,tsx}'],
+  ignores: ['**/*.{test,spec,dbtest}.{ts,tsx}', '**/__tests__/**', '**/*.d.ts'],
+  plugins: { '@typescript-eslint': tsESLint.plugin },
+  rules: {
+    '@typescript-eslint/no-restricted-imports': [
+      'warn',
+      {
+        paths: [
+          {
+            name: '@offgrid/models',
+            message:
+              'Compose from @offgrid/models/workspace (or constants from @offgrid/models/catalog). Business logic lives in shared; this app is a port.',
+            allowTypeImports: true
+          }
+        ]
+      }
+    ]
+  }
+}
+
 // Sonar-grade rules (bugs, cognitive complexity, duplicated branches, dead code)
 // scoped to pro/** ONLY. Core src is covered by SonarCloud Automatic Analysis, so
 // running sonarjs there too would be redundant — but SonarCloud (public project)
@@ -127,6 +153,7 @@ export default defineConfig(
   sonarProWarn,
   goldStandardRatchet,
   typedDeadBranchWarn,
+  modelBoundaryWarn,
   {
     settings: {
       react: {
