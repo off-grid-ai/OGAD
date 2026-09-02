@@ -40,8 +40,6 @@ export interface RetryOptions {
    * the deadline. Defaults to `true` (the common replayable case).
    */
   replayable?: boolean
-  /** A failure that is waited out regardless of the deadline (the upstream is busy, not dead). */
-  deadlineExempt?: (err: unknown) => boolean
   /**
    * Classify a rejection: `true` = transient (connection error, worth
    * retrying), `false` = fatal (e.g. an HTTP >= 400 answer, never retried).
@@ -67,15 +65,13 @@ export function retryWithDeadline<T>(fn: () => Promise<T>, opts: RetryOptions): 
     replayable = true,
     isTransient = () => true,
     delayMs = 1000,
-    clock = systemClock,
-    deadlineExempt
+    clock = systemClock
   } = opts
 
   return new Promise<T>((resolve, reject) => {
     const attempt = (): void => {
       fn().then(resolve, (err) => {
-        const exempt = deadlineExempt?.(err) === true
-        if (replayable && isTransient(err) && (exempt || clock.now() < deadlineMs)) {
+        if (replayable && isTransient(err) && clock.now() < deadlineMs) {
           clock.setTimeout(attempt, delayMs)
         } else {
           reject(err)

@@ -9,7 +9,7 @@
 //   GET  /v1/models              -> the ACTIVE model per modality (text/vision +
 //                                   image/speech/transcription), each tagged with
 //                                   a `kind` — what a request would load on demand
-//   POST /v1/chat/completions    -> proxied to llama-server (text + vision-in)
+//   POST /v1/chat/completions    -> shared GenerationService (text + vision-in, tools returned)
 //   POST /v1/completions         -> proxied to llama-server
 //   POST /v1/embeddings          -> proxied to llama-server
 //   POST /v1/audio/transcriptions-> whisper.cpp (speech -> text), multilingual
@@ -45,11 +45,18 @@ import {
   requestsAsyncResponse as isAsync,
   resolveGatewayImageDimensions as resolveDims,
   safeGatewayProxyResponse as safeProxyResponse,
-  sanitizeGatewayChatMessages as sanitizeChatMessages,
   stripGatewayFileScheme as stripFileScheme,
   tagGatewayLlmModels as tagLlmEntries,
+  openAIChatCompletion,
+  openAIChatRequestToGeneration,
+  openAIChunkFrame,
+  openAIFinalFrame,
+  ModelCapabilityError,
+  ModelReadinessError,
+  PartialGenerationError,
   type GatewayAsyncRequest,
-  type GatewayModalities
+  type GatewayModalities,
+  type GenerationResult
 } from '@offgrid/models'
 import { getActiveTranscription } from './transcription/select'
 import * as tts from './tts'
@@ -63,13 +70,12 @@ import { logActionTokenForDev } from './mcp-auth'
 import { llm, type LlmSettings } from './llm'
 import { GATEWAY_HOST, GATEWAY_BIND_HOST, GATEWAY_PORT } from '../shared/ports'
 import { pickFreePort } from './free-port'
-import { retryWithDeadline } from './lib/retry'
 import { guardProxyStreams } from './stream-guards'
 import { decodeDataUrl, mimeFromExt, toDataUrl } from './model-server/image-bytes'
-import { applyThinkingPayload } from './llm/chat-payload'
+import { ModelServerError } from './llm/http-post'
 import { writeDiagnosticLog } from './diagnostics-log'
 import { parseRemoteVisionModelId } from '../shared/remote-vision-server'
-import { getActiveRemoteVisionServer } from './vision/remote-vision-server'
+import { getActiveRemoteVisionServer, getRemoteVisionServer } from './vision/remote-vision-server'
 
 const UPSTREAM_HOST = '127.0.0.1'
 // The upstream llama-server port is LIVE, not fixed: llm.getPort() moves off LLAMA_SERVER_PORT when
@@ -135,130 +141,34 @@ function handlePoll(res: http.ServerResponse, id: string): void {
   json(res, 200, requests.polled(r))
 }
 
-// Proxy a request to the local llama-server (response streaming preserved).
-// If `bodyOverride` is supplied, that buffer is sent as the request body (used
-// when we rewrite chat messages to inline remote images); otherwise the incoming
-// request is piped straight through.
-//
-// When a buffer is supplied the request is replayable, so on a connection error
-// (llama-server briefly down while it reloads after image generation) we wait and
-// retry until `retryUntil` rather than failing the caller with a 502. Piped
-// (streamed) requests can't be replayed, so they fail fast. The wait-and-retry
-// loop is the shared `retryWithDeadline` helper.
-function proxyToLlama(
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
-  bodyOverride?: Buffer,
-  retryUntil = 0
-): void {
+// Proxy a non-chat request (completions, embeddings passthrough) to the local llama-server,
+// response streaming preserved. Chat does NOT come through here: it is served by the shared
+// GenerationService so residency, routing, and error policy are decided once for every client.
+function proxyToLlama(req: http.IncomingMessage, res: http.ServerResponse): void {
   const headers = { ...req.headers, host: `${UPSTREAM_HOST}:${upstreamPort()}` }
-  if (bodyOverride) {
-    headers['content-length'] = String(bodyOverride.length)
-    delete headers['transfer-encoding']
-  }
-  // One attempt: resolves once the upstream response is piped through, rejects
-  // on a connection error (the only transient failure this proxy retries).
-  const attempt = (): Promise<void> =>
-    new Promise<void>((resolve, reject) => {
-      const proxyReq = http.request(
-        {
-          hostname: UPSTREAM_HOST,
-          port: upstreamPort(),
-          path: req.url,
-          method: req.method,
-          headers
-        },
-        (proxyRes) => {
-          // llama-server answers 503 while its model loads. That is our wait, not the
-          // client's failure: hold the replayable request and try again once it is up.
-          if (proxyRes.statusCode === 503 && bodyOverride && !res.destroyed) {
-            proxyRes.resume()
-            const loading = new Error('llama-server is loading its model') as Error & {
-              upstreamLoading?: boolean
-            }
-            loading.upstreamLoading = true
-            reject(loading)
-            return
-          }
-          const safeResponse = safeProxyResponse(proxyRes.statusCode, proxyRes.headers)
-          res.writeHead(safeResponse.statusCode, safeResponse.headers)
-          // Guard both ends BEFORE piping: a mid-stream reset from llama-server (or a client
-          // disconnect) emits 'error' on these streams, and with no listener that becomes an
-          // uncaught exception that crashes the main process. Does not re-settle this promise —
-          // it has already resolved once piping begins.
-          guardProxyStreams(proxyRes, res)
-          proxyRes.pipe(res)
-          resolve()
-        }
-      )
-      proxyReq.on('error', reject)
-      if (bodyOverride) {
-        proxyReq.end(bodyOverride)
-      } else {
-        req.pipe(proxyReq)
-      }
-    })
-  // Piped requests aren't replayable, so they fail fast (replayable=false). A model that is
-  // still loading is waited for as long as the client stays connected; only a dead upstream
-  // is bound by the deadline.
-  retryWithDeadline(attempt, {
-    deadlineMs: retryUntil,
-    replayable: !!bodyOverride,
-    isTransient: (err) =>
-      (err as { upstreamLoading?: boolean }).upstreamLoading ? !res.destroyed : true,
-    deadlineExempt: (err) => !!(err as { upstreamLoading?: boolean }).upstreamLoading
-  }).catch(() => {
-    if (res.destroyed || res.headersSent) return
-    json(res, 502, errBody('Local model not ready (llama-server unavailable).', 'upstream_error'))
-  })
-}
-
-/** Forward an inventory-selected remote model through the Desktop connection that owns it.
- * Mobile sees the stable inventory id, while the provider must receive its native model id. */
-function proxyToSelectedRemote(res: http.ServerResponse, body: Record<string, unknown>): boolean {
-  const model = typeof body.model === 'string' ? body.model : ''
-  const route = decodeModelRouteId(model)
-  const requested =
-    route?.adapterId === 'desktop.remote-chat' && route.serverId
-      ? { serverId: route.serverId, modelId: route.modelId }
-      : parseRemoteVisionModelId(model)
-  if (!requested) return false
-  const remote = getActiveRemoteVisionServer()
-  if (!remote || requested.serverId !== remote.id || requested.modelId !== remote.model) {
-    json(res, 400, errBody('The selected remote model is not active.', 'invalid_request_error'))
-    return true
-  }
-
-  const target = new URL(`${remote.endpoint.replace(/\/+$/, '')}/chat/completions`)
-  const payload = Buffer.from(JSON.stringify({ ...body, model: remote.model }))
-  const client = target.protocol === 'https:' ? https : http
-  const proxyReq = client.request(
-    target,
+  const proxyReq = http.request(
     {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'content-length': String(payload.length),
-        ...(remote.apiKey ? { authorization: `Bearer ${remote.apiKey}` } : {})
-      }
+      hostname: UPSTREAM_HOST,
+      port: upstreamPort(),
+      path: req.url,
+      method: req.method,
+      headers
     },
     (proxyRes) => {
       const safeResponse = safeProxyResponse(proxyRes.statusCode, proxyRes.headers)
       res.writeHead(safeResponse.statusCode, safeResponse.headers)
+      // Guard both ends BEFORE piping: a mid-stream reset from llama-server (or a client
+      // disconnect) emits 'error' on these streams, and with no listener that becomes an
+      // uncaught exception that crashes the main process.
       guardProxyStreams(proxyRes, res)
       proxyRes.pipe(res)
     }
   )
-  proxyReq.setTimeout(300_000, () => proxyReq.destroy(new Error('Remote model timed out.')))
   proxyReq.on('error', () => {
-    if (!res.headersSent) {
-      json(res, 502, errBody('Remote model connection failed.', 'upstream_error'))
-    } else {
-      res.end()
-    }
+    if (res.destroyed || res.headersSent) return
+    json(res, 502, errBody('Local model not ready (llama-server unavailable).', 'upstream_error'))
   })
-  proxyReq.end(payload)
-  return true
+  req.pipe(proxyReq)
 }
 
 // Fetch an image reference into a Buffer. Accepts data: URLs, http(s):// URLs,
@@ -329,9 +239,6 @@ async function readJson(req: http.IncomingMessage): Promise<Record<string, unkno
   return JSON.parse(body.toString('utf8'))
 }
 
-// Chat message sanitization (Gemma system-message ordering) lives in
-// ./model-server/chat-messages (sanitizeChatMessages), imported above.
-
 // ─── Text(+image) → text (chat, proxied) ─────────────────────────────────────
 // Walk an OpenAI chat body and replace any remote/file image_url with an inlined
 // base64 data URL (llama-server only accepts data URLs). Returns true if changed.
@@ -389,63 +296,42 @@ function jsonWithId(res: http.ServerResponse, rid: string, result: unknown): voi
   json(res, 200, { request_id: rid, ...(result as Record<string, unknown>) })
 }
 
-// Non-streaming chat call to llama-server returning parsed JSON (used for async
-// chat). Retries through a brief reload window like the streaming proxy does,
-// via the shared `retryWithDeadline` helper. Only a connection error is
-// transient; an HTTP >= 400 answer (or a parse failure) is the engine's real
-// reply and is never retried - so those attempt-rejections are tagged fatal.
-function callLlamaJson(bodyObj: Record<string, unknown>, retryUntil: number): Promise<unknown> {
-  const payload = Buffer.from(JSON.stringify({ ...bodyObj, stream: false }))
-  // One attempt. A connection ('error') rejection is left un-tagged (transient);
-  // an HTTP-error or parse rejection is tagged `fatal` so it is not replayed.
-  const attempt = (): Promise<unknown> =>
-    new Promise((resolve, reject) => {
-      const upstream = http.request(
-        {
-          hostname: UPSTREAM_HOST,
-          port: upstreamPort(),
-          path: '/v1/chat/completions',
-          method: 'POST',
-          headers: { 'content-type': 'application/json', 'content-length': String(payload.length) }
-        },
-        (resp) => {
-          const chunks: Buffer[] = []
-          resp.on('data', (c: Buffer) => chunks.push(c))
-          resp.on('end', () => {
-            try {
-              const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-              if ((resp.statusCode || 0) >= 400) {
-                const err = new Error(parsed?.error?.message || 'upstream error') as Error & {
-                  status?: number
-                  fatal?: boolean
-                }
-                err.status = resp.statusCode
-                err.fatal = true
-                reject(err)
-              } else resolve(parsed)
-            } catch (e) {
-              ;(e as { fatal?: boolean }).fatal = true
-              reject(e)
-            }
-          })
-        }
-      )
-      upstream.on('error', reject)
-      upstream.end(payload)
-    })
-  return retryWithDeadline(attempt, {
-    deadlineMs: retryUntil,
-    isTransient: (err) => !(err as { fatal?: boolean }).fatal
-  }).catch((err) => {
-    // A transient failure that outlived the deadline surfaces as the 502 the
-    // caller previously saw; fatal errors keep their own status.
-    if ((err as { fatal?: boolean }).fatal) throw err
-    const e = new Error('Local model not ready (llama-server unavailable).') as Error & {
-      status?: number
-    }
-    e.status = 502
-    throw e
+/** The shared route a client's `model` string names, or undefined for the active text selection.
+ * A paired Mobile sends the stable inventory id Desktop advertised (a route id, or the legacy
+ * remote-vision id); the shared service resolves it, so an inactive remote is its error. */
+function chatRouteId(model: unknown): string | undefined {
+  if (typeof model !== 'string') return undefined
+  if (decodeModelRouteId(model)) return model
+  const legacy = parseRemoteVisionModelId(model)
+  if (!legacy) return undefined
+  const server = getRemoteVisionServer(legacy.serverId)
+  return encodeModelRouteId({
+    adapterId: 'desktop.remote-chat',
+    providerId: server?.provider,
+    serverId: legacy.serverId,
+    modelId: legacy.modelId
   })
+}
+
+/** HTTP status + error type for a failed shared generation, in the gateway's JSON envelope. */
+function chatErrorResponse(error: unknown): { status: number; type: string; message: string } {
+  const cause = error instanceof PartialGenerationError ? error.cause : error
+  if (cause instanceof ModelReadinessError) {
+    return { status: 503, type: 'unavailable_error', message: cause.message }
+  }
+  if (cause instanceof ModelCapabilityError) {
+    return { status: 400, type: 'invalid_request_error', message: cause.message }
+  }
+  if (cause instanceof ModelServerError) {
+    if (cause.kind === 'overflow') {
+      return { status: 400, type: 'context_length_exceeded', message: cause.message }
+    }
+    if (cause.kind === 'unavailable') {
+      return { status: 502, type: 'upstream_error', message: cause.message }
+    }
+  }
+  const message = cause instanceof Error ? cause.message : String(cause)
+  return { status: 500, type: 'server_error', message }
 }
 
 async function handleChat(
@@ -461,7 +347,6 @@ async function handleChat(
     return
   }
   let body: Record<string, unknown>
-  let forward: Buffer = buf
   try {
     const parsed: unknown = JSON.parse(buf.toString('utf8'))
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -475,54 +360,101 @@ async function handleChat(
   }
 
   try {
-    // llama-server may have been evicted (an image model took its memory) or stopped. A chat
-    // request is the demand that brings it back, through the same residency lock the app uses,
-    // instead of retrying a dead port for 45s and answering 502.
-    if (!llm.isReady() && !llm.isStarting()) {
-      try {
-        await desktopModelServices.warmText()
-      } catch (e) {
-        json(res, 503, errBody(e instanceof Error ? e.message : 'Chat model unavailable.', 'unavailable_error'))
-        return
-      }
-    }
-    let changed = await inlineChatImages(body)
-    // Gemma 4 (and others) reject system messages that aren't at position 0.
-    // Consolidate them before forwarding so any client's ordering works.
-    if (sanitizeChatMessages(body)) changed = true
-    // A client says WHETHER it wants thinking; this server decides HOW, because the second half
-    // of the answer (reasoning_format) is a property of the model server running here, not of the
-    // request. Without this a phone could ask for thinking and get a reply with nothing in it.
-    if (applyThinkingPayload(body)) changed = true
-    if (changed) forward = Buffer.from(JSON.stringify(body))
+    // Remote image URLs are fetched here (a port) so the shared request carries image bytes.
+    await inlineChatImages(body)
   } catch {
-    // Image fetch failed — forward the original valid request unchanged so the
-    // model process can return its own stable input error.
+    // Image fetch failed: the shared pipeline returns its own stable input error.
   }
 
-  // A paired Mobile sends the stable remote inventory id advertised by Desktop.
-  // Route that id through the configured remote server instead of llama-server.
-  res.setHeader('X-Request-Id', rid)
-  if (proxyToSelectedRemote(res, body)) return
+  // The client's disconnect is the cancel signal: the phone's Stop must stop the Mac's model.
+  const controller = new AbortController()
+  res.on('close', () => {
+    if (!res.writableFinished) controller.abort()
+  })
 
-  // Async chat: run a non-streaming completion in the background and poll for it.
+  let prepared: ReturnType<typeof openAIChatRequestToGeneration>
+  try {
+    prepared = openAIChatRequestToGeneration(body, {
+      identity: { conversationId: rid, turnId: rid },
+      routeId: chatRouteId(body.model),
+      signal: controller.signal
+    })
+  } catch (e) {
+    json(res, 400, errBody(e instanceof Error ? e.message : 'Invalid chat request.'))
+    return
+  }
+  const complete = async (): Promise<Record<string, unknown>> =>
+    openAIChatCompletion(await desktopModelServices.generation.generate(prepared.request), {
+      id: rid,
+      created: Math.floor(Date.now() / 1000),
+      model: prepared.model
+    })
+
+  res.setHeader('X-Request-Id', rid)
+
+  // Async chat: run the completion in the background and poll for it.
   if (isAsync(req, body)) {
-    const inlined = body
-    await serve(
-      res,
-      rid,
-      'chat',
-      '/v1/chat/completions',
-      true,
-      () => callLlamaJson(inlined, Date.now() + 45_000),
-      () => {}
-    )
+    await serve(res, rid, 'chat', '/v1/chat/completions', true, complete, () => {})
     return
   }
 
-  // Sync: stream straight through. Retry for up to 45s if llama-server is mid-reload
-  // (e.g. just after an image generation freed and is respawning it, ~16s).
-  proxyToLlama(req, res, forward, Date.now() + 45_000)
+  if (!prepared.stream) {
+    try {
+      json(res, 200, await complete())
+    } catch (e) {
+      const { status, type, message } = chatErrorResponse(e)
+      json(res, status, errBody(message, type))
+    }
+    return
+  }
+
+  await streamChat(res, rid, prepared)
+}
+
+/** Serve one streaming chat turn as OpenAI SSE frames. Headers are written with the first frame
+ * so a failure before any token still gets the JSON envelope and its real status. */
+async function streamChat(
+  res: http.ServerResponse,
+  rid: string,
+  prepared: ReturnType<typeof openAIChatRequestToGeneration>
+): Promise<void> {
+  const wire = { id: rid, created: Math.floor(Date.now() / 1000), model: prepared.model }
+  const sse = { started: false, streamedToolCalls: false }
+  const writeFrame = (frame: unknown): void => {
+    if (!sse.started) {
+      sse.started = true
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'X-Request-Id': rid
+      })
+    }
+    res.write(`data: ${JSON.stringify(frame)}\n\n`)
+  }
+  let result: GenerationResult
+  try {
+    result = await desktopModelServices.generation.generate(prepared.request, {
+      chunk: (chunk) => {
+        if (chunk.toolCallDeltas?.length) sse.streamedToolCalls = true
+        const frame = openAIChunkFrame(chunk, wire)
+        if (frame) writeFrame(frame)
+      }
+    })
+  } catch (e) {
+    if (res.destroyed) return
+    const { status, type, message } = chatErrorResponse(e)
+    if (sse.started) {
+      writeFrame({ error: { message, type } })
+      res.end()
+    } else {
+      json(res, status, errBody(message, type))
+    }
+    return
+  }
+  if (res.destroyed) return
+  writeFrame(openAIFinalFrame(result, wire, sse.streamedToolCalls))
+  res.end('data: [DONE]\n\n')
 }
 
 // ─── Embeddings (local MiniLM) ───────────────────────────────────────────────
@@ -1291,8 +1223,7 @@ export async function startModelServer(
       return
     }
 
-    // Chat (text + image-to-text): buffer so we can inline remote image URLs,
-    // which llama-server can't fetch itself, then forward (response still streams).
+    // Chat (text + image-to-text): served by the shared GenerationService, not proxied.
     if (url === '/v1/chat/completions' && method === 'POST') return void handleChat(req, res, rid)
     // Full local model surface across all modalities (not just the LLM).
     if (url === '/v1/models' && method === 'GET') return void handleModelsList(res)
