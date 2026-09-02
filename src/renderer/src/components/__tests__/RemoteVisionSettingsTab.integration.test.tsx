@@ -108,6 +108,9 @@ describe('<RemoteVisionSettingsTab/>', () => {
     expect(screen.queryByText(/remote-vision:/i)).toBeNull()
     fireEvent.change(screen.getByPlaceholderText('Search models'), { target: { value: 'gemini' } })
     expect(screen.getByText('google/gemini')).toBeTruthy()
+    // Media pickers are fed from the catalog the test connection returned, not the text list.
+    const imagePicker = screen.getByLabelText('Image') as HTMLSelectElement
+    expect(Array.from(imagePicker.options).map((o) => o.text)).toContain('Remote Image')
     fireEvent.change(screen.getByPlaceholderText('Search models'), { target: { value: 'new' } })
     expect(screen.queryByText('Vision model')).toBeNull()
     fireEvent.click(screen.getByText('New vision model'))
