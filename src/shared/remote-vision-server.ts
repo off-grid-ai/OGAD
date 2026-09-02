@@ -57,6 +57,12 @@ export function parseRemoteVisionModelId(value: string): RemoteVisionModelRefere
   return parseSharedRemoteVisionModelId(value)
 }
 
+/**
+ * The remote models a server contributes to the app's inventory: only the ones SELECTED for it
+ * (one per modality). The full catalog belongs to the server's settings page; the inventory is what
+ * can be used, so the Active models panel and the paired phone see one remote model per modality,
+ * not every model a provider lists.
+ */
 export function remoteVisionInventoryModels(
   servers: RemoteVisionSavedServer[]
 ): RemoteVisionInventoryModel[] {
@@ -66,27 +72,32 @@ export function remoteVisionInventoryModels(
   ): RemoteVisionInventoryModel['kind'] =>
     modality === 'text' ? (capabilities?.supportsVision ? 'vision' : 'text') : modality
   return servers.flatMap((server) => {
-    const catalog = Object.entries(server.catalog ?? {}) as Array<
-      [RemoteModelModality, NonNullable<RemoteModelCatalog[RemoteModelModality]>]
-    >
-    const options = catalog.flatMap(([modality, models]) =>
-      models.map((model) => ({ modality, model }))
+    const selections = Object.entries(server.selections ?? {}).filter(
+      (entry): entry is [RemoteModelModality, string] => typeof entry[1] === 'string' && !!entry[1]
     )
-    const discovered = options.length
-      ? options
-      : [{ modality: 'text' as const, model: { id: server.model, name: server.model } }]
-    return discovered.map(({ modality, model }) => ({
-      id: remoteVisionModelId(server.id, model.id),
-      name: model.name,
-      kind: kindFor(modality, model.capabilities),
-      org: server.name,
-      description: `Runs through ${server.name}.`,
-      files: [],
-      tags: ['Remote'],
-      remoteServerId: server.id,
-      remoteModelId: model.id,
-      remoteCapabilities: model.capabilities
-    }))
+    const selected = selections.length
+      ? selections
+      : server.model
+        ? [['text', server.model] as [RemoteModelModality, string]]
+        : []
+    return selected.map(([modality, modelId]) => {
+      const model = server.catalog?.[modality]?.find((candidate) => candidate.id === modelId) ?? {
+        id: modelId,
+        name: modelId
+      }
+      return {
+        id: remoteVisionModelId(server.id, model.id),
+        name: model.name,
+        kind: kindFor(modality, model.capabilities),
+        org: server.name,
+        description: `Runs through ${server.name}.`,
+        files: [],
+        tags: ['Remote'],
+        remoteServerId: server.id,
+        remoteModelId: model.id,
+        remoteCapabilities: model.capabilities
+      }
+    })
   })
 }
 

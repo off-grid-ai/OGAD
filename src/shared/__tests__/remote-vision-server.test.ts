@@ -55,6 +55,36 @@ describe('remote model inventory ids', () => {
     expect(parseRemoteVisionModelId('remote-vision:only-one-part')).toBeNull()
   })
 
+  it('lists only the selected model per modality, never the whole catalog', () => {
+    const models = remoteVisionInventoryModels([
+      {
+        id: 'or',
+        name: 'OpenRouter',
+        provider: 'openrouter',
+        endpoint: 'https://openrouter.ai/api/v1',
+        model: 'google/gemini-3.7-flash',
+        hasApiKey: true,
+        screenFramesAllowed: false,
+        selections: { text: 'google/gemini-3.7-flash', image: 'google/nano-banana' },
+        catalog: {
+          text: [
+            { id: 'google/gemini-3.7-flash', name: 'Gemini 3.7 Flash', capabilities: { supportsVision: true } },
+            { id: 'meta/muse-spark', name: 'Muse Spark' }
+          ],
+          image: [
+            { id: 'google/nano-banana', name: 'Nano Banana' },
+            { id: 'openai/gpt-image', name: 'GPT Image' }
+          ]
+        }
+      }
+    ])
+    expect(models.map((model) => [model.kind, model.name])).toEqual([
+      ['vision', 'Gemini 3.7 Flash'],
+      ['image', 'Nano Banana']
+    ])
+    expect(models[1]).toMatchObject({ id: 'remote-vision:or:google%2Fnano-banana', remoteModelId: 'google/nano-banana' })
+  })
+
   it('migrates a saved single-model server into the text inventory', () => {
     expect(
       remoteVisionInventoryModels([

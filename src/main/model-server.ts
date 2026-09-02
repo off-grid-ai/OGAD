@@ -33,6 +33,7 @@ import {
   buildGatewayModalities,
   decodeModelRouteId,
   encodeModelRouteId,
+  runtimeModelRouteId,
   classifyGatewayImageReference as classifyRef,
   gatewayErrorBody as errBody,
   gatewayErrorMeta as errMeta,
@@ -581,9 +582,16 @@ async function handleModelsList(res: http.ServerResponse): Promise<void> {
     extra: Record<string, unknown> = {}
   ): Record<string, unknown> => modelEntry(id, kind, now, extra)
 
-  // Active image model (chosen pick, else the resolver default).
-  const imgId = activeImageModel()
-  const images = imgId ? [tag(imgId, 'image')] : []
+  // Active image model: a remote route is advertised by its stable route id so a paired phone
+  // can name it; a local pick by its native id.
+  const activeImage = desktopModelServices.llm.active('image').model
+  const imgId =
+    activeImage?.source === 'remote' && activeImage.serverId
+      ? (activeImage.routeId ?? runtimeModelRouteId(activeImage))
+      : activeImageModel()
+  const images = imgId
+    ? [tag(imgId, 'image', activeImage?.source === 'remote' ? { name: activeImage.name, remote: true } : {})]
+    : []
 
   // Active speech (TTS) model + its available voices.
   let voices: string[] = []
