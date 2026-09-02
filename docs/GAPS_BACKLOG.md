@@ -1910,3 +1910,19 @@ below shows its own dots. One reply, one indicator.
 
 Add a small pin icon to the left of the Back control. Pinned keeps the sidebar open; unpinned returns
 it to open-on-hover. The state persists with the other UI preferences.
+
+## Desktop cannot show which model answered after a mid-turn fallback (open, 2026-09-02)
+
+Remote Qwen 3.5 2B returned HTTP 502 while llama-server restarted; shared's GenerationService in
+the main process fell back to SmolLM2 135M (`allowFallback: true` in `src/main/ipc.ts` and
+`desktop-generation.ts`) and answered with it. The renderer never learns this: its
+`ChatSessionService` runs the IPC `DesktopChatGenerationAdapter`
+(`src/renderer/src/lib/desktop-chat-generation-adapter.ts`), which only forwards `content` and
+`reasoning` stream events, and `ActiveChatStreamContract` (`src/shared/ipc-contracts.ts`) carries no
+model identity and no fallback phase. So the shared `fallback` event (and `result.model`) stop in
+main, and MemoryChat's notice pattern (the `compacted` branch of `desktopChatSession.subscribe`) has
+nothing to react to. Mobile already renders the shared `fallbackNoticeText(failed, next, error)` row
+and names `turn.result.model` in the meta line. Fix: extend the IPC stream contract with the
+generation's `route`/`fallback` events (model name + reason) and the finished result's model, have
+`ipc.ts` forward `events.fallback` on it, and let the adapter re-emit them through the session's
+events port so MemoryChat inserts `_fallbackNoticeText(...)_` exactly like the compaction notice.
