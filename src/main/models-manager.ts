@@ -675,8 +675,9 @@ export async function reconcileActiveModelClassification(): Promise<boolean> {
 
   const modality = specialistReclassificationModality(entry.kind)
   if (!modality) return false
-  const active = desktopModelServices.activeModalities()
-  const activeForModality = modality === 'voice' ? active.speech : active[modality]
+  // selectedModelRoutes owns the modality-to-slot mapping; a modality this desktop has no
+  // slot for reads as unselected and the migration proceeds through the same selection port.
+  const activeForModality = selectedModelRoutes()[modality]
   if (!activeForModality) {
     const migrated = await setActiveModalChoice(modality, activeId)
     if (!migrated.success) return false
