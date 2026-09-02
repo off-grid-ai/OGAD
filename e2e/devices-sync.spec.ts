@@ -115,6 +115,8 @@ const teardown = async (): Promise<void> => {
   await syntheticPeer?.stop().catch(() => {})
   syntheticPeer = null
   syntheticState = null
+  syntheticImportedEntitlement = undefined
+  syntheticEntitlementCommitted = false
   await syntheticFiles?.dispose().catch(() => {})
   syntheticFiles = null
   syntheticClipboard = null
@@ -152,37 +154,41 @@ test.describe('Devices surface — pro tier', () => {
   test('renders the real Devices screen with live sync status', async () => {
     await navButton(page, 'Devices').click()
     await expect(page.getByRole('heading', { name: 'Devices', exact: true })).toBeVisible()
-    // Per-ROUTE state, which is how the screen actually reports itself: one chip per transport reading
-    // "LAN: ready" or "LAN: <listen>/<advertise>/<browse>" (syncRouteDisplay + DevicesScreen). This asserted
-    // 'LAN + nearby ready' and 'Personal mesh', and neither string exists anywhere in the app - the first was
-    // never shipped and the second is now 'Licensed devices'. The spec was failing on its own stale copy, in
-    // CI and locally both, while the screen underneath was fine.
-    await expect(page.getByText(/^LAN:/)).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText(/\d+ nearby/)).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Licensed devices' })).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Available on this network' })).toBeVisible()
+    // The shared control-center projection owns health and section names. The old spec asserted a
+    // renderer-owned route summary ("LAN: ..." and "N nearby") plus the removed "Licensed devices"
+    // hierarchy. The current journey exposes one actionable health control and divides the mesh by
+    // what is on this network now versus what is saved but away.
+    await expect(
+      page.getByRole('button', {
+        name: /^(Discoverable|Partially available|Hidden)$/
+      })
+    ).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('button', { name: 'Find nearby devices' })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Connection settings\./ })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Saved', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Available', exact: true })).toBeVisible()
     await page.screenshot({ path: 'e2e/screenshots/devices-pro.png' })
   })
 
-  test('sync settings on the screen expose a toggle per replicated category', async () => {
+  test('sync settings expose optional sending and receiving controls', async () => {
     await navButton(page, 'Devices').click()
     await openSyncSettings()
 
-    await expect(page.getByRole('heading', { name: 'Data sent from this device' })).toBeVisible()
-    // One switch per user-facing category, plus the master switch.
-    await expect(page.getByRole('switch', { name: 'Sync enabled' })).toBeVisible()
-    for (const label of [
-      'Sync Chats',
-      'Sync Projects',
-      'Sync Model settings',
-      'Sync Copied text'
-    ]) {
-      await expect(page.getByRole('switch', { name: label })).toBeVisible()
-    }
+    await expect(page.getByRole('heading', { name: 'Sending', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Receiving', exact: true })).toBeVisible()
+    await expect(page.getByRole('switch', { name: 'Optional sending enabled' })).toBeVisible()
+    // Shared classifies required workspace state as always-synced. Only optional data has a switch;
+    // exposing Chats, Projects, or Model settings here would create a second policy owner.
+    await expect(page.getByRole('switch', { name: 'Sync Chats' })).toHaveCount(0)
+    await expect(page.getByRole('switch', { name: 'Sync Projects' })).toHaveCount(0)
+    await expect(page.getByRole('switch', { name: 'Sync Model settings' })).toHaveCount(0)
     await expect(page.getByRole('switch', { name: 'Sync Copied text' })).toHaveAttribute(
       'aria-checked',
       'false'
     )
+    await expect(
+      page.getByRole('switch', { name: 'Accept optional data from all paired devices' })
+    ).toBeVisible()
     await page.screenshot({ path: 'e2e/screenshots/devices-sync-settings.png' })
   })
 
@@ -199,11 +205,16 @@ test.describe('Devices surface — pro tier', () => {
             proInvoke(channel: string): Promise<{
               localDevice: DeviceInfo
               port: number
+              licensed?: boolean
               pairingCode?: { status: string; code?: string }
             }>
           }
         }
       ).api.proInvoke('pro:sync:status')
+    )
+    test.skip(
+      desktop.licensed !== true,
+      'requires an active cached E2E Pro license for the licensed pairing transaction'
     )
     expect(desktop.port).toBeGreaterThan(0)
     // The code this Mac is SHOWING, not one the harness made up. A joining device is told the code by a
@@ -476,6 +487,8 @@ test.describe('Devices surface — pro tier', () => {
       .toBe(true)
     releaseSecureStore?.()
     await pairing
+    expect(syntheticImportedEntitlement).toBeDefined()
+    expect(syntheticEntitlementCommitted).toBe(true)
     // What the screen can honestly show for THIS peer. The Devices list renders two groups - devices in
     // the licence registry, and devices discovered on the network - and the synthetic peer is in neither:
     // its entitlement adapter is a stub, so no machine is ever registered for it, where a real phone is
@@ -664,26 +677,18 @@ test.describe('Devices surface — pro tier', () => {
     await expect(page.getByText('Could not reach Synthetic Android')).toHaveCount(0)
   })
 
-  test('turning a category off persists across a screen change', async () => {
+  test('turning optional copied-text sync on persists across a screen change', async () => {
     await navButton(page, 'Devices').click()
     await openSyncSettings()
-    const chats = page.getByRole('switch', { name: 'Sync Chats' })
     const clipboard = page.getByRole('switch', { name: 'Sync Copied text' })
-    await expect(chats).toHaveAttribute('aria-checked', 'true')
     await expect(clipboard).toHaveAttribute('aria-checked', 'false')
-    await chats.click()
     await clipboard.click()
-    await expect(chats).toHaveAttribute('aria-checked', 'false')
     await expect(clipboard).toHaveAttribute('aria-checked', 'true')
 
     // Leave and come back: the preference is persisted in main, not just React state.
     await navButton(page, 'Models').click()
     await navButton(page, 'Devices').click()
     await openSyncSettings()
-    await expect(page.getByRole('switch', { name: 'Sync Chats' })).toHaveAttribute(
-      'aria-checked',
-      'false'
-    )
     await expect(page.getByRole('switch', { name: 'Sync Copied text' })).toHaveAttribute(
       'aria-checked',
       'true'

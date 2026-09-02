@@ -337,7 +337,7 @@ test('cancelling a tool-owned image keeps its text answer after a full relaunch'
     fs.writeFileSync(path.join(modelsDir, filename), bytes)
   }
   writeGguf('fake-chat.gguf')
-  writeGguf('sdxl-lightning-e2e.gguf', 'first_stage_model text_encoder')
+  writeGguf('sdxl_lightning_4step.q8_0.gguf', 'first_stage_model text_encoder')
   fs.writeFileSync(
     path.join(modelsDir, 'active-model.json'),
     JSON.stringify({ id: 'e2e-chat', primary: 'fake-chat.gguf' })
@@ -353,7 +353,8 @@ test('cancelling a tool-owned image keeps its text answer after a full relaunch'
   await launchApp()
   await page.evaluate(async () => {
     await window.api.saveSetting('composerToolsOn', true)
-    await window.api.setActiveModalModel('image', 'sdxl-lightning-e2e.gguf')
+    const selection = await window.api.setActiveModalModel('image', 'mzwing/SDXL-Lightning-GGUF')
+    if (!selection.success) throw new Error(selection.error || 'Image model selection failed')
   })
   await enterChat()
   await dismissCapturePrompt()
@@ -369,6 +370,11 @@ test('cancelling a tool-owned image keeps its text answer after a full relaunch'
   // is about.
   const answer = page.getByText('Here is your weekly summary.', { exact: true }).last()
   await expect(answer).toBeVisible()
+  await expect
+    .poll(() => page.evaluate(() => window.api.imageGenJobStatus()))
+    .toMatchObject({
+      phase: 'running'
+    })
   const stopImage = page.getByRole('button', { name: 'Stop', exact: true })
   await expect(stopImage).toBeVisible()
   await stopImage.click()
@@ -397,9 +403,7 @@ test('cancelling a tool-owned image keeps its text answer after a full relaunch'
   // Terminal artifact: a newly created renderer, backed by the re-opened SQLite
   // database in a new Electron main process, paints the exact completed text turn.
   // The transcript copy again (see above): the rail's preview is the earlier match.
-  await expect(
-    page.getByText('Here is your weekly summary.', { exact: true }).last()
-  ).toBeVisible()
+  await expect(page.getByText('Here is your weekly summary.', { exact: true }).last()).toBeVisible()
   await expect(
     page
       .locator('p')

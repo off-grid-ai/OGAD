@@ -110,6 +110,7 @@ test('proposal intake collects the complete brief before enabling chat', async (
 
 test('the chat empty state reuses the same catalog with its compact intro', async () => {
   await page.getByRole('button', { name: 'Chat', exact: true }).first().click()
+  await page.getByRole('button', { name: 'New chat', exact: true }).click()
   await expect(page.getByText('Explore what Off Grid AI can do')).toBeVisible()
   await expect(page.getByTestId('explore-preset-best-nearby')).toBeVisible()
   await page.screenshot({ path: 'e2e/screenshots/explore-chat-empty.png' })

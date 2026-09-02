@@ -11,10 +11,15 @@ import type { ChildProcess } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import type { PersistedModelDownload } from '@offgrid/models'
 
 interface InterruptedFixture {
   modelId: string
+  modelName: string
+  kind: PersistedModelDownload['manifest']['kind']
   fileName: string
+  fileUrl: string
+  fileRole?: PersistedModelDownload['manifest']['artifacts'][number]['role']
   partial: Buffer
 }
 
@@ -98,35 +103,70 @@ test('relaunch resumes onboarding progress and one interrupted transfer (#12)', 
     ])
     const selected = plan.items.find((item) => !item.installed) ?? plan.items[0]
     const entry = catalog.models.find((model) => model.id === selected?.id)
-    const fileName = entry?.files[0]?.name
-    if (!selected || !fileName) throw new Error('Setup plan did not expose a downloadable model')
-    return { modelId: selected.id, fileName }
+    const file = entry?.files[0]
+    if (!selected || !entry || !file?.url) {
+      throw new Error('Setup plan did not expose a downloadable model')
+    }
+    return {
+      modelId: selected.id,
+      modelName: entry.name,
+      kind: entry.kind,
+      fileName: file.name,
+      fileUrl: file.url,
+      fileRole: file.role
+    }
   })
   const interrupted: InterruptedFixture = {
     ...fixture,
     partial: Buffer.from('synthetic partial model payload for relaunch recovery')
   }
+  const artifactId = `${interrupted.modelId}:${interrupted.fileName}`
+  const totalBytes = Math.round(interrupted.partial.length / 0.37)
+  const persistedAt = Date.now()
+  const persistedDownload: PersistedModelDownload = {
+    manifest: {
+      id: interrupted.modelId,
+      modelId: interrupted.modelId,
+      kind: interrupted.kind,
+      revision: 'main',
+      artifacts: [
+        {
+          id: artifactId,
+          name: interrupted.fileName,
+          url: interrupted.fileUrl,
+          sizeBytes: totalBytes,
+          role: interrupted.fileRole,
+          localName: interrupted.fileName,
+          required: true
+        }
+      ],
+      metadata: { catalogEntry: true, name: interrupted.modelName }
+    },
+    phase: 'failed',
+    artifacts: [
+      {
+        artifactId,
+        phase: 'failed',
+        bytesDownloaded: interrupted.partial.length,
+        totalBytes,
+        error: 'interrupted - retry to resume'
+      }
+    ],
+    createdAt: persistedAt,
+    updatedAt: persistedAt,
+    attempt: 0
+  }
   fs.mkdirSync(modelsDir, { recursive: true })
   fs.writeFileSync(path.join(modelsDir, `${interrupted.fileName}.part`), interrupted.partial)
-  fs.writeFileSync(
-    path.join(modelsDir, 'downloads.json'),
-    JSON.stringify([
-      {
-        modelId: interrupted.modelId,
-        status: 'downloading',
-        percent: 37,
-        currentFile: interrupted.fileName,
-        downloadedMB: '1',
-        totalMB: '3'
-      }
-    ])
-  )
+  fs.writeFileSync(path.join(modelsDir, 'downloads.json'), JSON.stringify([persistedDownload]))
 
   await closeApp()
   await launchApp()
 
   await expect(page.getByRole('heading', { name: 'Models' })).toBeVisible()
-  await expect(page.getByRole('button', { name: /Continue|Start using Off Grid AI/i })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Continue|Start using Off Grid AI/i })).toHaveCount(
+    0
+  )
 
   const downloads = await page.evaluate(async () => window.api.listDownloads())
   expect(downloads).toEqual([

@@ -10,8 +10,7 @@ import http from 'node:http'
 const args = process.argv.slice(2)
 const portFlag = Math.max(args.indexOf('--port'), args.indexOf('-p'))
 const port = portFlag >= 0 ? Number(args[portFlag + 1]) : 8439
-let completionCount = 0
-
+let imageToolRequested = false
 // Plain executable JavaScript cannot carry a TypeScript return annotation.
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 const delta = (payload) => `data: ${JSON.stringify({ choices: [{ delta: payload }] })}\n\n`
@@ -43,7 +42,6 @@ const server = http.createServer((request, response) => {
       'Content-Type': payload.stream ? 'text/event-stream' : 'application/json'
     })
 
-    const turn = completionCount++
     if (!payload.stream) {
       response.end(
         JSON.stringify({
@@ -54,7 +52,16 @@ const server = http.createServer((request, response) => {
       return
     }
 
-    if (turn === 0) {
+    // Model-server readiness and capability probes can issue completions before the user turn.
+    // Route from the OpenAI conversation contract instead of request order: the first agent round
+    // has no tool result, while the follow-up round does. This keeps the native boundary fake
+    // faithful when startup probes change without teaching it any Off Grid implementation detail.
+    const offersImageTool =
+      Array.isArray(payload.tools) &&
+      payload.tools.some((tool) => tool?.function?.name === 'generate_image')
+
+    if (offersImageTool && !imageToolRequested) {
+      imageToolRequested = true
       response.write(
         delta({
           tool_calls: [

@@ -86,6 +86,13 @@ test('populated projects stay dense, adjacent, and reachable on a wide desktop (
   await expect(detail.getByText('Synthetic Project 12', { exact: true })).toBeVisible()
   await expect(detail.getByText('8 chats', { exact: true })).toBeVisible()
 
+  // Moving from the navigation rail to a project collapses the hover-expanded
+  // rail. Geometry is meaningful only after that real layout transition reaches
+  // its authoritative collapsed width.
+  const navigation = page.getByRole('navigation', { name: 'Primary navigation' })
+  await expect(navigation).toHaveAttribute('data-state', 'collapsed')
+  await expect(navigation).toHaveCSS('width', '60px')
+
   const geometry = await Promise.all([
     master.boundingBox(),
     detail.boundingBox(),
@@ -133,7 +140,9 @@ test('populated projects stay dense, adjacent, and reachable on a wide desktop (
   expect(columns).toBeGreaterThanOrEqual(3)
 
   const gridBox = await chatGrid.boundingBox()
-  const firstCardBox = await chatGrid.getByRole('button').first().boundingBox()
+  const firstCardBox = await chatGrid
+    .getByRole('button', { name: /^Synthetic chat 01/ })
+    .boundingBox()
   expect(gridBox).not.toBeNull()
   expect(firstCardBox).not.toBeNull()
   if (!gridBox || !firstCardBox) return

@@ -114,6 +114,15 @@ const server = http.createServer((request, response) => {
     response.end(JSON.stringify({ data: [{ id: 'e2e-hybrid-model' }] }))
     return
   }
+  if (request.method === 'GET' && request.url === '/props') {
+    // The production model inventory admits Same as Chat and the hybrid reasoner only when the
+    // loaded runtime publishes a thinking control. This boundary represents Qwen 3.5, so publish
+    // the same template capability that a real llama-server exposes instead of relying on a model
+    // name inference that the shared model-control plane deliberately removed.
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify({ chat_template: '{{ enable_thinking }}' }))
+    return
+  }
   if (request.method !== 'POST' || !String(request.url).includes('/chat/completions')) {
     response.writeHead(404)
     response.end()
