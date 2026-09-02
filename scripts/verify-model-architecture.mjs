@@ -28,6 +28,16 @@ const lineOf = (source, node) =>
 const keyOf = (finding) => `${finding.rule}|${finding.file}|${finding.detail}`
 const findings = []
 
+const legacyDownloadQueue = path.join(repoRoot, 'src/main/models/download-queue.ts')
+if (fs.existsSync(legacyDownloadQueue)) {
+  findings.push({
+    rule: 'desktop-model-download-coordinator-is-shared',
+    file: relative(legacyDownloadQueue),
+    line: 1,
+    detail: 'restored app-owned download queue compatibility surface'
+  })
+}
+
 function report(rule, file, source, node, detail) {
   findings.push({ rule, file, line: lineOf(source, node), detail })
 }
@@ -44,18 +54,232 @@ for (const file of files) {
     /(^|\/)(adapters?|model-generation-adapters|remote-chat|remote-media-runtime)(\/|\.|$)/.test(
       fileName
     )
+  const isRendererProduction =
+    fileName.startsWith('src/renderer/src/') || fileName.startsWith('pro/renderer/')
 
+  const modelControlComponents = new Set([
+    'src/renderer/src/components/ModelsScreen.tsx',
+    'src/renderer/src/components/ModelPicker.tsx',
+    'pro/renderer/components/voice/TranscriptionModels.tsx'
+  ])
   if (
-    fileName === 'src/renderer/src/components/ModelsScreen.tsx' &&
-    (!/ModelActivationCommandService/.test(text) ||
-      /activeKind\s*===\s*['"]computer_use['"]/.test(text))
+    fileName === 'src/renderer/src/lib/model-control-application.ts' &&
+    (!/\bgetModelControlSnapshot\b/.test(text) ||
+      /\bapi\(\)\.(?:getActiveModel|getActiveModelIds|getActiveModalities|getModelCatalog|getInstalledModels|getComputerUseActiveModels)\b/.test(
+        text
+      ))
   ) {
     report(
-      'desktop-model-activation-command-is-shared',
+      'desktop-model-control-reads-one-main-snapshot',
       fileName,
       source,
       source,
-      'screen-owned memory admission or activation dispatch'
+      'renderer model-control adapter uses split model-state reads'
+    )
+  }
+  if (
+    isRendererProduction &&
+    fileName !== 'src/renderer/src/lib/model-control-application.ts' &&
+    /\b(?:getModelCatalog|getInstalledModels|getActiveModel|getActiveModelIds|getActiveModalities)\s*(?:\?\.)?\s*\(/.test(
+      text
+    )
+  ) {
+    report(
+      'desktop-model-control-reads-one-main-snapshot',
+      fileName,
+      source,
+      source,
+      'renderer reads a split model-state endpoint instead of the coherent projection'
+    )
+  }
+  if (
+    isRendererProduction &&
+    fileName !== 'src/renderer/src/lib/model-control-application.ts' &&
+    /\b(?:window\.)?api\s*(?:\?\.|\.)\s*(?:activateModel|setActiveModalModel|cancelModelDownload)\s*(?:\?\.)?\s*\(/.test(
+      text
+    )
+  ) {
+    report(
+      'desktop-model-control-command-is-shared',
+      fileName,
+      source,
+      source,
+      'renderer calls a raw model mutation endpoint instead of the typed application service'
+    )
+  }
+  if (
+    fileName === 'src/main/models-manager.ts' &&
+    (!/\bDesktopModelDownloadService\b/.test(text) ||
+      /\b(?:ModelLibraryDownloadService|DownloadStatusLedger|ModelDownloadQueue|runSequentialArtifactDownload)\b/.test(
+        text
+      ))
+  ) {
+    report(
+      'desktop-model-download-coordinator-is-shared',
+      fileName,
+      source,
+      source,
+      'deprecated or app-owned download workflow'
+    )
+  }
+  if (
+    fileName === 'src/main/models/desktop-model-download-service.ts' &&
+    (!/\bModelDownloadCoordinator\b/.test(text) ||
+      /\b(?:ModelLibraryDownloadService|DownloadStatusLedger|runSequentialArtifactDownload)\b/.test(
+        text
+      ))
+  ) {
+    report(
+      'desktop-model-download-coordinator-is-shared',
+      fileName,
+      source,
+      source,
+      'Desktop download composition bypasses the canonical Shared coordinator'
+    )
+  }
+  if (
+    fileName === 'src/main/imagegen.ts' &&
+    (!/\bdesktopImageRuntimeIdentity\.resolve\b/.test(text) || /\bprimaryFileName\b/.test(text))
+  ) {
+    report(
+      'desktop-image-runtime-identity-has-one-adapter',
+      fileName,
+      source,
+      source,
+      'image generation derives a native image identity outside the canonical Desktop adapter'
+    )
+  }
+  if (
+    fileName === 'src/main/models-manager.ts' &&
+    !/\bdesktopImageRuntimeIdentity\.resolve\b/.test(text)
+  ) {
+    report(
+      'desktop-image-runtime-identity-has-one-adapter',
+      fileName,
+      source,
+      source,
+      'model library does not use the canonical Desktop image-runtime identity adapter'
+    )
+  }
+  if (
+    fileName.startsWith('src/main/imagegen/') &&
+    /\b(?:const|let|var)\s+DEFAULT\w*NEGATIVE\w*\s*=|blurry,\s*low quality,\s*low resolution/i.test(
+      text
+    )
+  ) {
+    report(
+      'image-negative-prompt-default-is-shared',
+      fileName,
+      source,
+      source,
+      'image adapter declares a local negative-prompt default'
+    )
+  }
+  if (fileName === 'src/main/index.ts' && /from\s+['"]\.\/models\/download-queue['"]/.test(text)) {
+    report(
+      'desktop-model-download-coordinator-is-shared',
+      fileName,
+      source,
+      source,
+      'production shutdown uses a second queue owner'
+    )
+  }
+  if (
+    modelControlComponents.has(fileName) &&
+    (!/\bdesktopModelControl\.execute\b/.test(text) ||
+      /\b(?:ModelActivationCommandService|ModelInstallActivationCommandService|primaryFile)\b|\bapi(?:\(\))?\??\.(?:activateModel|downloadModel|cancelModelDownload|unloadRuntime|getActiveModel|getActiveModelIds|getActiveModalities|getInstalledModels)\b/.test(
+        text
+      ))
+  ) {
+    report(
+      'desktop-model-control-command-is-shared',
+      fileName,
+      source,
+      source,
+      'renderer-owned model identity, activation, transfer, unload, or refresh workflow'
+    )
+  }
+
+  if (
+    new Set([
+      'pro/main/crm/agent-rank.ts',
+      'pro/main/crm/capture-input-budget.ts',
+      'pro/main/ingest-helpers.ts'
+    ]).has(fileName)
+  ) {
+    report('desktop-pro-policy-is-shared', fileName, source, source, 'restored:local-policy-module')
+  }
+  if (
+    fileName === 'pro/main/crm/agent.ts' &&
+    (!/\bProactiveActionApplicationService\b/.test(text) ||
+      !/\bProactiveToolCatalogService\b/.test(text) ||
+      /\b(?:extractJson|toolScore|isActionTool|jaccard|sameSubject)\b|\bconst\s+(?:prompt|gate)\s*=|Return JSON only/.test(
+        text
+      ))
+  ) {
+    report(
+      'desktop-proactive-action-policy-is-shared',
+      fileName,
+      source,
+      source,
+      'local proactive prompt, profile, parsing, ranking, or missing shared service'
+    )
+  }
+  if (
+    fileName === 'pro/main/ingest.ts' &&
+    (!/\bConnectorReadApplicationService\b/.test(text) ||
+      !/\bConnectorDistillApplicationService\b/.test(text) ||
+      /\b(?:DISTILL_SCHEMA|extractJson|pickReadTool|buildArgs|structuredItems)\b|\bconst\s+prompt\s*=|\b(?:maxTokens|temperature|disableThinking)\s*:/.test(
+        text
+      ))
+  ) {
+    report(
+      'desktop-connector-ingest-policy-is-shared',
+      fileName,
+      source,
+      source,
+      'local ingest prompt, profile, parsing, selection, or missing shared service'
+    )
+  }
+  if (
+    /^pro\/main\//.test(fileName) &&
+    /\b(?:VISION_IMAGE_TOKEN_ESTIMATE|OBSERVATION_RESERVE_TOKENS|OBSERVATION_OVERHEAD_TOKENS|MAX_MATERIAL_CHARS|MIN_MATERIAL_CHARS)\b\s*=|\bfunction\s+planCaptureInput\b/.test(
+      text
+    )
+  ) {
+    report(
+      'desktop-capture-input-budget-is-shared',
+      fileName,
+      source,
+      source,
+      'local capture input budget policy'
+    )
+  }
+
+  if (
+    fileName === 'src/renderer/src/components/PermissionGate.tsx' &&
+    /\b(?:getActiveModel|getModelVisionStatus|downloadModel|checkCaptureVision|VisionIssue)\b|proInvoke\s*\(\s*['"]capture:status['"]/.test(
+      text
+    )
+  ) {
+    report(
+      'desktop-capture-readiness-is-shared',
+      fileName,
+      source,
+      source,
+      'renderer-owned capture readiness or repair policy'
+    )
+  }
+  if (
+    fileName === 'src/renderer/src/components/use-capture-readiness.ts' &&
+    !/\bCaptureReadinessApplicationService\b/.test(text)
+  ) {
+    report(
+      'desktop-capture-readiness-is-shared',
+      fileName,
+      source,
+      source,
+      'missing shared capture-readiness application service'
     )
   }
 
@@ -70,6 +294,23 @@ for (const file of files) {
 
   if (fileName === 'src/main/mcp.ts' && /Promise\.race\s*\(|setTimeout\s*\(/.test(text)) {
     report('connector-timeout-policy-is-shared', fileName, source, source, 'local:timeout-race')
+  }
+  if (
+    fileName === 'src/main/mcp.ts' &&
+    (!/\bMcpConnectorApplicationService\b/.test(text) ||
+      !/connectorApplication\.verifyAndDiscover\s*\(/.test(text) ||
+      !/connectorApplication\.discoverInBackground\s*\(/.test(text) ||
+      !/connectorApplication\.remove\s*\(/.test(text) ||
+      !/removeWithCredentials\s*\(/.test(text) ||
+      !/\.transaction\s*\(/.test(text))
+  ) {
+    report(
+      'desktop-mcp-lifecycle-is-shared',
+      fileName,
+      source,
+      source,
+      'app-owned connector lifecycle, cleanup, or discovery workflow'
+    )
   }
 
   if (
@@ -168,6 +409,19 @@ for (const file of files) {
       'missing shared role projection'
     )
   }
+  if (
+    fileName === 'src/main/vision/vision-task-model-strategy.ts' &&
+    (!/\bComputerUseSessionApplicationService\b/.test(text) ||
+      /\bresolveComputerUseExecutionPlan\b|\bplan\.(?:mode|source)\b/.test(text))
+  ) {
+    report(
+      'computer-use-session-orchestration-is-shared',
+      fileName,
+      source,
+      source,
+      'app-owned Computer Use session strategy branch or missing shared application service'
+    )
+  }
 
   if (
     fileName === 'src/main/vision/grounder-loader.ts' &&
@@ -242,7 +496,9 @@ for (const file of files) {
 
   if (
     fileName === 'src/main/vision/remote-vision-server.ts' &&
-    /\b(?:activateRemoteServerConfiguration|deactivateRemoteServerConfiguration|removeRemoteServerConfiguration|upsertRemoteServerConfiguration)\b/.test(text)
+    /\b(?:activateRemoteServerConfiguration|deactivateRemoteServerConfiguration|removeRemoteServerConfiguration|upsertRemoteServerConfiguration)\b/.test(
+      text
+    )
   ) {
     report(
       'remote-server-workflow-is-shared',
@@ -500,7 +756,6 @@ for (const file of files) {
         `declaration:${node.name.getText(source)}`
       )
     }
-
     if (
       isAdapter &&
       (ts.isIfStatement(node) || ts.isSwitchStatement(node) || ts.isConditionalExpression(node))

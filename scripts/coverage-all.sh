@@ -27,7 +27,7 @@ MERGE="../shared/scripts/new-code-coverage.mjs"
 
 echo "▶ product-integration (unit + integration)…"
 rm -rf coverage
-npm run test:coverage >/tmp/coverage-all-product.log 2>&1
+OFFGRID_AGGREGATE_COVERAGE=1 npm run test:coverage >/tmp/coverage-all-product.log 2>&1
 PRODUCT_STATUS=$?
 grep -E "^ +Tests " /tmp/coverage-all-product.log | tail -1
 
@@ -67,9 +67,16 @@ echo
 E2E_NOTE="without the e2e tour"
 [ -n "$COARSE" ] && E2E_NOTE="including the e2e tour"
 echo "▶ new-code coverage from ${#REPORTS[@]} source-instrumented report(s), $E2E_NOTE:"
-node "$MERGE" . "${REPORTS[@]}" $COARSE
+node "$MERGE" . "${REPORTS[@]}" $COARSE \
+  --min-statements=78 --min-branches=57 --min-functions=52 --min-lines=78
+CORE_COVERAGE_STATUS=$?
 echo
-node "$MERGE" ./pro "${REPORTS[@]}" $COARSE 2>/dev/null || true
+PRO_COVERAGE_STATUS=0
+if [ -d pro ]; then
+  node "$MERGE" ./pro "${REPORTS[@]}" $COARSE \
+    --min-statements=72 --min-branches=45 --min-functions=46 --min-lines=72
+  PRO_COVERAGE_STATUS=$?
+fi
 
 if [ -z "$COARSE" ]; then
   echo
@@ -81,3 +88,8 @@ fi
 # The suites' own exit codes are surfaced, so a green number from a red suite is impossible to mistake.
 [ $PRODUCT_STATUS -eq 0 ] || echo "warning: product-integration exited $PRODUCT_STATUS"
 [ $DB_STATUS -eq 0 ] || echo "warning: DB journeys exited $DB_STATUS"
+
+if [ $PRODUCT_STATUS -ne 0 ] || [ $DB_STATUS -ne 0 ] || \
+  [ $CORE_COVERAGE_STATUS -ne 0 ] || [ $PRO_COVERAGE_STATUS -ne 0 ]; then
+  exit 1
+fi

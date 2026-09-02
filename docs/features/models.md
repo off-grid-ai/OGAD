@@ -15,9 +15,11 @@ it does not define a second provider, fallback, budget, or model-selection polic
   dates and credibility tiers (official / verified / community / Off Grid AI).
 - **Direct Hugging Face search**, scoped to the focused modality; auto-detects GGUF / GGML /
   ONNX variants.
-- **Download manager** — progress, cancel, and a per-modality **active model** that the
-  gateway loads on demand.
-- **Voice** — Kokoro is the supported Mobile TTS runtime and the only Mobile voice runtime in the
-  shared catalog.
+- **Download manager** - progress, cancel, and a per-modality **active model** that the
+  gateway loads on demand. After a restart, an interrupted download stays stopped and offers Retry.
+  Desktop resumes automatically only when a verified native transfer still owns the work.
+- **Voice** - Desktop uses the Shared Kokoro identity through its local ExecuTorch adapter. Opening
+  Chat or listing voices does not download or load speech assets. The first Speak request prepares
+  the assets on demand.
 - Off Grid AI publishes correctly-converted SDXL GGUFs under the
   [`offgrid-ai`](https://huggingface.co/offgrid-ai) org.

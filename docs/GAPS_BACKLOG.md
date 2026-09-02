@@ -24,6 +24,23 @@ Both Mobile model architecture gates passed. The focused Mobile transcription, d
 residency group passed 331 tests, and its one batch-timeout case passed alone in 2.8 seconds with
 open-handle detection.
 
+**Focused live-defect follow-up (2026-09-01):** Shared download hydration now leaves recovered
+interrupted work idle and retryable unless a verified native transfer still owns it. Shared voice
+readiness reports the requested modality instead of a false text-model failure. Direct Desktop image
+generation keeps the safe memory refusal and carries explicit `Run anyway` approval into Shared
+residency admission. The related focused Shared and Desktop tests passed, and Desktop node typecheck
+passed. These checks close the concrete code defects found during the development run. They do not
+replace the packaged and physical-device evidence below.
+
+**QA/platform-integration and docs sweep (2026-09-01):** Shared models typecheck and architecture
+passed. Desktop node typecheck, web typecheck, and model architecture passed with zero temporary
+items. The combined boundary scan found one Computer Use role-projection owner in Shared policy and
+one Desktop application adapter that supplies runtime facts. The image memory override remains an
+explicit request fact; download restart ownership remains in the Shared coordinator. No Desktop or
+Electron import crosses into the Shared model package. The Desktop Models guide was corrected to
+state the current interrupted-download recovery rule and on-demand Kokoro speech preparation. This
+is integration and documentation evidence only. The complete release proof remains open.
+
 **Open release evidence:** run the complete Shared, Desktop, Mobile, and Pro command matrices on one
 candidate head. Then verify local and remote text, vision, image, transcription, speech, download,
 repair, transfer, load, force-load, co-residency, eviction, unload, eject, Stop, Resend, Edit, and
@@ -628,26 +645,181 @@ knowledge-document sync, and the service under test builds no orchestrator.
 
 ---
 
-### DEF-009 (P2) - ModelPicker re-implements the Computer Use model-resolution rule in the renderer
+## RESOLVED
 
-**Evidence (2026-08-27):** `src/renderer/src/components/ModelPicker.tsx` (~lines 175-179) re-derives
-which model Computer Use will run: it checks `computerUseStrategy === 'same_as_chat'` and matches
-models by `id` / `primaryFile` itself. The main process already owns that rule - the grounder loader's
-`modelStrategy`, `selectedGrounderModelId`, and `resolveActiveBrowserVisionSelection` are the source
-of truth. Two layers now answer "which model grounds Computer Use", kept in step by hand; any change
-to the main-process rule (a new strategy, a different identity key) silently strands the renderer copy
-and the picker labels the wrong model.
+### DEF-009 (P2) - ModelPicker uses the main-owned Computer Use projection - RESOLVED 2026-09-01
 
-**Fix direction:** collapse to one source. Add a main-process IPC (e.g.
-`getComputerUseModelSelection()`) that returns the resolved model identity, expose it through the
-preload, and have ModelPicker render that answer instead of re-deriving it.
+The renderer no longer resolves the Computer Use model. `getComputerUseActiveModelProjection()`
+uses the main-process strategy, active Chat route, remote route, and selected specialist identity.
+`desktopModelServices.modelControlSnapshot()` includes that projection. `ModelPicker` renders the
+projection and sends selection commands through the model-control application boundary. It does not
+match `id`, `primaryFile`, or `computerUseStrategy` to infer the active Computer Use route.
 
-**Why deferred:** needs a new IPC channel plus a preload surface change, out of scope for a
-quality-only pass. Filed during the 2026-08-27 code-quality sweep.
+**Closure evidence:** the focused main integration proves the `Text + Specialist` projection uses
+the exact reasoner and grounding specialist that the task strategy executes. The focused renderer
+integration proves `ModelPicker` renders those main-owned roles and local/remote facts from the
+model-control snapshot. Both files passed 10/10 tests. Desktop node typecheck passed in the same
+round before this backlog reconciliation.
 
 ---
 
-## RESOLVED
+### MOD-003 (P1) - Local model registry failures are typed and atomic - RESOLVED 2026-09-01
+
+Shared remains the local import, transfer-registration, and removal transaction owner. Desktop now
+supplies one `LocalModelRegistry` filesystem adapter. A missing file is the only empty state;
+unreadable, malformed, and invalid registries return typed failures. Writes use a mode-0600 temporary
+file and atomic rename, so a failed save keeps the prior registry. Shared converts adapter failures
+to failed command results and removes newly copied import bytes instead of reporting success.
+
+**Closure evidence:** focused Shared tests prove typed import, transfer, and removal failures. Real
+Desktop filesystem tests prove absent/corrupt distinction, atomic replacement, prior-state
+preservation, and the full import boundary against damaged JSON. Focused checks passed 7/7. Desktop
+node and web type checks passed.
+
+---
+
+### MOD-005 (P2) - Orphan cleanup reports partial failures - RESOLVED 2026-09-01
+
+The Desktop cleanup adapter now returns each failed filename, its retained bytes, and the boundary
+error. `success` is false when any file remains. Storage refreshes its authoritative scan and shows
+the failed names and retained size. A missing file remains safe through forced idempotent removal.
+
+**Closure evidence:** a real models-directory integration test removes one orphan, forces an
+`EACCES` boundary failure for the second, and proves the second file remains visible. The Storage
+integration proves the user sees the failed filename and retained bytes. Focused checks passed 9/9.
+
+---
+
+### MOD-007 (P2) - Download recovery persistence has visible health - RESOLVED 2026-09-01
+
+`DownloadRecoveryStore` is the single Desktop persistence adapter for Shared's download
+coordinator. Missing recovery data is healthy and empty. Damaged/read-failed data stays degraded and
+is not overwritten. Writes use a mode-0600 temporary file and atomic rename; a transient write
+failure keeps the prior valid snapshot while live downloads continue. Diagnostics and the Storage
+health projection state the restart-resume risk.
+
+**Closure evidence:** real filesystem tests prove damaged-state reporting and last-valid-snapshot
+preservation across failed atomic promotion. The Storage integration proves the non-blocking health
+message is visible. Focused checks passed 10/10. Desktop node and web type checks passed.
+
+---
+
+### AUT-003 (P1) - Approval intake load failure leaves Review in Chat with no result - RESOLVED 2026-09-01
+
+Approval intake now uses one closed `idle | loading | ready | error` state contract. The Pro
+approval store stays authoritative. A rejected, unavailable, or missing read shows the typed
+reason, preserves the approval, and offers Retry or Close. The renderer does not create a
+substitute record. Both the event path and direct Chat target use the same loader.
+
+**Closure evidence:** `MemoryChat.approval-intake.integration.test.tsx` drives the real Chat listener
+through a failed Pro IPC boundary, verifies the visible failure and unchanged approval message,
+retries, and opens the original intake. The focused renderer/preload files passed 24/24 tests.
+Desktop node and web type checks passed.
+
+---
+
+### CU-016 (P1) - Computer Use settings show defaults when the authoritative read fails - RESOLVED 2026-09-01
+
+Shared defines the Computer Use settings port result. Main is the only read/write owner and returns
+authoritative settings or a typed unavailable result. The Pro renderer shows loading or a retryable
+failure instead of defaults, blocks writes until a successful read, and sends only the changed
+field. Main merges that patch with the latest persisted object. A save failure keeps the last
+authoritative projection and shows the reason.
+
+**Closure evidence:** `ComputerUseSettingsSection.integration.test.tsx` proves load, field-only
+patch, read failure, retry, and save rollback behavior. `computer-use-settings.integration.dbtest.ts`
+proves the real SQLite owner preserves untouched fields. The focused renderer/preload files passed
+24/24 tests; the focused DB file passed 5/5. Desktop node and web type checks passed.
+
+---
+
+### MOD-004 (P1) - Model finalization reports active-projector repair failure - RESOLVED 2026-09-01
+
+Desktop now has one fallible `finalizeInstalledModelArtifacts` command. Download and transfer
+registration both use it. A projector persistence or reload failure becomes the typed
+`ActiveModelProjectorFinalizationError`; the Shared download coordinator records a failed,
+recoverable terminal state instead of completed. Transfer registration returns the same actionable
+failure result. Retrying is idempotent because verified artifacts remain ready and the finalizer
+runs again.
+
+**Closure evidence:** real filesystem and HTTP-boundary integration tests force the active selection
+file to reject the projector update, assert that download and transfer registration report failure,
+restore the file, retry, and assert that the projector is persisted. The four focused files passed
+15/15 tests. The Desktop model architecture gate passed.
+
+---
+
+### MOD-006 (P2) - One Desktop image-runtime identity adapter - RESOLVED 2026-09-01
+
+`desktopImageRuntimeIdentity` is now the only Desktop adapter that maps Shared's canonical image
+model ID and artifact-role facts to the native image runtime identity. Image generation and model
+removal consume that port. Shared remains the only catalog and primary-artifact policy owner;
+Desktop keeps only the one-way native filename projection.
+
+**Closure evidence:** focused tests prove that a Shared catalog ID maps to its primary artifact and
+that unknown native identities remain unchanged. Image generation no longer imports or calls
+`primaryFileName`. The four focused files passed 15/15 tests. The Desktop model architecture gate
+passed.
+
+---
+
+### IMG-001 (P1) - Generated image persistence failures are explicit - RESOLVED 2026-09-01
+
+Direct, RAG, and tool-owned image paths now preserve the generated artifact while projecting a
+visible `created but not saved` warning onto the image when its durable Chat message or sidecar
+acknowledgement fails. Each failure is logged with the conversation, turn, artifact path, and sync
+identity. Tool-owned image rows also change from completed to failed, so `Work done` cannot describe
+an image that did not reach its Chat record. SQLite remains the Chat-message owner; the image job
+remains the artifact owner.
+
+**Closure evidence:** the real `MemoryChat` component test forces the assistant image-message write
+to fail, proves the artifact stays visible, proves the warning has alert semantics, and proves the
+sidecar acknowledgement does not run without a durable message. The complete focused image file
+passed 24/24. The image lifecycle and cancellation files passed 38/38 before this additional case,
+and the cancellation/relaunch E2E passed 1/1.
+
+---
+
+### AUT-002 (P1) - Chat action approval results are durable and failure-isolated - RESOLVED 2026-09-01
+
+`@offgrid/use` now owns an append-once terminal Chat-action journal in the same injected SQL driver
+as its queue. The engine writes the terminal record before it removes the queue item and exposes
+only a read-only outcome reader. A stop after the journal write leaves a saved terminal machine
+snapshot; restart clears the stale lease, completes queue cleanup, and does not execute the external
+effect again.
+
+Desktop converts the engine record into the stable core-to-Pro `ChatActionResult` contract. A Pro
+observer exception is contained and logged after the action result has committed, so it cannot
+reject the completed wait or invite a retry. Pro startup reads the authoritative terminal journal
+and projects matching `approved` rows to `executed` or `failed`. Reconciliation calls only
+`recordExecution`; it never calls an executor, and its status claim makes replay idempotent.
+
+**Closure evidence:**
+
+- `@offgrid/use` typecheck and ESM/CJS/DTS build passed; all 101 package tests passed.
+- The shared crash-window test proved one external effect, one persisted terminal fact, and no
+  second execution after simulated restart cleanup.
+- Desktop Node typecheck passed.
+- The real-database Desktop runtime file passed 7/7, including a throwing Pro observer while the
+  action still returned `done` and remained queryable from the engine journal.
+- The Pro approval lifecycle passed 25/25, including restart reconciliation, zero connector calls,
+  idempotent replay, and the exact `proposed -> approved -> executed` audit sequence.
+- Focused Desktop and Shared diff checks passed. No broad suite, production build, or package build
+  beyond the required `@offgrid/use` package build was run for this closure.
+
+### MOD-002 (P1) - Desktop navigation fixtures use the model-control port - RESOLVED 2026-09-01
+
+`src/renderer/src/__tests__/App.navigation.integration.test.tsx` now supplies one factual
+`getModelControlSnapshot` at the Electron boundary. The model, installed IDs, active IDs, active
+routes, and available kinds come from that snapshot. The obsolete `getModelCatalog`,
+`getInstalledModels`, and `getActiveModelIds` fixtures were removed from these journeys. The active
+model assertion is scoped to the visible Model settings dialog, so the catalog card cannot satisfy
+it accidentally.
+
+The focused renderer integration file passes all 27 tests. Prettier and `git diff --check` pass for
+the changed test and this backlog entry.
+
+---
 
 ### CU-014 (P1) - A DOM heuristic could reject a valid visual model action - RESOLVED 2026-08-26
 
