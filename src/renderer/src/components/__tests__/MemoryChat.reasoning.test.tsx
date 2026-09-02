@@ -19,6 +19,7 @@ import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/re
 import userEvent from '@testing-library/user-event'
 import { MemoryChat } from '../MemoryChat'
 import { TooltipProvider } from '../ui/tooltip'
+import { preloadCapabilityFakes } from './harness/chat-boundary'
 import { readReasoning } from '@renderer/lib/message-persistence'
 
 type StreamEvent = { streamId: string; type: 'content' | 'reasoning' | 'step'; text?: string }
@@ -38,6 +39,7 @@ function installApi(): { addRagMessage: AddRagMessageBoundary } {
   })
   const api = {
     isPro: false,
+    ...preloadCapabilityFakes(),
     imageGenStatus: vi.fn(async () => ({ available: false, models: [], active: '' })),
     cancelImageGen: vi.fn(),
     onImageGenProgress: vi.fn(() => () => {}),

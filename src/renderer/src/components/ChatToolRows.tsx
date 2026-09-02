@@ -26,7 +26,7 @@ interface ChatToolRowsProps {
   liveTask?: TaskSession
 }
 
-type WorkStatus = 'running' | 'complete' | 'failed' | 'needs attention'
+type WorkStatus = 'running' | 'complete' | 'failed' | 'cancelled' | 'needs attention'
 
 const PROPOSAL_STAGE_LABELS: Record<string, string> = {
   start: 'Started proposal',
@@ -118,10 +118,14 @@ function workStepLabel(tool: DisplayTool): string {
 
 function workStatus(tool: DisplayTool): WorkStatus {
   const result = visibleToolResult(tool.result)
+  const key = normalizedToolKey(tool.name)
   if ('error' in tool && tool.error?.trim()) return 'failed'
   if (/^\s*(error|failed)\s*:/i.test(result)) return 'failed'
   if (tool.status === 'failed') return 'failed'
-  if (tool.status === 'pending' || tool.status === 'cancelled') return 'needs attention'
+  if (tool.status === 'cancelled' && (key === 'request_approval' || key === 'action_approval'))
+    return 'needs attention'
+  if (tool.status === 'cancelled') return 'cancelled'
+  if (tool.status === 'pending') return 'needs attention'
   if (tool.status === 'running') return 'running'
   return 'complete'
 }
@@ -129,6 +133,7 @@ function workStatus(tool: DisplayTool): WorkStatus {
 function shortResult(tool: DisplayTool, status = workStatus(tool), taskSummary?: string): string {
   if (taskSummary?.trim()) return taskSummary.trim()
   if (status === 'running') return 'In progress.'
+  if (status === 'cancelled') return 'Cancelled.'
   if (status === 'needs attention') return 'Waiting for your attention.'
   const key = normalizedToolKey(tool.name)
   if (key === 'read_file') {
@@ -172,6 +177,9 @@ function statusIcon(status: WorkStatus): React.JSX.Element {
     return <Check className="h-3 w-3 text-green-500" aria-hidden="true" />
   }
   if (status === 'failed') return <X className="h-3 w-3 text-red-500" aria-hidden="true" />
+  if (status === 'cancelled') {
+    return <X className="h-3 w-3 text-neutral-500" aria-hidden="true" />
+  }
   if (status === 'needs attention') {
     return <Warning className="h-3 w-3 text-amber-500" aria-hidden="true" />
   }
@@ -184,6 +192,7 @@ function overallStatus(tools: readonly DisplayTool[]): WorkStatus {
   const statuses = tools.map(workStatus)
   if (statuses.includes('running')) return 'running'
   if (statuses.includes('failed')) return 'failed'
+  if (statuses.includes('cancelled')) return 'cancelled'
   if (statuses.includes('needs attention')) return 'needs attention'
   return 'complete'
 }
@@ -200,6 +209,7 @@ function workHeading(status: WorkStatus): string {
   if (status === 'running') return 'Working'
   if (status === 'needs attention') return 'Action needed'
   if (status === 'failed') return 'Work failed'
+  if (status === 'cancelled') return 'Work stopped'
   return 'Work done'
 }
 

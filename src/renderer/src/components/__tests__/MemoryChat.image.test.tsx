@@ -112,8 +112,12 @@ type InstallApiOptions = {
   conversations?: TestConversation[]
   generate?: (payload: GenPayload) => Promise<ImageResult>
   chatVision?: boolean
+  chatVisionError?: Error
+  thinking?: boolean
   processFile?: Mock<ProcessImage>
   ragAnswer?: string
+  persistMessage?: (...args: unknown[]) => Promise<{ id: number; uuid: string }>
+  announceImageMessage?: (...args: unknown[]) => Promise<void>
   /** Main-owned image job snapshot that imageGenJobStatus() reports on mount (reattach path). */
   jobStatus?: ImageGenerationJobContract
   /** Seed per-conversation persisted messages (getRagMessages), keyed by conversation id. */
@@ -130,7 +134,9 @@ type InstalledApi = {
   generateImage: Mock<(payload: GenPayload) => Promise<ImageResult>>
   emitConversationUpdated: (conversationId: string) => void
   emitJobState: (job: ImageGenerationJobContract) => void
-  setActiveModalModel: Mock<(kind: string, model: string) => Promise<void>>
+  setActiveModalModel: Mock<
+    (kind: string, model: string) => Promise<{ success: true; activeModelId: string }>
+  >
   toolChat: Mock<
     (...args: unknown[]) => Promise<{
       answer: string
@@ -202,7 +208,10 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     })
     return result
   })
-  const setActiveModalModel = vi.fn<(kind: string, model: string) => Promise<void>>(async () => {})
+  const setActiveModalModel = vi.fn(async (_kind: string, model: string) => ({
+    success: true as const,
+    activeModelId: model
+  }))
   // The agentic path's single entry point. Returns a benign text answer with no
   // imageRequest, so if the turn reaches the agent no generateImage call follows —
   // making "generateImage was/ wasn't called" an unambiguous terminal artifact.
@@ -214,11 +223,14 @@ function installApi(opts: InstallApiOptions): InstalledApi {
   const cancelImageGen = vi.fn<() => void>()
   const exportGeneratedImage = vi.fn<(...args: unknown[]) => Promise<void>>(async () => {})
   let nextStoredMessageId = 1
-  const addRagMessage = vi.fn(async () => {
-    const id = nextStoredMessageId++
-    return { id, uuid: `stored-message-${id}` }
-  })
-  const imageGenConversationPersisted = vi.fn(async () => {})
+  const addRagMessage = vi.fn(
+    opts.persistMessage ??
+      (async () => {
+        const id = nextStoredMessageId++
+        return { id, uuid: `stored-message-${id}` }
+      })
+  )
+  const imageGenConversationPersisted = vi.fn(opts.announceImageMessage ?? (async () => {}))
   // Timestamps are filled in where a seed omitted one. The renderer projects each row through
   // projectSyncedMessageTurn, which returns null for a message it cannot order, so an untimestamped
   // row is silently dropped and the conversation renders empty. The table this stands for always has
@@ -229,7 +241,10 @@ function installApi(opts: InstallApiOptions): InstalledApi {
       ...(row as Record<string, unknown>)
     }))
   )
-  const chatVisionAvailable = vi.fn(async () => opts.chatVision ?? true)
+  const chatVisionAvailable = vi.fn(async () => {
+    if (opts.chatVisionError) throw opts.chatVisionError
+    return opts.chatVision ?? true
+  })
   const processFile =
     opts.processFile ??
     vi.fn<ProcessImage>(async (_bytes: ArrayBuffer, name: string) => ({
@@ -251,6 +266,28 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     // --- assertion subjects ---
     generateImage,
     setActiveModalModel,
+    // Canonical model-control read boundary used after a selection command. The image
+    // runtime filenames are also the catalog ids in this focused renderer fixture.
+    getModelControlSnapshot: vi.fn(async () => ({
+      kinds: ['image'],
+      models: opts.models.map((model) => ({
+        id: model,
+        name: model,
+        kind: 'image',
+        files: [{ name: model, role: 'primary' }],
+        capabilities: opts.thinking === undefined ? undefined : { thinking: opts.thinking }
+      })),
+      installed: [...opts.models],
+      activeIds: [opts.active],
+      active: {
+        text: opts.thinking === undefined ? null : opts.active,
+        image: opts.active,
+        speech: null,
+        transcription: null,
+        computer_use: null
+      },
+      computerUse: null
+    })),
     // --- image engine probe (drives imgModels + imgModel on mount) ---
     imageGenStatus: vi.fn(async () => ({
       available: true,
@@ -820,6 +857,33 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     expect(generateImage).not.toHaveBeenCalled()
   })
 
+  it('keeps a completed tool answer visible and reports when Chat cannot save it', async () => {
+    let storedId = 0
+    installApi({
+      active: FULL,
+      models: [FULL],
+      settings: { composerToolsOn: true },
+      toolResult: {
+        answer: 'The task is complete.',
+        toolCalls: [{ name: 'search_memory', result: 'Found the result' }],
+        unified: []
+      },
+      persistMessage: async (_conversationId, role) => {
+        if (role === 'assistant') throw new Error('database unavailable')
+        storedId += 1
+        return { id: storedId, uuid: `stored-message-${storedId}` }
+      }
+    })
+    const user = userEvent.setup()
+    renderChat()
+
+    await sendChat(user, 'Find the result')
+
+    expect(await screen.findByText('The task is complete.')).toBeTruthy()
+    const warnings = await screen.findAllByText(/answer is visible, but chat could not save it/i)
+    expect(warnings.some((warning) => warning.getAttribute('role') === 'alert')).toBe(true)
+  })
+
   it('with tools OFF, the same "draw ..." turn auto-routes to direct image generation', async () => {
     const user = userEvent.setup()
     const { generateImage, toolChat } = installApi({ active: FULL, models: [FULL] })
@@ -832,6 +896,99 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     expect(toolChat).not.toHaveBeenCalled()
     const payload = generateImage.mock.calls[0]![0] as GenPayload
     expect(payload.prompt).toBe('a dog') // cleanImagePrompt stripped the verb
+  })
+
+  it('keeps a generated artifact visible but reports that its Chat message was not saved', async () => {
+    let storedId = 0
+    const boundary = installApi({
+      active: FULL,
+      models: [FULL],
+      persistMessage: async (_conversationId, role, _content, context) => {
+        if (
+          role === 'assistant' &&
+          typeof context === 'object' &&
+          context !== null &&
+          'imageRef' in context
+        ) {
+          throw new Error('database unavailable')
+        }
+        storedId += 1
+        return { id: storedId, uuid: `stored-message-${storedId}` }
+      }
+    })
+    const user = userEvent.setup()
+    renderChat()
+
+    await sendChat(user, 'draw a dog')
+
+    expect(await screen.findByAltText('Generated')).toBeTruthy()
+    const warnings = await screen.findAllByText(
+      /image was created, but chat could not save its message/i
+    )
+    expect(warnings.some((warning) => warning.getAttribute('role') === 'alert')).toBe(true)
+    expect(boundary.imageGenConversationPersisted).not.toHaveBeenCalled()
+  })
+
+  it('reports a sync-link failure without claiming the durable Chat message was lost', async () => {
+    const boundary = installApi({
+      active: FULL,
+      models: [FULL],
+      announceImageMessage: async () => {
+        throw new Error('sync link unavailable')
+      }
+    })
+    const user = userEvent.setup()
+    renderChat()
+
+    await sendChat(user, 'draw a dog')
+
+    expect(await screen.findByAltText('Generated')).toBeTruthy()
+    const warnings = await screen.findAllByText(
+      /image was saved in chat, but it could not be linked for device sync/i
+    )
+    expect(warnings.some((warning) => warning.getAttribute('role') === 'alert')).toBe(true)
+    expect(screen.queryByText(/image was created, but chat could not save its message/i)).toBeNull()
+    expect(boundary.addRagMessage).toHaveBeenCalled()
+    expect(boundary.imageGenConversationPersisted).toHaveBeenCalledOnce()
+  })
+
+  it('keeps successful image tool work complete when its Chat image row cannot be saved', async () => {
+    let storedId = 0
+    installApi({
+      active: FULL,
+      models: [FULL],
+      settings: { composerToolsOn: true },
+      toolResult: {
+        answer: 'I made the image.',
+        toolCalls: [{ name: 'generate_image', result: 'Image generation completed' }],
+        unified: [],
+        imageRequests: [{ prompt: 'a dog' }]
+      },
+      persistMessage: async (_conversationId, role, _content, context) => {
+        if (
+          role === 'assistant' &&
+          typeof context === 'object' &&
+          context !== null &&
+          'imageRef' in context
+        ) {
+          throw new Error('database unavailable')
+        }
+        storedId += 1
+        return { id: storedId, uuid: `stored-message-${storedId}` }
+      }
+    })
+    const user = userEvent.setup()
+    renderChat()
+
+    await sendChat(user, 'make an image of a dog')
+
+    expect(await screen.findByAltText('Generated')).toBeTruthy()
+    expect(await screen.findByText('Work done')).toBeTruthy()
+    expect(screen.queryByText('Work failed')).toBeNull()
+    const warnings = await screen.findAllByText(
+      /image was created, but chat could not save its message/i
+    )
+    expect(warnings.some((warning) => warning.getAttribute('role') === 'alert')).toBe(true)
   })
 
   it('generates, associates, and renders one distinct image for every completed image tool call', async () => {
@@ -1185,13 +1342,14 @@ describe('<MemoryChat/> image and vision release journeys', () => {
     const boundary = installApi({
       active: FULL,
       models: [FULL],
-      settings: { composerThinking: true }
+      settings: { composerThinking: true },
+      thinking: true
     })
     const user = userEvent.setup()
     renderChat()
 
     await waitFor(() => expect(boundary.chatVisionAvailable).toHaveBeenCalledTimes(1))
-    const thinkingButton = screen.getByRole('button', { name: 'Thinking' })
+    const thinkingButton = await screen.findByRole('button', { name: 'Thinking' })
     await waitFor(() => expect(thinkingButton.className).toContain('border-green-500'))
     expect(boundary.saveSetting).not.toHaveBeenCalled()
 
@@ -1217,6 +1375,31 @@ describe('<MemoryChat/> image and vision release journeys', () => {
     await sendChat(user, 'Continue with text only')
     expect(await screen.findByText('A red fox is standing in snow.')).toBeTruthy()
     expect(boundary.ragChat.mock.calls[0]![8]).toEqual([])
+  })
+
+  it('fails closed and exposes a warning when vision capability projection fails', async () => {
+    const boundary = installApi({
+      active: FULL,
+      models: [FULL],
+      chatVisionError: new Error('vision status unavailable')
+    })
+    const user = userEvent.setup()
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    renderChat()
+
+    expect(
+      await screen.findByText(
+        'Chat could not verify image support. Image attachments stay off until model status is available.'
+      )
+    ).toBeTruthy()
+    await user.upload(imageInput(), new File(['png'], 'blocked.png', { type: 'image/png' }))
+
+    expect(boundary.processFile).not.toHaveBeenCalled()
+    expect(screen.queryByText('blocked.png')).toBeNull()
+    expect(console.error).toHaveBeenCalledWith(
+      '[ModelControl] Chat vision capability projection failed.',
+      expect.any(Error)
+    )
   })
 
   it('shows a damaged-image error and keeps the conversation usable (#70)', async () => {

@@ -35,7 +35,7 @@ import {
   type FitTier,
   fitLevel,
   FIT_OK_FRAC,
-  ModelActivationCommandService
+  modelControlSurfaceForKind
 } from '@offgrid/models'
 import {
   filterAndSort,
@@ -52,6 +52,11 @@ import {
   type Credibility,
   type ModelKind
 } from '@offgrid/models'
+import {
+  desktopModelControl,
+  type DesktopModelControlModel,
+  type DesktopModelControlProjection
+} from '@renderer/lib/model-control-application'
 import {
   useModelDownloadProgress,
   type ModelDownloadProgressEvent
@@ -131,32 +136,7 @@ function Sel({
   )
 }
 
-interface ModelFile {
-  name: string
-  url: string
-  sizeBytes?: number
-}
-interface ModelEntry {
-  id: string
-  sourceModelId?: string
-  name: string
-  kind: ModelKind
-  org?: string
-  description?: string
-  params?: number
-  minRamGb?: number
-  isNew?: boolean
-  files: ModelFile[]
-  imageModes?: string[]
-  tags?: string[]
-  releaseDate?: string
-  quant?: string
-  availability?: 'ready' | 'coming_soon'
-  availabilityNote?: string
-  grounder?: boolean
-  remoteServerId?: string
-  remoteModelId?: string
-}
+type ModelEntry = DesktopModelControlModel
 
 interface UseCase {
   id: string
@@ -348,9 +328,24 @@ export function ModelsScreen({
   // one truth from the backend; the UI never re-derives "active" per kind.
   const [activeIds, setActiveIds] = useState<Set<string>>(new Set())
   const isActive = (id: string): boolean => activeIds.has(id)
-  const refreshActive = (): void => {
-    void api.getActiveModelIds?.().then((ids: string[]) => setActiveIds(new Set(ids)))
-  }
+  const applyModelControlProjection = useCallback(
+    (projection: DesktopModelControlProjection): void => {
+      setKinds(projection.kinds)
+      setModels(projection.models)
+      setInstalled(projection.installed)
+      setActiveIds(new Set(projection.activeIds))
+      setActiveKind((current) =>
+        current === 'storage' || projection.kinds.includes(current)
+          ? current
+          : (projection.kinds[0] ?? 'text')
+      )
+    },
+    []
+  )
+  const refreshModelControl = useCallback(async (): Promise<void> => {
+    const result = await desktopModelControl.execute({ type: 'refresh' })
+    if (result.status === 'completed') applyModelControlProjection(result.projection)
+  }, [applyModelControlProjection])
   const [switching, setSwitching] = useState<string | null>(null)
   const [switchError, setSwitchError] = useState<string | null>(null)
   const [ramGb, setRamGb] = useState<number | null>(null)
@@ -395,12 +390,7 @@ export function ModelsScreen({
     try {
       const res = await api.importLocalModel?.()
       if (res?.success) {
-        const c = await api.getModelCatalog?.()
-        if (c) {
-          setKinds(c.kinds)
-          setModels(c.models)
-        }
-        setInstalled(await api.getInstalledModels?.())
+        await refreshModelControl()
         selectKind('text')
       } else if (res && !res.canceled && res.error) {
         window.alert(`Import failed: ${res.error}`)
@@ -415,17 +405,9 @@ export function ModelsScreen({
       .systemHealth?.()
       .then((h: { ramGb?: number }) => setRamGb(h.ramGb ?? null))
       .catch(() => {})
-    api.getModelCatalog?.().then((c: { kinds: string[]; models: ModelEntry[] }) => {
-      setKinds(c.kinds)
-      setModels(c.models)
-      setActiveKind((current) =>
-        current === 'storage' || c.kinds.includes(current) ? current : (c.kinds[0] ?? 'text')
-      )
-    })
-    api.getInstalledModels?.().then(setInstalled)
+    void refreshModelControl()
     refreshVision()
-    refreshActive()
-  }, [])
+  }, [refreshModelControl])
 
   useModelDownloadProgress((d: ModelDownloadProgressEvent) => {
     if (d.status === 'cancelled') {
@@ -446,40 +428,44 @@ export function ModelsScreen({
       }
     })
     if (d.status === 'completed') {
-      api.getModelCatalog?.().then((c: { kinds: string[]; models: ModelEntry[] }) => {
-        setKinds(c.kinds)
-        setModels(c.models)
-      })
-      api.getInstalledModels?.().then(setInstalled)
+      void refreshModelControl()
       refreshVision()
-      refreshActive()
     }
   })
 
   const cancelDownload = (id: string): void => {
-    void api.cancelModelDownload?.(id)
     setProgress((p) => withoutProgressEntry(p, id))
+    void desktopModelControl.execute({ type: 'cancel-download', modelId: id }).then((result) => {
+      if (result.status === 'cancelled') applyModelControlProjection(result.projection)
+    })
   }
   const download = (id: string): void => {
     // 'queued', not 'downloading': nothing has been downloaded yet, and claiming otherwise is what
     // left a refused request showing a spinner at 0% forever. The main process moves it to
     // 'downloading' when bytes actually start, and to 'failed' if it never gets that far.
     setProgress((p) => ({ ...p, [id]: { percent: 0, status: 'queued' } }))
-    void Promise.resolve(api.downloadModel?.(id)).then(
-      (r?: { success: boolean; error?: string }) => {
-        if (!r || r.success) return
+    void desktopModelControl.execute({ type: 'download', modelId: id }).then((result) => {
+      if (result.status === 'completed') {
+        applyModelControlProjection(result.projection)
+        return
+      }
+      if (result.status === 'cancelled') {
+        setProgress((p) => withoutProgressEntry(p, id))
+        applyModelControlProjection(result.projection)
+        return
+      }
+      if (result.status === 'failed') {
         // You cancelled it, so there is nothing to report: the download resolves unsuccessfully by
         // design, and the progress channel has already cleared the card. Treating that as a failure
         // put a red "cancelled" box under a model you had just chosen to stop.
-        if (r.error === 'cancelled') return
         // A refusal also arrives on the progress channel; recording it here too means the card
         // still tells the truth if this window was not listening when the event went out.
         setProgress((p) => ({
           ...p,
-          [id]: { ...p[id], percent: 0, status: 'failed', error: r.error }
+          [id]: { ...p[id], percent: 0, status: 'failed', error: result.error }
         }))
       }
-    )
+    })
   }
   const retryDownload = (id: string): void => {
     setProgress((p) => withoutProgressEntry(p, id))
@@ -489,9 +475,8 @@ export function ModelsScreen({
     if (!window.confirm(`Delete "${label}"? This removes its files from disk.`)) return
     setDeleting(id)
     try {
-      await api.deleteModel?.(id)
-      setInstalled(await api.getInstalledModels?.())
-      refreshActive()
+      const result = await desktopModelControl.execute({ type: 'remove', modelId: id })
+      if (result.status === 'completed') applyModelControlProjection(result.projection)
     } finally {
       setDeleting(null)
     }
@@ -501,21 +486,20 @@ export function ModelsScreen({
     setSwitchError(null)
     setSwitching(id)
     try {
-      const command = new ModelActivationCommandService({
-        assess: async (modelId) => (await api.estimateModelFit?.(modelId)) ?? null,
-        activate: async (modelId, requestedKind) =>
-          (await api.activateModel?.(modelId, requestedKind)) ?? {
-            success: false,
-            error: 'activation unavailable'
-          },
-        refresh: async () => refreshActive()
-      })
-      let result = await command.execute({ modelId: id, kind: activeKind })
+      const surface = modelControlSurfaceForKind(activeKind)
+      if (!surface) throw new Error(`Unsupported model control kind: ${activeKind}`)
+      let result = await desktopModelControl.execute({ type: 'activate', modelId: id, surface })
       if (result.status === 'confirmation_required') {
         if (!window.confirm(`${result.message}\n\nLoad it anyway?`)) return
-        result = await command.execute({ modelId: id, kind: activeKind, overrideMemory: true })
+        result = await desktopModelControl.execute({
+          type: 'activate',
+          modelId: id,
+          surface,
+          overrideMemory: true
+        })
       }
       if (result.status === 'failed') setSwitchError(`Couldn't switch: ${result.error}`)
+      if (result.status === 'completed') applyModelControlProjection(result.projection)
     } catch (e) {
       setSwitchError(e instanceof Error ? e.message : "Couldn't switch model")
     } finally {
@@ -611,7 +595,7 @@ export function ModelsScreen({
   // Four-way browse chip: only a model past the AGGRESSIVE ceiling reads "won't
   // fit"; 55-82%-of-RAM models read "tight" and stay loadable (Load anyway) — the
   // never-block posture, more accurate than the old 3-way "may not fit".
-  const ramTier = (m: { files?: ModelFile[] }): FitTier => {
+  const ramTier = (m: { files?: { sizeBytes?: number }[] }): FitTier => {
     if (!ramGb) return 'easy'
     const gb = totalBytes(m) / 1e9
     if (!gb) return 'easy'

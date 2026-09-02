@@ -11,6 +11,7 @@
  */
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
+import { modelControlSnapshot } from './harness/model-control-snapshot'
 
 interface Entry {
   id: string
@@ -44,6 +45,8 @@ const HUGE: Entry = {
 let ramGbValue = 16
 ;(window as unknown as { api: unknown }).api = {
   systemHealth: async () => ({ ramGb: ramGbValue }),
+  getModelControlSnapshot: async () =>
+    modelControlSnapshot({ kinds: ['language'], models: [SMALL, HUGE] }),
   getModelCatalog: async () => ({ kinds: ['language'], models: [SMALL, HUGE] }),
   getInstalledModels: async () => [],
   getActiveModelIds: async () => [],

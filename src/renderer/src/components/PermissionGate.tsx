@@ -11,15 +11,22 @@ import { formatTransferSpeed } from '@offgrid/sync'
 import { projectProgress, type ProgressLike } from '@offgrid/ui'
 import { formatStorageBytes } from './setup/storage-format'
 import { useTaskWorkspaceOpen } from '@renderer/lib/task-side-panel'
-import { useModelDownloadProgress } from '@renderer/hooks/useModelDownloadProgress'
+import { useCaptureReadiness } from './use-capture-readiness'
+import type { CaptureReadinessProjection } from '@offgrid/models'
 
 interface PermissionGateProps {
   children: React.ReactNode
 }
 
-type VisionIssue =
-  | { kind: 'missing-projector'; modelId: string; modelName: string }
-  | { kind: 'choose-vision-model'; modelId: string | null; modelName: string | null }
+type RepairableCaptureProjection = Extract<
+  CaptureReadinessProjection,
+  { kind: 'missing-projector' | 'choose-vision-model' }
+>
+
+function openModelLibrary(): void {
+  window.dispatchEvent(new CustomEvent('og:navigate', { detail: 'models' }))
+  window.history.replaceState(null, '', '/models')
+}
 
 export function PermissionGate({ children }: PermissionGateProps) {
   const { isPro } = useRendererEntitlement()
@@ -30,11 +37,10 @@ export function PermissionGate({ children }: PermissionGateProps) {
   // The detailed setup screen opens on demand; a slim nudge can be dismissed.
   const [showSetup, setShowSetup] = useState(false)
   const [setupDismissed, setSetupDismissed] = useState(false)
-  const [visionIssue, setVisionIssue] = useState<VisionIssue | null>(null)
-  const [visionDownloadProgress, setVisionDownloadProgress] = useState<ProgressLike | null>(null)
   const permissions = usePermissionController(isPro)
   const permissionStatus = permissions.status
   const isChecking = permissions.checking
+  const captureReadiness = useCaptureReadiness(isPro)
 
   // Capture permissions (Accessibility + Screen Recording) are only needed by the
   // Pro "sees" layer. The free build runs chat/projects/models and gates on the
@@ -53,69 +59,10 @@ export function PermissionGate({ children }: PermissionGateProps) {
     }
   }, [])
 
-  const checkCaptureVision = useCallback(async () => {
-    if (!isPro || !window.api.proInvoke) return
-    try {
-      const [activeId, statuses, capture] = await Promise.all([
-        window.api.getActiveModel?.(),
-        window.api.getModelVisionStatus?.(),
-        window.api.proInvoke('capture:status')
-      ])
-      const status = capture as
-        | { running?: boolean; paused?: boolean; visionReady?: boolean }
-        | undefined
-      if (!status?.running || status.paused || status.visionReady) {
-        setVisionIssue(null)
-        return
-      }
-      const activeStatus = activeId ? statuses?.[activeId] : undefined
-      if (activeId && activeStatus?.supportsVision && !activeStatus.projectorInstalled) {
-        setVisionIssue({
-          kind: 'missing-projector',
-          modelId: activeId,
-          modelName: activeId.split('/').pop() ?? activeId
-        })
-        return
-      }
-      if (activeId && activeStatus?.supportsVision && activeStatus.projectorInstalled) {
-        setVisionIssue(null)
-        return
-      }
-      setVisionIssue({
-        kind: 'choose-vision-model',
-        modelId: activeId ?? null,
-        modelName: activeId ? (activeId.split('/').pop() ?? activeId) : null
-      })
-    } catch (error) {
-      console.error('Failed to check capture vision readiness:', error)
-    }
-  }, [isPro])
-
   // Initial check
   useEffect(() => {
     checkModelStatus()
-    void checkCaptureVision()
-  }, [checkModelStatus, checkCaptureVision])
-
-  useEffect(() => {
-    if (!isPro) return
-    const offCapture = window.api.proOn?.('capture:changed', () => void checkCaptureVision())
-    return () => {
-      if (typeof offCapture === 'function') offCapture()
-    }
-  }, [checkCaptureVision, isPro])
-
-  useModelDownloadProgress((progress) => {
-    if (progress.modelId !== visionIssue?.modelId) return
-    if (progress.status === 'completed') {
-      setVisionDownloadProgress(null)
-      void checkCaptureVision()
-    } else if (progress.status === 'failed' || progress.status === 'cancelled') {
-      setVisionDownloadProgress(null)
-    } else {
-      setVisionDownloadProgress(progress)
-    }
-  }, isPro)
+  }, [checkModelStatus])
 
   // Permission polling is owned by usePermissionController. Keep model polling here
   // because model readiness is a separate setup boundary.
@@ -128,26 +75,6 @@ export function PermissionGate({ children }: PermissionGateProps) {
 
     return () => clearInterval(interval)
   }, [modelStatus?.downloaded, checkModelStatus])
-
-  const openModels = (): void => {
-    window.dispatchEvent(new CustomEvent('og:navigate', { detail: 'models' }))
-    window.history.replaceState(null, '', '/models')
-  }
-
-  const handleVisionAction = (): void => {
-    if (visionIssue?.kind === 'missing-projector') {
-      setVisionDownloadProgress({ percent: 0 })
-      void window.api
-        .downloadModel?.(visionIssue.modelId)
-        .catch((error) => console.error('Failed to download capture vision support:', error))
-        .finally(() => {
-          setVisionDownloadProgress(null)
-          void checkCaptureVision()
-        })
-      return
-    }
-    openModels()
-  }
 
   // Loading state
   if (isChecking && !permissionStatus) {
@@ -188,15 +115,19 @@ export function PermissionGate({ children }: PermissionGateProps) {
             onDismiss={() => setSetupDismissed(true)}
           />
         )}
-        {ready && visionIssue && !setupDismissed && (
-          <SetupNudge
-            issue={visionIssue.kind}
-            modelName={visionIssue.modelName}
-            progress={visionDownloadProgress}
-            onOpen={handleVisionAction}
-            onDismiss={() => setSetupDismissed(true)}
-          />
-        )}
+        {ready &&
+          captureReadiness.projection &&
+          (captureReadiness.projection.kind === 'missing-projector' ||
+            captureReadiness.projection.kind === 'choose-vision-model') &&
+          !setupDismissed && (
+            <SetupNudge
+              issue={captureReadiness.projection.kind}
+              modelName={captureReadiness.projection.modelName}
+              progress={captureReadiness.progress}
+              onOpen={() => void captureReadiness.repair()}
+              onDismiss={() => setSetupDismissed(true)}
+            />
+          )}
       </>
     )
   }
@@ -264,7 +195,7 @@ export function PermissionGate({ children }: PermissionGateProps) {
                   // app shell (already mounted behind this gate) listens for og:navigate
                   // and switches view — replaceState alone wouldn't re-derive it. Keep
                   // the URL in sync, then dismiss the gate.
-                  openModels()
+                  openModelLibrary()
                   setSetupDismissed(true)
                   setShowSetup(false)
                 }}
@@ -328,7 +259,7 @@ function SetupNudge({
 }: {
   missingModel?: boolean
   missingLocalNetwork?: boolean
-  issue?: VisionIssue['kind']
+  issue?: RepairableCaptureProjection['kind']
   modelName?: string | null
   progress?: ProgressLike | null
   onOpen: () => void

@@ -325,6 +325,12 @@ interface RendererAPIOverrides {
   // App Settings
   getSettings: () => Promise<AppSettings>
   saveSetting: (key: string, value: unknown) => Promise<void>
+  getComputerUseSettings: () => Promise<
+    import('../../shared/computer-use-settings').ComputerUseSettingsPortResult
+  >
+  patchComputerUseSettings: (
+    patch: import('../../shared/computer-use-settings').ComputerUseSettingsPatch
+  ) => Promise<import('../../shared/computer-use-settings').ComputerUseSettingsPortResult>
   consoleEnroll: (
     url: string,
     token: string

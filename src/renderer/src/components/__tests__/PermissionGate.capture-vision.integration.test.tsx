@@ -9,17 +9,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { PermissionGate } from '../PermissionGate'
+import { modelControlSnapshot } from './harness/model-control-snapshot'
 
 const MODEL_ID = 'unsloth/gemma-4-E2B-it-GGUF'
 let visionStatus: Record<string, { supportsVision: boolean; projectorInstalled: boolean }>
 let downloadModel: ReturnType<typeof vi.fn>
 let captureStatus: { running: boolean; paused: boolean; visionReady: boolean }
 let proListeners: Map<string, () => void>
-let modelProgress: ((progress: {
-  modelId: string
-  percent?: number
-  status?: 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled'
-}) => void) | null
+let modelProgress:
+  | ((progress: {
+      modelId: string
+      percent?: number
+      status?: 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled'
+    }) => void)
+  | null
 
 beforeEach(() => {
   visionStatus = {}
@@ -38,7 +41,16 @@ beforeEach(() => {
         allGranted: true
       }),
       checkModelStatus: async () => ({ downloaded: true, modelsDir: '/tmp/models' }),
+      getModelControlSnapshot: async () =>
+        modelControlSnapshot({
+          kinds: ['vision'],
+          models: [{ id: MODEL_ID, name: 'Gemma 4', kind: 'vision', files: [] }],
+          installed: [MODEL_ID],
+          activeIds: [MODEL_ID],
+          active: { text: MODEL_ID }
+        }),
       getActiveModel: async () => MODEL_ID,
+      getModelCatalog: async () => ({ models: [{ id: MODEL_ID, name: 'Gemma 4' }] }),
       getModelVisionStatus: async () => visionStatus,
       proInvoke: async (channel: string) => {
         if (channel === 'capture:status') {
@@ -74,6 +86,9 @@ describe('<PermissionGate/> Pro capture vision recovery', () => {
     )
 
     expect(await screen.findByText('Capture needs vision support')).toBeTruthy()
+    expect(
+      screen.getByText('Gemma 4 can read images after its vision projector is downloaded.')
+    ).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Download vision support' }))
     expect(downloadModel).toHaveBeenCalledWith(MODEL_ID)
   })
@@ -144,25 +159,31 @@ describe('<PermissionGate/> Pro capture vision recovery', () => {
 
     modelProgress?.({ modelId: MODEL_ID, percent: 42, status: 'downloading' })
     expect(
-      (await screen.findByRole('button', { name: 'Downloading 42%' }) as HTMLButtonElement).disabled
+      ((await screen.findByRole('button', { name: 'Downloading 42%' })) as HTMLButtonElement)
+        .disabled
     ).toBe(true)
 
     modelProgress?.({ modelId: MODEL_ID, status: 'failed' })
     expect(
-      (await screen.findByRole('button', {
-        name: 'Download vision support'
-      }) as HTMLButtonElement).disabled
+      (
+        (await screen.findByRole('button', {
+          name: 'Download vision support'
+        })) as HTMLButtonElement
+      ).disabled
     ).toBe(false)
 
     modelProgress?.({ modelId: MODEL_ID, percent: 65, status: 'downloading' })
     expect(
-      (await screen.findByRole('button', { name: 'Downloading 65%' }) as HTMLButtonElement).disabled
+      ((await screen.findByRole('button', { name: 'Downloading 65%' })) as HTMLButtonElement)
+        .disabled
     ).toBe(true)
     modelProgress?.({ modelId: MODEL_ID, status: 'cancelled' })
     expect(
-      (await screen.findByRole('button', {
-        name: 'Download vision support'
-      }) as HTMLButtonElement).disabled
+      (
+        (await screen.findByRole('button', {
+          name: 'Download vision support'
+        })) as HTMLButtonElement
+      ).disabled
     ).toBe(false)
   })
 

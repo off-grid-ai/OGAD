@@ -5,26 +5,14 @@ import { SidePanel } from './SidePanel'
 import type { ComputerUseActiveModelProjection } from '../../../shared/computer-use-settings'
 import { openModelSettingsPanel } from '@renderer/lib/model-settings-panel'
 import { SettingsSelect } from './SettingsSelect'
+import {
+  desktopModelControl,
+  type DesktopModelControlModel,
+  type DesktopModelControlProjection
+} from '@renderer/lib/model-control-application'
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const api = (): any => (window as any).api
+type ModelEntry = DesktopModelControlModel
 
-interface ModelFile {
-  name: string
-  role?: string
-}
-interface ModelEntry {
-  id: string
-  name: string
-  kind: string
-  files?: ModelFile[]
-  remoteServerId?: string
-  grounder?: boolean
-  availability?: 'ready' | 'coming_soon'
-}
-
-// The text/vision LLM is selected by catalog id (it reloads llama-server); image
-// and transcription runtimes resolve by FILENAME on disk; voice is one engine.
 const MODALITIES: {
   label: string
   kinds: string[]
@@ -37,22 +25,9 @@ const MODALITIES: {
 ]
 type PickerMode = (typeof MODALITIES)[number]['mode']
 
-// Picker mode -> runtime Modality (the id the unload/residency seam uses). One map,
-// so the composer chip / panel / any future surface all resolve unload the same way.
-const MODE_TO_MODALITY: Record<PickerMode, string> = {
-  text: 'llm',
-  image: 'image',
-  speech: 'tts',
-  transcription: 'stt'
-}
-
 // Per-modality unload status. Absent = loaded/idle. Kept as a map keyed by mode so each
 // modality is independent — unloading one must NOT reset another's state.
 type UnloadStatus = 'unloading' | 'unloaded' | 'error'
-
-function primaryFile(m: ModelEntry): string {
-  return m.files?.find((f) => f.role === 'primary')?.name ?? m.files?.[0]?.name ?? m.id
-}
 
 function openSettings(onClose: () => void): void {
   onClose()
@@ -62,35 +37,22 @@ function openSettings(onClose: () => void): void {
 export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactElement {
   const [models, setModels] = useState<ModelEntry[]>([])
   const [installed, setInstalled] = useState<string[]>([])
-  // The active selection per modality: id for text, filename for image/STT.
   const [active, setActive] = useState<Record<string, string | null>>({})
-  const [activeIds, setActiveIds] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState<string | null>(null)
   const [unload, setUnload] = useState<Record<string, UnloadStatus>>({})
   const [computerUse, setComputerUse] = useState<ComputerUseActiveModelProjection | null>(null)
 
-  const load = useCallback(async () => {
-    const cat = await api().getModelCatalog?.()
-    const catalogModels: ModelEntry[] = cat?.models ?? []
-    setModels(catalogModels)
-    setInstalled((await api().getInstalledModels?.()) ?? [])
-    const text = await api().getActiveModel?.()
-    const modal = (await api().getActiveModalities?.()) ?? {}
-    const nextActiveIds = new Set<string>((await api().getActiveModelIds?.()) ?? [])
-    const computerUseProjection = await api().getComputerUseActiveModels?.()
-    const remoteTextActive = catalogModels.some(
-      (model) => model.remoteServerId && nextActiveIds.has(model.id)
-    )
-    setActiveIds(nextActiveIds)
-    setActive({
-      text: remoteTextActive ? null : (text ?? modal.text ?? null),
-      image: modal.image ?? null,
-      speech: modal.speech ?? null,
-      transcription: modal.transcription ?? null,
-      computer_use: modal.computer_use ?? null
-    })
-    setComputerUse(computerUseProjection ?? null)
+  const applyProjection = useCallback((projection: DesktopModelControlProjection): void => {
+    setModels(projection.models)
+    setInstalled(projection.installed)
+    setActive(projection.active)
+    setComputerUse(projection.computerUse)
   }, [])
+
+  const load = useCallback(async () => {
+    const result = await desktopModelControl.execute({ type: 'refresh' })
+    if (result.status === 'completed') applyProjection(result.projection)
+  }, [applyProjection])
   useEffect(() => {
     void load()
   }, [load])
@@ -111,10 +73,12 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     setBusy(m.id)
     clearUnloadStatus(mode) // re-selecting reloads this modality on next use
     try {
-      const result = await api().activateModel?.(m.id, m.kind)
-      if (result?.success !== false) {
-        await load()
-      }
+      const result = await desktopModelControl.execute({
+        type: 'activate',
+        modelId: m.id,
+        surface: mode
+      })
+      if (result.status === 'completed') applyProjection(result.projection)
     } finally {
       setBusy(null)
     }
@@ -124,11 +88,12 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     if (!modelId) return
     setBusy(modelId)
     try {
-      const result = await api().activateModel?.(modelId, 'computer_use')
-      if (result?.success !== false) {
-        setActive((current) => ({ ...current, computer_use: modelId }))
-        await load()
-      }
+      const result = await desktopModelControl.execute({
+        type: 'activate',
+        modelId,
+        surface: 'computer_use'
+      })
+      if (result.status === 'completed') applyProjection(result.projection)
     } finally {
       setBusy(null)
     }
@@ -137,21 +102,10 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
   // Unload one modality's model from memory now (frees RAM; reloads on next use).
   // Independent per modality — writes only this mode's status.
   const unloadModel = async (mode: PickerMode): Promise<void> => {
-    const bridge = api()
-    if (typeof bridge?.unloadRuntime !== 'function') {
-      // Preload method missing — surface it instead of a silent no-op (there'd be no
-      // IPC call and no log). Happens until the app is restarted after preload changed.
-      setUnloadStatus(mode, 'error')
-      console.error('[models] unloadRuntime is unavailable — restart the app')
-      return
-    }
     setUnloadStatus(mode, 'unloading')
     try {
-      const freed = await bridge.unloadRuntime(MODE_TO_MODALITY[mode])
-      console.log(
-        `[models] unload ${mode} (${MODE_TO_MODALITY[mode]}):`,
-        freed ? 'freed' : 'nothing loaded'
-      )
+      const result = await desktopModelControl.execute({ type: 'unload', surface: mode })
+      if (result.status === 'completed') applyProjection(result.projection)
       setUnloadStatus(mode, 'unloaded')
     } catch (e) {
       console.error('[models] unload failed', e)
@@ -249,12 +203,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
           const list = models.filter((m) => kinds.includes(m.kind) && installed.includes(m.id))
           const cur = active[mode]
           const status = unload[mode]
-          const isActive = (m: ModelEntry): boolean =>
-            mode === 'text'
-              ? m.remoteServerId
-                ? activeIds.has(m.id)
-                : cur === m.id
-              : cur === primaryFile(m)
+          const isActive = (m: ModelEntry): boolean => cur === m.id
           return (
             <div key={mode}>
               <div className="mb-1.5 flex items-center justify-between">

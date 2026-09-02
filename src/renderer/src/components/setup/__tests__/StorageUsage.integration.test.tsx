@@ -10,10 +10,15 @@ describe('rendered storage usage', () => {
   let api: {
     getStorageInfo: ReturnType<typeof vi.fn>
     listDownloads: ReturnType<typeof vi.fn>
+    getDownloadRecoveryHealth: ReturnType<typeof vi.fn>
+    deleteOrphans: ReturnType<typeof vi.fn>
     getDataSummary: ReturnType<typeof vi.fn>
     onModelProgress: ReturnType<typeof vi.fn>
     retryDownload: ReturnType<typeof vi.fn>
     cancelModelDownload: ReturnType<typeof vi.fn>
+    getModelControlSnapshot: ReturnType<typeof vi.fn>
+    estimateModelFit: ReturnType<typeof vi.fn>
+    activateModel: ReturnType<typeof vi.fn>
     clearAppCache: ReturnType<typeof vi.fn>
   }
 
@@ -42,6 +47,14 @@ describe('rendered storage usage', () => {
         orphans: []
       })),
       listDownloads: vi.fn(async () => []),
+      getDownloadRecoveryHealth: vi.fn(async () => ({ status: 'healthy' })),
+      deleteOrphans: vi.fn(async () => ({
+        success: true,
+        count: 0,
+        freedBytes: 0,
+        retainedBytes: 0,
+        failures: []
+      })),
       getDataSummary: vi.fn(async () => [
         {
           id: 'captures',
@@ -61,6 +74,25 @@ describe('rendered storage usage', () => {
       onModelProgress: vi.fn(() => () => {}),
       retryDownload: vi.fn(async () => ({ success: false })),
       cancelModelDownload: vi.fn(async () => true),
+      getModelControlSnapshot: vi.fn(async () => ({
+        kinds: ['text', 'vision'],
+        models: [
+          { id: 'text-model', name: 'Local text model', kind: 'text', files: [] },
+          { id: 'vision-model', name: 'Local vision model', kind: 'vision', files: [] }
+        ],
+        installed: ['text-model', 'vision-model'],
+        activeIds: ['text-model'],
+        active: {
+          text: 'text-model',
+          image: null,
+          speech: null,
+          transcription: null,
+          computer_use: null
+        },
+        computerUse: null
+      })),
+      estimateModelFit: vi.fn(async () => ({ level: 'ok' })),
+      activateModel: vi.fn(async () => ({ success: true })),
       clearAppCache: vi.fn(async () => ({ success: true, freedBytes: 3_000_000 }))
     }
     ;(globalThis as unknown as { window: Window }).window.api = api as never
@@ -111,6 +143,77 @@ describe('rendered storage usage', () => {
     }
   })
 
+  it('uses the canonical model-control identity when the storage projection is stale', async () => {
+    api.getModelControlSnapshot.mockResolvedValue({
+      kinds: ['text', 'vision'],
+      models: [
+        { id: 'text-model', name: 'Local text model', kind: 'text', files: [] },
+        { id: 'vision-model', name: 'Local vision model', kind: 'vision', files: [] }
+      ],
+      installed: ['text-model', 'vision-model'],
+      activeIds: ['vision-model'],
+      active: {
+        text: 'vision-model',
+        image: null,
+        speech: null,
+        transcription: null,
+        computer_use: null
+      },
+      computerUse: null
+    })
+
+    render(<StoragePanel />)
+
+    expect(
+      await screen.findByRole('button', { name: 'Settings for Local vision model' })
+    ).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Settings for Local text model' })).toBeNull()
+    expect(
+      (screen.getByRole('button', { name: 'Delete Local vision model' }) as HTMLButtonElement)
+        .disabled
+    ).toBe(true)
+    expect(
+      (
+        screen.getByRole('button', {
+          name: 'Delete Local text model'
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(false)
+  })
+
+  it('requires explicit approval before it overrides the memory guard', async () => {
+    api.estimateModelFit.mockResolvedValue({
+      level: 'challenger',
+      message: 'This model can use more memory than is currently available.'
+    })
+    const user = userEvent.setup()
+    render(<StoragePanel />)
+
+    await user.click(await screen.findByRole('button', { name: 'Use' }))
+
+    expect(api.activateModel).not.toHaveBeenCalled()
+    expect(
+      screen.getByText('This model can use more memory than is currently available.')
+    ).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Load anyway' }))
+    expect(api.activateModel).toHaveBeenCalledWith('vision-model', undefined)
+  })
+
+  it('shows an activation failure instead of refreshing as if it succeeded', async () => {
+    api.activateModel.mockResolvedValue({
+      success: false,
+      error: 'The runtime rejected this model.'
+    })
+    const user = userEvent.setup()
+    render(<StoragePanel />)
+
+    await user.click(await screen.findByRole('button', { name: 'Use' }))
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'The runtime rejected this model.'
+    )
+  })
+
   it('explains a disk-full download and keeps its retry action reachable', async () => {
     // This is the public IPC payload. The producer's ENOSPC normalization and
     // persistence are exercised separately by model-integrity.integration.test.ts.
@@ -131,6 +234,38 @@ describe('rendered storage usage', () => {
     expect(screen.getByText(diskFullMessage)).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Retry' }))
     expect(api.retryDownload).toHaveBeenCalledWith('synthetic/text-model')
+  })
+
+  it('shows restart recovery risk and retained orphan files without false success', async () => {
+    api.getDownloadRecoveryHealth.mockResolvedValue({
+      status: 'degraded',
+      error: 'Download recovery data could not be saved.'
+    })
+    api.getStorageInfo.mockResolvedValue({
+      dir: '/tmp/offgrid/models',
+      totalBytes: 1024,
+      freeBytes: 6_000_000_000,
+      models: [],
+      orphans: [{ name: 'busy.gguf', bytes: 1024 }]
+    })
+    api.deleteOrphans.mockResolvedValue({
+      success: false,
+      count: 0,
+      freedBytes: 0,
+      retainedBytes: 1024,
+      failures: [{ name: 'busy.gguf', bytes: 1024, error: 'File is busy.' }]
+    })
+    const user = userEvent.setup()
+
+    render(<StoragePanel />)
+
+    expect(
+      await screen.findByText(
+        'Current downloads can continue, but interrupted downloads cannot resume after restart.'
+      )
+    ).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Clean up' }))
+    expect(await screen.findByText('busy.gguf could not be removed. 1 KB remains.')).toBeTruthy()
   })
 
   it('shows manager-owned running and queued counts and can cancel a queued item (#22)', async () => {

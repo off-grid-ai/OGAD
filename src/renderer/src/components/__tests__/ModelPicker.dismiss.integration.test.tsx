@@ -11,70 +11,103 @@ afterEach(() => {
 })
 
 function renderPicker(onClose = vi.fn()): ReturnType<typeof vi.fn> {
+  const computerUse = {
+    strategy: 'text_plus_specialist',
+    strategyLabel: 'Text + Specialist',
+    models: [
+      {
+        role: 'reasoner',
+        modelId: 'remote/reasoner',
+        modelName: 'Qwen Reasoner',
+        remote: true
+      },
+      {
+        role: 'grounding_specialist',
+        modelId: 'local/ui-tars',
+        modelName: 'UI-TARS 1.5 7B',
+        remote: false
+      }
+    ]
+  }
+  const models = [
+    {
+      id: 'local/qwen',
+      name: 'Qwen 3.5 2B',
+      kind: 'text',
+      files: [{ name: 'qwen.gguf', role: 'primary' }]
+    }
+  ]
   ;(window as unknown as { api: Record<string, unknown> }).api = {
-    getModelCatalog: vi.fn().mockResolvedValue({
-      models: [
-        {
-          id: 'local/qwen',
-          name: 'Qwen 3.5 2B',
-          kind: 'text',
-          files: [{ name: 'qwen.gguf', role: 'primary' }]
-        }
-      ]
+    getModelControlSnapshot: vi.fn().mockResolvedValue({
+      kinds: ['text'],
+      models,
+      installed: ['local/qwen'],
+      activeIds: [],
+      active: {
+        text: null,
+        image: null,
+        speech: null,
+        transcription: null,
+        computer_use: null
+      },
+      computerUse
     }),
+    getModelCatalog: vi.fn().mockResolvedValue({ models }),
     getInstalledModels: vi.fn().mockResolvedValue(['local/qwen']),
     getActiveModel: vi.fn().mockResolvedValue(null),
     getActiveModalities: vi.fn().mockResolvedValue({}),
     getActiveModelIds: vi.fn().mockResolvedValue([]),
-    getComputerUseActiveModels: vi.fn().mockResolvedValue({
-      strategy: 'text_plus_specialist',
-      strategyLabel: 'Text + Specialist',
-      models: [
-        {
-          role: 'reasoner',
-          modelId: 'remote/reasoner',
-          modelName: 'Qwen Reasoner',
-          remote: true
-        },
-        {
-          role: 'grounding_specialist',
-          modelId: 'local/ui-tars',
-          modelName: 'UI-TARS 1.5 7B',
-          remote: false
-        }
-      ]
-    })
+    getComputerUseActiveModels: vi.fn().mockResolvedValue(computerUse)
   }
   render(<ModelPicker onClose={onClose} />)
   return onClose
 }
 
 function renderPickerWithRemote(): ReturnType<typeof vi.fn> {
+  const remoteId = 'remote-vision:home:google%2Fgemma-4'
+  let activeIds: string[] = []
   const activateModel = vi.fn().mockResolvedValue({ success: true })
+  const models = [
+    {
+      id: remoteId,
+      name: 'google/gemma-4',
+      kind: 'vision',
+      files: [],
+      remoteServerId: 'home'
+    }
+  ]
+  activateModel.mockImplementation(async () => {
+    activeIds = [remoteId]
+    return { success: true }
+  })
   ;(window as unknown as { api: Record<string, unknown> }).api = {
-    getModelCatalog: vi.fn().mockResolvedValue({
-      models: [
-        {
-          id: 'remote-vision:home:google%2Fgemma-4',
-          name: 'google/gemma-4',
-          kind: 'vision',
-          files: [],
-          remoteServerId: 'home'
-        }
-      ]
-    }),
-    getInstalledModels: vi.fn().mockResolvedValue(['remote-vision:home:google%2Fgemma-4']),
+    getModelControlSnapshot: vi.fn().mockImplementation(async () => ({
+      kinds: ['vision'],
+      models,
+      installed: [remoteId],
+      activeIds,
+      active: {
+        text: activeIds[0] ?? null,
+        image: null,
+        speech: null,
+        transcription: null,
+        computer_use: null
+      },
+      computerUse: { strategy: 'same_as_chat', strategyLabel: 'Same as Chat', models: [] }
+    })),
+    getModelCatalog: vi.fn().mockResolvedValue({ models }),
+    getInstalledModels: vi.fn().mockResolvedValue([remoteId]),
     getActiveModel: vi.fn().mockResolvedValue(null),
     getActiveModalities: vi.fn().mockResolvedValue({}),
-    getActiveModelIds: vi
-      .fn()
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce(['remote-vision:home:google%2Fgemma-4']),
+    getActiveModelIds: vi.fn().mockImplementation(async () => activeIds),
     getComputerUseActiveModels: vi.fn().mockResolvedValue({
       strategy: 'same_as_chat',
       strategyLabel: 'Same as Chat',
       models: []
     }),
+    // Activation assesses fit first through the shared service; a remote model has no
+    // local footprint, so the boundary reports "nothing to assess".
+    estimateModelFit: vi.fn().mockResolvedValue(null),
     activateModel
   }
   render(<ModelPicker onClose={vi.fn()} />)
@@ -106,7 +139,10 @@ describe('<ModelPicker/> dismissal', () => {
     expect(button).toBeTruthy()
     fireEvent.click(button as HTMLButtonElement)
     await waitFor(() =>
-      expect(activateModel).toHaveBeenCalledWith('remote-vision:home:google%2Fgemma-4')
+      expect(activateModel).toHaveBeenCalledWith(
+        'remote-vision:home:google%2Fgemma-4',
+        undefined
+      )
     )
     expect(await screen.findByText('Remote')).toBeTruthy()
   })

@@ -1,4 +1,5 @@
 import { vi } from 'vitest'
+import { modelControlSnapshot } from '../../components/__tests__/harness/model-control-snapshot'
 
 export const APP_PROJECTS = Array.from({ length: 12 }, (_, index) => {
   const suffix = index === 0 ? 'Alpha' : index === 1 ? 'Beta' : String(index + 1).padStart(2, '0')
@@ -36,6 +37,8 @@ export function installAppBoundary(overrides: Record<string, unknown> = {}): voi
       error: ''
     }),
     getModelCatalog: async () => ({ kinds: ['text'], models: [] }),
+    getModelControlSnapshot: async () =>
+      modelControlSnapshot({ kinds: ['text'], models: [] }),
     getInstalledModels: async () => [],
     getActiveModelIds: async () => [],
     listProjects: async () => APP_PROJECTS.map((project) => ({ ...project })),

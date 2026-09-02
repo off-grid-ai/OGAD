@@ -9,6 +9,7 @@ import { toSpeakableText } from '@renderer/lib/speakable'
 import { isAgenticTurn } from '@renderer/lib/agentic-active'
 import { applyStreamEvent, hasLiveStreamActivity } from '@renderer/lib/stream-reducer'
 import { useActiveModelSummary } from '@renderer/hooks/useActiveModelSummary'
+import { admitThinkingRequest } from '@renderer/lib/model-summary'
 import { shouldFollowBottom } from '@renderer/lib/scroll-follow'
 import {
   chatListPreviewLine,
@@ -26,11 +27,7 @@ import {
   type SyncedTurnStatus
 } from '@offgrid/sync'
 import type { VoiceTurnMode } from '@offgrid/speech'
-import {
-  cleanImagePrompt,
-  shouldAutoRouteImage,
-  type ChatTurn
-} from '@offgrid/models'
+import { cleanImagePrompt, shouldAutoRouteImage, type ChatTurn } from '@offgrid/models'
 import ReactMarkdown, { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -51,7 +48,8 @@ import { stopAllVoicePlayback } from '@renderer/lib/voice-playback-bus'
 import { ChatVoiceComposer, VoiceModeControl } from './ChatVoiceComposer'
 import { ExploreSection } from './explore/ExploreSection'
 import { PresetSetup } from './explore/PresetSetup'
-import { ApprovalSetup, type ApprovalSetupRecord } from './actions/ApprovalSetup'
+import { ApprovalIntakeFailure, ApprovalSetup } from './actions/ApprovalSetup'
+import { loadApprovalIntake, type ApprovalIntakeState } from '@renderer/lib/approval-intake'
 import {
   REQUEST_FORM_URL,
   presetById,
@@ -63,6 +61,7 @@ import { SkillsPanel } from './SkillsPanel'
 import { ModelPicker } from './ModelPicker'
 import { SettingsPanel } from './SettingsPanel'
 import { OPEN_ACTIVE_MODELS_PANEL_EVENT } from '@renderer/lib/model-settings-panel'
+import { desktopModelControl } from '@renderer/lib/model-control-application'
 import { LoadingDots } from './ui/loading-dots'
 import { SidePanel } from './SidePanel'
 import { ConversationTitleActions } from './ConversationTitleActions'
@@ -86,7 +85,11 @@ import {
   readGenerationMetrics,
   readPersistedChatSessionTurn
 } from '../lib/message-persistence'
-import { formatGenerationMetrics, type GenerationMetrics } from '../../../shared/generation-metrics'
+import {
+  formatGenerationDuration,
+  formatGenerationMetrics,
+  type GenerationMetrics
+} from '../../../shared/generation-metrics'
 import {
   readGeneratedImageReference,
   withGeneratedImageReference
@@ -209,6 +212,8 @@ type ChatMessage = {
   image?: string
   imagePath?: string
   imageMetadata?: ImageGenerationMetadata
+  /** The artifact exists, but its durable Chat projection failed. */
+  persistenceWarning?: string
   toolCalls?: ProjectedSyncedTool[]
   toolName?: string
   toolCallId?: string
@@ -239,6 +244,13 @@ type ChatMessage = {
   audioUrl?: string // voice-mode: recorded clip for a user voice note
   audioDuration?: number // seconds, when known from the recording
 }
+
+const GENERATED_IMAGE_NOT_SAVED =
+  'The image was created, but Chat could not save its message. It remains in Generated images.'
+const GENERATED_IMAGE_NOT_LINKED =
+  'The image was saved in Chat, but it could not be linked for device sync.'
+const CHAT_ANSWER_NOT_SAVED =
+  'The answer is visible, but Chat could not save it. Copy it before you leave this chat.'
 
 function completedImageMessage(
   content: string,
@@ -291,11 +303,7 @@ async function announceImageMessagePersisted(
   conversationId: string,
   messageId: string
 ): Promise<void> {
-  try {
-    await window.api.imageGenConversationPersisted?.(conversationId, messageId)
-  } catch {
-    /* The message is already durable; a later mount still loads it from SQLite. */
-  }
+  await window.api.imageGenConversationPersisted?.(conversationId, messageId)
 }
 
 /**
@@ -600,8 +608,7 @@ function restoredChatSessionTurns(
     if (!session) return []
     const imageOperation = session.responseMessages.some(
       (response) =>
-        Array.isArray(response.content) &&
-        response.content.some((part) => part.type === 'image')
+        Array.isArray(response.content) && response.content.some((part) => part.type === 'image')
     )
     return [
       {
@@ -609,9 +616,6 @@ function restoredChatSessionTurns(
         conversationId,
         userMessage: { role: 'user', content: userMessage.content },
         responseMessages: session.responseMessages,
-        assistantMessage: session.responseMessages.findLast(
-          (response) => response.role === 'assistant'
-        ),
         status: session.status,
         request: {
           operation: imageOperation
@@ -1212,10 +1216,9 @@ function MessageMarkdown({
 /**
  * What the generation cost, under the answer that cost it.
  *
- * Only the fields the run actually produced: a server that reports no token counts shows a time and
- * nothing else, because "0 tok/s" would be a lie. Rendered whenever the numbers exist rather than
- * behind a preference - unlike mobile, the desktop chat has no display-settings surface to hang a
- * toggle on, and inventing one for a single muted line is not worth the drift.
+ * Only the detailed fields the run actually produced: a server that reports no token counts shows
+ * a time and nothing else, because "0 tok/s" would be a lie. The caller applies the generation
+ * details preference. The basic response duration stays in the assistant action row either way.
  */
 function GenerationMetricsRow({
   metrics
@@ -1602,8 +1605,21 @@ function AssistantMessageActions({
   onSpeak: () => void
 }>): React.JSX.Element | null {
   if (message.image || isSupportingMessage(message)) return null
+  const generationDuration = formatGenerationDuration({
+    generationTimeMs: message.generationTimeMs,
+    totalSeconds: message.metrics?.totalSeconds
+  })
   return (
     <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+      {generationDuration ? (
+        <span
+          aria-label={`Response duration ${generationDuration}`}
+          className="font-mono text-[10px] tabular-nums text-neutral-600"
+          data-testid="response-duration"
+        >
+          {generationDuration}
+        </span>
+      ) : null}
       {speechEnabled ? <SpeechAction state={speechState} onSpeak={onSpeak} /> : null}
       <CopyAction copied={copied} onCopy={onCopy} />
       {!message.context?.executionApproval ? (
@@ -2036,6 +2052,11 @@ function MessageBubble({
           className="mb-2 w-full max-w-full cursor-zoom-in rounded-md border border-neutral-800 object-contain transition-opacity hover:opacity-90"
           onOpen={actions.openImage}
         />
+      ) : null}
+      {message.persistenceWarning ? (
+        <p role="alert" className="mb-2 text-xs text-amber-500">
+          {message.persistenceWarning}
+        </p>
       ) : null}
       {editing ? (
         <MessageEditor
@@ -2525,12 +2546,12 @@ export function MemoryChat({
   const [input, setInput] = useState('')
   // A curated run collects its complete brief inside Chat before any model request starts.
   const [presetSetup, setPresetSetup] = useState<DemoPreset | null>(null)
-  const [approvalSetup, setApprovalSetup] = useState<ApprovalSetupRecord | null>(null)
+  const [approvalIntake, setApprovalIntake] = useState<ApprovalIntakeState>({ status: 'idle' })
   const [attachments, setAttachments] = useState<Attachment[]>([])
   // Whether the active chat model can read images. Gate image attachment on this. The
   // main-owned model selection is read on mount and after an explicit invalidation;
   // opening Chat must not create a permanent IPC polling loop.
-  const [chatVision, setChatVision] = useState(true)
+  const [chatVision, setChatVision] = useState(false)
   const [attachWarn, setAttachWarn] = useState<string | null>(null)
   /**
    * Files a peer has announced for this chat whose bytes have not arrived.
@@ -2571,10 +2592,16 @@ export function MemoryChat({
     [incomingFiles]
   )
   const refreshChatVision = useCallback((): void => {
-    void (window.api as { chatVisionAvailable?: () => Promise<boolean> })
-      .chatVisionAvailable?.()
-      .then((v) => setChatVision(!!v))
-      .catch(() => {})
+    void window.api
+      .chatVisionAvailable()
+      .then((available) => setChatVision(available === true))
+      .catch((error) => {
+        console.error('[ModelControl] Chat vision capability projection failed.', error)
+        setChatVision(false)
+        setAttachWarn(
+          'Chat could not verify image support. Image attachments stay off until model status is available.'
+        )
+      })
   }, [])
   useEffect(() => {
     const refreshWhenVisible = (): void => {
@@ -2897,6 +2924,20 @@ export function MemoryChat({
   // Active text model + running context window, shown in the composer. Refreshes when
   // the model picker closes (the selection may have changed).
   const modelSummary = useActiveModelSummary(modelPickerOpen)
+  const modelProjectionReady = modelSummary.status === 'ready'
+  const thinkingAvailable =
+    modelProjectionReady && admitThinkingRequest(true, modelSummary.name, modelSummary.thinking)
+  const thinkingRequested =
+    modelProjectionReady &&
+    admitThinkingRequest(thinkingEnabled, modelSummary.name, modelSummary.thinking)
+  const thinkingControlLabel =
+    modelSummary.status === 'loading'
+      ? 'Thinking unavailable while model status loads'
+      : modelSummary.status === 'failed'
+        ? 'Thinking unavailable because model status failed'
+        : !thinkingAvailable
+          ? `Thinking unavailable for ${modelSummary.name ?? 'the active model'}`
+          : 'Thinking'
   const [canvasWidth, setCanvasWidth] = useState<number | null>(null) // px; null = default 30vw
   const [dragOver, setDragOver] = useState(false)
   // Safety net so the "Drop files to attach" overlay never gets stuck: a drag that
@@ -3143,18 +3184,31 @@ export function MemoryChat({
   }, [imgModel, imgParamStore])
 
   // Composer image-model dropdown: write through to the SAME owner ModelPicker
-  // uses (setActiveModalModel), then mirror locally for immediate UI. This is what
+  // uses, then mirror locally for immediate UI. This is what
   // keeps the composer and the Active-models panel from silently disagreeing about
   // which model runs — one source of truth.
-  const chooseImageModel = useCallback((value: string) => {
-    setImgModel(value)
-    // Write through to the owning source; log on failure rather than swallow — a
-    // silent reject would let the composer and Active-models panel diverge again
-    // (the exact drift this binding prevents), with no signal.
-    void window.api
-      .setActiveModalModel?.('image', value)
-      .catch((e) => console.error('[image] failed to persist active model', e))
-  }, [])
+  const chooseImageModel = useCallback(
+    (value: string) => {
+      const previous = imgModel
+      setImgModel(value)
+      // Write through to the owning source; log on failure rather than swallow — a
+      // silent reject would let the composer and Active-models panel diverge again
+      // (the exact drift this binding prevents), with no signal.
+      void desktopModelControl
+        .execute({ type: 'select', surface: 'image', modelId: value })
+        .then((result) => {
+          if (result.status !== 'completed') {
+            setImgModel(previous)
+            console.error('[image] failed to persist active model', result)
+          }
+        })
+        .catch((error) => {
+          setImgModel(previous)
+          console.error('[image] failed to persist active model', error)
+        })
+    },
+    [imgModel]
+  )
   // Steps/size edits persist as a per-model override so they survive a remount and
   // a model switch (setOverride is pure; a value == the model default clears it).
   const setStepsOverride = useCallback(
@@ -3430,7 +3484,7 @@ export function MemoryChat({
     ;(async () => {
       try {
         setPresetSetup(null)
-        setApprovalSetup(null)
+        setApprovalIntake({ status: 'idle' })
         if (openTarget.conversationId) {
           const convId = openTarget.conversationId
           setActiveConversationId(convId)
@@ -3440,8 +3494,8 @@ export function MemoryChat({
           const nextMessages = await loadLatestConversationMessages(convId)
           if (nextMessages) replaceDurableMessages(convId, nextMessages)
           if (openTarget.approvalId) {
-            const approval = await window.api.proInvoke?.('approvals:for-execution-chat', convId)
-            setApprovalSetup((approval as ApprovalSetupRecord | null | undefined) ?? null)
+            setApprovalIntake({ status: 'loading', approvalId: openTarget.approvalId })
+            setApprovalIntake(await loadApprovalIntake(openTarget.approvalId, window.api.proInvoke))
           }
           if (openTarget.draftPrompt) setInput(openTarget.draftPrompt)
         } else if (openTarget.projectId) {
@@ -3471,32 +3525,27 @@ export function MemoryChat({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openTarget])
 
+  const openApprovalIntake = useCallback((approvalId: number): void => {
+    setApprovalIntake({ status: 'loading', approvalId })
+    void loadApprovalIntake(approvalId, window.api.proInvoke).then(setApprovalIntake)
+  }, [])
+
   useEffect(() => {
-    const openApprovalIntake = (event: Event): void => {
+    const onApprovalIntake = (event: Event): void => {
       const approvalId = (event as CustomEvent<{ approvalId?: number }>).detail?.approvalId
       if (!approvalId) return
-      void window.api
-        .proInvoke?.('approvals:list')
-        .then((approvals) => {
-          const match = Array.isArray(approvals)
-            ? (approvals as ApprovalSetupRecord[]).find(
-                (approval) => Number(approval.id) === approvalId
-              )
-            : undefined
-          if (match) setApprovalSetup(match)
-        })
-        .catch(() => undefined)
+      openApprovalIntake(approvalId)
     }
-    window.addEventListener('og:approval-intake', openApprovalIntake)
-    return () => window.removeEventListener('og:approval-intake', openApprovalIntake)
-  }, [])
+    window.addEventListener('og:approval-intake', onApprovalIntake)
+    return () => window.removeEventListener('og:approval-intake', onApprovalIntake)
+  }, [openApprovalIntake])
 
   const startNewConversation = useCallback(() => {
     setActiveConversationId(null)
     setConvMessages(null, []) // clear the fresh-chat bucket
     setActiveProjectId(null)
     setPresetSetup(null)
-    setApprovalSetup(null)
+    setApprovalIntake({ status: 'idle' })
   }, [setConvMessages])
 
   const deleteConversation = useCallback(
@@ -3525,6 +3574,54 @@ export function MemoryChat({
       current.map((conversation) => (conversation.id === stored.id ? stored : conversation))
     )
   }, [])
+
+  /** Persist the durable Chat row first, then complete its mesh association.
+   *  These are separate outcomes: a sync-link failure must never masquerade as a lost Chat row. */
+  const persistGeneratedImageProjection = async (input: {
+    conversationId: string
+    turnId: string
+    imagePath: string
+    imageSyncId?: string
+    storedContent: string
+    context: unknown
+  }): Promise<{ messageId: string | null; warning?: string }> => {
+    let messageId: string
+    try {
+      const stored = await window.api.addRagMessage(
+        input.conversationId,
+        'assistant',
+        input.storedContent,
+        input.context
+      )
+      messageId = stored.uuid
+    } catch (error) {
+      console.error('[chat-image] generated artifact projection failed', {
+        conversationId: input.conversationId,
+        turnId: input.turnId,
+        imagePath: input.imagePath,
+        imageSyncId: input.imageSyncId,
+        error
+      })
+      setAttachWarn(GENERATED_IMAGE_NOT_SAVED)
+      return { messageId: null, warning: GENERATED_IMAGE_NOT_SAVED }
+    }
+
+    try {
+      await announceImageMessagePersisted(input.conversationId, messageId)
+      return { messageId }
+    } catch (error) {
+      console.error('[chat-image] durable image message could not be linked for sync', {
+        conversationId: input.conversationId,
+        turnId: input.turnId,
+        messageId,
+        imagePath: input.imagePath,
+        imageSyncId: input.imageSyncId,
+        error
+      })
+      setAttachWarn(GENERATED_IMAGE_NOT_LINKED)
+      return { messageId, warning: GENERATED_IMAGE_NOT_LINKED }
+    }
+  }
 
   const sendMessage = async (
     override?: string,
@@ -3708,14 +3805,13 @@ export function MemoryChat({
     const persistedAttachments = initAttachment
       ? [...attachmentMetadata, initAttachment]
       : attachmentMetadata
-    const userPersistence = regen && opts?.sessionReplay?.type !== 'edit'
-      ? undefined
-      : {
-          content: trimmed,
-          context: persistedAttachments.length
-            ? { attachments: persistedAttachments }
-            : undefined
-        }
+    const userPersistence =
+      regen && opts?.sessionReplay?.type !== 'edit'
+        ? undefined
+        : {
+            content: trimmed,
+            context: persistedAttachments.length ? { attachments: persistedAttachments } : undefined
+          }
 
     // Catalogue attached inputs (files / pasted text) as artifacts of this chat &
     // project, so the gallery holds the whole working set — inputs and outputs.
@@ -3841,16 +3937,22 @@ export function MemoryChat({
           context: imageContext
         }
         setConvMessages(convId, (prev) => [...prev, assistantMessage])
-        try {
-          const stored = await window.api.addRagMessage(
-            convId,
-            'assistant',
-            completedImage.storedContent,
-            imageContext
+        const projection = await persistGeneratedImageProjection({
+          conversationId: convId,
+          turnId: sessionTurn.id,
+          imagePath: img.path,
+          imageSyncId: img.syncId,
+          storedContent: completedImage.storedContent,
+          context: imageContext
+        })
+        if (projection.warning) {
+          setConvMessages(convId, (previous) =>
+            previous.map((message) =>
+              message.id === assistantMessage.id
+                ? { ...message, persistenceWarning: projection.warning }
+                : message
+            )
           )
-          await announceImageMessagePersisted(convId, stored.uuid)
-        } catch {
-          /* ignore */
         }
       } catch (e) {
         const memoryGuard = parseImageMemoryGuardError(e)
@@ -3872,8 +3974,14 @@ export function MemoryChat({
           ])
           try {
             await window.api.addRagMessage(convId, 'assistant', errorContent)
-          } catch {
-            /* ignore */
+          } catch (persistenceError) {
+            console.error('[chat-image] could not persist image failure message', {
+              conversationId: convId,
+              error: persistenceError
+            })
+            setAttachWarn(
+              'The image failed, and Chat could not save the error. Copy it before you leave this chat.'
+            )
           }
         }
       } finally {
@@ -3914,7 +4022,7 @@ export function MemoryChat({
             role: 'assistant',
             content: '',
             reasoning: '',
-            reasoningRequested: thinkingEnabled,
+            reasoningRequested: thinkingRequested,
             streaming: true
           }
         ])
@@ -3946,10 +4054,14 @@ export function MemoryChat({
           userPersistence,
           replay: opts?.sessionReplay?.type,
           invalidationKeepCount: opts?.sessionReplay?.keepCount,
-          thinking: thinkingEnabled
+          thinking: thinkingRequested
         })
         const toolCalls = (tr?.toolCalls || []).map(
-          (c: { name: string; result: string; status?: 'completed' | 'failed' | 'pending' }) => ({
+          (c: {
+            name: string
+            result: string
+            status?: 'completed' | 'failed' | 'pending' | 'cancelled'
+          }) => ({
             name: c.name,
             result: c.result,
             status: c.status ?? ('completed' as const)
@@ -4023,8 +4135,20 @@ export function MemoryChat({
               )
             )
             if (voiceMode) setAutoPlayId(stored.uuid)
-          } catch {
-            /* The answer remains on screen; image rows can still be persisted independently. */
+          } catch (error) {
+            console.error('[chat-image] could not persist the tool answer', {
+              conversationId: convId,
+              turnId: toolStreamId,
+              error
+            })
+            setAttachWarn(CHAT_ANSWER_NOT_SAVED)
+            setConvMessages(convId, (previous) =>
+              previous.map((message) =>
+                message.id === toolStreamId
+                  ? { ...message, persistenceWarning: CHAT_ANSWER_NOT_SAVED }
+                  : message
+              )
+            )
             if (voiceMode) setAutoPlayId(toolStreamId)
           }
           for (const [index, img] of toolGeneratedImages.entries()) {
@@ -4034,27 +4158,26 @@ export function MemoryChat({
               prompt,
               img.prompt
             )
-            let imageMessageId: string = crypto.randomUUID()
-            try {
-              const stored = await window.api.addRagMessage(
-                convId,
-                'assistant',
-                completedImage.storedContent,
-                withGeneratedImageReference(undefined, { id: img.syncId, path: img.path })
-              )
-              imageMessageId = stored.uuid
-              await announceImageMessagePersisted(convId, stored.uuid)
-            } catch {
-              /* Keep the generated file visible even if this database write fails. */
-            }
+            const projection = await persistGeneratedImageProjection({
+              conversationId: convId,
+              turnId: toolStreamId,
+              imagePath: img.path,
+              imageSyncId: img.syncId,
+              storedContent: completedImage.storedContent,
+              context: withGeneratedImageReference(undefined, {
+                id: img.syncId,
+                path: img.path
+              })
+            })
             setConvMessages(convId, (prev) => [
               ...prev,
               {
-                id: imageMessageId,
+                id: projection.messageId ?? crypto.randomUUID(),
                 role: 'assistant',
                 ...completedImage,
                 image: img.dataUrl,
-                imagePath: img.path
+                imagePath: img.path,
+                persistenceWarning: projection.warning
               }
             ])
           }
@@ -4073,8 +4196,20 @@ export function MemoryChat({
             )
           )
           if (voiceMode) setAutoPlayId(stored.uuid)
-        } catch {
-          /* ignore */
+        } catch (error) {
+          console.error('[chat] could not persist the tool answer', {
+            conversationId: convId,
+            turnId: toolStreamId,
+            error
+          })
+          setAttachWarn(CHAT_ANSWER_NOT_SAVED)
+          setConvMessages(convId, (previous) =>
+            previous.map((message) =>
+              message.id === toolStreamId
+                ? { ...message, persistenceWarning: CHAT_ANSWER_NOT_SAVED }
+                : message
+            )
+          )
           if (voiceMode) setAutoPlayId(toolStreamId)
         }
         return
@@ -4096,7 +4231,7 @@ export function MemoryChat({
           role: 'assistant',
           content: '',
           reasoning: '',
-          reasoningRequested: thinkingEnabled,
+          reasoningRequested: thinkingRequested,
           streaming: true
         }
       ])
@@ -4119,7 +4254,7 @@ export function MemoryChat({
         query: modelQuery,
         history,
         noMemory,
-        thinking: thinkingEnabled,
+        thinking: thinkingRequested,
         images: imagePaths,
         userPersistence,
         replay: opts?.sessionReplay?.type,
@@ -4167,16 +4302,25 @@ export function MemoryChat({
               : m
           )
         )
-        try {
-          const stored = await window.api.addRagMessage(
-            convId,
-            'assistant',
-            completedImage.storedContent,
-            withGeneratedImageReference(undefined, { id: ragImage.syncId, path: ragImage.path })
+        const projection = await persistGeneratedImageProjection({
+          conversationId: convId,
+          turnId: streamId,
+          imagePath: ragImage.path,
+          imageSyncId: ragImage.syncId,
+          storedContent: completedImage.storedContent,
+          context: withGeneratedImageReference(undefined, {
+            id: ragImage.syncId,
+            path: ragImage.path
+          })
+        })
+        if (projection.warning) {
+          setConvMessages(convId, (previous) =>
+            previous.map((message) =>
+              message.id === streamId
+                ? { ...message, persistenceWarning: projection.warning }
+                : message
+            )
           )
-          await announceImageMessagePersisted(convId, stored.uuid)
-        } catch {
-          /* ignore */
         }
       } else {
         // Finalize the streamed message — set authoritative text + context, clear streaming.
@@ -5462,20 +5606,36 @@ export function MemoryChat({
                 )}
                 {/* Messages */}
                 <div ref={scrollRef} onScroll={onScrollFollow} className="flex-1 overflow-y-auto">
-                  {approvalSetup ? (
+                  {approvalIntake.status === 'loading' ? (
+                    <div
+                      role="status"
+                      className="flex min-h-full w-full items-center justify-center gap-2 px-6 py-6 text-xs text-muted-foreground"
+                    >
+                      Loading approval
+                      <LoadingDots />
+                    </div>
+                  ) : approvalIntake.status === 'error' ? (
+                    <div className="flex min-h-full w-full flex-col items-center justify-center px-6 py-6 text-center">
+                      <ApprovalIntakeFailure
+                        message={approvalIntake.message}
+                        onCancel={() => setApprovalIntake({ status: 'idle' })}
+                        onRetry={() => openApprovalIntake(approvalIntake.approvalId)}
+                      />
+                    </div>
+                  ) : approvalIntake.status === 'ready' ? (
                     <div className="flex min-h-full w-full flex-col items-center justify-center px-6 py-6 text-center">
                       <ApprovalSetup
-                        key={approvalSetup.id}
-                        record={approvalSetup}
-                        onCancel={() => setApprovalSetup(null)}
+                        key={approvalIntake.record.id}
+                        record={approvalIntake.record}
+                        onCancel={() => setApprovalIntake({ status: 'idle' })}
                         onSubmit={(prompt) => {
                           void (async () => {
                             const approved = await window.api.proInvoke?.(
                               'approvals:approve-for-chat',
-                              approvalSetup.id
+                              approvalIntake.record.id
                             )
                             if (!approved) return
-                            setApprovalSetup(null)
+                            setApprovalIntake({ status: 'idle' })
                             await sendMessage(prompt, { asUserInput: true })
                           })()
                         }}
@@ -6363,6 +6523,20 @@ export function MemoryChat({
                           </DropdownMenu>
                           {/* Active model + context window — click to change (opens the same
                         ModelPicker as the header). Mirrors what the Active-models panel shows. */}
+                          {modelSummary.status === 'loading' ? (
+                            <span role="status" className="px-1 text-[10px] text-muted-foreground">
+                              Loading model status
+                            </span>
+                          ) : null}
+                          {modelSummary.status === 'failed' ? (
+                            <span
+                              role="alert"
+                              title={modelSummary.failure?.message}
+                              className="px-1 text-[10px] text-destructive"
+                            >
+                              Model status unavailable
+                            </span>
+                          ) : null}
                           {modelSummary.name && (
                             <Tooltip>
                               <TooltipTrigger asChild>
@@ -6395,16 +6569,24 @@ export function MemoryChat({
                                 type="button"
                                 variant="outline"
                                 size="sm"
+                                disabled={!thinkingAvailable}
+                                aria-label={thinkingControlLabel}
                                 onClick={() => setThinkingEnabled((t) => !t)}
-                                className={`h-8 gap-1.5 rounded-full ${thinkingEnabled ? 'border-green-500 text-primary' : 'text-neutral-400'}`}
+                                className={`h-8 gap-1.5 rounded-full ${thinkingRequested ? 'border-green-500 text-primary' : 'text-neutral-400'}`}
                               >
                                 <Brain className="h-3.5 w-3.5" /> Thinking
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent>
-                              {thinkingEnabled
-                                ? 'Reasoning on — the model thinks step by step (slower)'
-                                : 'Reasoning off — direct answers (faster)'}
+                              {modelSummary.status === 'loading'
+                                ? 'Thinking stays off until the active model is ready.'
+                                : modelSummary.status === 'failed'
+                                  ? `Thinking stays off because the model status could not load${modelSummary.failure?.message ? `: ${modelSummary.failure.message}` : '.'}`
+                                  : !thinkingAvailable
+                                    ? `${modelSummary.name ?? 'The active model'} does not support Thinking.`
+                                    : thinkingRequested
+                                      ? 'Reasoning on — the model thinks step by step (slower)'
+                                      : 'Reasoning off — direct answers (faster)'}
                             </TooltipContent>
                           </Tooltip>
                           <VoiceModeControl

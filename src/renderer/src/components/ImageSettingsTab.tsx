@@ -7,6 +7,7 @@ import {
 } from '@renderer/lib/image-params'
 import { announceImageSettingsChanged } from '@renderer/lib/image-settings-events'
 import { SettingsSelect } from './SettingsSelect'
+import { desktopModelControl } from '@renderer/lib/model-control-application'
 
 type ImageSettings = {
   imageParams?: ImageParamStore
@@ -50,10 +51,15 @@ export function ImageSettingsTab(): React.JSX.Element {
   }
 
   const chooseModel = (nextModel: string): void => {
+    const previous = model
     setModel(nextModel)
-    void Promise.resolve(window.api.setActiveModalModel('image', nextModel))
-      .then(announceImageSettingsChanged)
-      .catch(() => {})
+    void desktopModelControl
+      .execute({ type: 'select', surface: 'image', modelId: nextModel })
+      .then((result) => {
+        if (result.status === 'completed') announceImageSettingsChanged()
+        else setModel(previous)
+      })
+      .catch(() => setModel(previous))
   }
 
   const saveOverride = (key: keyof ImageParamOverride, value: number): void => {

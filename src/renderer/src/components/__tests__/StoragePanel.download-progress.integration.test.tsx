@@ -8,6 +8,19 @@ type ProgressListener = (progress: Record<string, unknown>) => void
 let listeners: ProgressListener[] = []
 let downloads: Array<Record<string, unknown>> = []
 const cancelModelDownload = vi.fn(async () => true)
+const catalogModels = [
+  {
+    id: 'Qwen/Qwen3.5-9B',
+    name: 'Qwen 3.5 9B',
+    kind: 'vision',
+    org: 'Qwen',
+    params: 9,
+    files: [
+      { name: 'qwen.gguf', role: 'primary', sizeBytes: 6_000_000_000 },
+      { name: 'mmproj.gguf', role: 'mmproj', sizeBytes: 700_000_000 }
+    ]
+  }
+]
 
 ;(globalThis as unknown as { window: { api: unknown; confirm: () => boolean } }).window.api = {
   getStorageInfo: async () => ({
@@ -18,6 +31,21 @@ const cancelModelDownload = vi.fn(async () => true)
     orphans: []
   }),
   listDownloads: async () => downloads,
+  getDownloadRecoveryHealth: async () => ({ status: 'healthy' }),
+  getModelControlSnapshot: async () => ({
+    kinds: ['vision'],
+    models: catalogModels,
+    installed: [],
+    activeIds: [],
+    active: {
+      text: null,
+      image: null,
+      speech: null,
+      transcription: null,
+      computer_use: null
+    },
+    computerUse: null
+  }),
   onModelProgress: (next: ProgressListener) => {
     listeners.push(next)
     return () => {
@@ -27,19 +55,7 @@ const cancelModelDownload = vi.fn(async () => true)
   systemHealth: async () => ({ ramGb: 32 }),
   getModelCatalog: async () => ({
     kinds: ['vision'],
-    models: [
-      {
-        id: 'Qwen/Qwen3.5-9B',
-        name: 'Qwen 3.5 9B',
-        kind: 'vision',
-        org: 'Qwen',
-        params: 9,
-        files: [
-          { name: 'qwen.gguf', role: 'primary', sizeBytes: 6_000_000_000 },
-          { name: 'mmproj.gguf', role: 'mmproj', sizeBytes: 700_000_000 }
-        ]
-      }
-    ]
+    models: catalogModels
   }),
   getInstalledModels: async () => [],
   getModelVisionStatus: async () => ({}),
@@ -114,6 +130,7 @@ describe('Models > Storage download rows', () => {
     expect(document.body.textContent).not.toMatch(/NaN|Infinity/)
     expect(screen.getByRole('button', { name: 'Cancel image/unknown-size' })).toBeTruthy()
   })
+
 
   it('keeps Models and Storage on the same live multi-file job facts', async () => {
     downloads = [{ modelId: 'Qwen/Qwen3.5-9B', status: 'queued' }]

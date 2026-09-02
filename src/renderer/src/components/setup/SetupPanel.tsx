@@ -17,6 +17,7 @@ import { HealthPanel } from './HealthPanel'
 import { formatTransferSpeed } from '@offgrid/sync'
 import { projectProgress } from '@offgrid/ui'
 import { formatStorageBytes } from './storage-format'
+import { desktopModelControl } from '@renderer/lib/model-control-application'
 
 type Mode = 'conservative' | 'balanced' | 'extreme'
 
@@ -160,8 +161,8 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
   const cancel = (): void => {
     const id = progress?.modelId
     if (id) {
-      api
-        .cancelModelDownload(id)
+      desktopModelControl
+        .execute({ type: 'cancel-download', modelId: id })
         .catch((error: unknown) => reportSetupFailure('model-download cancellation', error))
     }
   }

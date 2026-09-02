@@ -14,6 +14,11 @@ import { formatTransferSpeed } from '@offgrid/sync'
 import { projectProgress } from '@offgrid/ui'
 import { downloadTimeRemaining } from '@renderer/lib/download-progress'
 import {
+  desktopModelControl,
+  type DesktopModelControlProjection
+} from '@renderer/lib/model-control-application'
+import { modelControlSurfaceForKind } from '@offgrid/models'
+import {
   useModelDownloadProgress,
   type ModelDownloadProgressEvent
 } from '@renderer/hooks/useModelDownloadProgress'
@@ -23,7 +28,8 @@ interface ModelDiskEntry {
   name: string
   kind?: string
   bytes: number
-  active: boolean
+  /** Legacy storage projection. Active identity comes from Shared model control. */
+  active?: boolean
 }
 interface StorageInfo {
   dir: string
@@ -44,6 +50,23 @@ interface DownloadEntry {
   bytesPerSecond?: number
   error?: string
 }
+interface DownloadRecoveryHealth {
+  status: 'healthy' | 'degraded'
+  error?: string
+}
+interface OrphanCleanupResult {
+  success: boolean
+  count: number
+  freedBytes: number
+  retainedBytes: number
+  failures: Array<{ name: string; bytes: number; error: string }>
+}
+interface ModelActionNotice {
+  type: 'confirmation' | 'error'
+  message: string
+  modelId?: string
+  kind?: string
+}
 
 // Group order for the by-type storage layout. Display labels come from the shared
 // model-kind-labels source (single source of truth with the Models screen).
@@ -55,13 +78,40 @@ export function StoragePanel(): React.ReactElement {
   const api = window.api
   const [info, setInfo] = useState<StorageInfo | null>(null)
   const [downloads, setDownloads] = useState<DownloadEntry[]>([])
+  const [activeIds, setActiveIds] = useState<Set<string>>(new Set())
+  const [storageError, setStorageError] = useState<string | null>(null)
+  const [recoveryHealth, setRecoveryHealth] = useState<DownloadRecoveryHealth>({
+    status: 'healthy'
+  })
+  const [cleanupFailure, setCleanupFailure] = useState<OrphanCleanupResult | null>(null)
+  const [modelActionNotice, setModelActionNotice] = useState<ModelActionNotice | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const liveProgress = useRef(new Map<string, DownloadEntry>())
 
+  const applyModelControlProjection = useCallback(
+    (projection: DesktopModelControlProjection): void =>
+      setActiveIds(new Set(projection.activeIds)),
+    []
+  )
+
   const refresh = useCallback(async () => {
     try {
-      const [s, d] = await Promise.all([api.getStorageInfo(), api.listDownloads()])
+      const s = await api.getStorageInfo()
       if (s) setInfo(s as StorageInfo)
+      setStorageError(null)
+    } catch (error) {
+      setStorageError(
+        error instanceof Error ? error.message : 'Your model library could not be read.'
+      )
+    }
+    try {
+      applyModelControlProjection(await desktopModelControl.project())
+    } catch {
+      // Never keep a stale active identity when the canonical projection is unavailable.
+      setActiveIds(new Set())
+    }
+    try {
+      const [d, health] = await Promise.all([api.listDownloads(), api.getDownloadRecoveryHealth()])
       if (Array.isArray(d)) {
         const registry = (d as DownloadEntry[]).map((entry) => ({
           ...entry,
@@ -73,10 +123,18 @@ export function StoragePanel(): React.ReactElement {
           ...Array.from(liveProgress.current.values()).filter((entry) => !known.has(entry.modelId))
         ])
       }
-    } catch {
-      /* keep last */
+      setRecoveryHealth(
+        health && (health.status === 'healthy' || health.status === 'degraded')
+          ? (health as DownloadRecoveryHealth)
+          : { status: 'degraded', error: 'Download recovery status is unavailable.' }
+      )
+    } catch (error) {
+      setRecoveryHealth({
+        status: 'degraded',
+        error: error instanceof Error ? error.message : 'Download recovery status is unavailable.'
+      })
     }
-  }, [api])
+  }, [api, applyModelControlProjection])
 
   useEffect(() => {
     refresh()
@@ -115,11 +173,37 @@ export function StoragePanel(): React.ReactElement {
   }
   // Activate a downloaded model straight from Storage. One call — the main process
   // routes by kind (chat LLM vs image/voice/STT default). The UI never branches.
-  const use = async (id: string): Promise<void> => {
+  const use = async (id: string, kind?: string, overrideMemory = false): Promise<void> => {
     setBusy(id)
     try {
-      await api.activateModel(id)
+      const surface = modelControlSurfaceForKind(kind ?? '')
+      const result = await desktopModelControl.execute({
+        type: 'activate',
+        modelId: id,
+        ...(surface ? { surface } : {}),
+        ...(overrideMemory ? { overrideMemory: true } : {})
+      })
+      if (result.status === 'confirmation_required') {
+        setModelActionNotice({
+          type: 'confirmation',
+          message: result.message,
+          modelId: id,
+          kind
+        })
+        return
+      }
+      if (result.status === 'failed') {
+        setModelActionNotice({ type: 'error', message: result.error })
+        return
+      }
+      applyModelControlProjection(result.projection)
+      setModelActionNotice(null)
       await refresh()
+    } catch (error) {
+      setModelActionNotice({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'The model could not be activated.'
+      })
     } finally {
       setBusy(null)
     }
@@ -127,8 +211,23 @@ export function StoragePanel(): React.ReactElement {
   const cleanOrphans = async (): Promise<void> => {
     setBusy('orphans')
     try {
-      await api.deleteOrphans()
+      const result = (await api.deleteOrphans()) as OrphanCleanupResult
+      setCleanupFailure(result.success ? null : result)
       await refresh()
+    } catch (error) {
+      setCleanupFailure({
+        success: false,
+        count: 0,
+        freedBytes: 0,
+        retainedBytes: 0,
+        failures: [
+          {
+            name: 'cleanup',
+            bytes: 0,
+            error: error instanceof Error ? error.message : 'Unused files could not be removed.'
+          }
+        ]
+      })
     } finally {
       setBusy(null)
     }
@@ -145,8 +244,18 @@ export function StoragePanel(): React.ReactElement {
   const cancel = async (id: string): Promise<void> => {
     setBusy(id)
     try {
-      await api.cancelModelDownload(id)
+      const result = await desktopModelControl.execute({ type: 'cancel-download', modelId: id })
+      if (result.status === 'failed') {
+        setModelActionNotice({ type: 'error', message: result.error })
+        return
+      }
+      setModelActionNotice(null)
       await refresh()
+    } catch (error) {
+      setModelActionNotice({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'The download could not be cancelled.'
+      })
     } finally {
       setBusy(null)
     }
@@ -195,6 +304,59 @@ export function StoragePanel(): React.ReactElement {
           <ArrowsClockwise className="h-3 w-3" /> Refresh
         </button>
       </div>
+
+      {storageError && (
+        <div role="alert" className="border-b border-red-900/60 px-4 py-2 text-[11px] text-red-400">
+          <div>Your model library could not be read.</div>
+          <div className="mt-0.5 text-[10px] text-neutral-500">{storageError}</div>
+          <button type="button" onClick={refresh} className="mt-1 underline hover:text-red-300">
+            Retry
+          </button>
+        </div>
+      )}
+
+      {recoveryHealth.status === 'degraded' && (
+        <div
+          role="status"
+          className="border-b border-red-900/60 px-4 py-2 text-[11px] text-red-400"
+        >
+          Current downloads can continue, but interrupted downloads cannot resume after restart.
+          <div className="mt-0.5 text-[10px] text-neutral-500">{recoveryHealth.error}</div>
+        </div>
+      )}
+
+      {cleanupFailure && (
+        <div role="alert" className="border-b border-red-900/60 px-4 py-2 text-[11px] text-red-400">
+          {cleanupFailure.failures.map((failure) => failure.name).join(', ')} could not be removed.
+          {cleanupFailure.retainedBytes > 0
+            ? ` ${formatStorageBytes(cleanupFailure.retainedBytes)} remains.`
+            : ''}
+        </div>
+      )}
+
+      {modelActionNotice && (
+        <div role="alert" className="border-b border-red-900/60 px-4 py-2 text-[11px] text-red-400">
+          <div>{modelActionNotice.message}</div>
+          {modelActionNotice.type === 'confirmation' && modelActionNotice.modelId && (
+            <div className="mt-1 flex gap-3">
+              <button
+                type="button"
+                onClick={() => use(modelActionNotice.modelId!, modelActionNotice.kind, true)}
+                className="underline hover:text-red-300"
+              >
+                Load anyway
+              </button>
+              <button
+                type="button"
+                onClick={() => setModelActionNotice(null)}
+                className="underline hover:text-neutral-300"
+              >
+                Keep current model
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="px-4 py-2">
         <div className="mb-1 flex items-center justify-between">
@@ -332,7 +494,7 @@ export function StoragePanel(): React.ReactElement {
               (info?.models ?? []).some((m) => (m.kind || 'other') === k)
             ).map((kind) => {
               const group = (info?.models ?? []).filter((m) => (m.kind || 'other') === kind)
-              const active = group.find((m) => m.active)
+              const activeModel = group.find((model) => activeIds.has(model.id))
               return (
                 <div key={kind}>
                   <div className="mb-1.5 flex items-center gap-2">
@@ -340,23 +502,25 @@ export function StoragePanel(): React.ReactElement {
                       {modelKindLabel(kind)}
                     </span>
                     <span className="text-[9px] text-neutral-700">{group.length}</span>
-                    {active && (
+                    {activeModel && (
                       <span className="flex items-center gap-1 text-[9px] text-green-500">
-                        <span className="h-1 w-1 rounded-full bg-green-500" /> {active.name} active
+                        <span className="h-1 w-1 rounded-full bg-green-500" /> {activeModel.name}{' '}
+                        active
                       </span>
                     )}
                     <div className="h-px flex-1 bg-neutral-800/50" />
                   </div>
                   <div className="grid grid-cols-2 gap-1.5 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
                     {group.map((m) => {
+                      const modelActive = activeIds.has(m.id)
                       // Every model type has an "active" pick — activate any non-active one.
-                      const activatable = !m.active
+                      const activatable = !modelActive
                       return (
                         <div
                           key={m.id}
-                          className={`group flex h-7 items-center gap-2 rounded border px-2.5 transition-colors duration-150 hover:border-neutral-700 ${m.active ? 'border-green-500/50 bg-green-500/5' : 'border-neutral-800/60 bg-neutral-900/30'}`}
+                          className={`group flex h-7 items-center gap-2 rounded border px-2.5 transition-colors duration-150 hover:border-neutral-700 ${modelActive ? 'border-green-500/50 bg-green-500/5' : 'border-neutral-800/60 bg-neutral-900/30'}`}
                         >
-                          {m.active && supportsModelSettings(m.kind) && (
+                          {modelActive && supportsModelSettings(m.kind) && (
                             <div className="h-1.5 w-1.5 shrink-0 rounded-full bg-green-500" />
                           )}
                           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-neutral-200">
@@ -365,7 +529,7 @@ export function StoragePanel(): React.ReactElement {
                           {/* Hover actions: activate (text/vision) + delete. Size shows when idle. */}
                           {activatable && (
                             <button
-                              onClick={() => use(m.id)}
+                              onClick={() => use(m.id, m.kind)}
                               disabled={busy === m.id}
                               className="hidden shrink-0 rounded border border-neutral-700 px-1.5 text-[9px] leading-4 text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95 disabled:opacity-40 group-hover:block"
                             >
@@ -377,7 +541,7 @@ export function StoragePanel(): React.ReactElement {
                           >
                             {formatStorageBytes(m.bytes)}
                           </span>
-                          {m.active && (
+                          {modelActive && (
                             <button
                               type="button"
                               onClick={() => openModelSettings(m.kind)}
@@ -390,9 +554,9 @@ export function StoragePanel(): React.ReactElement {
                           )}
                           <button
                             onClick={() => del(m.id, m.name)}
-                            disabled={busy === m.id || m.active}
+                            disabled={busy === m.id || modelActive}
                             aria-label={`Delete ${m.name}`}
-                            title={m.active ? 'Deactivate before deleting' : 'Delete'}
+                            title={modelActive ? 'Deactivate before deleting' : 'Delete'}
                             className="shrink-0 rounded p-0.5 text-neutral-700 transition-all duration-150 hover:text-red-400 active:scale-90 disabled:opacity-30 group-hover:text-neutral-500"
                           >
                             <Trash className="h-3 w-3" />

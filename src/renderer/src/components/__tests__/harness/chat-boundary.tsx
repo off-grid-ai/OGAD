@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { vi } from 'vitest'
+import { vi, type Mock } from 'vitest'
 import { MemoryChat } from '../../MemoryChat'
 import { TooltipProvider } from '../../ui/tooltip'
 import type {
@@ -91,6 +91,18 @@ function deferred<T>(): {
   return { promise, resolve, reject }
 }
 
+/**
+ * The capability reads the production preload contract requires at Chat mount time.
+ *
+ * One owner for the fail-closed default: every fixture that installs a hand-built
+ * `window.api` spreads this in, so a new required preload read is added here once
+ * instead of failing each journey with "is not a function". A journey that needs a
+ * capability on installs its own boundary after the spread.
+ */
+export function preloadCapabilityFakes(): { chatVisionAvailable: Mock<() => Promise<boolean>> } {
+  return { chatVisionAvailable: vi.fn(async () => false) }
+}
+
 export class ChatBoundary {
   constructor(private readonly createSplitter?: ThinkSplitterFactory) {}
 
@@ -172,8 +184,58 @@ export class ChatBoundary {
     if (conversation) conversation.message_count = this.messages[conversationId]!.length
   })
 
+  private async modelControlSnapshot(): Promise<unknown> {
+    const boundary = this.api as unknown as Record<string, (...args: never[]) => Promise<unknown>>
+    const catalog = (await boundary.getModelCatalog?.()) as
+      | { kinds?: string[]; models?: unknown[] }
+      | undefined
+    const activeText = (await boundary.getActiveModel?.()) as string | null | undefined
+    const activeIds = (await boundary.getActiveModelIds?.()) as string[] | undefined
+    const active = (await boundary.getActiveModalities?.()) as
+      | Record<string, string | null>
+      | undefined
+    return {
+      kinds: catalog?.kinds ?? [],
+      models: catalog?.models ?? [],
+      installed: [],
+      activeIds: activeIds ?? (activeText ? [activeText] : []),
+      active: {
+        text: activeText ?? null,
+        image: active?.image ?? null,
+        speech: active?.speech ?? null,
+        transcription: active?.transcription ?? null,
+        computer_use: active?.computer_use ?? null
+      },
+      computerUse: null
+    }
+  }
+
   readonly api = {
     isPro: false,
+    ...preloadCapabilityFakes(),
+    // Canonical model-control evidence for Chat journeys. Thinking is visible only
+    // because the active catalog model explicitly publishes that capability.
+    getModelCatalog: vi.fn(async () => ({
+      kinds: ['text'],
+      models: [
+        {
+          id: 'chat-boundary-text',
+          name: 'Chat boundary text model',
+          kind: 'text',
+          files: [],
+          capabilities: { thinking: true }
+        }
+      ]
+    })),
+    getActiveModel: vi.fn(async () => 'chat-boundary-text'),
+    getActiveModelIds: vi.fn(async () => ['chat-boundary-text']),
+    getActiveModalities: vi.fn(async () => ({
+      text: 'chat-boundary-text',
+      image: null,
+      speech: null,
+      transcription: null,
+      computer_use: null
+    })),
     imageGenStatus: vi.fn(async () => ({ available: false, models: [], active: '' })),
     cancelImageGen: vi.fn(),
     cancelRag: this.cancelRag,
@@ -245,6 +307,7 @@ export class ChatBoundary {
     prepareTtsVoice: vi.fn(async () => ({ ready: true })),
     onTtsVoiceProgress: vi.fn(() => () => {}),
     getSettings: vi.fn(async () => ({})),
+    getModelControlSnapshot: vi.fn(() => this.modelControlSnapshot()),
     saveSetting: vi.fn(async () => {}),
     listProjects: vi.fn(async () => this.projects.map((item) => ({ ...item }))),
     styleThumbs: vi.fn(async () => ({})),

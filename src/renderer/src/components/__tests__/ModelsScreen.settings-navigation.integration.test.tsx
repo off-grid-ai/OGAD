@@ -8,6 +8,7 @@
 import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { modelControlSnapshot } from './harness/model-control-snapshot'
 
 const ACTIVE_ID = 'offgrid/active-model'
 const ACTIVE_IMAGE_ID = 'offgrid/active-image-model'
@@ -59,6 +60,25 @@ const activateModel = vi.fn(async () => ({ success: true }))
 
 ;(window as unknown as { api: unknown }).api = {
   systemHealth: async () => ({ ramGb: 32 }),
+  getModelControlSnapshot: async () =>
+    modelControlSnapshot({
+      kinds: ['text', 'image', 'voice', 'transcription'],
+      models: MODELS,
+      installed: [
+        ACTIVE_ID,
+        INSTALLED_ID,
+        ACTIVE_IMAGE_ID,
+        ACTIVE_VOICE_ID,
+        ACTIVE_TRANSCRIPTION_ID
+      ],
+      activeIds: [ACTIVE_ID, ACTIVE_IMAGE_ID, ACTIVE_VOICE_ID, ACTIVE_TRANSCRIPTION_ID],
+      active: {
+        text: ACTIVE_ID,
+        image: ACTIVE_IMAGE_ID,
+        speech: ACTIVE_VOICE_ID,
+        transcription: ACTIVE_TRANSCRIPTION_ID
+      }
+    }),
   getModelCatalog: async () => ({
     kinds: ['text', 'image', 'voice', 'transcription'],
     models: MODELS

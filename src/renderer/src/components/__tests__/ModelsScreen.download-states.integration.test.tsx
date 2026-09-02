@@ -11,6 +11,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { modelControlSnapshot } from './harness/model-control-snapshot'
 
 const MODEL = {
   id: 'unsloth/Qwen3.5-9B-GGUF',
@@ -67,6 +68,12 @@ let installedModels: string[] = []
 
 ;(globalThis as unknown as { window: { api: unknown } }).window.api = {
   systemHealth: async () => ({ ramGb: 32 }),
+  getModelControlSnapshot: async () =>
+    modelControlSnapshot({
+      kinds: ['vision'],
+      models: catalogModels,
+      installed: installedModels
+    }),
   getModelCatalog: async () => ({ kinds: ['vision'], models: catalogModels }),
   getInstalledModels: async () => installedModels,
   getModelVisionStatus: async () => ({}),

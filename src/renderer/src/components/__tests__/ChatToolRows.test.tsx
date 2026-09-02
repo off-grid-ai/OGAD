@@ -262,6 +262,27 @@ describe('<ChatToolRows/> work timeline', () => {
     expect(screen.queryByRole('button', { name: /Work done/ })).toBeNull()
   })
 
+  it('shows cancelled image work as stopped instead of complete or failed', async () => {
+    render(
+      <ChatToolRows
+        tools={[
+          {
+            name: 'generate_image',
+            status: 'cancelled',
+            result: 'Image generation was cancelled.'
+          }
+        ]}
+      />
+    )
+
+    const heading = screen.getByRole('button', { name: /Work stopped/ })
+    expect(heading.textContent).toContain('1 step · cancelled')
+    await userEvent.click(heading)
+    expect(screen.getByRole('button', { name: 'Generated image, cancelled' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Work done/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Work failed/ })).toBeNull()
+  })
+
   it('shows persisted redacted Computer Use evidence inside the assistant turn', async () => {
     const user = userEvent.setup()
     window.api.tasks!.list = vi.fn(async () => [

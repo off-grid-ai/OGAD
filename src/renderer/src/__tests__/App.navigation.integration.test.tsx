@@ -40,6 +40,40 @@ vi.mock('../bootstrap/loadProFeaturesRenderer', () => ({
 
 let App: typeof import('../App').default
 
+const MODEL_KINDS = ['text', 'image', 'computer_use', 'voice', 'transcription']
+
+function modelControlSnapshot(
+  overrides: {
+    kinds?: string[]
+    models?: unknown[]
+    installed?: string[]
+    activeIds?: string[]
+    active?: Partial<{
+      text: string | null
+      image: string | null
+      speech: string | null
+      transcription: string | null
+      computer_use: string | null
+    }>
+  } = {}
+): Record<string, unknown> {
+  return {
+    kinds: overrides.kinds ?? MODEL_KINDS,
+    models: overrides.models ?? [],
+    installed: overrides.installed ?? [],
+    activeIds: overrides.activeIds ?? [],
+    active: {
+      text: null,
+      image: null,
+      speech: null,
+      transcription: null,
+      computer_use: null,
+      ...overrides.active
+    },
+    computerUse: null
+  }
+}
+
 function routedTabButton(label: string): HTMLButtonElement {
   const button = screen
     .getAllByRole('button', { name: new RegExp(`^${label}`) })
@@ -54,10 +88,7 @@ describe('<App/> desktop navigation integration', () => {
     // module initialization. Install that real boundary once, then keep module
     // loading outside the interaction assertion's timeout budget.
     installAppBoundary({
-      getModelCatalog: async () => ({
-        kinds: ['text', 'image', 'computer_use', 'voice', 'transcription'],
-        models: []
-      })
+      getModelControlSnapshot: async () => modelControlSnapshot()
     })
     installAppBrowserBoundary()
     ;({ default: App } = await import('../App'))
@@ -214,7 +245,7 @@ describe('<App/> desktop navigation integration', () => {
     expect(screen.getByRole('button', { name: 'Mobile app' })).toBeTruthy()
 
     await user.hover(navigation)
-    expect(await screen.findByText('Menu')).toBeTruthy()
+    expect(screen.queryByText('Menu')).toBeNull()
     expect(navigation.getAttribute('aria-expanded')).toBe('true')
     expect(buttonNames()).toEqual(collapsedDestinations)
 
@@ -383,19 +414,21 @@ describe('<App/> desktop navigation integration', () => {
       llmSettings = { ...llmSettings, ...patch, effectiveCtxSize: patch.ctxSize ?? 32768 }
     })
     installAppBoundary({
-      getModelCatalog: async () => ({
-        kinds: ['vision'],
-        models: [
-          {
-            id: 'local/qwen',
-            name: 'Qwen 3.5 2B',
-            kind: 'vision',
-            files: [{ name: 'qwen.gguf', url: 'https://example.test/qwen.gguf', sizeBytes: 2e9 }]
-          }
-        ]
-      }),
-      getInstalledModels: async () => ['local/qwen'],
-      getActiveModelIds: async () => ['local/qwen'],
+      getModelControlSnapshot: async () =>
+        modelControlSnapshot({
+          kinds: ['vision'],
+          models: [
+            {
+              id: 'local/qwen',
+              name: 'Qwen 3.5 2B',
+              kind: 'vision',
+              files: [{ name: 'qwen.gguf', url: 'https://example.test/qwen.gguf', sizeBytes: 2e9 }]
+            }
+          ],
+          installed: ['local/qwen'],
+          activeIds: ['local/qwen'],
+          active: { text: 'local/qwen' }
+        }),
       getActiveModel: async () => 'local/qwen',
       getLlmSettings: async () => llmSettings,
       setLlmSettings
@@ -406,12 +439,13 @@ describe('<App/> desktop navigation integration', () => {
       window.dispatchEvent(new CustomEvent('og:open-model-settings-panel'))
     })
 
-    expect(await screen.findByRole('dialog', { name: 'Model settings' })).toBeTruthy()
+    const modelSettings = await screen.findByRole('dialog', { name: 'Model settings' })
+    expect(modelSettings).toBeTruthy()
     expect(window.location.pathname).toBe('/models')
-    expect(await screen.findByText('Qwen 3.5 2B')).toBeTruthy()
-    expect(screen.getByText('64K')).toBeTruthy()
-    expect(screen.getByText('32K')).toBeTruthy()
-    expect(screen.getByText('16K')).toBeTruthy()
+    expect(await within(modelSettings).findByText('Qwen 3.5 2B')).toBeTruthy()
+    expect(within(modelSettings).getByText('64K')).toBeTruthy()
+    expect(within(modelSettings).getByText('32K')).toBeTruthy()
+    expect(within(modelSettings).getByText('16K')).toBeTruthy()
 
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: '[', metaKey: true, bubbles: true }))
@@ -527,10 +561,7 @@ describe('<App/> desktop navigation integration', () => {
       registerProView(proView)
       installAppBoundary({
         isPro: true,
-        getModelCatalog: async () => ({
-          kinds: ['text', 'image', 'computer_use', 'voice', 'transcription'],
-          models: []
-        }),
+        getModelControlSnapshot: async () => modelControlSnapshot(),
         crmListEntities: async () => [],
         proInvoke: async (channel: string) => {
           if (channel === 'pro:sync:status') return undefined
@@ -587,7 +618,7 @@ describe('<App/> desktop navigation integration', () => {
       registerProView(proView)
       installAppBoundary({
         isPro: true,
-        getModelCatalog: async () => ({ kinds: [], models: [] }),
+        getModelControlSnapshot: async () => modelControlSnapshot(),
         crmListEntities: async () => [],
         proInvoke: async (channel: string) => {
           if (channel === 'pro:sync:status') return undefined

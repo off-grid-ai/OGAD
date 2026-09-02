@@ -72,14 +72,49 @@ describe('<MemoryChat/> generation details', () => {
     vi.unstubAllGlobals()
   })
 
-  it('hides the numbers until the preference is on, even when the run reported them', async () => {
+  it('shows the basic duration but hides detailed numbers until the preference is on', async () => {
     const { boundary } = boundaryWithSettings({})
     const user = userEvent.setup()
 
     await answerWith(boundary, 'conversation-off', user, MEASURED)
 
-    // The measurement exists on the turn; the user just has not asked to see it.
+    expect(screen.getByLabelText('Response duration 3.4s')).toBeTruthy()
+    // The rest of the measurement exists on the turn; the user just has not asked to see it.
     expect(screen.queryByTestId('generation-metrics')).toBeNull()
+  })
+
+  it('formats synced response durations and prefers the explicit duration over metrics', async () => {
+    const { boundary } = boundaryWithSettings({})
+    boundary.messages['conversation-a'] = [
+      {
+        id: 'duration-ms',
+        role: 'assistant',
+        content: 'Milliseconds answer',
+        context: { durationMs: 123, metrics: { totalSeconds: 90 } },
+        created_at: '2026-01-01 09:00:01'
+      },
+      {
+        id: 'duration-seconds',
+        role: 'assistant',
+        content: 'Seconds answer',
+        context: { durationMs: 12_300 },
+        created_at: '2026-01-01 09:00:02'
+      },
+      {
+        id: 'duration-minutes',
+        role: 'assistant',
+        content: 'Minutes answer',
+        context: { durationMs: 73_000 },
+        created_at: '2026-01-01 09:00:03'
+      }
+    ]
+
+    renderChat({ conversationId: 'conversation-a' })
+
+    expect(await screen.findByLabelText('Response duration 123ms')).toBeTruthy()
+    expect(screen.getByLabelText('Response duration 12.3s')).toBeTruthy()
+    expect(screen.getByLabelText('Response duration 1m 13s')).toBeTruthy()
+    expect(screen.queryByLabelText('Response duration 1m 30s')).toBeNull()
   })
 
   it('turns the preference on in Settings and prints the measured numbers under the answer', async () => {

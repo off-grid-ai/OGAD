@@ -1010,14 +1010,15 @@ function AppContent() {
     locked?: boolean
   }): React.ReactElement => {
     const active = viewMode === item.view
+    const accessibleLabel = item.locked ? `${item.label} Pro` : item.label
     const notificationCount = item.view === 'notifications' ? unreadCount + externalUnreadCount : 0
     const notificationCountLabel = notificationCount > 9 ? '9+' : String(notificationCount)
     return (
       <button
         key={item.view}
         onClick={() => goToView(item.view)}
-        aria-label={item.label}
-        title={!sidebarOpen ? item.label : undefined}
+        aria-label={accessibleLabel}
+        title={!sidebarOpen ? accessibleLabel : undefined}
         className={navRowClass(sidebarOpen, active)}
       >
         {active && (
@@ -1037,7 +1038,11 @@ function AppContent() {
           </span>
         )}
         {sidebarOpen && item.locked && (
-          <IconLock className="h-3.5 w-3.5 shrink-0 text-neutral-400/60" title="Pro" />
+          <IconLock
+            aria-hidden="true"
+            className="h-3.5 w-3.5 shrink-0 text-neutral-400/60"
+            title="Pro"
+          />
         )}
       </button>
     )
@@ -1197,11 +1202,6 @@ function AppContent() {
 
               {/* Navigation (scrolls; Settings is pinned to the bottom) */}
               <div className="mt-5 flex flex-1 flex-col overflow-y-auto overflow-x-hidden pr-0.5">
-                {sidebarOpen && (
-                  <div className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-neutral-500">
-                    Menu
-                  </div>
-                )}
                 <SidebarNavigationMenu
                   activeView={viewMode}
                   expanded={sidebarOpen}

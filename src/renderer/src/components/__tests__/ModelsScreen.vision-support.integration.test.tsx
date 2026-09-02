@@ -9,6 +9,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { cleanup, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { render } from '@testing-library/react'
+import { modelControlSnapshot } from './harness/model-control-snapshot'
 
 type VisionStatus = Record<string, { supportsVision: boolean; projectorInstalled: boolean }>
 
@@ -29,6 +30,12 @@ let visionStatus: VisionStatus = {}
 
 ;(globalThis as unknown as { window: { api: unknown } }).window.api = {
   systemHealth: async () => ({ ramGb: 32 }),
+  getModelControlSnapshot: async () =>
+    modelControlSnapshot({
+      kinds: ['text', 'vision'],
+      models: [VISION_MODEL],
+      installed: [VISION_MODEL.id]
+    }),
   getModelCatalog: async () => ({ kinds: ['text', 'vision'], models: [VISION_MODEL] }),
   getInstalledModels: async () => [VISION_MODEL.id],
   getModelVisionStatus: async () => visionStatus,

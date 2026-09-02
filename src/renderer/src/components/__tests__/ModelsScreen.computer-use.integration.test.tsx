@@ -18,6 +18,20 @@ let activationRequests: Array<[string, string?]> = []
 
 ;(globalThis as unknown as { window: { api: unknown } }).window.api = {
   systemHealth: async () => ({ ramGb: 34 }),
+  getModelControlSnapshot: async () => ({
+    kinds: MODEL_KINDS,
+    models: CATALOG,
+    installed: [uiMate.id],
+    activeIds,
+    active: {
+      text: null,
+      image: null,
+      speech: null,
+      transcription: null,
+      computer_use: activeIds[0] ?? null
+    },
+    computerUse: null
+  }),
   getModelCatalog: async () => ({ kinds: MODEL_KINDS, models: CATALOG }),
   getInstalledModels: async () => [uiMate.id],
   getModelVisionStatus: async () => ({}),
@@ -87,7 +101,7 @@ describe('<ModelsScreen/> Computer Use catalog journey', () => {
     expect(screen.getByRole('button', { name: 'Sort: Recommended' })).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Any size' }))
-    await user.click(screen.getByRole('button', { name: 'Tiny (<2B)' }))
+    await user.click(screen.getByRole('button', { name: '< 1B' }))
     expect(await screen.findByText('1 models')).toBeTruthy()
     expect(screen.getByText('Holo3.1-0.8B')).toBeTruthy()
     expect(screen.queryByText('UI-Mate-27B')).toBeNull()

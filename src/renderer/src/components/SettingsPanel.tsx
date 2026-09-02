@@ -38,6 +38,7 @@ import { SettingsSelect } from './SettingsSelect'
 import type { SpeechLanguage } from '@offgrid/speech'
 import { X } from '@phosphor-icons/react'
 import { getSlot, SLOTS } from '@renderer/bootstrap/slotRegistry'
+import { desktopModelControl } from '@renderer/lib/model-control-application'
 
 const MAX_OUTPUT_AUTO = MAX_TOKENS_AUTO
 // The values THIS picker offers. The nesting rule they obey is shared (@offgrid/models); which
@@ -172,16 +173,12 @@ export function SettingsPanel({
       .getLlmSettings?.()
       .then((v: LlmSettings) => setS(v))
       .catch(() => {})
-    const modelApi = window.api as Partial<
-      Pick<typeof window.api, 'getModelCatalog' | 'getActiveModel'>
-    >
-    if (modelApi.getModelCatalog && modelApi.getActiveModel) {
-      Promise.all([modelApi.getModelCatalog(), modelApi.getActiveModel()])
-        .then(([catalog, activeId]) =>
-          setActiveModelName(resolveModelName(catalog.models, activeId))
-        )
-        .catch(() => setActiveModelName(null))
-    }
+    void desktopModelControl
+      .project()
+      .then((projection) =>
+        setActiveModelName(resolveModelName(projection.models, projection.active.text))
+      )
+      .catch(() => setActiveModelName(null))
     window.api
       .getTranscriptionInfo?.()
       .then((info: TranscriptionInfo) => setTranscriptionInfo(info))
@@ -258,7 +255,8 @@ export function SettingsPanel({
 
   const pickTranscriptionModel = (value: string): void => {
     const modelId = value === DEFAULT_TRANSCRIPTION_MODEL ? null : value
-    void Promise.resolve(window.api.setActiveModalModel('transcription', modelId))
+    void desktopModelControl
+      .execute({ type: 'select', surface: 'transcription', modelId })
       .then(() => window.api.getTranscriptionInfo())
       .then((info) => setTranscriptionInfo(info))
       .catch(() => {

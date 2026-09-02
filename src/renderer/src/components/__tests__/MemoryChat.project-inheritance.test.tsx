@@ -15,6 +15,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryChat } from '../MemoryChat'
 import { TooltipProvider } from '../ui/tooltip'
+import { preloadCapabilityFakes } from './harness/chat-boundary'
 
 type CreateConversationArgs = [id: string, title?: string, projectId?: string | null]
 type RagChatArgs = [
@@ -51,6 +52,7 @@ function installApi(
   }))
   const api = {
     isPro: false,
+    ...preloadCapabilityFakes(),
     imageGenStatus: vi.fn(async () => ({ available: false, models: [], active: '' })),
     onImageGenProgress: vi.fn(() => () => {}),
     onRagStream: vi.fn(() => () => {}),

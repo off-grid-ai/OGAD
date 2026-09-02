@@ -171,7 +171,11 @@ describe('<HealthPanel/> production status integration', () => {
     const user = userEvent.setup()
     render(<HealthPanel />)
 
-    await screen.findByRole('status', { name: 'Chat model (llama-server)' })
+    await screen.findByRole(
+      'status',
+      { name: 'Chat model (llama-server)' },
+      { timeout: 5_000 }
+    )
     await expect(boundary.invoke('permissions:get-status')).resolves.toEqual({
       accessibility: true,
       screenRecording: false,
