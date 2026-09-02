@@ -21,6 +21,9 @@ describe('window zoom shortcuts', () => {
     expect(zoomIntentForInput(key('=', { alt: true }))).toBeNull()
     expect(zoomIntentForInput(key('=', { type: 'keyUp' as never }))).toBeNull()
     expect(zoomIntentForInput(key('a'))).toBeNull()
+    // The physical key wins when the layout reports another character for it.
+    expect(zoomIntentForInput(key('−', { code: 'Minus' } as never))).toBe('out')
+    expect(zoomIntentForInput(key('*', { code: 'NumpadAdd' } as never))).toBe('in')
   })
 
   it('steps by half a level within bounds and resets to zero', () => {
