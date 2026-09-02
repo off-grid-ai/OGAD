@@ -1,6 +1,7 @@
 /**
  * The supervisor bridge: a renderer Stop/Pause/Take Over/Resume reaches the active task's
- * guard, commands fail closed, a stale command after the task ends is refused,
+ * guard, commands fail closed, a stale command after the task ends reaches no guard (stop is
+ * idempotent; anything else is refused),
  * and step/state broadcasts reach the overlay. Electron is the mocked boundary;
  * the guard runs real.
  */
@@ -91,6 +92,9 @@ describe('registerVisionIpc', () => {
     expect(owner.control('pause', 'web-control-task')).toBe(true)
     expect(owner.control('resume', 'web-control-task')).toBe(true)
     expect(owner.control('stop', 'web-control-task')).toBe(true)
+    // Stopping again, once the session is gone, is still the outcome you asked for.
+    expect(owner.control('stop', 'web-control-task')).toBe(true)
+    expect(owner.control('pause', 'web-control-task')).toBe(false)
 
     expect(projected).toEqual([
       { status: 'paused', action: 'Paused by you', kind: 'web_use' },
@@ -333,7 +337,9 @@ describe('registerVisionIpc', () => {
     const dispose = owner.registerSession('stale-task', guard, new AbortController())
     dispose()
     const handler = world.handlers.get('vision:control')
-    expect(await handler?.({}, 'stop', 'stale-task')).toBe(false)
+    // A stop for a task that already ended is the outcome you asked for; nothing else is allowed.
+    expect(await handler?.({}, 'stop', 'stale-task')).toBe(true)
+    expect(await handler?.({}, 'pause', 'stale-task')).toBe(false)
     expect(guard.isHalted).toBe(false)
   })
 })
