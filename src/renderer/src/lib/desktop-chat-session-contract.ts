@@ -96,7 +96,7 @@ export interface DesktopChatSessionBoundary {
     content: string,
     context?: unknown
   ): Promise<{ id: number; uuid: string }>
-  truncateRagMessages?(conversationId: string, keepCount: number): Promise<unknown>
+  truncateRagMessages?(conversationId: string, anchor: DesktopTruncationAnchor): Promise<unknown>
 }
 
 interface DesktopChatSessionCommonInput {
@@ -111,7 +111,13 @@ interface DesktopChatSessionCommonInput {
   images: string[]
   userPersistence?: { content: string; context?: unknown }
   replay?: 'regenerate' | 'edit'
-  invalidationKeepCount?: number
+  /** Which persisted rows a replay retires: everything after this message (and the message itself for an edit). */
+  invalidationAnchor?: DesktopTruncationAnchor
+}
+
+export interface DesktopTruncationAnchor {
+  messageId: string
+  keepAnchor: boolean
 }
 
 export interface DesktopChatSessionInput extends DesktopChatSessionCommonInput {

@@ -1332,12 +1332,47 @@ export function addRagMessage(
 
 // Keep the first `keepCount` messages of a conversation (chronological) and
 // delete the rest — used by regenerate/edit so old answers don't pile up.
-export function truncateRagMessages(conversationId: string, keepCount: number): number {
+export interface RagTruncationAnchor {
+  /** The uuid (or legacy numeric id, as text) of the message the cut is measured from. */
+  messageId: string
+  /** Regenerate keeps the question and drops what came after; edit drops the question too. */
+  keepAnchor: boolean
+}
+
+/**
+ * Retire every row after one message - the old answer, its tool rounds, its thought processes,
+ * whichever device wrote them. The anchor is the message's identity, never a count: a count taken
+ * from a rendered list (time-ordered, with hidden rows, with rows synced from a phone) does not
+ * match insert order, and that is how a resend once left the earlier run standing.
+ */
+export function truncateRagMessages(conversationId: string, anchor: RagTruncationAnchor): number {
   const db = getDB()
-  const rows = db
-    .prepare(`SELECT id, uuid FROM rag_messages WHERE conversation_id = ? ORDER BY id ASC`)
-    .all(conversationId) as Array<{ id: number; uuid: string }>
-  const toDelete = rows.slice(Math.max(0, keepCount))
+  const anchorRow = db
+    .prepare(
+      `SELECT id, created_at FROM rag_messages
+       WHERE conversation_id = ? AND (uuid = ? OR CAST(id AS TEXT) = ?) LIMIT 1`
+    )
+    .get(conversationId, anchor.messageId, anchor.messageId) as
+    | { id: number; created_at: string }
+    | undefined
+  if (!anchorRow) {
+    console.warn(`[RAG] truncate: anchor ${anchor.messageId} not found in ${conversationId}`)
+    return 0
+  }
+  const after = db
+    .prepare(
+      `SELECT id, uuid FROM rag_messages
+       WHERE conversation_id = ?
+         AND (created_at > ? OR (created_at = ? AND id > ?) ${anchor.keepAnchor ? '' : 'OR id = ?'})`
+    )
+    .all(
+      conversationId,
+      anchorRow.created_at,
+      anchorRow.created_at,
+      anchorRow.id,
+      ...(anchor.keepAnchor ? [] : [anchorRow.id])
+    ) as Array<{ id: number; uuid: string }>
+  const toDelete = after
   if (!toDelete.length) return 0
   const ph = toDelete.map(() => '?').join(',')
   const result = db

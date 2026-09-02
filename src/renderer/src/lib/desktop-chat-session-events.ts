@@ -20,8 +20,8 @@ export async function publishDesktopChatEvent({
 }: DesktopChatEventProjection): Promise<void> {
   if (event.type === 'invalidated') {
     const input = event.turnIds.map(inputFor).find((candidate) => candidate !== undefined)
-    if (input?.invalidationKeepCount !== undefined && boundary.truncateRagMessages) {
-      await boundary.truncateRagMessages(event.conversationId, input.invalidationKeepCount)
+    if (input?.invalidationAnchor && boundary.truncateRagMessages) {
+      await boundary.truncateRagMessages(event.conversationId, input.invalidationAnchor)
     }
   }
   if (event.type === 'started') {

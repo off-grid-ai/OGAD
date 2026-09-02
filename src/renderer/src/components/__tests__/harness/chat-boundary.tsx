@@ -29,6 +29,7 @@ type RagResult = RagChatResultContract & {
 }
 type StoredMessage = {
   id: number | string
+  uuid?: string
   role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
   context?: unknown
@@ -178,11 +179,16 @@ export class ChatBoundary {
     }
   )
 
-  readonly truncateRagMessages = vi.fn(async (conversationId: string, keepCount: number) => {
-    this.messages[conversationId] = (this.messages[conversationId] ?? []).slice(0, keepCount)
-    const conversation = this.conversations.find((item) => item.id === conversationId)
-    if (conversation) conversation.message_count = this.messages[conversationId]!.length
-  })
+  readonly truncateRagMessages = vi.fn(
+    async (conversationId: string, anchor: { messageId: string; keepAnchor: boolean }) => {
+      const rows = this.messages[conversationId] ?? []
+      const index = rows.findIndex((row) => String(row.uuid ?? row.id) === anchor.messageId)
+      if (index < 0) return
+      this.messages[conversationId] = rows.slice(0, anchor.keepAnchor ? index + 1 : index)
+      const conversation = this.conversations.find((item) => item.id === conversationId)
+      if (conversation) conversation.message_count = this.messages[conversationId]!.length
+    }
+  )
 
   private async modelControlSnapshot(): Promise<unknown> {
     const boundary = this.api as unknown as Record<string, (...args: never[]) => Promise<unknown>>

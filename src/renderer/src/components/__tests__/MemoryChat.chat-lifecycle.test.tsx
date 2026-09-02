@@ -676,7 +676,10 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
       projectId: 'project-alpha',
       conversationId: 'conversation-a'
     })
-    expect(boundary.truncateRagMessages).toHaveBeenCalledWith('conversation-a', 1)
+    expect(boundary.truncateRagMessages).toHaveBeenCalledWith(
+      'conversation-a',
+      expect.objectContaining({ keepAnchor: true })
+    )
     expect(screen.getAllByText('Explain the release gate')).toHaveLength(1)
 
     boundary.resolve(0, 'Updated explanation')

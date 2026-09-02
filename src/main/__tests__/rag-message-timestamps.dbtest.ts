@@ -25,7 +25,8 @@ import {
   createRagConversation,
   getDB,
   getRagMessages,
-  normalizeLegacyTimestamps
+  normalizeLegacyTimestamps,
+  truncateRagMessages
 } from '../database'
 
 afterAll(() => {
@@ -64,5 +65,38 @@ describe('chat row timestamps', () => {
     expect(normalizeLegacyTimestamps(getDB())).toBeGreaterThanOrEqual(1)
     expect(getRagMessages(conversationId)[0]!.created_at).toBe('2026-09-02T17:39:00.000Z')
     expect(normalizeLegacyTimestamps(getDB())).toBe(0)
+  })
+})
+
+describe('retiring rows on resend and edit', () => {
+  it('drops everything after the resent question by identity, including rows another device synced in', () => {
+    const conversationId = createRagConversation('Resend')
+    const question = addRagMessage(conversationId, 'user', 'Question')
+    // The old run: a phone-written tool row (ISO, earlier insert id order irrelevant) and an answer.
+    getDB()
+      .prepare(
+        `INSERT INTO rag_messages (uuid, conversation_id, role, content, created_at)
+         VALUES ('phone-tool', ?, 'tool', 'old tool row', ?)`
+      )
+      .run(conversationId, new Date(Date.now() + 1000).toISOString())
+    addRagMessage(conversationId, 'assistant', 'old answer')
+    const removed = truncateRagMessages(conversationId, {
+      messageId: question.uuid,
+      keepAnchor: true
+    })
+    expect(removed).toBe(2)
+    expect(getRagMessages(conversationId).map((row) => row.content)).toEqual(['Question'])
+  })
+
+  it('an edit drops the question too, and an unknown anchor drops nothing', () => {
+    const conversationId = createRagConversation('Edit')
+    addRagMessage(conversationId, 'user', 'Earlier question')
+    const question = addRagMessage(conversationId, 'user', 'Question to edit')
+    addRagMessage(conversationId, 'assistant', 'old answer')
+    expect(truncateRagMessages(conversationId, { messageId: 'missing', keepAnchor: true })).toBe(0)
+    expect(
+      truncateRagMessages(conversationId, { messageId: question.uuid, keepAnchor: false })
+    ).toBe(2)
+    expect(getRagMessages(conversationId).map((row) => row.content)).toEqual(['Earlier question'])
   })
 })

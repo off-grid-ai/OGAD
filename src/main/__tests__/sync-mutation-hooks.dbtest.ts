@@ -78,12 +78,14 @@ describe('core sync mutation contract', () => {
     mutations.length = 0
     createProject({ id: 'project-delete', name: 'Delete me' })
     createRagConversation('conversation-delete', 'Delete me', 'project-delete')
-    addRagMessage('conversation-delete', 'user', 'one')
+    const first = addRagMessage('conversation-delete', 'user', 'one')
     addRagMessage('conversation-delete', 'assistant', 'two')
     addRagMessage('conversation-delete', 'user', 'three')
 
     mutations.length = 0
-    expect(truncateRagMessages('conversation-delete', 1)).toBe(2)
+    expect(
+      truncateRagMessages('conversation-delete', { messageId: first.uuid, keepAnchor: true })
+    ).toBe(2)
     expect(mutations).toHaveLength(2)
     expect(mutations.every(({ entity, kind }) => entity === 'message' && kind === 'delete')).toBe(
       true

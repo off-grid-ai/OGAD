@@ -295,8 +295,10 @@ const offGridApi = {
     content: string,
     context?: unknown
   ) => ipcRenderer.invoke('rag:add-message', conversationId, role, content, context),
-  truncateRagMessages: (conversationId: string, keepCount: number) =>
-    ipcRenderer.invoke('rag:truncate-messages', conversationId, keepCount),
+  truncateRagMessages: (
+    conversationId: string,
+    anchor: { messageId: string; keepAnchor: boolean }
+  ) => ipcRenderer.invoke('rag:truncate-messages', conversationId, anchor),
   updateRagConversationTitle: (id: string, title: string) =>
     ipcRenderer.invoke('rag:update-conversation-title', id, title),
   deleteRagConversation: (id: string) => ipcRenderer.invoke('rag:delete-conversation', id),

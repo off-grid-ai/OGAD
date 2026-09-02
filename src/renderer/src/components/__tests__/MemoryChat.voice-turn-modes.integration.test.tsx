@@ -414,7 +414,10 @@ describe('<MemoryChat/> Desktop voice turn modes', () => {
     await waitFor(() => expect(boundary.calls).toHaveLength(1))
 
     expect(boundary.calls[0]?.query).toBe('Schedule the planning review')
-    expect(boundary.truncateRagMessages).toHaveBeenCalledWith('conversation-a', 1)
+    expect(boundary.truncateRagMessages).toHaveBeenCalledWith(
+      'conversation-a',
+      expect.objectContaining({ keepAnchor: true })
+    )
     expect(screen.getAllByRole('button', { name: 'Resend' })).toHaveLength(1)
 
     boundary.resolve(0, 'The review is scheduled again.')

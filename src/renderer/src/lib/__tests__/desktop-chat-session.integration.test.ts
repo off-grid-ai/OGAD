@@ -134,12 +134,15 @@ describe('DesktopChatSession', () => {
     const result = await session.send({
       ...input('turn-a'),
       replay: 'regenerate',
-      invalidationKeepCount: 1
+      invalidationAnchor: { messageId: 'user-a', keepAnchor: true }
     })
 
     expect(result.turn.status).toBe('completed')
     expect(result.response.answer).toBe('Updated answer')
-    expect(boundary.truncateRagMessages).toHaveBeenCalledWith('conversation-a', 1)
+    expect(boundary.truncateRagMessages).toHaveBeenCalledWith('conversation-a', {
+      messageId: 'user-a',
+      keepAnchor: true
+    })
   })
 
   it('edits a canonical turn and persists the replacement user message when it starts', async () => {
@@ -159,12 +162,15 @@ describe('DesktopChatSession', () => {
       userMessage: { role: 'user', content: 'Edited question' },
       query: 'Edited question',
       replay: 'edit',
-      invalidationKeepCount: 0,
+      invalidationAnchor: { messageId: 'user-a', keepAnchor: false },
       userPersistence: { content: 'Edited question' }
     })
 
     expect(edited.turn.userMessage).toEqual({ role: 'user', content: 'Edited question' })
-    expect(boundary.truncateRagMessages).toHaveBeenCalledWith('conversation-a', 0)
+    expect(boundary.truncateRagMessages).toHaveBeenCalledWith('conversation-a', {
+      messageId: 'user-a',
+      keepAnchor: false
+    })
     expect(boundary.addRagMessage).toHaveBeenCalledWith(
       'conversation-a',
       'user',

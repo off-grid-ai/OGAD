@@ -29,7 +29,8 @@ import {
   searchRagConversationIds,
   getSettings,
   saveSetting,
-  getSetting
+  getSetting,
+  type RagTruncationAnchor
 } from './database'
 import { deleteEntityById, resolveEntityCandidate } from './entity-domain'
 import {
@@ -1179,10 +1180,13 @@ export function setupIPC() {
     return getRagMessages(conversationId)
   })
 
-  ipcMain.handle('rag:truncate-messages', async (_e, conversationId: string, keepCount: number) => {
-    const { truncateRagMessages } = await import('./database')
-    return truncateRagMessages(conversationId, keepCount)
-  })
+  ipcMain.handle(
+    'rag:truncate-messages',
+    async (_e, conversationId: string, anchor: RagTruncationAnchor) => {
+      const { truncateRagMessages } = await import('./database')
+      return truncateRagMessages(conversationId, anchor)
+    }
+  )
   ipcMain.handle(
     'rag:add-message',
     (_, conversationId: string, role: 'user' | 'assistant', content: string, context?: any) => {

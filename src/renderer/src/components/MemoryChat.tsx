@@ -3666,7 +3666,11 @@ export function MemoryChat({
       conversationId?: string
       imageRequest?: ImageGenerationRequestContract
       projectIdOverride?: string | null
-      sessionReplay?: { type: 'regenerate' | 'edit'; turnId: string; keepCount: number }
+      sessionReplay?: {
+        type: 'regenerate' | 'edit'
+        turnId: string
+        anchor: { messageId: string; keepAnchor: boolean }
+      }
       /** A form submission is user input even though its text is supplied as an argument. */
       asUserInput?: boolean
     }
@@ -3928,7 +3932,7 @@ export function MemoryChat({
           images: [],
           userPersistence,
           replay: opts?.sessionReplay?.type,
-          invalidationKeepCount: opts?.sessionReplay?.keepCount,
+          invalidationAnchor: opts?.sessionReplay?.anchor,
           request: {
             ...imageRequest,
             conversationId: convId, // the turn's own conversation (activeConversationId can lag for a fresh/queued chat)
@@ -4087,7 +4091,7 @@ export function MemoryChat({
           noMemory,
           userPersistence,
           replay: opts?.sessionReplay?.type,
-          invalidationKeepCount: opts?.sessionReplay?.keepCount,
+          invalidationAnchor: opts?.sessionReplay?.anchor,
           thinking: thinkingRequested
         })
         const toolCalls = (tr?.toolCalls || []).map(
@@ -4292,7 +4296,7 @@ export function MemoryChat({
         images: imagePaths,
         userPersistence,
         replay: opts?.sessionReplay?.type,
-        invalidationKeepCount: opts?.sessionReplay?.keepCount
+        invalidationAnchor: opts?.sessionReplay?.anchor
       })
       const resultContext = result.context as RagContext | undefined
 
@@ -4949,7 +4953,10 @@ export function MemoryChat({
             await stopLiveWebUseForConversation(activeConversationId)
             setMessages((prev) => prev.slice(0, i + 1))
             if (activeConversationId && !sessionTurn)
-              await window.api.truncateRagMessages(activeConversationId, i + 1)
+              await window.api.truncateRagMessages(activeConversationId, {
+                messageId: mi.id,
+                keepAnchor: true
+              })
             // The turn's own attachments, not the composer's - the composer was cleared when this
             // turn was first sent, so regenerating without them re-asks the question WITHOUT its image.
             await sendMessage(content, {
@@ -4960,7 +4967,7 @@ export function MemoryChat({
                     sessionReplay: {
                       type: 'regenerate' as const,
                       turnId: sessionTurn.turnId,
-                      keepCount: i + 1
+                      anchor: { messageId: mi.id, keepAnchor: true }
                     }
                   }
                 : {})
@@ -4991,6 +4998,7 @@ export function MemoryChat({
     // record of it - so the chip vanished from the thread and every later regenerate lost it too.
     const cid = activeConversationId
     const edited = messages[idx]
+    if (!edited) return
     const sessionTurn = messages
       .slice(idx + 1)
       .map((message) => readPersistedChatSessionTurn(message.context))
@@ -5013,7 +5021,7 @@ export function MemoryChat({
       try {
         if (cid) {
           if (!sessionTurn) {
-            await window.api.truncateRagMessages(cid, idx)
+            await window.api.truncateRagMessages(cid, { messageId: edited.id, keepAnchor: false })
             await window.api.addRagMessage(cid, 'user', text, persisted)
           }
         }
@@ -5037,7 +5045,7 @@ export function MemoryChat({
                 sessionReplay: {
                   type: 'edit' as const,
                   turnId: sessionTurn.turnId,
-                  keepCount: idx
+                  anchor: { messageId: edited.id, keepAnchor: false }
                 }
               }
             : {})
