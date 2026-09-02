@@ -1901,7 +1901,7 @@ Entering voice mode on an existing chat rendered an empty screen with no indicat
 it loads (voice model / engine bridge) was ready. Show the loader for the duration instead of a
 blank list.
 
-## Voice mode shows two loaders for one reply (open, 2026-09-02)
+## Voice mode shows two loaders for one reply (RESOLVED 2026-09-02: the voice bubble holds a still waveform placeholder while the reply streams; the thinking header's dots are the one loader; test VoiceBubble.streaming)
 
 While a reply generates in voice mode, the message header shows loading dots and the voice bubble
 below shows its own dots. One reply, one indicator.
