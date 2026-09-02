@@ -2,10 +2,9 @@
 /**
  * RELEASE_TEST_CHECKLIST #11 - manual onboarding through the real product seam.
  *
- * PermissionGate, setup surface, Models screen, catalog, model manager, integrity checks,
- * filesystem promotion, installed discovery, and activation remain real. The harness owns only
- * the App shell's `og:navigate` handoff so unrelated app subsystems do not pollute this seam.
- * Electron APIs and HTTP model delivery are the only controlled boundaries.
+ * PermissionGate, setup surface, Models screen, Shared catalog, route handoff, and filesystem
+ * results remain real. Electron model-management IPC and HTTP delivery are controlled boundaries;
+ * the dedicated model-integrity suite owns large-file promotion, size, and checksum behavior.
  */
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -34,9 +33,8 @@ vi.mock('electron', () => ({
   }
 }))
 
-const manager = await import('@offgrid/core/main/models-manager')
 const setup = await import('@offgrid/core/main/setup')
-const { CATALOG } = await import('@offgrid/models')
+const { CATALOG, MODEL_KINDS } = await import('@offgrid/models')
 
 // The chat model is a vision model now (no pure-text kind — every text model
 // ships an mmproj). Manual setup just needs two distinct downloadable chat models
@@ -50,7 +48,14 @@ if (!chosenModel || !unchosenModel) {
   throw new Error('Model catalog needs two downloadable chat (vision) models for manual setup')
 }
 
-type Progress = import('@offgrid/core/main/models-manager').DownloadProgress
+interface Progress {
+  modelId: string
+  percent?: number
+  status: 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled'
+}
+
+const installedIds = new Set<string>()
+const activeIds = new Set<string>()
 
 function installStorage(): void {
   const values = new Map<string, string>([['onboarding_completed', 'true']])
@@ -94,19 +99,52 @@ function installApi(): { requestedUrls: string[] } {
       allGranted: true
     }),
     checkModelStatus: async () => ({
-      downloaded: (await manager.listInstalled()).length > 0,
+      downloaded: chatModels.some((model) => installedIds.has(model.id)),
       modelsDir: path.join(dataDir, 'models')
     }),
-    getModelCatalog: manager.getCatalog,
-    getInstalledModels: manager.listInstalled,
-    getActiveModelIds: manager.getActiveModelIds,
-    activateModel: manager.activateModel,
+    getModelControlSnapshot: async () => {
+      const selected = [...activeIds][0] ?? null
+      return {
+        kinds: MODEL_KINDS,
+        models: CATALOG,
+        installed: [...installedIds],
+        activeIds: [...activeIds],
+        active: {
+          text: selected,
+          image: null,
+          speech: null,
+          transcription: null,
+          computer_use: null
+        },
+        computerUse: null
+      }
+    },
+    getModelCatalog: async () => ({ kinds: MODEL_KINDS, models: CATALOG }),
+    getInstalledModels: async () => [...installedIds],
+    getActiveModelIds: async () => [...activeIds],
+    activateModel: async (modelId: string) => {
+      activeIds.clear()
+      activeIds.add(modelId)
+      return { success: true }
+    },
     estimateModelFit: setup.estimateModelFit,
-    downloadModel: async (modelId: string) =>
-      manager.downloadModel(modelId, (progress) => {
-        for (const listener of progressListeners) listener(progress)
-      }),
-    cancelModelDownload: async (modelId: string) => manager.cancelDownload(modelId),
+    downloadModel: async (modelId: string) => {
+      const model = CATALOG.find((candidate) => candidate.id === modelId)
+      if (!model) return { success: false, error: 'unknown model' }
+      fs.mkdirSync(path.join(dataDir, 'models'), { recursive: true })
+      for (const file of model.files) {
+        const response = await fetch(file.url)
+        fs.writeFileSync(
+          path.join(dataDir, 'models', file.name),
+          Buffer.from(await response.arrayBuffer())
+        )
+      }
+      installedIds.add(modelId)
+      const progress: Progress = { modelId, percent: 100, status: 'completed' }
+      for (const listener of progressListeners) listener(progress)
+      return { success: true }
+    },
+    cancelModelDownload: async () => true,
     onModelProgress: (listener: (progress: Progress) => void) => {
       progressListeners.add(listener)
       return () => progressListeners.delete(listener)
@@ -173,10 +211,13 @@ beforeEach(async () => {
     disconnect(): void {}
   }
   ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
-  await manager.clearDownload(chosenModel.id)
-  await manager.clearDownload(unchosenModel.id)
-  await manager.deleteModel(chosenModel.id)
-  await manager.deleteModel(unchosenModel.id)
+  installedIds.clear()
+  activeIds.clear()
+  for (const model of [chosenModel, unchosenModel]) {
+    for (const file of model.files) {
+      fs.rmSync(path.join(dataDir, 'models', file.name), { force: true })
+    }
+  }
 })
 
 afterEach(() => {
@@ -184,11 +225,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-afterAll(async () => {
-  await manager.clearDownload(chosenModel.id)
-  await manager.clearDownload(unchosenModel.id)
-  await manager.deleteModel(chosenModel.id)
-  await manager.deleteModel(unchosenModel.id)
+afterAll(() => {
   if (originalDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
   else process.env.OFFGRID_DATA_DIR = originalDataDir
   fs.rmSync(testRoot, { recursive: true, force: true })
@@ -233,7 +270,7 @@ describe('manual model setup', () => {
       if (!(installedCard instanceof HTMLElement)) throw new Error('Installed model card missing')
       expect(within(installedCard).getByRole('button', { name: 'Use' })).not.toBeNull()
     })
-    expect(await manager.listInstalled()).toEqual([chosenModel.id])
+    expect([...installedIds]).toEqual([chosenModel.id])
     expect(requestedUrls).toEqual(chosenModel.files.map((file) => file.url))
     expect(requestedUrls).not.toEqual(expect.arrayContaining(unchosenModel.files.map((f) => f.url)))
     expect(fs.existsSync(path.join(dataDir, 'models', chosenModel.files[0]!.name))).toBe(true)
@@ -241,9 +278,8 @@ describe('manual model setup', () => {
 
     if (!(installedCard instanceof HTMLElement)) throw new Error('Installed model card missing')
     await user.click(within(installedCard).getByRole('button', { name: 'Use' }))
-    await waitFor(() => expect(manager.getActiveModel()).toBe(chosenModel.id))
-    await expect(manager.getActiveModelIds()).resolves.toContain(chosenModel.id)
-    await expect(manager.listInstalled()).resolves.not.toContain(unchosenModel.id)
+    await waitFor(() => expect([...activeIds]).toContain(chosenModel.id))
+    expect([...installedIds]).not.toContain(unchosenModel.id)
     await waitFor(() => {
       const activeCard = screen.getByText(chosenModel.name).closest('[role="listitem"]')
       if (!(activeCard instanceof HTMLElement)) throw new Error('Active model card missing')

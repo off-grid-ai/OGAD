@@ -40,6 +40,21 @@ function installApi(): void {
         database.updateRagConversationTitle(id, title),
       getSettings: async () => database.getSettings(),
       saveSetting: async (key: string, value: unknown) => database.saveSetting(key, value),
+      chatVisionAvailable: async () => false,
+      getModelControlSnapshot: async () => ({
+        kinds: [],
+        models: [],
+        installed: [],
+        activeIds: [],
+        active: {
+          text: null,
+          image: null,
+          speech: null,
+          transcription: null,
+          computer_use: null
+        },
+        computerUse: null
+      }),
       listSkills: async () => skills.listSkills(),
       imageGenStatus: async () => ({ available: false, models: [], active: '' }),
       onRagStream: () => () => undefined,

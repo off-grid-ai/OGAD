@@ -55,7 +55,8 @@ describe('Desktop active-model authority', () => {
       {
         listCatalog: async () => selectedModels,
         listInstalled: async () => selectedModels.map((model) => model.id),
-        localTextRuntimeState: async () => ({ ready: true, loaded: true })
+        localTextRuntimeState: async () => ({ ready: true, loaded: true }),
+        localVoiceRuntimeState: async () => ({ installed: true, ready: true })
       },
       persistence
     )

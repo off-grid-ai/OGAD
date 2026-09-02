@@ -580,6 +580,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     expect(steps).toEqual(['generate_image'])
     expect(r.imageRequest).toEqual({ prompt: 'a red bicycle on a beach' })
     expect(r.toolCalls[0]!.result).toMatch(/will appear in the chat/i) // placeholder fed back
+    expect(r.toolCalls[0]!.status).toBe('pending')
     expect(r.answer).toBe('Here is your image.')
   })
 

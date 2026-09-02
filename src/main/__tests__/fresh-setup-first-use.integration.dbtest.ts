@@ -12,10 +12,12 @@ import { afterAll, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { WHISPER_MIN_BYTES } from '@offgrid/models'
 
 const originalDataDir = process.env.OFFGRID_DATA_DIR
 const originalBinDir = process.env.OFFGRID_BIN_DIR
 const originalResourceDir = process.env.OFFGRID_RESOURCE_DIR
+const originalSkipCompatibleGenerationModel = process.env.OFFGRID_SKIP_COMPATIBLE_GENERATION_MODEL
 const hostFetch = globalThis.fetch.bind(globalThis)
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-fresh-setup-'))
 const dataDir = path.join(root, 'profile')
@@ -24,6 +26,9 @@ const resourceDir = path.join(root, 'resources')
 process.env.OFFGRID_DATA_DIR = dataDir
 process.env.OFFGRID_BIN_DIR = binDir
 process.env.OFFGRID_RESOURCE_DIR = resourceDir
+// This journey must start before Desktop model services create the profile.
+// It installs its own real runtime boundary after proving the profile is absent.
+process.env.OFFGRID_SKIP_COMPATIBLE_GENERATION_MODEL = '1'
 
 vi.mock('electron', () => ({
   app: {
@@ -135,13 +140,14 @@ function installRuntimeBoundaries(): void {
       `fs.writeFileSync(args[outputIndex + 1], Buffer.from('${PNG_BASE64}', 'base64'))`
     ].join('\n')
   )
-  fs.mkdirSync(resourceDir, { recursive: true })
-  fs.writeFileSync(
-    path.join(resourceDir, 'tts-worker.mjs'),
+  executable(
+    path.join(resourceDir, 'bin', 'executorch-speech'),
     [
-      "import fs from 'node:fs'",
-      'const [, , command, output] = process.argv',
-      "if (command === 'speak' && output) {",
+      '#!/usr/bin/env node',
+      "const fs = require('node:fs')",
+      'const args = process.argv.slice(2)',
+      "const output = args[args.indexOf('--output') + 1]",
+      'if (output) {',
       "  let input = ''",
       "  process.stdin.setEncoding('utf8')",
       "  process.stdin.on('data', chunk => { input += chunk })",
@@ -149,12 +155,14 @@ function installRuntimeBoundaries(): void {
       "    fs.writeFileSync(output, Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(60, 1)]))",
       '  })',
       '}'
-    ].join('\n'),
-    { mode: 0o755 }
+    ].join('\n')
   )
 }
 
 function fixtureBytes(fileName: string, seed: number): Buffer {
+  if (/^ggml-[^/\\]+\.bin$/i.test(fileName)) {
+    return Buffer.alloc(WHISPER_MIN_BYTES, seed)
+  }
   if (fileName.endsWith('.gguf')) {
     return Buffer.concat([Buffer.from('GGUF', 'ascii'), Buffer.alloc(2_044, seed)])
   }
@@ -263,6 +271,11 @@ afterAll(async () => {
   else process.env.OFFGRID_BIN_DIR = originalBinDir
   if (originalResourceDir === undefined) delete process.env.OFFGRID_RESOURCE_DIR
   else process.env.OFFGRID_RESOURCE_DIR = originalResourceDir
+  if (originalSkipCompatibleGenerationModel === undefined) {
+    delete process.env.OFFGRID_SKIP_COMPATIBLE_GENERATION_MODEL
+  } else {
+    process.env.OFFGRID_SKIP_COMPATIBLE_GENERATION_MODEL = originalSkipCompatibleGenerationModel
+  }
   fs.rmSync(root, { recursive: true, force: true })
 })
 
@@ -286,7 +299,10 @@ describe('fresh setup to first use', () => {
     const plan = await setup.getSetupPlan()
     expect(plan.mode).toBe('conservative')
     expect(plan.items.map((item) => item.kind)).toEqual(['chat', 'transcription', 'voice'])
-    expect(plan.items.every((item) => item.installed === false)).toBe(true)
+    expect(plan.items.find((item) => item.kind === 'chat')?.installed).toBe(false)
+    expect(plan.items.find((item) => item.kind === 'transcription')?.installed).toBe(false)
+    // Executorch Kokoro is bundled with Desktop and is ready without a model download.
+    expect(plan.items.find((item) => item.kind === 'voice')?.installed).toBe(true)
 
     const baselineModels: JourneyModel[] = plan.items.map((item) => {
       const catalogEntry = CATALOG.find((entry) => entry.id === item.id)
@@ -327,20 +343,42 @@ describe('fresh setup to first use', () => {
         }
       })
     const models = [...baselineModels, ...additionalModels]
+    const downloadableModels = models.filter((model) => model.files.length > 0)
     expect(new Set(models.map((model) => model.kind))).toEqual(new Set(requiredKinds))
     installDownloadBoundary(models)
 
     // Each representative modality download loses its connection after writing a
     // real .part prefix. No model is installed or selectable from partial bytes.
-    for (const model of models) {
+    const interruptedFileByModel = new Map<string, CatalogFile>()
+    for (const model of downloadableModels) {
       await expect(manager.downloadModel(model.id)).resolves.toEqual({
         success: false,
         error: 'network connection interrupted'
       })
-      const firstFile = model.files[0]!
-      expect(fs.statSync(path.join(dataDir, 'models', `${firstFile.name}.part`)).size).toBe(700)
+      const interruptedFile = model.files.find((file) =>
+        fs.existsSync(path.join(dataDir, 'models', `${file.name}.part`))
+      )
+      expect(interruptedFile).toBeDefined()
+      interruptedFileByModel.set(model.id, interruptedFile!)
+      expect(fs.statSync(path.join(dataDir, 'models', `${interruptedFile!.name}.part`)).size).toBe(
+        700
+      )
       expect(await manager.listInstalled()).not.toContain(model.id)
     }
+
+    // The HTTP boundary serves compact deterministic artifacts. Persist matching
+    // manifest evidence before relaunch so the real integrity gate can verify the
+    // resumed bytes without allocating the multi-gigabyte production artifacts.
+    const downloadsFile = path.join(dataDir, 'models', 'downloads.json')
+    const persistedDownloads = JSON.parse(fs.readFileSync(downloadsFile, 'utf8')) as Array<{
+      manifest: { artifacts: Array<{ url: string; sizeBytes?: number }> }
+    }>
+    for (const record of persistedDownloads) {
+      for (const artifact of record.manifest.artifacts) {
+        artifact.sizeBytes = delivery.get(artifact.url)?.length
+      }
+    }
+    fs.writeFileSync(downloadsFile, JSON.stringify(persistedDownloads))
 
     // Relaunch the module graph like a newly started main process. The production
     // registry restores every interrupted row. Configure for me resumes its baseline,
@@ -354,7 +392,7 @@ describe('fresh setup to first use', () => {
     ])
     expect(resumedManager.listDownloads()).toEqual(
       expect.arrayContaining(
-        models.map((model) =>
+        downloadableModels.map((model) =>
           expect.objectContaining({
             modelId: model.id,
             status: 'failed',
@@ -365,24 +403,26 @@ describe('fresh setup to first use', () => {
     )
 
     const progress: import('../setup').SetupProgress[] = []
-    await expect(
-      resumedSetup.autoConfigure((event) => progress.push(event))
-    ).resolves.toMatchObject({ success: true, modelId: baselineModels[0]!.id })
+    const resumedResult = await resumedSetup.autoConfigure((event) => progress.push(event))
+    expect(resumedResult.success, JSON.stringify(resumedResult)).toBe(true)
+    expect(resumedResult.modelId).toBe(baselineModels[0]!.id)
     expect(progress.at(-1)).toMatchObject({
       phase: 'done',
       modelId: baselineModels[0]!.id
     })
-    for (const model of additionalModels) {
+    for (const model of additionalModels.filter((candidate) => candidate.files.length > 0)) {
       await expect(resumedManager.retryDownload(model.id)).resolves.toEqual({ success: true })
       await expect(resumedManager.activateModel(model.id)).resolves.toEqual({ success: true })
     }
     expect(await resumedManager.listInstalled()).toEqual(
       expect.arrayContaining(models.map((model) => model.id))
     )
-    for (const model of models) {
-      const firstFile = model.files[0]!
-      expect(resumedRanges.get(firstFile.url)).toBe('bytes=700-')
-      expect(fs.existsSync(path.join(dataDir, 'models', `${firstFile.name}.part`))).toBe(false)
+    for (const model of downloadableModels) {
+      const interruptedFile = interruptedFileByModel.get(model.id)!
+      expect(resumedRanges.get(interruptedFile.url)).toBe('bytes=700-')
+      expect(fs.existsSync(path.join(dataDir, 'models', `${interruptedFile.name}.part`))).toBe(
+        false
+      )
     }
 
     // A SECOND chat model, not the one being activated. What the assertion below protects is that

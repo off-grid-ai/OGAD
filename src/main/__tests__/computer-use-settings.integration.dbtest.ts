@@ -15,7 +15,12 @@ vi.mock('electron', () => ({
 }))
 
 import { deleteSetting, getDB } from '../database'
-import { getComputerUseSettings, setComputerUseSettings } from '../computer-use-settings'
+import {
+  getComputerUseSettings,
+  patchComputerUseSettings,
+  readComputerUseSettings,
+  setComputerUseSettings
+} from '../computer-use-settings'
 import { COMPUTER_USE_SETTINGS_KEY } from '../../shared/computer-use-settings'
 import { TaskHistoryStore } from '../tasks/task-history-store'
 import { recentVisualFacts } from '../vision/visual-context'
@@ -63,6 +68,35 @@ describe('Computer Use settings persistence', () => {
 
     expect(getComputerUseSettings()).toMatchObject({
       modelStrategy: 'text_plus_specialist'
+    })
+  })
+
+  it('reads through a typed owner port and patches from the latest authoritative value', () => {
+    setComputerUseSettings({
+      modelStrategy: 'text_plus_specialist',
+      context: '16k',
+      screenshotSize: 'large',
+      checkpointInterval: 8
+    })
+
+    expect(readComputerUseSettings()).toEqual({
+      status: 'available',
+      settings: expect.objectContaining({
+        modelStrategy: 'text_plus_specialist',
+        context: '16k',
+        screenshotSize: 'large',
+        checkpointInterval: 8
+      })
+    })
+
+    expect(patchComputerUseSettings({ context: '32k' })).toEqual({
+      status: 'available',
+      settings: expect.objectContaining({
+        modelStrategy: 'text_plus_specialist',
+        context: '32k',
+        screenshotSize: 'large',
+        checkpointInterval: 8
+      })
     })
   })
 

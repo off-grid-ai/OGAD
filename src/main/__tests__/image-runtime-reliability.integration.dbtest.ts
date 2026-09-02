@@ -530,7 +530,7 @@ describe('multimodal runtime reliability', () => {
   }, 10_000)
 
   it('persists, scopes, exports, reopens, and fully deletes a generated image artifact', async () => {
-    const image = await generateImage({
+    const generated = await generateImage({
       prompt: 'An emerald release map',
       model: IMAGE_MODEL,
       seed: 405,
@@ -538,6 +538,10 @@ describe('multimodal runtime reliability', () => {
       height: 512,
       steps: 4
     })
+    const { persistImageGenerationOutput } = await import('../imagegen/application-service')
+    // Enter the image library through its canonical ownership boundary. The native
+    // runtime path is an input artifact, not permission to bypass library scoping.
+    const image = await persistImageGenerationOutput(generated)
     const imageBytes = Buffer.from(PNG_BASE64, 'base64')
     const exportPath = path.join(fixture.root, 'exports', 'release-map.png')
     fs.mkdirSync(path.dirname(exportPath), { recursive: true })

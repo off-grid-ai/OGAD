@@ -69,10 +69,13 @@ describe('mimeForExt — single source of truth for ext -> MIME', () => {
 // and does not decode", plus "the one decoder uses the shared resolver".
 describe('attachment MIME — one decoder, no re-inlined png/jpeg guess', () => {
   const toolsSrc = readFileSync(join(__dirname, '../tools.ts'), 'utf8')
+  const platformPortsSrc = readFileSync(join(__dirname, '../tools/platform-ports.ts'), 'utf8')
   const readImagesSrc = readFileSync(join(__dirname, '../llm/read-images.ts'), 'utf8')
 
-  it('tools.ts delegates image decoding instead of doing its own', () => {
-    expect(toolsSrc).toContain("import { readImages } from './llm/read-images'")
+  it('tools.ts delegates image decoding through the platform port instead of doing its own', () => {
+    expect(toolsSrc).toContain('readSupportedToolImages')
+    expect(platformPortsSrc).toContain("import { readImages } from '../llm/read-images'")
+    expect(platformPortsSrc).toMatch(/readSupportedToolImages[\s\S]*?readImages/)
     // No second decoder: the inline readFileSync/base64 loop it used to carry is gone.
     expect(toolsSrc).not.toMatch(/readFileSync\([^)]*\)\.toString\('base64'\)/)
   })
@@ -84,6 +87,7 @@ describe('attachment MIME — one decoder, no re-inlined png/jpeg guess', () => 
   it('neither inlines the .png-or-jpeg ternary that mislabelled webp', () => {
     const ternary = /endsWith\('\.png'\)\s*\?\s*'image\/png'\s*:\s*'image\/jpeg'/
     expect(toolsSrc).not.toMatch(ternary)
+    expect(platformPortsSrc).not.toMatch(ternary)
     expect(readImagesSrc).not.toMatch(ternary)
   })
 })

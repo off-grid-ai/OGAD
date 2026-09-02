@@ -11,8 +11,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import type { AddressInfo } from 'net'
-import { encodeModelRouteId } from '@offgrid/models'
-import { LLAMA_SERVER_PORT } from '../../shared/ports'
+import { CATALOG, WHISPER_MIN_BYTES, encodeModelRouteId } from '@offgrid/models'
 
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-gateway-chat-'))
 const hostFetch = globalThis.fetch.bind(globalThis)
@@ -32,12 +31,14 @@ vi.mock('electron', () => ({
 }))
 
 let upstream: http.Server
+let upstreamPort: number
 let gatewayPort: number
 let releaseUpstream: (() => void) | undefined
 let upstreamRequest: Record<string, unknown> | undefined
 let startModelServer: typeof import('../model-server').startModelServer
 let stopModelServer: typeof import('../model-server').stopModelServer
 const previousDataDir = process.env.OFFGRID_DATA_DIR
+const restoreCatalogFacts: Array<() => void> = []
 
 function installLlamaBoundary(source: string): string {
   const binRoot = path.join(TMP_DIR, 'test-bin')
@@ -95,8 +96,10 @@ async function resetNativeJourney(llm: typeof import('../llm').llm): Promise<voi
 }
 
 function fixtureDownload(url: string): Response {
-  const bytes = Buffer.alloc(2048, 7)
+  const name = decodeURIComponent(new URL(url).pathname.split('/').at(-1) ?? '')
+  const bytes = Buffer.alloc(/^ggml-[^/\\]+\.bin$/i.test(name) ? WHISPER_MIN_BYTES : 2048, 7)
   if (/\.gguf(?:\?|$)/i.test(url)) bytes.write('GGUF')
+  if (/\.zip(?:\?|$)/i.test(url)) bytes.write('PK\x03\x04')
   return new Response(bytes, {
     status: 200,
     headers: { 'content-length': String(bytes.length) }
@@ -127,6 +130,19 @@ async function waitForGateway(): Promise<void> {
 
 beforeAll(async () => {
   process.env.OFFGRID_DATA_DIR = TMP_DIR
+  for (const model of CATALOG) {
+    for (const file of model.files) {
+      const mutable = file as { sizeBytes?: number; sha256?: string }
+      const originalSize = mutable.sizeBytes
+      const originalSha256 = mutable.sha256
+      mutable.sizeBytes = /^ggml-[^/\\]+\.bin$/i.test(file.name) ? WHISPER_MIN_BYTES : 2048
+      mutable.sha256 = undefined
+      restoreCatalogFacts.push(() => {
+        mutable.sizeBytes = originalSize
+        mutable.sha256 = originalSha256
+      })
+    }
+  }
   ;({ startModelServer, stopModelServer } = await import('../model-server'))
   upstream = http.createServer((req, res) => {
     if (req.method === 'GET' && req.url === '/health') {
@@ -170,17 +186,19 @@ beforeAll(async () => {
       res.end('data: [DONE]\n\n')
     })
   })
+  upstreamPort = await unusedPort()
   await new Promise<void>((resolve, reject) => {
     upstream.once('error', reject)
-    upstream.listen(LLAMA_SERVER_PORT, '127.0.0.1', () => resolve())
+    upstream.listen(upstreamPort, '127.0.0.1', () => resolve())
   })
 
   gatewayPort = await unusedPort()
-  startModelServer(gatewayPort)
+  startModelServer(gatewayPort, { upstreamPort: () => upstreamPort })
   await waitForGateway()
 })
 
 afterAll(async () => {
+  for (const restore of restoreCatalogFacts.splice(0)) restore()
   releaseUpstream?.()
   stopModelServer()
   await new Promise<void>((resolve) => upstream.close(() => resolve()))
@@ -190,6 +208,32 @@ afterAll(async () => {
 })
 
 describe('model gateway chat streaming', () => {
+  it('publishes authoritative catalog capability evidence without changing it', async () => {
+    const model = CATALOG[0]
+    if (!model) throw new Error('catalog fixture is empty')
+    const original = model.capabilities
+    model.capabilities = {
+      ...original,
+      vision: true,
+      tools: false,
+      thinking: true
+    }
+    try {
+      const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/models/catalog`)
+      expect(response.status).toBe(200)
+      const body = (await response.json()) as { models: Array<Record<string, unknown>> }
+      expect(body.models.find((entry) => entry.id === model.id)).toMatchObject({
+        capabilities: {
+          vision: true,
+          tools: false,
+          thinking: true
+        }
+      })
+    } finally {
+      model.capabilities = original
+    }
+  })
+
   it('reports and activates the Desktop remote Chat model through the management API', async () => {
     const remote = await import('../vision/remote-vision-server')
     const serverId = 'mobile-model-parity'
@@ -399,9 +443,16 @@ describe('model gateway chat streaming', () => {
       await resetNativeJourney(llm)
       const chosen = await setup.getRecommendation('conservative')
       expect(chosen).not.toBeNull()
+      const installedBeforeChoice = new Set(await manager.listInstalled())
 
       expect(await manager.downloadModel(chosen!.id)).toEqual({ success: true })
-      expect(await manager.listInstalled()).toEqual([chosen!.id])
+      const manuallyAdded = (await manager.listInstalled()).filter(
+        (modelId) => !installedBeforeChoice.has(modelId)
+      )
+      // Runtime-managed models such as ExecuTorch Kokoro are already available
+      // without this download. The only model added by this user action is the
+      // selected Chat model.
+      expect(manuallyAdded).toEqual([chosen!.id])
       expect(await manager.activateModel(chosen!.id)).toEqual({ success: true })
       await llm.restart()
 

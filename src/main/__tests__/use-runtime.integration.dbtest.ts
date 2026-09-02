@@ -113,6 +113,101 @@ describe('getActionsRuntime', () => {
     expect(outcome).toBeUndefined()
   })
 
+  it('projects a terminal Chat-owned action through the Pro observation hook', async () => {
+    const { observeActionOutcome } = await import('../actions/use-runtime')
+    const observed: unknown[] = []
+    const observer = (result: unknown): void => {
+      observed.push(result)
+    }
+    registerHook(HOOKS.actionsObserveChatActionResult, observer)
+    try {
+      observeActionOutcome({
+        id: 'act_connector_1',
+        outcome: 'done',
+        record: {
+          id: 'act_connector_1',
+          type: 'connector',
+          intent: 'create_external_task via APP-143 guarded connector',
+          args: {},
+          risk: 'mutate',
+          source: 'chat',
+          sourceRef: 'approval-chat-143',
+          payloadHash: 'a'.repeat(64),
+          idempotencyKey: 'app143',
+          rail: 'connector',
+          attempts: 1,
+          attemptLog: [
+            {
+              rail: 'connector',
+              at: 1,
+              outcome: 'ok',
+              detail: 'Created external task "Ship guarded approval journey" in Desktop P0'
+            }
+          ],
+          state: 'done',
+          createdAt: 1,
+          updatedAt: 2
+        }
+      })
+    } finally {
+      unregisterHook(HOOKS.actionsObserveChatActionResult, observer)
+    }
+
+    expect(observed).toEqual([
+      {
+        actionId: 'act_connector_1',
+        conversationId: 'approval-chat-143',
+        status: 'done',
+        summary: 'Created external task "Ship guarded approval journey" in Desktop P0'
+      }
+    ])
+  })
+
+  it('contains a failing result observer after the action commits and exposes the saved result', async () => {
+    const { getActionsRuntime } = await import('../actions/use-runtime')
+    const runtime = getActionsRuntime()
+    const observer = async (): Promise<never> => {
+      throw new Error('projection database unavailable')
+    }
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    registerHook(HOOKS.actionsObserveChatActionResult, observer)
+    try {
+      const proposed = await runtime.propose(
+        {
+          type: 'reminder',
+          intent: 'save the observer isolation proof',
+          args: { title: 'Observer isolation proof' },
+          risk: 'mutate'
+        },
+        { source: 'chat', sourceRef: 'approval-chat-observer-failure' }
+      )
+      expect(proposed.accepted).toBe(true)
+      if (!proposed.accepted) return
+
+      const outcome = await runtime.waitForOutcome(proposed.id, 10_000)
+      expect(outcome?.outcome).toBe('done')
+      expect(landed.some(({ title }) => title === 'Observer isolation proof')).toBe(true)
+      await vi.waitFor(() => {
+        expect(logged).toHaveBeenCalledWith(
+          '[actions] Chat action result projection failed',
+          expect.objectContaining({ message: 'projection database unavailable' })
+        )
+      })
+      await expect(runtime.listTerminalChatActionResults()).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            actionId: proposed.id,
+            conversationId: 'approval-chat-observer-failure',
+            status: 'done'
+          })
+        ])
+      )
+    } finally {
+      unregisterHook(HOOKS.actionsObserveChatActionResult, observer)
+      logged.mockRestore()
+    }
+  })
+
   it('the browser rail is registered: a web_use proposal routes to browser', async () => {
     const { getActionsRuntime } = await import('../actions/use-runtime')
     const { buildRegistry } = await import('../actions/use-runtime')

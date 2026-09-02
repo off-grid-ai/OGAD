@@ -40,7 +40,9 @@ describe('model-server.ts — gateway proxies to the LIVE engine port', () => {
   const src = read('model-server.ts')
 
   it('reads llm.getPort() for the upstream, not a fixed constant', () => {
-    expect(src).toMatch(/upstreamPort = \(\): number => llm\.getPort\(\)/)
+    expect(src).toMatch(/upstreamPortResolver = \(\): number => llm\.getPort\(\)/)
+    expect(src).toMatch(/upstreamPort = \(\): number => upstreamPortResolver\(\)/)
+    expect(src).toMatch(/options\.upstreamPort \?\? \(\(\) => llm\.getPort\(\)\)/)
     // No lingering fixed-constant upstream.
     expect(src).not.toMatch(/const UPSTREAM_PORT = LLAMA_SERVER_PORT/)
   })

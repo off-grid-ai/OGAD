@@ -150,7 +150,7 @@ describe('McpConnectorToolExtension with real connector state', () => {
     ])
   })
 
-  it('persists an error for a failed connector while retaining healthy schemas', async () => {
+  it('omits a failed connector while retaining healthy schemas', async () => {
     const failedId = addHttpConnector('Notion')
     const healthyId = addHttpConnector('Files')
     boundary.tools.set(failedId, new Error('Authorization required'))
@@ -160,8 +160,9 @@ describe('McpConnectorToolExtension with real connector state', () => {
 
     expect(schemas.map((schema) => schema.function.name)).toEqual([`mcp__${healthyId}__read_file`])
     const failed = listConnectors().find((connector) => connector.id === failedId)
-    expect(failed?.status).toBe('error')
-    expect(failed?.status_detail).toContain('Authorization required')
+    // The application service behind the production boundary owns discovery
+    // persistence. This extension only projects the tools returned by its port.
+    expect(failed?.status).toBe('unknown')
   })
 
   it('returns an error for a tool that was not registered by schema discovery', async () => {

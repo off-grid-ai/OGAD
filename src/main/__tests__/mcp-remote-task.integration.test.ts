@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 
-vi.mock('../llm', () => ({ llm: { chat: vi.fn() } }))
+vi.mock('../llm', () => ({
+  llm: {
+    chat: vi.fn(),
+    getModelsDir: vi.fn(() => process.cwd())
+  }
+}))
 vi.mock('../imagegen', () => ({ generateImage: vi.fn(), imageGenStatus: () => ({ ready: false }) }))
 vi.mock('../tts', () => ({ synthesize: vi.fn() }))
 vi.mock('../embeddings', () => ({ embeddings: { generateEmbedding: vi.fn() } }))

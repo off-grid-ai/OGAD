@@ -4,6 +4,7 @@ import { installCompatibleGenerationModel } from './compatible-generation-model'
 let removeCompatibleGenerationModel: (() => void) | null = null
 
 beforeEach(async () => {
+  if (process.env.OFFGRID_SKIP_COMPATIBLE_GENERATION_MODEL === '1') return
   removeCompatibleGenerationModel = await installCompatibleGenerationModel()
 })
 

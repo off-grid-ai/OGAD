@@ -1,5 +1,5 @@
 /** Real filesystem coverage for the canonical Desktop selection persistence port. */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -18,10 +18,41 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 describe('DesktopModelSelectionPersistence', () => {
-  it('returns null for absent or corrupt selection files', () => {
+  it('returns null only when the selection file is absent', () => {
     expect(store.read('image')).toBeNull()
+  })
+
+  it('raises a typed failure for corrupt selection state', () => {
     fs.writeFileSync(path.join(tmpDir, 'model-selections.json'), '{ invalid')
-    expect(store.read('image')).toBeNull()
+    expect(() => store.read('image')).toThrowError(
+      expect.objectContaining({
+        name: 'ModelSelectionPersistenceError',
+        code: 'MODEL_SELECTION_CORRUPT',
+        filePath: path.join(tmpDir, 'model-selections.json')
+      })
+    )
+  })
+
+  it('raises a typed failure when selection state cannot be read', () => {
+    const selectionFile = path.join(tmpDir, 'model-selections.json')
+    fs.writeFileSync(selectionFile, '{}')
+    const read = fs.readFileSync.bind(fs)
+    const denied = Object.assign(new Error('permission denied'), { code: 'EACCES' })
+    const spy = vi.spyOn(fs, 'readFileSync').mockImplementation(((file, options) => {
+      if (String(file) === selectionFile) throw denied
+      return read(file, options as never)
+    }) as typeof fs.readFileSync)
+    try {
+      expect(() => store.read('image')).toThrowError(
+        expect.objectContaining({
+          name: 'ModelSelectionPersistenceError',
+          code: 'MODEL_SELECTION_READ_FAILED',
+          filePath: selectionFile
+        })
+      )
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it('round-trips canonical route identities without losing the provider model id', () => {

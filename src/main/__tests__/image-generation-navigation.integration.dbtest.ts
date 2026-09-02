@@ -35,6 +35,8 @@ vi.mock('electron', () => ({
 
 const IMAGE_MODEL_ID = 'mzwing/SDXL-Lightning-GGUF'
 const IMAGE_MODEL = primaryFileName(CATALOG.find((model) => model.id === IMAGE_MODEL_ID)!)!
+const CONVERSATION_ID = '11111111-1111-4111-8111-111111111111'
+const MESSAGE_ID = '22222222-2222-4222-8222-222222222222'
 const PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 
@@ -90,7 +92,7 @@ describe('image generation across feature navigation', () => {
     const generation = jobs.start({
       prompt: 'A green cabin rendered while navigating',
       model: IMAGE_MODEL_ID,
-      conversationId: 'conversation-navigation',
+      conversationId: CONVERSATION_ID,
       projectId: 'project-navigation',
       seed: 91,
       width: 512,
@@ -99,7 +101,7 @@ describe('image generation across feature navigation', () => {
     })
     expect(jobs.status()).toMatchObject({
       phase: 'running',
-      conversationId: 'conversation-navigation',
+      conversationId: CONVERSATION_ID,
       projectId: 'project-navigation'
     })
 
@@ -113,7 +115,7 @@ describe('image generation across feature navigation', () => {
     expect(returnedScreen).toContain('succeeded')
     expect(jobs.status()).toMatchObject({
       phase: 'succeeded',
-      conversationId: 'conversation-navigation',
+      conversationId: CONVERSATION_ID,
       outputPath: image.path
     })
 
@@ -121,8 +123,8 @@ describe('image generation across feature navigation', () => {
     const detachRefresh = jobs.onConversationUpdated((conversationId) =>
       refreshed.push(conversationId)
     )
-    expect(jobs.acknowledgeConversation('conversation-navigation')).toBe(true)
-    expect(refreshed).toEqual(['conversation-navigation'])
+    expect(jobs.acknowledgeConversation(CONVERSATION_ID, MESSAGE_ID)).toBe(true)
+    expect(refreshed).toEqual([CONVERSATION_ID])
     detachRefresh()
     detachReturned()
   }, 15_000)

@@ -279,7 +279,8 @@ describe('the Electron quit seam', () => {
     // one-way by design, so whatever event drives this decides whether a process that keeps
     // running can still download — the macOS session that refused every download for hours while
     // the app was open, because a deferred quit had already torn it down.
-    const { modelDownloadQueue } = await import('../models/download-queue')
+    const { ModelDownloadQueue } = await import('@offgrid/models')
+    const modelDownloadQueue = new ModelDownloadQueue()
     const listeners: Record<string, (() => void)[]> = {}
     const app = {
       on: (event: string, listener: () => void) => (listeners[event] ??= []).push(listener),
