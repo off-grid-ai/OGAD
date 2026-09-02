@@ -581,7 +581,28 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
             ) : null}
             {MEDIA_MODALITIES.map((modality) => {
               const options = models.filter((model) => model.modality === modality)
-              if (!options.length) return null
+              // Image, transcription, and voice are always on offer, so an absence reads as the
+              // server's, not the app's. Embeddings stay quiet until a server has one.
+              if (!options.length && modality === 'embedding') return null
+              if (!options.length) {
+                return (
+                  <Row
+                    key={modality}
+                    label={MODALITY_LABEL[modality]}
+                    controlId={`remote-server-model-${modality}`}
+                    hint={`This server lists no ${MODALITY_LABEL[modality].toLowerCase()} models.`}
+                  >
+                    <select
+                      id={`remote-server-model-${modality}`}
+                      value=""
+                      disabled
+                      className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-1.5 text-xs text-neutral-500 outline-none"
+                    >
+                      <option value="">No {MODALITY_LABEL[modality].toLowerCase()} models on this server</option>
+                    </select>
+                  </Row>
+                )
+              }
               return (
                 <Row
                   key={modality}

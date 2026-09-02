@@ -194,4 +194,37 @@ describe('<RemoteVisionSettingsTab/>', () => {
     fireEvent.click(screen.getByRole('switch', { name: 'Use remote server' }))
     expect(screen.getByPlaceholderText('https://models.example')).toBeTruthy()
   })
+
+  it('always offers image, transcription, and voice rows, naming an absence as the server\'s', async () => {
+    ;(window as unknown as { api: unknown }).api = {
+      getRemoteVisionServer: vi.fn(async () => ({
+        provider: 'ollama',
+        endpoint: 'http://192.168.1.20:11434/v1',
+        model: 'llama',
+        hasApiKey: false,
+        activeServerId: 'server-1',
+        servers: [
+          {
+            id: 'server-1',
+            name: 'Text only box',
+            provider: 'ollama',
+            endpoint: 'http://192.168.1.20:11434/v1',
+            model: 'llama',
+            selections: { text: 'llama' },
+            catalog: { text: [{ id: 'llama', name: 'Llama' }] },
+            hasApiKey: false,
+            screenFramesAllowed: false
+          }
+        ]
+      })),
+      testRemoteVisionServer: vi.fn(),
+      setRemoteVisionServer: vi.fn(),
+      removeRemoteVisionServer: vi.fn()
+    }
+    render(<RemoteVisionSettingsTab />)
+    expect(await screen.findByText('No image models on this server')).toBeTruthy()
+    expect(screen.getByText('No transcription models on this server')).toBeTruthy()
+    expect(screen.getByText('No voice models on this server')).toBeTruthy()
+    expect(screen.queryByLabelText('Embeddings')).toBeNull()
+  })
 })
