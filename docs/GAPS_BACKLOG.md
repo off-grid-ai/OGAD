@@ -1863,3 +1863,26 @@ response right now." as if the model had said it. Only the context-overflow case
 the shared session can compact and continue. Every other failure still reaches the user as a bubble
 that looks like an answer, is persisted as one, and never reaches the shared failure path. Fix:
 rethrow; let the renderer's existing error path render and persist it as an error.
+
+## Chat transcript: one turn's tool work renders as N "Work done" headers (open, 2026-09-02)
+
+Live, a turn's steps sit under one "Working" header. Once persisted, every tool round is its own
+"Work done · 1 step" card with a "Thought process" row between - a 12-step task reads as 12 cards.
+The coalescing rule (`MemoryChat.tsx` ~5721) only merges ADJACENT tool rows, so a reasoning-only
+assistant row between two tool rows splits the run. Fix: group a turn's rows (tool rows and
+prose-less assistant rows) into one timeline, thought processes as steps inside it.
+
+## Chat transcript: two "Thought process" looks, two gaps (open, 2026-09-02)
+
+The thought-process toggle renders with a framed surface in one place and bare in another, and the
+vertical gap between rows differs. Keep the bare look and the smaller gap everywhere.
+
+## Task PiP: drag works only from the top half of the header (open, 2026-09-02)
+
+Holding the lower part of the PiP header does not start a drag. The drag handle region must be the
+whole header.
+
+## Stopped task: no acknowledgement in chat; panel says "Could not stop this task on this device." (open, 2026-09-02)
+
+The user stopped a web-use task; the task record went STOPPED but the live panel reports it could
+not stop, and the chat turn shows no "stopped" marker. Stop must be acknowledged on both surfaces.
