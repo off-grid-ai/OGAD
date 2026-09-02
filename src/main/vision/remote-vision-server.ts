@@ -14,6 +14,7 @@ import {
   mergeRemoteSelections,
   hasRemoteServerSelection,
   remoteAuthorizationHeaders,
+  remoteModelListUrl,
   type RemoteModelCatalog,
   type RemoteModalitySelections,
   type PersistedRemoteServer
@@ -252,7 +253,7 @@ const desktopRemoteServerApplication = new RemoteServerApplicationService(
     async test(server, credential) {
       const startedAt = Date.now()
       try {
-        const response = await fetch(`${server.endpoint}/models`, {
+        const response = await fetch(remoteModelListUrl(server.endpoint), {
           headers: remoteAuthorizationHeaders(server.endpoint, credential),
           signal: AbortSignal.timeout(10_000),
           redirect: REMOTE_FETCH_REDIRECT_POLICY
