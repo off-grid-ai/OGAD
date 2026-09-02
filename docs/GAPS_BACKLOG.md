@@ -1933,3 +1933,11 @@ Settings > Remote model server offers one "Text and vision" selection. Shared's 
 record (`RemoteModalitySelections`) already carries image, transcription, and voice, and mobile's
 editor fills all four. Desktop should offer the same four, discovered from the server's model list,
 and route each modality through the shared selection service exactly as mobile does.
+
+## Gateway image endpoint ignores the memory override and names a button remote clients lack (open, 2026-09-02)
+
+`/v1/images/generations` refuses with `OFFGRID_IMAGE_MEMORY_LIMIT:Not enough free memory to load
+<model> safely. Choose a smaller image model, or use Run anyway.` A phone has no "Run anyway": the
+handler never reads `allowUnsafeMemoryOverride`, and the message assumes the Desktop UI. Honour the
+request's override flag in the gateway and word the shared `imageModelAdmissionMessage` for any
+client. The wire contract now lives in `@offgrid/models` (`parseImageMemoryGuardError`).
