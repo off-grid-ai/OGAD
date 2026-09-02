@@ -323,3 +323,44 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
     expect(await screen.findByText(result)).toBeTruthy()
   })
 })
+
+describe('one turn, one work timeline', () => {
+  it('folds tool rounds separated by thought processes into one Work done card', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-b'] = [
+      { id: 1, role: 'user', content: 'Find the latest release' },
+      { id: 2, role: 'assistant', content: '', context: { reasoning: 'Search first.' } },
+      {
+        id: 3,
+        role: 'tool',
+        content: 'Release page found.',
+        context: { unified: [], tool: { name: 'web_search', status: 'completed', durationMs: 900 } }
+      },
+      { id: 4, role: 'assistant', content: '', context: { reasoning: 'Now read it.' } },
+      {
+        id: 5,
+        role: 'tool',
+        content: 'Version 1.7.0 shipped.',
+        context: { unified: [], tool: { name: 'read_url', status: 'completed', durationMs: 1200 } }
+      },
+      { id: 6, role: 'assistant', content: 'The latest release is 1.7.0.' }
+    ]
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-b' })
+
+    const work = await screen.findByRole('button', { name: /Work done/ })
+    expect(work.textContent).toContain('2 steps · complete')
+    expect(screen.getAllByRole('button', { name: /Work done/ })).toHaveLength(1)
+    expect(screen.queryByTestId('supporting-context-bubble')).toBeNull()
+    expect(screen.getByText('The latest release is 1.7.0.')).toBeTruthy()
+
+    await user.click(work)
+    const step = await screen.findByRole('button', { name: 'Searched the web, complete' })
+    await user.click(step)
+    // The thought process before the step travels with it, behind its own toggle.
+    const thought = await screen.findByRole('button', { name: /Thought process/ })
+    await user.click(thought)
+    expect(await screen.findByText('Search first.')).toBeTruthy()
+  })
+})

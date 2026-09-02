@@ -1,6 +1,7 @@
 import type { ChatStreamTool, ProjectedSyncedTool } from '@offgrid/sync'
 import { CaretDown, Check, Circle, Warning, Wrench, X } from '@phosphor-icons/react'
 import { ChatMarkdown } from './ChatMarkdown'
+import { ChatThinkingBlock } from './ChatThinkingBlock'
 import {
   Collapsible,
   CollapsibleContent,
@@ -16,9 +17,13 @@ import { ComputerUseStepDetails } from './tasks/ComputerUseStepDetails'
 import { RetryTaskButton } from './tasks/RetryTaskButton'
 import { taskReferenceFromResult, visibleToolResult } from './chat-tool-projection'
 
-type DisplayTool =
+type DisplayTool = (
   | Pick<ProjectedSyncedTool, 'name' | 'arguments' | 'result' | 'status' | 'durationMs' | 'error'>
   | ChatStreamTool
+) & {
+  /** The model's thought process right before this step, when the transcript kept it. */
+  reasoning?: string
+}
 
 interface ChatToolRowsProps {
   tools?: readonly DisplayTool[]
@@ -199,7 +204,9 @@ function overallStatus(tools: readonly DisplayTool[]): WorkStatus {
 
 function taskWorkStatus(task: TaskSession | undefined): WorkStatus | undefined {
   if (!task) return undefined
-  if (task.status === 'failed' || task.status === 'stopped') return 'failed'
+  if (task.status === 'failed') return 'failed'
+  // You stopped it. That is not a failure, and the card must not say it is.
+  if (task.status === 'stopped') return 'cancelled'
   if (task.status === 'paused' || task.status === 'waiting') return 'needs attention'
   if (task.status === 'running' || task.status === 'reconnecting') return 'running'
   return 'complete'
@@ -309,7 +316,9 @@ export function ChatToolRows({
             const details = taskSummary || error || result
             const durationMs = 'durationMs' in tool ? tool.durationMs : undefined
             const hasComputerDetails = Boolean(linkedTask?.stepDetails?.length)
-            const hasDisclosure = Boolean(details) || hasComputerDetails || Boolean(linkedTask)
+            const reasoning = tool.reasoning?.trim()
+            const hasDisclosure =
+              Boolean(details) || hasComputerDetails || Boolean(linkedTask) || Boolean(reasoning)
             return (
               <li key={`${tool.name}:${index}`} className="relative pb-2 pl-4 last:pb-0">
                 <span className="absolute -left-1.5 top-1 flex h-3 w-3 items-center justify-center bg-neutral-950">
@@ -349,6 +358,9 @@ export function ChatToolRows({
                   </CollapsibleTrigger>
                   {hasDisclosure ? (
                     <CollapsibleContent className="mt-1 border-l-2 border-neutral-800 pl-3 text-xs leading-relaxed text-neutral-500">
+                      {reasoning ? (
+                        <ChatThinkingBlock content={reasoning} className="mb-1.5" />
+                      ) : null}
                       {details ? <ChatMarkdown content={details} /> : null}
                       <ComputerUseStepDetails details={linkedTask?.stepDetails} />
                       {linkedTask ? (

@@ -24,10 +24,15 @@ import {
   type ProjectedSyncedTool,
   type RecordProvenance,
   type SyncedMessageRole,
-  type SyncedTurnStatus
+  type SyncedTurnStatus,
+  groupWorkRuns,
+  type WorkRunStep
 } from '@offgrid/sync'
 import type { VoiceTurnMode } from '@offgrid/speech'
-import { cleanImagePrompt, shouldAutoRouteImage, type ChatTurn,
+import {
+  cleanImagePrompt,
+  shouldAutoRouteImage,
+  type ChatTurn,
   compactionNoticeText
 } from '@offgrid/models'
 import ReactMarkdown, { Components } from 'react-markdown'
@@ -778,18 +783,19 @@ function PromptEnhancementMessageRow({
 }
 
 function ToolMessageTimelineRow({
-  messages
-}: Readonly<{ messages: ChatMessage[] }>): React.JSX.Element {
+  steps
+}: Readonly<{ steps: WorkRunStep<ChatMessage>[] }>): React.JSX.Element {
   return (
     <div
       className="mb-2 flex flex-col items-start"
-      data-testid={`chat-tool-timeline-${messages[0]?.id ?? 'unknown'}`}
+      data-testid={`chat-tool-timeline-${steps[0]?.tool.id ?? 'unknown'}`}
     >
       <ChatToolRows
-        tools={messages.map((message) => ({
+        tools={steps.map(({ tool: message, reasoning }) => ({
           name: message.toolName || 'Tool result',
           result: message.content,
           status: message.turnStatus === 'failed' ? 'failed' : 'completed',
+          ...(reasoning ? { reasoning } : {}),
           ...(message.generationTimeMs === undefined
             ? {}
             : { durationMs: message.generationTimeMs })
@@ -941,14 +947,10 @@ function MessageThinkingHeader({ message }: Readonly<{ message: ChatMessage }>):
   const supporting = isSupportingMessage(message)
   return (
     <div
-      className={
-        supporting
-          ? // The same box a tool row uses. This pill sits BETWEEN tool rows in a tool-calling turn,
-            // and at px-3.5/py-2.5 it was visibly fatter than the rows either side of it, so a
-            // sequence of reasoning and calls read as two competing shapes rather than one list.
-            'rounded-sm border border-neutral-800 bg-neutral-900/40 px-2 py-1'
-          : 'mb-1'
-      }
+      // One look for a thought process wherever it sits: the bare toggle, no frame. A reasoning
+      // row between tool rounds now travels inside the work timeline; one left over here is the
+      // same thing as the one above an answer.
+      className="mb-1"
       data-testid={supporting ? 'supporting-context-bubble' : undefined}
     >
       <ChatThinkingBlock
@@ -2234,7 +2236,7 @@ function MessageRow({
   } else if (isPromptEnhancementMessage(message)) {
     body = <PromptEnhancementMessageRow message={message} />
   } else if (message.role === 'tool') {
-    body = <ToolMessageTimelineRow messages={[message]} />
+    body = <ToolMessageTimelineRow steps={[{ tool: message }]} />
   } else if (voiceMode) {
     body = (
       <VoiceMessageRow
@@ -5739,24 +5741,17 @@ export function MemoryChat({
                     </div>
                   ) : (
                     <div className="w-full px-6 py-5">
-                      {messages.map((message, messageIndex) => {
-                        if (message.role === 'tool') {
-                          if (messages[messageIndex - 1]?.role === 'tool') return null
-                          const run: ChatMessage[] = []
-                          for (
-                            let index = messageIndex;
-                            messages[index]?.role === 'tool';
-                            index += 1
-                          ) {
-                            run.push(messages[index]!)
-                          }
-                          return <ToolMessageTimelineRow key={message.id} messages={run} />
+                      {groupWorkRuns(messages).map((entry, entryIndex, entries) => {
+                        if (entry.kind === 'work') {
+                          return <ToolMessageTimelineRow key={entry.id} steps={entry.steps} />
                         }
+                        const { message } = entry
+                        const next = entries[entryIndex + 1]
                         return (
                           <MessageRow
                             key={message.id}
                             message={message}
-                            nextMessageRole={messages[messageIndex + 1]?.role}
+                            nextMessageRole={next?.kind === 'work' ? 'tool' : next?.message.role}
                             liveTask={
                               message.streaming ? (liveJourneyTask ?? undefined) : undefined
                             }
