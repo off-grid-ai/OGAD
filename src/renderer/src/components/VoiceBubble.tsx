@@ -91,7 +91,7 @@ interface VoiceBubbleProps {
   durationSeconds?: number
   transcript: string
   isUser?: boolean
-  /** Assistant reply still generating — shows pulsing dots, no playback. */
+  /** Assistant reply still generating — a quiet waveform placeholder, no playback. */
   isLoading?: boolean
   /** Synthesize text → playable dataUrl on-device (assistant replies). */
   synthesize: (text: string) => Promise<{ dataUrl: string }>
@@ -306,7 +306,13 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
         {/* Waveform (click to seek) */}
         <div className="flex h-10 flex-1 items-center gap-[1.5px] overflow-hidden">
           {isLoading && !isUser ? (
-            <LoadingDots className="mx-1" />
+            // The turn's thinking header already animates while the reply streams; a
+            // second animation here read as two loaders. Hold a quiet waveform placeholder.
+            <span
+              aria-hidden
+              data-testid="voice-waveform-pending"
+              className="block h-[6px] w-full rounded-sm bg-green-500/20"
+            />
           ) : (
             bars.map((shape, i) => {
               const played = progress > 0 && i / bars.length < progress
