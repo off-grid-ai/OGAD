@@ -1900,3 +1900,8 @@ the row that is still generating.
 Entering voice mode on an existing chat rendered an empty screen with no indicator until whatever
 it loads (voice model / engine bridge) was ready. Show the loader for the duration instead of a
 blank list.
+
+## Voice mode shows two loaders for one reply (open, 2026-09-02)
+
+While a reply generates in voice mode, the message header shows loading dots and the voice bubble
+below shows its own dots. One reply, one indicator.
