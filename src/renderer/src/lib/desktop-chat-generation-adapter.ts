@@ -50,6 +50,11 @@ export class DesktopChatGenerationAdapter {
       if (event.type === 'reasoning' && event.text) {
         context.events?.chunk?.({ reasoning: event.text })
       }
+      if (event.type === 'route' && event.model) context.events?.route?.(event.model)
+      if (event.type === 'fallback' && event.fallback) {
+        const { failed, next, reason } = event.fallback
+        context.events?.fallback?.(failed, next, new Error(reason))
+      }
     })
     try {
       if (input.kind === 'image') return this.generateImage(execution, context.signal)
@@ -246,7 +251,7 @@ export class DesktopChatGenerationAdapter {
     execution.response = response
     const prompt = generatedImagePrompt(response.answer)
     if (!prompt || !this.boundary.generateImage || signal?.aborted) {
-      return desktopTextResult(response.answer, signal)
+      return desktopTextResult(response.answer, signal, response.model)
     }
     execution.imageActive = true
     try {

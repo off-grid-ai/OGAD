@@ -33,7 +33,8 @@ import {
   cleanImagePrompt,
   shouldAutoRouteImage,
   type ChatTurn,
-  compactionNoticeText
+  compactionNoticeText,
+  fallbackNoticeText
 } from '@offgrid/models'
 import ReactMarkdown, { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -3064,23 +3065,31 @@ export function MemoryChat({
     () =>
       desktopChatSession.subscribe((event) => {
         if (event.type === 'queue_changed') setChatQueue(event.queue)
-        if (event.type === 'compacted') {
-          // Forward-looking: what is on screen stays. The app says so, as a quiet marker.
-          const convId = event.turn.conversationId
-          const content = `_${compactionNoticeText(event.before, event.after)}_`
+        // A quiet marker above the live reply, kept in the transcript: what happened mid-turn.
+        const insertTurnNotice = (turn: { id: string; conversationId: string }, text: string) => {
+          const content = `_${text}_`
           const notice: ChatMessage = {
-            id: `notice-compacted-${event.turn.id}-${Date.now()}`,
+            id: `notice-${event.type}-${turn.id}-${Date.now()}`,
             role: 'assistant',
             content,
             notice: true
           }
-          setConvMessages(convId, (prev) => {
-            const placeholder = prev.findIndex((m) => m.id === event.turn.id)
+          setConvMessages(turn.conversationId, (prev) => {
+            const placeholder = prev.findIndex((m) => m.id === turn.id)
             return placeholder < 0
               ? [...prev, notice]
               : [...prev.slice(0, placeholder), notice, ...prev.slice(placeholder)]
           })
-          void window.api.addRagMessage(convId, 'assistant', content).catch(() => undefined)
+          void window.api
+            .addRagMessage(turn.conversationId, 'assistant', content)
+            .catch(() => undefined)
+        }
+        if (event.type === 'compacted') {
+          // Forward-looking: what is on screen stays. The app says so.
+          insertTurnNotice(event.turn, compactionNoticeText(event.before, event.after))
+        }
+        if (event.type === 'fallback') {
+          insertTurnNotice(event.turn, fallbackNoticeText(event.failed, event.next, event.error))
         }
       }),
     [desktopChatSession, setConvMessages]

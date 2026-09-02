@@ -1,3 +1,5 @@
+import { DESKTOP_CHAT_ROUTE } from '../desktop-chat-session-policy'
+import type { DesktopChatStreamEvent } from '../desktop-chat-session-contract'
 import { describe, expect, it, vi } from 'vitest'
 import {
   DesktopChatSession,
@@ -480,5 +482,39 @@ describe('DesktopChatSession context compaction', () => {
     const session = new DesktopChatSession(boundary)
     await expect(session.send(input('turn-d', 'conversation-d'))).rejects.toThrow(/context size/)
     expect(boundary.ragChat).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('DesktopChatSession model fallback', () => {
+  it('publishes the shared fallback event and names the model that answered', async () => {
+    let streamListener: ((event: DesktopChatStreamEvent) => void) | undefined
+    const failed = { ...DESKTOP_CHAT_ROUTE, id: 'gemma', name: 'Gemma 4' }
+    const next = { ...DESKTOP_CHAT_ROUTE, id: 'qwen', name: 'Qwen 3.5' }
+    const boundary: DesktopChatSessionBoundary = {
+      ragChat: vi.fn(async (...args: unknown[]) => {
+        const streamId = args[6] as string
+        streamListener?.({
+          streamId,
+          type: 'fallback',
+          fallback: { failed, next, reason: 'it ran out of memory' }
+        })
+        return { answer: 'Fallback answer', context: { sources: [] }, model: next }
+      }),
+      onRagStream: vi.fn((listener) => {
+        streamListener = listener
+        return () => undefined
+      }),
+      cancelRag: vi.fn()
+    }
+    const session = new DesktopChatSession(boundary)
+    const fallbacks: Array<{ failed: string; next: string }> = []
+    session.subscribe((event) => {
+      if (event.type === 'fallback') fallbacks.push({ failed: event.failed.name, next: event.next.name })
+    })
+
+    const result = await session.send(input('turn-f'))
+
+    expect(fallbacks).toEqual([{ failed: 'Gemma 4', next: 'Qwen 3.5' }])
+    expect(result.turn.result?.model.name).toBe('Qwen 3.5')
   })
 })

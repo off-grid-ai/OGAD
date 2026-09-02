@@ -243,20 +243,24 @@ const offGridApi = {
   onRagStream: (
     callback: (data: {
       streamId: string
-      type: 'content' | 'reasoning' | 'step' | 'tool_result' | 'done'
+      type: 'content' | 'reasoning' | 'step' | 'tool_result' | 'route' | 'fallback' | 'done'
       text?: string
       step?: unknown
       call?: { name: string; result: string; status: 'completed' | 'failed' | 'pending' }
+      model?: unknown
+      fallback?: { failed: unknown; next: unknown; reason: string }
     }) => void
   ) => {
     const sub = (
       _: unknown,
       data: {
         streamId: string
-        type: 'content' | 'reasoning' | 'step' | 'tool_result' | 'done'
+        type: 'content' | 'reasoning' | 'step' | 'tool_result' | 'route' | 'fallback' | 'done'
         text?: string
         step?: unknown
         call?: { name: string; result: string; status: 'completed' | 'failed' | 'pending' }
+        model?: unknown
+        fallback?: { failed: unknown; next: unknown; reason: string }
       }
     ): void => callback(data)
     ipcRenderer.on('rag:stream', sub)

@@ -48,17 +48,18 @@ export function desktopImageResult(
 
 export function desktopTextResult(
   content: string,
-  signal: AbortSignal | undefined
+  signal: AbortSignal | undefined,
+  model: RuntimeModel = DESKTOP_CHAT_ROUTE
 ): GenerationResult {
   return {
-    model: DESKTOP_CHAT_ROUTE,
+    model,
     output: { type: 'text', content },
     content,
     reasoning: '',
     toolCalls: [],
     finishReason: signal?.aborted ? 'cancelled' : 'stop',
-    attemptedModelIds: [DESKTOP_CHAT_ROUTE.id],
-    attemptedRouteIds: []
+    attemptedModelIds: [model.id],
+    attemptedRouteIds: model.routeId ? [model.routeId] : []
   }
 }
 

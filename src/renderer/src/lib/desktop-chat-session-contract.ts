@@ -1,12 +1,16 @@
-import type { ChatTurn, GenerationMessage } from '@offgrid/models'
+import type { ChatTurn, GenerationMessage, RuntimeModel } from '@offgrid/models'
 import type { ImageGenerationRequestContract } from '../../../shared/image-generation-contract'
 import type { RagChatResultContract } from '../../../shared/ipc-contracts'
 import type { SearchHit } from '../types'
 
 export interface DesktopChatStreamEvent {
   streamId: string
-  type: 'content' | 'reasoning' | 'step' | 'tool_result' | 'done'
+  type: 'content' | 'reasoning' | 'step' | 'tool_result' | 'route' | 'fallback' | 'done'
   text?: string
+  /** `route`: the model that took the turn. */
+  model?: RuntimeModel
+  /** `fallback`: the shared generation moved the turn to another model. */
+  fallback?: { failed: RuntimeModel; next: RuntimeModel; reason: string }
 }
 
 export interface DesktopImageGenerationResponse {

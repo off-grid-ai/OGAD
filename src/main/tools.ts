@@ -30,7 +30,8 @@ import {
   selectToolExtensions,
   stripHtmlTags as stripTags,
   toolSchemaTokenBudget,
-  ToolRoutingService
+  ToolRoutingService,
+  type RuntimeModel
 } from '@offgrid/models'
 
 import type { SearchKind, SearchResult } from '../shared/search-contract'
@@ -537,6 +538,8 @@ export async function toolChat(
     thinking?: boolean
     signal?: AbortSignal
     onDelta?: (text: string, kind: 'content' | 'reasoning') => void
+    onRoute?: (model: RuntimeModel) => void
+    onFallback?: (failed: RuntimeModel, next: RuntimeModel, error: unknown) => void
     onStep?: (call: { name: string; args: Record<string, unknown> }) => void
     onToolResult?: (call: { name: string; result: string; status: ToolCallStatus }) => void
     onActivity?: (activity: ToolActivity) => void
@@ -688,7 +691,9 @@ export async function toolChat(
             streamedContent += chunk.content
             onDelta(chunk.content, 'content')
           }
-        }
+        },
+        route: opts.onRoute,
+        fallback: opts.onFallback
       },
       toolExecution: {
         prepare: (call) => prepareToolCallWithQueryFallback(call, query),

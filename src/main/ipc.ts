@@ -73,7 +73,10 @@ import {
   type RetrievalEntity,
   type RetrievalFact,
   type RetrievalMessage,
-  type RetrievalSummary
+  type RetrievalSummary,
+  fallbackReasonText,
+  type GenerationEvents,
+  type RuntimeModel
 } from '@offgrid/models'
 import type { GenerationMetrics } from '../shared/generation-metrics'
 import { getAllPromptDefs } from './prompts'
@@ -119,6 +122,25 @@ async function regenerateMasterMemory(): Promise<string | null> {
 }
 
 // Generate the answer for a rag:chat turn. When a streamId + sender are present,
+/** Which route answers, and when the shared generation swaps it, travel on the same stream as tokens. */
+function streamModelEvents(
+  sender: { send: (channel: string, payload: unknown) => void },
+  streamId: string
+): Pick<GenerationEvents, 'route' | 'fallback'> {
+  const send = (payload: Record<string, unknown>): void => {
+    try {
+      sender.send('rag:stream', { streamId, ...payload })
+    } catch {
+      /* window gone */
+    }
+  }
+  return {
+    route: (model) => send({ type: 'route', model }),
+    fallback: (failed, next, error) =>
+      send({ type: 'fallback', fallback: { failed, next, reason: fallbackReasonText(error) } })
+  }
+}
+
 // stream tokens/reasoning to the renderer over the 'rag:stream' channel as they
 // arrive (inline chain-of-thought); otherwise fall back to a single blocking call.
 // Active streaming turns, keyed by streamId, so a renderer 'rag:cancel' can abort
@@ -212,13 +234,19 @@ async function streamAnswer(
     partialOutputPolicy: 'discard-and-fallback' as const,
     ...(signal ? { signal } : {})
   })
-  const response = (content: string, finishReason: string): ResponseGenerationResult =>
-    toResponseGenerationResult({
+  const response = (
+    content: string,
+    finishReason: string,
+    model?: RuntimeModel
+  ): ResponseGenerationResult & { model?: RuntimeModel } => ({
+    ...toResponseGenerationResult({
       content,
       finishReason,
       maxTokens: llm.generationMaxTokens(),
       metrics: desktopModelServices.generationObservations.takeMetrics(turnId)
-    })
+    }),
+    ...(model ? { model } : {})
+  })
 
   // No-renderer fallback still uses the same streaming transport with a no-op
   // observer, so finish metadata and the configured cap cannot diverge by caller.
@@ -226,7 +254,7 @@ async function streamAnswer(
     // Shared generation owns model admission, residency, and fallback for this turn.
     return desktopModelServices.generation
       .generate(request())
-      .then((result) => response(result.content, result.finishReason))
+      .then((result) => response(result.content, result.finishReason, result.model))
   }
 
   const sender = event.sender
@@ -255,9 +283,10 @@ async function streamAnswer(
         },
         partialDiscarded: () => {
           partialContent = ''
-        }
+        },
+        ...streamModelEvents(sender, streamId)
       })
-      return response(result.content, result.finishReason)
+      return response(result.content, result.finishReason, result.model)
     } catch (error) {
       if (!controller.signal.aborted) throw error
       return response(partialContent, 'cancelled')
@@ -1813,6 +1842,8 @@ export function setupIPC() {
               /* window gone */
             }
           },
+          onRoute: streamModelEvents(sender, streamId).route,
+          onFallback: streamModelEvents(sender, streamId).fallback,
           onStep: (call) => {
             noteChatStreamToolStarted(streamId, call.name)
             try {

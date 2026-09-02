@@ -1,4 +1,5 @@
 /** Electron IPC payloads shared by main, preload, and renderer type-checks. */
+import type { RuntimeModel } from '@offgrid/models'
 import type { GenerationMetrics } from './generation-metrics'
 
 export interface UserProfileContract {
@@ -51,6 +52,8 @@ export interface RagChatResultContract {
   cutoff?: ResponseCutoffContract
   /** How the generation performed, when the run was measured. */
   metrics?: GenerationMetrics
+  /** The route that produced the answer, after any fallback. */
+  model?: RuntimeModel
 }
 
 /** One reply still owned by the main process, used to reattach chat UI after navigation. */
