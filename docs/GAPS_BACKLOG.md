@@ -1973,3 +1973,14 @@ The chat endpoint carried its own readiness, retry, and proxy policy (`proxyToLl
 ## Meetings: no language choice beside the transcription model (RESOLVED 2026-09-02: the meeting page offers the same `sttLanguage` setting dictation uses; Re-transcribe reads it; MeetingsScreen test 'offers the transcription language')
 
 The transcript in the report was Whisper auto-detecting Hindi on English speech. Pick English and re-transcribe.
+
+## Model selection has two writers and three hand-kept copies (open, 2026-09-02)
+
+One fact, "which model answers each modality on this Mac", is held in: Desktop's canonical
+`model-selections.json` (authority), the phone's selection store (was a second WRITER: its store
+adapter activated the route on Desktop on every write; fixed 2026-09-02, mobile commit "selection: the
+phone's selection write is pure"), the saved remote server's per-modality `selections`, the legacy
+`active-modalities.json`, and the "Use remote server" toggle derived from the text selection. The last
+three must become read-only projections of the authority, owned by `@offgrid/models`; today two of
+them are written by hand. Symptoms today: Nano Banana saved on Desktop, phone re-activated DreamShaper
+(22:33Z), both surfaces then failed on the local model's memory guard.
