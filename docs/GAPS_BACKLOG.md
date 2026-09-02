@@ -1927,7 +1927,7 @@ generation's `route`/`fallback` events (model name + reason) and the finished re
 `ipc.ts` forward `events.fallback` on it, and let the adapter re-emit them through the session's
 events port so MemoryChat inserts `_fallbackNoticeText(...)_` exactly like the compaction notice.
 
-## Remote model server: only text and vision can be chosen (open, 2026-09-02)
+## Remote model server: only text and vision can be chosen (RESOLVED 2026-09-02: the pickers for image, transcription, and voice existed since the media control plane but hid when a server listed none; the four rows now always show, an empty one says the server lists no such models; test 'always offers image, transcription, and voice rows')
 
 Settings > Remote model server offers one "Text and vision" selection. Shared's remote server
 record (`RemoteModalitySelections`) already carries image, transcription, and voice, and mobile's
