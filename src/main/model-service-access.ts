@@ -25,7 +25,7 @@ export interface DesktopModelServices {
     modality: ModelModality,
     modelId: string | null
   ): Promise<{ success: boolean; error?: string }>
-  clearRemoteServerSelections(serverId: string): void
+  clearRemoteServerSelections(serverId: string): Promise<void>
   warmText(): Promise<boolean>
   unload(modality: ModelModality): Promise<boolean>
   shutdown(): Promise<void>

@@ -666,7 +666,8 @@ export function createDesktopModelServices(
         }
       }
     },
-    clearRemoteServerSelections(serverId) {
+    // Through the shared authority, like every other selection change: one writer, one file.
+    async clearRemoteServerSelections(serverId) {
       for (const modality of [
         'text',
         'vision',
@@ -680,8 +681,7 @@ export function createDesktopModelServices(
         const selected = selectionPersistence.readCanonical(modality)
         const route = selected ? decodeModelRouteId(selected) : null
         if (route?.serverId !== serverId) continue
-        selectionPersistence.write(modality, null)
-        selectionPersistence.projectLegacyModality(modality, null)
+        await llm.select(modality, null)
       }
     },
     async warmText() {

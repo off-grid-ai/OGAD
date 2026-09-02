@@ -248,7 +248,7 @@ const desktopRemoteServerApplication = new RemoteServerApplicationService(
       if (!selected.success) throw new Error(selected.error)
     },
     async clearSelections(serverId) {
-      desktopModelServices.clearRemoteServerSelections(serverId)
+      await desktopModelServices.clearRemoteServerSelections(serverId)
     },
     async test(server, credential) {
       const startedAt = Date.now()
