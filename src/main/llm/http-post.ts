@@ -84,7 +84,7 @@ export function modelRequestOptions(port: number, contentLength: number): http.R
 export function postCompletionOnce(
   port: number,
   body: string,
-  timeoutMs: number,
+  timeoutMs: number | undefined,
   signal?: AbortSignal
 ): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -106,12 +106,18 @@ export function postCompletionOnce(
       req.destroy()
       finish(() => reject(new ModelServerError('aborted', 'aborted')))
     }
-    const timer = setTimeout(() => {
-      req.destroy()
-      finish(() =>
-        reject(new ModelServerError('unavailable', 'LLM request timed out - try a shorter prompt'))
-      )
-    }, timeoutMs)
+    // No deadline unless the caller set one: a slow prompt is not a failure.
+    const timer =
+      timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            req.destroy()
+            finish(() =>
+              reject(
+                new ModelServerError('unavailable', 'LLM request timed out - try a shorter prompt')
+              )
+            )
+          }, timeoutMs)
 
     const req = http.request(modelRequestOptions(port, Buffer.byteLength(body)), (res) => {
       let data = ''

@@ -72,7 +72,7 @@ abstract class DesktopGenerationAdapter implements GenerationAdapter {
       openAIProjectedMessages(request.messages ?? []),
       (text, kind) => channel.push(projectedTextGenerationChunk(text, kind)),
       openAIProjectedGenerationOptions(request) as StreamChatOptions,
-      request.timeoutMs ?? 300_000
+      request.timeoutMs
     ).then(
       (result) => {
         this.observations.record(request.identity?.turnId, result.metrics)
@@ -96,7 +96,7 @@ abstract class DesktopGenerationAdapter implements GenerationAdapter {
     messages: OpenAIProjectedMessage[],
     onDelta: (text: string, kind: 'content' | 'reasoning') => void,
     options: StreamChatOptions,
-    timeoutMs: number
+    timeoutMs: number | undefined
   ): Promise<StreamResult>
 }
 
@@ -144,7 +144,7 @@ export class DesktopLocalGenerationAdapter extends DesktopGenerationAdapter {
     messages: OpenAIProjectedMessage[],
     onDelta: (text: string, kind: 'content' | 'reasoning') => void,
     options: StreamChatOptions,
-    timeoutMs: number
+    timeoutMs: number | undefined
   ): Promise<StreamResult> {
     return llm.streamChatLocal(
       messages,
@@ -176,7 +176,7 @@ export class DesktopRemoteGenerationAdapter extends DesktopGenerationAdapter {
     messages: OpenAIProjectedMessage[],
     onDelta: (text: string, kind: 'content' | 'reasoning') => void,
     options: StreamChatOptions,
-    timeoutMs: number
+    timeoutMs: number | undefined
   ): Promise<StreamResult> {
     if (!model.serverId) throw new Error('The remote model route has no server identity.')
     const remote = getRemoteVisionServer(model.serverId)

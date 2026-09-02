@@ -48,7 +48,8 @@ export interface RemoteChatRequest {
 
 export interface RemoteChatOptions {
   signal?: AbortSignal
-  timeoutMs: number
+  /** Idle limit between chunks. Undefined means none. */
+  timeoutMs?: number
 }
 
 interface OpenRouterModelMetadata {
@@ -249,12 +250,17 @@ interface IdleWatchdog {
  * the compiler cannot order against a later read, so a plain flag narrowed to `false` and made the
  * timeout branch look statically dead.
  */
-function createIdleWatchdog(timeoutMs: number, callerSignal?: AbortSignal): IdleWatchdog {
+function createIdleWatchdog(
+  timeoutMs: number | undefined,
+  callerSignal?: AbortSignal
+): IdleWatchdog {
   const controller = new AbortController()
   const firedRef = { current: false }
   let timer: ReturnType<typeof setTimeout> | undefined
   const arm = (): void => {
     if (timer) clearTimeout(timer)
+    // No idle limit unless the caller set one: a generation runs until it finishes or is stopped.
+    if (timeoutMs === undefined) return
     timer = setTimeout(() => {
       firedRef.current = true
       controller.abort()

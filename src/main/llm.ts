@@ -1091,7 +1091,7 @@ export class LLMService {
     messages: unknown[],
     onDelta: (text: string, kind: 'content' | 'reasoning') => void,
     options: {
-      timeoutMs: number
+      timeoutMs?: number
       maxTokens?: number
       temperature?: number
       topP?: number
@@ -1130,7 +1130,7 @@ export class LLMService {
     messages: unknown[],
     onDelta: (text: string, kind: 'content' | 'reasoning') => void,
     opts: StreamChatOptions = {},
-    timeoutMs: number = 300000
+    timeoutMs?: number
   ): Promise<StreamResult> {
     return this.completeRemote(remote, messages, onDelta, {
       timeoutMs,
@@ -1151,7 +1151,7 @@ export class LLMService {
     messages: unknown[],
     onDelta: (text: string, kind: 'content' | 'reasoning') => void,
     opts: StreamChatOptions = {},
-    timeoutMs: number = 300000
+    timeoutMs?: number
   ): Promise<StreamResult> {
     await this.beginGeneration()
     try {

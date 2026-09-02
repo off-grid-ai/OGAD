@@ -45,10 +45,14 @@ async function remoteRequest<T>(
   const controller = new AbortController()
   const abort = (): void => controller.abort(request.signal?.reason)
   request.signal?.addEventListener('abort', abort, { once: true })
-  const timer = setTimeout(
-    () => controller.abort(new Error('The remote media request timed out.')),
-    request.timeoutMs ?? 300_000
-  )
+  // No deadline unless the caller set one; a large image on a slow remote is not a failure.
+  const timer =
+    request.timeoutMs === undefined
+      ? undefined
+      : setTimeout(
+          () => controller.abort(new Error('The remote media request timed out.')),
+          request.timeoutMs
+        )
   try {
     request.signal?.throwIfAborted()
     const response = await fetcher(url, {
