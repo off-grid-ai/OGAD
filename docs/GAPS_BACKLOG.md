@@ -1960,13 +1960,13 @@ handler never reads `allowUnsafeMemoryOverride`, and the message assumes the Des
 request's override flag in the gateway and word the shared `imageModelAdmissionMessage` for any
 client. The wire contract now lives in `@offgrid/models` (`parseImageMemoryGuardError`).
 
-## Gateway chat bypassed residency (RESOLVED in code 2026-09-02: `/v1/chat/completions` warms the chat model through `desktopModelServices.warmText()` when llama-server is down, and waits out llama-server's loading 503 while the client stays connected; needs a Desktop restart to take effect)
+## Gateway chat bypassed residency (RESOLVED 2026-09-02: superseded by the shared-generation route below; the shared residency lease loads the chat model on demand, so the interim `warmText()` pre-check and the 503-wait retry were deleted)
 
 Desktop log: llama-server exited cleanly at 21:23:13 and 21:28:32 (evicted for the image model); the gateway retried the dead port for 45 s and answered 502; on the next load it passed llama-server's 503 "Loading model" straight to the phone.
 
-## Gateway chat should call the shared generation service, not proxy llama-server (open, 2026-09-02)
+## Gateway chat should call the shared generation service, not proxy llama-server (RESOLVED in code 2026-09-02: `handleChat` builds a shared `GenerationRequest` via `openAIChatRequestToGeneration`, runs `desktopModelServices.generation.generate`, and projects chunks to OpenAI SSE frames; tool calls are returned unexecuted; client disconnect aborts the turn; readiness → 503, capability → 400, overflow → 400 `context_length_exceeded`, engine unavailable → 502; tests in `model-server-chat.integration.test.ts` ('streams tokens in OpenAI frames before the engine completes', 'returns the model's tool calls to the client and does not execute them', 'answers 503 in the JSON envelope when no text model is selected'). LIVE CHECK PENDING: needs a Desktop restart, then a phone turn with streaming, thinking, a web_search round trip, and Stop cancelling on Desktop)
 
-The chat endpoint still carries its own readiness, retry, and proxy policy. The image endpoint already runs through the shared application service, which is why its errors are right. Route chat through `desktopModelServices.generation` with streaming adapted to SSE, and delete the proxy policy. About a day with tests.
+The chat endpoint carried its own readiness, retry, and proxy policy (`proxyToLlama` with a body, `callLlamaJson`, `proxyToSelectedRemote`, `applyThinkingPayload`, `sanitizeChatMessages`). All of that is deleted; `proxyToLlama` remains a plain pipe for `/v1/completions` and `/v1/embeddings` passthrough only. `src/main/lib/retry.ts` now has no production caller (its unit tests still pass); delete it with approval.
 
 ## Meetings: a recording only appeared after it ended (RESOLVED 2026-09-02: `beginMeeting(startedAt)` creates the row when the recorder starts; the stop path fills it in place; the list shows "Recording…"; dead live rows are cleared at boot; MeetingsScreen test 'lists a meeting as Recording…')
 
