@@ -50,6 +50,8 @@ import {
   IconLock,
   IconLoader2,
   IconArrowLeft,
+  IconPin,
+  IconPinnedOff,
   IconArrowRight,
   IconActivityHeartbeat,
   IconDeviceMobile,
@@ -371,7 +373,17 @@ function AppContent() {
     prepare?.()
     commitViewMode(destination)
   }, [])
-  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarHovered, setSidebarHovered] = useState(false)
+  // Pinned keeps the rail open; unpinned returns it to open-on-hover. A per-machine preference.
+  const [sidebarPinned, setSidebarPinned] = useState(() => readSidebarPinned())
+  const sidebarOpen = sidebarPinned || sidebarHovered
+  const setSidebarOpen = setSidebarHovered
+  const toggleSidebarPinned = (): void => {
+    setSidebarPinned((pinned) => {
+      writeSidebarPinned(!pinned)
+      return !pinned
+    })
+  }
   const rec = useMeetingRecorder()
 
   const setTaskDetailSidebarMode = useCallback((detailOpen: boolean): void => {
@@ -1174,6 +1186,24 @@ function AppContent() {
 
               {/* Back / forward — a distinct control (filled), available everywhere (⌘[ / ⌘]) */}
               <div className={cn('mt-3 flex items-center gap-1', !sidebarOpen && 'justify-center')}>
+                {sidebarOpen && (
+                  <button
+                    onClick={toggleSidebarPinned}
+                    aria-label={sidebarPinned ? 'Unpin sidebar' : 'Pin sidebar'}
+                    aria-pressed={sidebarPinned}
+                    title={sidebarPinned ? 'Unpin: open on hover' : 'Pin: keep the sidebar open'}
+                    className={cn(
+                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-800 bg-neutral-800/40 transition-colors hover:border-neutral-700 hover:bg-neutral-800 hover:text-white',
+                      sidebarPinned ? 'text-green-500' : 'text-neutral-400'
+                    )}
+                  >
+                    {sidebarPinned ? (
+                      <IconPinnedOff className="h-4 w-4 shrink-0" />
+                    ) : (
+                      <IconPin className="h-4 w-4 shrink-0" />
+                    )}
+                  </button>
+                )}
                 <button
                   onClick={navigateBack}
                   disabled={!canGoBack}
@@ -1397,6 +1427,22 @@ function AppContent() {
       {TaskFloatingView ? <TaskFloatingView /> : null}
     </div>
   )
+}
+
+const SIDEBAR_PINNED_KEY = 'sidebar_pinned'
+function readSidebarPinned(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_PINNED_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+function writeSidebarPinned(pinned: boolean): void {
+  try {
+    localStorage.setItem(SIDEBAR_PINNED_KEY, pinned ? 'true' : 'false')
+  } catch {
+    /* a private window forgets the choice; nothing else breaks */
+  }
 }
 
 function App() {
