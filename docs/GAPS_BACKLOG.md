@@ -1967,3 +1967,9 @@ Desktop log: llama-server exited cleanly at 21:23:13 and 21:28:32 (evicted for t
 ## Gateway chat should call the shared generation service, not proxy llama-server (open, 2026-09-02)
 
 The chat endpoint still carries its own readiness, retry, and proxy policy. The image endpoint already runs through the shared application service, which is why its errors are right. Route chat through `desktopModelServices.generation` with streaming adapted to SSE, and delete the proxy policy. About a day with tests.
+
+## Meetings: a recording only appeared after it ended (RESOLVED 2026-09-02: `beginMeeting(startedAt)` creates the row when the recorder starts; the stop path fills it in place; the list shows "Recording…"; dead live rows are cleared at boot; MeetingsScreen test 'lists a meeting as Recording…')
+
+## Meetings: no language choice beside the transcription model (RESOLVED 2026-09-02: the meeting page offers the same `sttLanguage` setting dictation uses; Re-transcribe reads it; MeetingsScreen test 'offers the transcription language')
+
+The transcript in the report was Whisper auto-detecting Hindi on English speech. Pick English and re-transcribe.
