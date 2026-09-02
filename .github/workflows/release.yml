@@ -253,12 +253,16 @@ jobs:
           # build tool live at the root, and packages/sync declares neither. A locked install, so a
           # drifted lock stops the release instead of resolving a graph nobody committed.
           npm --prefix ../shared ci
-          npm --prefix ../shared/packages/sync run build
-          # @offgrid/use (the durable action engine) is consumed the same way as sync
-          # and needs the same explicit build - file-dep prepare alone does not emit
-          # its dist/ types before the typecheck runs.
-          npm --prefix ../shared/packages/use run build
+          # Every shared package this app declares as a file: dependency, in dependency order (sync
+          # builds on automation). file-dep prepare alone does not emit dist/ types before the
+          # typecheck runs, and a package left out here fails it as "Cannot find module".
+          npm --prefix ../shared/packages/automation run build
           npm --prefix ../shared/packages/models run build
+          npm --prefix ../shared/packages/rag run build
+          npm --prefix ../shared/packages/speech run build
+          npm --prefix ../shared/packages/sync run build
+          npm --prefix ../shared/packages/ui run build
+          npm --prefix ../shared/packages/use run build
       - name: Check out the private Desktop speech runtime
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -529,12 +533,16 @@ jobs:
           # build tool live at the root, and packages/sync declares neither. A locked install, so a
           # drifted lock stops the release instead of resolving a graph nobody committed.
           npm --prefix ../shared ci
-          npm --prefix ../shared/packages/sync run build
-          # @offgrid/use (the durable action engine) is consumed the same way as sync
-          # and needs the same explicit build - file-dep prepare alone does not emit
-          # its dist/ types before the typecheck runs.
-          npm --prefix ../shared/packages/use run build
+          # Every shared package this app declares as a file: dependency, in dependency order (sync
+          # builds on automation). file-dep prepare alone does not emit dist/ types before the
+          # typecheck runs, and a package left out here fails it as "Cannot find module".
+          npm --prefix ../shared/packages/automation run build
           npm --prefix ../shared/packages/models run build
+          npm --prefix ../shared/packages/rag run build
+          npm --prefix ../shared/packages/speech run build
+          npm --prefix ../shared/packages/sync run build
+          npm --prefix ../shared/packages/ui run build
+          npm --prefix ../shared/packages/use run build
       - name: Check out the private Desktop speech package
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:

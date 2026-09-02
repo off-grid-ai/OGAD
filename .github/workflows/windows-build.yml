@@ -136,8 +136,12 @@ jobs:
           rm -rf ../shared
           mv _shared ../shared
           npm --prefix ../shared ci
+          npm --prefix ../shared/packages/automation run build
           npm --prefix ../shared/packages/models run build
+          npm --prefix ../shared/packages/rag run build
+          npm --prefix ../shared/packages/speech run build
           npm --prefix ../shared/packages/sync run build
+          npm --prefix ../shared/packages/ui run build
           npm --prefix ../shared/packages/use run build
 
       - name: Install dependencies

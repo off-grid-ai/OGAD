@@ -115,10 +115,16 @@ jobs:
           # A LOCKED install, and no fallback: an unlocked install would resolve a different graph and let the
           # later gates run against dependencies nobody committed. A drifted lock should stop the build.
           npm --prefix ../shared ci
-          npm --prefix ../shared/packages/sync run build
+          # Every shared package this app declares as a file: dependency, in dependency order
+          # (sync builds on automation). A package left out here has no dist on the runner, and the
+          # typecheck reports it as "Cannot find module" - which is how @offgrid/rag failed this gate.
+          npm --prefix ../shared/packages/automation run build
           npm --prefix ../shared/packages/models run build
+          npm --prefix ../shared/packages/rag run build
           npm --prefix ../shared/packages/speech run build
+          npm --prefix ../shared/packages/sync run build
           npm --prefix ../shared/packages/ui run build
+          npm --prefix ../shared/packages/use run build
       - name: Check out the private Desktop speech runtime
         uses: actions/checkout@v4
         with:
