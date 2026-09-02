@@ -26,7 +26,6 @@ import {
   activateRemoteVisionModel,
   deactivateRemoteVisionModel,
   getRemoteVisionServer,
-  getRemoteVisionServerSettings,
   desktopRemoteServerPorts
 } from './vision/remote-vision-server'
 import { remoteReasoningMetadata } from './llm/remote-chat'
@@ -187,6 +186,44 @@ const SHARED_MODALITIES: readonly ModelModality[] = [
   'embedding'
 ]
 
+/** A text model also serves classification, tool selection and (with vision) computer use. */
+export function expandDesktopTextRoutes(base: RuntimeModel): RuntimeModel[] {
+  const route = (
+    routeModality: ModelModality,
+    adapterId: string,
+    capabilities: RuntimeModel['capabilities']
+  ): RuntimeModel => ({ ...base, modality: routeModality, adapterId, capabilities })
+  const prefix = base.source === 'remote' ? 'desktop.remote-chat' : 'desktop.llama'
+  return [
+    base,
+    route('classifier', `${prefix}.classifier`, { classification: true, streaming: true }),
+    ...(base.capabilities.tools
+      ? [
+          route('tool_selection', `${prefix}.tool-selection`, {
+            tools: true,
+            toolSelection: true,
+            thinking: base.capabilities.thinking,
+            streaming: true,
+            structuredOutput: true
+          })
+        ]
+      : []),
+    ...(base.capabilities.vision && base.capabilities.tools
+      ? [
+          route('computer_use', `${prefix}.computer-use`, {
+            vision: true,
+            computerUse: true,
+            tools: true,
+            toolSelection: true,
+            thinking: base.capabilities.thinking,
+            streaming: true,
+            structuredOutput: true
+          })
+        ]
+      : [])
+  ]
+}
+
 export function desktopAdapterId(source: 'local' | 'remote', modality: ModelModality): string {
   const prefix = source === 'remote' ? 'desktop.remote-chat' : 'desktop.llama'
   // Vision is a capability of the text runtime, not a second residency or
@@ -341,19 +378,6 @@ class DesktopInventorySource {
     ])
     this.ids.index(catalog)
     const installed = new Set(installedIds)
-    const remoteSettings = getRemoteVisionServerSettings()
-    const remoteById = new Map(remoteSettings.servers.map((server) => [server.id, server] as const))
-    const remoteReasoningById = new Map(
-      await Promise.all(
-        remoteSettings.servers.map(async (server) => {
-          const connection = getRemoteVisionServer(server.id)
-          return [
-            server.id,
-            connection ? await remoteReasoningMetadata(connection) : undefined
-          ] as const
-        })
-      )
-    )
     const activeText = this.selections.read('text')
     const activeTextRoute = activeText ? decodeModelRouteId(activeText) : null
     const residencyLifecycle = (
@@ -361,91 +385,40 @@ class DesktopInventorySource {
     ): NonNullable<RuntimeModel['residencyLifecycle']> =>
       runtimeResidencyLifecycle(this.dependencies.residencySetting?.(modality) ?? 'on-demand')
 
-    const expandTextRoutes = (base: RuntimeModel): RuntimeModel[] => {
-      const route = (
-        routeModality: ModelModality,
-        adapterId: string,
-        capabilities: RuntimeModel['capabilities']
-      ): RuntimeModel => ({ ...base, modality: routeModality, adapterId, capabilities })
-      const prefix = base.source === 'remote' ? 'desktop.remote-chat' : 'desktop.llama'
-      return [
-        base,
-        route('classifier', `${prefix}.classifier`, { classification: true, streaming: true }),
-        ...(base.capabilities.tools
-          ? [
-              route('tool_selection', `${prefix}.tool-selection`, {
-                tools: true,
-                toolSelection: true,
-                thinking: base.capabilities.thinking,
-                streaming: true,
-                structuredOutput: true
-              })
-            ]
-          : []),
-        ...(base.capabilities.vision && base.capabilities.tools
-          ? [
-              route('computer_use', `${prefix}.computer-use`, {
-                vision: true,
-                computerUse: true,
-                tools: true,
-                toolSelection: true,
-                thinking: base.capabilities.thinking,
-                streaming: true,
-                structuredOutput: true
-              })
-            ]
-          : [])
-      ]
-    }
-
+    // Remote routes come from the workspace's own adapter (one per saved server selection).
     const catalogRoutes = catalog.flatMap((model): RuntimeModel[] => {
+      if (model.remoteServerId) return []
       const modality = runtimeModalityForModelKind(model.kind)
       if (!modality) return []
-      const remote = model.remoteServerId ? remoteById.get(model.remoteServerId) : undefined
-      const source = remote ? 'remote' : 'local'
-      const runtimeManagedVoice =
-        source === 'local' && modality === 'voice' && model.artifactDelivery === 'runtime'
-      const isInstalled = runtimeManagedVoice
-        ? localVoiceState.installed
-        : source === 'remote' || installed.has(model.id)
+      const runtimeManagedVoice = modality === 'voice' && model.artifactDelivery === 'runtime'
+      const isInstalled = runtimeManagedVoice ? localVoiceState.installed : installed.has(model.id)
       const ready =
         isInstalled &&
         model.availability !== 'coming_soon' &&
         (!runtimeManagedVoice || localVoiceState.ready)
       const loaded =
-        source === 'remote'
-          ? activeTextRoute?.serverId === remote?.id &&
-            activeTextRoute?.modelId === model.remoteModelId
-          : modality === 'text' &&
-            (activeTextRoute?.modelId ?? activeText) === model.id &&
-            localTextState.loaded
-      const adapterId = desktopAdapterId(source, modality)
-      const reasoning = remote
-        ? remoteReasoningById.get(remote.id)
-        : modality === 'text' || modality === 'computer_use'
-          ? localTextState.reasoning
-          : undefined
-      const capabilities = inventoryModelCapabilities({
-        kind: model.kind,
-        source,
-        remoteCapabilities: model.remoteCapabilities
-      })
-      if (source === 'local' && loaded && (modality === 'text' || modality === 'computer_use')) {
+        modality === 'text' &&
+        (activeTextRoute?.modelId ?? activeText) === model.id &&
+        localTextState.loaded
+      const adapterId = desktopAdapterId('local', modality)
+      const reasoning =
+        modality === 'text' || modality === 'computer_use' ? localTextState.reasoning : undefined
+      const capabilities = inventoryModelCapabilities({ kind: model.kind, source: 'local' })
+      // `loaded` is only ever true for the text runtime.
+      if (loaded) {
         capabilities.thinking =
           resolveReasoningPlan({ enabled: true }, reasoning).disposition === 'controlled'
       }
       const base: RuntimeModel = {
-        id: remote && model.remoteModelId ? model.remoteModelId : model.id,
+        id: model.id,
         name: model.name?.trim() || model.id,
         kind: (model.kind ?? 'text') as RuntimeModel['kind'],
         modality,
-        source,
+        source: 'local',
         adapterId,
-        providerId: remote?.provider ?? model.runtime ?? model.engine,
-        serverId: remote?.id,
+        providerId: model.runtime ?? model.engine,
         reasoning,
-        contextLength:
-          source === 'local' && modality === 'text' ? localTextState.contextLength : undefined,
+        contextLength: modality === 'text' ? localTextState.contextLength : undefined,
         ...runtimeSizes(model),
         dirtyMemory: modality === 'image',
         residencyLifecycle:
@@ -462,7 +435,7 @@ class DesktopInventorySource {
         loaded
       }
       if (modality !== 'text') return [base]
-      return expandTextRoutes(base)
+      return expandDesktopTextRoutes(base)
     })
 
     const embeddingRoute: RuntimeModel = {
@@ -520,7 +493,15 @@ export function createDesktopModelServices(
     // No deadline: a generation runs until it finishes or the user stops it.
     generation: { tools: desktopToolExecutor },
     remote: desktopRemoteServerPorts,
-    remoteServerId: randomUUID
+    remoteServerId: randomUUID,
+    remoteInventory: {
+      adapterId: (modality) => desktopAdapterId('remote', modality),
+      expandText: expandDesktopTextRoutes,
+      reasoning: async (server) => {
+        const connection = getRemoteVisionServer(server.id)
+        return connection ? remoteReasoningMetadata(connection) : undefined
+      }
+    }
   })
   const llm = workspace.llm
   const source = new DesktopInventorySource(dependencies, ids, selections)
