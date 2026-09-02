@@ -115,6 +115,24 @@ explicit per-server privacy boundary, clear local-network versus cloud disclosur
 a capability gate that rejects a model unless the required visual, structured-output, and thinking
 features are verified.
 
+### CU-017 (P1) - Computer Use and Web Use inference is untuned and gives the user no control
+
+**Evidence (2026-09-02):** each Computer Use step re-reads the whole history plus every prior
+screenshot. No slot reuse or prompt caching is set on the llama-server request path, no screenshot
+history cap exists, and the balanced and extreme presets disable flash attention, which mostly costs
+the prefill phase these loops live in. We measure neither prefill nor decode throughput per model, so
+defaults are guesses. Prefill throughput on Apple Silicon peaks near a 4K-token prompt, and batch-1
+speculative decoding tends to slow sparse MoE models; our speculative toggle has no MoE default.
+
+**Impact:** slower steps than the hardware allows, and the user cannot trade speed against context or
+see what a setting does on their own Mac.
+
+**Fix direction:** the itemised plan lives in `shared/docs/LOCAL_INFERENCE_TUNING_TODO.md`. Local
+prefill and decode measurement with an in-app "Measure on this Mac" result, slot reuse, a
+user-configurable screenshot history cap, presets exposed as settings with their measured effect,
+speculative decoding off by default for MoE, and a three-way privacy gate before any remote handoff
+(the privacy-boundary half of CU-015). Every result stays on the device.
+
 ### SYN-004 (P1) - Late-pair full graph is not verified between the real Desktop and Mobile apps
 
 **Evidence (2026-08-13):** the production send paths now backfill state records, generated images,
@@ -1941,3 +1959,11 @@ and route each modality through the shared selection service exactly as mobile d
 handler never reads `allowUnsafeMemoryOverride`, and the message assumes the Desktop UI. Honour the
 request's override flag in the gateway and word the shared `imageModelAdmissionMessage` for any
 client. The wire contract now lives in `@offgrid/models` (`parseImageMemoryGuardError`).
+
+## Gateway chat bypassed residency (RESOLVED in code 2026-09-02: `/v1/chat/completions` warms the chat model through `desktopModelServices.warmText()` when llama-server is down, and waits out llama-server's loading 503 while the client stays connected; needs a Desktop restart to take effect)
+
+Desktop log: llama-server exited cleanly at 21:23:13 and 21:28:32 (evicted for the image model); the gateway retried the dead port for 45 s and answered 502; on the next load it passed llama-server's 503 "Loading model" straight to the phone.
+
+## Gateway chat should call the shared generation service, not proxy llama-server (open, 2026-09-02)
+
+The chat endpoint still carries its own readiness, retry, and proxy policy. The image endpoint already runs through the shared application service, which is why its errors are right. Route chat through `desktopModelServices.generation` with streaming adapted to SSE, and delete the proxy policy. About a day with tests.
