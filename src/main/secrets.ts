@@ -16,7 +16,7 @@ function reportUnavailable(): void {
   console.error('[secrets] OS encryption unavailable - protected secrets cannot be read or written')
 }
 
-function ensure(): void {
+export function ensureSecretsStorage(): void {
   if (ready) return
   getDB().exec(
     `CREATE TABLE IF NOT EXISTS secrets (
@@ -38,7 +38,7 @@ export function secretsAvailable(): boolean {
 }
 
 export function setSecret(key: string, value: string): boolean {
-  ensure()
+  ensureSecretsStorage()
   if (!secretsAvailable()) {
     reportUnavailable()
     return false
@@ -54,7 +54,7 @@ export function setSecret(key: string, value: string): boolean {
 }
 
 export function getSecret(key: string): string | null {
-  ensure()
+  ensureSecretsStorage()
   const row = getDB().prepare('SELECT blob FROM secrets WHERE key = ?').get(key) as
     | { blob: Buffer }
     | undefined
@@ -72,19 +72,22 @@ export function getSecret(key: string): string | null {
 }
 
 export function deleteSecret(key: string): void {
-  ensure()
+  ensureSecretsStorage()
   getDB().prepare('DELETE FROM secrets WHERE key = ?').run(key)
 }
 
 /** Delete every secret owned by one namespace without exposing or decrypting values. */
-export function deleteSecretsByPrefix(prefix: string): void {
-  ensure()
-  getDB().prepare('DELETE FROM secrets WHERE substr(key, 1, ?) = ?').run(prefix.length, prefix)
+export function deleteSecretsByPrefix(
+  prefix: string,
+  database: Pick<ReturnType<typeof getDB>, 'prepare'> = getDB()
+): void {
+  ensureSecretsStorage()
+  database.prepare('DELETE FROM secrets WHERE substr(key, 1, ?) = ?').run(prefix.length, prefix)
 }
 
 /** Key names only (never values) — for showing what's stored without exposing it. */
 export function listSecretKeys(): string[] {
-  ensure()
+  ensureSecretsStorage()
   return (getDB().prepare('SELECT key FROM secrets ORDER BY key').all() as { key: string }[]).map(
     (r) => r.key
   )

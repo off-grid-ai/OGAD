@@ -18,10 +18,11 @@ import {
   type Rail,
   type TickOutcome,
   type ActionRecord,
-  type ExecuteResult
+  type ExecuteResult,
+  type TerminalChatActionOutcome
 } from '@offgrid/use'
 import { getDB } from '../database'
-import { hasHook, HOOKS } from '../bootstrap/hookRegistry'
+import { callHook, hasHook, HOOKS, type ChatActionResult } from '../bootstrap/hookRegistry'
 import { shell } from 'electron'
 import { makeUseDriver } from './use-driver'
 import { makeSemanticRailExecutor } from './semantic-rail'
@@ -60,6 +61,9 @@ export interface ActionsRuntime {
    *  card and Undo chip feed. Returns unsubscribe. */
   onOutcome(listener: (event: { outcome: TickOutcome; undoable: boolean }) => void): () => void
   waitForOutcome(actionId: string, timeoutMs: number): Promise<TickOutcome | undefined>
+  /** Read-only terminal facts owned by the action engine. Projection consumers may reconcile them;
+   * they cannot execute or mutate an Action through this port. */
+  listTerminalChatActionResults(): Promise<readonly ChatActionResult[]>
   whenParked(actionId: string): Promise<void>
   onParked(actionId: string, listener: () => void): () => void
   kick(): void
@@ -157,27 +161,79 @@ function recordAuthenticatedTaskLaunch(
   })
 }
 
-/** Keep the durable task projection aligned with the action engine's terminal decision. */
-function recordTaskActionOutcome(outcome: TickOutcome): void {
-  if (outcome.outcome === 'poisoned') return
-  const kind = taskKindForActionType(outcome.record.type)
-  if (!kind || outcome.outcome === 'done') return
-  const detail = outcome.record.attemptLog.at(-1)?.detail?.trim()
-  const status = outcome.outcome === 'rejected' ? 'failed' : 'waiting'
+/** One-way projection from the durable action engine to a Chat owner's result observer. */
+function chatActionResultFromRecord(
+  actionId: string,
+  outcome: 'done' | 'rejected' | 'needs_help',
+  record: ActionRecord
+): ChatActionResult | null {
+  const conversationId = record.source === 'chat' ? record.sourceRef?.trim() : ''
+  if (!conversationId) return null
+  const detail = record.attemptLog.at(-1)?.detail?.trim()
   const summary =
     detail ||
-    (outcome.outcome === 'rejected'
-      ? 'The task was declined and did not run.'
-      : outcome.outcome === 'edited'
-        ? 'The task is waiting for changes.'
-        : 'The task ran but could not be confirmed.')
-  recordTaskRun({
-    taskId: outcome.id,
-    kind,
-    title: outcome.record.intent,
-    status,
+    (outcome === 'rejected'
+      ? 'The action was declined and did not run.'
+      : outcome === 'needs_help'
+        ? 'The action ran but could not be confirmed.'
+        : record.intent)
+  return {
+    actionId,
+    conversationId,
+    status: outcome === 'done' ? 'done' : 'failed',
     summary
-  })
+  }
+}
+
+export function chatActionResultFromOutcome(outcome: TickOutcome): ChatActionResult | null {
+  if (outcome.outcome === 'poisoned' || outcome.outcome === 'edited') return null
+  return chatActionResultFromRecord(outcome.id, outcome.outcome, outcome.record)
+}
+
+export function chatActionResultFromTerminalOutcome(
+  outcome: TerminalChatActionOutcome
+): ChatActionResult | null {
+  return chatActionResultFromRecord(outcome.actionId, outcome.outcome, outcome.record)
+}
+
+export function observeActionOutcome(outcome: TickOutcome): void {
+  const chatResult = chatActionResultFromOutcome(outcome)
+  if (chatResult) {
+    const reportProjectionFailure = (error: unknown): void => {
+      console.error('[actions] Chat action result projection failed', error)
+    }
+    try {
+      const projection = callHook<unknown>(HOOKS.actionsObserveChatActionResult, chatResult)
+      void Promise.resolve(projection).catch(reportProjectionFailure)
+    } catch (error) {
+      // Projection is downstream of the committed action. Its failure must not turn a completed
+      // external effect into a rejected wait result or invite an unsafe retry.
+      reportProjectionFailure(error)
+    }
+  }
+  if (outcome.outcome === 'poisoned') return
+  try {
+    const kind = taskKindForActionType(outcome.record.type)
+    if (!kind || outcome.outcome === 'done') return
+    const detail = outcome.record.attemptLog.at(-1)?.detail?.trim()
+    const status = outcome.outcome === 'rejected' ? 'failed' : 'waiting'
+    const summary =
+      detail ||
+      (outcome.outcome === 'rejected'
+        ? 'The task was declined and did not run.'
+        : outcome.outcome === 'edited'
+          ? 'The task is waiting for changes.'
+          : 'The task ran but could not be confirmed.')
+    recordTaskRun({
+      taskId: outcome.id,
+      kind,
+      title: outcome.record.intent,
+      status,
+      summary
+    })
+  } catch (error) {
+    console.error('[actions] Task action result projection failed', error)
+  }
 }
 
 let runtime: ActionsRuntime | null = null
@@ -229,8 +285,8 @@ export function getActionsRuntime(): ActionsRuntime {
   // rail for the A/B; unset = the real tiered behaviour.
   const computerTaskTiers: ComputerTaskTiers = {
     routingSnapshot: (goal) => getAxRailHost().routingSnapshot(goal),
-    runAx: (goal, taskId, journeyId, app, initial) =>
-      getAxRailHost().runTask(goal, taskId, app, initial, journeyId),
+    runAx: (goal, taskId, journeyId, app, initial, allowVisionRecovery) =>
+      getAxRailHost().runTask(goal, taskId, app, initial, journeyId, allowVisionRecovery),
     visionExecute: groundedVisionExecute
   }
   const computerTaskExecute = (action: ActionRecord): Promise<ExecuteResult> => {
@@ -301,8 +357,16 @@ export function getActionsRuntime(): ActionsRuntime {
     async waitForOutcome(actionId, timeoutMs) {
       await ready
       const outcome = await worker.waitForOutcome(actionId, timeoutMs)
-      if (outcome) recordTaskActionOutcome(outcome)
+      if (outcome) observeActionOutcome(outcome)
       return outcome
+    },
+    async listTerminalChatActionResults() {
+      await ready
+      const outcomes = await engine.terminalChatOutcomes.list()
+      return outcomes.flatMap((outcome) => {
+        const result = chatActionResultFromTerminalOutcome(outcome)
+        return result ? [result] : []
+      })
     },
     whenParked: whenActionParked,
     onParked: onActionParked,

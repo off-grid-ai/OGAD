@@ -6,14 +6,18 @@
 // closed — we don't hold long-lived child processes.
 
 import { getDB } from './database'
-import { deleteSecretsByPrefix, getSecret } from './secrets'
+import { deleteSecretsByPrefix, ensureSecretsStorage, getSecret } from './secrets'
 import { makeOAuthProvider, ensureLoopback, hasOAuthTokens } from './mcp-oauth'
 import { cancelOAuthAuthorization } from './mcp-oauth-cancellation'
 import { callHook, HOOKS } from './bootstrap/hookRegistry'
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import type { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import type { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { DEFAULT_CONNECTOR_OPERATION_TIMEOUT_MS, withOperationTimeout } from '@offgrid/models'
+import {
+  DEFAULT_CONNECTOR_OPERATION_TIMEOUT_MS,
+  McpConnectorApplicationService,
+  type McpConnectorStatus
+} from '@offgrid/models'
 
 // Provider-specific quirks (e.g. Google's MCP endpoints) are a Pro concern and
 // register these hooks; in the free build they return undefined → generic MCP.
@@ -118,35 +122,20 @@ export function addConnector(c: NewConnector): number {
 }
 
 export function setConnectorEnabled(id: number, enabled: boolean): void {
-  ensure()
-  getDB()
-    .prepare('UPDATE connectors SET enabled = ? WHERE id = ?')
-    .run(enabled ? 1 : 0, id)
+  connectorApplication.setEnabled(id, enabled)
 }
 
-/** Single writer for a connector's health status — so testConnector and the chat
- *  tool loader can't diverge on how a failure is recorded. When a background load
- *  can't reach a connector (expired token / server down), this flips its status to
- *  'error' so the UI shows it needs reconnecting instead of silently going dark. */
+/** Compatibility wrapper. Shared owns the status transition; Desktop persists it. */
 export function setConnectorStatus(
   id: number,
-  status: 'ok' | 'error' | 'unknown',
+  status: McpConnectorStatus,
   detail?: string | null
 ): void {
-  ensure()
-  getDB()
-    .prepare('UPDATE connectors SET status = ?, status_detail = ? WHERE id = ?')
-    .run(status, detail ?? null, id)
+  connectorApplication.setStatus(id, status, detail ?? undefined)
 }
 
 export function removeConnector(id: number): void {
-  ensure()
-  cancelOAuthAuthorization(id)
-  const database = getDB()
-  database.transaction(() => {
-    deleteSecretsByPrefix(`connector:${id}:`)
-    database.prepare('DELETE FROM connectors WHERE id = ?').run(id)
-  })()
+  connectorApplication.remove(id)
 }
 
 function getConnector(id: number): Connector | undefined {
@@ -285,46 +274,75 @@ async function connect(
   }
 }
 
+async function discoverConnectorTools(
+  connector: Connector,
+  interactive: boolean
+): Promise<ConnectorToolDefinition[]> {
+  const source = connectorToolSource(connector)
+  if (source) {
+    if (interactive) {
+      // A fresh account still needs the generic OAuth adapter before provider verification.
+      if (!hasOAuthTokens(connector.id)) {
+        const session = await connect(connector, true)
+        await session.close()
+      }
+      await source.verify()
+    }
+    return [...source.tools]
+  }
+  const { client, close } = await connect(connector, interactive)
+  try {
+    const result = await client.listTools()
+    return result.tools as ConnectorToolDefinition[]
+  } finally {
+    await close()
+  }
+}
+
+const connectorApplication = new McpConnectorApplicationService<Connector>({
+  repository: {
+    find: getConnector,
+    setEnabled(id, enabled) {
+      ensure()
+      getDB()
+        .prepare('UPDATE connectors SET enabled = ? WHERE id = ?')
+        .run(enabled ? 1 : 0, id)
+    },
+    setStatus(id, status, detail) {
+      ensure()
+      getDB()
+        .prepare('UPDATE connectors SET status = ?, status_detail = ? WHERE id = ?')
+        .run(status, detail ?? null, id)
+    },
+    cacheDiscovery(id, tools) {
+      ensure()
+      getDB()
+        .prepare("UPDATE connectors SET status='ok', status_detail=NULL, tools=? WHERE id=?")
+        .run(JSON.stringify(tools), id)
+    },
+    removeWithCredentials(id) {
+      ensure()
+      ensureSecretsStorage()
+      const database = getDB()
+      database.transaction(() => {
+        deleteSecretsByPrefix(`connector:${id}:`, database)
+        database.prepare('DELETE FROM connectors WHERE id = ?').run(id)
+      })()
+    }
+  },
+  authorization: {
+    cancel: cancelOAuthAuthorization
+  },
+  transport: {
+    discover: discoverConnectorTools
+  }
+})
+
 /** Connect, list tools, cache them + status. Returns the discovered tools. */
 export async function testConnector(
   id: number
 ): Promise<{ ok: boolean; tools: { name: string; description?: string }[]; error?: string }> {
-  ensure()
-  const c = getConnector(id)
-  if (!c) return { ok: false, tools: [], error: 'not found' }
-  try {
-    const source = connectorToolSource(c)
-    let tools: ConnectorToolDefinition[]
-    if (source) {
-      // A fresh account still needs the existing interactive OAuth handshake. Once tokens exist,
-      // provider verification must not touch a preview-gated MCP endpoint.
-      if (!hasOAuthTokens(c.id)) {
-        const session = await connect(c, true)
-        await session.close()
-      }
-      await source.verify()
-      tools = source.tools
-    } else {
-      const { client, close } = await connect(c, true) // user-initiated → allow browser OAuth
-      try {
-        const res = await client.listTools()
-        tools = res.tools.map((tool) => ({
-          name: tool.name,
-          description: tool.description
-        }))
-      } finally {
-        await close()
-      }
-    }
-    getDB()
-      .prepare("UPDATE connectors SET status='ok', status_detail=NULL, tools=? WHERE id=?")
-      .run(JSON.stringify(tools), id)
-    return { ok: true, tools }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    setConnectorStatus(id, 'error', msg)
-    return { ok: false, tools: [], error: msg }
-  }
+  return connectorApplication.verifyAndDiscover(id)
 }
 
 // A background tool load must never hang the chat turn it runs inside: one dead or
@@ -336,24 +354,7 @@ export const FETCH_TOOLS_TIMEOUT_MS = DEFAULT_CONNECTOR_OPERATION_TIMEOUT_MS
 /** Full tool definitions (incl. inputSchema) for a connected connector. Rejects if
  *  the connect+list exceeds FETCH_TOOLS_TIMEOUT_MS. */
 export async function fetchTools(id: number): Promise<ConnectorToolDefinition[]> {
-  ensure()
-  const c = getConnector(id)
-  if (!c) throw new Error('connector not found')
-  const op = (async (): Promise<ConnectorToolDefinition[]> => {
-    const source = connectorToolSource(c)
-    if (source) return [...source.tools]
-    const { client, close } = await connect(c, false)
-    try {
-      const res = await client.listTools()
-      return res.tools as ConnectorToolDefinition[]
-    } finally {
-      await close()
-    }
-  })()
-  return withOperationTimeout(op, {
-    timeoutMs: FETCH_TOOLS_TIMEOUT_MS,
-    message: `listing tools for ${c.name} timed out`
-  })
+  return connectorApplication.discoverInBackground(id)
 }
 
 export function getConnectorMeta(

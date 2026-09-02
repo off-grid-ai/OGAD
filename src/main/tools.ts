@@ -10,6 +10,7 @@ import { SEARCH_KB_TOOL, makeSearchKnowledgeBaseHandler } from '@offgrid/rag'
 import { getSetting, saveSetting } from './database'
 import {
   DeferredImageRequestCollector,
+  ModelCapabilityError,
   boundedToolHistory,
   buildAgentToolMessages,
   decodeSearchRedirect as decodeDdgHref,
@@ -398,6 +399,9 @@ const TOOLS: ToolDef[] = [
       return prompt
         ? {
             text: 'Image generation started - it will appear in the chat.',
+            // Native generation runs after the text-model loop. This step is not complete until
+            // that deferred boundary returns a real artifact.
+            status: 'pending',
             imageRequest: { prompt }
           }
         : { text: 'Error: no image prompt provided.' }
@@ -720,6 +724,9 @@ export async function toolChat(
   } catch (error) {
     if (opts.signal?.aborted) {
       return imageRequests.project({ answer: streamedContent.trim(), toolCalls, unified })
+    }
+    if (error instanceof Error && error.cause instanceof ModelCapabilityError) {
+      return imageRequests.project({ answer: error.message, toolCalls, unified })
     }
     throw error
   }
