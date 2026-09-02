@@ -385,7 +385,7 @@ export class DesktopRemoteImageGenerationAdapter extends DesktopTypedGenerationA
         images: [
           {
             id: model.id,
-            mimeType: 'image/png',
+            mimeType: image.mimeType ?? 'image/png',
             ...(image.base64 ? { data: image.base64 } : {}),
             ...(image.url ? { uri: image.url } : {})
           }
