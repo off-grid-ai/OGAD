@@ -96,8 +96,13 @@ export class DesktopChatGenerationAdapter {
       thinking: input.thinking
     })
     execution.toolResponse = response
-    this.publishToolCalls(input, response, context.events)
     await this.generateDeferredImages(execution, context)
+    // Shared receives only terminal tool rows. The IPC stream owns the live running projection;
+    // this transcript is the durable session outcome.
+    this.publishToolCalls(input, response, context.events)
+    if (context.signal?.aborted) {
+      throw context.signal.reason ?? new Error('Desktop tool generation cancelled')
+    }
     return desktopTextResult(response.answer ?? '', context.signal)
   }
 
@@ -142,9 +147,9 @@ export class DesktopChatGenerationAdapter {
     if (!requests.length || !this.boundary.generateImage) return
     execution.imageActive = true
     try {
-      for (const request of requests) {
+      for (const [index, request] of requests.entries()) {
         if (context.signal?.aborted) break
-        await this.generateOptionalToolImage(execution, request, context)
+        await this.generateOptionalToolImage(execution, request, index, context)
       }
     } finally {
       execution.imageActive = false
@@ -155,6 +160,7 @@ export class DesktopChatGenerationAdapter {
   private async generateOptionalToolImage(
     execution: DesktopTurnExecution,
     request: NonNullable<DesktopToolChatResponse['imageRequest']>,
+    requestIndex: number,
     context: DesktopGenerationContext
   ): Promise<void> {
     const input = execution.input as DesktopToolChatSessionInput
@@ -167,6 +173,10 @@ export class DesktopChatGenerationAdapter {
         projectId: input.projectId
       })
       execution.generatedImages.push(image)
+      this.setDeferredImageToolOutcome(execution, requestIndex, {
+        status: 'completed',
+        result: 'Image created and added to the chat.'
+      })
       if (request.proposal && this.boundary.storeProposalIllustration) {
         await this.boundary.storeProposalIllustration(
           request.proposal.conversationId,
@@ -186,9 +196,34 @@ export class DesktopChatGenerationAdapter {
           }
         ]
       })
-    } catch {
-      // A deferred image is optional output. Shared cancellation stops the remaining requests.
+    } catch (error) {
+      const cancelled = Boolean(context.signal?.aborted) || /cancel/i.test(this.errorMessage(error))
+      this.setDeferredImageToolOutcome(execution, requestIndex, {
+        status: cancelled ? 'cancelled' : 'failed',
+        result: cancelled
+          ? 'Image generation was cancelled.'
+          : `Image generation failed: ${this.errorMessage(error)}`
+      })
     }
+  }
+
+  private setDeferredImageToolOutcome(
+    execution: DesktopTurnExecution,
+    requestIndex: number,
+    outcome: { status: 'completed' | 'failed' | 'cancelled'; result: string }
+  ): void {
+    const calls = execution.toolResponse?.toolCalls
+    if (!calls) return
+    const call = calls.filter((candidate) => candidate.name === 'generate_image')[requestIndex]
+    if (!call) return
+    call.status = outcome.status
+    call.result = outcome.result
+  }
+
+  private errorMessage(error: unknown): string {
+    return error instanceof Error && error.message.trim()
+      ? error.message.trim()
+      : 'The image runtime returned an unknown error.'
   }
 
   private async generateRag(

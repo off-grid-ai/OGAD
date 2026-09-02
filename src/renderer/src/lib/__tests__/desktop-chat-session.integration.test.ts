@@ -121,7 +121,6 @@ describe('DesktopChatSession', () => {
         conversationId: 'conversation-a',
         projectId: 'project-a',
         userMessage: { role: 'user', content: 'Question turn-a' },
-        assistantMessage: { role: 'assistant', content: 'Original answer' },
         responseMessages: [{ role: 'assistant', content: 'Original answer' }],
         status: 'completed',
         request: {
@@ -211,6 +210,13 @@ describe('DesktopChatSession', () => {
       ragChat: vi.fn(async () => ({ answer: '' })),
       toolChat: vi.fn(async () => ({
         answer: 'I made the image.',
+        toolCalls: [
+          {
+            name: 'generate_image',
+            result: 'Image generation started - it will appear in the chat.',
+            status: 'pending' as const
+          }
+        ],
         imageRequests: [{ prompt: 'A green bicycle' }]
       })),
       generateImage: vi.fn(async () => ({
@@ -237,10 +243,111 @@ describe('DesktopChatSession', () => {
       projectId: 'project-a'
     })
     expect(result.generatedImages).toHaveLength(1)
+    expect(result.response.toolCalls).toEqual([
+      {
+        name: 'generate_image',
+        result: 'Image created and added to the chat.',
+        status: 'completed'
+      }
+    ])
     expect(result.turn.responseMessages?.at(-1)).toMatchObject({
       role: 'assistant',
       content: 'I made the image.'
     })
+  })
+
+  it('keeps a deferred image failure as the terminal tool outcome', async () => {
+    const boundary: DesktopChatSessionBoundary = {
+      ragChat: vi.fn(async () => ({ answer: '' })),
+      toolChat: vi.fn(async () => ({
+        answer: 'I tried to make the image.',
+        toolCalls: [
+          {
+            name: 'generate_image',
+            result: 'Image generation started - it will appear in the chat.',
+            status: 'pending' as const
+          }
+        ],
+        imageRequests: [{ prompt: 'A green bicycle' }]
+      })),
+      generateImage: vi.fn(async () => {
+        throw new Error('Native image process exited')
+      }),
+      onRagStream: () => () => undefined,
+      cancelRag: vi.fn()
+    }
+    const session = new DesktopChatSession(boundary)
+
+    const result = await session.send({
+      ...input('turn-tool-image-failed'),
+      kind: 'tools',
+      connectors: false,
+      allMemory: true,
+      imageAvailable: true
+    })
+
+    expect(result.generatedImages).toEqual([])
+    expect(result.response.toolCalls).toEqual([
+      {
+        name: 'generate_image',
+        result: 'Image generation failed: Native image process exited',
+        status: 'failed'
+      }
+    ])
+    expect(result.turn.status).toBe('completed')
+  })
+
+  it('keeps cancellation distinct from a deferred image failure', async () => {
+    let rejectImage = (error: Error): void => {
+      throw error
+    }
+    const boundary: DesktopChatSessionBoundary = {
+      ragChat: vi.fn(async () => ({ answer: '' })),
+      toolChat: vi.fn(async () => ({
+        answer: 'I started the image.',
+        toolCalls: [
+          {
+            name: 'generate_image',
+            result: 'Image generation started - it will appear in the chat.',
+            status: 'pending' as const
+          }
+        ],
+        imageRequests: [{ prompt: 'A green bicycle' }]
+      })),
+      generateImage: vi.fn(
+        () =>
+          new Promise<
+            Awaited<ReturnType<NonNullable<DesktopChatSessionBoundary['generateImage']>>>
+          >((_resolve, reject) => {
+            rejectImage = reject
+          })
+      ),
+      onRagStream: () => () => undefined,
+      cancelRag: vi.fn(),
+      cancelImageGen: vi.fn(() => rejectImage(new Error('Image generation cancelled')))
+    }
+    const session = new DesktopChatSession(boundary)
+    const pending = session.send({
+      ...input('turn-tool-image-cancelled'),
+      kind: 'tools',
+      connectors: false,
+      allMemory: true,
+      imageAvailable: true
+    })
+
+    await vi.waitFor(() => expect(boundary.generateImage).toHaveBeenCalledOnce())
+    expect(session.stopConversation('conversation-a', 'User stopped generation')).toBe(1)
+    const result = await pending
+
+    expect(result.generatedImages).toEqual([])
+    expect(result.response.toolCalls).toEqual([
+      {
+        name: 'generate_image',
+        result: 'Image generation was cancelled.',
+        status: 'cancelled'
+      }
+    ])
+    expect(result.turn.status).toBe('stopped')
   })
 
   it('executes a text-model image hand-off inside the one session command', async () => {

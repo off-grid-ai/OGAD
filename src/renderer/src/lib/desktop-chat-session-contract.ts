@@ -47,7 +47,7 @@ export interface DesktopToolChatResponse {
   toolCalls?: Array<{
     name: string
     result: string
-    status?: 'completed' | 'failed' | 'pending'
+    status?: 'completed' | 'failed' | 'pending' | 'cancelled'
   }>
   imageRequest?: { prompt: string; proposal?: { conversationId: string; slide: number } }
   imageRequests?: Array<{
