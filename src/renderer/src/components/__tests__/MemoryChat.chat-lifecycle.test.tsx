@@ -863,3 +863,34 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     ).toBeNull()
   })
 })
+
+describe('rows the database gained during a turn', () => {
+  it('shows a task result persisted mid-turn once the turn settles, like every other device', async () => {
+    const boundary = new ChatBoundary()
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+
+    await send('run the task', user)
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+    boundary.emit(0, 'Starting the task')
+    expect(await screen.findByText('Starting the task')).toBeTruthy()
+
+    // Main persisted the stop while this device was still generating here.
+    boundary.messages['conversation-a'] = [
+      ...(boundary.messages['conversation-a'] ?? []),
+      {
+        id: 902,
+        role: 'assistant',
+        content: 'Task stopped: Stopped',
+        context: { taskResult: { taskId: 't1', kind: 'web_use', status: 'stopped' } }
+      }
+    ]
+    boundary.changeConversation('conversation-a')
+    expect(screen.queryByText('Task stopped: Stopped')).toBeNull()
+
+    boundary.resolve(0, 'Starting the task')
+    expect(await screen.findByText('Task stopped: Stopped')).toBeTruthy()
+    expect(screen.getByText('Starting the task')).toBeTruthy()
+  })
+})

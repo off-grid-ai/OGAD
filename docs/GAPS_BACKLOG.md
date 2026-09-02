@@ -1887,7 +1887,7 @@ whole header.
 The user stopped a web-use task; the task record went STOPPED but the live panel reports it could
 not stop, and the chat turn shows no "stopped" marker. Stop must be acknowledged on both surfaces.
 
-## Desktop live transcript diverges from the persisted record mobile shows (open, 2026-09-02)
+## Desktop live transcript diverges from the persisted record mobile shows (RESOLVED 2026-09-02: a change announced mid-turn is re-read once the turn settles; lifecycle test "rows the database gained during a turn")
 
 For the same turn, mobile (synced rows) shows the Web Use step and a "Task stopped: Stopped" row;
 Desktop's own view shows neither. Desktop renders a separate in-memory live state from IPC stream

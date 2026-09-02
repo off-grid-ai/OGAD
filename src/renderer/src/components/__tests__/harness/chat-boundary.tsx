@@ -346,6 +346,11 @@ export class ChatBoundary {
     this.pendingUserWrite?.resolve()
   }
 
+  /** Main announced that this conversation's rows changed (a task result, a synced row). */
+  changeConversation(conversationId: string): void {
+    this.conversationChangedCallback?.({ conversationId })
+  }
+
   emit(callIndex: number, text: string): void {
     const call = this.calls[callIndex]!
     this.streamCallback?.({ streamId: call.streamId, type: 'content', text })

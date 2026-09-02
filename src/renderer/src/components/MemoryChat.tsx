@@ -3029,11 +3029,25 @@ export function MemoryChat({
   // Native image-job restoration also writes this projection until Shared reattaches it.
   const generatingRef = useRef<Set<string>>(new Set())
   const [generatingConvs, setGeneratingConvs] = useState<Set<string>>(new Set())
-  const markGenerating = useCallback((cid: string, on: boolean): void => {
-    if (on) generatingRef.current.add(cid)
-    else generatingRef.current.delete(cid)
-    setGeneratingConvs(new Set(generatingRef.current))
-  }, [])
+  // Conversations the database changed under while THIS device was generating in them (a task
+  // result such as "Task stopped", a synced row). The re-read waits until the turn settles, then
+  // runs - otherwise the screen keeps a stale live copy while every other device shows the record.
+  const pendingRefreshRef = useRef<Set<string>>(new Set())
+  const markGenerating = useCallback(
+    (cid: string, on: boolean): void => {
+      if (on) generatingRef.current.add(cid)
+      else {
+        generatingRef.current.delete(cid)
+        if (pendingRefreshRef.current.delete(cid)) {
+          void refreshConversationMessages(cid).catch((error) =>
+            console.error('Failed to refresh a conversation after its turn settled:', error)
+          )
+        }
+      }
+      setGeneratingConvs(new Set(generatingRef.current))
+    },
+    [refreshConversationMessages]
+  )
   const [chatQueue, setChatQueue] = useState(desktopChatSession.queueProjection())
   useEffect(
     () =>
@@ -3463,11 +3477,9 @@ export function MemoryChat({
     const off = window.api.onRagConversationsChanged?.(({ conversationId }) => {
       void (async () => {
         try {
-          if (
-            conversationId &&
-            conversationId === activeConversationId &&
-            !generatingRef.current.has(conversationId)
-          ) {
+          if (conversationId && generatingRef.current.has(conversationId)) {
+            pendingRefreshRef.current.add(conversationId)
+          } else if (conversationId && conversationId === activeConversationId) {
             await refreshConversationMessages(conversationId)
           }
           scheduleConversationListRefresh()
