@@ -1864,7 +1864,7 @@ the shared session can compact and continue. Every other failure still reaches t
 that looks like an answer, is persisted as one, and never reaches the shared failure path. Fix:
 rethrow; let the renderer's existing error path render and persist it as an error.
 
-## Chat transcript: one turn's tool work renders as N "Work done" headers (open, 2026-09-02)
+## Chat transcript: one turn's tool work renders as N "Work done" headers (RESOLVED 2026-09-02: `groupWorkRuns` in @offgrid/sync; MemoryChat.tool-calls test "one turn, one work timeline")
 
 Live, a turn's steps sit under one "Working" header. Once persisted, every tool round is its own
 "Work done · 1 step" card with a "Thought process" row between - a 12-step task reads as 12 cards.
@@ -1872,17 +1872,25 @@ The coalescing rule (`MemoryChat.tsx` ~5721) only merges ADJACENT tool rows, so 
 assistant row between two tool rows splits the run. Fix: group a turn's rows (tool rows and
 prose-less assistant rows) into one timeline, thought processes as steps inside it.
 
-## Chat transcript: two "Thought process" looks, two gaps (open, 2026-09-02)
+## Chat transcript: two "Thought process" looks, two gaps (RESOLVED 2026-09-02: the framed supporting wrapper is gone; reasoning between rounds travels inside the step)
 
 The thought-process toggle renders with a framed surface in one place and bare in another, and the
 vertical gap between rows differs. Keep the bare look and the smaller gap everywhere.
 
-## Task PiP: drag works only from the top half of the header (open, 2026-09-02)
+## Task PiP: drag works only from the top half of the header (RESOLVED 2026-09-02: the title no longer swallows the pointer; FloatingTaskView test "drags from the title too")
 
 Holding the lower part of the PiP header does not start a drag. The drag handle region must be the
 whole header.
 
-## Stopped task: no acknowledgement in chat; panel says "Could not stop this task on this device." (open, 2026-09-02)
+## Stopped task: no acknowledgement in chat; panel says "Could not stop this task on this device." (PARTIAL 2026-09-02: stop is idempotent in the vision controller so the panel no longer reports a failure; the chat acknowledgement is the live-transcript parity gap below)
 
 The user stopped a web-use task; the task record went STOPPED but the live panel reports it could
 not stop, and the chat turn shows no "stopped" marker. Stop must be acknowledged on both surfaces.
+
+## Desktop live transcript diverges from the persisted record mobile shows (open, 2026-09-02)
+
+For the same turn, mobile (synced rows) shows the Web Use step and a "Task stopped: Stopped" row;
+Desktop's own view shows neither. Desktop renders a separate in-memory live state from IPC stream
+events, and a tool result or a stop that arrives outside that stream never reaches it. Fix: Desktop
+renders the persisted record like mobile does (one projection), with the live stream only filling
+the row that is still generating.
