@@ -169,6 +169,17 @@ function proxyToLlama(
           headers
         },
         (proxyRes) => {
+          // llama-server answers 503 while its model loads. That is our wait, not the
+          // client's failure: hold the replayable request and try again once it is up.
+          if (proxyRes.statusCode === 503 && bodyOverride && !res.destroyed) {
+            proxyRes.resume()
+            const loading = new Error('llama-server is loading its model') as Error & {
+              upstreamLoading?: boolean
+            }
+            loading.upstreamLoading = true
+            reject(loading)
+            return
+          }
           const safeResponse = safeProxyResponse(proxyRes.statusCode, proxyRes.headers)
           res.writeHead(safeResponse.statusCode, safeResponse.headers)
           // Guard both ends BEFORE piping: a mid-stream reset from llama-server (or a client
@@ -187,8 +198,17 @@ function proxyToLlama(
         req.pipe(proxyReq)
       }
     })
-  // Piped requests aren't replayable, so they fail fast (replayable=false).
-  retryWithDeadline(attempt, { deadlineMs: retryUntil, replayable: !!bodyOverride }).catch(() => {
+  // Piped requests aren't replayable, so they fail fast (replayable=false). A model that is
+  // still loading is waited for as long as the client stays connected; only a dead upstream
+  // is bound by the deadline.
+  retryWithDeadline(attempt, {
+    deadlineMs: retryUntil,
+    replayable: !!bodyOverride,
+    isTransient: (err) =>
+      (err as { upstreamLoading?: boolean }).upstreamLoading ? !res.destroyed : true,
+    deadlineExempt: (err) => !!(err as { upstreamLoading?: boolean }).upstreamLoading
+  }).catch(() => {
+    if (res.destroyed || res.headersSent) return
     json(res, 502, errBody('Local model not ready (llama-server unavailable).', 'upstream_error'))
   })
 }
@@ -455,6 +475,17 @@ async function handleChat(
   }
 
   try {
+    // llama-server may have been evicted (an image model took its memory) or stopped. A chat
+    // request is the demand that brings it back, through the same residency lock the app uses,
+    // instead of retrying a dead port for 45s and answering 502.
+    if (!llm.isReady() && !llm.isStarting()) {
+      try {
+        await desktopModelServices.warmText()
+      } catch (e) {
+        json(res, 503, errBody(e instanceof Error ? e.message : 'Chat model unavailable.', 'unavailable_error'))
+        return
+      }
+    }
     let changed = await inlineChatImages(body)
     // Gemma 4 (and others) reject system messages that aren't at position 0.
     // Consolidate them before forwarding so any client's ordering works.
