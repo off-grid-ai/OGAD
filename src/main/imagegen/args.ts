@@ -5,12 +5,7 @@
 // binary expects. The standard builder CALLS standardModelDefaults from the
 // shared single-source-of-truth module — it never re-implements the defaults.
 
-import { standardImageModelDefaults } from '@offgrid/models'
-
-/** A general-purpose negative prompt that meaningfully lifts quality when the
- *  caller doesn't supply one. Kept conservative so it doesn't fight most prompts. */
-export const DEFAULT_NEGATIVE =
-  'blurry, low quality, low resolution, jpeg artifacts, deformed, disfigured, bad anatomy, extra limbs, watermark, text, signature, grainy, oversaturated'
+import { DEFAULT_IMAGE_NEGATIVE_PROMPT, standardImageModelDefaults } from '@offgrid/models'
 
 export interface CoreMLArgsInput {
   model: string
@@ -166,7 +161,7 @@ export function buildStandardArgs(i: StandardArgsInput): string[] {
   // low-res draft. When present it makes VAE-tiling moot, so prefer it.
   if (i.taesdPath) args.push('--taesd', i.taesdPath)
   else if (isXL && Math.max(effW, effH) > 768) args.push('--vae-tiling')
-  args.push('-n', i.negativePrompt?.trim() || DEFAULT_NEGATIVE)
+  args.push('-n', i.negativePrompt?.trim() || DEFAULT_IMAGE_NEGATIVE_PROMPT)
   // img2img (not supported by Z-Image gen-only turbo).
   if (i.initImage) {
     args.push('-i', i.initImage, '--strength', String(i.strength ?? 0.75))

@@ -15,7 +15,6 @@ import {
   type GeneratedImageSidecar
 } from './imagegen/gallery-sidecar'
 import {
-  CATALOG,
   ensureCheckpointExtension as ensureCheckpointExt,
   hasCheckpointExtension as hasCheckpointExt,
   IMAGE_CANCELLED_MESSAGE,
@@ -23,11 +22,11 @@ import {
   isImageModelFile,
   reduceImageProgress as reduceProgress,
   stripCheckpointExtension as stripCheckpointExt,
-  type ManagedRuntimePort as ManagedRuntime,
   type ImageExecutionPlan,
   type ImageNativeExecutionFacts,
   imageTaesdFilename
 } from '@offgrid/models'
+import type { DesktopManagedRuntime } from './model-runtime-port'
 import {
   isMfluxModelId,
   mfluxAvailable,
@@ -39,7 +38,6 @@ import {
 import { binRoots, dataDir, modelsDir, resourceDirs, exe } from './runtime-env'
 import { sdServer } from './sd-server'
 import { hasMlmodelc, isZImageModel, isQuantizedModel } from './imagegen/runtime-detect'
-import { primaryFileName, type CatalogEntry } from '@offgrid/models'
 import { buildCoreMLArgs, buildZImageArgs, buildStandardArgs } from './imagegen/args'
 import {
   resolveExistingOwnedEntry,
@@ -57,6 +55,7 @@ import {
   registerDesktopImageCancelBoundary,
   registerDesktopImageInspectionBoundary
 } from './imagegen/application-service'
+import { desktopImageRuntimeIdentity } from './models/image-runtime-identity'
 
 function findSdCli(): string | null {
   for (const r of binRoots()) {
@@ -129,20 +128,23 @@ export function listGeneratedImages(scope?: GeneratedImageScope): {
     let all = fs
       .readdirSync(dir)
       .filter((f) => /\.png$/i.test(f) && !f.startsWith('preview-'))
-      .map((f) => {
-        const p = path.join(dir, f)
+      .flatMap((f) => {
+        const ownedImage = resolveExistingOwnedEntry(dir, f)
+        if (!ownedImage) return []
         // The sidecar is the one owner of what is known about an image besides its bytes, including
         // the syncId that names it on the mesh. Read through that module so this scan and the sync
         // receiver cannot disagree about the shape.
-        const meta = readGeneratedImageSidecar(p)
-        return {
-          path: p,
-          name: f,
-          mtime: fs.statSync(p).mtimeMs,
-          syncId: meta.syncId,
-          conversationId: meta.conversationId,
-          projectId: meta.projectId ?? null
-        }
+        const meta = readGeneratedImageSidecar(ownedImage)
+        return [
+          {
+            path: ownedImage,
+            name: f,
+            mtime: fs.statSync(ownedImage).mtimeMs,
+            syncId: meta.syncId,
+            conversationId: meta.conversationId,
+            projectId: meta.projectId ?? null
+          }
+        ]
       })
       .sort((a, b) => b.mtime - a.mtime)
     if (scope?.conversationId) all = all.filter((r) => r.conversationId === scope.conversationId)
@@ -324,9 +326,7 @@ export function activeImageModel(): string | null {
 
 /** Translate a canonical catalog selection only at the native runtime boundary. */
 function imageRuntimeModelId(selected: string): string {
-  const entry = CATALOG.find((model) => model.id === selected)
-  if (!entry || entry.runtime === 'mflux') return selected
-  return primaryFileName(entry as unknown as CatalogEntry) ?? selected
+  return desktopImageRuntimeIdentity.resolve(selected)
 }
 
 function resolveNativeModel(selected?: string): string | null {
@@ -920,7 +920,7 @@ async function runImageGen(
  *  modality can reclaim the RAM. warm/release are no-ops — the server lazily
  *  re-spawns on the next eligible resident generation (ensureUp), and the one-shot
  *  sd-cli/mflux paths hold nothing between jobs. */
-export const imageRuntime: ManagedRuntime = {
+export const imageRuntime: DesktopManagedRuntime = {
   modality: 'image',
   evict: () => {
     sdServer.stop()

@@ -79,6 +79,10 @@ export function imageMemoryGuardErrorMessage(message: string): string {
   return `${IMAGE_MEMORY_GUARD_ERROR_CODE}:${message}`
 }
 
+export function imageModelAdmissionMessage(modelName: string): string {
+  return `Not enough free memory to load ${modelName} safely. Choose a smaller image model, or use Run anyway.`
+}
+
 export function parseImageMemoryGuardError(error: unknown): ImageMemoryGuardErrorContract | null {
   const raw = error instanceof Error ? error.message : String(error ?? '')
   const marker = `${IMAGE_MEMORY_GUARD_ERROR_CODE}:`

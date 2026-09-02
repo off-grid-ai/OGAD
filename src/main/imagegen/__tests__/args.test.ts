@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { buildCoreMLArgs, buildZImageArgs, buildStandardArgs, DEFAULT_NEGATIVE } from '../args'
+import { DEFAULT_IMAGE_NEGATIVE_PROMPT } from '@offgrid/models'
+import { buildCoreMLArgs, buildZImageArgs, buildStandardArgs } from '../args'
 import { standardImageModelDefaults } from '@offgrid/models'
 
 // A helper: value that follows a flag in the argv (or undefined if the flag is absent).
@@ -140,7 +141,7 @@ describe('buildStandardArgs', () => {
 
   it('falls back to DEFAULT_NEGATIVE when no negative is given, else uses the trimmed one', () => {
     const a1 = buildStandardArgs({ ...common, base: 'sd-1.5.gguf' })
-    expect(flagVal(a1, '-n')).toBe(DEFAULT_NEGATIVE)
+    expect(flagVal(a1, '-n')).toBe(DEFAULT_IMAGE_NEGATIVE_PROMPT)
     const a2 = buildStandardArgs({ ...common, base: 'sd-1.5.gguf', negativePrompt: '  blurry  ' })
     expect(flagVal(a2, '-n')).toBe('blurry')
   })
