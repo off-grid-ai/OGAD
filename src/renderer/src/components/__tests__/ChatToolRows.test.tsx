@@ -463,3 +463,34 @@ describe('<ChatToolRows/> work timeline', () => {
     expect((retry as HTMLButtonElement).disabled).toBe(true)
   })
 })
+
+describe('<ChatToolRows/> a stopped task headlines as stopped', () => {
+  it('says Work stopped when you stopped the task, even if an earlier step returned an error', async () => {
+    window.api.tasks!.list = vi.fn(async () => [
+      {
+        taskId: 'web-stopped',
+        kind: 'web_use' as const,
+        journeyId: 'conversation-a',
+        title: 'Find the release notes',
+        status: 'stopped' as const,
+        updatedAt: 2,
+        createdAt: 1
+      }
+    ])
+    render(
+      <ChatToolRows
+        tools={[
+          { name: 'read_url', arguments: '{}', result: 'Error: HTTP 404', status: 'completed' },
+          {
+            name: 'web_use',
+            arguments: '{}',
+            result: 'Started "Find the release notes". Task reference: web-stopped.',
+            status: 'pending'
+          }
+        ]}
+      />
+    )
+    await waitFor(() => expect(screen.getByText('Work stopped')).toBeTruthy())
+    expect(screen.queryByText('Work failed')).toBeNull()
+  })
+})

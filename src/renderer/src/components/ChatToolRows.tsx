@@ -196,8 +196,9 @@ function statusIcon(status: WorkStatus): React.JSX.Element {
 function overallStatus(tools: readonly DisplayTool[]): WorkStatus {
   const statuses = tools.map(workStatus)
   if (statuses.includes('running')) return 'running'
-  if (statuses.includes('failed')) return 'failed'
+  // You stopped it: that is the outcome, whatever a step before it returned.
   if (statuses.includes('cancelled')) return 'cancelled'
+  if (statuses.includes('failed')) return 'failed'
   if (statuses.includes('needs attention')) return 'needs attention'
   return 'complete'
 }
@@ -282,11 +283,13 @@ export function ChatToolRows({
   const projectedStatuses = projected.map((item) => item.status)
   const status = projectedStatuses.includes('running')
     ? 'running'
-    : projectedStatuses.includes('failed')
-      ? 'failed'
-      : projectedStatuses.includes('needs attention')
-        ? 'needs attention'
-        : overallStatus(visible)
+    : projectedStatuses.includes('cancelled')
+      ? 'cancelled'
+      : projectedStatuses.includes('failed')
+        ? 'failed'
+        : projectedStatuses.includes('needs attention')
+          ? 'needs attention'
+          : overallStatus(visible)
 
   return (
     <Collapsible
