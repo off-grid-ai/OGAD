@@ -18,11 +18,11 @@ import {
   isRuntimeResidencyLocked as isResidencyLocked,
   normalizeRuntimeResidency as normalizeResidency,
   type RuntimeModality as Modality,
-  type RuntimeResidencyMode as ResidencyMode
+  type PersistedResidencyPreference as ResidencyMode
 } from '@offgrid/models'
 export type {
   RuntimeModality as Modality,
-  RuntimeResidencyMode as ResidencyMode
+  PersistedResidencyPreference as ResidencyMode
 } from '@offgrid/models'
 
 const SETTING_KEY = 'runtime:residency'

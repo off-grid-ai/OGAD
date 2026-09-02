@@ -26,7 +26,6 @@ import {
   applyTextRuntimeModePreset,
   llamaServerCompletionPayload,
   normalizeMaxToolCalls,
-  type ManagedRuntimePort as ManagedRuntime,
   llamaServerLaunchArgs,
   textRuntimeLaunchChanged,
   textRuntimeCrashRecoveryPlan,
@@ -41,6 +40,7 @@ import {
   type ReasoningEffort,
   type ReasoningWireFragment
 } from '@offgrid/models'
+import type { DesktopManagedRuntime } from './model-runtime-port'
 import { acceleratorForEngine, type EngineAccelerator } from '../shared/engine-accelerator'
 import { verifyArtifactFile } from './models/gguf'
 import { readGgufContextLength } from './models/gguf-metadata'
@@ -1307,7 +1307,7 @@ export class LLMService {
 
   /** This engine as a raw runtime port for the shared residency service,
    *  so the chat model is managed identically to image/STT/TTS — one code path. */
-  get runtime(): ManagedRuntime {
+  get runtime(): DesktopManagedRuntime {
     return {
       modality: 'llm',
       evict: () => {

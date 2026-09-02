@@ -14,7 +14,7 @@ import os from 'os'
 import path from 'path'
 import { writeDiagnosticLog } from './diagnostics-log'
 import { modelsDir, resourceDirs } from './runtime-env'
-import type { ManagedRuntimePort as ManagedRuntime } from '@offgrid/models'
+import type { DesktopManagedRuntime } from './model-runtime-port'
 import { DEFAULT_SPEECH_VOICE, resolveSpeechVoice } from '@offgrid/models'
 import { generateDesktopOperation } from './desktop-generation'
 import { registerDesktopVoiceProgress } from './generation-progress'
@@ -39,6 +39,22 @@ function executablePath(): string {
   return executable
 }
 
+export interface TtsRuntimeState {
+  installed: boolean
+  ready: boolean
+  error?: string
+}
+
+/** Publish native adapter readiness without projecting runtime assets into the generic model store. */
+export function inspectTtsRuntimeState(): TtsRuntimeState {
+  try {
+    executablePath()
+    return { installed: true, ready: true }
+  } catch (error) {
+    return { installed: false, ready: false, error: messageOf(error) }
+  }
+}
+
 function cacheDirectory(): string {
   return path.join(modelsDir(), '.cache', 'executorch-speech')
 }
@@ -57,7 +73,7 @@ function runtime(): ExecutorchSpeechRuntime {
 let busy = false
 
 /** ExecuTorch releases every model when its short-lived process exits. */
-export const ttsRuntime: ManagedRuntime = {
+export const ttsRuntime: DesktopManagedRuntime = {
   modality: 'tts',
   evict: () => {},
   warm: () => {},

@@ -11,14 +11,14 @@ import {
   type CatalogTranscriptionEngine,
   type TranscriptionCatalogEntry,
   type TranscriptionEngine,
-  type TranscriptionResidencyMode
+  type PersistedResidencyPreference
 } from '@offgrid/models'
 import path from 'node:path'
 import { transcriptionLanguages, type SpeechLanguage } from '@offgrid/speech'
 import { getSetting } from '../database'
 import { activeDesktopModelId, generateDesktopOperation } from '../desktop-generation'
 import { desktopModelServices } from '../model-service-access'
-import type { ManagedRuntimePort as ManagedRuntime } from '@offgrid/models'
+import type { DesktopManagedRuntime } from '../model-runtime-port'
 import { modelsByKind } from '@offgrid/models'
 import { parakeetTranscription as parakeet } from './parakeet-cli'
 import type { TranscriptionService, TranscribeOptions } from './types'
@@ -58,7 +58,7 @@ export function pickTranscription(
 
 export function resolveTranscription(
   engine: TranscriptionEngine,
-  mode?: TranscriptionResidencyMode
+  mode?: PersistedResidencyPreference
 ): { service: TranscriptionService; engine: TranscriptionEngine; fellBack: boolean } {
   const requested =
     mode == null || engine === 'whisper-resident'
@@ -250,7 +250,7 @@ export function residentWhisperAvailable(): boolean {
   return whisperResident.isAvailable()
 }
 
-export const sttRuntime: ManagedRuntime = {
+export const sttRuntime: DesktopManagedRuntime = {
   modality: 'stt',
   evict: () => whisperServer.stop(),
   warm: () => {},

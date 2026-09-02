@@ -118,7 +118,8 @@ function throwDesktopGenerationError(error: unknown): never {
       nativeToolPlannerUnavailableMessage({
         status: 'unsupported',
         modelName: error.model.name
-      })
+      }),
+      { cause: error }
     )
   }
   throw error
@@ -130,6 +131,7 @@ export async function generateDesktopMessages(
 ): Promise<GenerationResult> {
   await desktopModelServices.refresh()
   const settings = llm.getSettings()
+  const activeTextModel = desktopModelServices.llm.active('text').model
   const needsVision = messages.some(
     (message) =>
       Array.isArray(message.content) && message.content.some((part) => part.type === 'image')
@@ -170,7 +172,12 @@ export async function generateDesktopMessages(
       ...(needsVision ? { vision: true } : {}),
       ...(options.thinking === undefined ? {} : { thinking: options.thinking })
     },
-    allowFallback: options.allowFallback ?? true,
+    // A selected remote route is an explicit provider boundary. Shared still owns capability and
+    // route resolution, but it must report an unsupported selected route instead of silently
+    // substituting another catalog model from that provider.
+    allowFallback:
+      options.allowFallback ??
+      ((options.operation?.type ?? 'text') !== 'text' || activeTextModel?.source !== 'remote'),
     routeId: options.routeId,
     partialOutputPolicy: 'discard-and-fallback'
   }
