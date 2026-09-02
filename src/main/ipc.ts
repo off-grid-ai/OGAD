@@ -1,4 +1,5 @@
 import { ipcMain, BrowserWindow, app, clipboard } from 'electron'
+import { randomUUID } from 'node:crypto'
 import { setupArtifactPreviewIpc } from './artifact-preview-ipc'
 import {
   getDB,
@@ -197,7 +198,7 @@ async function streamAnswer(
   const { desktopModelServices } = await import('./model-services')
 
   await desktopModelServices.refresh()
-  const turnId = streamId ?? `desktop-chat:${Date.now()}:${Math.random().toString(36).slice(2)}`
+  const turnId = streamId ?? `desktop-chat:${randomUUID()}`
   const request = (signal?: AbortSignal): GenerationRequest => ({
     messages: generationMessages(prompt, images, llm.getSettings().systemPrompt ?? ''),
     identity: { conversationId: streamId ?? turnId, turnId },

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 // Local text-to-speech through the pinned React Native ExecuTorch Kokoro runtime.
 // The runtime lives in its own repository and runs as a child process, so it does
 // not add another native inference engine to Electron's main process.
@@ -170,7 +171,7 @@ export async function synthesize(
   voice?: string,
   onProgress?: (progress: DownloadProgress) => void
 ): Promise<{ dataUrl: string }> {
-  const turnId = `desktop-voice:${Date.now()}:${Math.random().toString(36).slice(2)}`
+  const turnId = `desktop-voice:${randomUUID()}`
   const unregister = onProgress ? registerDesktopVoiceProgress(turnId, onProgress) : undefined
   try {
     const result = await generateDesktopOperation(

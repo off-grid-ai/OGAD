@@ -7,6 +7,7 @@
 // search + MCP connectors plug in here later.
 
 import { SEARCH_KB_TOOL, makeSearchKnowledgeBaseHandler } from '@offgrid/rag'
+import { randomUUID } from 'node:crypto'
 import { getSetting, saveSetting } from './database'
 import {
   DeferredImageRequestCollector,
@@ -664,7 +665,7 @@ export async function toolChat(
 
   const maxToolRounds = normalizeMaxToolCalls(desktopToolCallLimit() ?? DEFAULT_MAX_TOOL_CALLS)
   let streamedContent = ''
-  const turnId = `desktop-tools:${Date.now()}:${Math.random().toString(36).slice(2)}`
+  const turnId = `desktop-tools:${randomUUID()}`
   try {
     const result = await generateDesktopMessages(messages, {
       operation: { type: 'text' },

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type {
   GenerationMessage,
   GenerationEvents,
@@ -136,8 +137,7 @@ export async function generateDesktopMessages(
     (message) =>
       Array.isArray(message.content) && message.content.some((part) => part.type === 'image')
   )
-  const turnId =
-    options.identity?.turnId ?? `desktop:${Date.now()}:${Math.random().toString(36).slice(2)}`
+  const turnId = options.identity?.turnId ?? `desktop:${randomUUID()}`
   const request: GenerationRequest = {
     operation: options.operation ?? { type: 'text' },
     messages,
@@ -211,8 +211,7 @@ export async function generateDesktopOperation(
   const modality = operation.type === 'classifier' ? 'classifier' : operation.type
   const modelId = 'modelId' in operation ? operation.modelId : undefined
   const routeId = options.routeId ?? desktopModelServices.routeIdFor(modality, modelId)
-  const turnId =
-    options.identity?.turnId ?? `desktop:${Date.now()}:${Math.random().toString(36).slice(2)}`
+  const turnId = options.identity?.turnId ?? `desktop:${randomUUID()}`
   return desktopModelServices.generation.generate(
     {
       operation,
