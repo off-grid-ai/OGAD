@@ -15,6 +15,9 @@ const SHORTCUTS: Shortcut[] = [
   { keys: ['⌘', 'K'], action: 'Open command palette' }, // CommandPalette.tsx
   { keys: ['⌘', '['], action: 'Back' }, // App.tsx
   { keys: ['⌘', ']'], action: 'Forward' }, // App.tsx
+  { keys: ['⌘', '+'], action: 'Zoom in' }, // main/window-zoom.ts
+  { keys: ['⌘', '-'], action: 'Zoom out' }, // main/window-zoom.ts
+  { keys: ['⌘', '0'], action: 'Reset zoom' }, // main/window-zoom.ts
   { keys: ['⌘', '⇧', 'C'], action: 'Clipboard quick-paste popup', pro: true }, // pro/main/clipboard.ts
   {
     keys: ['⌥', 'Space'],

@@ -19,6 +19,9 @@ describe('KeyboardShortcuts reference', () => {
     expect(screen.getByText('Open command palette')).toBeTruthy()
     expect(screen.getByText('Back')).toBeTruthy()
     expect(screen.getByText('Forward')).toBeTruthy()
+    expect(screen.getByText('Zoom in')).toBeTruthy()
+    expect(screen.getByText('Zoom out')).toBeTruthy()
+    expect(screen.getByText('Reset zoom')).toBeTruthy()
   })
 
   it('hides pro shortcuts in the free build', () => {
