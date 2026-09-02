@@ -1856,7 +1856,7 @@ Evidence: desktop E2E runs 6 and 7 on 2026-09-02, `imagegen:generate` failed wit
 host's free-memory figure when admission would fail (`e2e/helpers/memory.ts`), so the fail-closed
 behaviour is not reported as a regression while this gap is open.
 
-## rag:chat swallows generation failures into a fake answer (open, 2026-09-02)
+## rag:chat swallows generation failures into a fake answer (RESOLVED 2026-09-02: `ipc.ts` rethrows every failure; MemoryChat shows the real reason with Electron's IPC prefix stripped; lifecycle test 'shows a failed turn')
 
 `src/main/ipc.ts` memory-RAG branch catches every error and returns "Sorry, I could not generate a
 response right now." as if the model had said it. Only the context-overflow case is rethrown now so
