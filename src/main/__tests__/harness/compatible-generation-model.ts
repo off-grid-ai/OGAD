@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { RuntimeModel } from '@offgrid/models'
+import { installFakeActiveTextModel } from './fake-llama-server'
 
 const TEST_INVENTORY_ADAPTER = 'desktop.test-compatible-inventory'
 const TEST_GENERATION_ADAPTER = 'desktop.test-compatible-generation'
@@ -160,5 +161,36 @@ export async function installCompatibleGenerationModel(): Promise<() => void> {
   return () => {
     for (const unregister of unregisterGeneration) unregister()
     unregisterInventory()
+  }
+}
+
+/**
+ * Make the REAL local text route ready over a fake llama-server. Pins the data dir, installs the
+ * durable fake model selection, marks the engine up, and registers the compatible route - the
+ * whole boundary a CRM/LLM journey needs. Tests that only poked the engine's port were green on
+ * machines with a real model installed and red in CI ("No compatible text model is ready").
+ */
+export async function readyFakeLocalTextModel(
+  fake: { port: number },
+  dataDir: string
+): Promise<() => void> {
+  const previousDataDir = process.env.OFFGRID_DATA_DIR
+  process.env.OFFGRID_DATA_DIR = dataDir
+  const [{ configureRuntime }, { llm }] = await Promise.all([
+    import('../../runtime-env'),
+    import('../../llm')
+  ])
+  configureRuntime({ dataDir })
+  installFakeActiveTextModel(dataDir)
+  const engine = llm as unknown as { port: number; initialized: boolean; paused: boolean }
+  engine.port = fake.port
+  engine.initialized = true
+  engine.paused = false
+  const uninstall = await installCompatibleGenerationModel()
+  return () => {
+    uninstall()
+    configureRuntime({ dataDir: undefined })
+    if (previousDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
+    else process.env.OFFGRID_DATA_DIR = previousDataDir
   }
 }
