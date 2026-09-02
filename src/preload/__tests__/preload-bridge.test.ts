@@ -193,6 +193,18 @@ describe('the preload bridge', () => {
       expect(electron.invoke).toHaveBeenCalledWith('vision:control', 'stop', 'computer-task-7')
     })
 
+    it('forwards Computer Use settings through their owning read and patch ports', async () => {
+      const bridge = await loadBridge()
+
+      ;(bridge.getComputerUseSettings as () => unknown)()
+      ;(bridge.patchComputerUseSettings as (patch: unknown) => unknown)({ context: '32k' })
+
+      expect(electron.invoke).toHaveBeenCalledWith('computer-use-settings:get')
+      expect(electron.invoke).toHaveBeenCalledWith('computer-use-settings:patch', {
+        context: '32k'
+      })
+    })
+
     it('keeps Computer Use PiP visibility separate from task control', async () => {
       const bridge = await loadBridge()
       const vision = bridge.vision as {

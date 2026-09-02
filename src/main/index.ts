@@ -68,7 +68,7 @@ import {
   installApplicationShutdown,
   registerCoreShutdownOwners
 } from './shutdown'
-import { shutdownModelDownloads } from './models/download-queue'
+import { shutdownModelDownloads } from './models-manager'
 
 // Before anything logs: a broken stdout/stderr pipe (parent/e2e-harness exited, closed pipe)
 // must never crash main via an uncaught EPIPE. See stream-guards.ts.

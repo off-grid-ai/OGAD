@@ -12,6 +12,14 @@ type HookFn = (...args: any[]) => any
 
 const hooks: Record<string, HookFn> = {}
 
+/** Stable core-to-Pro contract for a terminal Action owned by an existing Chat. */
+export interface ChatActionResult {
+  actionId: string
+  conversationId: string
+  status: 'done' | 'failed'
+  summary: string
+}
+
 export function registerHook(name: string, fn: HookFn): void {
   hooks[name] = fn
 }
@@ -85,6 +93,9 @@ export const HOOKS = {
   /** (task: TaskRunSnapshot) => void - lets Pro project the normal task outcome onto the
    * approval that started the task. Core task state remains the single source of truth. */
   actionsObserveTaskResult: 'actions:observeTaskResult',
+  /** (result: ChatActionResult) => void - lets Pro project a terminal Chat-owned Action onto the
+   * approval that started that Chat. The action engine remains the execution source of truth. */
+  actionsObserveChatActionResult: 'actions:observeChatActionResult',
   /** Legacy MCP-only predecessor of actionsProposeApproval. Kept so a pro build
    *  that has not yet migrated still gates connector writes; remove once
    *  desktop-pro registers actionsProposeApproval. */

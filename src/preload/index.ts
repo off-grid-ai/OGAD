@@ -312,6 +312,9 @@ const offGridApi = {
   // App Settings
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSetting: (key: string, value: unknown) => ipcRenderer.invoke('settings:save', key, value),
+  getComputerUseSettings: () => ipcRenderer.invoke('computer-use-settings:get'),
+  patchComputerUseSettings: (patch: unknown) =>
+    ipcRenderer.invoke('computer-use-settings:patch', patch),
   consoleEnroll: (url: string, token: string) => ipcRenderer.invoke('console:enroll', url, token),
   consoleStatus: () => ipcRenderer.invoke('console:status'),
   consoleSyncNow: () => ipcRenderer.invoke('console:sync-now'),
@@ -462,6 +465,7 @@ const offGridApi = {
 
   // Off Grid AI model catalog (text, vision, image, voice, transcription)
   getModelCatalog: () => ipcRenderer.invoke('models:catalog'),
+  getModelControlSnapshot: () => ipcRenderer.invoke('models:control-snapshot'),
   getInstalledModels: () => ipcRenderer.invoke('models:installed'),
   getModelVisionStatus: () => ipcRenderer.invoke('models:vision-status'),
   searchModels: (query: string, kind?: string) => ipcRenderer.invoke('models:search', query, kind),
@@ -534,6 +538,7 @@ const offGridApi = {
   getStorageInfo: () => ipcRenderer.invoke('models:storage'),
   deleteOrphans: () => ipcRenderer.invoke('models:delete-orphans'),
   listDownloads: () => ipcRenderer.invoke('models:downloads'),
+  getDownloadRecoveryHealth: () => ipcRenderer.invoke('models:download-recovery-health'),
   retryDownload: (modelId: string) => ipcRenderer.invoke('models:retry-download', modelId),
   clearDownload: (modelId: string) => ipcRenderer.invoke('models:clear-download', modelId),
   clearDownloads: () => ipcRenderer.invoke('models:clear-downloads'),

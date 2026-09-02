@@ -31,7 +31,11 @@ import {
   getSetting
 } from './database'
 import { deleteEntityById, resolveEntityCandidate } from './entity-domain'
-import { setComputerUseSettings } from './computer-use-settings'
+import {
+  patchComputerUseSettings,
+  readComputerUseSettings,
+  setComputerUseSettings
+} from './computer-use-settings'
 import { COMPUTER_USE_SETTINGS_KEY } from '../shared/computer-use-settings'
 import { embeddings } from './embeddings'
 import {
@@ -1194,6 +1198,11 @@ export function setupIPC() {
     return getSettings()
   })
 
+  ipcMain.handle('computer-use-settings:get', () => readComputerUseSettings())
+  ipcMain.handle('computer-use-settings:patch', (_, patch: unknown) =>
+    patchComputerUseSettings(patch && typeof patch === 'object' ? patch : {})
+  )
+
   // App version (for the Settings footer — so users know what build they're on).
   ipcMain.handle('app:version', () => app.getVersion())
 
@@ -1424,6 +1433,9 @@ export function setupIPC() {
   // the headless gateway HTTP admin endpoints). These IPC handlers are thin
   // wrappers; the download one adds a renderer progress broadcast.
   ipcMain.handle('models:catalog', () => import('./models-manager').then((m) => m.getCatalog()))
+  ipcMain.handle('models:control-snapshot', () =>
+    import('./model-services').then((m) => m.desktopModelServices.modelControlSnapshot())
+  )
   ipcMain.handle('models:vision-status', () =>
     import('./models-manager').then((m) => m.getVisionStatuses())
   )
@@ -1486,6 +1498,9 @@ export function setupIPC() {
   )
   ipcMain.handle('models:downloads', () =>
     import('./models-manager').then((m) => m.listDownloads())
+  )
+  ipcMain.handle('models:download-recovery-health', () =>
+    import('./models-manager').then((m) => m.getDownloadRecoveryHealth())
   )
   ipcMain.handle('models:retry-download', async (_, modelId: string) => {
     const { retryDownload } = await import('./models-manager')
