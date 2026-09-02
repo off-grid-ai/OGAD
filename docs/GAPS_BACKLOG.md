@@ -1838,3 +1838,20 @@ Local evidence on commit `bcb86a09675cca8a60da68ff2afb571510454b9f` plus this di
    warnings remain for `computer-use-frame-pointer.ts` and `MessageNudge.tsx`.
 3. Node and web TypeScript checks: pass.
 4. Web Use lifecycle and semantic evidence tests: 2 files, 7 tests, all pass.
+
+---
+
+## Tool-owned image generation has no Run anyway when memory admission fails
+
+**Status:** open, found 2026-09-02 by the chat-memory E2E on a loaded Mac.
+
+When a Chat turn asks a tool to generate an image and the shared residency rule refuses the image
+model for lack of free memory, the turn renders "Work failed 1 step" and stops. The direct image
+path offers "Run anyway" on the failed message (`MemoryChat.tsx`, `imageMemoryRetry`); the
+tool-owned path does not, so a person has no way forward except freeing memory or picking a smaller
+model elsewhere. One owner for the override affordance is needed so both paths behave the same.
+
+Evidence: desktop E2E runs 6 and 7 on 2026-09-02, `imagegen:generate` failed with
+`OFFGRID_IMAGE_MEMORY_LIMIT` and the page showed only the failed step. The journey now skips with the
+host's free-memory figure when admission would fail (`e2e/helpers/memory.ts`), so the fail-closed
+behaviour is not reported as a regression while this gap is open.
