@@ -5,6 +5,7 @@ import type {
   ModelControlApplicationSnapshot,
   ModelModality,
   ModelResidencyManager,
+  ModelWorkspace,
   RuntimeModel
 } from '@offgrid/models'
 import type { ComputerUseActiveModelProjection } from '../shared/computer-use-settings'
@@ -15,6 +16,8 @@ export interface DesktopGenerationObservationPort {
 }
 
 export interface DesktopModelServices {
+  /** The one shared facade; `llm`, `generation`, `residency` below are its parts (migration). */
+  workspace: ModelWorkspace
   llm: LLMService
   generation: GenerationService
   residency: ModelResidencyManager

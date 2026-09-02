@@ -174,7 +174,7 @@ describe('Desktop active-model authority', () => {
     }
   })
 
-  it('clears every route for a removed remote server through the synchronous service port', async () => {
+  it('clears every route for a removed remote server through the one selection writer', async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-remote-clear-'))
     try {
       const [{ createDesktopModelServices }, { DesktopModelSelectionPersistence }] =
@@ -211,7 +211,7 @@ describe('Desktop active-model authority', () => {
         },
         persistence
       )
-      services.clearRemoteServerSelections('removed')
+      await services.clearRemoteServerSelections('removed')
 
       expect(persistence.readCanonical('text')).toBeNull()
       expect(persistence.readCanonical('image')).toBeNull()

@@ -1,8 +1,7 @@
+import { randomUUID } from 'crypto'
 import os from 'node:os'
 import {
-  GenerationService as SharedGenerationService,
-  LLMService as SharedLLMService,
-  ModelResidencyManager,
+  createModelWorkspace,
   decodeModelRouteId,
   runtimeModelRouteId,
   ModelAdmissionError,
@@ -27,7 +26,8 @@ import {
   activateRemoteVisionModel,
   deactivateRemoteVisionModel,
   getRemoteVisionServer,
-  getRemoteVisionServerSettings
+  getRemoteVisionServerSettings,
+  desktopRemoteServerPorts
 } from './vision/remote-vision-server'
 import { remoteReasoningMetadata } from './llm/remote-chat'
 import { parseRemoteVisionModelId } from '../shared/remote-vision-server'
@@ -508,7 +508,21 @@ export function createDesktopModelServices(
     selectionPersistence,
     dependencies.projectTextSelection
   )
-  const llm = new SharedLLMService(selections)
+  const workspace = createModelWorkspace({
+    selection: selections,
+    memory: {
+      current: () => ({
+        totalMB: os.totalmem() / (1024 * 1024),
+        availableMB: os.freemem() / (1024 * 1024),
+        platform: 'desktop'
+      })
+    },
+    // No deadline: a generation runs until it finishes or the user stops it.
+    generation: { tools: desktopToolExecutor },
+    remote: desktopRemoteServerPorts,
+    remoteServerId: randomUUID
+  })
+  const llm = workspace.llm
   const source = new DesktopInventorySource(dependencies, ids, selections)
   for (const adapterId of [
     'desktop.llama',
@@ -530,17 +544,8 @@ export function createDesktopModelServices(
   ]) {
     llm.registerAdapter(new DesktopModelInventoryAdapter(adapterId, source))
   }
-  const memory = new ModelResidencyManager({
-    current: () => ({
-      totalMB: os.totalmem() / (1024 * 1024),
-      availableMB: os.freemem() / (1024 * 1024),
-      platform: 'desktop'
-    })
-  })
-  const generation = new SharedGenerationService(llm, memory, {
-    // No deadline: a generation runs until it finishes or the user stops it.
-    tools: desktopToolExecutor
-  })
+  const memory = workspace.residency
+  const generation = workspace.generation
   const generationObservations = new DesktopGenerationObservations()
   const localGenerationAdapters = new Map<string, DesktopLocalGenerationAdapter>()
   for (const adapterId of [
@@ -622,6 +627,7 @@ export function createDesktopModelServices(
   }
 
   return {
+    workspace,
     llm,
     generation,
     residency: memory,

@@ -5,6 +5,7 @@ import { modelsDir } from '../runtime-env'
 import {
   REMOTE_FETCH_REDIRECT_POLICY,
   RemoteServerApplicationService,
+  type RemoteServerApplicationPorts,
   canReconcileCredentialedEndpoint,
   catalogFromDiscovery,
   defaultRemoteSelections,
@@ -27,7 +28,6 @@ import {
   REMOTE_VISION_PROVIDERS,
   remoteVisionApiBase,
   remoteVisionEndpoint,
-  remoteVisionModelId,
   type RemoteVisionConnectionResult,
   type RemoteVisionProvider,
   type RemoteVisionSavedServer,
@@ -207,8 +207,12 @@ function publicServer(server: StoredRemoteVisionServer): RemoteVisionSavedServer
   return { ...server, hasApiKey: Boolean(serverApiKey(server.id)) }
 }
 
-const desktopRemoteServerApplication = new RemoteServerApplicationService(
-  {
+/**
+ * Desktop's remote-server I/O, handed to the shared ModelWorkspace. Selection is NOT a port here:
+ * the workspace resolves a server's model to this device's route and writes it through the one
+ * selection authority.
+ */
+export const desktopRemoteServerPorts: Omit<RemoteServerApplicationPorts, 'select' | 'clearSelections'> = {
     configuration: {
       read: () => {
         const configuration = sharedConfiguration(readStored())
@@ -236,19 +240,16 @@ const desktopRemoteServerApplication = new RemoteServerApplicationService(
       async remove(serverId) { deleteSecret(secretKey(serverId)) }
     },
     providers: {
-      async register() {},
-      async update() {},
-      async unregister() {}
-    },
-    async select(modality, route) {
-      const selected = await desktopModelServices.select(
-        modality,
-        route ? remoteVisionModelId(route.serverId, route.modelId) : null
-      )
-      if (!selected.success) throw new Error(selected.error)
-    },
-    async clearSelections(serverId) {
-      await desktopModelServices.clearRemoteServerSelections(serverId)
+      // Desktop has no provider registry: the workspace inventory reads saved servers directly.
+      async register() {
+        /* see above */
+      },
+      async update() {
+        /* see above */
+      },
+      async unregister() {
+        /* see above */
+      }
     },
     async test(server, credential) {
       const startedAt = Date.now()
@@ -281,8 +282,18 @@ const desktopRemoteServerApplication = new RemoteServerApplicationService(
         }
       }
     }
-  },
-  randomUUID
+}
+
+/** The workspace owns the remote-server application; this file only reaches it lazily. */
+const desktopRemoteServerApplication: RemoteServerApplicationService = new Proxy(
+  {} as RemoteServerApplicationService,
+  {
+    get: (_target, property) => {
+      const servers = desktopModelServices.workspace.servers
+      const value = servers[property as keyof RemoteServerApplicationService]
+      return typeof value === 'function' ? value.bind(servers) : value
+    }
+  }
 )
 
 function selectedRemoteServer(stored: StoredRemoteVisionConfig): StoredRemoteVisionServer | null {
@@ -330,7 +341,9 @@ export function activateRemoteVisionModel(serverId: string, modelId: string): bo
   )
 }
 
-export function deactivateRemoteVisionModel(): void {}
+export function deactivateRemoteVisionModel(): void {
+  /* the canonical text selection is the only record of an active remote; nothing to clear here */
+}
 
 export async function setRemoteVisionServerSettings(
   update: RemoteVisionServerUpdate
