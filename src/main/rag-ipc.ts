@@ -5,12 +5,12 @@ import { ipcMain, dialog, BrowserWindow } from 'electron'
 import fs from 'fs'
 import { randomUUID } from 'node:crypto'
 import { ragService, listProjects, createProject, updateProject, deleteProject } from './rag'
-import { uploadPickerExtensions } from './files-classify'
+import { attachmentPickerExtensions } from '@offgrid/sync'
 
-// Built from the router's classify sets (files-classify) so the picker allowlist
+// Built from the shared attachment classifier (@offgrid/sync) so the picker allowlist
 // and the processor can never drift: it used to hardcode a subset that omitted
 // gif/bmp/heic/opus/aiff/avi the router actually handles.
-const DOC_FILTERS = [{ name: 'Documents, audio & video', extensions: uploadPickerExtensions() }]
+const DOC_FILTERS = [{ name: 'Documents, audio & video', extensions: attachmentPickerExtensions() }]
 
 export function setupRagIPC(): void {
   // --- Projects -------------------------------------------------------------
