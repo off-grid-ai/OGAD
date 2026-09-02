@@ -370,12 +370,18 @@ test('cancelling a tool-owned image keeps its text answer after a full relaunch'
   // is about.
   const answer = page.getByText('Here is your weekly summary.', { exact: true }).last()
   await expect(answer).toBeVisible()
+  // The image job is admitted against the host's REAL free memory. On a loaded machine the product
+  // fails closed and offers "Run anyway" on the message; a person takes that path, so the journey does
+  // too. Either way the job must end up running before it can be stopped.
+  const stopImage = page.getByRole('button', { name: 'Stop', exact: true })
+  const runAnyway = page.getByRole('button', { name: 'Run anyway', exact: true })
+  await expect(stopImage.or(runAnyway).first()).toBeVisible()
+  if (await runAnyway.isVisible()) await runAnyway.click()
   await expect
     .poll(() => page.evaluate(() => window.api.imageGenJobStatus()))
     .toMatchObject({
       phase: 'running'
     })
-  const stopImage = page.getByRole('button', { name: 'Stop', exact: true })
   await expect(stopImage).toBeVisible()
   await stopImage.click()
   await expect(stopImage).toBeHidden()
