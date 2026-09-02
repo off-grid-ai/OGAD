@@ -1,3 +1,4 @@
+import { toWireTimestamp } from '@offgrid/sync'
 // better-sqlite3-multiple-ciphers is a drop-in superset of better-sqlite3 that
 // adds SQLCipher-style `PRAGMA key` encryption. Same API surface + types.
 import Database from 'better-sqlite3-multiple-ciphers'
@@ -77,6 +78,41 @@ function cosineSimilarity(v1Str: string, v2Str: string): number {
   } catch {
     return 0
   }
+}
+
+/**
+ * Chat rows carry the ONE wire timestamp form shared sync defines (`toWireTimestamp`). SQLite's
+ * CURRENT_TIMESTAMP writes "YYYY-MM-DD HH:MM:SS"; as strings a space sorts before "T", so a locally
+ * written row landed ABOVE every synced row before it - a task result appeared at the top of the
+ * conversation instead of the end. One emitter, here, for every local write.
+ */
+export function nowIso(): string {
+  return toWireTimestamp(new Date()) as string
+}
+
+/** One-time repair of rows written with CURRENT_TIMESTAMP. Idempotent; cheap when nothing is left. */
+export function normalizeLegacyTimestamps(db: Database.Database): number {
+  let changed = 0
+  const fix = (table: string, column: string): void => {
+    const rows = db
+      .prepare(
+        `SELECT rowid AS rowid, ${column} AS value FROM ${table} WHERE ${column} NOT LIKE '%T%'`
+      )
+      .all() as Array<{ rowid: number; value: string | null }>
+    const update = db.prepare(`UPDATE ${table} SET ${column} = ? WHERE rowid = ?`)
+    for (const row of rows) {
+      if (typeof row.value !== 'string') continue
+      const next = toWireTimestamp(row.value) ?? row.value
+      if (next !== row.value) {
+        update.run(next, row.rowid)
+        changed += 1
+      }
+    }
+  }
+  fix('rag_messages', 'created_at')
+  fix('rag_conversations', 'created_at')
+  fix('rag_conversations', 'updated_at')
+  return changed
 }
 
 export function getDB(): Database.Database {
@@ -405,6 +441,7 @@ export function getDB(): Database.Database {
       // Column already exists, ignore
     }
   }
+  normalizeLegacyTimestamps(db)
   // Backfill rows that predate the column. Done in JS because SQLite has no uuid() function.
   try {
     const needsUuid = db
@@ -699,7 +736,6 @@ export function upsertEntitySession(entityId: number, sessionId: string): void {
   stmt.run(entityId, sessionId)
 }
 
-
 export interface EntityRecord {
   id: number
   name: string
@@ -728,7 +764,6 @@ export interface EntityDetailsRecord {
   entity: (EntityRecord & Record<string, unknown>) | undefined
   facts: EntityFactRecord[]
 }
-
 
 export function getEntities(appName?: string): EntityListRecord[] {
   const db = getDB()
@@ -795,7 +830,6 @@ export function getEntitiesForSession(sessionId: string): SessionEntityRecord[] 
     `)
   return stmt.all(sessionId) as SessionEntityRecord[]
 }
-
 
 // === DELETE FUNCTIONS ===
 
@@ -1275,17 +1309,17 @@ export function addRagMessage(
     .prepare(
       `
         INSERT INTO rag_messages (uuid, conversation_id, role, content, context, created_at)
-        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?)
     `
     )
-    .run(uuid, conversationId, role, content, contextJson)
+    .run(uuid, conversationId, role, content, contextJson, nowIso())
 
   // Update conversation updated_at timestamp
   db.prepare(
     `
-        UPDATE rag_conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?
+        UPDATE rag_conversations SET updated_at = ? WHERE id = ?
     `
-  ).run(conversationId)
+  ).run(nowIso(), conversationId)
 
   emitSyncMutation({ entity: CORE_SYNC_ENTITIES.message, entityId: uuid, kind: 'put' })
   emitSyncMutation({
@@ -1328,7 +1362,7 @@ export function getRagMessages(conversationId: string): RagMessage[] {
                origin_device_id, origin_device_name, created_at
         FROM rag_messages
         WHERE conversation_id = ?
-        ORDER BY created_at ASC
+        ORDER BY created_at ASC, id ASC
     `
     )
     .all(conversationId) as RagMessage[]

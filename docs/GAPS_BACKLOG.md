@@ -1894,3 +1894,9 @@ Desktop's own view shows neither. Desktop renders a separate in-memory live stat
 events, and a tool result or a stop that arrives outside that stream never reaches it. Fix: Desktop
 renders the persisted record like mobile does (one projection), with the live stream only filling
 the row that is still generating.
+
+## Mobile: switching to voice mode shows a blank white chat for a while (open, 2026-09-02)
+
+Entering voice mode on an existing chat rendered an empty screen with no indicator until whatever
+it loads (voice model / engine bridge) was ready. Show the loader for the duration instead of a
+blank list.
