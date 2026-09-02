@@ -473,6 +473,8 @@ describe('<ChatToolRows/> a stopped task headlines as stopped', () => {
         journeyId: 'conversation-a',
         title: 'Find the release notes',
         status: 'stopped' as const,
+        steps: [],
+        startedAt: 1,
         updatedAt: 2,
         createdAt: 1
       }
