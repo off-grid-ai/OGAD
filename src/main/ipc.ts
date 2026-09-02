@@ -89,7 +89,8 @@ import { requestApplicationRelaunch } from './shutdown'
 import type { GenerationMessage, GenerationRequest } from '@offgrid/models'
 import { notifyRagConversationChanged } from './rag-conversation-events'
 import { readImages } from './llm/read-images'
-import { generateDesktopText } from './desktop-generation'
+import { generateDesktopMessages, generateDesktopText } from './desktop-generation'
+import { ModelServerError } from './llm/http-post'
 // import { llm } from './llm'; // Moved to dynamic import to support ESM
 
 type ResponseGenerationResult = NormalizedTextResponse<GenerationMetrics>
@@ -661,6 +662,15 @@ export function setupIPC() {
     return getDashboardStats()
   })
 
+  // One plain generation over explicit messages (system prompt included). The shared context
+  // compaction summarizer needs exactly this and nothing RAG adds.
+  ipcMain.handle(
+    'llm:generate-text',
+    async (_, messages: GenerationMessage[], options?: { maxTokens?: number }) =>
+      (await generateDesktopMessages(messages, { maxTokens: options?.maxTokens, thinking: false }))
+        .content
+  )
+
   ipcMain.handle('llm:extract', async (_, text: string) => {
     try {
       const response = (
@@ -1009,6 +1019,10 @@ export function setupIPC() {
           }
         }
       } catch (e) {
+        // A full context window is the renderer's to handle: the shared chat session compacts
+        // the committed history and continues the turn. Swallowing it here as an answer string
+        // made compaction unreachable on Desktop.
+        if (e instanceof ModelServerError && e.kind === 'overflow') throw e
         console.error('[RAG] LLM chat failed:', e)
         return {
           answer: 'Sorry, I could not generate a response right now.',

@@ -1855,3 +1855,11 @@ Evidence: desktop E2E runs 6 and 7 on 2026-09-02, `imagegen:generate` failed wit
 `OFFGRID_IMAGE_MEMORY_LIMIT` and the page showed only the failed step. The journey now skips with the
 host's free-memory figure when admission would fail (`e2e/helpers/memory.ts`), so the fail-closed
 behaviour is not reported as a regression while this gap is open.
+
+## rag:chat swallows generation failures into a fake answer (open, 2026-09-02)
+
+`src/main/ipc.ts` memory-RAG branch catches every error and returns "Sorry, I could not generate a
+response right now." as if the model had said it. Only the context-overflow case is rethrown now so
+the shared session can compact and continue. Every other failure still reaches the user as a bubble
+that looks like an answer, is persisted as one, and never reaches the shared failure path. Fix:
+rethrow; let the renderer's existing error path render and persist it as an error.

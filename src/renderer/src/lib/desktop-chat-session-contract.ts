@@ -71,6 +71,13 @@ export interface DesktopChatSessionBoundary {
   ): Promise<RagChatResultContract>
   onRagStream(listener: (event: DesktopChatStreamEvent) => void): () => void
   cancelRag(streamId: string): void
+  /** Plain generation for the compaction summarizer. Absent means Desktop cannot compact. */
+  generateText?(
+    messages: ReadonlyArray<{ role: string; content: string }>,
+    options?: { maxTokens?: number }
+  ): Promise<string>
+  /** The llama-server window. Absent means Desktop cannot compact. */
+  getLlmSettings?(): Promise<{ ctxSize?: number; effectiveCtxSize?: number } | null | undefined>
   cancelImageGen?(): void
   toolChat?(
     query: string,

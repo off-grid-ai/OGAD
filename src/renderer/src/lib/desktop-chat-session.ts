@@ -5,6 +5,7 @@ import {
   type ChatTurn,
   type GenerationResult
 } from '@offgrid/models'
+import { DesktopChatCompaction } from './desktop-chat-compaction'
 import { DesktopTurnRepository } from './desktop-chat-session-repository'
 import { publishDesktopChatEvent } from './desktop-chat-session-events'
 import {
@@ -41,9 +42,11 @@ export class DesktopChatSession {
   private readonly listeners = new Set<(event: ChatSessionEvent) => void>()
   private readonly service: ChatSessionService
   private readonly generation: DesktopChatGenerationAdapter
+  private readonly compaction: DesktopChatCompaction
 
   constructor(private readonly boundary: DesktopChatSessionBoundary) {
     this.generation = new DesktopChatGenerationAdapter(boundary)
+    this.compaction = new DesktopChatCompaction(boundary)
     this.service = new ChatSessionService(
       {
         generate: (request, events) =>
@@ -54,7 +57,11 @@ export class DesktopChatSession {
           })
       },
       this.repository,
-      { events: { publish: (event) => this.publish(event) } }
+      {
+        events: { publish: (event) => this.publish(event) },
+        compactionRetry: { shouldRetry: ({ error }) => this.compaction.isCapacityError(error) },
+        compaction: { compact: (context) => this.compaction.compact(context) }
+      }
     )
   }
 

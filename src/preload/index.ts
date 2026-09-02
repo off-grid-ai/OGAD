@@ -195,6 +195,10 @@ const offGridApi = {
   getStats: () => ipcRenderer.invoke('db:get-stats'),
   getDashboardStats: () => ipcRenderer.invoke('db:get-dashboard-stats'),
   extractMemory: (text: string) => ipcRenderer.invoke('llm:extract', text),
+  generateText: (
+    messages: ReadonlyArray<{ role: string; content: string }>,
+    options?: { maxTokens?: number }
+  ): Promise<string> => ipcRenderer.invoke('llm:generate-text', messages, options),
 
   // Chat Summaries
   getChatSessions: (appName?: string) => ipcRenderer.invoke('db:get-chat-sessions', appName),

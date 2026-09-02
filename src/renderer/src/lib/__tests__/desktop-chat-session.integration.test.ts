@@ -416,3 +416,63 @@ describe('DesktopChatSession', () => {
     ])
   })
 })
+
+describe('DesktopChatSession context compaction', () => {
+  it('compacts on a full window, keeps the turn, and continues with the compacted history', async () => {
+    const histories: Array<Array<{ role: string; content: string }>> = []
+    let calls = 0
+    const boundary: DesktopChatSessionBoundary = {
+      ragChat: vi.fn(async (_query, _app, history) => {
+        histories.push(history)
+        calls += 1
+        if (calls === 1) {
+          throw new Error(
+            "Error invoking remote method 'rag:chat': Error: The request is larger than the model’s context window — usually too many connectors enabled at once."
+          )
+        }
+        return { answer: 'Continued answer', context: { sources: [] } }
+      }),
+      onRagStream: vi.fn(() => () => undefined),
+      cancelRag: vi.fn(),
+      generateText: vi.fn(async () => 'What was said before'),
+      getLlmSettings: vi.fn(async () => ({ ctxSize: 2048, effectiveCtxSize: 2048 }))
+    }
+    const session = new DesktopChatSession(boundary)
+    const events: string[] = []
+    session.subscribe((event) => events.push(event.type))
+    const long = Array.from({ length: 12 }, (_, index) => ({
+      id: `t${index}`,
+      conversationId: 'conversation-c',
+      userMessage: { role: 'user' as const, content: `Question ${index} ${'x'.repeat(600)}` },
+      responseMessages: [
+        { role: 'assistant' as const, content: `Answer ${index} ${'y'.repeat(600)}` }
+      ],
+      status: 'completed' as const,
+      request: { operation: { type: 'text' as const }, request: {} }
+    }))
+    session.restoreConversation('conversation-c', long)
+
+    const result = await session.send(input('turn-c', 'conversation-c'))
+
+    expect(result.turn.status).toBe('completed')
+    expect(result.response.answer).toBe('Continued answer')
+    expect(calls).toBe(2)
+    expect(events).toContain('compacted')
+    expect(boundary.generateText).toHaveBeenCalledTimes(1)
+    expect(histories[1]!.some((turn) => turn.content.includes('What was said before'))).toBe(true)
+    expect(histories[1]!.length).toBeLessThan(histories[0]!.length)
+  })
+
+  it('surfaces the original error when the window is full but Desktop cannot compact', async () => {
+    const boundary: DesktopChatSessionBoundary = {
+      ragChat: vi.fn(async () => {
+        throw new Error('the request exceeds the available context size')
+      }),
+      onRagStream: vi.fn(() => () => undefined),
+      cancelRag: vi.fn()
+    }
+    const session = new DesktopChatSession(boundary)
+    await expect(session.send(input('turn-d', 'conversation-d'))).rejects.toThrow(/context size/)
+    expect(boundary.ragChat).toHaveBeenCalledTimes(1)
+  })
+})

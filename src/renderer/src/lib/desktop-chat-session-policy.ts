@@ -1,3 +1,4 @@
+import { generationMessageText as sharedGenerationMessageText } from '@offgrid/models'
 import type { GenerationMessage, GenerationResult, RuntimeModel } from '@offgrid/models'
 import type { DesktopImageGenerationResponse } from './desktop-chat-session-contract'
 
@@ -72,9 +73,5 @@ export function desktopHistory(messages: readonly GenerationMessage[]): Array<{
 }
 
 function generationMessageText(message: GenerationMessage): string {
-  if (typeof message.content === 'string') return message.content
-  return message.content
-    .filter((part) => part.type === 'text')
-    .map((part) => part.text)
-    .join('\n')
+  return sharedGenerationMessageText(message)
 }

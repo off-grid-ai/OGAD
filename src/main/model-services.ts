@@ -165,6 +165,8 @@ interface DesktopModelServicesDependencies {
     ready: boolean
     loaded: boolean
     reasoning?: ModelReasoningMetadata
+    /** The window llama-server runs with; Shared bounds tool results to the room left in it. */
+    contextLength?: number
   }>
   localVoiceRuntimeState?(): Promise<{ installed: boolean; ready: boolean; error?: string }>
   localTextLifecycle?: {
@@ -442,6 +444,8 @@ class DesktopInventorySource {
         providerId: remote?.provider ?? model.runtime ?? model.engine,
         serverId: remote?.id,
         reasoning,
+        contextLength:
+          source === 'local' && modality === 'text' ? localTextState.contextLength : undefined,
         ...runtimeSizes(model),
         dirtyMemory: modality === 'image',
         residencyLifecycle:
@@ -534,9 +538,7 @@ export function createDesktopModelServices(
     })
   })
   const generation = new SharedGenerationService(llm, memory, {
-    // Native transports enforce an idle timeout. Keep this outer safety fence long
-    // enough that a healthy long stream is not stopped while it is still producing.
-    generationTimeoutMs: 24 * 60 * 60 * 1000,
+    // No deadline: a generation runs until it finishes or the user stops it.
     tools: desktopToolExecutor
   })
   const generationObservations = new DesktopGenerationObservations()
@@ -794,7 +796,8 @@ export const desktopModelServices = createDesktopModelServices({
     return {
       ready: llm.isReady(),
       loaded: llm.isReady(),
-      reasoning: llm.getReasoningMetadata()
+      reasoning: llm.getReasoningMetadata(),
+      contextLength: llm.effectiveContextSize()
     }
   },
   localVoiceRuntimeState: async () => {

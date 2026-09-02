@@ -27,7 +27,9 @@ import {
   type SyncedTurnStatus
 } from '@offgrid/sync'
 import type { VoiceTurnMode } from '@offgrid/speech'
-import { cleanImagePrompt, shouldAutoRouteImage, type ChatTurn } from '@offgrid/models'
+import { cleanImagePrompt, shouldAutoRouteImage, type ChatTurn,
+  compactionNoticeText
+} from '@offgrid/models'
 import ReactMarkdown, { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -3035,8 +3037,26 @@ export function MemoryChat({
     () =>
       desktopChatSession.subscribe((event) => {
         if (event.type === 'queue_changed') setChatQueue(event.queue)
+        if (event.type === 'compacted') {
+          // Forward-looking: what is on screen stays. The app says so, as a quiet marker.
+          const convId = event.turn.conversationId
+          const content = `_${compactionNoticeText(event.before, event.after)}_`
+          const notice: ChatMessage = {
+            id: `notice-compacted-${event.turn.id}-${Date.now()}`,
+            role: 'assistant',
+            content,
+            notice: true
+          }
+          setConvMessages(convId, (prev) => {
+            const placeholder = prev.findIndex((m) => m.id === event.turn.id)
+            return placeholder < 0
+              ? [...prev, notice]
+              : [...prev.slice(0, placeholder), notice, ...prev.slice(placeholder)]
+          })
+          void window.api.addRagMessage(convId, 'assistant', content).catch(() => undefined)
+        }
       }),
-    [desktopChatSession]
+    [desktopChatSession, setConvMessages]
   )
   const activeQueuedTurns = activeConversationId
     ? chatQueue.entries.some(
