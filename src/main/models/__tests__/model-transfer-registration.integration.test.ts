@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import type { TransferredModelManifest } from '@offgrid/sync'
 
 const originalDataDir = process.env.OFFGRID_DATA_DIR
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-model-transfer-registration-'))
@@ -98,6 +99,47 @@ describe('device-transferred model registration', () => {
     expect(other.success).toBe(true)
     expect(other.id).not.toBe(result.id)
     expect(await manager.listInstalled()).toEqual(expect.arrayContaining([result.id, other.id]))
+  })
+
+  it('reports active-projector finalization failure and repairs it on an idempotent retry', async () => {
+    const primary = 'finalization-retry-q4.gguf'
+    const projector = 'finalization-retry-mmproj-f16.gguf'
+    const primaryBytes = validGguf(12)
+    const projectorBytes = validGguf(13)
+    const manifest: TransferredModelManifest = {
+      id: 'off-grid/finalization-retry',
+      name: 'Finalization retry',
+      kind: 'vision',
+      source: 'downloaded' as const,
+      files: [
+        { name: primary, sizeBytes: primaryBytes.length },
+        { name: projector, sizeBytes: projectorBytes.length }
+      ]
+    }
+    const { modelPackageIdentity } = await import('@offgrid/sync')
+    const packageId = modelPackageIdentity(manifest)
+    const activePath = path.join(dataDir, 'models', 'active-model.json')
+    fs.writeFileSync(path.join(dataDir, 'models', primary), primaryBytes)
+    fs.writeFileSync(path.join(dataDir, 'models', projector), projectorBytes)
+    fs.writeFileSync(activePath, JSON.stringify({ id: packageId, primary, mmproj: null }))
+    fs.chmodSync(activePath, 0o400)
+
+    const failed = await manager.registerTransferredModel(manifest)
+
+    expect(failed).toEqual({
+      success: false,
+      error:
+        'Model files are ready, but the active vision model could not be updated. Retry to finish setup.'
+    })
+    expect(await manager.listInstalled()).toContain(packageId)
+    expect(JSON.parse(fs.readFileSync(activePath, 'utf8')).mmproj).toBeNull()
+
+    fs.chmodSync(activePath, 0o600)
+    await expect(manager.registerTransferredModel(manifest)).resolves.toEqual({
+      success: true,
+      id: packageId
+    })
+    expect(JSON.parse(fs.readFileSync(activePath, 'utf8')).mmproj).toBe(projector)
   })
 
   it('registers a verified multi-file model through the production catalog owner', async () => {

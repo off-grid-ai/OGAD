@@ -27,6 +27,26 @@ interface LegacyRemoteSettings {
   servers?: unknown
 }
 
+export type ModelSelectionPersistenceFailureCode =
+  | 'MODEL_SELECTION_READ_FAILED'
+  | 'MODEL_SELECTION_CORRUPT'
+
+export class ModelSelectionPersistenceError extends Error {
+  constructor(
+    readonly code: ModelSelectionPersistenceFailureCode,
+    readonly filePath: string,
+    message: string,
+    options?: ErrorOptions
+  ) {
+    super(message, options)
+    this.name = 'ModelSelectionPersistenceError'
+  }
+}
+
+function isMissingFile(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT'
+}
+
 const legacyModality = (modality: ModelModality): LegacyModality | null => {
   if (modality === 'computer_use' || modality === 'image' || modality === 'transcription') {
     return modality
@@ -60,15 +80,37 @@ export class DesktopModelSelectionPersistence implements ModelSelectionStore {
     return path.join(this.directory(), 'remote-vision-server.json')
   }
 
-  private readObject(file: string): Record<string, unknown> {
+  private readOptionalObject(file: string): Record<string, unknown> | null {
+    let source: string
     try {
-      const value: unknown = JSON.parse(fs.readFileSync(file, 'utf8'))
-      return value && typeof value === 'object' && !Array.isArray(value)
-        ? (value as Record<string, unknown>)
-        : {}
-    } catch {
-      return {}
+      source = fs.readFileSync(file, 'utf8')
+    } catch (error) {
+      if (isMissingFile(error)) return null
+      throw new ModelSelectionPersistenceError(
+        'MODEL_SELECTION_READ_FAILED',
+        file,
+        'The active model selection could not be read.',
+        { cause: error }
+      )
     }
+    try {
+      const value: unknown = JSON.parse(source)
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error('The selection state must be an object.')
+      }
+      return value as Record<string, unknown>
+    } catch (error) {
+      throw new ModelSelectionPersistenceError(
+        'MODEL_SELECTION_CORRUPT',
+        file,
+        'The active model selection is damaged. Repair it before changing models.',
+        { cause: error }
+      )
+    }
+  }
+
+  private readObject(file: string): Record<string, unknown> {
+    return this.readOptionalObject(file) ?? {}
   }
 
   private writeObject(file: string, value: Record<string, unknown>): void {
@@ -113,6 +155,10 @@ export class DesktopModelSelectionPersistence implements ModelSelectionStore {
 
   readLegacyTextConfig(): LegacyTextSelection {
     return this.readObject(this.legacyTextFile())
+  }
+
+  readLegacyTextConfigIfPresent(): LegacyTextSelection | null {
+    return this.readOptionalObject(this.legacyTextFile())
   }
 
   projectLegacyTextConfig(value: { id: string; primary: string; mmproj: string | null }): void {

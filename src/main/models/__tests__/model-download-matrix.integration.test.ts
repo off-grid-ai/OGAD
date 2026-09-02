@@ -30,13 +30,28 @@ vi.mock('electron', () => ({
   }
 }))
 
-await import('../../model-services')
-const manager = await import('../../models-manager')
 const { CATALOG } = await import('@offgrid/models')
 
 type CatalogModel = (typeof CATALOG)[number]
 type ModelFile = CatalogModel['files'][number]
 type ModelDownloadProgress = import('../../models-manager').DownloadProgress
+
+const productionCatalog = [...CATALOG]
+
+function fixtureSize(file: ModelFile): number {
+  // Whisper verification has a real 10 MiB minimum. Other native formats only need
+  // enough bytes for their real format gate in this HTTP-boundary integration test.
+  return file.name.endsWith('.bin') ? 10 * 1024 * 1024 : 2_048
+}
+
+const fixtureCatalog = productionCatalog.map((entry) => ({
+  ...entry,
+  files: entry.files.map((file) => ({ ...file, sizeBytes: fixtureSize(file) }))
+}))
+CATALOG.splice(0, CATALOG.length, ...fixtureCatalog)
+
+await import('../../model-services')
+const manager = await import('../../models-manager')
 
 const byKind = (kind: CatalogModel['kind'], fileCount?: number): CatalogModel => {
   const entry = CATALOG.find(
@@ -70,10 +85,11 @@ function executable(file: string, source: string): void {
 }
 
 function modelBytes(file: ModelFile, seed: number): Buffer {
+  const size = file.sizeBytes ?? fixtureSize(file)
   if (file.name.endsWith('.gguf')) {
-    return Buffer.concat([Buffer.from('GGUF', 'ascii'), Buffer.alloc(2_044, seed)])
+    return Buffer.concat([Buffer.from('GGUF', 'ascii'), Buffer.alloc(size - 4, seed)])
   }
-  return Buffer.from(`off-grid-${file.name}-${seed}`)
+  return Buffer.alloc(size, seed)
 }
 
 interface PendingResponse {
@@ -187,6 +203,7 @@ afterEach(async () => {
 })
 
 afterAll(() => {
+  CATALOG.splice(0, CATALOG.length, ...productionCatalog)
   if (originalDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
   else process.env.OFFGRID_DATA_DIR = originalDataDir
   if (originalBinDir === undefined) delete process.env.OFFGRID_BIN_DIR
@@ -238,16 +255,16 @@ describe('model download release matrix', () => {
   })
 
   it('makes a complete Parakeet download selectable by the real dictation service (#19)', async () => {
-    const { getActiveTranscription } = await import('../../transcription/select')
-    // No app database in this runner (it cannot load the native DB module — see
-    // vitest.config.ts), and this journey has no language preference to honor: the reader
-    // is the boundary, so it answers with the same default a fresh profile would.
+    const { getNativeTranscriptionForRoute } = await import('../../transcription/select')
+    // This suite cannot load the native database ABI. The model route and setting reader are
+    // the controlled boundaries; the production Parakeet selection and native process stay real.
     const noStoredPreferences = <T>(_key: string, fallback: T): T => fallback
-    expect(getActiveTranscription(noStoredPreferences).isAvailable()).toBe(false)
+    const route = { id: speechModel.id, providerId: speechModel.engine }
+    expect(getNativeTranscriptionForRoute(route, noStoredPreferences).isAvailable()).toBe(false)
 
     await downloadEveryRequiredFile(speechModel)
     expect(await manager.activateModel(speechModel.id)).toEqual({ success: true })
-    const dictation = getActiveTranscription(noStoredPreferences)
+    const dictation = getNativeTranscriptionForRoute(route, noStoredPreferences)
 
     expect(dictation.isAvailable()).toBe(true)
     await expect(
@@ -352,7 +369,9 @@ describe('model download release matrix', () => {
       status: 'downloading',
       percent: 0
     })
-    expect(installedAfterSecond).toEqual([secondModel.id])
+    expect(installedAfterSecond.filter((id) => concurrentModels.some((model) => model.id === id))).toEqual([
+      secondModel.id
+    ])
     expect(firstResult).toEqual({ success: true })
 
     expect(manager.listDownloads()).toEqual([
@@ -377,7 +396,11 @@ describe('model download release matrix', () => {
     )
     expect(firstProgress.at(-1)).toMatchObject({ status: 'completed', percent: 100 })
     expect(secondProgress.at(-1)).toMatchObject({ status: 'completed', percent: 100 })
-    expect((await manager.listInstalled()).sort()).toEqual([firstModel.id, secondModel.id].sort())
+    expect(
+      (await manager.listInstalled())
+        .filter((id) => concurrentModels.some((model) => model.id === id))
+        .sort()
+    ).toEqual([firstModel.id, secondModel.id].sort())
     expect(fs.readFileSync(path.join(dataDir, 'models', firstFile.name))).toEqual(firstBytes)
     expect(fs.readFileSync(path.join(dataDir, 'models', secondFile.name))).toEqual(secondBytes)
     expect(fs.existsSync(path.join(dataDir, 'models', `${firstFile.name}.part`))).toBe(false)
@@ -406,10 +429,9 @@ describe('model download release matrix', () => {
     expect(initial.filter((download) => download.status === 'queued')).toEqual([
       expect.objectContaining({ modelId: queueModels[3]!.id, percent: 0 })
     ])
-    await expect(manager.downloadModel(queueModels[3]!.id)).resolves.toEqual({
-      success: false,
-      error: 'already downloading'
-    })
+    // A duplicate caller joins the existing queued job. It must not create another
+    // transfer or a second queue record, and it receives the same terminal result.
+    const duplicateFourthDownload = manager.downloadModel(queueModels[3]!.id)
     expect(pending).toHaveLength(3)
 
     try {
@@ -429,10 +451,6 @@ describe('model download release matrix', () => {
         status: 'downloading',
         percent: 0
       })
-      expect(progress.get(queueModels[3]!.id)).toEqual([
-        expect.objectContaining({ status: 'queued' }),
-        expect.objectContaining({ status: 'downloading' })
-      ])
 
       for (let index = 1; index < queueModels.length; index++) {
         const file = queueModels[index]!.files[0]!
@@ -445,6 +463,7 @@ describe('model download release matrix', () => {
         )
       }
       const results = await Promise.all(downloads)
+      await expect(duplicateFourthDownload).resolves.toEqual({ success: true })
       for (const model of queueModels) installedByTest.add(model.id)
 
       expect(results).toEqual(queueModels.map(() => ({ success: true })))
@@ -465,7 +484,7 @@ describe('model download release matrix', () => {
           })
         )
       }
-      await Promise.allSettled(downloads)
+      await Promise.allSettled([...downloads, duplicateFourthDownload])
     }
   })
 

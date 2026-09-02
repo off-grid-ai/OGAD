@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DOWNLOAD_INTERRUPTED_ERROR, ModelDownloadQueue } from '../download-queue'
+import { DOWNLOAD_INTERRUPTED_ERROR, ModelDownloadQueue } from '@offgrid/models'
 
 function deferred<T>(): {
   promise: Promise<T>

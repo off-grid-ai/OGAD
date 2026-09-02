@@ -1,10 +1,11 @@
 // Exercises the real model-manager ingress paths against a temporary models
 // directory. Network delivery is the only boundary fake; validation, streaming,
 // filesystem promotion, registry state, and installed-model discovery stay real.
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { createHash } from 'crypto'
 import { Writable } from 'stream'
 import { NETWORK_UNAVAILABLE_MESSAGE } from '@offgrid/models'
 
@@ -37,24 +38,106 @@ const fixtures = CATALOG.flatMap((entry) => {
   return [{ entry, fileName: file.name, filePath: path.join(dataDir, 'models', file.name) }]
 })
 
-// 'text' dropped: the chat model is a vision model now (mmproj), so there's no
-// standalone text kind to select.
-const activeSelectionFixtures = ['vision', 'image', 'computer_use', 'voice', 'transcription'].map(
-  (kind) => {
-    const entry = CATALOG.find(
-      (candidate) =>
-        candidate.kind === kind &&
-        candidate.files.length > 0 &&
-        candidate.availability !== 'coming_soon'
-    )
-    if (!entry) throw new Error(`Model catalog needs an installable ${kind} fixture`)
-    return { kind, entry }
-  }
-)
+// Runtime-managed voice assets do not enter this file-backed integrity path. Their native adapter
+// owns installation and readiness; this suite covers only catalog-delivered artifacts.
+const activeSelectionFixtures = ['vision', 'image', 'computer_use', 'transcription'].map((kind) => {
+  const entry = CATALOG.find(
+    (candidate) =>
+      candidate.kind === kind &&
+      candidate.files.length > 0 &&
+      candidate.availability !== 'coming_soon'
+  )
+  if (!entry) throw new Error(`Model catalog needs an installable ${kind} fixture`)
+  return { kind, entry }
+})
 
-const [primary, diskFailure, interrupted, offline] = fixtures
-if (!primary || !diskFailure || !interrupted || !offline) {
-  throw new Error('Model catalog needs four single-file GGUF fixtures')
+const [primary, diskFailure, interrupted] = fixtures
+if (!primary || !diskFailure || !interrupted) {
+  throw new Error('Model catalog needs three single-file GGUF fixtures')
+}
+
+const invalidRetryBytes = Buffer.concat([Buffer.from('XXXX', 'ascii'), Buffer.alloc(2_000)])
+const validRetryBytes = Buffer.concat([Buffer.from('GGUF', 'ascii'), Buffer.alloc(2_000)])
+const checksumExpectedBytes = Buffer.concat([Buffer.from('GGUF', 'ascii'), Buffer.alloc(2_000, 11)])
+const checksumWrongBytes = Buffer.concat([Buffer.from('GGUF', 'ascii'), Buffer.alloc(2_000, 17)])
+const checksumFileName = 'offgrid-checksum-fixture.gguf'
+const checksumModel = {
+  ...primary.entry,
+  id: 'offgrid-test/checksum',
+  name: 'Checksum fixture',
+  files: [
+    {
+      ...primary.entry.files[0]!,
+      name: checksumFileName,
+      url: 'https://example.invalid/offgrid-checksum-fixture.gguf',
+      sizeBytes: checksumExpectedBytes.length,
+      sha256: createHash('sha256').update(checksumExpectedBytes).digest('hex')
+    }
+  ]
+}
+const checksumPath = path.join(dataDir, 'models', checksumFileName)
+const interruptedBytes = Buffer.concat([Buffer.from('GGUF', 'ascii'), Buffer.alloc(2_000, 7)])
+const interruptedFileName = 'offgrid-interrupted-fixture.gguf'
+const interruptedModel = {
+  ...primary.entry,
+  id: 'offgrid-test/interrupted',
+  name: 'Interrupted fixture',
+  files: [
+    {
+      ...primary.entry.files[0]!,
+      name: interruptedFileName,
+      url: 'https://example.invalid/offgrid-interrupted-fixture.gguf',
+      sizeBytes: interruptedBytes.length,
+      sha256: undefined
+    }
+  ]
+}
+const interruptedPath = path.join(dataDir, 'models', interruptedFileName)
+const invalidRetryFileName = 'offgrid-invalid-retry.gguf'
+const invalidRetryModel = {
+  ...primary.entry,
+  id: 'offgrid-test/invalid-retry',
+  name: 'Invalid retry fixture',
+  files: [
+    {
+      ...primary.entry.files[0]!,
+      name: invalidRetryFileName,
+      url: 'https://example.invalid/offgrid-invalid-retry.gguf',
+      sizeBytes: validRetryBytes.length,
+      sha256: undefined
+    }
+  ]
+}
+const invalidRetryPath = path.join(dataDir, 'models', invalidRetryFileName)
+const offlineRetryFileName = 'offgrid-offline-retry.gguf'
+const offlineRetryModel = {
+  ...primary.entry,
+  id: 'offgrid-test/offline-retry',
+  name: 'Offline retry fixture',
+  files: [
+    {
+      ...primary.entry.files[0]!,
+      name: offlineRetryFileName,
+      url: 'https://example.invalid/offgrid-offline-retry.gguf',
+      sizeBytes: validRetryBytes.length,
+      sha256: undefined
+    }
+  ]
+}
+const offlineRetryPath = path.join(dataDir, 'models', offlineRetryFileName)
+
+const testCatalogEntries = [
+  unavailableModel,
+  invalidRetryModel,
+  offlineRetryModel,
+  checksumModel,
+  interruptedModel
+]
+
+function registerTestCatalogEntries(catalog: typeof CATALOG): void {
+  for (const entry of testCatalogEntries) {
+    if (!catalog.some((candidate) => candidate.id === entry.id)) catalog.push(entry)
+  }
 }
 
 interface CapacityProbe {
@@ -87,8 +170,12 @@ function capacityLimitedFileStream(
 }
 
 beforeAll(() => {
-  CATALOG.push(unavailableModel)
+  registerTestCatalogEntries(CATALOG)
   fs.mkdirSync(path.dirname(primary.filePath), { recursive: true })
+})
+
+beforeEach(async () => {
+  registerTestCatalogEntries((await import('@offgrid/models')).CATALOG)
 })
 
 afterEach(() => {
@@ -105,11 +192,27 @@ afterEach(() => {
   }
   fs.rmSync(path.join(dataDir, 'models', 'active-model.json'), { force: true })
   fs.rmSync(path.join(dataDir, 'models', 'active-modalities.json'), { force: true })
+  fs.rmSync(invalidRetryPath, { force: true })
+  fs.rmSync(`${invalidRetryPath}.part`, { force: true })
+  fs.rmSync(offlineRetryPath, { force: true })
+  fs.rmSync(`${offlineRetryPath}.part`, { force: true })
+  fs.rmSync(checksumPath, { force: true })
+  fs.rmSync(`${checksumPath}.part`, { force: true })
+  fs.rmSync(interruptedPath, { force: true })
+  fs.rmSync(`${interruptedPath}.part`, { force: true })
 })
 
 afterAll(() => {
-  const fixtureIndex = CATALOG.findIndex((entry) => entry.id === unavailableModel.id)
-  if (fixtureIndex >= 0) CATALOG.splice(fixtureIndex, 1)
+  for (const fixtureId of [
+    unavailableModel.id,
+    invalidRetryModel.id,
+    offlineRetryModel.id,
+    checksumModel.id,
+    interruptedModel.id
+  ]) {
+    const fixtureIndex = CATALOG.findIndex((entry) => entry.id === fixtureId)
+    if (fixtureIndex >= 0) CATALOG.splice(fixtureIndex, 1)
+  }
   if (originalDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
   else process.env.OFFGRID_DATA_DIR = originalDataDir
   fs.rmSync(dataDir, { recursive: true, force: true })
@@ -152,44 +255,79 @@ describe('model-manager GGUF integrity', () => {
 
     expect(result).toEqual({
       success: false,
-      error: `${primary.fileName}: downloaded file is not a valid GGUF (corrupt or truncated)`
+      error: `${primary.fileName}: transferred file size does not match the manifest`
     })
     expect(fs.existsSync(primary.filePath)).toBe(false)
+    expect(fs.existsSync(`${primary.filePath}.part`)).toBe(false)
     expect(await manager.listInstalled()).not.toContain(primary.entry.id)
     expect(manager.downloadStatus(primary.entry.id)).toMatchObject({
       modelId: primary.entry.id,
       status: 'failed',
       error: result.error
     })
+
+    const cleared = await manager.clearDownload(primary.entry.id)
+    expect(cleared).toEqual({ success: true, freedBytes: 0 })
+    expect(fs.existsSync(`${primary.filePath}.part`)).toBe(false)
+    expect(manager.downloadStatus(primary.entry.id)).toBeNull()
   })
 
-  it('rejects same-shape Muse bytes when their SHA-256 does not match the shared catalog', async () => {
-    const muse = CATALOG.find((entry) => entry.id === 'unsloth/Muse-Glimmer-30B-GGUF')
-    if (!muse) throw new Error('Shared model catalog must include Muse Glimmer')
-    const wrongBytes = Buffer.concat([Buffer.from('GGUF', 'ascii'), Buffer.alloc(2_000, 17)])
+  it('retries an invalid completed GGUF from byte zero', async () => {
+    const requests: Array<RequestInit | undefined> = []
+    let attempt = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        requests.push(init)
+        const bytes = attempt++ === 0 ? invalidRetryBytes : validRetryBytes
+        return new Response(bytes, {
+          status: 200,
+          headers: { 'content-length': String(bytes.length) }
+        })
+      })
+    )
+
+    const firstAttempt = await manager.downloadModel(invalidRetryModel.id)
+
+    expect(firstAttempt).toEqual({
+      success: false,
+      error: `${invalidRetryFileName}: downloaded file is not a valid GGUF (corrupt or truncated)`
+    })
+    expect(fs.existsSync(invalidRetryPath)).toBe(false)
+    expect(fs.existsSync(`${invalidRetryPath}.part`)).toBe(false)
+    expect(manager.downloadStatus(invalidRetryModel.id)).toMatchObject({ status: 'failed' })
+
+    const retry = await manager.retryDownload(invalidRetryModel.id)
+
+    expect(retry).toEqual({ success: true })
+    expect(requests).toHaveLength(2)
+    expect(requests[1]?.headers).toBeUndefined()
+    expect(fs.readFileSync(invalidRetryPath)).toEqual(validRetryBytes)
+    expect(await manager.listInstalled()).toContain(invalidRetryModel.id)
+  })
+
+  it('rejects same-shape catalog bytes when their SHA-256 does not match', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () =>
         Promise.resolve(
-          new Response(wrongBytes, {
+          new Response(checksumWrongBytes, {
             status: 200,
-            headers: { 'content-length': String(wrongBytes.length) }
+            headers: { 'content-length': String(checksumWrongBytes.length) }
           })
         )
       )
     )
 
-    const result = await manager.downloadModel(muse.id)
+    const result = await manager.downloadModel(checksumModel.id)
 
     expect(result).toEqual({
       success: false,
       error: expect.stringMatching(/checksum mismatch/i)
     })
-    for (const file of muse.files) {
-      expect(fs.existsSync(path.join(dataDir, 'models', file.name))).toBe(false)
-      expect(fs.existsSync(path.join(dataDir, 'models', `${file.name}.part`))).toBe(false)
-    }
-    expect(await manager.listInstalled()).not.toContain(muse.id)
+    expect(fs.existsSync(checksumPath)).toBe(false)
+    expect(fs.existsSync(`${checksumPath}.part`)).toBe(false)
+    expect(await manager.listInstalled()).not.toContain(checksumModel.id)
   })
 
   it('rejects a truncated local GGUF before copying or registration', async () => {
@@ -240,7 +378,7 @@ describe('model-manager GGUF integrity', () => {
       error: 'ENOSPC: no space left on device, write'
     })
     expect(fs.existsSync(diskFailure.filePath)).toBe(false)
-    expect(fs.existsSync(`${diskFailure.filePath}.part`)).toBe(false)
+    expect(fs.readFileSync(`${diskFailure.filePath}.part`)).toEqual(body.subarray(0, 512))
     expect(capacityProbe).toEqual({ acceptedBytes: 512, partialExistedAtFailure: true })
     expect(fs.readFileSync(primary.filePath)).toEqual(installedBytes)
     expect(await manager.listInstalled()).toContain(primary.entry.id)
@@ -253,7 +391,7 @@ describe('model-manager GGUF integrity', () => {
   })
 
   it('restores an interrupted download after restart and resumes it without corruption', async () => {
-    const complete = Buffer.concat([Buffer.from('GGUF', 'ascii'), Buffer.alloc(2_000, 7)])
+    const complete = interruptedBytes
     const splitAt = 700
     const prefix = complete.subarray(0, splitAt)
     const suffix = complete.subarray(splitAt)
@@ -289,36 +427,38 @@ describe('model-manager GGUF integrity', () => {
       })
     )
 
-    const firstAttempt = await manager.downloadModel(interrupted.entry.id)
+    const firstAttempt = await manager.downloadModel(interruptedModel.id)
 
     expect(firstAttempt).toEqual({ success: false, error: 'network connection interrupted' })
-    expect(fs.readFileSync(`${interrupted.filePath}.part`)).toEqual(prefix)
-    expect(fs.existsSync(interrupted.filePath)).toBe(false)
+    expect(fs.readFileSync(`${interruptedPath}.part`)).toEqual(prefix)
+    expect(fs.existsSync(interruptedPath)).toBe(false)
 
     vi.resetModules()
+    registerTestCatalogEntries((await import('@offgrid/models')).CATALOG)
     await import('../../model-services')
     const restartedManager = await import('../../models-manager')
     expect(restartedManager.listDownloads()).toContainEqual(
       expect.objectContaining({
-        modelId: interrupted.entry.id,
+        modelId: interruptedModel.id,
         status: 'failed',
         error: 'network connection interrupted'
       })
     )
 
-    const retry = await restartedManager.retryDownload(interrupted.entry.id)
+    const retry = await restartedManager.retryDownload(interruptedModel.id)
 
     expect(retry).toEqual({ success: true })
     expect(retryRange).toBe(`bytes=${prefix.length}-`)
-    expect(fs.readFileSync(interrupted.filePath)).toEqual(complete)
-    expect(fs.existsSync(`${interrupted.filePath}.part`)).toBe(false)
-    expect(await restartedManager.listInstalled()).toContain(interrupted.entry.id)
+    expect(fs.readFileSync(interruptedPath)).toEqual(complete)
+    expect(fs.existsSync(`${interruptedPath}.part`)).toBe(false)
+    expect(await restartedManager.listInstalled()).toContain(interruptedModel.id)
 
     vi.resetModules()
+    registerTestCatalogEntries((await import('@offgrid/models')).CATALOG)
     await import('../../model-services')
     const finalRestart = await import('../../models-manager')
     expect(finalRestart.listDownloads().map((download) => download.modelId)).not.toContain(
-      interrupted.entry.id
+      interruptedModel.id
     )
   })
 
@@ -343,29 +483,29 @@ describe('model-manager GGUF integrity', () => {
       })
     )
 
-    const firstAttempt = await manager.downloadModel(offline.entry.id)
+    const firstAttempt = await manager.downloadModel(offlineRetryModel.id)
 
     expect(firstAttempt).toEqual({
       success: false,
       error: NETWORK_UNAVAILABLE_MESSAGE
     })
-    expect(fs.existsSync(offline.filePath)).toBe(false)
-    expect(fs.existsSync(`${offline.filePath}.part`)).toBe(false)
-    expect(await manager.listInstalled()).not.toContain(offline.entry.id)
+    expect(fs.existsSync(offlineRetryPath)).toBe(false)
+    expect(fs.existsSync(`${offlineRetryPath}.part`)).toBe(false)
+    expect(await manager.listInstalled()).not.toContain(offlineRetryModel.id)
     expect(await manager.listInstalled()).toContain(primary.entry.id)
-    expect(manager.downloadStatus(offline.entry.id)).toMatchObject({
-      modelId: offline.entry.id,
+    expect(manager.downloadStatus(offlineRetryModel.id)).toMatchObject({
+      modelId: offlineRetryModel.id,
       status: 'failed',
       error: firstAttempt.error
     })
 
-    const retry = await manager.retryDownload(offline.entry.id)
+    const retry = await manager.retryDownload(offlineRetryModel.id)
 
     expect(retry).toEqual({ success: true })
-    expect(fs.readFileSync(offline.filePath)).toEqual(validGguf)
-    expect(fs.existsSync(`${offline.filePath}.part`)).toBe(false)
+    expect(fs.readFileSync(offlineRetryPath)).toEqual(validGguf)
+    expect(fs.existsSync(`${offlineRetryPath}.part`)).toBe(false)
     expect(await manager.listInstalled()).toEqual(
-      expect.arrayContaining([primary.entry.id, offline.entry.id])
+      expect.arrayContaining([primary.entry.id, offlineRetryModel.id])
     )
   })
 })
@@ -436,11 +576,11 @@ describe('active model persistence', () => {
 
   it('keeps every selected modal model active after a module-style relaunch', async () => {
     const modalModels = activeSelectionFixtures.filter(({ kind }) =>
-      ['computer_use', 'image', 'voice', 'transcription'].includes(kind)
+      ['computer_use', 'image', 'transcription'].includes(kind)
     )
-    if (modalModels.length !== 4) {
+    if (modalModels.length !== 3) {
       throw new Error(
-        'Model catalog needs installable computer use, image, voice, and transcription fixtures'
+        'Model catalog needs installable computer use, image, and transcription fixtures'
       )
     }
 
@@ -457,7 +597,6 @@ describe('active model persistence', () => {
     expect(activeBeforeRestart).toMatchObject({
       computer_use: expect.any(String),
       image: expect.any(String),
-      speech: expect.any(String),
       transcription: expect.any(String)
     })
 

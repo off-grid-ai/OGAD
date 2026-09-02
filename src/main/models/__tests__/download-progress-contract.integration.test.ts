@@ -8,7 +8,7 @@
 // Grounded in the macOS session of 2026-08-09: a refused download told nobody, so the card kept a
 // spinner at 0% for hours; and the percent was per-FILE, so a two-file model ran 0→100 twice and
 // the number meant something different on each side of the reset.
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -31,14 +31,24 @@ vi.mock('electron', () => ({
   }
 }))
 
-await import('../../model-services')
-const manager = await import('../../models-manager')
 const { CATALOG } = await import('@offgrid/models')
 type ModelDownloadProgress = import('../../models-manager').DownloadProgress
 
 /** A real catalog model with TWO files — the shape the reset was visible on (weights + projector). */
-const twoFileModel = CATALOG.find((m) => m.files.length === 2)
-if (!twoFileModel) throw new Error('Model catalog needs a two-file fixture')
+const productionModel = CATALOG.find((m) => m.files.length === 2)
+if (!productionModel) throw new Error('Model catalog needs a two-file fixture')
+const productionIndex = CATALOG.indexOf(productionModel)
+const twoFileModel = {
+  ...productionModel,
+  files: productionModel.files.map((file, index) => ({
+    ...file,
+    sizeBytes: index === 0 ? 8 * 1024 * 1024 : 4 * 1024 * 1024
+  }))
+}
+CATALOG.splice(productionIndex, 1, twoFileModel)
+
+await import('../../model-services')
+const manager = await import('../../models-manager')
 
 interface Pending {
   url: string
@@ -75,8 +85,15 @@ function bodyOf(name: string, bytes: number): Buffer {
     : Buffer.alloc(bytes, 7)
 }
 
-afterEach(() => {
+afterEach(async () => {
   vi.unstubAllGlobals()
+  await manager.deleteModel(twoFileModel.id)
+  await manager.clearDownload(twoFileModel.id)
+})
+
+afterAll(() => {
+  CATALOG.splice(productionIndex, 1, productionModel)
+  fs.rmSync(testRoot, { recursive: true, force: true })
 })
 
 describe('the progress a download publishes', () => {
@@ -101,7 +118,9 @@ describe('the progress a download publishes', () => {
 
     // The first file has finished and the job is NOT done: reporting 100 here is what made the
     // number restart on the file after it. The card also learns which part of how many is moving.
-    const afterFirst = events.filter((e) => e.status === 'downloading' && e.downloadedMB).at(-1)!
+    const afterFirst = events
+      .filter((e) => e.status === 'downloading' && e.fileIndex === 1 && e.downloadedMB)
+      .at(-1)!
     expect(afterFirst.percent).toBeLessThan(100)
     expect(afterFirst.fileIndex).toBe(1)
     expect(afterFirst.fileCount).toBe(2)
@@ -145,8 +164,14 @@ describe('the progress a download publishes', () => {
     // ...and so is every watcher of the channel, which is the part the screen needs. Without this
     // the card keeps whatever it assumed when you clicked, forever.
     expect(events).toContainEqual(
-      expect.objectContaining({ modelId: twoFileModel.id, status: 'failed', percent: 0 })
+      expect.objectContaining({ modelId: twoFileModel.id, status: 'failed' })
     )
-    expect(manager.downloadStatus(twoFileModel.id)?.status).toBe('failed')
+    const failed = events.findLast((event) => event.status === 'failed')
+    const stored = manager.downloadStatus(twoFileModel.id)
+    expect(stored?.status).toBe('failed')
+    // Do not rewrite progress to zero. The terminal event must project the coordinator's
+    // truthful retained-byte state, whether this refusal has a partial file or no bytes yet.
+    expect(failed?.downloadedBytes).toBe(stored?.downloadedBytes)
+    expect(failed?.percent).toBe(stored?.percent)
   })
 })

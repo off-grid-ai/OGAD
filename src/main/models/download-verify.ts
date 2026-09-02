@@ -18,20 +18,29 @@ import { desktopArtifactVerificationFiles } from './gguf'
 /** Reason a just-downloaded file must NOT be promoted to installed, or null if it
  *  passes. Checks the byte count (when the server reported a length) and, for a
  *  GGUF, the magic header + minimum size. */
-export async function verifyDownloadedPart(
-  name: string,
-  written: number,
-  total: number,
-  partPath: string,
+export interface DownloadedPartVerificationInput {
+  name: string
+  writtenBytes: number
+  responseTotalBytes: number
+  partPath: string
   expectedSha256?: string
+  expectedBytes?: number
+}
+
+export async function verifyDownloadedPart(
+  input: DownloadedPartVerificationInput
 ): Promise<string | null> {
   const request: ArtifactVerificationRequest = {
-    path: partPath,
-    name,
+    path: input.partPath,
+    name: input.name,
     origin: 'download',
-    writtenBytes: written,
-    responseTotalBytes: total,
-    expectedSha256,
+    writtenBytes: input.writtenBytes,
+    responseTotalBytes: input.responseTotalBytes,
+    expectedSha256: input.expectedSha256,
+    expectedBytes: input.expectedBytes,
+    // Only an interrupted stream is safe to resume. A completed file with the
+    // wrong manifest size, checksum, or format must restart from byte zero.
+    resumeSupported: true,
     removeInvalid: true
   }
   const service = new ArtifactVerificationService({

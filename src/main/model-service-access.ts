@@ -1,10 +1,13 @@
 import type {
   GenerationService,
   LLMService,
+  ModelCapabilities,
+  ModelControlApplicationSnapshot,
   ModelModality,
   ModelResidencyManager,
   RuntimeModel
 } from '@offgrid/models'
+import type { ComputerUseActiveModelProjection } from '../shared/computer-use-settings'
 import type { GenerationMetrics } from '../shared/generation-metrics'
 
 export interface DesktopGenerationObservationPort {
@@ -34,6 +37,20 @@ export interface DesktopModelServices {
     speech: string | null
     transcription: string | null
   }
+  modelControlSnapshot(): Promise<
+    ModelControlApplicationSnapshot<
+      {
+        id: string
+        name: string
+        kind: string
+        engine?: string
+        remoteServerId?: string
+        files?: Array<{ name: string; role?: string }>
+        capabilities?: ModelCapabilities
+      },
+      ComputerUseActiveModelProjection
+    >
+  >
 }
 
 let services: DesktopModelServices | null = null

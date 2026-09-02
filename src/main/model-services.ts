@@ -8,9 +8,12 @@ import {
   ModelAdmissionError,
   inventoryModelCapabilities,
   inventoryModelMemoryProfile,
+  resolveReasoningPlan,
   runtimeModalityForModelKind,
   runtimeResidencyLifecycle,
   type ModelInventoryAdapter,
+  type ModelControlCatalogModel,
+  type ModelCapabilities,
   type ModelModality,
   type ModelSelectionStore,
   type ModelReasoningMetadata,
@@ -65,16 +68,105 @@ interface DesktopInventoryModel {
     supportsThinking?: boolean
   }
   grounder?: boolean
+  artifactDelivery?: 'catalog' | 'runtime'
+}
+
+export type DesktopModelControlCatalogModel = Omit<ModelControlCatalogModel, 'files'> & {
+  files?: Array<{ name: string; role?: string }>
+  remoteModelId?: string
+  capabilities?: ModelCapabilities
+}
+
+/** A persisted runtime route cannot be presented as a ready model-control selection. */
+export class DesktopModelProjectionError extends Error {
+  readonly code = 'model_control_route_unresolved' as const
+
+  constructor(readonly routeId: string) {
+    super('The active model route is unavailable in the model-control catalog.')
+    this.name = 'DesktopModelProjectionError'
+  }
+}
+
+function projectActiveTextCapabilities(
+  models: readonly DesktopModelControlCatalogModel[],
+  activeModelId: string | null,
+  capabilities: ModelCapabilities | null
+): DesktopModelControlCatalogModel[] {
+  if (!activeModelId || !capabilities) return [...models]
+  return models.map((model) =>
+    model.id === activeModelId ? { ...model, capabilities: { ...capabilities } } : model
+  )
+}
+
+/** Convert the runtime route identity into the catalog identity used by model-control clients. */
+export function projectActiveTextCatalogId(
+  models: readonly DesktopModelControlCatalogModel[],
+  selectedId: string | null
+): string | null {
+  if (!selectedId) return null
+  const route = decodeModelRouteId(selectedId)
+  const selected = route
+    ? route.serverId
+      ? models.find(
+          (model) =>
+            model.remoteServerId === route.serverId && model.remoteModelId === route.modelId
+        )
+      : models.find((model) => model.id === route.modelId)
+    : models.find((model) => model.id === selectedId)
+  if (!selected) throw new DesktopModelProjectionError(selectedId)
+  return selected.id
+}
+
+function isModelControlCatalogModel(value: unknown): value is DesktopModelControlCatalogModel {
+  if (!value || typeof value !== 'object') return false
+  if (
+    !('id' in value) ||
+    typeof value.id !== 'string' ||
+    !('name' in value) ||
+    typeof value.name !== 'string' ||
+    !('kind' in value) ||
+    typeof value.kind !== 'string'
+  ) {
+    return false
+  }
+  const files = 'files' in value ? value.files : undefined
+  return (
+    files === undefined ||
+    (Array.isArray(files) &&
+      files.every(
+        (file) =>
+          Boolean(file) &&
+          typeof file === 'object' &&
+          'name' in file &&
+          typeof file.name === 'string'
+      ))
+  )
+}
+
+function requireModelControlCatalogModels(
+  values: readonly unknown[]
+): DesktopModelControlCatalogModel[] {
+  return values.map((value, index) => {
+    if (!isModelControlCatalogModel(value)) {
+      throw new Error(`Model-control catalog entry ${String(index)} is invalid.`)
+    }
+    return value
+  })
 }
 
 interface DesktopModelServicesDependencies {
   listCatalog(): Promise<DesktopInventoryModel[]>
+  modelControlCatalog?(): Promise<{
+    kinds: readonly string[]
+    models: DesktopModelControlCatalogModel[]
+  }>
   listInstalled(): Promise<string[]>
   localTextRuntimeState(): Promise<{
     ready: boolean
     loaded: boolean
     reasoning?: ModelReasoningMetadata
   }>
+  localVoiceRuntimeState?(): Promise<{ installed: boolean; ready: boolean; error?: string }>
   localTextLifecycle?: {
     load(): Promise<void>
     unload(): Promise<void>
@@ -95,7 +187,9 @@ const SHARED_MODALITIES: readonly ModelModality[] = [
 
 export function desktopAdapterId(source: 'local' | 'remote', modality: ModelModality): string {
   const prefix = source === 'remote' ? 'desktop.remote-chat' : 'desktop.llama'
-  if (modality === 'text') return prefix
+  // Vision is a capability of the text runtime, not a second residency or
+  // selection authority. Keep legacy callers on the canonical text adapter.
+  if (modality === 'text' || modality === 'vision') return prefix
   if (modality === 'computer_use') return `${prefix}.computer-use`
   if (modality === 'image') return source === 'remote' ? 'desktop.remote-image' : 'desktop.image'
   if (modality === 'voice') return source === 'remote' ? 'desktop.remote-voice' : 'desktop.tts'
@@ -236,10 +330,12 @@ class DesktopInventorySource {
   }
 
   private async readModels(): Promise<RuntimeModel[]> {
-    const [catalog, installedIds, localTextState] = await Promise.all([
+    const [catalog, installedIds, localTextState, localVoiceState] = await Promise.all([
       this.dependencies.listCatalog(),
       this.dependencies.listInstalled(),
-      this.dependencies.localTextRuntimeState()
+      this.dependencies.localTextRuntimeState(),
+      this.dependencies.localVoiceRuntimeState?.() ??
+        Promise.resolve({ installed: false, ready: false })
     ])
     this.ids.index(catalog)
     const installed = new Set(installedIds)
@@ -258,7 +354,9 @@ class DesktopInventorySource {
     )
     const activeText = this.selections.read('text')
     const activeTextRoute = activeText ? decodeModelRouteId(activeText) : null
-    const residencyLifecycle = (modality: 'image' | 'stt') =>
+    const residencyLifecycle = (
+      modality: 'image' | 'stt'
+    ): NonNullable<RuntimeModel['residencyLifecycle']> =>
       runtimeResidencyLifecycle(this.dependencies.residencySetting?.(modality) ?? 'on-demand')
 
     const expandTextRoutes = (base: RuntimeModel): RuntimeModel[] => {
@@ -282,26 +380,17 @@ class DesktopInventorySource {
               })
             ]
           : []),
-        ...(base.capabilities.vision
+        ...(base.capabilities.vision && base.capabilities.tools
           ? [
-              route('vision', `${prefix}.vision`, {
+              route('computer_use', `${prefix}.computer-use`, {
                 vision: true,
-                textGeneration: true,
+                computerUse: true,
+                tools: true,
+                toolSelection: true,
+                thinking: base.capabilities.thinking,
                 streaming: true,
                 structuredOutput: true
-              }),
-              ...(base.capabilities.tools
-                ? [
-                    route('computer_use', `${prefix}.computer-use`, {
-                      vision: true,
-                      computerUse: true,
-                      tools: true,
-                      toolSelection: true,
-                      streaming: true,
-                      structuredOutput: true
-                    })
-                  ]
-                : [])
+              })
             ]
           : [])
       ]
@@ -312,8 +401,15 @@ class DesktopInventorySource {
       if (!modality) return []
       const remote = model.remoteServerId ? remoteById.get(model.remoteServerId) : undefined
       const source = remote ? 'remote' : 'local'
-      const isInstalled = source === 'remote' || installed.has(model.id)
-      const ready = isInstalled && model.availability !== 'coming_soon'
+      const runtimeManagedVoice =
+        source === 'local' && modality === 'voice' && model.artifactDelivery === 'runtime'
+      const isInstalled = runtimeManagedVoice
+        ? localVoiceState.installed
+        : source === 'remote' || installed.has(model.id)
+      const ready =
+        isInstalled &&
+        model.availability !== 'coming_soon' &&
+        (!runtimeManagedVoice || localVoiceState.ready)
       const loaded =
         source === 'remote'
           ? activeTextRoute?.serverId === remote?.id &&
@@ -322,6 +418,20 @@ class DesktopInventorySource {
             (activeTextRoute?.modelId ?? activeText) === model.id &&
             localTextState.loaded
       const adapterId = desktopAdapterId(source, modality)
+      const reasoning = remote
+        ? remoteReasoningById.get(remote.id)
+        : modality === 'text' || modality === 'computer_use'
+          ? localTextState.reasoning
+          : undefined
+      const capabilities = inventoryModelCapabilities({
+        kind: model.kind,
+        source,
+        remoteCapabilities: model.remoteCapabilities
+      })
+      if (source === 'local' && loaded && (modality === 'text' || modality === 'computer_use')) {
+        capabilities.thinking =
+          resolveReasoningPlan({ enabled: true }, reasoning).disposition === 'controlled'
+      }
       const base: RuntimeModel = {
         id: remote && model.remoteModelId ? model.remoteModelId : model.id,
         name: model.name?.trim() || model.id,
@@ -331,11 +441,7 @@ class DesktopInventorySource {
         adapterId,
         providerId: remote?.provider ?? model.runtime ?? model.engine,
         serverId: remote?.id,
-        reasoning: remote
-          ? remoteReasoningById.get(remote.id)
-          : modality === 'text' || modality === 'computer_use'
-            ? localTextState.reasoning
-            : undefined,
+        reasoning,
         ...runtimeSizes(model),
         dirtyMemory: modality === 'image',
         residencyLifecycle:
@@ -346,11 +452,7 @@ class DesktopInventorySource {
               : modality === 'voice'
                 ? 'operation'
                 : 'persistent',
-        capabilities: inventoryModelCapabilities({
-          kind: model.kind,
-          source,
-          remoteCapabilities: model.remoteCapabilities
-        }),
+        capabilities,
         installed: isInstalled,
         ready,
         loaded
@@ -408,12 +510,10 @@ export function createDesktopModelServices(
     'desktop.llama',
     'desktop.llama.classifier',
     'desktop.llama.tool-selection',
-    'desktop.llama.vision',
     'desktop.llama.computer-use',
     'desktop.remote-chat',
     'desktop.remote-chat.classifier',
     'desktop.remote-chat.tool-selection',
-    'desktop.remote-chat.vision',
     'desktop.remote-chat.computer-use',
     'desktop.image',
     'desktop.remote-image',
@@ -445,7 +545,6 @@ export function createDesktopModelServices(
     'desktop.llama',
     'desktop.llama.classifier',
     'desktop.llama.tool-selection',
-    'desktop.llama.vision',
     'desktop.llama.computer-use'
   ]) {
     const adapter = new DesktopLocalGenerationAdapter(
@@ -468,7 +567,6 @@ export function createDesktopModelServices(
     'desktop.remote-chat',
     'desktop.remote-chat.classifier',
     'desktop.remote-chat.tool-selection',
-    'desktop.remote-chat.vision',
     'desktop.remote-chat.computer-use'
   ]) {
     generation.registerAdapter(
@@ -641,7 +739,40 @@ export function createDesktopModelServices(
       })
       return [...new Set(active)]
     },
-    activeModalities
+    activeModalities,
+    async modelControlSnapshot() {
+      await llm.refresh()
+      const runtimeActive = activeModalities()
+      const catalogRead = dependencies.modelControlCatalog
+        ? dependencies.modelControlCatalog()
+        : dependencies.listCatalog().then((models) => ({
+            kinds: [...new Set(models.flatMap((model) => (model.kind ? [model.kind] : [])))],
+            models: requireModelControlCatalogModels(models)
+          }))
+      const [catalog, installed, computerUse] = await Promise.all([
+        catalogRead,
+        dependencies.listInstalled(),
+        import('./vision/vision-task-model-strategy').then((module) =>
+          module.getComputerUseActiveModelProjection()
+        )
+      ])
+      const activeTextCapabilities = llm.active('text').model?.capabilities ?? null
+      const active = {
+        ...runtimeActive,
+        text: projectActiveTextCatalogId(catalog.models, runtimeActive.text)
+      }
+      const activeIds = [
+        ...new Set(Object.values(active).filter((id): id is string => Boolean(id)))
+      ]
+      return {
+        kinds: [...catalog.kinds],
+        models: projectActiveTextCapabilities(catalog.models, active.text, activeTextCapabilities),
+        installed,
+        activeIds,
+        active,
+        computerUse
+      }
+    }
   }
 }
 
@@ -649,6 +780,13 @@ export const desktopModelServices = createDesktopModelServices({
   listCatalog: async () => {
     const catalog = await desktopModelManagerPorts.getCatalog()
     return catalog.models as DesktopInventoryModel[]
+  },
+  modelControlCatalog: async () => {
+    const catalog = await desktopModelManagerPorts.getCatalog()
+    return {
+      kinds: catalog.kinds,
+      models: requireModelControlCatalogModels(catalog.models)
+    }
   },
   listInstalled: () => desktopModelManagerPorts.listInstalled(),
   localTextRuntimeState: async () => {
@@ -658,6 +796,10 @@ export const desktopModelServices = createDesktopModelServices({
       loaded: llm.isReady(),
       reasoning: llm.getReasoningMetadata()
     }
+  },
+  localVoiceRuntimeState: async () => {
+    const { inspectTtsRuntimeState } = await import('./tts')
+    return inspectTtsRuntimeState()
   },
   resolveLegacyModelId: (modelId) =>
     desktopModelManagerPorts.resolveCanonicalModelSelectionId(modelId),

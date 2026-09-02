@@ -75,7 +75,8 @@ const UPSTREAM_HOST = '127.0.0.1'
 // The upstream llama-server port is LIVE, not fixed: llm.getPort() moves off LLAMA_SERVER_PORT when
 // another app owns it (see llm.prepareModelPort). Read it per-request so the gateway always proxies
 // to wherever the engine actually bound. (LLAMA_SERVER_PORT stays the PREFERRED default in llm.)
-const upstreamPort = (): number => llm.getPort()
+let upstreamPortResolver = (): number => llm.getPort()
+const upstreamPort = (): number => upstreamPortResolver()
 const MAX_UPLOAD = 200 * 1024 * 1024 // 200MB upload cap (audio / init image)
 
 let server: http.Server | null = null
@@ -987,9 +988,17 @@ let startingGateway = false
 
 /** Start the unified local model gateway. Bound to loopback (local-only). Async because it scans
  *  for a free port when the preferred one is taken. */
-export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
+export interface ModelServerStartOptions {
+  upstreamPort?: () => number
+}
+
+export async function startModelServer(
+  port = GATEWAY_PORT,
+  options: ModelServerStartOptions = {}
+): Promise<void> {
   if (server || startingGateway) return
   startingGateway = true
+  upstreamPortResolver = options.upstreamPort ?? (() => llm.getPort())
   boundGatewayPort = (await pickFreePort(port)) ?? port
 
   server = http.createServer(async (req, res) => {
@@ -1298,6 +1307,7 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
     // Bind failed — drop the dead server and reset so a retry starts clean.
     server = null
     boundGatewayPort = GATEWAY_PORT
+    upstreamPortResolver = () => llm.getPort()
     throw e
   } finally {
     startingGateway = false
@@ -1307,4 +1317,5 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
 export function stopModelServer(): void {
   server?.close()
   server = null
+  upstreamPortResolver = () => llm.getPort()
 }
