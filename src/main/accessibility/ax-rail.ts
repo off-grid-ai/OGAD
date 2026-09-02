@@ -4,11 +4,10 @@
  *
  *   accessibility (this rail, free, any chat model) -> vision (grounder, RAM).
  *
- * The decision is made ONCE, from the routing snapshot's richness (ax-router):
- * a control-rich AX window drives here; a dead-AX window (Catalyst, a game, a
- * canvas) falls through to the vision executor untouched. If AX is viable but
- * the model can't finish, that give_up is the honest answer - we do NOT then
- * re-run the whole task under vision (that would double-actuate the desktop).
+ * The routing snapshot chooses the first rail. A control-rich AX window starts
+ * with Accessibility; a dead-AX window starts with vision. If AX cannot make
+ * progress, the same action then moves to vision. Duplicate-action guards in
+ * both rails prevent the recovery pass from repeating unsafe input.
  *
  * Pure and injected: the AX host (routing + run) and the vision executor are
  * passed in, so the tiering is unit-tested without a screen. The wiring in
@@ -28,7 +27,8 @@ export interface ComputerTaskTiers {
     taskId: string,
     journeyId: string,
     app: string,
-    initial: AxRouting['snapshot']
+    initial: AxRouting['snapshot'],
+    allowVisionRecovery: boolean
   ): Promise<ElementTaskResult>
   /** The vision-rail executor, used when AX can't drive this surface. */
   visionExecute(action: ActionRecord): Promise<ExecuteResult>
@@ -76,14 +76,15 @@ export function makeComputerTaskExecutor(
         routing ? `${routing.app}/${routing.snapshot.elements.length} elements` : 'none'
       } axViable=${viable} -> ${useAx ? 'AX' : 'grounder-vision'}`
     )
-    if (useAx && routing) {
+    if (useAx) {
       const t0 = now()
       const result = await tiers.runAx(
         goal,
         action.id,
         action.sourceRef ?? action.id,
         routing.app,
-        routing.snapshot
+        routing.snapshot,
+        forced !== 'ax'
       )
       const ms = now() - t0
       const stepCount = result.steps.length
@@ -91,7 +92,11 @@ export function makeComputerTaskExecutor(
         `[computer-task] AX rail: ok=${result.ok} steps=${stepCount} wallMs=${ms} summary="${result.summary}"`
       )
       if (!result.ok) {
-        return { ok: false, detail: result.summary }
+        if (forced === 'ax') return { ok: false, detail: result.summary }
+        console.log(
+          `[computer-task] AX could not finish; using visual recovery for action=${action.id}`
+        )
+        return tiers.visionExecute(action)
       }
       // A GUI action has no generic undo; the action id is the effect handle.
       return { ok: true, effectId: action.id }

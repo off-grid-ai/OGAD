@@ -30,10 +30,10 @@ import type { VisionGroundingInput, VisionGroundingResult } from './vision-agent
 import { currentRemoteScreenTaskSession } from '../actions/remote-screen-session'
 import { desktopModelServices } from '../model-services'
 import {
-  resolveComputerUseExecutionPlan,
+  ComputerUseSessionApplicationService,
   resolveComputerUseRoleProjection,
   type ComputerUseRoleSelection
-} from '@offgrid/models'
+} from '@offgrid/models/computer-use'
 
 export interface VisionTaskModelSession {
   adapter: VisionModelAdapter
@@ -61,7 +61,7 @@ export interface VisionTaskModelStrategyDependencies {
   withSpecialist<T>(task: () => Promise<T>): Promise<{ result: T }>
   runReasoner: typeof productionHybridReasoner
   runSpecialist?: HybridVisionGrounderDependencies['runSpecialist']
-  resolveGenerationRoute?(modelId: string): Promise<string>
+  resolveGenerationRoute?(modelId: string, requiredThinking?: boolean): Promise<string>
 }
 
 const productionDependencies: VisionTaskModelStrategyDependencies = {
@@ -155,20 +155,37 @@ function specialistFamily(dependencies: VisionTaskModelStrategyDependencies): Vi
   }
 }
 
-async function directSession(
-  environment: VisionPolicyInput['operatorEnvironment'],
+async function observeModel(
   selection: VisionModelSelection,
-  dependencies: VisionTaskModelStrategyDependencies
-): Promise<VisionTaskModelSession> {
-  const routeId = await dependencies.resolveGenerationRoute?.(selection.modelId)
+  dependencies: VisionTaskModelStrategyDependencies,
+  requiredThinking = false
+): Promise<{ modelId: string; model: VisionModelAdapter; routeId?: string }> {
   return {
-    adapter: selection.adapter,
-    identity: await dependencies.resolveIdentity(selection.modelId),
-    decide: createVisionGrounder(selection.adapter, environment, routeId)
+    modelId: selection.modelId,
+    model: selection.adapter,
+    routeId: await dependencies.resolveGenerationRoute?.(selection.modelId, requiredThinking)
   }
 }
 
-async function computerUseRouteId(modelId: string): Promise<string> {
+export function computerUseRouteIdFromInventory(
+  models: readonly import('@offgrid/models').RuntimeModel[],
+  modelId: string,
+  requiredThinking: boolean
+): string {
+  const matches = models.filter((model) => model.id === modelId)
+  const selected = matches.length === 1 ? matches[0] : undefined
+  if (!selected?.routeId) {
+    throw new Error(`The Computer Use model route is unavailable: ${modelId}.`)
+  }
+  if (requiredThinking && selected.capabilities.thinking !== true) {
+    throw new Error(
+      `${selected.name || modelId} does not support the required capabilities: thinking.`
+    )
+  }
+  return selected.routeId
+}
+
+async function computerUseRouteId(modelId: string, requiredThinking = false): Promise<string> {
   await desktopModelServices.refresh()
   const remote = parseRemoteVisionModelId(modelId)
   const matches = desktopModelServices.llm
@@ -178,43 +195,43 @@ async function computerUseRouteId(modelId: string): Promise<string> {
         ? model.serverId === remote.serverId && model.id === remote.modelId
         : !model.serverId && model.id === modelId
     )
-  if (matches.length !== 1 || !matches[0]?.routeId) {
-    throw new Error(`The Computer Use model route is unavailable: ${modelId}.`)
-  }
-  return matches[0].routeId
+  return computerUseRouteIdFromInventory(matches, remote?.modelId ?? modelId, requiredThinking)
 }
 
-async function hybridSession(
-  environment: VisionPolicyInput['operatorEnvironment'],
+function createVisionTaskModelService(
   dependencies: VisionTaskModelStrategyDependencies
-): Promise<VisionTaskModelSession> {
-  const reasoner = activeChatSelection(dependencies)
-  const specialist = specialistFamily(dependencies)
-  const [reasonerIdentity, specialistIdentity] = await Promise.all([
-    dependencies.resolveIdentity(reasoner.modelId),
-    dependencies.resolveIdentity(specialist.modelId)
-  ])
-  const [reasonerRouteId, specialistRouteId] = dependencies.resolveGenerationRoute
-    ? await Promise.all([
-        dependencies.resolveGenerationRoute(reasoner.modelId),
-        dependencies.resolveGenerationRoute(specialist.modelId)
-      ])
-    : [undefined, undefined]
-  return {
-    adapter: specialist.adapter,
-    identity: {
-      modelId: `${reasonerIdentity.modelId} + ${specialistIdentity.modelId}`,
-      modelName: `${reasonerIdentity.modelName} + ${specialistIdentity.modelName}`
-    },
-    decide: createHybridVisionGrounder(environment, {
-      runReasoner: dependencies.runReasoner,
-      withSpecialist: dependencies.withSpecialist,
-      activeSpecialistAdapter: () => activeSpecialistSelection(dependencies).adapter,
-      runSpecialist: dependencies.runSpecialist,
-      reasonerRouteId,
-      specialistRouteId
-    })
-  }
+): ComputerUseSessionApplicationService<
+  VisionPolicyInput['operatorEnvironment'],
+  VisionModelAdapter,
+  VisionGroundingInput,
+  VisionGroundingResult
+> {
+  return new ComputerUseSessionApplicationService({
+    strategy: dependencies.strategy,
+    observeChatModel: () => observeModel(activeChatSelection(dependencies), dependencies, true),
+    observeSpecialistModel: () => observeModel(specialistFamily(dependencies), dependencies),
+    observeActiveSpecialistModel: () =>
+      observeModel(activeSpecialistSelection(dependencies), dependencies),
+    resolveIdentity: dependencies.resolveIdentity,
+    runWithSpecialist: async (task) => (await dependencies.withSpecialist(task)).result,
+    createDirectDecision: ({ environment, selection }) =>
+      createVisionGrounder(selection.model, environment, selection.routeId),
+    createHybridDecision: ({
+      environment,
+      reasoner,
+      specialist,
+      runWithSpecialist,
+      observeActiveSpecialistModel
+    }) =>
+      createHybridVisionGrounder(environment, {
+        runReasoner: dependencies.runReasoner,
+        withSpecialist: async (task) => ({ result: await runWithSpecialist(task) }),
+        activeSpecialistAdapter: async () => (await observeActiveSpecialistModel()).model,
+        runSpecialist: dependencies.runSpecialist,
+        reasonerRouteId: reasoner.routeId,
+        specialistRouteId: specialist.routeId
+      })
+  })
 }
 
 /** Resolve one immutable model strategy session for a task. Web Use and
@@ -224,18 +241,7 @@ export async function withVisionTaskModelStrategy<T>(
   task: (session: VisionTaskModelSession) => Promise<T>,
   dependencies: VisionTaskModelStrategyDependencies = productionDependencies
 ): Promise<T> {
-  const strategy = dependencies.strategy()
-  const plan = resolveComputerUseExecutionPlan(strategy)
-  if (plan.mode === 'hybrid') {
-    return task(await hybridSession(environment, dependencies))
-  }
-  if (plan.source === 'chat') {
-    return task(await directSession(environment, activeChatSelection(dependencies), dependencies))
-  }
-  const { result } = await dependencies.withSpecialist(async () => {
-    return task(
-      await directSession(environment, activeSpecialistSelection(dependencies), dependencies)
-    )
-  })
-  return result
+  return createVisionTaskModelService(dependencies).withSession(environment, (session) =>
+    task({ adapter: session.model, identity: session.identity, decide: session.decide })
+  )
 }

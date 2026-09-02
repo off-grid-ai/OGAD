@@ -267,7 +267,7 @@ export function stopVisionTask(taskId: string, reason: string, currentAction: st
 }
 
 /** Agent-requested human handoff uses the same run owner as Pause, Take Over,
- * Continue, Stop, and Esc. */
+ * Continue, and Stop. */
 export function waitForVisionUser(
   taskId: string,
   reason: string,

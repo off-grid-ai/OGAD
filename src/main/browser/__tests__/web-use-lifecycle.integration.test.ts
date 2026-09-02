@@ -384,13 +384,13 @@ describe('Web Use shared lifecycle', () => {
 
     expect(result).toEqual({
       ok: false,
-      fallback: false,
+      fallback: true,
       summary: 'The final page no longer contained the evidence required for completion.',
       handoffs: 0
     })
     expect(notes).toContain(
       'verification failed: The final page no longer contained the evidence required for completion.'
     )
-    expect(guard.snapshot()).toMatchObject({ status: 'failed', kind: 'web_use' })
+    expect(guard.snapshot()).toMatchObject({ status: 'verifying', kind: 'web_use' })
   })
 })

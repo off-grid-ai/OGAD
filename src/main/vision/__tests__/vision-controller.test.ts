@@ -152,20 +152,20 @@ describe('registerVisionIpc', () => {
     expect(records.at(-1)).toMatchObject({ taskId: 'terminal-task', status: 'stopped' })
   })
 
-  it('routes Esc through the same stop owner and aborts in-flight work', () => {
+  it('routes Stop through the task owner and aborts in-flight work', () => {
     const guard = new VisionGuard({ taskId: 'escape-task', kind: 'computer_use' })
     const request = new AbortController()
     owner.registerSession('escape-task', guard, request)
     owner.emitState({ taskId: 'escape-task', goal: 'Send a message', status: 'running' })
 
-    expect(owner.stop('escape-task', 'stopped with Esc', 'Stopped with Esc')).toBe(true)
+    expect(owner.stop('escape-task', 'stopped by you', 'Stopped by you')).toBe(true)
 
     expect(guard.isHalted).toBe(true)
     expect(request.signal.aborted).toBe(true)
     expect(owner.current().state).toMatchObject({
       status: 'stopped',
       phase: 'stopped',
-      currentAction: 'Stopped with Esc'
+      currentAction: 'Stopped by you'
     })
   })
 

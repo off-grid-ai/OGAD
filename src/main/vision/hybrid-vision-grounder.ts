@@ -275,7 +275,7 @@ export interface HybridVisionGrounderDependencies {
     onReasoningDelta?: (text: string) => void
   ): Promise<VisionPolicyResponse>
   withSpecialist<T>(task: () => Promise<T>): Promise<{ result: T }>
-  activeSpecialistAdapter(): VisionModelAdapter
+  activeSpecialistAdapter(): VisionModelAdapter | Promise<VisionModelAdapter>
   runSpecialist?(
     adapter: VisionModelAdapter,
     input: VisionGroundingInput,
@@ -319,7 +319,7 @@ export function createHybridVisionGrounder(
       }
     }
     const { result: grounded } = await dependencies.withSpecialist(async () => {
-      const adapter = dependencies.activeSpecialistAdapter()
+      const adapter = await dependencies.activeSpecialistAdapter()
       const policyInput = {
         ...specialistInput(prepared, outcome.delegation),
         generationRouteId: dependencies.specialistRouteId

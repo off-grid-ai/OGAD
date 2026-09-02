@@ -426,7 +426,6 @@ export async function runElementTask(
         return { ok: true, summary: action.summary, steps }
       }
       if (action.action === 'give_up') {
-        deps.control?.fail(action.why)
         reportPhase((deps.plan?.phases.length ?? 1) - 1)
         observe('terminal')
         note(`gave up: ${action.why}`)
@@ -548,7 +547,6 @@ export async function runElementTask(
 
   note('ran out of steps')
   const summary = `stopped after ${maxSteps} steps without finishing`
-  deps.control?.fail(summary)
   return { ok: false, summary, steps }
 }
 /* eslint-enable complexity */

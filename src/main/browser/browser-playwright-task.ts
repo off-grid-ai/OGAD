@@ -170,19 +170,12 @@ async function terminalDecision(
     if (!input.guard.beginVerification()) return undefined
     const verification = await observeWithCurrentLease(input)
     if (verification.isError) {
-      input.guard.fail('The final page could not be verified.')
-      return {
-        ok: false,
-        fallback: false,
-        summary: 'The final page could not be verified.',
-        handoffs: state.handoffs
-      }
+      return fallback('The final page could not be verified.', state.handoffs)
     }
     if (!completionEvidenceMatches(decision, verification.text)) {
       const failure = 'The final page no longer contained the evidence required for completion.'
-      input.guard.fail(failure)
       input.onStep(`verification failed: ${failure}`)
-      return { ok: false, fallback: false, summary: failure, handoffs: state.handoffs }
+      return fallback(failure, state.handoffs)
     }
     await publishObservation(input, { step, phase: 'complete', summary })
     if (!input.guard.complete()) return undefined

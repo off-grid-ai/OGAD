@@ -17,7 +17,7 @@
  */
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { globalShortcut, systemPreferences } from 'electron'
+import { systemPreferences } from 'electron'
 import { llm } from '../llm'
 import { generateDesktopText } from '../desktop-generation'
 import { loadActuation, type ActuationPort } from '../input/actuation'
@@ -35,7 +35,6 @@ import {
   emitVisionState,
   emitVisionStep,
   registerVisionSession,
-  stopVisionTask,
   waitForVisionUser
 } from '../vision/vision-controller'
 import { hideSupervisorWindow } from '../vision/supervisor-window'
@@ -49,11 +48,12 @@ import { accessibilityHelperPath } from './ax-helper'
 import { encodeTaskPhase } from '../../shared/task-execution-plan'
 import { prepareTaskExecutionPlan } from '../tasks/task-execution-plan-service'
 import { registerTaskGuideHandler } from '../tasks/task-guide'
-import { resolveModelIdentity } from '../models-manager'
+import { resolveModelIdentity, type ModelIdentity } from '../models-manager'
 import { NativeAppTargeter } from './native-app-target'
 import { createMacNativeAppPlatform } from './native-app-macos'
 import { windowsNativeAppPlatform } from './native-app-windows'
 import { automationTaskReadStatus } from '@offgrid/automation'
+import { decodeModelRouteId } from '@offgrid/models'
 
 const execFileAsync = promisify(execFile)
 
@@ -61,7 +61,22 @@ const execFileAsync = promisify(execFile)
  *  the user approves the task). */
 const SELF_APP_NAME = 'Off Grid AI Desktop'
 
-/** Thrown when the kill switch (Esc / overlay Stop) halts a run mid-action so
+/** Display metadata is noncritical. Keep its typed diagnostic, then use an explicit task fallback. */
+export async function resolveComputerUseModelIdentity(
+  activeModel: { id: string } | null,
+  resolver: (modelId: string) => Promise<ModelIdentity> = resolveModelIdentity
+): Promise<ModelIdentity | undefined> {
+  if (!activeModel) return undefined
+  try {
+    return await resolver(activeModel.id)
+  } catch (error) {
+    const route = decodeModelRouteId(activeModel.id)
+    console.error('[ax-rail] Model display identity unavailable; using selected model id.', error)
+    return { modelId: activeModel.id, modelName: route?.modelId ?? activeModel.id }
+  }
+}
+
+/** Thrown when the task controls halt a run mid-action so
  *  the loop unwinds instead of actuating again. */
 class HaltError extends Error {}
 
@@ -207,7 +222,8 @@ class AxRailHost {
     taskId: string,
     app: string,
     initial?: AxSnapshot,
-    journeyId = taskId
+    journeyId = taskId,
+    allowVisionRecovery = false
   ): Promise<ElementTaskResult> {
     console.log(`[ax-rail] runTask app="${app}" goal="${goal}"`)
     const actuation = loadActuation()
@@ -228,17 +244,12 @@ class AxRailHost {
     const request = new AbortController()
     const settings = getComputerUseSettings()
     const activeModel = llm.activeModelInfo()
-    const modelIdentity = activeModel ? await resolveModelIdentity(activeModel.id) : undefined
+    const modelIdentity = await resolveComputerUseModelIdentity(activeModel)
     const contextTokens = resolveComputerUseContextTokens(
       settings.context,
       llm.effectiveContextSize()
     )
     const retrievedFacts = settings.retrieveOlderVisuals ? recentVisualFacts(taskId) : []
-    // The kill switch: Esc halts for good. The overlay's Stop routes to the SAME
-    // guard through the controller session, so both paths end one run.
-    const escapeRegistered = globalShortcut.register('Escape', () => {
-      stopVisionTask(taskId, 'stopped with Esc', 'Stopped with Esc')
-    })
     const releaseSession = registerVisionSession(taskId, guard, request)
     // The AX rail is model-agnostic and needs no grounding-model notice.
     emitVisionState({
@@ -249,10 +260,7 @@ class AxRailHost {
       status: 'running',
       phase: 'preparing',
       currentStep: 0,
-      currentAction: `Preparing to control ${app}`,
-      ...(escapeRegistered
-        ? {}
-        : { notice: 'Esc is unavailable. Use Stop or Take Over in the task controls.' })
+      currentAction: `Preparing to control ${app}`
     })
     let usedInitial = false
     let liveStep = 0
@@ -370,18 +378,28 @@ class AxRailHost {
           persistAxObservation(taskId, goal, { ...observation, frame: observationFrame })
         }
       })
-      if (!result.ok && !guard.isHalted) guard.fail(result.summary)
+      if (!result.ok && !guard.isHalted && !allowVisionRecovery) guard.fail(result.summary)
+      if (!result.ok && !guard.isHalted && allowVisionRecovery) {
+        emitVisionStep(taskId, `visual recovery: ${result.summary}`)
+      }
       const finalStatus = automationTaskReadStatus(guard.automationStatus)
       emitVisionState({
         taskId,
         journeyId,
         goal,
-        status: finalStatus,
+        status: !result.ok && allowVisionRecovery ? 'running' : finalStatus,
         phase:
-          finalStatus === 'done' ? 'complete' : finalStatus === 'failed' ? 'failed' : 'stopped',
+          !result.ok && allowVisionRecovery
+            ? 'checking'
+            : finalStatus === 'done'
+              ? 'complete'
+              : finalStatus === 'failed'
+                ? 'failed'
+                : 'stopped',
         currentStep: liveStep,
-        currentAction: result.summary,
-        summary: result.summary
+        currentAction:
+          !result.ok && allowVisionRecovery ? 'Switching to visual recovery' : result.summary,
+        ...(!result.ok && allowVisionRecovery ? {} : { summary: result.summary })
       })
       return result
     } catch (error) {
@@ -392,7 +410,7 @@ class AxRailHost {
           : error instanceof Error
             ? error.message
             : 'accessibility run failed'
-      if (!guard.isHalted) guard.fail(summary)
+      if (!guard.isHalted && !allowVisionRecovery) guard.fail(summary)
       const finalStatus = automationTaskReadStatus(guard.automationStatus)
       // Project the terminal state after the guard changes. A capture failure first
       // reports its detailed recovery trace while the guard is still running, so the
@@ -401,16 +419,21 @@ class AxRailHost {
         taskId,
         journeyId,
         goal,
-        status: finalStatus,
-        phase: finalStatus === 'failed' ? 'failed' : 'stopped',
+        status: !guard.isHalted && allowVisionRecovery ? 'running' : finalStatus,
+        phase:
+          !guard.isHalted && allowVisionRecovery
+            ? 'checking'
+            : finalStatus === 'failed'
+              ? 'failed'
+              : 'stopped',
         currentStep: liveStep,
-        currentAction: summary,
-        summary
+        currentAction:
+          !guard.isHalted && allowVisionRecovery ? 'Switching to visual recovery' : summary,
+        ...(!guard.isHalted && allowVisionRecovery ? {} : { summary })
       })
       return { ok: false, summary, steps: [] }
     } finally {
       releaseGuidance()
-      if (escapeRegistered) globalShortcut.unregister('Escape')
       releaseSession()
       hideSupervisorWindow()
     }
