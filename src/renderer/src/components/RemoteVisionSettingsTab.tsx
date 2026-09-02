@@ -231,7 +231,18 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
         (discovered.some((model) => model.id === selectedModel && model.modality === 'text')
           ? selectedModel
           : '')
-      setModels(discovered)
+      // Text comes from the capability-projected list; image, transcription, voice, and
+      // embeddings come from the catalog, which is the only place the server declares them.
+      const mediaModels = Object.entries(result.catalog ?? {}).flatMap(([modality, options]) =>
+        modality === 'text'
+          ? []
+          : (options ?? []).map((model) => ({
+              id: model.id,
+              name: model.name,
+              modality: modality as RemoteModelModality
+            }))
+      )
+      setModels([...discovered.filter((model) => model.modality === 'text'), ...mediaModels])
       setForm((current) => ({
         ...current,
         model: nextModel,
@@ -484,7 +495,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                 }}
                 autoComplete="off"
                 placeholder={
-                  form.hasApiKey ? 'Stored key - enter a new value to replace it' : 'API key'
+                  form.hasApiKey ? '••••••••••••••••  stored key, type to replace' : 'API key'
                 }
                 className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-1.5 text-xs text-neutral-200 outline-none placeholder:text-neutral-600 focus-visible:border-green-500"
               />
