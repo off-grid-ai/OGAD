@@ -1905,3 +1905,8 @@ blank list.
 
 While a reply generates in voice mode, the message header shows loading dots and the voice bubble
 below shows its own dots. One reply, one indicator.
+
+## Sidebar: pin toggle beside Back (open, 2026-09-02)
+
+Add a small pin icon to the left of the Back control. Pinned keeps the sidebar open; unpinned returns
+it to open-on-hover. The state persists with the other UI preferences.
