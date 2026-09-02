@@ -31,7 +31,7 @@ import { startMediaServer, stopMediaServer, mediaUrlFor } from './media-server'
 import { capturePathFromUrl, serveCaptureFile } from './ogcapture-serve'
 import { serveArtifactPreview } from './artifact-preview'
 import { ipcMain } from 'electron'
-import { installWindowZoom, WINDOW_ZOOM_LEVEL_SETTING } from './window-zoom'
+import { installWindowZoom, installZoomMenu, WINDOW_ZOOM_LEVEL_SETTING } from './window-zoom'
 import { loadProEntitlementProvider, loadProFeaturesMain } from './bootstrap/loadProFeaturesMain'
 import { resolveWindowPresentation } from './bootstrap/window-presentation'
 import { mayUseIsolatedEvidenceInstance } from './bootstrap/isolated-evidence-instance'
@@ -184,10 +184,12 @@ function createWindow(): void {
   })
   // Cmd/Ctrl + and - zoom the page; the app has no menu bar to carry the standard roles. The
   // level persists with the other settings.
-  installWindowZoom(mainWindow, {
+  const zoomStore = {
     read: () => getSetting<number>(WINDOW_ZOOM_LEVEL_SETTING, 0),
-    write: (level) => saveSetting(WINDOW_ZOOM_LEVEL_SETTING, level)
-  })
+    write: (level: number) => saveSetting(WINDOW_ZOOM_LEVEL_SETTING, level)
+  }
+  installWindowZoom(mainWindow, zoomStore)
+  installZoomMenu(() => BrowserWindow.getFocusedWindow() ?? mainWindow, zoomStore)
 
   // Record THE main window so callers that lay a view over it (the browser
   // rail) attach to the right window, not a stray overlay from getAllWindows().

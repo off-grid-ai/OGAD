@@ -1,4 +1,4 @@
-import type { BrowserWindow, Input } from 'electron'
+import { Menu, type BrowserWindow, type Input, type MenuItemConstructorOptions } from 'electron'
 
 export type ZoomIntent = 'in' | 'out' | 'reset'
 
@@ -51,8 +51,48 @@ export function installWindowZoom(window: BrowserWindow, store: ZoomLevelStore):
     const intent = zoomIntentForInput(input)
     if (!intent) return
     event.preventDefault()
-    const level = nextZoomLevel(window.webContents.getZoomLevel(), intent)
-    window.webContents.setZoomLevel(level)
-    store.write(level)
+    applyZoom(window, store, intent)
   })
+}
+
+function applyZoom(window: BrowserWindow, store: ZoomLevelStore, intent: ZoomIntent): void {
+  const level = nextZoomLevel(window.webContents.getZoomLevel(), intent)
+  window.webContents.setZoomLevel(level)
+  store.write(level)
+}
+
+/**
+ * The macOS default menu already owns Cmd+- ("Zoom Out") and swallows it before the window sees the
+ * key, while its "Zoom In" sits on Cmd+Shift+= so Cmd+= fell through. Own the menu so every zoom key
+ * runs the same persisted zoom. The rest of the menu keeps the standard roles.
+ */
+export function installZoomMenu(
+  windowFor: () => BrowserWindow | undefined,
+  store: ZoomLevelStore
+): void {
+  const zoom = (intent: ZoomIntent) => () => {
+    const window = windowFor()
+    if (window) applyZoom(window, store, intent)
+  }
+  const template: MenuItemConstructorOptions[] = [
+    ...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
+    { role: 'fileMenu' },
+    { role: 'editMenu' },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { label: 'Zoom In', accelerator: 'CmdOrCtrl+=', click: zoom('in') },
+        { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: zoom('out') },
+        { label: 'Actual Size', accelerator: 'CmdOrCtrl+0', click: zoom('reset') },
+        { type: 'separator' },
+        { role: 'togglefullscreen' }
+      ]
+    },
+    { role: 'windowMenu' }
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
