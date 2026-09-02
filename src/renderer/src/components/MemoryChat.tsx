@@ -922,6 +922,17 @@ function WebTaskStepFeed(): React.JSX.Element | null {
   )
 }
 
+/** The main process rethrows the real reason; Electron wraps it as "Error invoking remote method". */
+function generationErrorContent(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error ?? '')
+  const message = raw
+    .replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 800)
+  return message || 'Sorry, something went wrong while generating a response.'
+}
+
 function MessageThinkingHeader({ message }: Readonly<{ message: ChatMessage }>): React.JSX.Element {
   if (message.role !== 'assistant') return <></>
   if (message.streaming) {
@@ -4444,15 +4455,7 @@ export function MemoryChat({
         return
       }
       console.error('RAG chat failed', e)
-      const errorMessage = e instanceof Error ? e.message : ''
-      const remoteErrorStart = errorMessage.indexOf('Remote text model')
-      const errorContent =
-        remoteErrorStart >= 0
-          ? errorMessage
-              .slice(remoteErrorStart, remoteErrorStart + 800)
-              .replace(/\s+/g, ' ')
-              .trim()
-          : 'Sorry, something went wrong while generating a response.'
+      const errorContent = generationErrorContent(e)
       // Update the streaming placeholder to show the error — never append a second bubble.
       const sid = activeStreamId
       setConvMessages(convId, (prev) => {

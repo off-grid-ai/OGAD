@@ -1020,23 +1020,12 @@ export function setupIPC() {
           }
         }
       } catch (e) {
-        // A full context window is the renderer's to handle: the shared chat session compacts
-        // the committed history and continues the turn. Swallowing it here as an answer string
-        // made compaction unreachable on Desktop.
-        if (e instanceof ModelServerError && e.kind === 'overflow') throw e
-        console.error('[RAG] LLM chat failed:', e)
-        return {
-          answer: 'Sorry, I could not generate a response right now.',
-          context: {
-            masterMemory: null,
-            memories,
-            messages,
-            summaries,
-            entities,
-            entityFacts,
-            unified: unifiedHits
-          }
-        }
+        // Every failure is the renderer's to render: the shared chat session compacts on a
+        // full context window and records any other error as a failed turn. Answering with a
+        // "Sorry" string here persisted a failure as if the model had said it.
+        if (!(e instanceof ModelServerError && e.kind === 'overflow'))
+          console.error('[RAG] LLM chat failed:', e)
+        throw e
       }
     }
   )

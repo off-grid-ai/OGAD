@@ -823,9 +823,10 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     await waitFor(() => expect(boundary.calls).toHaveLength(1))
     boundary.reject(0, new Error('local model unavailable'))
 
+    expect(await screen.findByText('local model unavailable')).toBeTruthy()
     expect(
-      await screen.findByText('Sorry, something went wrong while generating a response.')
-    ).toBeTruthy()
+      screen.queryByText('Sorry, something went wrong while generating a response.')
+    ).toBeNull()
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: /stop generating/i })).toBeNull()
     )
