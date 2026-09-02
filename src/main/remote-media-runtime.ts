@@ -15,13 +15,17 @@ import {
   remoteEmbeddingPayload,
   type GenerationRequest,
   type RemoteImageArtifact,
-  type RuntimeModel
+  type RuntimeModel,
+  remoteImageRequest,
+  parseRemoteImageResponse
 } from '@offgrid/models'
 import { getRemoteVisionServer } from './vision/remote-vision-server'
 
 export interface RemoteMediaConnection {
   endpoint: string
   apiKey: string
+  /** Decides the image transport (OpenRouter draws through chat completions). */
+  provider?: string
 }
 
 function connectionFor(model: RuntimeModel): RemoteMediaConnection {
@@ -121,6 +125,36 @@ export function createRemoteMediaRuntime(
       if (request.operation?.type !== 'image') throw new Error('An image operation is required.')
       const operation = request.operation
       const connection = resolveConnection(model)
+      if (!operation.sourceImage) {
+        const plan = remoteImageRequest({
+          provider: connection.provider,
+          endpoint: connection.endpoint,
+          model: model.id,
+          prompt: operation.prompt,
+          negativePrompt: operation.negativePrompt,
+          width: operation.width,
+          height: operation.height,
+          steps: operation.steps,
+          guidanceScale: operation.guidanceScale,
+          seed: operation.seed,
+          allowUnsafeMemoryOverride: operation.allowUnsafeMemoryOverride
+        })
+        return remoteRequest(
+          {
+            connection,
+            url: plan.url,
+            init: {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(plan.body)
+            },
+            request,
+            consume: async (response) =>
+              parseRemoteImageResponse(await response.json(), plan.transport)
+          },
+          fetcher
+        )
+      }
       const payload = remoteImageGenerationPayload({
         model: model.id,
         prompt: operation.prompt,
