@@ -1911,7 +1911,7 @@ below shows its own dots. One reply, one indicator.
 Add a small pin icon to the left of the Back control. Pinned keeps the sidebar open; unpinned returns
 it to open-on-hover. The state persists with the other UI preferences.
 
-## Desktop cannot show which model answered after a mid-turn fallback (open, 2026-09-02)
+## Desktop cannot show which model answered after a mid-turn fallback (RESOLVED 2026-09-02: `route`/`fallback` travel on rag:stream, the adapter re-emits them through the shared session, MemoryChat inserts the shared fallback notice; rag:chat returns the answering model; test 'publishes the shared fallback event')
 
 Remote Qwen 3.5 2B returned HTTP 502 while llama-server restarted; shared's GenerationService in
 the main process fell back to SmolLM2 135M (`allowFallback: true` in `src/main/ipc.ts` and
