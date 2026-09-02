@@ -1926,3 +1926,10 @@ and names `turn.result.model` in the meta line. Fix: extend the IPC stream contr
 generation's `route`/`fallback` events (model name + reason) and the finished result's model, have
 `ipc.ts` forward `events.fallback` on it, and let the adapter re-emit them through the session's
 events port so MemoryChat inserts `_fallbackNoticeText(...)_` exactly like the compaction notice.
+
+## Remote model server: only text and vision can be chosen (open, 2026-09-02)
+
+Settings > Remote model server offers one "Text and vision" selection. Shared's remote server
+record (`RemoteModalitySelections`) already carries image, transcription, and voice, and mobile's
+editor fills all four. Desktop should offer the same four, discovered from the server's model list,
+and route each modality through the shared selection service exactly as mobile does.
