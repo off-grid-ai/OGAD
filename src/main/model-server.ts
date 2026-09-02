@@ -870,7 +870,8 @@ async function handleImagesUnified(
     seed: typeof payload.seed === 'number' ? payload.seed : undefined,
     cfgScale: typeof payload.cfg_scale === 'number' ? payload.cfg_scale : undefined,
     model: typeof payload.model === 'string' ? payload.model : undefined,
-    strength: typeof payload.strength === 'number' ? payload.strength : undefined
+    strength: typeof payload.strength === 'number' ? payload.strength : undefined,
+    allowUnsafeMemoryOverride: payload.allow_unsafe_memory_override === true
   }
 
   // image-to-image: first input_reference becomes the init image.
