@@ -156,12 +156,10 @@ jobs:
         if: ${{ hashFiles('pro/tsconfig.json') != '' }}
         timeout-minutes: 6
         run: cd pro && npx tsc --noEmit -p tsconfig.json
-      # npm's Electron install hooks leave sqlite compiled for Electron's ABI. The
-      # Vitest process is plain Node, and some default integration tests open the
-      # real database, so put the native module on Node's ABI before that gate.
-      # The later DB journey script restores the Electron ABI in its EXIT trap.
-      - name: Rebuild SQLite for the Node test runner
-        run: npm rebuild better-sqlite3-multiple-ciphers
+      # The vitest scripts run under Electron's Node (scripts/vitest-electron-node.mjs), so the
+      # SQLite module keeps the Electron ABI that `postinstall` built. Rebuilding it for plain Node
+      # here made it fail to self-register under that runner. scripts/test-db.sh still swaps the ABI
+      # for its own Node runner and restores Electron's build in its EXIT trap.
       # This is the fast report, not the complete coverage measurement. DB-only
       # journeys run next and e2e can add coarse coverage later. Test failures still
       # block here; the aggregate new-code gate below owns the coverage decision.
