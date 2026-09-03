@@ -25,7 +25,6 @@ import { modelPackageIdentity, type TransferredModelManifest } from '@offgrid/sy
 import {
   artifactVerificationError,
   type LocalModelImportService,
-  type ModelActivationService,
   type ModelLibraryRemovalService,
   type ModelTransferRegistrationService,
   type ModelMetadataRepairCommandService,
@@ -59,7 +58,6 @@ import { desktopModelSelectionPersistence } from './model-selection-persistence'
 import {
   activeProjectorRepairService,
   localModelImportService,
-  modelActivationService,
   modelLibraryRemovalService,
   modelTransferRegistration,
   registerDesktopModelLibraryPorts,
@@ -72,6 +70,7 @@ import { MODEL_FILE_EXTENSION, isGgufFile } from '@offgrid/models'
 import {
   desktopActiveModalities,
   desktopModels,
+  modelsFailureMessage,
   selectDesktopModel
 } from './composition/application-access'
 
@@ -846,7 +845,7 @@ export async function getActiveModelIds(): Promise<string[]> {
  * transcription set that modality's default pick. Callers pass only the id and
  * never branch on kind. Adding a new modality needs zero caller changes.
  */
-async function resolveDesktopActivation(
+export async function resolveDesktopActivation(
   modelId: string,
   requestedKind?: string
 ): Promise<{ kind?: string; remote?: boolean; supportsRequestedKind?: boolean } | null> {
@@ -875,29 +874,24 @@ async function resolveDesktopActivation(
   return kind ? { kind, supportsRequestedKind } : null
 }
 
-export function desktopModelActivationPorts(): ConstructorParameters<
-  typeof ModelActivationService
->[0] {
-  return {
-    resolve: resolveDesktopActivation,
-    select: (modality, modelId) => selectDesktopModel(modality, modelId)
-  }
-}
-
-const modelActivation = (): ModelActivationService => modelActivationService()
-
-export function activateModel(
+export async function activateModel(
   modelId: string,
   requestedKind?: string
 ): Promise<{ success: boolean; error?: string }> {
-  return modelActivation().activate(modelId, requestedKind)
+  const outcome = await desktopModels.activate({ modelId, requestedKind })
+  return outcome.ok
+    ? { success: true }
+    : { success: false, error: modelsFailureMessage(outcome.failure) }
 }
 
-export function setActiveModalChoice(
+export async function setActiveModalChoice(
   kind: string,
   modelId: string | null
 ): Promise<{ success: boolean; error?: string }> {
-  return modelActivation().selectModal(kind, modelId)
+  const outcome = await desktopModels.activate({ modelId, requestedKind: kind })
+  return outcome.ok
+    ? { success: true }
+    : { success: false, error: modelsFailureMessage(outcome.failure) }
 }
 
 export function getActiveModalities(): { text: string | null } & Record<Modality, string | null> {
@@ -1135,7 +1129,6 @@ export function desktopLocalModelImportPorts(): ConstructorParameters<
 registerDesktopModelLibraryPorts({
   removal: desktopModelLibraryRemovalPorts,
   repair: desktopActiveProjectorRepairPorts,
-  activation: desktopModelActivationPorts,
   localImport: desktopLocalModelImportPorts,
   transfer: desktopModelTransferRegistrationPorts
 })

@@ -2,7 +2,6 @@
 // runtime ports. Desktop registers I/O factories; this root owns only Shared service construction.
 import {
   LocalModelImportService,
-  ModelActivationService,
   ModelLibraryRemovalService,
   ModelMetadataRepairCommandService,
   ModelTransferRegistrationService
@@ -20,7 +19,6 @@ interface DesktopModelLibraryPortFactories {
   repair: () => ConstructorParameters<
     typeof ModelMetadataRepairCommandService<DesktopProjectorRepair>
   >[0]
-  activation: () => ConstructorParameters<typeof ModelActivationService>[0]
   localImport: () => ConstructorParameters<typeof LocalModelImportService>[0]
   transfer: (
     dir: () => string,
@@ -46,7 +44,6 @@ export const modelLibraryRemovalService = once(
 export const activeProjectorRepairService = once(
   () => new ModelMetadataRepairCommandService<DesktopProjectorRepair>(ports().repair())
 )
-export const modelActivationService = once(() => new ModelActivationService(ports().activation()))
 export const localModelImportService = once(
   () => new LocalModelImportService(ports().localImport())
 )

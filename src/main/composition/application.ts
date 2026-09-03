@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { createOffGridApplication } from '@offgrid/application'
 import { DEFAULT_RAG_EMBEDDING_DIMENSION } from '@offgrid/rag'
 import { desktopModelWorkspace } from '../model-services'
+import { resolveDesktopActivation } from '../models-manager'
 import { embeddings } from '../embeddings'
 import { desktopExtraction } from '../rag/extractors'
 import { desktopVectorStore, projectExists } from '../rag/store'
@@ -17,7 +18,11 @@ import { createDesktopUsePorts, observeActionOutcome } from '../actions/use-runt
 import { createDesktopGuidedSetupPorts } from './guided-setup'
 
 export const desktopApplication = createOffGridApplication({
-  models: { workspace: desktopModelWorkspace, guidedSetup: createDesktopGuidedSetupPorts() },
+  models: {
+    workspace: desktopModelWorkspace,
+    guidedSetup: createDesktopGuidedSetupPorts(),
+    activation: { resolve: resolveDesktopActivation }
+  },
   rag: {
     store: desktopVectorStore,
     embeddings: {
