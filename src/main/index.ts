@@ -142,8 +142,6 @@ installApplicationShutdown(app, applicationShutdown, ({ owner, error }) =>
 registerCoreShutdownOwners(applicationShutdown, {
   stopGateway: stopModelServer,
   stopMediaServer,
-  stopModelRuntimes: () =>
-    import('./model-services').then(({ desktopModelServices }) => desktopModelServices.shutdown()),
   stopModelDownloads: shutdownModelDownloads
 })
 
@@ -279,11 +277,13 @@ app.whenReady().then(async () => {
     // startModelServer is async (it scans for a free port); a try/catch can't catch its rejection,
     // so handle it on the promise itself.
     startModelServer().catch((e) => console.error('[gateway] start failed', e))
-    void import('./model-services').then(({ desktopModelServices }) =>
-      desktopModelServices
-        .warmText()
-        .catch((err) => console.error('[gateway] LLM init failed', err))
-    )
+    void import('./composition/application')
+      .then(async ({ desktopApplication, startDesktopApplication }) => {
+        await startDesktopApplication()
+        const outcome = await desktopApplication.models.prepare('text')
+        if (!outcome.ok) throw new Error(outcome.failure.kind)
+      })
+      .catch((err) => console.error('[gateway] LLM init failed', err))
     return // skip window, tray, IPC, capture, connectors — gateway only
   }
 
@@ -468,8 +468,13 @@ app.whenReady().then(async () => {
 
   // 3. Initialize LLM (Async)
   // We don't await this to avoid blocking window creation
-  import('./model-services').then(({ desktopModelServices }) => {
-    desktopModelServices.warmText().catch((err) => console.error('Failed to init LLM:', err))
+  import('./composition/application-access').then(({ desktopModels, modelsFailureMessage }) => {
+    desktopModels
+      .prepare('text')
+      .then((outcome) => {
+        if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
+      })
+      .catch((err) => console.error('Failed to init LLM:', err))
   })
 
   createWindow()
@@ -517,8 +522,8 @@ app.on('before-quit', (event) => {
       /* best-effort — never block quit */
     }
     try {
-      const { desktopModelServices } = await import('./model-services')
-      await desktopModelServices.shutdown()
+      const { stopDesktopApplication } = await import('./composition/application')
+      await stopDesktopApplication()
     } catch {
       /* best-effort — quit regardless so the app never hangs on exit */
     }

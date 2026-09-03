@@ -19,7 +19,7 @@ import { createProject, deleteProject } from './rag/store'
 import { saveArtifact, listArtifacts, deleteArtifact } from './artifacts'
 import { saveSkill } from './skills'
 import { addConnector, listConnectors } from './mcp'
-import { desktopModelServices } from './model-services'
+import { desktopModels, modelsFailureMessage } from './composition/application-access'
 import { generateDesktopText } from './desktop-generation'
 import { generateImage, listImageModels } from './imagegen'
 import { ragService } from './rag/index'
@@ -175,7 +175,8 @@ export async function seedDemo(live = false): Promise<void> {
     })
     if (live) {
       try {
-        await desktopModelServices.warmText()
+        const outcome = await desktopModels.prepare('text')
+        if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
       } catch (e) {
         console.error('[seed] llm init', e)
       }

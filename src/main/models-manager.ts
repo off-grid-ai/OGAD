@@ -46,13 +46,16 @@ import {
   specialistReclassificationModality,
   transferredProjectorRepair,
   type CatalogEntry,
+  type ModelCapabilities,
+  type ModelControlApplicationSnapshot,
+  type ModelControlCatalogModel,
   type ModelModality,
   type Modality,
   type VisionStatus,
   isLocalLibraryModelId
 } from '@offgrid/models'
 import type { RemoteVisionInventoryModel } from '../shared/remote-vision-server'
-import { desktopModelServices } from './model-service-access'
+import type { ComputerUseActiveModelProjection } from '../shared/computer-use-settings'
 import { registerDesktopModelManagerPorts } from './model-manager-ports'
 import { desktopModelSelectionPersistence } from './model-selection-persistence'
 import {
@@ -66,10 +69,57 @@ import { platformFetch } from '@offgrid/models/fetch'
 import { desktopImageRuntimeIdentity } from './models/image-runtime-identity'
 import { LocalModelRegistry, type LocalModelRegistryEntry } from './models/local-model-registry'
 import { MODEL_FILE_EXTENSION, isGgufFile } from '@offgrid/models'
-import { desktopModels } from './composition/application-access'
+import {
+  desktopActiveModalities,
+  desktopModels,
+  selectDesktopModel
+} from './composition/application-access'
 
 export { DOWNLOAD_INTERRUPTED_ERROR }
 export type { DownloadProgress, ProgressCb }
+
+type DesktopModelControlCatalogModel = Omit<ModelControlCatalogModel, 'files'> & {
+  files?: Array<{ name: string; role?: string }>
+  remoteModelId?: string
+  capabilities?: ModelCapabilities
+}
+
+function isModelControlCatalogModel(value: unknown): value is DesktopModelControlCatalogModel {
+  if (!value || typeof value !== 'object') return false
+  if (
+    !('id' in value) ||
+    typeof value.id !== 'string' ||
+    !('name' in value) ||
+    typeof value.name !== 'string' ||
+    !('kind' in value) ||
+    typeof value.kind !== 'string'
+  ) {
+    return false
+  }
+  const files = 'files' in value ? value.files : undefined
+  return (
+    files === undefined ||
+    (Array.isArray(files) &&
+      files.every(
+        (file) =>
+          Boolean(file) &&
+          typeof file === 'object' &&
+          'name' in file &&
+          typeof file.name === 'string'
+      ))
+  )
+}
+
+function requireModelControlCatalogModels(
+  values: readonly unknown[]
+): DesktopModelControlCatalogModel[] {
+  return values.map((value, index) => {
+    if (!isModelControlCatalogModel(value)) {
+      throw new Error(`Model-control catalog entry ${String(index)} is invalid.`)
+    }
+    return value
+  })
+}
 
 function activeModelFile(): string {
   return path.join(llm.getModelsDir(), 'active-model.json')
@@ -273,6 +323,31 @@ export async function getCatalog(): Promise<{ kinds: readonly string[]; models: 
   return { kinds: MODEL_KINDS, models: [...models, ...legacySelected, ...remoteModels] }
 }
 
+/** Combine host catalog facts with the canonical Shared model-control projection. */
+export async function getModelControlSnapshot(): Promise<
+  ModelControlApplicationSnapshot<
+    DesktopModelControlCatalogModel,
+    ComputerUseActiveModelProjection
+  >
+> {
+  await desktopModels.refresh()
+  const [catalog, installed, computerUse] = await Promise.all([
+    getCatalog(),
+    listInstalled(),
+    import('./vision/vision-task-model-strategy').then((module) =>
+      module.getComputerUseActiveModelProjection()
+    )
+  ])
+  return desktopModels.controlSnapshot({
+    catalog: {
+      kinds: catalog.kinds,
+      models: requireModelControlCatalogModels(catalog.models)
+    },
+    installed,
+    computerUse
+  })
+}
+
 export interface ModelIdentity {
   modelId: string
   modelName: string
@@ -473,7 +548,7 @@ interface DesktopRemovalTarget extends ModelLibraryRemovalTarget {
 }
 
 function selectedModelRoutes(): Partial<Record<ModelModality, string | null>> {
-  const active = desktopModelServices.activeModalities()
+  const active = desktopActiveModalities()
   return {
     text: active.text,
     computer_use: active.computer_use,
@@ -568,7 +643,7 @@ export function desktopModelLibraryRemovalPorts(): ConstructorParameters<typeof 
       removeDownloaded(llm.getModelsDir(), target.modelId)
     }
   },
-  clearSelection: (modality) => desktopModelServices.select(modality, null)
+  clearSelection: (modality) => selectDesktopModel(modality, null)
 }
 }
 
@@ -661,7 +736,7 @@ export function projectActiveTextModelSelection(
 
 /** Set the chat LLM through the shared selection owner. */
 export function setActiveModel(modelId: string): Promise<{ success: boolean; error?: string }> {
-  return desktopModelServices.select('text', modelId)
+  return selectDesktopModel('text', modelId)
 }
 
 /** Load the selected Computer Use policy into the shared llama.cpp runtime for one supervised run. */
@@ -700,7 +775,7 @@ export async function reconcileActiveModelClassification(): Promise<boolean> {
     const migrated = await setActiveModalChoice(modality, activeId)
     if (!migrated.success) return false
   }
-  const cleared = await desktopModelServices.select('text', null)
+  const cleared = await selectDesktopModel('text', null)
   if (!cleared.success) return false
   return true
 }
@@ -760,7 +835,7 @@ export function desktopActiveProjectorRepairPorts(): ConstructorParameters<
   resolve: resolveActiveModelProjectorRepair,
   persist: (repair) => desktopModelSelectionPersistence.projectLegacyTextConfig(repair),
   reload: () => llm.reloadModel(),
-  refresh: () => desktopModelServices.refresh().then(() => undefined)
+  refresh: () => desktopModels.refresh()
 }
 }
 
@@ -778,7 +853,7 @@ export function reconcileActiveModelProjector(): Promise<boolean> {
  * per-entry active computation in getStorageInfo (one definition of "active").
  */
 export async function getActiveModelIds(): Promise<string[]> {
-  return desktopModelServices.activeModelIds()
+  return [...desktopModels.activeModelIds()]
 }
 
 /**
@@ -819,7 +894,7 @@ async function resolveDesktopActivation(
 export function desktopModelActivationPorts(): ConstructorParameters<typeof ModelActivationService>[0] {
   return {
   resolve: resolveDesktopActivation,
-  select: (modality, modelId) => desktopModelServices.select(modality, modelId)
+  select: (modality, modelId) => selectDesktopModel(modality, modelId)
 }
 }
 
@@ -840,7 +915,7 @@ export function setActiveModalChoice(
 }
 
 export function getActiveModalities(): { text: string | null } & Record<Modality, string | null> {
-  return desktopModelServices.activeModalities()
+  return desktopActiveModalities()
 }
 
 // ---------------------------------------------------------------------------
@@ -1122,7 +1197,7 @@ export async function getStorageInfo(): Promise<StorageInfo> {
   // chosen FILENAME, not the catalog id — so an image/voice/STT model is "active"
   // when its primary file matches. Without this, only the chat LLM ever shows
   // active and image models can't be activated from the UI.
-  const selected = desktopModelServices.activeModalities()
+  const selected = desktopActiveModalities()
   const modals: Record<Modality, string | null> = {
     computer_use: selected.computer_use,
     image: selected.image,

@@ -23,7 +23,7 @@ import { getRemoteVisionServer, desktopRemoteServerPorts } from './vision/remote
 import { peekRemoteReasoningMetadata, remoteReasoningMetadata } from './llm/remote-chat'
 import {
   DesktopLocalGenerationAdapter,
-  DesktopGenerationObservations,
+  desktopGenerationObservations,
   DesktopRemoteGenerationAdapter,
   DesktopImageGenerationAdapter,
   DesktopVoiceGenerationAdapter,
@@ -359,7 +359,7 @@ export function createDesktopModelServices(
         const known = peekRemoteReasoningMetadata(connection)
         if (!known) {
           void remoteReasoningMetadata(connection)
-            .then(() => desktopModelServices.refresh())
+            .then(() => desktopModels.refresh())
             .catch(() => undefined)
         }
         return known
@@ -391,7 +391,7 @@ export function createDesktopModelServices(
   }
   const memory = workspace.residency
   const generation = workspace.generation
-  const generationObservations = new DesktopGenerationObservations()
+  const generationObservations = desktopGenerationObservations
   const localGenerationAdapters = new Map<string, DesktopLocalGenerationAdapter>()
   for (const adapterId of [
     'desktop.llama',

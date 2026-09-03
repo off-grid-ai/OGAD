@@ -48,7 +48,7 @@ import { proposalDeckSystemHint, proposalDeckService } from './proposal-deck/ser
 import { callHookAsync, HOOKS } from './bootstrap/hookRegistry'
 import { DEFAULT_MAX_TOOL_CALLS } from '@offgrid/models'
 import { generateDesktopMessages } from './desktop-generation'
-import { desktopModelServices } from './model-service-access'
+import { desktopGenerationObservations } from './model-generation-adapters'
 import type { GenerationMetrics } from '../shared/generation-metrics'
 import {
   desktopToolCallLimit,
@@ -692,7 +692,7 @@ export async function toolChat(
     })
     return {
       ...imageRequests.project({ answer: result.content.trim(), toolCalls, unified }),
-      metrics: desktopModelServices.generationObservations.takeMetrics(turnId)
+      metrics: desktopGenerationObservations.takeMetrics(turnId)
     }
   } catch (error) {
     if (opts.signal?.aborted) {

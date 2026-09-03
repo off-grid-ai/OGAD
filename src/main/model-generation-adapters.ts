@@ -115,6 +115,9 @@ export class DesktopGenerationObservations {
   }
 }
 
+/** Desktop-only runtime metrics. Model behavior and state remain in ModelsFacade. */
+export const desktopGenerationObservations = new DesktopGenerationObservations()
+
 export class DesktopLocalGenerationAdapter extends DesktopGenerationAdapter {
   constructor(
     observations: DesktopGenerationObservations,

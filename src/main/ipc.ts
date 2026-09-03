@@ -96,6 +96,13 @@ import { readImages } from './llm/read-images'
 import { generateDesktopMessages, generateDesktopText } from './desktop-generation'
 import { ModelServerError } from './llm/http-post'
 import { mimeForExt } from './mime'
+import {
+  desktopModels,
+  generateWithDesktopModels,
+  selectDesktopModel,
+  unloadDesktopModel
+} from './composition/application-access'
+import { desktopGenerationObservations } from './model-generation-adapters'
 // import { llm } from './llm'; // Moved to dynamic import to support ESM
 
 type ResponseGenerationResult = NormalizedTextResponse<GenerationMetrics>
@@ -220,9 +227,7 @@ async function streamAnswer(
   images: string[] = []
 ): Promise<ResponseGenerationResult> {
   const { llm } = await import('./llm')
-  const { desktopModelServices } = await import('./model-services')
-
-  await desktopModelServices.refresh()
+  await desktopModels.refresh()
   const turnId = streamId ?? `desktop-chat:${randomUUID()}`
   const request = (signal?: AbortSignal): GenerationRequest => ({
     messages: generationMessages(prompt, images, llm.getSettings().systemPrompt ?? ''),
@@ -245,7 +250,7 @@ async function streamAnswer(
       content,
       finishReason,
       maxTokens: llm.generationMaxTokens(),
-      metrics: desktopModelServices.generationObservations.takeMetrics(turnId)
+      metrics: desktopGenerationObservations.takeMetrics(turnId)
     }),
     ...(model ? { model } : {})
   })
@@ -254,8 +259,7 @@ async function streamAnswer(
   // observer, so finish metadata and the configured cap cannot diverge by caller.
   if (!streamId || !event?.sender) {
     // Shared generation owns model admission, residency, and fallback for this turn.
-    return desktopModelServices.generation
-      .generate(request())
+    return generateWithDesktopModels(request())
       .then((result) => response(result.content, result.finishReason, result.model))
   }
 
@@ -267,7 +271,7 @@ async function streamAnswer(
     // Keep the controller registered for the complete shared generation operation.
     let partialContent = ''
     try {
-      const result = await desktopModelServices.generation.generate(request(controller.signal), {
+      const result = await generateWithDesktopModels(request(controller.signal), {
         chunk: (chunk) => {
           const deltas = [
             ...(chunk.reasoning ? [{ text: chunk.reasoning, kind: 'reasoning' as const }] : []),
@@ -1256,14 +1260,12 @@ export function setupIPC() {
   ipcMain.handle('runtime:residency:get', () => getResidency())
   ipcMain.handle('runtime:residency:set', async (_e, modality: Modality, mode: ResidencyMode) => {
     const residency = setResidencyMode(modality, mode)
-    const { desktopModelServices } = await import('./model-services')
-    await desktopModelServices.refresh()
+    await desktopModels.refresh()
     return residency
   })
   // Unload one modality's model from memory now (the "free RAM" button). Goes through
   // the same evict() seam as residency/shutdown; the engine reloads on next use.
   ipcMain.handle('runtime:unload', async (_e, modality: Modality) => {
-    const { desktopModelServices } = await import('./model-services')
     const sharedModality =
       modality === 'llm'
         ? 'text'
@@ -1272,7 +1274,7 @@ export function setupIPC() {
           : modality === 'tts'
             ? 'voice'
             : modality
-    const freed = await desktopModelServices.unload(sharedModality)
+    const freed = await unloadDesktopModel(sharedModality)
     console.log(`[runtime] unload ${modality}: ${freed ? 'freed' : 'nothing registered'}`)
     return freed
   })
@@ -1472,7 +1474,7 @@ export function setupIPC() {
   // wrappers; the download one adds a renderer progress broadcast.
   ipcMain.handle('models:catalog', () => import('./models-manager').then((m) => m.getCatalog()))
   ipcMain.handle('models:control-snapshot', () =>
-    import('./model-services').then((m) => m.desktopModelServices.modelControlSnapshot())
+    import('./models-manager').then((m) => m.getModelControlSnapshot())
   )
   ipcMain.handle('models:vision-status', () =>
     import('./models-manager').then((m) => m.getVisionStatuses())
@@ -1498,8 +1500,7 @@ export function setupIPC() {
   )
 
   ipcMain.handle('models:set-active', async (_, modelId: string) => {
-    const { desktopModelServices } = await import('./model-services')
-    return desktopModelServices.select('text', modelId)
+    return selectDesktopModel('text', modelId)
   })
   // Single activation seam: route any model to the right backend by its kind.
   ipcMain.handle('models:activate', (_, modelId: string, requestedKind?: string) =>
@@ -1517,8 +1518,7 @@ export function setupIPC() {
     if (!modality) {
       return { success: false, error: 'use models:set-active for the chat LLM (text/vision)' }
     }
-    const { desktopModelServices } = await import('./model-services')
-    return desktopModelServices.select(modality, modelId)
+    return selectDesktopModel(modality, modelId)
   })
   ipcMain.handle('models:active-modalities', () =>
     import('./models-manager').then((m) => m.getActiveModalities())
@@ -1926,8 +1926,7 @@ export function setupIPC() {
   // Cleanly unload the chat engine so it stops holding the model port (frees it for LM Studio /
   // another tool without force-quitting the app). Returns whether the port was actually freed.
   ipcMain.handle('llm:unload', async () => {
-    const { desktopModelServices } = await import('./model-services')
-    return desktopModelServices.unload('text')
+    return unloadDesktopModel('text')
   })
 
   // --- Canvas / artifacts sandbox runtime ---------------------------------

@@ -8,7 +8,8 @@ import type {
   GenerationEvents,
   GenerationLifecycleEvent,
   GenerationRequest,
-  GenerationResult
+  GenerationResult,
+  ModelModality
 } from '@offgrid/models'
 
 let application: OffGridApplication | null = null
@@ -58,6 +59,41 @@ export class DesktopModelsOperationError extends Error {
   ) {
     super(modelsFailureMessage(failure))
     this.name = 'DesktopModelsOperationError'
+  }
+}
+
+export async function selectDesktopModel(
+  modality: ModelModality,
+  modelId: string | null
+): Promise<{ success: boolean; error?: string }> {
+  const outcome = await desktopModels.select({ modality, modelId })
+  return outcome.ok
+    ? { success: true }
+    : { success: false, error: modelsFailureMessage(outcome.failure) }
+}
+
+export async function unloadDesktopModel(
+  modality: ModelModality,
+  keepSelection = false
+): Promise<boolean> {
+  const outcome = await desktopModels.unload({ modality, keepSelection })
+  if (!outcome.ok) throw new DesktopModelsOperationError(outcome.failure)
+  return outcome.value
+}
+
+export function desktopActiveModalities(): {
+  text: string | null
+  computer_use: string | null
+  image: string | null
+  speech: string | null
+  transcription: string | null
+} {
+  return {
+    text: desktopModels.activeModelId('text'),
+    computer_use: desktopModels.activeModelId('computer_use'),
+    image: desktopModels.activeModelId('image'),
+    speech: desktopModels.activeModelId('voice'),
+    transcription: desktopModels.activeModelId('transcription')
   }
 }
 
