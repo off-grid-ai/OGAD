@@ -1,19 +1,21 @@
 /**
- * The computer_use tiering (R5 T1e): try the cheapest rail that can actually
- * see the controls, and only pay for vision when it can't. Order is
- *
- *   accessibility (this rail, free, any chat model) -> vision (grounder, RAM).
- *
- * The routing snapshot chooses the first rail. A control-rich AX window starts
- * with Accessibility; a dead-AX window starts with vision. If AX cannot make
- * progress, the same action then moves to vision. Duplicate-action guards in
- * both rails prevent the recovery pass from repeating unsafe input.
- *
- * Pure and injected: the AX host (routing + run) and the vision executor are
- * passed in, so the tiering is unit-tested without a screen. The wiring in
- * use-runtime supplies the live hosts.
+ * The computer_use tiering: try the cheapest rail that can actually see the controls, and only pay
+ * for vision when it can't (accessibility -> vision). Which rail starts, whether vision may recover,
+ * and how the action maps to a task are `@offgrid/automation` / `@offgrid/use` rules; the AX host
+ * (routing + run) and the vision executor are injected so the tiering runs without a screen.
  */
-import type { ActionRecord, ExecuteResult } from '@offgrid/use'
+import {
+  chooseComputerUseRail,
+  parseForcedComputerUseRail,
+  type ForcedComputerUseRail
+} from '@offgrid/automation'
+import {
+  taskExecuteResult,
+  taskGoalFromAction,
+  taskJourneyFromAction,
+  type ActionRecord,
+  type ExecuteResult
+} from '@offgrid/use'
 import { axRailViable } from './ax-router'
 import type { AxRouting } from './ax-host'
 import type { ElementTaskResult } from './ax-agent'
@@ -34,20 +36,8 @@ export interface ComputerTaskTiers {
   visionExecute(action: ActionRecord): Promise<ExecuteResult>
 }
 
-/** Extract the task goal the same way the vision rail does. */
-function goalOf(action: ActionRecord): string {
-  const args = action.args as Record<string, unknown>
-  return typeof args.goal === 'string' && args.goal.trim() ? args.goal : action.intent
-}
-
-/** Force a specific rail for A/B measurement. 'auto' (default) is the real
- *  tiered behaviour; 'ax'/'vision' pin the rail so the same task can be timed on
- *  each. Parsed from OFFGRID_COMPUTER_RAIL at the wiring layer. */
-export type ForcedRail = 'ax' | 'vision' | 'auto'
-
-export function parseForcedRail(value: string | undefined): ForcedRail {
-  return value === 'ax' || value === 'vision' ? value : 'auto'
-}
+export type ForcedRail = ForcedComputerUseRail
+export const parseForcedRail = parseForcedComputerUseRail
 
 export interface ComputerTaskOptions {
   /** Pin the rail (A/B). Default 'auto' = tiered. */
@@ -55,8 +45,7 @@ export interface ComputerTaskOptions {
   now?: () => number
 }
 
-/** Build the tiered computer_use executor for the DeviceController's 'vision'
- *  rail. Tries accessibility first, then vision - unless a rail is forced. */
+/** Build the tiered computer_use executor for the DeviceController's 'vision' rail. */
 export function makeComputerTaskExecutor(
   tiers: ComputerTaskTiers,
   opts: ComputerTaskOptions = {}
@@ -64,46 +53,43 @@ export function makeComputerTaskExecutor(
   const forced = opts.forcedRail ?? 'auto'
   const now = opts.now ?? Date.now
   return async (action) => {
-    const goal = goalOf(action)
+    const goal = taskGoalFromAction(action)
     // 'vision' forces the grounder rail: skip the AX read entirely.
     const routing = forced === 'vision' ? null : await tiers.routingSnapshot(goal)
-    const viable = routing !== null && axRailViable(routing.snapshot)
-    // 'ax' drives via AX whenever a target app resolved (even below the
-    // richness threshold); 'auto' requires it viable.
-    const useAx = routing !== null && (forced === 'ax' || viable)
+    const choice = chooseComputerUseRail(
+      forced,
+      routing ? { resolved: true, viable: axRailViable(routing.snapshot) } : null
+    )
     console.log(
       `[computer-task] rail=${forced} goal="${goal}" routing=${
         routing ? `${routing.app}/${routing.snapshot.elements.length} elements` : 'none'
-      } axViable=${viable} -> ${useAx ? 'AX' : 'grounder-vision'}`
+      } -> ${choice.rail === 'accessibility' ? 'AX' : 'grounder-vision'}`
     )
-    if (useAx) {
-      const t0 = now()
-      const result = await tiers.runAx(
-        goal,
-        action.id,
-        action.sourceRef ?? action.id,
-        routing.app,
-        routing.snapshot,
-        forced !== 'ax'
-      )
-      const ms = now() - t0
-      const stepCount = result.steps.length
-      console.log(
-        `[computer-task] AX rail: ok=${result.ok} steps=${stepCount} wallMs=${ms} summary="${result.summary}"`
-      )
-      if (!result.ok) {
-        if (forced === 'ax') return { ok: false, detail: result.summary }
-        console.log(
-          `[computer-task] AX could not finish; using visual recovery for action=${action.id}`
-        )
-        return tiers.visionExecute(action)
-      }
-      // A GUI action has no generic undo; the action id is the effect handle.
-      return { ok: true, effectId: action.id }
+    if (choice.rail === 'vision' || !routing) {
+      // Dead-AX surface, no named app, or forced: the grounder-vision rail. The
+      // wiring wraps this with the on-demand grounder swap + its own timing.
+      console.log('[computer-task] using the grounder-vision rail')
+      return tiers.visionExecute(action)
     }
-    // Dead-AX surface, no named app, or forced: the grounder-vision rail. The
-    // wiring wraps this with the on-demand grounder swap + its own timing.
-    console.log('[computer-task] using the grounder-vision rail')
-    return tiers.visionExecute(action)
+    const t0 = now()
+    const result = await tiers.runAx(
+      goal,
+      action.id,
+      taskJourneyFromAction(action),
+      routing.app,
+      routing.snapshot,
+      choice.allowVisionRecovery
+    )
+    console.log(
+      `[computer-task] AX rail: ok=${result.ok} steps=${result.steps.length} wallMs=${now() - t0} summary="${result.summary}"`
+    )
+    if (!result.ok && choice.allowVisionRecovery) {
+      console.log(
+        `[computer-task] AX could not finish; using visual recovery for action=${action.id}`
+      )
+      return tiers.visionExecute(action)
+    }
+    // A GUI action has no generic undo; the action id is the effect handle.
+    return taskExecuteResult(action, { ok: result.ok, summary: result.summary })
   }
 }

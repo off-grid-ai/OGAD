@@ -149,7 +149,7 @@ function attachCdp(view: WebContentsView): CdpTransport {
 class BrowserHost implements BrowserRailHost {
   private readonly sessions = new BrowserSessionStore<WebContentsView>()
   private readonly history = new BrowserHistoryStore(getDB())
-  private readonly runOwners = new BrowserJourneyRunOwners()
+  private readonly runOwners = new BrowserJourneyRunOwners<VisionGuard>()
   private readonly taskPointers = new Map<string, BrowserPointerEvent>()
   private region: Rect | null = null
   /** Latest rect per hosting surface. The painted region is the highest-priority entry present. */

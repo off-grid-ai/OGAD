@@ -1,4 +1,4 @@
-import type { TaskExecutionPlan } from '../../shared/task-execution-plan'
+import type { TaskExecutionPlan } from '@offgrid/automation'
 import type { VisionGuard } from '../vision/vision-guard'
 import type { BrowserDriver } from './browser-driver'
 import type { PlaywrightMcpSession } from './playwright-mcp-session'

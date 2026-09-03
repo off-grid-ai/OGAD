@@ -66,14 +66,8 @@ export async function projectPlaywrightPointer(
   }
 }
 
-/** Sensitive entry stays with the user even if the model fails to request HITL. */
-export function isPrivateSemanticTarget(decision: SemanticDecision, snapshot: string): boolean {
-  if (decision.action !== 'type' || !decision.ref) return false
-  const line = snapshot.split('\n').find((candidate) => candidate.includes(`[ref=${decision.ref}]`))
-  return /password|passcode|one[- ]?time|verification code|otp|captcha|card number|cvv|cvc/i.test(
-    `${decision.element ?? ''} ${line ?? ''}`
-  )
-}
+/** The private-entry rule is `@offgrid/automation`'s; re-exported for this rail's callers. */
+export { isPrivateSemanticTarget } from '@offgrid/automation'
 
 function requiredRef(decision: SemanticDecision): { element: string; target: string } {
   const target = requiredValue(decision.ref, 'Playwright reference')

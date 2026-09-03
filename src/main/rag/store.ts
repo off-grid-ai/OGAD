@@ -9,8 +9,17 @@ import { deleteArtifactsForProject } from '../artifacts'
 import { CORE_SYNC_ENTITIES, emitSyncMutation } from '../sync-mutation'
 import { emitKnowledgeDocumentMutation } from '../sync-knowledge-document'
 import { randomUUID } from 'crypto'
-import type { VectorStore, ChunkCandidate } from '@offgrid/rag'
-import type { MediaKind, Project, RagDocument } from '@offgrid/rag'
+import {
+  MEMORY_CANDIDATE_LIMIT,
+  memoryChunkCandidate,
+  parseStoredEmbedding,
+  projectIncludesMemory as projectIncludesMemoryRule,
+  type ChunkCandidate,
+  type MediaKind,
+  type Project,
+  type RagDocument,
+  type VectorStore
+} from '@offgrid/rag'
 
 let migrated = false
 
@@ -79,23 +88,13 @@ export function ensureRagStoreSchema(): void {
   migrated = true
 }
 
-function parseEmbedding(s: string | null): number[] {
-  if (!s) return []
-  try {
-    const v = JSON.parse(s)
-    return Array.isArray(v) ? v : []
-  } catch {
-    return []
-  }
-}
-
-/** Whether a project folds captured memories into its KB (default on). */
+/** Whether a project folds captured memories into its KB: its stored flag, else the shared default. */
 export function projectIncludesMemory(projectId: string): boolean {
   ensureRagStoreSchema()
   const row = getDB().prepare('SELECT include_memory FROM projects WHERE id = ?').get(projectId) as
     | { include_memory: number }
     | undefined
-  return row ? row.include_memory === 1 : true
+  return projectIncludesMemoryRule(row ? row.include_memory === 1 : undefined)
 }
 
 export const desktopVectorStore: VectorStore = {
@@ -156,7 +155,7 @@ export const desktopVectorStore: VectorStore = {
       embedding: string
     }[]
     for (const r of rows) {
-      const embedding = parseEmbedding(r.embedding)
+      const embedding = parseStoredEmbedding(r.embedding)
       if (embedding.length)
         out.push({
           docId: r.docId,
@@ -172,19 +171,12 @@ export const desktopVectorStore: VectorStore = {
       const mems = db
         .prepare(
           `SELECT id, content, embedding FROM memories
-           WHERE embedding IS NOT NULL AND embedding != '[]' LIMIT 2000`
+           WHERE embedding IS NOT NULL AND embedding != '[]' LIMIT ?`
         )
-        .all() as { id: number; content: string; embedding: string }[]
+        .all(MEMORY_CANDIDATE_LIMIT) as { id: number; content: string; embedding: string }[]
       for (const m of mems) {
-        const embedding = parseEmbedding(m.embedding)
-        if (embedding.length)
-          out.push({
-            docId: -m.id,
-            name: 'Captured memory',
-            content: m.content,
-            position: 0,
-            embedding
-          })
+        const embedding = parseStoredEmbedding(m.embedding)
+        if (embedding.length) out.push(memoryChunkCandidate({ id: m.id, content: m.content, embedding }))
       }
     }
 
