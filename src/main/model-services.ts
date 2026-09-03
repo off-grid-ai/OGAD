@@ -746,9 +746,21 @@ export function createDesktopModelServices(
         )
       ])
       const activeTextCapabilities = llm.active('text').model?.capabilities ?? null
+      // Every modality's active id is projected onto the catalog's id space (a remote route
+      // becomes its catalog entry), so the panel marks and picks remote models like local ones.
+      const projectCatalogId = (selectedId: string | null): string | null => {
+        try {
+          return projectActiveTextCatalogId(catalog.models, selectedId)
+        } catch {
+          return selectedId
+        }
+      }
       const active = {
-        ...runtimeActive,
-        text: projectActiveTextCatalogId(catalog.models, runtimeActive.text)
+        text: projectActiveTextCatalogId(catalog.models, runtimeActive.text),
+        computer_use: projectCatalogId(runtimeActive.computer_use),
+        image: projectCatalogId(runtimeActive.image),
+        speech: projectCatalogId(runtimeActive.speech),
+        transcription: projectCatalogId(runtimeActive.transcription)
       }
       const activeIds = [
         ...new Set(Object.values(active).filter((id): id is string => Boolean(id)))
