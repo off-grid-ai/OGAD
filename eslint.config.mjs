@@ -41,7 +41,14 @@ const typedDeadBranchWarn = {
 const modelBoundaryWarn = {
   name: 'model facade boundary (warn ratchet)',
   files: ['src/**/*.{ts,tsx}', 'pro/**/*.{ts,tsx}'],
-  ignores: ['**/*.{test,spec,dbtest}.{ts,tsx}', '**/__tests__/**', '**/*.d.ts'],
+  // The composition root is the ONE place shared services are constructed with this app's ports.
+  ignores: [
+    '**/*.{test,spec,dbtest}.{ts,tsx}',
+    '**/__tests__/**',
+    '**/*.d.ts',
+    'src/main/model-services.ts',
+    'src/main/composition/**'
+  ],
   plugins: { '@typescript-eslint': tsESLint.plugin },
   rules: {
     '@typescript-eslint/no-restricted-imports': [

@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { modelsDir } from '../runtime-env'
 import {
   REMOTE_FETCH_REDIRECT_POLICY,
-  RemoteServerApplicationService,
+  type RemoteServerApplicationService,
   type RemoteServerApplicationPorts,
   canReconcileCredentialedEndpoint,
   catalogFromDiscovery,
