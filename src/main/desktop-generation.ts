@@ -10,13 +10,18 @@ import type {
   GenerationToolDefinition,
   GenerationToolHandling,
   GenerationProfileKind,
+  ModelModality,
   ReasoningEffort
 } from '@offgrid/models'
-import { ModelCapabilityError, nativeToolPlannerUnavailableMessage } from '@offgrid/models'
+import { nativeToolPlannerUnavailableMessage } from '@offgrid/models'
 import { llm } from './llm'
 import { readImages } from './llm/read-images'
-import { desktopModelServices } from './model-service-access'
 import { desktopToolExecutor, type DesktopToolExecutionSession } from './desktop-tool-executor'
+import {
+  desktopModels,
+  DesktopModelsOperationError,
+  generateWithDesktopModels
+} from './composition/application-access'
 
 export interface DesktopGenerationOptions {
   /** The kind of work; shared resolves sampling, reasoning, timeout, and caps from it. */
@@ -117,11 +122,15 @@ export function promptMessages(prompt: string, images: string[] = []): Generatio
 }
 
 function throwDesktopGenerationError(error: unknown): never {
-  if (error instanceof ModelCapabilityError && error.unsupportedCapabilities.includes('tools')) {
+  if (
+    error instanceof DesktopModelsOperationError &&
+    error.failure.kind === 'unsupported_capability' &&
+    error.failure.capabilities.includes('tools')
+  ) {
     throw new Error(
       nativeToolPlannerUnavailableMessage({
         status: 'unsupported',
-        modelName: error.model.name
+        modelName: error.failure.modelName
       }),
       { cause: error }
     )
@@ -133,7 +142,7 @@ export async function generateDesktopMessages(
   messages: GenerationMessage[],
   options: DesktopGenerationOptions = {}
 ): Promise<GenerationResult> {
-  await desktopModelServices.refresh()
+  await desktopModels.refresh()
   const settings = llm.getSettings()
   const needsVision = messages.some(
     (message) =>
@@ -182,7 +191,7 @@ export async function generateDesktopMessages(
     ? desktopToolExecutor.register(turnId, options.toolExecution)
     : undefined
   try {
-    return await desktopModelServices.generation.generate(request, options.events)
+    return await generateWithDesktopModels(request, options.events)
   } catch (error) {
     return throwDesktopGenerationError(error)
   } finally {
@@ -203,12 +212,14 @@ export async function generateDesktopOperation(
     routeId?: string
   } = {}
 ): Promise<GenerationResult> {
-  await desktopModelServices.refresh()
+  await desktopModels.refresh()
   const modality = operation.type === 'classifier' ? 'classifier' : operation.type
   const modelId = 'modelId' in operation ? operation.modelId : undefined
-  const routeId = options.routeId ?? desktopModelServices.routeIdFor(modality, modelId)
+  const routeId =
+    options.routeId ??
+    (modelId ? (desktopModels.resolveRoute(modality, modelId) ?? undefined) : undefined)
   const turnId = options.identity?.turnId ?? `desktop:${randomUUID()}`
-  return desktopModelServices.generation.generate(
+  return generateWithDesktopModels(
     {
       profile: options.profile,
       operation,
@@ -221,8 +232,6 @@ export async function generateDesktopOperation(
 }
 
 /** Read the canonical selected model from LLMService without exposing its store to adapters. */
-export function activeDesktopModelId(
-  modality: Parameters<typeof desktopModelServices.llm.active>[0]
-): string | null {
-  return desktopModelServices.llm.active(modality).model?.id ?? null
+export function activeDesktopModelId(modality: ModelModality): string | null {
+  return desktopModels.snapshot().active[modality]?.model?.id ?? null
 }

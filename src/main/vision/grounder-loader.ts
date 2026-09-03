@@ -29,19 +29,18 @@ import { getActiveModel, listInstalled, loadComputerUseModel } from '../models-m
 import { desktopModelServices, type DesktopModelServices } from '../model-service-access'
 import { isGrounderActive } from './vision-model-notice'
 import { getComputerUseSettings } from '../computer-use-settings'
-import {
-  getActiveRemoteVisionServer
-} from './remote-vision-server'
+import { getActiveRemoteVisionServer } from './remote-vision-server'
 import {
   currentRemoteScreenTaskSession,
   runWithRemoteScreenTaskSession
 } from '../actions/remote-screen-session'
+import { desktopModels } from '../composition/application-access'
 
 const DEFAULT_GROUNDER_MODEL_ID = 'mradermacher/UI-TARS-1.5-7B-GGUF'
 
 /** The saved Computer Use choice, or the current catalog default. */
 export function selectedGrounderModelId(): string {
-  return desktopModelServices.llm.active('computer_use').model?.id ?? DEFAULT_GROUNDER_MODEL_ID
+  return desktopModels.snapshot().active.computer_use?.model?.id ?? DEFAULT_GROUNDER_MODEL_ID
 }
 
 async function grounderInstalled(modelId: string): Promise<boolean> {
@@ -171,7 +170,7 @@ const productionGrounderDependencies: GrounderRunnerDependencies = {
   // The canonical text selection is the only record of an active remote; nothing to suspend.
   suspendRemote: () => undefined,
   restoreRemote(selection) {
-    if (!desktopModelServices.workspace.remoteModelRoute(selection.id, selection.model, 'text')) {
+    if (!desktopModels.remoteModelRoute(selection.id, selection.model, 'text')) {
       throw new Error('The remote chat model could not be restored.')
     }
   }

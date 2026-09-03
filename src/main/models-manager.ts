@@ -66,6 +66,7 @@ import { platformFetch } from '@offgrid/models/fetch'
 import { desktopImageRuntimeIdentity } from './models/image-runtime-identity'
 import { LocalModelRegistry, type LocalModelRegistryEntry } from './models/local-model-registry'
 import { MODEL_FILE_EXTENSION, isGgufFile } from '@offgrid/models'
+import { desktopModels } from './composition/application-access'
 
 export { DOWNLOAD_INTERRUPTED_ERROR }
 export type { DownloadProgress, ProgressCb }
@@ -92,7 +93,7 @@ function fileSizeOf(dir: string, name: string): number {
   try {
     return fs.statSync(filePath).size
   } catch (cause) {
-    if ((cause as NodeJS.ErrnoException)?.code === 'ENOENT') return 0
+    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return 0
     console.error('[models] Failed to inspect model artifact:', filePath, cause)
     throw new ModelFilesystemProbeError(filePath, cause)
   }
@@ -127,7 +128,7 @@ function downloadedVariant(models: DownloadedModel[], id: string): DownloadedMod
 
 /** A route id, or any id that names a remote route, is already canonical (the workspace decides). */
 function isCanonicalSelectionId(modelId: string): boolean {
-  const model = desktopModelServices.workspace.lookup(modelId)
+  const model = desktopModels.lookup(modelId)
   return Boolean(model && (model.source === 'remote' || workspaceRouteId(model) === modelId))
 }
 
@@ -237,7 +238,7 @@ function uniqueLegacySelectedInventory(
 
 /** Remote rows for the catalog surfaces: the workspace's rows plus Desktop presentation. */
 function remoteCatalogEntries(): RemoteVisionInventoryModel[] {
-  return desktopModelServices.workspace.remoteCatalogRows().map((row) => ({
+  return desktopModels.remoteCatalogRows().map((row) => ({
     id: row.id,
     name: row.name,
     kind: row.kind,
@@ -790,7 +791,7 @@ async function resolveDesktopActivation(
   modelId: string,
   requestedKind?: string
 ): Promise<{ kind?: string; remote?: boolean; supportsRequestedKind?: boolean } | null> {
-  const known = desktopModelServices.workspace.lookup(modelId)
+  const known = desktopModels.lookup(modelId)
   if (known?.source === 'remote') {
     // A remote route's modality is an inventory fact; without it a caller that names no kind would
     // be routed to text and an image pick would silently fail.

@@ -27,13 +27,13 @@ import { createVisionGrounder } from './vision-policy-runner'
 import { getActiveRemoteVisionServer } from './remote-vision-server'
 import type { VisionGroundingInput, VisionGroundingResult } from './vision-agent'
 import { currentRemoteScreenTaskSession } from '../actions/remote-screen-session'
-import { desktopModelServices } from '../model-services'
 import {
   resolveComputerUseRoleProjection,
   type ComputerUseRoleSelection,
   type ComputerUseSessionApplicationService
 } from '@offgrid/models/computer-use'
 import { createComputerUseSessionApplication } from '../composition/computer-use-session'
+import { desktopModels } from '../composition/application-access'
 
 export interface VisionTaskModelSession {
   adapter: VisionModelAdapter
@@ -94,9 +94,7 @@ export async function getComputerUseActiveModelProjection(
 ): Promise<ComputerUseActiveModelProjection> {
   const strategy = dependencies.strategy()
   const remote = dependencies.activeRemote()
-  const chatModelId = remote
-    ? remoteChatRouteId(remote)
-    : dependencies.selectedChatId()
+  const chatModelId = remote ? remoteChatRouteId(remote) : dependencies.selectedChatId()
   const projection = resolveComputerUseRoleProjection({
     strategy,
     chatModelId,
@@ -187,16 +185,17 @@ export function computerUseRouteIdFromInventory(
 
 /** A remote server's chat model, named by the route this device lists for it. */
 function remoteChatRouteId(remote: { id: string; model: string }): string {
-  const route = desktopModelServices.workspace.remoteModelRoute(remote.id, remote.model, 'text')
-  if (!route) throw new Error('The remote chat model is not in this device\'s inventory.')
+  const route = desktopModels.remoteModelRoute(remote.id, remote.model, 'text')
+  if (!route) throw new Error("The remote chat model is not in this device's inventory.")
   return route
 }
 
 async function computerUseRouteId(modelId: string, requiredThinking = false): Promise<string> {
-  await desktopModelServices.refresh()
-  const known = desktopModelServices.workspace.lookup(modelId)
-  const matches = desktopModelServices.llm
-    .list('computer_use')
+  await desktopModels.refresh()
+  const known = desktopModels.lookup(modelId)
+  const matches = desktopModels
+    .snapshot()
+    .inventory.filter((model) => model.modality === 'computer_use')
     .filter((model) =>
       known?.serverId
         ? model.serverId === known.serverId && model.id === known.id
