@@ -28,8 +28,11 @@ import { taskOriginFromRequestMeta } from '@offgrid/sync'
 import { mayRunRemoteTask } from './remote-task-permission'
 import { getTaskExecutionDevice } from './tasks/task-history'
 import { promptMessages } from './desktop-generation'
-import { desktopModelServices } from './model-services'
 import { DEFAULT_IMAGE_MIME } from '@offgrid/models'
+import {
+  desktopModels,
+  generateWithDesktopModels
+} from './composition/application-access'
 
 const EXECUTION_DEVICE_DESCRIPTION =
   'Exact paired Desktop name or alias. Omit to select any enabled connected Desktop.'
@@ -79,9 +82,9 @@ async function generateMcpText(
   maxTokens: number,
   operation: { type: 'text' } | { type: 'vision' }
 ): Promise<string> {
-  await desktopModelServices.refresh()
+  await desktopModels.refresh()
   const turnId = `mcp:${String(requestId)}`
-  const result = await desktopModelServices.generation.generate({
+  const result = await generateWithDesktopModels({
     operation,
     messages: promptMessages(prompt, images),
     identity: { conversationId: turnId, turnId },

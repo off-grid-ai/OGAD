@@ -17,7 +17,7 @@ import path from 'node:path'
 import { transcriptionLanguages, type SpeechLanguage } from '@offgrid/speech'
 import { getSetting } from '../database'
 import { activeDesktopModelId, generateDesktopOperation } from '../desktop-generation'
-import { desktopModelServices } from '../model-service-access'
+import { desktopModels } from '../composition/application-access'
 import type { DesktopManagedRuntime } from '../model-runtime-port'
 import { modelsByKind } from '@offgrid/models'
 import { parakeetTranscription as parakeet } from './parakeet-cli'
@@ -88,17 +88,18 @@ async function routeForTranscription(
   nativeModelId?: string,
   preferSmallModel: boolean = false
 ): Promise<string | undefined> {
-  await desktopModelServices.refresh()
+  await desktopModels.refresh()
   const requestedModel = nativeModelId ? path.basename(nativeModelId) : undefined
   const explicitRoute = requestedModel
-    ? desktopModelServices.routeIdFor('transcription', requestedModel)
+    ? (desktopModels.resolveRoute('transcription', requestedModel) ?? undefined)
     : undefined
   if (explicitRoute) return explicitRoute
 
   const requestedEngine: CatalogTranscriptionEngine = engine === 'parakeet' ? 'parakeet' : 'whisper'
-  const active = desktopModelServices.llm.active('transcription').model
-  const candidates = desktopModelServices.llm
-    .list('transcription')
+  const active = desktopModels.snapshot().active.transcription?.model
+  const candidates = desktopModels
+    .snapshot()
+    .inventory.filter((model) => model.modality === 'transcription')
     .filter((model): model is typeof model & { routeId: string } => Boolean(model.routeId))
     .map((model) => ({
       routeId: model.routeId,

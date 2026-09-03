@@ -9,7 +9,7 @@
 import os from 'os'
 import * as http from 'http'
 import { llm } from './llm'
-import { desktopModelServices } from './model-service-access'
+import { desktopModels } from './composition/application-access'
 import { decideChatStatus } from './chat-health'
 import {
   getActiveModel,
@@ -95,7 +95,7 @@ export async function getChatHealth(): Promise<HealthComponent> {
   const activeModel = getActiveModel()
   const modelsExist = llm.modelsExist()
   const llamaHealth = await pingJson(llm.getPort())
-  const activeRoute = desktopModelServices.llm.active('text').model
+  const activeRoute = desktopModels.snapshot().active.text?.model
   const { status, detail } = decideChatStatus({
     remote: activeRoute?.source === 'remote' ? { name: activeRoute.name } : null,
     // A healthy socket is not sufficient: another app/profile can own this port.

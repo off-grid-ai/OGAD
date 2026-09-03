@@ -49,7 +49,7 @@ import {
   type ImageGenerationOutputContract,
   type ImageGenerationRequestContract
 } from '../shared/image-generation-contract'
-import { desktopModelServices } from './model-service-access'
+import { desktopModels } from './composition/application-access'
 import {
   desktopImageApplication,
   registerDesktopImageCancelBoundary,
@@ -327,7 +327,7 @@ function ggufIsFullCheckpoint(p: string): boolean {
 
 /** The local image model selected by the shared control plane, as a native runtime id. */
 export function activeImageModel(): string | null {
-  const selected = desktopModelServices.llm.active('image').model
+  const selected = desktopModels.snapshot().active.image?.model
   if (!selected || selected.source !== 'local') return null
   return path.basename(imageRuntimeModelId(selected.id))
 }

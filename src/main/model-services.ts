@@ -336,6 +336,11 @@ export function createDesktopModelServices(
     generation: { tools: desktopToolExecutor },
     remote: desktopRemoteServerPorts,
     remoteServerId: randomUUID,
+    localFallback: (modality) => {
+      if (modality !== 'text') return undefined
+      const id = desktopModelSelectionPersistence.readLegacyTextConfig().id
+      return typeof id === 'string' ? id : undefined
+    },
     remoteInventory: {
       adapterId: (modality) => desktopAdapterId('remote', modality),
       // Inventory never waits on the network: answer from the cache, probe in the background, and

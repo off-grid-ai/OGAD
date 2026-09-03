@@ -2,9 +2,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { modelsDir } from '../runtime-env'
-import { type WorkspaceRemoteServersPort,
+import {
   REMOTE_FETCH_REDIRECT_POLICY,
-  type RemoteServerApplicationService,
   type RemoteServerApplicationPorts,
   activeRemoteServer,
   canReconcileCredentialedEndpoint,
@@ -22,8 +21,7 @@ import { type WorkspaceRemoteServersPort,
   type RemoteModalitySelections,
   type PersistedRemoteServer
 } from '@offgrid/models'
-import { desktopModelSelectionPersistence } from '../model-selection-persistence'
-import { desktopModelServices } from '../model-service-access'
+import { desktopModels, modelsFailureMessage } from '../composition/application-access'
 import { deleteSecret, getSecret, setSecret } from '../secrets'
 import {
   REMOTE_VISION_PROVIDERS,
@@ -216,7 +214,7 @@ export const desktopRemoteServerPorts: Omit<RemoteServerApplicationPorts, 'selec
       read: () => sharedConfiguration(readStored()),
       async write(value) {
         writeStored({ version: CONFIG_VERSION, servers: value.servers.map(storedFromShared) })
-        await desktopModelServices.refresh()
+        await desktopModels.refresh()
       }
     },
     credentials: {
@@ -269,18 +267,6 @@ export const desktopRemoteServerPorts: Omit<RemoteServerApplicationPorts, 'selec
     }
 }
 
-/** The workspace owns the remote-server application; this file only reaches it lazily. */
-const desktopRemoteServerApplication: RemoteServerApplicationService = new Proxy(
-  {} as RemoteServerApplicationService,
-  {
-    get: (_target, property) => {
-      const servers = desktopModelServices.workspace.servers
-      const value = servers[property as keyof WorkspaceRemoteServersPort]
-      return typeof value === 'function' ? value.bind(servers) : value
-    }
-  }
-)
-
 export function getRemoteVisionServerSettings(): RemoteVisionServerSettings {
   const stored = readStored()
   const active = activeRemoteServer(stored.servers)
@@ -312,12 +298,9 @@ export async function setRemoteVisionServerSettings(
   if (update.provider === 'local') {
     // "Off uses models on this device": one shared rule, every modality. The last local text model
     // is the preferred fallback for text.
-    const previousLocal = desktopModelSelectionPersistence.readLegacyTextConfig().id
     for (const server of readStored().servers) {
       if (server.enabled === false) continue
-      await desktopModelServices.workspace.setServerEnabled(server.id, false, (modality) =>
-        modality === 'text' && typeof previousLocal === 'string' ? previousLocal : undefined
-      )
+      await desktopModels.setRemoteServerEnabled(server.id, false)
     }
     return getRemoteVisionServerSettings()
   }
@@ -326,7 +309,7 @@ export async function setRemoteVisionServerSettings(
   const model = update.model.trim()
   if (!endpoint) throw new Error('Remote model server is required.')
   const id = update.serverId || randomUUID()
-  const existing = desktopRemoteServerApplication.get(id)
+  const existing = desktopModels.remoteServer(id)
   const catalog =
     update.catalog ??
     existing?.catalog ??
@@ -335,7 +318,7 @@ export async function setRemoteVisionServerSettings(
     (model ? { text: [{ id: model, name: model }] } : {})
   const selections = update.selections ?? existing?.selections ?? (model ? { text: model } : {})
   if (!hasRemoteServerSelection({ selections })) throw new Error('Select at least one remote model.')
-  await desktopRemoteServerApplication.save({
+  const saved = await desktopModels.saveRemoteServer({
     id,
     name: update.name?.trim() || defaultServerName(endpoint),
     provider: sharedProvider(update.provider),
@@ -348,13 +331,15 @@ export async function setRemoteVisionServerSettings(
     credential: update.apiKey?.trim() || undefined,
     clearCredential: update.clearApiKey === true
   })
+  if (!saved.ok) throw new Error(modelsFailureMessage(saved.failure))
   for (const [remoteModality, selectedModel] of Object.entries(selections)) {
     if (typeof selectedModel !== 'string' || !selectedModel) continue
-    await desktopRemoteServerApplication.activate(
+    const activated = await desktopModels.activateOnServer(
       id,
       remoteModality as 'text' | 'image' | 'transcription' | 'voice' | 'embedding',
       selectedModel
     )
+    if (!activated.ok) throw new Error(modelsFailureMessage(activated.failure))
   }
   return getRemoteVisionServerSettings()
 }
@@ -362,7 +347,7 @@ export async function setRemoteVisionServerSettings(
 export async function removeRemoteVisionServer(
   serverId: string
 ): Promise<RemoteVisionServerSettings> {
-  await desktopRemoteServerApplication.remove(serverId)
+  await desktopModels.removeRemoteServer(serverId)
   return getRemoteVisionServerSettings()
 }
 
@@ -372,8 +357,8 @@ export async function testRemoteVisionServer(
   if (update.provider === 'local') return { ok: true, latencyMs: 0 }
   const endpoint = remoteVisionApiBase(remoteVisionEndpoint(update.provider, update.endpoint))
   if (!endpoint) return { ok: false, latencyMs: 0, error: 'Remote model server is required.' }
-  const current = update.serverId ? desktopRemoteServerApplication.get(update.serverId) : null
-  const result = await desktopRemoteServerApplication.checkCandidate({
+  const current = update.serverId ? desktopModels.remoteServer(update.serverId) : null
+  const result = await desktopModels.checkRemoteServerCandidate({
     id: update.serverId || 'connection-test',
     name: update.name?.trim() || defaultServerName(endpoint),
     endpoint,

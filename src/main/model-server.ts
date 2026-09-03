@@ -45,9 +45,6 @@ import {
   openAIChatRequestToGeneration,
   openAIChunkFrame,
   openAIFinalFrame,
-  ModelCapabilityError,
-  ModelReadinessError,
-  PartialGenerationError,
   type GatewayAsyncRequest,
   type GatewayModalities,
   type GenerationResult
@@ -56,7 +53,6 @@ import { getActiveTranscription } from './transcription/select'
 import * as tts from './tts'
 import { generateImage, imageGenStatus, type ImageGenParams } from './imagegen'
 import { whisperModel } from './rag/extractors'
-import { desktopModelServices } from './model-services'
 import { embeddings } from './embeddings'
 import { docsText, docsHtml, openApiSpec } from './api-docs'
 import { handleMcpRequest } from './mcp-server'
@@ -70,7 +66,11 @@ import { ModelServerError } from './llm/http-post'
 import { writeDiagnosticLog } from './diagnostics-log'
 import { DEFAULT_IMAGE_MIME } from '@offgrid/models'
 import { gatewayAsyncRequests } from './composition/gateway'
-import { desktopModels } from './composition/application-access'
+import {
+  desktopModels,
+  DesktopModelsOperationError,
+  generateWithDesktopModels
+} from './composition/application-access'
 
 const UPSTREAM_HOST = '127.0.0.1'
 // The upstream llama-server port is LIVE, not fixed: llm.getPort() moves off LLAMA_SERVER_PORT when
@@ -302,13 +302,26 @@ function chatRouteId(model: unknown): string | undefined {
 
 /** HTTP status + error type for a failed shared generation, in the gateway's JSON envelope. */
 function chatErrorResponse(error: unknown): { status: number; type: string; message: string } {
-  const cause = error instanceof PartialGenerationError ? error.cause : error
-  if (cause instanceof ModelReadinessError) {
-    return { status: 503, type: 'unavailable_error', message: cause.message }
+  if (error instanceof DesktopModelsOperationError) {
+    const failure = error.failure
+    if (failure.kind === 'unsupported_capability') {
+      return { status: 400, type: 'invalid_request_error', message: failure.reason }
+    }
+    if (failure.kind === 'context_full') {
+      return { status: 400, type: 'context_length_exceeded', message: error.message }
+    }
+    if (failure.kind === 'remote_http') {
+      return { status: 502, type: 'upstream_error', message: error.message }
+    }
+    if (failure.kind === 'timeout') {
+      return { status: 504, type: 'timeout_error', message: failure.reason }
+    }
+    if (failure.kind === 'not_ready' || failure.kind === 'memory_refused') {
+      return { status: 503, type: 'unavailable_error', message: error.message }
+    }
+    return { status: 500, type: 'server_error', message: error.message }
   }
-  if (cause instanceof ModelCapabilityError) {
-    return { status: 400, type: 'invalid_request_error', message: cause.message }
-  }
+  const cause = error
   if (cause instanceof ModelServerError) {
     if (cause.kind === 'overflow') {
       return { status: 400, type: 'context_length_exceeded', message: cause.message }
@@ -371,7 +384,7 @@ async function handleChat(
     return
   }
   const complete = async (): Promise<Record<string, unknown>> =>
-    openAIChatCompletion(await desktopModelServices.generation.generate(prepared.request), {
+    openAIChatCompletion(await generateWithDesktopModels(prepared.request), {
       id: rid,
       created: Math.floor(Date.now() / 1000),
       model: prepared.model
@@ -421,7 +434,7 @@ async function streamChat(
   }
   let result: GenerationResult
   try {
-    result = await desktopModelServices.generation.generate(prepared.request, {
+    result = await generateWithDesktopModels(prepared.request, {
       chunk: (chunk) => {
         if (chunk.toolCallDeltas?.length) sse.streamedToolCalls = true
         const frame = openAIChunkFrame(chunk, wire)
