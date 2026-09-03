@@ -253,7 +253,8 @@ function applicationPorts(): ImageGenerationApplicationPorts<
           generateDesktopText(instruction, {
             temperature: 0.7,
             thinking: false,
-            maxTokens: 200,
+            // No output cap: a reasoning model spends tokens before it answers, and a cap cut the
+            // enhanced prompt to its first words. The prompt policy bounds the result by length.
             timeoutMs: 60_000,
             signal,
             events: { chunk: (chunk) => chunk.content && onText(chunk.content) }
