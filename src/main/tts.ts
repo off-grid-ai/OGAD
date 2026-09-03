@@ -162,7 +162,15 @@ export async function synthesizeNative(
     throw error
   } finally {
     busy = false
-    void fs.promises.unlink(outputPath).catch(() => {})
+    void fs.promises.unlink(outputPath).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+      writeDiagnosticLog(
+        'tts',
+        'request.cleanup_failed',
+        { requestId, path: outputPath, error: messageOf(error) },
+        'error'
+      )
+    })
   }
 }
 
