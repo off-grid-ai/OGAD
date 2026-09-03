@@ -41,8 +41,8 @@ describe('connector rail adapter', () => {
     expect(await run(record)).toEqual({ ok: true, detail: 'Connector action completed.' })
     const long = await run(record)
     expect(long.ok).toBe(true)
-    expect(long.detail.endsWith('… (truncated)')).toBe(true)
-    expect(long.detail.length).toBeLessThan(8_100)
+    expect(long.detail?.endsWith('… (truncated)')).toBe(true)
+    expect(long.detail?.length).toBeLessThan(8_100)
   })
 
   it('surfaces a connector refusal and a thrown transport error as failed results', async () => {
