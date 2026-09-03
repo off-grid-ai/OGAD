@@ -12,38 +12,40 @@ import {
   type ToolPlanCatalogEntry as ToolCatalogEntry
 } from '@offgrid/models'
 
-export { ToolPlanValidationError as PlanValidationError } from '@offgrid/models'
-
 export type PlanComplete = (
-  prompt: string,
-  schema: unknown,
-  onReasoning?: (text: string) => void,
-  signal?: AbortSignal
+  ...args: [
+    prompt: string,
+    schema: unknown,
+    onReasoning?: (text: string) => void,
+    signal?: AbortSignal
+  ]
 ) => Promise<string>
 
 export type PlanTask = (
-  goal: string,
-  history: { role: string; content: string }[],
-  catalog: ToolCatalogEntry[],
-  onReasoning?: (text: string) => void,
-  signal?: AbortSignal
+  ...args: [
+    goal: string,
+    history: { role: string; content: string }[],
+    catalog: ToolCatalogEntry[],
+    onReasoning?: (text: string) => void,
+    signal?: AbortSignal
+  ]
 ) => Promise<Plan>
 
 export function makePlanner(complete: PlanComplete): PlanTask {
-  return (goal, history, catalog, onReasoning, signal) =>
+  return (...[goal, history, catalog, onReasoning, signal]: Parameters<PlanTask>) =>
     generateToolPlan({
       goal,
       history,
       catalog,
       signal,
-      generate: (prompt, schema, currentSignal) =>
+      generate: (...[prompt, schema, currentSignal]) =>
         complete(prompt, schema, onReasoning, currentSignal)
     })
 }
 
 /** Production planner over the active model. It streams only the provider's
  * separated reasoning channel; the strict plan JSON remains internal. */
-export const planTask: PlanTask = makePlanner(async (prompt, schema, onReasoning, signal) => {
+export const planTask: PlanTask = makePlanner(async (...[prompt, schema, onReasoning, signal]) => {
   const result = await generateDesktopMessages([{ role: 'user', content: prompt }], {
     operation: { type: 'tool_selection', input: prompt, limit: 1 },
     responseFormat: schema,

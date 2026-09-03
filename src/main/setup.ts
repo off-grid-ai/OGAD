@@ -10,7 +10,7 @@ import { llm } from './llm'
 import { desktopModels } from './composition/application-access'
 import { desktopApplication } from './composition/application'
 import { desktopRamGb, pingLocalJson } from './composition/guided-setup'
-import { decideChatStatus } from './chat-health'
+import { decideChatStatus } from '@offgrid/application'
 import { getActiveModel } from './models-manager'
 import { getGatewayPort } from './model-server'
 import type {
@@ -127,8 +127,6 @@ export async function getSystemHealth(): Promise<SystemHealth> {
 /** Choose the best chat/vision model that fits this machine's RAM. Prefers a
  *  vision model (so chat supports images) at the largest size the RAM tier
  *  allows; falls back to text, then to a safe small default. */
-export type { GuidedSetupMode as RecMode } from '@offgrid/models'
-
 export async function recommendChatModel(
   modeOverride?: RecMode
 ): Promise<{ id: string; name: string } | null> {
