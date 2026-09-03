@@ -38,7 +38,7 @@ import { SettingsSelect } from './SettingsSelect'
 import type { SpeechLanguage } from '@offgrid/speech'
 import { X } from '@phosphor-icons/react'
 import { getSlot, SLOTS } from '@renderer/bootstrap/slotRegistry'
-import { desktopModelControl } from '@renderer/lib/model-control-application'
+import { desktopModelControl } from '@renderer/composition/model-control'
 
 const MAX_OUTPUT_AUTO = MAX_TOKENS_AUTO
 // The values THIS picker offers. The nesting rule they obey is shared (@offgrid/models); which

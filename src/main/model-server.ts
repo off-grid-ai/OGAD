@@ -408,12 +408,12 @@ async function handleChat(
     return
   }
 
-  await streamChat(res, rid, prepared)
+  await serveStreamingChat(res, rid, prepared)
 }
 
 /** Serve one streaming chat turn as OpenAI SSE frames. Headers are written with the first frame
  * so a failure before any token still gets the JSON envelope and its real status. */
-async function streamChat(
+async function serveStreamingChat(
   res: http.ServerResponse,
   rid: string,
   prepared: ReturnType<typeof openAIChatRequestToGeneration>

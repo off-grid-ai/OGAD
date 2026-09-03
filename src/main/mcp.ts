@@ -18,7 +18,7 @@ import {
   type McpConnectorApplicationService,
   type McpConnectorStatus
 } from '@offgrid/models'
-import { mcpConnectorApplication } from './composition/mcp'
+import { mcpConnectorApplication, registerDesktopMcpConnectorPorts } from './composition/mcp'
 
 // Provider-specific quirks (e.g. Google's MCP endpoints) are a Pro concern and
 // register these hooks; in the free build they return undefined → generic MCP.
@@ -123,7 +123,8 @@ export function addConnector(c: NewConnector): number {
 }
 
 export function setConnectorEnabled(id: number, enabled: boolean): void {
-  mcpConnectorApplication().setEnabled(id, enabled)
+  const connectorApplication = mcpConnectorApplication()
+  connectorApplication.setEnabled(id, enabled)
 }
 
 /** Compatibility wrapper. Shared owns the status transition; Desktop persists it. */
@@ -132,11 +133,13 @@ export function setConnectorStatus(
   status: McpConnectorStatus,
   detail?: string | null
 ): void {
-  mcpConnectorApplication().setStatus(id, status, detail ?? undefined)
+  const connectorApplication = mcpConnectorApplication()
+  connectorApplication.setStatus(id, status, detail ?? undefined)
 }
 
 export function removeConnector(id: number): void {
-  mcpConnectorApplication().remove(id)
+  const connectorApplication = mcpConnectorApplication()
+  connectorApplication.remove(id)
 }
 
 function getConnector(id: number): Connector | undefined {
@@ -305,51 +308,53 @@ type McpConnectorPorts = ConstructorParameters<typeof McpConnectorApplicationSer
 /** SQLite repository, OAuth cancellation, and MCP transport. I/O only; shared owns the lifecycle. */
 export function desktopMcpConnectorPorts(): McpConnectorPorts {
   return {
-  repository: {
-    find: getConnector,
-    setEnabled(id, enabled) {
-      ensure()
-      getDB()
-        .prepare('UPDATE connectors SET enabled = ? WHERE id = ?')
-        .run(enabled ? 1 : 0, id)
+    repository: {
+      find: getConnector,
+      setEnabled(id, enabled) {
+        ensure()
+        getDB()
+          .prepare('UPDATE connectors SET enabled = ? WHERE id = ?')
+          .run(enabled ? 1 : 0, id)
+      },
+      setStatus(id, status, detail) {
+        ensure()
+        getDB()
+          .prepare('UPDATE connectors SET status = ?, status_detail = ? WHERE id = ?')
+          .run(status, detail ?? null, id)
+      },
+      cacheDiscovery(id, tools) {
+        ensure()
+        getDB()
+          .prepare("UPDATE connectors SET status='ok', status_detail=NULL, tools=? WHERE id=?")
+          .run(JSON.stringify(tools), id)
+      },
+      removeWithCredentials(id) {
+        ensure()
+        ensureSecretsStorage()
+        const database = getDB()
+        database.transaction(() => {
+          deleteSecretsByPrefix(`connector:${id}:`, database)
+          database.prepare('DELETE FROM connectors WHERE id = ?').run(id)
+        })()
+      }
     },
-    setStatus(id, status, detail) {
-      ensure()
-      getDB()
-        .prepare('UPDATE connectors SET status = ?, status_detail = ? WHERE id = ?')
-        .run(status, detail ?? null, id)
+    authorization: {
+      cancel: cancelOAuthAuthorization
     },
-    cacheDiscovery(id, tools) {
-      ensure()
-      getDB()
-        .prepare("UPDATE connectors SET status='ok', status_detail=NULL, tools=? WHERE id=?")
-        .run(JSON.stringify(tools), id)
-    },
-    removeWithCredentials(id) {
-      ensure()
-      ensureSecretsStorage()
-      const database = getDB()
-      database.transaction(() => {
-        deleteSecretsByPrefix(`connector:${id}:`, database)
-        database.prepare('DELETE FROM connectors WHERE id = ?').run(id)
-      })()
+    transport: {
+      discover: discoverConnectorTools
     }
-  },
-  authorization: {
-    cancel: cancelOAuthAuthorization
-  },
-  transport: {
-    discover: discoverConnectorTools
-  }
   }
 }
 
+registerDesktopMcpConnectorPorts(desktopMcpConnectorPorts())
 
 /** Connect, list tools, cache them + status. Returns the discovered tools. */
 export async function testConnector(
   id: number
 ): Promise<{ ok: boolean; tools: { name: string; description?: string }[]; error?: string }> {
-  return mcpConnectorApplication().verifyAndDiscover(id)
+  const connectorApplication = mcpConnectorApplication()
+  return connectorApplication.verifyAndDiscover(id)
 }
 
 // A background tool load must never hang the chat turn it runs inside: one dead or
@@ -361,7 +366,8 @@ export const FETCH_TOOLS_TIMEOUT_MS = DEFAULT_CONNECTOR_OPERATION_TIMEOUT_MS
 /** Full tool definitions (incl. inputSchema) for a connected connector. Rejects if
  *  the connect+list exceeds FETCH_TOOLS_TIMEOUT_MS. */
 export async function fetchTools(id: number): Promise<ConnectorToolDefinition[]> {
-  return mcpConnectorApplication().discoverInBackground(id)
+  const connectorApplication = mcpConnectorApplication()
+  return connectorApplication.discoverInBackground(id)
 }
 
 export function getConnectorMeta(

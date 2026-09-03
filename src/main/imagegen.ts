@@ -56,7 +56,7 @@ import {
   registerDesktopImageInspectionBoundary
 } from './imagegen/application-service'
 import { desktopImageRuntimeIdentity } from './models/image-runtime-identity'
-import { isGeneratedImageFile, selectInstalledImageModel } from '@offgrid/models'
+import { isGeneratedImageFile } from '@offgrid/models'
 import {
   Z_IMAGE_TEXT_ENCODER_PATTERN,
   Z_IMAGE_VAE_PATTERN,
@@ -467,9 +467,9 @@ export function imageGenStatus(): {
   const active = activeImageModel()
   // Which installed model to start a person on when nothing is active is one shared rule (it skips
   // the parked Core ML directory and prefers the distilled quant that fits this machine's RAM).
-  const defaultModel = selectInstalledImageModel({
+  const defaultModel = desktopModels.preferredImageModel({
     installed: models,
-    active,
+    preferred: active,
     ramGb: os.totalmem() / 1e9
   })
   // Available if EITHER runtime is usable: sd-cli (with a model) or MLX/mflux.

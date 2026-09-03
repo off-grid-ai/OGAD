@@ -1,5 +1,5 @@
 // Composition root: the shared model-library commands over Desktop's filesystem, registry, and
-// runtime ports (all exported as functions from models-manager so module order never matters).
+// runtime ports. Desktop registers I/O factories; this root owns only Shared service construction.
 import {
   LocalModelImportService,
   ModelActivationService,
@@ -7,27 +7,48 @@ import {
   ModelMetadataRepairCommandService,
   ModelTransferRegistrationService
 } from '@offgrid/models'
-import {
-  desktopActiveProjectorRepairPorts,
-  desktopLocalModelImportPorts,
-  desktopModelActivationPorts,
-  desktopModelLibraryRemovalPorts,
-  desktopModelTransferRegistrationPorts,
-  type DesktopProjectorRepair
-} from '../models-manager'
 import { once } from '@offgrid/models'
 
+export interface DesktopProjectorRepair {
+  id: string
+  primary: string
+  mmproj: string
+}
+
+interface DesktopModelLibraryPortFactories {
+  removal: () => ConstructorParameters<typeof ModelLibraryRemovalService>[0]
+  repair: () => ConstructorParameters<
+    typeof ModelMetadataRepairCommandService<DesktopProjectorRepair>
+  >[0]
+  activation: () => ConstructorParameters<typeof ModelActivationService>[0]
+  localImport: () => ConstructorParameters<typeof LocalModelImportService>[0]
+  transfer: (
+    dir: () => string,
+    afterRegistered?: () => Promise<void>
+  ) => ConstructorParameters<typeof ModelTransferRegistrationService>[0]
+}
+
+let desktopPorts: DesktopModelLibraryPortFactories | null = null
+
+export function registerDesktopModelLibraryPorts(ports: DesktopModelLibraryPortFactories): void {
+  if (desktopPorts) throw new Error('Desktop model-library ports are already registered.')
+  desktopPorts = ports
+}
+
+function ports(): DesktopModelLibraryPortFactories {
+  if (!desktopPorts) throw new Error('Desktop model-library ports are not registered.')
+  return desktopPorts
+}
+
 export const modelLibraryRemovalService = once(
-  () => new ModelLibraryRemovalService(desktopModelLibraryRemovalPorts())
+  () => new ModelLibraryRemovalService(ports().removal())
 )
 export const activeProjectorRepairService = once(
-  () => new ModelMetadataRepairCommandService<DesktopProjectorRepair>(desktopActiveProjectorRepairPorts())
+  () => new ModelMetadataRepairCommandService<DesktopProjectorRepair>(ports().repair())
 )
-export const modelActivationService = once(
-  () => new ModelActivationService(desktopModelActivationPorts())
-)
+export const modelActivationService = once(() => new ModelActivationService(ports().activation()))
 export const localModelImportService = once(
-  () => new LocalModelImportService(desktopLocalModelImportPorts())
+  () => new LocalModelImportService(ports().localImport())
 )
 
 const transferRegistrations = new Map<string, ModelTransferRegistrationService>()
@@ -39,9 +60,7 @@ export function modelTransferRegistration(
   const key = dir()
   const existing = transferRegistrations.get(key)
   if (existing) return existing
-  const created = new ModelTransferRegistrationService(
-    desktopModelTransferRegistrationPorts(dir, afterRegistered)
-  )
+  const created = new ModelTransferRegistrationService(ports().transfer(dir, afterRegistered))
   transferRegistrations.set(key, created)
   return created
 }

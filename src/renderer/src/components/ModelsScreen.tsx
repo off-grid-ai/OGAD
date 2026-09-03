@@ -58,10 +58,10 @@ import {
   type ModelKind
 } from '@offgrid/models'
 import {
-  desktopModelControl,
   type DesktopModelControlModel,
   type DesktopModelControlProjection
 } from '@renderer/lib/model-control-application'
+import { desktopModelControl } from '@renderer/composition/model-control'
 import {
   useModelDownloadProgress,
   type ModelDownloadProgressEvent

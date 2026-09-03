@@ -7,7 +7,7 @@ import {
 } from '@renderer/lib/image-params'
 import { announceImageSettingsChanged } from '@renderer/lib/image-settings-events'
 import { SettingsSelect } from './SettingsSelect'
-import { desktopModelControl } from '@renderer/lib/model-control-application'
+import { desktopModelControl } from '@renderer/composition/model-control'
 import { modelFileDisplayName } from '@offgrid/models'
 
 type ImageSettings = {

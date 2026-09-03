@@ -5,7 +5,10 @@ import type {
   ArtifactVerification,
   ArtifactVerificationFilePort
 } from '@offgrid/models'
-import { artifactVerification } from '../composition/artifact-verification'
+import {
+  artifactVerification,
+  registerDesktopArtifactVerificationFiles
+} from '../composition/artifact-verification'
 
 /** The subset of `fs` this check needs — injected so the read path is testable
  *  against a real temp file (or a fake) without importing node fs into callers'
@@ -18,7 +21,9 @@ export interface GgufFs {
 }
 
 /** Node filesystem adapter. It contains no artifact-validity decisions. */
-export function desktopArtifactVerificationFiles(nativeFs: typeof fs): ArtifactVerificationFilePort {
+export function desktopArtifactVerificationFiles(
+  nativeFs: typeof fs
+): ArtifactVerificationFilePort {
   return {
     async stat(candidate) {
       try {
@@ -47,6 +52,8 @@ export function desktopArtifactVerificationFiles(nativeFs: typeof fs): ArtifactV
     }
   }
 }
+
+registerDesktopArtifactVerificationFiles(desktopArtifactVerificationFiles)
 
 export function verifyArtifactFile(
   candidate: string,

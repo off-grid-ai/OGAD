@@ -6,10 +6,10 @@ import type { ComputerUseActiveModelProjection } from '../../../shared/computer-
 import { openModelSettingsPanel } from '@renderer/lib/model-settings-panel'
 import { SettingsSelect } from './SettingsSelect'
 import {
-  desktopModelControl,
   type DesktopModelControlModel,
   type DesktopModelControlProjection
 } from '@renderer/lib/model-control-application'
+import { desktopModelControl } from '@renderer/composition/model-control'
 
 type ModelEntry = DesktopModelControlModel
 

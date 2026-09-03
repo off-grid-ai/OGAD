@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { formatContextWindow, resolveActiveTextModel } from '../lib/model-summary'
 import { recommendedContextWindow } from '../lib/ctx-options'
 import { LLM_SETTINGS_INVALIDATED_EVENT } from '../lib/settings-invalidation'
-import { desktopModelControl } from '../lib/model-control-application'
+import { desktopModelControl } from '../composition/model-control'
 
 type ActiveModelApi = Partial<Pick<typeof window.api, 'getLlmSettings'>>
 

@@ -13,10 +13,8 @@ import { formatStorageBytes } from './storage-format'
 import { formatTransferSpeed } from '@offgrid/sync'
 import { projectProgress } from '@offgrid/ui'
 import { downloadTimeRemaining } from '@renderer/lib/download-progress'
-import {
-  desktopModelControl,
-  type DesktopModelControlProjection
-} from '@renderer/lib/model-control-application'
+import { type DesktopModelControlProjection } from '@renderer/lib/model-control-application'
+import { desktopModelControl } from '@renderer/composition/model-control'
 import { modelControlSurfaceForKind } from '@offgrid/models'
 import {
   useModelDownloadProgress,

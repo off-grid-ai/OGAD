@@ -61,22 +61,20 @@ type DesktopModelControlPorts = ConstructorParameters<
 >[0]
 
 /** Electron methods as I/O ports only. Shared owns every decision; the instance is composed in
- *  `@renderer/composition/model-control` and re-exported here for its callers. */
+ *  `@renderer/composition/model-control`. */
 export function desktopModelControlPorts(): DesktopModelControlPorts {
   return {
-  snapshot: async () => {
-    return api().getModelControlSnapshot()
-  },
-  assess: (modelId) => api().estimateModelFit(modelId),
-  activate: (modelId, requestedKind) => api().activateModel(modelId, requestedKind),
-  select: (surface, modelId) => api().setActiveModalModel(surface, modelId),
-  download: (modelId) => api().downloadModel(modelId),
-  cancelDownload: (modelId) => api().cancelModelDownload(modelId),
-  unload: (modality) => api().unloadRuntime(modality),
-  remove: async (modelId) => {
-    return api().deleteModel(modelId)
-  }
+    snapshot: async () => {
+      return api().getModelControlSnapshot()
+    },
+    assess: (modelId) => api().estimateModelFit(modelId),
+    activate: (modelId, requestedKind) => api().activateModel(modelId, requestedKind),
+    select: (surface, modelId) => api().setActiveModalModel(surface, modelId),
+    download: (modelId) => api().downloadModel(modelId),
+    cancelDownload: (modelId) => api().cancelModelDownload(modelId),
+    unload: (modality) => api().unloadRuntime(modality),
+    remove: async (modelId) => {
+      return api().deleteModel(modelId)
+    }
   }
 }
-
-export { desktopModelControl } from '@renderer/composition/model-control'

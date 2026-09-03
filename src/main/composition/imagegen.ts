@@ -1,21 +1,43 @@
-// Composition root: the shared image generation application over Desktop's image ports.
-import { ImageGenerationApplicationService } from '@offgrid/models'
-import type { ImageGenerationOutputContract } from '../../shared/image-generation-contract'
+// Composition root: the shared image application over registered Desktop I/O ports.
 import {
-  desktopImageApplicationPorts,
-  type DesktopImageSharedRequest
-} from '../imagegen/application-service'
+  ImageGenerationApplicationService,
+  once,
+  type ImageGenerationApplicationPorts
+} from '@offgrid/models'
+import type {
+  ImageGenerationOutputContract,
+  ImageGenerationRequestContract
+} from '../../shared/image-generation-contract'
 import { desktopModels } from './application-access'
-import { once } from '@offgrid/models'
 
-export const imageGenerationApplication = once(
-  () =>
-    new ImageGenerationApplicationService<
-      ImageGenerationOutputContract,
-      ImageGenerationOutputContract,
-      DesktopImageSharedRequest
-    >(
-      { resolveRoute: (requirements) => desktopModels.resolve(requirements) },
-      desktopImageApplicationPorts()
-    )
-)
+type DesktopImageSharedRequest = ImageGenerationRequestContract & {
+  requestId?: string
+  routeId?: string
+  conversationId?: string
+  projectId?: string | null
+  messageId?: string
+  guidanceScale?: number
+  sourceImageUri?: string
+}
+
+type DesktopImageApplicationPorts = ImageGenerationApplicationPorts<
+  ImageGenerationOutputContract,
+  ImageGenerationOutputContract,
+  DesktopImageSharedRequest
+>
+
+let desktopPorts: DesktopImageApplicationPorts | null = null
+
+export function registerDesktopImageApplicationPorts(ports: DesktopImageApplicationPorts): void {
+  if (desktopPorts) throw new Error('Desktop image application ports are already registered.')
+  desktopPorts = ports
+}
+
+export const imageGenerationApplication = once(() => {
+  if (!desktopPorts) throw new Error('Desktop image application ports are not registered.')
+  return new ImageGenerationApplicationService<
+    ImageGenerationOutputContract,
+    ImageGenerationOutputContract,
+    DesktopImageSharedRequest
+  >({ resolveRoute: (requirements) => desktopModels.resolve(requirements) }, desktopPorts)
+})

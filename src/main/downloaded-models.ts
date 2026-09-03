@@ -10,7 +10,10 @@ import type {
   DownloadedModelRecord,
   DownloadedRegistryCatalogEntry
 } from '@offgrid/models'
-import { downloadedModelRegistry } from './composition/downloaded-models'
+import {
+  downloadedModelRegistry,
+  registerDesktopDownloadedRegistryPorts
+} from './composition/downloaded-models'
 
 export type DownloadedModel = DownloadedModelRecord
 export type { DownloadedRegistryCatalogEntry }
@@ -27,31 +30,34 @@ export function desktopDownloadedRegistryPorts(dir: string): DownloadedRegistryP
     read: () => {
       try {
         const rows: unknown = JSON.parse(fs.readFileSync(registryPath(dir), 'utf-8'))
-        return Array.isArray(rows) ? rows as DownloadedModel[] : []
+        return Array.isArray(rows) ? (rows as DownloadedModel[]) : []
       } catch {
         return []
       }
     },
-    write: models => {
+    write: (models) => {
       try {
         fs.writeFileSync(registryPath(dir), JSON.stringify(models, null, 2))
       } catch {
         /* The registry is best-effort metadata. Model artifacts remain recoverable from disk. */
       }
     },
-    fileSize: fileName => {
+    fileSize: (fileName) => {
       try {
         return fs.statSync(path.join(dir, fileName)).size
       } catch {
         return 0
       }
     },
-    packageIdentity: input => modelPackageIdentity({
-      ...input,
-      files: input.files as [typeof input.files[number], ...Array<typeof input.files[number]>]
-    })
+    packageIdentity: (input) =>
+      modelPackageIdentity({
+        ...input,
+        files: input.files as [(typeof input.files)[number], ...Array<(typeof input.files)[number]>]
+      })
   }
 }
+
+registerDesktopDownloadedRegistryPorts(desktopDownloadedRegistryPorts)
 
 function registry(dir: string): DownloadedModelRegistryService {
   return downloadedModelRegistry(dir)

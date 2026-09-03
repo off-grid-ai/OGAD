@@ -17,7 +17,7 @@ import { HealthPanel } from './HealthPanel'
 import { formatTransferSpeed } from '@offgrid/sync'
 import { projectProgress } from '@offgrid/ui'
 import { formatStorageBytes } from './storage-format'
-import { desktopModelControl } from '@renderer/lib/model-control-application'
+import { desktopModelControl } from '@renderer/composition/model-control'
 
 type Mode = 'conservative' | 'balanced' | 'extreme'
 

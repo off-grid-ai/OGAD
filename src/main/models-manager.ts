@@ -63,7 +63,9 @@ import {
   localModelImportService,
   modelActivationService,
   modelLibraryRemovalService,
-  modelTransferRegistration
+  modelTransferRegistration,
+  registerDesktopModelLibraryPorts,
+  type DesktopProjectorRepair
 } from './composition/model-library'
 import { platformFetch } from '@offgrid/models/fetch'
 import { desktopImageRuntimeIdentity } from './models/image-runtime-identity'
@@ -285,7 +287,6 @@ function uniqueLegacySelectedInventory(
   )
 }
 
-
 /** Remote rows for the catalog surfaces: the workspace's rows plus Desktop presentation. */
 function remoteCatalogEntries(): RemoteVisionInventoryModel[] {
   return desktopModels.remoteCatalogRows().map((row) => ({
@@ -325,10 +326,7 @@ export async function getCatalog(): Promise<{ kinds: readonly string[]; models: 
 
 /** Combine host catalog facts with the canonical Shared model-control projection. */
 export async function getModelControlSnapshot(): Promise<
-  ModelControlApplicationSnapshot<
-    DesktopModelControlCatalogModel,
-    ComputerUseActiveModelProjection
-  >
+  ModelControlApplicationSnapshot<DesktopModelControlCatalogModel, ComputerUseActiveModelProjection>
 > {
   await desktopModels.refresh()
   const [catalog, installed, computerUse] = await Promise.all([
@@ -612,39 +610,41 @@ async function resolveDesktopRemoval(modelId: string): Promise<DesktopRemovalTar
 }
 
 /** Desktop file, runtime, and registry I/O for model removal. Shared owns the transaction. */
-export function desktopModelLibraryRemovalPorts(): ConstructorParameters<typeof ModelLibraryRemovalService>[0] {
+export function desktopModelLibraryRemovalPorts(): ConstructorParameters<
+  typeof ModelLibraryRemovalService
+>[0] {
   return {
-  resolve: resolveDesktopRemoval,
-  selected: selectedModelRoutes,
-  async removeFile(fileName) {
-    const filePath = path.join(llm.getModelsDir(), fileName)
-    const existed = fs.existsSync(filePath)
-    fs.rmSync(filePath, { force: true })
-    return existed
-  },
-  async removePartial(fileName) {
-    fs.rmSync(path.join(llm.getModelsDir(), `${fileName}.part`), { force: true })
-  },
-  async removeRuntime(target) {
-    const mod = await import('./mflux')
-    const remove = (mod as Record<string, unknown>).deleteMfluxModel
-    if (typeof remove === 'function') {
-      await (remove as (id: string) => Promise<void>)(target.modelId)
-    }
-  },
-  async unregister(target) {
-    const desktop = target as DesktopRemovalTarget
-    if (desktop.source === 'local') {
-      saveLocalModels(getLocalModels().filter((model) => model.id !== target.modelId))
-    } else if (
-      desktop.source === 'downloaded' ||
-      findDownloaded(llm.getModelsDir(), target.modelId)
-    ) {
-      removeDownloaded(llm.getModelsDir(), target.modelId)
-    }
-  },
-  clearSelection: (modality) => selectDesktopModel(modality, null)
-}
+    resolve: resolveDesktopRemoval,
+    selected: selectedModelRoutes,
+    async removeFile(fileName) {
+      const filePath = path.join(llm.getModelsDir(), fileName)
+      const existed = fs.existsSync(filePath)
+      fs.rmSync(filePath, { force: true })
+      return existed
+    },
+    async removePartial(fileName) {
+      fs.rmSync(path.join(llm.getModelsDir(), `${fileName}.part`), { force: true })
+    },
+    async removeRuntime(target) {
+      const mod = await import('./mflux')
+      const remove = (mod as Record<string, unknown>).deleteMfluxModel
+      if (typeof remove === 'function') {
+        await (remove as (id: string) => Promise<void>)(target.modelId)
+      }
+    },
+    async unregister(target) {
+      const desktop = target as DesktopRemovalTarget
+      if (desktop.source === 'local') {
+        saveLocalModels(getLocalModels().filter((model) => model.id !== target.modelId))
+      } else if (
+        desktop.source === 'downloaded' ||
+        findDownloaded(llm.getModelsDir(), target.modelId)
+      ) {
+        removeDownloaded(llm.getModelsDir(), target.modelId)
+      }
+    },
+    clearSelection: (modality) => selectDesktopModel(modality, null)
+  }
 }
 
 const modelLibraryRemoval = (): ModelLibraryRemovalService => modelLibraryRemovalService()
@@ -826,17 +826,15 @@ async function resolveActiveModelProjectorRepair(): Promise<{
   }
 }
 
-export type DesktopProjectorRepair = Awaited<ReturnType<typeof resolveActiveModelProjectorRepair>> extends infer R | null ? NonNullable<R> : never
-
 export function desktopActiveProjectorRepairPorts(): ConstructorParameters<
   typeof ModelMetadataRepairCommandService<DesktopProjectorRepair>
 >[0] {
   return {
-  resolve: resolveActiveModelProjectorRepair,
-  persist: (repair) => desktopModelSelectionPersistence.projectLegacyTextConfig(repair),
-  reload: () => llm.reloadModel(),
-  refresh: () => desktopModels.refresh()
-}
+    resolve: resolveActiveModelProjectorRepair,
+    persist: (repair) => desktopModelSelectionPersistence.projectLegacyTextConfig(repair),
+    reload: () => llm.reloadModel(),
+    refresh: () => desktopModels.refresh()
+  }
 }
 
 const activeProjectorRepair = (): ModelMetadataRepairCommandService<DesktopProjectorRepair> =>
@@ -891,11 +889,13 @@ async function resolveDesktopActivation(
   return kind ? { kind, supportsRequestedKind } : null
 }
 
-export function desktopModelActivationPorts(): ConstructorParameters<typeof ModelActivationService>[0] {
+export function desktopModelActivationPorts(): ConstructorParameters<
+  typeof ModelActivationService
+>[0] {
   return {
-  resolve: resolveDesktopActivation,
-  select: (modality, modelId) => selectDesktopModel(modality, modelId)
-}
+    resolve: resolveDesktopActivation,
+    select: (modality, modelId) => selectDesktopModel(modality, modelId)
+  }
 }
 
 const modelActivation = (): ModelActivationService => modelActivationService()
@@ -984,24 +984,24 @@ export function desktopModelTransferRegistrationPorts(
   afterRegistered?: () => Promise<void>
 ): ConstructorParameters<typeof ModelTransferRegistrationService>[0] {
   return {
-  validateFiles: async (manifest) =>
-    (
-      await transferredFilesOnDisk(
-        dir(),
-        manifest.files.map((file) => ({ name: file.name, sizeBytes: file.sizeBytes }))
-      )
-    ).error ?? null,
-  async catalogFiles(modelId) {
-    const { CATALOG } = await import('@offgrid/models')
-    return CATALOG.find((model) => model.id === modelId)?.files.map((file) => file.name) ?? null
-  },
-  readLocalModels: () => getLocalModels(dir()),
-  writeLocalModels: (models) => saveLocalModels([...models], dir()),
-  recordDownloaded: (model) => recordDownloaded(dir(), model),
-  hasDownloaded: (id) => Boolean(findDownloaded(dir(), id)),
-  packageIdentity: (manifest) => modelPackageIdentity(manifest as TransferredModelManifest),
-  ...(afterRegistered ? { afterRegistered } : {})
-}
+    validateFiles: async (manifest) =>
+      (
+        await transferredFilesOnDisk(
+          dir(),
+          manifest.files.map((file) => ({ name: file.name, sizeBytes: file.sizeBytes }))
+        )
+      ).error ?? null,
+    async catalogFiles(modelId) {
+      const { CATALOG } = await import('@offgrid/models')
+      return CATALOG.find((model) => model.id === modelId)?.files.map((file) => file.name) ?? null
+    },
+    readLocalModels: () => getLocalModels(dir()),
+    writeLocalModels: (models) => saveLocalModels([...models], dir()),
+    recordDownloaded: (model) => recordDownloaded(dir(), model),
+    hasDownloaded: (id) => Boolean(findDownloaded(dir(), id)),
+    packageIdentity: (manifest) => modelPackageIdentity(manifest as TransferredModelManifest),
+    ...(afterRegistered ? { afterRegistered } : {})
+  }
 }
 
 const transferredModelRegistration = (): ModelTransferRegistrationService =>
@@ -1090,54 +1090,69 @@ function localProtectedNames(): Set<string> {
   return s
 }
 
-export function desktopLocalModelImportPorts(): ConstructorParameters<typeof LocalModelImportService>[0] {
+export function desktopLocalModelImportPorts(): ConstructorParameters<
+  typeof LocalModelImportService
+>[0] {
   return {
-  async inspect(source) {
-    if (!source || !isGgufFile(source)) {
-      return { fileName: '', sizeBytes: 0, valid: false, error: `Not a ${MODEL_FILE_EXTENSION.gguf} file` }
-    }
-    if (!(await verifyArtifactFile(source, fs, 'import')).valid) {
-      return {
-        fileName: path.basename(source),
-        sizeBytes: 0,
-        valid: false,
-        error: 'File is not a valid GGUF model (corrupt or wrong format)'
+    async inspect(source) {
+      if (!source || !isGgufFile(source)) {
+        return {
+          fileName: '',
+          sizeBytes: 0,
+          valid: false,
+          error: `Not a ${MODEL_FILE_EXTENSION.gguf} file`
+        }
       }
-    }
-    return { fileName: path.basename(source), sizeBytes: fs.statSync(source).size, valid: true }
-  },
-  async destinationHasSize(fileName, sizeBytes) {
-    const destination = path.join(llm.getModelsDir(), fileName)
-    try {
-      return fs.statSync(destination).size === sizeBytes
-    } catch {
-      return false
-    }
-  },
-  async copy({ source, fileName, onBytes }) {
-    const dir = llm.getModelsDir()
-    fs.mkdirSync(dir, { recursive: true })
-    await new Promise<void>((resolve, reject) => {
-      const input = fs.createReadStream(source)
-      const output = fs.createWriteStream(path.join(dir, fileName))
-      let copied = 0
-      input.on('data', (chunk) => {
-        copied += chunk.length
-        onBytes(copied)
+      if (!(await verifyArtifactFile(source, fs, 'import')).valid) {
+        return {
+          fileName: path.basename(source),
+          sizeBytes: 0,
+          valid: false,
+          error: 'File is not a valid GGUF model (corrupt or wrong format)'
+        }
+      }
+      return { fileName: path.basename(source), sizeBytes: fs.statSync(source).size, valid: true }
+    },
+    async destinationHasSize(fileName, sizeBytes) {
+      const destination = path.join(llm.getModelsDir(), fileName)
+      try {
+        return fs.statSync(destination).size === sizeBytes
+      } catch {
+        return false
+      }
+    },
+    async copy({ source, fileName, onBytes }) {
+      const dir = llm.getModelsDir()
+      fs.mkdirSync(dir, { recursive: true })
+      await new Promise<void>((resolve, reject) => {
+        const input = fs.createReadStream(source)
+        const output = fs.createWriteStream(path.join(dir, fileName))
+        let copied = 0
+        input.on('data', (chunk) => {
+          copied += chunk.length
+          onBytes(copied)
+        })
+        input.on('error', reject)
+        output.on('error', reject)
+        output.on('finish', resolve)
+        input.pipe(output)
       })
-      input.on('error', reject)
-      output.on('error', reject)
-      output.on('finish', resolve)
-      input.pipe(output)
-    })
-  },
-  async removeDestination(fileName) {
-    fs.rmSync(path.join(llm.getModelsDir(), fileName), { force: true })
-  },
-  readLocalModels: () => getLocalModels(),
-  writeLocalModels: (models) => saveLocalModels([...models])
+    },
+    async removeDestination(fileName) {
+      fs.rmSync(path.join(llm.getModelsDir(), fileName), { force: true })
+    },
+    readLocalModels: () => getLocalModels(),
+    writeLocalModels: (models) => saveLocalModels([...models])
+  }
 }
-}
+
+registerDesktopModelLibraryPorts({
+  removal: desktopModelLibraryRemovalPorts,
+  repair: desktopActiveProjectorRepairPorts,
+  activation: desktopModelActivationPorts,
+  localImport: desktopLocalModelImportPorts,
+  transfer: desktopModelTransferRegistrationPorts
+})
 
 const localModelImports = (): LocalModelImportService => localModelImportService()
 

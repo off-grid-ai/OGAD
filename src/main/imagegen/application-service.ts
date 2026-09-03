@@ -46,7 +46,10 @@ import { dataDir } from '../runtime-env'
 import { enhanceImagePrompt } from '@offgrid/models'
 import { resolveExistingOwnedPath } from './owned-path'
 import { decodeDataUrl, toDataUrl } from '../model-server/image-bytes'
-import { imageGenerationApplication } from '../composition/imagegen'
+import {
+  imageGenerationApplication,
+  registerDesktopImageApplicationPorts
+} from '../composition/imagegen'
 
 let nativeCancelBoundary: () => void | Promise<void> = () => undefined
 let nativeInspectionBoundary: (input: {
@@ -308,6 +311,8 @@ export function desktopImageApplicationPorts(): ImageGenerationApplicationPorts<
     retainCancelledState: true
   }
 }
+
+registerDesktopImageApplicationPorts(desktopImageApplicationPorts())
 
 const application = (): ReturnType<typeof imageGenerationApplication> =>
   imageGenerationApplication()
