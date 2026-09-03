@@ -1,10 +1,18 @@
 import { callHook, HOOKS } from './bootstrap/hookRegistry'
-import { CORE_SYNC_ENTITIES, type SyncMutation } from '@offgrid/sync'
-import { encodeChangedModelSettings } from '@offgrid/models'
-export { SYNCABLE_COMPUTER_USE_SETTING_KEYS, SYNCABLE_LLM_SETTING_KEYS } from '@offgrid/models'
-// The committed-mutation contract (entity table, mutation shape) is shared with Off Grid Mobile.
-export { CORE_SYNC_ENTITIES } from '@offgrid/sync'
-export type { CoreSyncEntity, SyncMutation } from '@offgrid/sync'
+import {
+  CORE_SYNC_ENTITIES as APPLICATION_SYNC_ENTITIES,
+  encodeChangedModelSettings,
+  type CoreSyncEntity,
+  type SyncMutation
+} from '@offgrid/application'
+
+/**
+ * TEST-ONLY COMPATIBILITY SHIM.
+ * Production consumers import this contract from `@offgrid/application`. Delete these two exports
+ * when the intentionally deferred test migration moves its imports to the application package.
+ */
+export const CORE_SYNC_ENTITIES = APPLICATION_SYNC_ENTITIES
+export type { CoreSyncEntity, SyncMutation }
 
 export function emitChangedLlmSettings(
   before: Record<string, unknown>,

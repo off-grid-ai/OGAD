@@ -12,7 +12,8 @@ import {
   type TaskRunSnapshot
 } from '@offgrid/automation'
 import { addRagMessage } from '../database'
-import { CORE_SYNC_ENTITIES, emitSyncMutation } from '../sync-mutation'
+import { CORE_SYNC_ENTITIES } from '@offgrid/application'
+import { emitSyncMutation } from '../sync-mutation'
 
 export { taskResultChatContent } from '@offgrid/automation'
 

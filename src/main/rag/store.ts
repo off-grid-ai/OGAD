@@ -6,7 +6,8 @@
 
 import { getDB } from '../database'
 import { deleteArtifactsForProject } from '../artifacts'
-import { CORE_SYNC_ENTITIES, emitSyncMutation } from '../sync-mutation'
+import { CORE_SYNC_ENTITIES } from '@offgrid/application'
+import { emitSyncMutation } from '../sync-mutation'
 import { randomUUID } from 'crypto'
 import {
   MEMORY_CANDIDATE_LIMIT,

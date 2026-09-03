@@ -7,7 +7,8 @@ import {
   type ComputerUseSettingsPortResult,
   type ComputerUseSettings
 } from '@offgrid/automation'
-import { CORE_SYNC_ENTITIES, emitSyncMutation } from './sync-mutation'
+import { CORE_SYNC_ENTITIES } from '@offgrid/application'
+import { emitSyncMutation } from './sync-mutation'
 
 export function getComputerUseSettings(): ComputerUseSettings {
   return normalizeComputerUseSettings(

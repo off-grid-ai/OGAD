@@ -7,7 +7,8 @@ import path from 'path'
 import fs from 'fs'
 import crypto from 'crypto'
 import { createSettingsStore, initializeSettingsStore } from './settings-store'
-import { CORE_SYNC_ENTITIES, emitSyncMutation } from './sync-mutation'
+import { CORE_SYNC_ENTITIES } from '@offgrid/application'
+import { emitSyncMutation } from './sync-mutation'
 import type {
   RagConversationContract,
   RagMessageContract,
