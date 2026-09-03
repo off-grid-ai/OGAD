@@ -765,7 +765,17 @@ async function resolveDesktopActivation(
   requestedKind?: string
 ): Promise<{ kind?: string; remote?: boolean; supportsRequestedKind?: boolean } | null> {
   const route = decodeModelRouteId(modelId)
-  if (route?.serverId || parseRemoteVisionModelId(modelId)) return { remote: true }
+  const remoteRef = route?.serverId
+    ? { serverId: route.serverId, modelId: route.modelId }
+    : parseRemoteVisionModelId(modelId)
+  if (remoteRef) {
+    // A remote route's modality is an inventory fact; without it a caller that names no kind would
+    // be routed to text and an image pick would silently fail.
+    const model = desktopModelServices.llm
+      .list()
+      .find((candidate) => candidate.serverId === remoteRef.serverId && candidate.id === remoteRef.modelId)
+    return { remote: true, ...(model ? { kind: model.kind } : {}) }
+  }
   let kind: string | undefined
   let supportsRequestedKind = false
   if (modelId.startsWith('local:')) {
