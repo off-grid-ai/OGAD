@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { getSetting } from './database'
 import { sampleProgressRate, type ProgressRateSample } from '@offgrid/ui'
+import { writeDiagnosticLog } from './diagnostics-log'
 
 /** Register the complete renderer-to-TTS contract in one place. The renderer sends text and an
  * optional voice; this owner resolves the persisted fallback and delegates synthesis to the active
@@ -49,8 +50,15 @@ export function setupTtsIpc(): void {
     if (!chosenVoice) {
       try {
         chosenVoice = getSetting<string>('ttsVoice', '') || undefined
-      } catch {
-        /* synthesize owns the default voice when settings are unavailable */
+      } catch (error) {
+        // The synthesis owner can safely choose its default, but the persistence outage must remain
+        // observable instead of looking like an intentional user selection.
+        writeDiagnosticLog(
+          'tts',
+          'voice_setting_read_failed',
+          { error: error instanceof Error ? error.message : String(error) },
+          'error'
+        )
       }
     }
     return synthesize(text, chosenVoice, progressSender(event))
