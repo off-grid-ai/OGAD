@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { Outcome, SpeechFailure } from '@offgrid/application'
 import { transcriptionRecoveryMessage } from '@offgrid/models'
-import {
-  audioFilename,
-  chooseRecorderMime,
-  type SpeechEndpointTimer,
-  type VoiceTurnMode
-} from '@offgrid/speech'
+import { chooseRecorderMime, type SpeechEndpointTimer, type VoiceTurnMode } from '@offgrid/speech'
 import { createSpeechEndpointTimer } from '@renderer/composition/speech-endpoint'
 
 /*
@@ -29,8 +25,12 @@ interface ChatVoiceTurnOptions {
   speakerDrainMs: number
   isGenerating: boolean
   isPlaybackActive: boolean
-  transcribeAudio: (audio: Uint8Array, extension: string, requestId: string) => Promise<string>
-  cancelTranscription?: (requestId: string) => Promise<boolean>
+  transcribeAudio: (
+    audio: Uint8Array,
+    mimeType: string,
+    operationId: string
+  ) => Promise<Outcome<{ text: string }, SpeechFailure>>
+  cancelTranscription?: (operationId: string) => Promise<Outcome<void, SpeechFailure>>
   getTranscriptionLabel?: () => Promise<{ label: string }>
   onTranscript: (text: string, clip: ChatVoiceClip | null) => void
 }
@@ -114,6 +114,19 @@ function microphoneFailure(cause: unknown): { denied: boolean; message: string }
   }
 }
 
+function transcriptionFailureMessage(failure: SpeechFailure): string | null {
+  if (failure.kind === 'cancelled') return null
+  if (failure.kind === 'runtime') {
+    return (
+      transcriptionRecoveryMessage(failure.message) ?? `Transcription failed: ${failure.message}`
+    )
+  }
+  if (failure.kind === 'permission_denied') {
+    return 'Microphone access is off. Allow Off Grid AI Desktop in System Settings, then try again.'
+  }
+  return 'Transcription failed. Check the speech-to-text model in Settings > Setup & health.'
+}
+
 /**
  * One owner for a chat voice turn.
  *
@@ -185,7 +198,20 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
       const transcriptionRequest = transcriptionRequestRef.current
       transcriptionRequestRef.current = null
       if (transcriptionRequest) {
-        void optionsRef.current.cancelTranscription?.(transcriptionRequest).catch(() => {})
+        void optionsRef.current
+          .cancelTranscription?.(transcriptionRequest)
+          .then((outcome) => {
+            if (outcome.ok) return
+            console.error('Transcription cancellation failed', outcome.failure)
+            const message = transcriptionFailureMessage(outcome.failure)
+            if (notify && mountedRef.current && message) setError(message)
+          })
+          .catch((cause) => {
+            console.error('Transcription cancellation failed', cause)
+            if (notify && mountedRef.current) {
+              setError('Transcription could not be stopped. Try again.')
+            }
+          })
       }
       const resources = resourcesRef.current
       resourcesRef.current = null
@@ -220,12 +246,19 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
       }
 
       try {
-        const extension = audioFilename(mime).split('.').pop() ?? 'webm'
         const bytes = new Uint8Array(await blob.arrayBuffer())
-        const requestId = crypto.randomUUID()
-        transcriptionRequestRef.current = requestId
-        const text = (await optionsRef.current.transcribeAudio(bytes, extension, requestId)).trim()
+        const operationId = crypto.randomUUID()
+        transcriptionRequestRef.current = operationId
+        const outcome = await optionsRef.current.transcribeAudio(bytes, mime, operationId)
         if (!mountedRef.current || sequence !== sequenceRef.current) return
+        if (!outcome.ok) {
+          const message = transcriptionFailureMessage(outcome.failure)
+          if (message) setError(message)
+          updateSuspended(optionsRef.current.mode === 'handsfree')
+          updatePhase('idle')
+          return
+        }
+        const text = outcome.value.text.trim()
         if (!text) {
           setError("Didn't catch that. Tap the microphone and try again.")
           updateSuspended(optionsRef.current.mode === 'handsfree')

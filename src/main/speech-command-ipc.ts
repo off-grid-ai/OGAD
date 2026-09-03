@@ -1,13 +1,22 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron'
-import type { OffGridApplication, SpeakCommand, StreamSpeechCommand } from '@offgrid/application'
+import type {
+  OffGridApplication,
+  SpeakCommand,
+  StreamSpeechCommand,
+  TranscribeCommand
+} from '@offgrid/application'
 import { getMainWindow } from './main-window'
 import { applicationShutdown } from './shutdown'
 import {
+  SPEECH_CANCEL_TRANSCRIPTION_CHANNEL,
   SPEECH_EVENT_CHANNEL,
   SPEECH_FEED_STREAM_CHANNEL,
   SPEECH_FINISH_STREAM_CHANNEL,
   SPEECH_INTERRUPT_CHANNEL,
   SPEECH_SPEAK_CHANNEL,
+  SPEECH_TRANSCRIBE_CHANNEL,
+  type SpeechCancelTranscriptionOutcome,
+  type SpeechTranscribeOutcome,
   type SpeechSpeakOutcome
 } from '../shared/speech-command-contract'
 
@@ -70,6 +79,30 @@ function parseOperationId(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 && value.length <= 256 ? value : null
 }
 
+function parseTranscribeCommand(value: unknown): TranscribeCommand | null {
+  if (!value || typeof value !== 'object') return null
+  const command = value as Record<string, unknown>
+  const source = command.source as Record<string, unknown> | undefined
+  const operationId = optionalString(command.operationId, 256) ? command.operationId : null
+  if (
+    !source ||
+    source.kind !== 'bytes' ||
+    !(source.bytes instanceof Uint8Array) ||
+    typeof source.mimeType !== 'string' ||
+    source.mimeType.length === 0 ||
+    source.mimeType.length > 256 ||
+    operationId === null ||
+    operationId === '' ||
+    !optionalString(command.language, 64)
+  )
+    return null
+  return {
+    source: { kind: 'bytes', bytes: source.bytes, mimeType: source.mimeType },
+    ...(typeof operationId === 'string' ? { operationId } : {}),
+    ...(typeof command.language === 'string' ? { language: command.language } : {})
+  }
+}
+
 function assertMainRenderer(event: IpcMainInvokeEvent): void {
   if (event.sender !== getMainWindow()?.webContents) {
     throw new Error('Speech commands are only available to the main renderer.')
@@ -91,6 +124,26 @@ async function speechApplication(): Promise<OffGridApplication> {
 export function setupSpeechCommandIpc(): void {
   if (registered) return
   registered = true
+  ipcMain.handle(
+    SPEECH_TRANSCRIBE_CHANNEL,
+    async (event, value: unknown): Promise<SpeechTranscribeOutcome> => {
+      assertMainRenderer(event)
+      const command = parseTranscribeCommand(value)
+      if (!command) throw new Error('Invalid speech transcription command.')
+      const desktopApplication = await speechApplication()
+      return desktopApplication.speech.transcribe(command)
+    }
+  )
+  ipcMain.handle(
+    SPEECH_CANCEL_TRANSCRIPTION_CHANNEL,
+    async (event, value: unknown): Promise<SpeechCancelTranscriptionOutcome> => {
+      assertMainRenderer(event)
+      const operationId = parseOperationId(value)
+      if (!operationId) throw new Error('Invalid speech transcription operation ID.')
+      const desktopApplication = await speechApplication()
+      return desktopApplication.speech.cancelTranscription(operationId)
+    }
+  )
   ipcMain.handle(
     SPEECH_SPEAK_CHANNEL,
     async (event, value: unknown): Promise<SpeechSpeakOutcome> => {
@@ -123,6 +176,8 @@ export function setupSpeechCommandIpc(): void {
   applicationShutdown.register({
     name: 'speech:command-transport',
     shutdown: () => {
+      ipcMain.removeHandler(SPEECH_TRANSCRIBE_CHANNEL)
+      ipcMain.removeHandler(SPEECH_CANCEL_TRANSCRIPTION_CHANNEL)
       ipcMain.removeHandler(SPEECH_SPEAK_CHANNEL)
       ipcMain.removeHandler(SPEECH_FEED_STREAM_CHANNEL)
       ipcMain.removeHandler(SPEECH_FINISH_STREAM_CHANNEL)

@@ -4532,9 +4532,13 @@ export function MemoryChat({
     speakerDrainMs: voiceSpeakerDrainMs,
     isGenerating: Boolean(activeConversationId && generatingConvs.has(activeConversationId)),
     isPlaybackActive: voicePlaybackOwner !== null,
-    transcribeAudio: (audio, extension, requestId) =>
-      window.api.transcribeAudio(audio, extension, requestId),
-    cancelTranscription: (requestId) => window.api.cancelTranscription(requestId),
+    transcribeAudio: (audio, mimeType, operationId) =>
+      window.api.speechCommands.transcribe({
+        source: { kind: 'bytes', bytes: audio, mimeType },
+        operationId
+      }),
+    cancelTranscription: (operationId) =>
+      window.api.speechCommands.cancelTranscription(operationId),
     getTranscriptionLabel: () => window.api.getTranscriptionInfo(),
     onTranscript: (text, clip) => {
       if (voiceMode && clip) {

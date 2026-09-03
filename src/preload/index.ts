@@ -49,15 +49,20 @@ import {
   type SpeechTextCleanResult
 } from '../shared/speech-text-cleaning-contract'
 import {
+  SPEECH_CANCEL_TRANSCRIPTION_CHANNEL,
   SPEECH_EVENT_CHANNEL,
   SPEECH_FEED_STREAM_CHANNEL,
   SPEECH_FINISH_STREAM_CHANNEL,
   SPEECH_INTERRUPT_CHANNEL,
   SPEECH_SPEAK_CHANNEL,
+  SPEECH_TRANSCRIBE_CHANNEL,
   type DesktopSpeechEvent,
+  type SpeechCancelTranscriptionOutcome,
   type SpeechStreamCommand,
   type SpeechSpeakCommand,
-  type SpeechSpeakOutcome
+  type SpeechSpeakOutcome,
+  type SpeechTranscribeCommand,
+  type SpeechTranscribeOutcome
 } from '../shared/speech-command-contract'
 
 console.log('PRELOAD SCRIPT LOADED')
@@ -785,6 +790,10 @@ const offGridApi = {
     }
   },
   speechCommands: {
+    transcribe: (command: SpeechTranscribeCommand): Promise<SpeechTranscribeOutcome> =>
+      ipcRenderer.invoke(SPEECH_TRANSCRIBE_CHANNEL, command),
+    cancelTranscription: (operationId: string): Promise<SpeechCancelTranscriptionOutcome> =>
+      ipcRenderer.invoke(SPEECH_CANCEL_TRANSCRIPTION_CHANNEL, operationId),
     speak: (command: SpeechSpeakCommand): Promise<SpeechSpeakOutcome> =>
       ipcRenderer.invoke(SPEECH_SPEAK_CHANNEL, command),
     feedStream: (command: SpeechStreamCommand): Promise<void> =>
