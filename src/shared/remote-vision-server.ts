@@ -27,6 +27,8 @@ export interface RemoteVisionSavedServer {
   hasApiKey: boolean
   /** The user has confirmed that this remote server can receive screen images. */
   screenFramesAllowed: boolean
+  /** "Use this server". Absent means true. */
+  enabled?: boolean
 }
 
 export interface RemoteVisionModelReference {
@@ -72,6 +74,7 @@ export function remoteVisionInventoryModels(
   ): RemoteVisionInventoryModel['kind'] =>
     modality === 'text' ? (capabilities?.supportsVision ? 'vision' : 'text') : modality
   return servers.flatMap((server) => {
+    if (server.enabled === false) return []
     const selections = Object.entries(server.selections ?? {}).filter(
       (entry): entry is [RemoteModelModality, string] => typeof entry[1] === 'string' && !!entry[1]
     )

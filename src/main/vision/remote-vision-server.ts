@@ -47,6 +47,8 @@ interface StoredRemoteVisionServer {
   selections: RemoteModalitySelections
   catalog: RemoteModelCatalog
   screenFramesAllowed: boolean
+  /** "Use this server". Absent means true (records written before the flag existed). */
+  enabled?: boolean
 }
 
 interface StoredRemoteVisionConfig {
@@ -150,7 +152,8 @@ function storedFromShared(server: PersistedRemoteServer): StoredRemoteVisionServ
     model: server.selections?.text ?? '',
     selections: server.selections ?? {},
     catalog: server.catalog ?? {},
-    screenFramesAllowed: server.screenFramesAllowed === true
+    screenFramesAllowed: server.screenFramesAllowed === true,
+    enabled: server.enabled !== false
   }
 }
 
@@ -302,7 +305,10 @@ function selectedRemoteServer(stored: StoredRemoteVisionConfig): StoredRemoteVis
   if (route?.adapterId === 'desktop.remote-chat' && route.serverId) {
     return (
       stored.servers.find(
-        (server) => server.id === route.serverId && server.selections.text === route.modelId
+        (server) =>
+          server.enabled !== false &&
+          server.id === route.serverId &&
+          server.selections.text === route.modelId
       ) ?? null
     )
   }
@@ -349,12 +355,15 @@ export async function setRemoteVisionServerSettings(
   update: RemoteVisionServerUpdate
 ): Promise<RemoteVisionServerSettings> {
   if (update.provider === 'local') {
+    // "Off uses models on this device": one shared rule, every modality. The last local text model
+    // is the preferred fallback for text.
     const previousLocal = desktopModelSelectionPersistence.readLegacyTextConfig().id
-    const selected = await desktopModelServices.select(
-      'text',
-      typeof previousLocal === 'string' ? previousLocal : null
-    )
-    if (!selected.success) throw new Error(selected.error)
+    for (const server of readStored().servers) {
+      if (server.enabled === false) continue
+      await desktopModelServices.workspace.setServerEnabled(server.id, false, (modality) =>
+        modality === 'text' && typeof previousLocal === 'string' ? previousLocal : undefined
+      )
+    }
     return getRemoteVisionServerSettings()
   }
   if (!validProvider(update.provider)) throw new Error('Unknown model server.')
@@ -378,6 +387,8 @@ export async function setRemoteVisionServerSettings(
     selections,
     catalog,
     screenFramesAllowed: update.screenFramesAllowed === true,
+    // Saving a server is the "on" side of the toggle.
+    enabled: true,
     credential: update.apiKey?.trim() || undefined,
     clearCredential: update.clearApiKey === true
   })
