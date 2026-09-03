@@ -68,10 +68,13 @@ export const HOOKS = {
   /** (mutation: SyncMutation) => void - record a committed core data change in Pro sync. */
   syncRecordLocalMutation: 'sync.recordLocalMutation',
   /**
-   * (mutation: KnowledgeDocumentMutation) => void - a committed RAG document lifecycle change.
-   * Pro transfers/reconciles it; free builds leave the hook unregistered.
+   * () => readonly string[] - connected peer IDs from the existing Pro transport runtime.
    */
-  syncKnowledgeDocumentMutation: 'sync.knowledgeDocumentMutation',
+  syncConnectedDeviceIds: 'sync.connectedDeviceIds',
+  /**
+   * (deviceId, document) => Promise<void> - send one Shared-approved knowledge document.
+   */
+  syncSendKnowledgeDocument: 'sync.sendKnowledgeDocument',
   /**
    * (mutation: LocalSharedFileMutation) => void - committed generated media or attachment bytes.
    * Pro owns transfer and consent; free builds leave this inert.

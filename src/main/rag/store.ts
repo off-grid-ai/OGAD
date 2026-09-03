@@ -7,7 +7,6 @@
 import { getDB } from '../database'
 import { deleteArtifactsForProject } from '../artifacts'
 import { CORE_SYNC_ENTITIES, emitSyncMutation } from '../sync-mutation'
-import { emitKnowledgeDocumentMutation } from '../sync-knowledge-document'
 import { randomUUID } from 'crypto'
 import {
   MEMORY_CANDIDATE_LIMIT,
@@ -384,9 +383,6 @@ export function deleteProject(id: string): void {
   const conversations = db
     .prepare('SELECT id FROM rag_conversations WHERE project_id = ?')
     .all(id) as Array<{ id: string }>
-  const documents = db
-    .prepare('SELECT sync_id FROM rag_documents WHERE project_id = ?')
-    .all(id) as Array<{ sync_id: string }>
   const tx = db.transaction(() => {
     const docs = db.prepare('SELECT id FROM rag_documents WHERE project_id = ?').all(id) as {
       id: number
@@ -416,8 +412,4 @@ export function deleteProject(id: string): void {
       kind: 'put'
     })
   }
-  for (const document of documents) {
-    emitKnowledgeDocumentMutation({ kind: 'deleted', syncId: document.sync_id })
-  }
-  emitSyncMutation({ entity: CORE_SYNC_ENTITIES.project, entityId: id, kind: 'delete' })
 }

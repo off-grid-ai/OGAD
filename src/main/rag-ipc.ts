@@ -6,6 +6,7 @@ import fs from 'fs'
 import { randomUUID } from 'node:crypto'
 import { listProjects, createProject, updateProject, deleteProject } from './rag'
 import { desktopRag } from './composition/application-access'
+import { desktopApplication } from './composition/application'
 import { attachmentPickerExtensions } from '@offgrid/sync'
 
 // Built from the shared attachment classifier (@offgrid/sync) so the picker allowlist
@@ -30,7 +31,10 @@ export function setupRagIPC(): void {
     updateProject(id, patch)
   })
 
-  ipcMain.handle('projects:delete', (_e, id: string) => deleteProject(id))
+  ipcMain.handle('projects:delete', async (_e, id: string) => {
+    await desktopApplication.workflows.deleteProject(id)
+    deleteProject(id)
+  })
 
   // --- Knowledge base (documents) ------------------------------------------
   ipcMain.handle('projects:list-documents', (_e, projectId: string) =>
