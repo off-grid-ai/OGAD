@@ -46,6 +46,8 @@ import { proposalDeckSystemHint, proposalDeckService } from './proposal-deck/ser
 import { callHookAsync, HOOKS } from './bootstrap/hookRegistry'
 import { DEFAULT_MAX_TOOL_CALLS } from '@offgrid/models'
 import { generateDesktopMessages } from './desktop-generation'
+import { desktopModelServices } from './model-service-access'
+import type { GenerationMetrics } from '../shared/generation-metrics'
 import {
   desktopToolCallLimit,
   desktopToolContextSize,
@@ -515,6 +517,8 @@ export async function toolChat(
   imageRequests: (ProposalDeferredImageRequest | { prompt: string })[]
   /** Compatibility alias for older renderer bundles that can generate only one image. */
   imageRequest?: { prompt: string }
+  /** Speed and token facts of the answer generation, when the engine reported them. */
+  metrics?: GenerationMetrics
 }> {
   if (opts.conversationId) {
     const decision = await callHookAsync<{ answer: string } | null>(
@@ -688,7 +692,10 @@ export async function toolChat(
         }
       }
     })
-    return imageRequests.project({ answer: result.content.trim(), toolCalls, unified })
+    return {
+      ...imageRequests.project({ answer: result.content.trim(), toolCalls, unified }),
+      metrics: desktopModelServices.generationObservations.takeMetrics(turnId)
+    }
   } catch (error) {
     if (opts.signal?.aborted) {
       return imageRequests.project({ answer: streamedContent.trim(), toolCalls, unified })

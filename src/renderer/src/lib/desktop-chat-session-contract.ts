@@ -2,6 +2,7 @@ import type { ChatTurn, GenerationMessage, RuntimeModel } from '@offgrid/models'
 import type { ImageGenerationRequestContract } from '../../../shared/image-generation-contract'
 import type { RagChatResultContract } from '../../../shared/ipc-contracts'
 import type { SearchHit } from '../types'
+import type { GenerationMetrics } from '../../../shared/generation-metrics'
 
 export interface DesktopChatStreamEvent {
   streamId: string
@@ -58,6 +59,7 @@ export interface DesktopToolChatResponse {
     prompt: string
     proposal?: { conversationId: string; slide: number }
   }>
+  metrics?: GenerationMetrics
   [key: string]: unknown
 }
 

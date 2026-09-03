@@ -4152,6 +4152,7 @@ export function MemoryChat({
         delete answerByStream.current[toolStreamId]
         const toolCtxWithReasoning = buildAssistantContext(toolCtx, {
           reasoning: toolReasoning,
+          metrics: tr?.metrics,
           session: {
             turnId: sessionTurn.id,
             status: sessionTurn.status,
@@ -4167,6 +4168,7 @@ export function MemoryChat({
                   content: answer,
                   context: toolCtxWithReasoning,
                   toolCalls,
+                  metrics: tr?.metrics,
                   activity: undefined,
                   streaming: false
                 }

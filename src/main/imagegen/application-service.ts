@@ -11,7 +11,8 @@ import {
   isImageApplicationInFlight,
   gatewayImageExtensionForMime,
   resolveImageGenerationSettings,
-  standardImageModelDefaults,
+  resolveImageParameters,
+  type ImageParameterStore,
   type ImageApplicationSnapshot,
   type ImageGenerationApplicationPorts,
   type ImageNativeExecutionFacts,
@@ -227,16 +228,21 @@ export function desktopImageApplicationPorts(): ImageGenerationApplicationPorts<
         : (desktopModelServices.llm.active('image').selectedRouteId ?? undefined)),
     createId: randomUUID,
     resolveSettings(request, model) {
-      const defaults = standardImageModelDefaults(model.name || model.id)
+      // The user's per-model overrides (Settings > Image, the composer) apply to EVERY path that
+      // generates an image: composer, tool call, gateway, paired phone. One store, one resolver.
+      const parameters = resolveImageParameters(
+        model,
+        getSetting<ImageParameterStore>('imageParams', {})
+      )
       return {
         ...resolveImageGenerationSettings({
           platform: process.platform,
           request,
           settings: {
-            steps: defaults.defaultSteps,
-            guidanceScale: defaults.defaultCfg,
-            width: defaults.defaultSize,
-            height: defaults.defaultSize,
+            steps: parameters.steps,
+            guidanceScale: parameters.cfgScale,
+            width: parameters.size,
+            height: parameters.size,
             threads: Math.max(1, os.cpus().length - 2),
             useOpenCL: false
           }
