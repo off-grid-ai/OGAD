@@ -17,7 +17,8 @@ import {
   type ImageGenerationApplicationPorts,
   type ImageNativeExecutionFacts,
   type ImageRuntimeInspection,
-  type RuntimeModel
+  type RuntimeModel,
+  imageEnhancementGenerationRequest
 } from '@offgrid/models'
 import type {
   ImageGenerationJobStage,
@@ -30,7 +31,7 @@ import {
   imageModelAdmissionMessage,
   parseImageMemoryGuardError
 } from '../../shared/image-generation-contract'
-import { generateDesktopOperation, generateDesktopText } from '../desktop-generation'
+import { generateDesktopOperation } from '../desktop-generation'
 import { getSetting } from '../database'
 import { desktopModelServices } from '../model-service-access'
 import { dataDir } from '../runtime-env'
@@ -243,22 +244,25 @@ function applicationPorts(): ImageGenerationApplicationPorts<
     async enhancePrompt(request, signal, ...callbacks) {
       const [, onPrompt] = callbacks
       let streamed = ''
+      const turnId = randomUUID()
       return enhanceImagePrompt(request.prompt, {
         enabled: true,
         onText: (text) => {
           streamed += text
           onPrompt?.(streamed)
         },
-        generate: (instruction, onText) =>
-          generateDesktopText(instruction, {
-            temperature: 0.7,
-            thinking: false,
-            // No output cap: a reasoning model spends tokens before it answers, and a cap cut the
-            // enhanced prompt to its first words. The prompt policy bounds the result by length.
-            timeoutMs: 60_000,
-            signal,
-            events: { chunk: (chunk) => chunk.content && onText(chunk.content) }
-          }).then((result) => result.content)
+        // Shared decides the whole request; this port only runs it and streams text back.
+        generate: (_instruction, onText) =>
+          desktopModelServices.generation
+            .generate(
+              imageEnhancementGenerationRequest(
+                request.prompt,
+                { conversationId: request.conversationId ?? turnId, turnId },
+                { signal }
+              ),
+              { chunk: (chunk) => chunk.content && onText(chunk.content) }
+            )
+            .then((result) => result.content)
       })
     },
     inspectRuntime: async (model, settings) => localRuntimeInspection(model, settings.threads),
