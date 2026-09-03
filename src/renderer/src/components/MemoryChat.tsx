@@ -128,6 +128,7 @@ import {
 } from '@renderer/lib/task-session-store'
 import { submitTaskGuidance } from '@renderer/lib/task-guidance-client'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
+import { modelFileDisplayName } from '@offgrid/models'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -5915,7 +5916,7 @@ export function MemoryChat({
                             >
                               {imgModels.map((m) => (
                                 <option key={m} value={m}>
-                                  {m.replace(/\.gguf$/i, '').replace(/-Q\d.*$/i, '')}
+                                  {modelFileDisplayName(m)}
                                 </option>
                               ))}
                             </select>

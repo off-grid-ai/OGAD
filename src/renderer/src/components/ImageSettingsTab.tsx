@@ -8,6 +8,7 @@ import {
 import { announceImageSettingsChanged } from '@renderer/lib/image-settings-events'
 import { SettingsSelect } from './SettingsSelect'
 import { desktopModelControl } from '@renderer/lib/model-control-application'
+import { modelFileDisplayName } from '@offgrid/models'
 
 type ImageSettings = {
   imageParams?: ImageParamStore
@@ -16,7 +17,7 @@ type ImageSettings = {
   enhanceImagePrompts?: boolean
 }
 
-const modelLabel = (model: string): string => model.replace(/\.gguf$/i, '').replace(/-Q\d.*$/i, '')
+const modelLabel = modelFileDisplayName
 
 export function ImageSettingsTab(): React.JSX.Element {
   const [models, setModels] = useState<string[]>([])

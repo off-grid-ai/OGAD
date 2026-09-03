@@ -63,6 +63,7 @@ import {
 import { platformFetch } from '@offgrid/models/fetch'
 import { desktopImageRuntimeIdentity } from './models/image-runtime-identity'
 import { LocalModelRegistry, type LocalModelRegistryEntry } from './models/local-model-registry'
+import { MODEL_FILE_EXTENSION, isGgufFile } from '@offgrid/models'
 
 export { DOWNLOAD_INTERRUPTED_ERROR }
 export type { DownloadProgress, ProgressCb }
@@ -1019,8 +1020,8 @@ function localProtectedNames(): Set<string> {
 export function desktopLocalModelImportPorts(): ConstructorParameters<typeof LocalModelImportService>[0] {
   return {
   async inspect(source) {
-    if (!source || !source.toLowerCase().endsWith('.gguf')) {
-      return { fileName: '', sizeBytes: 0, valid: false, error: 'Not a .gguf file' }
+    if (!source || !isGgufFile(source)) {
+      return { fileName: '', sizeBytes: 0, valid: false, error: `Not a ${MODEL_FILE_EXTENSION.gguf} file` }
     }
     if (!(await verifyArtifactFile(source, fs, 'import')).valid) {
       return {

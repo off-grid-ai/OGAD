@@ -56,6 +56,7 @@ import {
 import { emitChangedLlmSettings } from './sync-mutation'
 import { loadGatedVisionModelAdapter } from './vision/model-adapters/registry'
 import type { VisionModelArtifacts } from './vision/model-adapters/types'
+import { defaultChatModelArtifacts } from '@offgrid/models'
 
 export type { KvCacheType, PerformanceMode }
 
@@ -511,8 +512,9 @@ export class LLMService {
     // false and setup ("Configure for me") downloads + activates a fitting model.
     // (The old default named a non-existent Qwen3-VL-4B and dead-ended fresh
     // installs at a 502 — never auto-resolvable. Keep this aligned with the catalog.)
-    this.modelPath = path.join(modelsDir, 'gemma-4-E4B-it-Q4_K_M.gguf')
-    this.mmProjPath = path.join(modelsDir, 'mmproj-gemma-4-E4B-it-F16.gguf')
+    const artifacts = defaultChatModelArtifacts()
+    this.modelPath = path.join(modelsDir, artifacts.primary)
+    this.mmProjPath = artifacts.projector ? path.join(modelsDir, artifacts.projector) : ''
   }
 
   private applyModelReload(): void {

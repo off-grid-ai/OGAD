@@ -37,7 +37,7 @@ import {
 } from './mflux'
 import { binRoots, dataDir, modelsDir, resourceDirs, exe } from './runtime-env'
 import { sdServer } from './sd-server'
-import { hasMlmodelc, isZImageModel, isQuantizedModel } from './imagegen/runtime-detect'
+import { hasMlmodelc, isQuantizedModel } from './imagegen/runtime-detect'
 import { buildCoreMLArgs, buildZImageArgs, buildStandardArgs } from './imagegen/args'
 import {
   resolveExistingOwnedEntry,
@@ -57,6 +57,7 @@ import {
 } from './imagegen/application-service'
 import { desktopImageRuntimeIdentity } from './models/image-runtime-identity'
 import { isGeneratedImageFile } from '@offgrid/models'
+import { Z_IMAGE_TEXT_ENCODER_PATTERN, Z_IMAGE_VAE_PATTERN, isGgufFile, isZImageModel } from '@offgrid/models'
 
 function findSdCli(): string | null {
   for (const r of binRoots()) {
@@ -283,7 +284,7 @@ function findInModels(re: RegExp): string | null {
 // regressed. Cached by path+size+mtime. (Z-Image/FLUX are handled separately.)
 const ggufFullCache = new Map<string, boolean>()
 function ggufIsFullCheckpoint(p: string): boolean {
-  if (!/\.gguf$/i.test(p)) return true // .safetensors checkpoints are full pipelines
+  if (!isGgufFile(p)) return true // .safetensors checkpoints are full pipelines
   let key: string
   try {
     const st = fs.statSync(p)
@@ -405,10 +406,10 @@ export async function inspectImageNativeExecution(input: {
 
   const zImage = !coreml && isZImageModel(path.basename(model))
   const zImageTextEncoder = zImage
-    ? (findInModels(/qwen3-4b-instruct.*\.gguf$/i) ?? undefined)
+    ? (findInModels(Z_IMAGE_TEXT_ENCODER_PATTERN) ?? undefined)
     : undefined
   const zImageVae = zImage
-    ? (findInModels(/^ae\.(safetensors|sft)$|^ae.*\.gguf$/i) ?? undefined)
+    ? (findInModels(Z_IMAGE_VAE_PATTERN) ?? undefined)
     : undefined
   const fullCheckpoint = coreml || zImage || ggufIsFullCheckpoint(model)
   const sourceDimensions = await inspectSourceDimensions(input.sourceImageUri)

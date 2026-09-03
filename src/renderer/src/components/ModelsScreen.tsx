@@ -66,6 +66,7 @@ import {
   internalTabRoutes,
   internalTabSubroute
 } from '@renderer/lib/internal-tab-route'
+import { MODEL_FILE_EXTENSION } from '@offgrid/models'
 
 function Sel({
   value,
@@ -912,7 +913,7 @@ export function ModelsScreen({
             ) : (
               <IconUpload className="h-3 w-3" />
             )}
-            {importing ? 'Importing…' : 'Import .gguf'}
+            {importing ? 'Importing…' : `Import ${MODEL_FILE_EXTENSION.gguf}`}
           </button>
         </div>
       </div>
