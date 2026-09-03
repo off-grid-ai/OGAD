@@ -5820,10 +5820,13 @@ export function MemoryChat({
                           promptEnhancementComplete={promptEnhancementComplete}
                         />
                       ) : null}
+                      {/* The in-flight image card shows whenever an image job owns this chat, including a
+                          tool-invoked image while the assistant turn is still streaming. Only the text
+                          placeholder waits for streaming to end. */}
                       {!!activeConversationId &&
                       !liveJourneyTask &&
                       generatingConvs.has(activeConversationId) &&
-                      !messages.some((m) => m.streaming) ? (
+                      (imageGenConv === activeConversationId || !messages.some((m) => m.streaming)) ? (
                         <div className="mb-5 flex flex-col items-start">
                           <div className="mb-1 text-[10px] uppercase tracking-wider text-neutral-600">
                             Off Grid AI
