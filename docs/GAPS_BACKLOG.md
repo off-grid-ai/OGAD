@@ -7,6 +7,16 @@ how to reproduce, and the fix direction. Close with evidence; never hide.
 
 ## OPEN
 
+### ARC-001 (P1) - Application facade boundary needs its final six-domain static gate
+
+Desktop already has strict ESLint, Dependency Cruiser, and custom Models gates. Do not add a generic
+hexagonal folder plugin during the active migration. Follow
+`shared/docs/APPLICATION_BOUNDARY_ENFORCEMENT_PLAN.md`: extend the existing rules after each domain
+reaches zero bypasses, so production UI, IPC, and app workflows use Models, Sync, RAG, Speech,
+Automation, and Use only through `@offgrid/application`. Keep narrow exceptions for composition
+roots, platform adapters, and type-only imports. Close this gap when all six domain rules pass
+without a new permanent allowlist.
+
 ### MOD-001 (P0) - Shared model consolidation needs final live and release proof
 
 **Code and wired evidence (2026-09-01):** the Shared image application, Desktop model-library
