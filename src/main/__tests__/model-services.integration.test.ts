@@ -65,75 +65,8 @@ describe('Desktop shared model-service composition', () => {
     await expect(services.warmText()).rejects.toThrow('Models not downloaded')
   })
 
-  it('projects one remote runtime route onto its canonical model-control catalog identity', async () => {
-    const { encodeModelRouteId } = await import('@offgrid/models')
-    const { projectActiveTextCatalogId } = await import('../model-services')
-    const routeId = encodeModelRouteId({
-      adapterId: 'desktop.remote-chat',
-      providerId: 'openai',
-      serverId: 'server-1',
-      modelId: 'qwen/qwen3'
-    })
-
-    expect(
-      projectActiveTextCatalogId(
-        [
-          {
-            id: 'remote:server-1:qwen',
-            name: 'Qwen 3',
-            kind: 'text',
-            files: [],
-            remoteServerId: 'server-1',
-            remoteModelId: 'qwen/qwen3'
-          },
-          {
-            id: 'remote:server-2:qwen',
-            name: 'Qwen 3',
-            kind: 'text',
-            files: [],
-            remoteServerId: 'server-2',
-            remoteModelId: 'qwen/qwen3'
-          }
-        ],
-        routeId
-      )
-    ).toBe('remote:server-1:qwen')
-  })
-
-  it('rejects an encoded runtime route that has no canonical catalog projection', async () => {
-    const { encodeModelRouteId } = await import('@offgrid/models')
-    const { DesktopModelProjectionError, projectActiveTextCatalogId } =
-      await import('../model-services')
-    const routeId = encodeModelRouteId({
-      adapterId: 'desktop.remote-chat',
-      providerId: 'openai',
-      serverId: 'removed-server',
-      modelId: 'removed/model'
-    })
-
-    expect(() => projectActiveTextCatalogId([], routeId)).toThrow(DesktopModelProjectionError)
-    try {
-      projectActiveTextCatalogId([], routeId)
-      throw new Error('Expected the unresolved route projection to fail.')
-    } catch (error) {
-      expect(error).toMatchObject({
-        code: 'model_control_route_unresolved',
-        routeId,
-        message: 'The active model route is unavailable in the model-control catalog.'
-      })
-    }
-  })
-
-  it('resolves a legacy raw selection only when the catalog still owns that identity', async () => {
-    const { DesktopModelProjectionError, projectActiveTextCatalogId } =
-      await import('../model-services')
-    const catalog = [{ id: 'legacy-qwen', name: 'Legacy Qwen', kind: 'text', files: [] }]
-
-    expect(projectActiveTextCatalogId(catalog, 'legacy-qwen')).toBe('legacy-qwen')
-    expect(() => projectActiveTextCatalogId(catalog, 'removed-legacy-model')).toThrow(
-      DesktopModelProjectionError
-    )
-  })
+  // The panel's projection (active route -> catalog row, remote reference, or native id) is the
+  // workspace's and is pinned in shared/packages/models/test/workspace.test.mjs.
 
   it('publishes runtime-managed speech readiness from the native adapter', async () => {
     const { createDesktopModelServices } = await import('../model-services')
