@@ -22,14 +22,8 @@ import {
   DesktopModelSelectionPersistence,
   desktopModelSelectionPersistence
 } from './model-selection-persistence'
-import {
-  activateRemoteVisionModel,
-  deactivateRemoteVisionModel,
-  getRemoteVisionServer,
-  desktopRemoteServerPorts
-} from './vision/remote-vision-server'
+import { getRemoteVisionServer, desktopRemoteServerPorts } from './vision/remote-vision-server'
 import { peekRemoteReasoningMetadata, remoteReasoningMetadata } from './llm/remote-chat'
-import { parseRemoteVisionModelId } from '../shared/remote-vision-server'
 import {
   DesktopLocalGenerationAdapter,
   DesktopGenerationObservations,
@@ -277,32 +271,22 @@ export class DesktopModelSelectionStore implements ModelSelectionStore {
     }
   }
 
+  /**
+   * Two file writes and nothing else: the canonical route, and the native runtime's legacy
+   * projection of it (active-model.json for the chat engine; active-modalities.json for the rest).
+   * Which route is valid was decided by the workspace before this is called.
+   */
   async write(modality: ModelModality, modelId: string | null): Promise<void> {
     const route = modelId ? decodeModelRouteId(modelId) : null
     const nativeModelId = route?.modelId ?? modelId
     if (modality === 'text') {
-      if (!nativeModelId) {
-        deactivateRemoteVisionModel()
-        this.routes.clearLegacyTextConfig()
-        this.routes.write(modality, null)
-        return
-      }
-      const legacyRemote = parseRemoteVisionModelId(nativeModelId)
-      const remote = route?.serverId
-        ? { serverId: route.serverId, modelId: route.modelId }
-        : legacyRemote
-      if (remote) {
-        if (!activateRemoteVisionModel(remote.serverId, remote.modelId)) {
-          throw new Error('Remote model is no longer available.')
-        }
-        this.routes.write(modality, modelId)
-        return
-      }
-      if (this.projectTextSelection) {
+      if (!nativeModelId) this.routes.clearLegacyTextConfig()
+      // A remote route leaves the legacy file alone: it remembers the last local model, which is
+      // the route "Use remote server: off" returns to.
+      else if (!route?.serverId && this.projectTextSelection) {
         const result = await this.projectTextSelection(nativeModelId)
         if (!result.success) throw new Error(result.error ?? 'The model could not be selected.')
       }
-      deactivateRemoteVisionModel()
       this.routes.write(modality, modelId)
       return
     }
@@ -600,18 +584,14 @@ export function createDesktopModelServices(
           await llm.select(modality, null)
           return { success: true }
         }
-        const remote = parseRemoteVisionModelId(modelId)
+        // Any id space (route, legacy remote, native, or a stale family alias) resolves to the one
+        // route through the workspace; the legacy codec only maps aliases to native ids first.
         const canonicalModelId = dependencies.resolveLegacyModelId
           ? await dependencies.resolveLegacyModelId(modelId)
           : modelId
-        const selectedRoute = decodeModelRouteId(modelId)
-          ? modelId
-          : remote
-            ? llm
-                .list(modality)
-                .find((model) => model.serverId === remote.serverId && model.id === remote.modelId)
-                ?.routeId
-            : this.routeIdFor(modality, canonicalModelId)
+        const selectedRoute =
+          workspace.resolveRoute(modality, modelId) ??
+          this.routeIdFor(modality, canonicalModelId)
         if (!selectedRoute) return { success: false, error: 'unknown model' }
         await llm.select(modality, selectedRoute)
         return { success: true }

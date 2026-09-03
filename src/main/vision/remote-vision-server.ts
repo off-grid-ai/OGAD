@@ -325,17 +325,6 @@ export function getRemoteVisionServer(serverId: string): RemoteVisionServerConne
   return server ? { ...server, apiKey: transportApiKey(server) } : null
 }
 
-export function activateRemoteVisionModel(serverId: string, modelId: string): boolean {
-  const stored = readStored()
-  return stored.servers.some(
-    server => server.id === serverId && server.selections.text === modelId
-  )
-}
-
-export function deactivateRemoteVisionModel(): void {
-  /* the canonical text selection is the only record of an active remote; nothing to clear here */
-}
-
 export async function setRemoteVisionServerSettings(
   update: RemoteVisionServerUpdate
 ): Promise<RemoteVisionServerSettings> {

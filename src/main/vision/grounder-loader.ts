@@ -30,8 +30,6 @@ import { desktopModelServices, type DesktopModelServices } from '../model-servic
 import { isGrounderActive } from './vision-model-notice'
 import { getComputerUseSettings } from '../computer-use-settings'
 import {
-  activateRemoteVisionModel,
-  deactivateRemoteVisionModel,
   getActiveRemoteVisionServer
 } from './remote-vision-server'
 import {
@@ -170,9 +168,10 @@ const productionGrounderDependencies: GrounderRunnerDependencies = {
   isGrounder: isGrounderActive,
   load: productionGrounderLifecycle.load,
   restoreLocal: productionGrounderLifecycle.restoreLocal,
-  suspendRemote: deactivateRemoteVisionModel,
+  // The canonical text selection is the only record of an active remote; nothing to suspend.
+  suspendRemote: () => undefined,
   restoreRemote(selection) {
-    if (!activateRemoteVisionModel(selection.id, selection.model)) {
+    if (!desktopModelServices.workspace.remoteModelRoute(selection.id, selection.model, 'text')) {
       throw new Error('The remote chat model could not be restored.')
     }
   }
