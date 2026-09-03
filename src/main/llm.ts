@@ -17,7 +17,7 @@ import {
   reasoningMetadataFromChatTemplate,
   resolveMaxTokens,
   shouldAutoRecoverRuntime as shouldAutoRecover,
-  desktopTextContext,
+  textContextLength,
   engineReadinessAction,
   modelReadinessIssue,
   textRuntimeLoadAttempts,
@@ -297,7 +297,7 @@ export class LLMService {
       totalGb = undefined
       weightsGb = undefined
     }
-    const effective = desktopTextContext({
+    const effective = textContextLength({
       requested: requestedRaw,
       trainedContext: trained,
       totalGb,
