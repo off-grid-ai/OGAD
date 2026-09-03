@@ -1474,7 +1474,7 @@ export function setupIPC() {
   // wrappers; the download one adds a renderer progress broadcast.
   ipcMain.handle('models:catalog', () => import('./models-manager').then((m) => m.getCatalog()))
   ipcMain.handle('models:control-snapshot', () =>
-    import('./models-manager').then((m) => m.getModelControlSnapshot())
+    import('./composition/model-control-snapshot').then((m) => m.getModelControlSnapshot())
   )
   ipcMain.handle('models:vision-status', () =>
     import('./models-manager').then((m) => m.getVisionStatuses())

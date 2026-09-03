@@ -47,7 +47,6 @@ import {
   transferredProjectorRepair,
   type CatalogEntry,
   type ModelCapabilities,
-  type ModelControlApplicationSnapshot,
   type ModelControlCatalogModel,
   type ModelModality,
   type Modality,
@@ -55,7 +54,6 @@ import {
   isLocalLibraryModelId
 } from '@offgrid/models'
 import type { RemoteVisionInventoryModel } from '../shared/remote-vision-server'
-import type { ComputerUseActiveModelProjection } from '../shared/computer-use-settings'
 import { registerDesktopModelManagerPorts } from './model-manager-ports'
 import { desktopModelSelectionPersistence } from './model-selection-persistence'
 import {
@@ -80,7 +78,7 @@ import {
 export { DOWNLOAD_INTERRUPTED_ERROR }
 export type { DownloadProgress, ProgressCb }
 
-type DesktopModelControlCatalogModel = Omit<ModelControlCatalogModel, 'files'> & {
+export type DesktopModelControlCatalogModel = Omit<ModelControlCatalogModel, 'files'> & {
   files?: Array<{ name: string; role?: string }>
   remoteModelId?: string
   capabilities?: ModelCapabilities
@@ -112,7 +110,7 @@ function isModelControlCatalogModel(value: unknown): value is DesktopModelContro
   )
 }
 
-function requireModelControlCatalogModels(
+export function requireModelControlCatalogModels(
   values: readonly unknown[]
 ): DesktopModelControlCatalogModel[] {
   return values.map((value, index) => {
@@ -324,26 +322,14 @@ export async function getCatalog(): Promise<{ kinds: readonly string[]; models: 
   return { kinds: MODEL_KINDS, models: [...models, ...legacySelected, ...remoteModels] }
 }
 
-/** Combine host catalog facts with the canonical Shared model-control projection. */
-export async function getModelControlSnapshot(): Promise<
-  ModelControlApplicationSnapshot<DesktopModelControlCatalogModel, ComputerUseActiveModelProjection>
-> {
+/** Read Desktop catalog facts without reaching into Computer Use composition. */
+export async function getModelControlCatalogFacts(): Promise<{
+  catalog: Awaited<ReturnType<typeof getCatalog>>
+  installed: string[]
+}> {
   await desktopModels.refresh()
-  const [catalog, installed, computerUse] = await Promise.all([
-    getCatalog(),
-    listInstalled(),
-    import('./vision/vision-task-model-strategy').then((module) =>
-      module.getComputerUseActiveModelProjection()
-    )
-  ])
-  return desktopModels.controlSnapshot({
-    catalog: {
-      kinds: catalog.kinds,
-      models: requireModelControlCatalogModels(catalog.models)
-    },
-    installed,
-    computerUse
-  })
+  const [catalog, installed] = await Promise.all([getCatalog(), listInstalled()])
+  return { catalog, installed }
 }
 
 export interface ModelIdentity {
