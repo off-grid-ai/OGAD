@@ -4,7 +4,8 @@ import type {
   ModelsFailure,
   OffGridApplication,
   PartialGenerationState,
-  RagFacade
+  RagFacade,
+  UseFacade
 } from '@offgrid/application'
 import type {
   GenerationEvents,
@@ -48,6 +49,15 @@ export const desktopAutomation: AutomationFacade = new Proxy({} as AutomationFac
   get: (_target, property) => {
     const facade = current().automation
     const value = facade[property as keyof AutomationFacade]
+    return typeof value === 'function' ? value.bind(facade) : value
+  }
+})
+
+/** Stable access to the Shared Use facade without a composition-root import cycle. */
+export const desktopUse: UseFacade = new Proxy({} as UseFacade, {
+  get: (_target, property) => {
+    const facade = current().use
+    const value = facade[property as keyof UseFacade]
     return typeof value === 'function' ? value.bind(facade) : value
   }
 })

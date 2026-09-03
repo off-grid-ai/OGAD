@@ -11,7 +11,9 @@
  * the app is single-instance, so there is never a second live worker).
  */
 import {
-  type HandlerRegistry,
+  parseActionProposal,
+  WEB_USE_HANDLER,
+  type ActionHandler,
   type ActionSource,
   type ProposeOutcome,
   type Rail,
@@ -20,8 +22,8 @@ import {
   type ExecuteResult,
   type TerminalChatActionOutcome
 } from '@offgrid/use'
+import type { UsePlatformPorts } from '@offgrid/application'
 import { getDB } from '../database'
-import { createHandlerRegistry, createUseEngine } from '../composition/use-engine'
 import { callHook, hasHook, HOOKS, type ChatActionResult } from '../bootstrap/hookRegistry'
 import { shell } from 'electron'
 import { makeUseDriver } from './use-driver'
@@ -31,10 +33,9 @@ import { runPowerShell } from './win-powershell'
 import { makeReadBackVerifiers } from './verification'
 import { runNativeAction } from './native-helper'
 import { gateHost, onActionParked, onGateParked, whenActionParked } from './gate-host'
-import { createActionWorker, type ActionWorker } from './use-worker'
-import { makeBrowserRailExecutor, registerBrowserRail } from '../browser/browser-rail'
+import { makeBrowserRailExecutor } from '../browser/browser-rail'
 import { getBrowserRailHost } from '../browser/browser-host'
-import { makeVisionRailExecutor, registerVisionRail } from '../vision/vision-rail'
+import { makeVisionRailExecutor } from '../vision/vision-rail'
 import { getVisionRailHost } from '../vision/vision-host'
 import {
   makeComputerTaskExecutor,
@@ -49,6 +50,7 @@ import { withRemoteScreenGate } from './remote-screen-gate'
 import { getTaskExecutionDevice, recordTaskRun } from '../tasks/task-history'
 import { taskLaunchFromActionArgs } from '../tasks/task-launch-identity'
 import { taskKindForActionType } from '../tools/nativeActionToolExtension-logic'
+import { desktopUse } from '../composition/application-access'
 
 export interface ActionsRuntime {
   propose(
@@ -72,8 +74,8 @@ export interface ActionsRuntime {
   approvalHookActive(): boolean
 }
 
-export function buildRegistry(run: typeof runNativeAction): HandlerRegistry {
-  const registry = createHandlerRegistry()
+export function buildHandlers(run: typeof runNativeAction): ActionHandler[] {
+  const handlers: ActionHandler[] = []
   const verifiers = makeReadBackVerifiers(run)
   /** Undo = delete the exact effect the create returned (Approval UX v2):
    *  the capability that makes these reversible, which is what lets them
@@ -86,7 +88,7 @@ export function buildRegistry(run: typeof runNativeAction): HandlerRegistry {
     }
   // Calendar and reminders are observable: read back after create, so a
   // failed write retries once and "done" means the item is really there.
-  registry.register({
+  handlers.push({
     type: 'calendar',
     rail: 'semantic',
     defaultRisk: 'mutate',
@@ -94,7 +96,7 @@ export function buildRegistry(run: typeof runNativeAction): HandlerRegistry {
     verify: verifiers.calendar,
     undo: undoVia('calendar.deleteEvent')
   })
-  registry.register({
+  handlers.push({
     type: 'reminder',
     rail: 'semantic',
     defaultRisk: 'mutate',
@@ -111,27 +113,27 @@ export function buildRegistry(run: typeof runNativeAction): HandlerRegistry {
     { type: 'open', defaultRisk: 'navigate' },
     { type: 'lookup', defaultRisk: 'read' }
   ] as const) {
-    registry.register({
+    handlers.push({
       type: handler.type,
       rail: 'semantic',
       defaultRisk: handler.defaultRisk,
       verification: 'none_fuzzy'
     })
   }
-  // The browser rail: web_use, on every platform (Electron CDP is the same
-  // everywhere). Declared in the browser module so its rail/risk live there.
-  registerBrowserRail(registry)
-  // The vision rail: computer_use, the supervised tier. Registered so the
-  // engine routes it; the host refuses cleanly until actuation is available,
-  // and the tool is not offered to the model until then.
-  registerVisionRail(registry)
-  registry.register({
+  handlers.push(WEB_USE_HANDLER)
+  handlers.push({
+    type: 'computer_use',
+    rail: 'vision',
+    defaultRisk: 'mutate',
+    verification: 'none_fuzzy'
+  })
+  handlers.push({
     type: 'connector',
     rail: 'connector',
     defaultRisk: 'mutate',
     verification: 'none_fuzzy'
   })
-  return registry
+  return handlers
 }
 
 /** The one place a platform picks an implementation - exported so both arms
@@ -236,17 +238,10 @@ export function observeActionOutcome(outcome: TickOutcome): void {
   }
 }
 
-let runtime: ActionsRuntime | null = null
-
-/** Lazy singleton: built on first use so the DB and helper exist by then. */
-export function getActionsRuntime(): ActionsRuntime {
-  if (runtime) {
-    return runtime
-  }
-
+export function createDesktopUsePorts(): UsePlatformPorts {
   // The platform decides which semantic rail implements the port - the one
   // concrete choice, made once here; nothing above it branches on an OS.
-  const registry = buildRegistry(
+  const handlers = buildHandlers(
     pickByPlatform(process.platform, makeOutlookNativeReader(runPowerShell), runNativeAction)
   )
   const semanticExecute = pickByPlatform(
@@ -297,94 +292,73 @@ export function getActionsRuntime(): ActionsRuntime {
       forcedRail: parseForcedRail(process.env.OFFGRID_COMPUTER_RAIL)
     })(action)
   }
-  const engine = createUseEngine({
+  const device = {
+    async execute(action: ActionRecord, rail: Rail) {
+      if (rail === 'semantic') return semanticExecute(action)
+      if (rail === 'browser') {
+        if (!isProEntitled()) return { ok: false, detail: 'Browser Use requires Off Grid AI Pro.' }
+        recordAuthenticatedTaskLaunch(action, 'web_use')
+        return browserExecute(action)
+      }
+      if (rail === 'connector') return connectorExecute(action)
+      if (rail === 'vision') {
+        if (!isProEntitled()) return { ok: false, detail: 'Computer Use requires Off Grid AI Pro.' }
+        recordAuthenticatedTaskLaunch(action, 'computer_use')
+        return computerTaskExecute(action)
+      }
+      return { ok: false, detail: `the '${rail}' rail is not built yet` }
+    }
+  }
+  return {
     driver: makeUseDriver(getDB()),
-    // Read-back verification reads the world back through the platform's own
-    // surface: the Swift helper's list verbs on macOS, Outlook COM on
-    // Windows - the same command names, so buildRegistry is unchanged.
-    registry,
-    device: {
-      async execute(action: ActionRecord, rail: Rail) {
-        if (rail === 'semantic') {
-          return semanticExecute(action)
-        }
-        if (rail === 'browser') {
-          if (!isProEntitled()) {
-            return { ok: false, detail: 'Browser Use requires Off Grid AI Pro.' }
-          }
-          recordAuthenticatedTaskLaunch(action, 'web_use')
-          return browserExecute(action)
-        }
-        if (rail === 'connector') {
-          return connectorExecute(action)
-        }
-        if (rail === 'vision') {
-          if (!isProEntitled()) {
-            return { ok: false, detail: 'Computer Use requires Off Grid AI Pro.' }
-          }
-          recordAuthenticatedTaskLaunch(action, 'computer_use')
-          // computer_use: accessibility-first, vision as the fallback tier.
-          return computerTaskExecute(action)
-        }
-        return { ok: false, detail: `the '${rail}' rail is not built yet` }
+    handlers,
+    device,
+    gate: gateHost,
+    park: { onParked: onGateParked, onActionParked },
+    scheduler: {
+      every: (intervalMs, listener) => {
+        const timer = setInterval(listener, intervalMs)
+        timer.unref()
+        return () => clearInterval(timer)
+      },
+      after: (delayMs, listener) => {
+        const timer = setTimeout(listener, delayMs)
+        timer.unref()
+        return () => clearTimeout(timer)
       }
     },
-    gate: gateHost,
     attemptTimeoutMs: 30_000, // the helper's own timeout is 20s
     visibilityMs: 24 * 60 * 60 * 1000
-  })
-
-  const worker: ActionWorker = createActionWorker(engine, { onParked: onGateParked })
-
-  const ready = (async () => {
-    await engine.init()
-    await engine.queue.releaseAll() // stale leases from the previous process
-    worker.kick() // resume anything the last session left behind
-  })()
-
-  // Scheduled actions become due while the app idles; a slow heartbeat
-  // re-kicks the drain. unref'd so it never holds the process open.
-  const heartbeat = setInterval(() => worker.kick(), 30_000)
-  heartbeat.unref()
-
-  runtime = {
-    async propose(input, meta) {
-      await ready
-      const outcome = await engine.propose(input, meta)
-      worker.kick()
-      return outcome
-    },
-    async waitForOutcome(actionId, timeoutMs) {
-      await ready
-      const outcome = await worker.waitForOutcome(actionId, timeoutMs)
-      if (outcome) observeActionOutcome(outcome)
-      return outcome
-    },
-    async listTerminalChatActionResults() {
-      await ready
-      const outcomes = await engine.terminalChatOutcomes.list()
-      return outcomes.flatMap((outcome) => {
-        const result = chatActionResultFromTerminalOutcome(outcome)
-        return result ? [result] : []
-      })
-    },
-    whenParked: whenActionParked,
-    onParked: onActionParked,
-    kick: () => worker.kick(),
-    undo: async (record) => {
-      await ready
-      return engine.undo(record)
-    },
-    onOutcome: (listener) =>
-      worker.onOutcome((outcome) => {
-        const undoable =
-          outcome.outcome === 'done' &&
-          !!outcome.record.effectId &&
-          !!registry.get(outcome.record.type)?.undo
-        listener({ outcome, undoable })
-      }),
-    approvalHookActive: () =>
-      hasHook(HOOKS.actionsProposeApproval) || hasHook(HOOKS.legacyMcpProposeApproval)
   }
+}
+
+const runtime: ActionsRuntime = {
+  async propose(input, meta) {
+    const parsed = parseActionProposal(input)
+    if (!parsed.ok) return { accepted: false, reason: parsed.error }
+    return desktopUse.run({ proposal: parsed.value, ...meta })
+  },
+  waitForOutcome: (actionId, timeoutMs) => desktopUse.waitForOutcome(actionId, timeoutMs),
+  async listTerminalChatActionResults() {
+    const outcomes = await desktopUse.terminalChatOutcomes()
+    return outcomes.flatMap((outcome) => {
+      const result = chatActionResultFromTerminalOutcome(outcome)
+      return result ? [result] : []
+    })
+  },
+  whenParked: whenActionParked,
+  onParked: (actionId, listener) => desktopUse.onParked(actionId, listener),
+  kick: () => desktopUse.kick(),
+  undo: (record) => desktopUse.undo(record.id),
+  onOutcome: (listener) =>
+    desktopUse.events((event) => {
+      if (event.type === 'action_outcome') listener(event)
+    }),
+  approvalHookActive: () =>
+    hasHook(HOOKS.actionsProposeApproval) || hasHook(HOOKS.legacyMcpProposeApproval)
+}
+
+/** Compatibility API over the single Shared Use facade. */
+export function getActionsRuntime(): ActionsRuntime {
   return runtime
 }

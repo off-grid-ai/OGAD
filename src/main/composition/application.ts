@@ -13,6 +13,7 @@ import {
   createDesktopAutomationPorts,
   forwardDesktopAutomationEvent
 } from '../tasks/task-history'
+import { createDesktopUsePorts, observeActionOutcome } from '../actions/use-runtime'
 
 export const desktopApplication = createOffGridApplication({
   models: { workspace: desktopModelWorkspace },
@@ -26,12 +27,16 @@ export const desktopApplication = createOffGridApplication({
     projectExists: async (projectId) => projectExists(projectId)
   },
   automation: createDesktopAutomationPorts(),
+  use: createDesktopUsePorts(),
   pro: { sync: { state: desktopSyncStatePort } },
   newId: randomUUID
 })
 
 registerDesktopApplication(desktopApplication)
 desktopApplication.automation.events(forwardDesktopAutomationEvent)
+desktopApplication.use.events((event) => {
+  if (event.type === 'action_outcome') observeActionOutcome(event.outcome)
+})
 
 let starting: ReturnType<typeof desktopApplication.start> | null = null
 
