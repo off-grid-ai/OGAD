@@ -137,6 +137,52 @@ const modelBoundaryWarn = {
   }
 }
 
+// Pipeline decisions live in shared (see MODEL_FACADE_PLAN.md "Defect classes"). Class 1: request
+// parameters. Class 2: route/legacy id codecs. Class 3: image MIME / model-file literals. Each
+// warning is one decision to move into shared. Composition root and persistence ports are exempt.
+const pipelineDecisionsWarn = {
+  name: 'model pipeline decisions (warn ratchet)',
+  files: ['src/**/*.{ts,tsx}', 'pro/**/*.{ts,tsx}'],
+  ignores: [
+    '**/*.{test,spec,dbtest}.{ts,tsx}',
+    '**/__tests__/**',
+    '**/*.d.ts',
+    'src/main/model-services.ts',
+    'src/main/composition/**',
+    'src/main/model-selection-persistence.ts'
+  ],
+  plugins: { '@typescript-eslint': tsESLint.plugin },
+  rules: {
+    'no-restricted-syntax': [
+      'warn',
+      {
+        selector:
+          "Property[key.name=/^(maxTokens|temperature|topP|thinking|timeoutMs)$/][value.type='Literal']",
+        message:
+          'Class 1: a generation parameter is a pipeline decision. Use a shared request builder (e.g. imageEnhancementGenerationRequest).'
+      },
+      {
+        selector: "Literal[value=/^image\\/(png|jpe?g|webp)$/]",
+        message: 'Class 3: image MIME types are an artifact fact owned by shared.'
+      }
+    ],
+    '@typescript-eslint/no-restricted-imports': [
+      'warn',
+      {
+        paths: [
+          {
+            name: '@offgrid/models',
+            importNames: ['decodeModelRouteId', 'encodeModelRouteId', 'parseRemoteVisionModelId', 'remoteVisionModelId'],
+            message:
+              'Class 2: one id space. Ask the workspace for the projection you need instead of decoding route ids in app code.',
+            allowTypeImports: true
+          }
+        ]
+      }
+    ]
+  }
+}
+
 // Sonar-grade rules (bugs, cognitive complexity, duplicated branches, dead code)
 // scoped to pro/** ONLY. Core src is covered by SonarCloud Automatic Analysis, so
 // running sonarjs there too would be redundant — but SonarCloud (public project)
@@ -231,6 +277,7 @@ export default defineConfig(
   goldStandardRatchet,
   typedDeadBranchWarn,
   modelBoundaryWarn,
+  pipelineDecisionsWarn,
   {
     settings: {
       react: {

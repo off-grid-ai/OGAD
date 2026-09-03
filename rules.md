@@ -260,6 +260,17 @@ service has decided the operation, a copied regex, a second memory rule) is a de
 is correct today, because the two copies drift apart tomorrow. Apps keep: platform adapters
 (native modules, filesystem, sockets), store wiring, screens, and navigation.
 <!-- END GENERATED: shared/CLAUDE.md#debugging-source-of-truth -->
+
+## Hexagonal architecture (standing rule, 2026-09-02)
+
+For ALL packages in `shared`: every business rule lives in the shared `@offgrid/*` package. Desktop and
+mobile are dumb components or consumers - I/O adapters, composition roots, and UI. Nothing else. Before
+writing a rule in an app, ask "is this a decision or I/O?": a decision goes to shared with a node test,
+the app keeps only the port. A rule found in an app file is a defect to move, not a style choice.
+
+Every change follows FPT (first-principles thinking), SSOT, SOLID, DRY, SRP, and Clean architecture.
+Before each commit, answer "are you adhering to this?" honestly in one line: yes, or which rule the
+commit breaks and why. The four defect classes and the queue live in `../shared/docs/MODEL_FACADE_PLAN.md`.
 ## Architecture & abstractions (SOLID)
 
 Design to abstractions, not concrete types. When implementations are interchangeable (model backends, TTS/STT engines, image/diffusion runtimes, connectors), the rest of the app depends on one service/interface — never branch on a concrete type in UI/stores (`if (engine === 'kokoro')`, `instanceof X`). Push the decision behind the abstraction; adding an implementation should need zero changes to callers. Normalize capability gaps inside the service, not the UI.
