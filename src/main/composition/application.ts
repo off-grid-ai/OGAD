@@ -10,12 +10,16 @@ import { desktopVectorStore, projectExists } from '../rag/store'
 import { applicationShutdown } from '../shutdown'
 import { registerDesktopApplication } from './application-access'
 import { desktopSyncStatePort } from '../sync-state-port'
-import {
-  createDesktopAutomationPorts,
-  forwardDesktopAutomationEvent
-} from '../tasks/task-history'
+import { createDesktopAutomationPorts, forwardDesktopAutomationEvent } from '../tasks/task-history'
 import { createDesktopUsePorts, observeActionOutcome } from '../actions/use-runtime'
 import { createDesktopGuidedSetupPorts } from './guided-setup'
+import { createDesktopSpeechIoPorts } from './speech-io'
+import { createDesktopSpeechSelectionPort } from './speech-selection'
+import { setupSpeechMicrophoneIpc } from '../speech-microphone-ipc'
+import { setupSpeechPlaybackIpc } from '../speech-playback-ipc'
+import { setupSpeechTextCleaningIpc } from '../speech-text-cleaning-ipc'
+
+const speechIo = createDesktopSpeechIoPorts()
 
 export const desktopApplication = createOffGridApplication({
   models: {
@@ -34,6 +38,13 @@ export const desktopApplication = createOffGridApplication({
   },
   automation: createDesktopAutomationPorts(),
   use: createDesktopUsePorts(),
+  speech: {
+    ...speechIo,
+    microphone: setupSpeechMicrophoneIpc(),
+    playback: setupSpeechPlaybackIpc(),
+    selection: createDesktopSpeechSelectionPort(),
+    cleanForSpeech: setupSpeechTextCleaningIpc().clean
+  },
   pro: { sync: { state: desktopSyncStatePort } },
   newId: randomUUID
 })
