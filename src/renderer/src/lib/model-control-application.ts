@@ -4,7 +4,7 @@ import {
   type ModelControlProjection,
   type ModelControlSurface,
   type ModelKind
-} from '@offgrid/models'
+} from '@offgrid/application'
 import type { ComputerUseActiveModelProjection } from '../../../shared/computer-use-settings'
 
 export interface DesktopModelControlModel {

@@ -1,4 +1,4 @@
-import { isMMProjFile } from '@offgrid/models'
+import { isMMProjFile } from '@offgrid/application'
 
 // A download can fetch just a COMPANION file (e.g. adding a vision projector to a model
 // whose weights are already on disk — the downloader skips present files). Without a

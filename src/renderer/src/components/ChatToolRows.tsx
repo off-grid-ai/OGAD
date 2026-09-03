@@ -1,5 +1,5 @@
 import type { ChatStreamTool, ProjectedSyncedTool } from '@offgrid/sync'
-import { toolWorkStatus, type ToolWorkStatus } from '@offgrid/models'
+import { toolWorkStatus, type ToolWorkStatus } from '@offgrid/application'
 import { CaretDown, Check, Circle, Warning, Wrench, X } from '@phosphor-icons/react'
 import { ChatMarkdown } from './ChatMarkdown'
 import { ChatThinkingBlock } from './ChatThinkingBlock'

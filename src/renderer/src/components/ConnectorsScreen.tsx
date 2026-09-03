@@ -12,7 +12,7 @@ import {
   IconChevronLeft,
   IconX
 } from '@tabler/icons-react'
-import { connectorFailureReason } from '@offgrid/models'
+import { connectorFailureReason } from '@offgrid/application'
 import {
   CONNECTOR_CATALOG,
   CATEGORY_ORDER,

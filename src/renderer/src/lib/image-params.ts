@@ -8,7 +8,7 @@ import {
   type EffectiveImageParameters,
   type ImageParameterOverride,
   type ImageParameterStore
-} from '@offgrid/models'
+} from '@offgrid/application'
 
 export type ImageParamOverride = ImageParameterOverride
 export type ImageParamStore = ImageParameterStore
