@@ -48,6 +48,12 @@ import {
   type SpeechTextCleanRequest,
   type SpeechTextCleanResult
 } from '../shared/speech-text-cleaning-contract'
+import {
+  SPEECH_INTERRUPT_CHANNEL,
+  SPEECH_SPEAK_CHANNEL,
+  type SpeechSpeakCommand,
+  type SpeechSpeakOutcome
+} from '../shared/speech-command-contract'
 
 console.log('PRELOAD SCRIPT LOADED')
 
@@ -772,6 +778,11 @@ const offGridApi = {
     sendResult: (result: SpeechTextCleanResult): void => {
       ipcRenderer.send(SPEECH_TEXT_CLEAN_RESULT_CHANNEL, result)
     }
+  },
+  speechCommands: {
+    speak: (command: SpeechSpeakCommand): Promise<SpeechSpeakOutcome> =>
+      ipcRenderer.invoke(SPEECH_SPEAK_CHANNEL, command),
+    interrupt: (): Promise<void> => ipcRenderer.invoke(SPEECH_INTERRUPT_CHANNEL)
   },
 
   // --- On-device image generation (stable-diffusion.cpp) ---
