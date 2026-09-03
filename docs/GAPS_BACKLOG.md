@@ -2006,3 +2006,13 @@ Reported live: the app is extremely slow to start. Not profiled. Use the SIGUSR1
 top main-process and renderer costs before touching anything. Likely suspects to confirm or rule out,
 not to assume: inventory refresh with network probes at boot, capture drain, embeddings warm-up, and
 the renderer's initial catalog fetches.
+
+## Day view listed the same meeting three times (RESOLVED 2026-09-03, live finding)
+
+The event identity rule (title + day) changed format twice over the branch (local unpadded "2026-9-4",
+local "2026-9-3", ISO UTC "2026-09-04"), so one meeting carried three `dedup_key` values and the unique
+constraint never fired; the live table had 19 duplicated (title, start) groups. Fix: one rule
+(`pro/main/crm/calendar-identity.ts` `eventDedupKey`) used by both inserts, and an idempotent repair at
+schema bootstrap that rewrites keys and merges rows (freshest linked row wins, empty fields filled).
+Tests: `calendar-identity.test.ts`, `calendar-repair.integration.test.ts` (real SQLite). Verify live after
+restart: Today's Meetings lists each event once.
