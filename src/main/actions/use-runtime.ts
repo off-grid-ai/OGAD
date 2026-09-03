@@ -22,7 +22,7 @@ import {
   type ExecuteResult,
   type TerminalChatActionOutcome
 } from '@offgrid/use'
-import type { UsePlatformPorts } from '@offgrid/application'
+import type { Outcome, UseFailure, UsePlatformPorts } from '@offgrid/application'
 import { getDB } from '../database'
 import { callHook, hasHook, HOOKS, type ChatActionResult } from '../bootstrap/hookRegistry'
 import { shell } from 'electron'
@@ -72,6 +72,18 @@ export interface ActionsRuntime {
   /** True when a pro approval queue is listening - the chat tool keeps the
    *  legacy path then, so an unmigrated pro build behaves exactly as today. */
   approvalHookActive(): boolean
+}
+
+class DesktopUseOperationError extends Error {
+  constructor(readonly failure: UseFailure) {
+    super(failure.message)
+    this.name = 'DesktopUseOperationError'
+  }
+}
+
+function requireUseOutcome<Value>(outcome: Outcome<Value, UseFailure>): Value {
+  if (outcome.ok) return outcome.value
+  throw new DesktopUseOperationError(outcome.failure)
 }
 
 export function buildHandlers(run: typeof runNativeAction): ActionHandler[] {
@@ -338,9 +350,11 @@ const runtime: ActionsRuntime = {
     if (!parsed.ok) return { accepted: false, reason: parsed.error }
     return desktopUse.run({ proposal: parsed.value, ...meta })
   },
-  waitForOutcome: (actionId, timeoutMs) => desktopUse.waitForOutcome(actionId, timeoutMs),
+  async waitForOutcome(actionId, timeoutMs) {
+    return requireUseOutcome(await desktopUse.waitForOutcome(actionId, timeoutMs))
+  },
   async listTerminalChatActionResults() {
-    const outcomes = await desktopUse.terminalChatOutcomes()
+    const outcomes = requireUseOutcome(await desktopUse.terminalChatOutcomes())
     return outcomes.flatMap((outcome) => {
       const result = chatActionResultFromTerminalOutcome(outcome)
       return result ? [result] : []
