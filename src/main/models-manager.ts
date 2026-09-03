@@ -51,9 +51,10 @@ import {
 } from '@offgrid/models'
 import {
   parseRemoteVisionModelId,
-  remoteVisionInventoryModels
+  remoteVisionModelId,
+  type RemoteVisionInventoryModel
 } from '../shared/remote-vision-server'
-import { getRemoteVisionServerSettings } from './vision/remote-vision-server'
+import { getRemoteVisionServer } from './vision/remote-vision-server'
 import { desktopModelServices } from './model-service-access'
 import { registerDesktopModelManagerPorts } from './model-manager-ports'
 import { desktopModelSelectionPersistence } from './model-selection-persistence'
@@ -228,6 +229,53 @@ function uniqueLegacySelectedInventory(
   )
 }
 
+
+/**
+ * Remote rows for the catalog surfaces, projected from the ONE inventory (the workspace's remote
+ * adapter). There is no second builder: a disabled server, a changed selection, or a new server
+ * shows here exactly as inventory sees it. Text routes are expanded in inventory (classifier, tool
+ * selection, computer use); the catalog shows each remote model once.
+ */
+function remoteCatalogEntries(): RemoteVisionInventoryModel[] {
+  const seen = new Set<string>()
+  const entries: RemoteVisionInventoryModel[] = []
+  for (const model of desktopModelServices.llm.list()) {
+    if (model.source !== 'remote' || !model.serverId) continue
+    if (
+      model.modality !== 'text' &&
+      model.modality !== 'image' &&
+      model.modality !== 'transcription' &&
+      model.modality !== 'voice' &&
+      model.modality !== 'embedding'
+    ) {
+      continue
+    }
+    const id = remoteVisionModelId(model.serverId, model.id)
+    if (seen.has(id)) continue
+    seen.add(id)
+    const server = getRemoteVisionServer(model.serverId)
+    const kind =
+      model.modality === 'text' ? (model.capabilities.vision ? 'vision' : 'text') : model.modality
+    entries.push({
+      id,
+      name: model.name,
+      kind,
+      org: server?.name ?? 'Remote',
+      description: `Runs through ${server?.name ?? 'a remote server'}.`,
+      files: [],
+      tags: ['Remote'],
+      remoteServerId: model.serverId,
+      remoteModelId: model.id,
+      remoteCapabilities: {
+        supportsVision: model.capabilities.vision === true,
+        supportsToolCalling: model.capabilities.tools === true,
+        supportsThinking: model.capabilities.thinking === true
+      }
+    })
+  }
+  return entries
+}
+
 export async function getCatalog(): Promise<{ kinds: readonly string[]; models: unknown[] }> {
   const { CATALOG, MODEL_KINDS } = await import('@offgrid/models')
   const dir = llm.getModelsDir()
@@ -244,7 +292,7 @@ export async function getCatalog(): Promise<{ kinds: readonly string[]; models: 
     catalog: CATALOG,
     present
   })
-  const remoteModels = remoteVisionInventoryModels(getRemoteVisionServerSettings().servers)
+  const remoteModels = remoteCatalogEntries()
   const legacySelected = uniqueLegacySelectedInventory(dir, [...models, ...remoteModels])
   return { kinds: MODEL_KINDS, models: [...models, ...legacySelected, ...remoteModels] }
 }
@@ -336,9 +384,7 @@ export async function listInstalled(): Promise<string[]> {
     present: (name) => fileSizeOf(dir, name) > 0,
     mfluxCached: (id) => isMfluxModelCached(id)
   })
-  const remoteInstalled = remoteVisionInventoryModels(getRemoteVisionServerSettings().servers).map(
-    (model) => model.id
-  )
+  const remoteInstalled = remoteCatalogEntries().map((model) => model.id)
   const { inspectTtsRuntimeState } = await import('./tts')
   const runtimeInstalled = inspectTtsRuntimeState().installed
     ? CATALOG.filter(

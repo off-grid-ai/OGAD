@@ -60,6 +60,9 @@ export function parseRemoteVisionModelId(value: string): RemoteVisionModelRefere
 }
 
 /**
+ * @deprecated No production caller. Remote rows are projected from the one workspace inventory
+ * (`remoteCatalogEntries` in models-manager). Kept only until its unit test is retired at the test pass.
+ *
  * The remote models a server contributes to the app's inventory: only the ones SELECTED for it
  * (one per modality). The full catalog belongs to the server's settings page; the inventory is what
  * can be used, so the Active models panel and the paired phone see one remote model per modality,
