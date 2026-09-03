@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { modelsDir } from '../runtime-env'
-import {
+import { type WorkspaceRemoteServersPort,
   REMOTE_FETCH_REDIRECT_POLICY,
   type RemoteServerApplicationService,
   type RemoteServerApplicationPorts,
@@ -274,7 +274,7 @@ const desktopRemoteServerApplication: RemoteServerApplicationService = new Proxy
   {
     get: (_target, property) => {
       const servers = desktopModelServices.workspace.servers
-      const value = servers[property as keyof RemoteServerApplicationService]
+      const value = servers[property as keyof WorkspaceRemoteServersPort]
       return typeof value === 'function' ? value.bind(servers) : value
     }
   }
