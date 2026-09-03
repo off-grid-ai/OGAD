@@ -1984,3 +1984,17 @@ phone's selection write is pure"), the saved remote server's per-modality `selec
 three must become read-only projections of the authority, owned by `@offgrid/models`; today two of
 them are written by hand. Symptoms today: Nano Banana saved on Desktop, phone re-activated DreamShaper
 (22:33Z), both surfaces then failed on the local model's memory guard.
+
+## Typing is slow in the empty New chat screen (open, 2026-09-03)
+
+Reported live: keystrokes lag in the composer while the "Explore what Off Grid AI can do" cards are
+shown. Not yet profiled. Suspect: the composer's input state lives in the chat god-component, so every
+keystroke re-renders the whole screen including the card grid. Verify with the React profiler before
+fixing; the fix is to isolate the composer's state, not to memoize the cards.
+
+## Output token caps are policy numbers living in Desktop (open, 2026-09-03)
+
+`maxTokens: 200` in `ipc.ts` (two sites), `280` in `tasks/task-execution-plan-service.ts`, `200` in
+`vision/model-adapters/ui-tars.ts`. On a reasoning model the cap is spent before the answer (the
+image-enhancement cap cut prompts to seven words on Gemini). Each request shape belongs in shared, like
+`imageEnhancementGenerationRequest`.
