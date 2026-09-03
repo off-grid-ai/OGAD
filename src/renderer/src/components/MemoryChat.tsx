@@ -28,7 +28,7 @@ import {
   groupWorkRuns,
   type WorkRunStep
 } from '@offgrid/sync'
-import type { VoiceTurnMode } from '@offgrid/speech'
+import type { VoiceTurnMode } from '@offgrid/application'
 import {
   cleanImagePrompt,
   isCancellationError,

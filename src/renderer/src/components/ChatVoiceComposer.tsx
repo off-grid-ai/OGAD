@@ -1,5 +1,5 @@
 import { Microphone, SlidersHorizontal, SpeakerHigh, Stop, X } from '@phosphor-icons/react'
-import { VOICE_TURN_LABELS, type VoiceTurnMode } from '@offgrid/speech'
+import { VOICE_TURN_LABELS, type VoiceTurnMode } from '@offgrid/application'
 import { Button } from './ui/button'
 import { LoadingDots } from './ui/loading-dots'
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'

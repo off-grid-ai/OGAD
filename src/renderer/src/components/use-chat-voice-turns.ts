@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Outcome, SpeechFailure } from '@offgrid/application'
+import {
+  chooseRecorderMime,
+  type Outcome,
+  type SpeechEndpointTimer,
+  type SpeechFailure,
+  type VoiceTurnMode
+} from '@offgrid/application'
 import { transcriptionRecoveryMessage } from '@offgrid/models'
-import { chooseRecorderMime, type SpeechEndpointTimer, type VoiceTurnMode } from '@offgrid/speech'
 import { createSpeechEndpointTimer } from '@renderer/composition/speech-endpoint'
 
 /*

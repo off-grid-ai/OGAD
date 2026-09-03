@@ -109,6 +109,14 @@ module.exports = {
       to: { path: '^\\.\\./shared/packages/(rag|use|automation)/' }
     },
     {
+      name: 'presentation-not-to-raw-speech',
+      comment:
+        'Presentation reads Speech through @offgrid/application. Renderer composition adapters may depend on the raw platform contract.',
+      severity: 'error',
+      from: { path: '^(src/renderer/src/(components|lib|screens)/|pro/renderer/)' },
+      to: { path: '^\\.\\./shared/packages/speech/' }
+    },
+    {
       name: 'not-to-test',
       comment:
         'Production code must not import test files (they would ship, dragging fixtures in).',

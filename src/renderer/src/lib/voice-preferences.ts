@@ -4,7 +4,7 @@ import {
   SILENCE_AFTER_SPEECH_CHOICES_MS,
   SPEAKER_DRAIN_CHOICES_MS,
   type VoiceTurnMode
-} from '@offgrid/speech'
+} from '@offgrid/application'
 
 export const VOICE_PREFERENCES_CHANGED_EVENT = 'og:voice-preferences-changed'
 

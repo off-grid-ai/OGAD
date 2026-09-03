@@ -12,7 +12,7 @@ import {
   secondsLabel,
   type RuntimeSpeechVoice,
   type VoiceTurnMode
-} from '@offgrid/speech'
+} from '@offgrid/application'
 import {
   DEFAULT_VOICE_PREFERENCES,
   VOICE_PREFERENCES_CHANGED_EVENT,
