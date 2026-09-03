@@ -13,6 +13,7 @@ import { StrictMode, type FC } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import { TooltipProvider } from './components/ui/tooltip'
+import { attachSpeechPlaybackAdapter } from './composition/speech-playback-adapter'
 
 // The quick-paste popup is a Pro feature; its component lives in the pro package.
 // The Vite alias resolves `@offgrid/pro/renderer` to a stub in free builds (which
@@ -33,6 +34,11 @@ const hash = window.location.hash
 const isClipPopup = hash === '#clip-popup'
 const isDictation = hash === '#dictation'
 const isCuSupervisor = hash === '#cu-supervisor'
+
+if (!isClipPopup && !isDictation && !isCuSupervisor) {
+  const disposeSpeechPlayback = attachSpeechPlaybackAdapter(window.api.speechPlayback)
+  window.addEventListener('pagehide', disposeSpeechPlayback, { once: true })
+}
 
 // The dictation overlay is a transparent floating panel — strip the app's opaque
 // theme background off <html>/<body> so only the pill shows (no white box).
