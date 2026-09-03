@@ -3,7 +3,11 @@
 // including tool_result (completed tool calls accumulate live + persist) — is unit-tested
 // without mounting the chat.
 
-import { completeChatStreamTool, startChatStreamTool, type ChatStreamTool } from '@offgrid/sync'
+import {
+  completeChatStreamTool,
+  startChatStreamTool,
+  type ChatStreamTool
+} from '@offgrid/application'
 
 export interface StreamEvent {
   type: 'content' | 'reasoning' | 'step' | 'tool_result' | 'route' | 'fallback' | 'done'

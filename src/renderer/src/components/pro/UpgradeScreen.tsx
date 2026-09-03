@@ -12,7 +12,7 @@ import {
 import { PRO_PAY_URL, PRO_FEATURES, featureSupportsPlatform, type ProFeature } from './proCatalog'
 import { OFF_GRID_MOBILE_URL, OFF_GRID_WEBSITE_URL, openExternal } from '../../constants/links'
 import { deviceNoun, currentPlatform } from '@renderer/lib/device'
-import { projectPersonalMeshActivationFailure } from '@offgrid/sync'
+import { projectPersonalMeshActivationFailure } from '@offgrid/application'
 
 // License-key activation. Only meaningful in a pro-capable build (__OFFGRID_PRO__);
 // a core build has no pro code bundled, so entering a key would unlock nothing.
