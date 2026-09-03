@@ -9,7 +9,8 @@ import { subscribeDesktopChatStream } from './desktop-chat-stream-hub'
 import {
   desktopHistory,
   desktopImageResult,
-  desktopTextResult
+  desktopTextResult,
+  imageMemoryRefusal
 } from './desktop-chat-session-policy'
 import type {
   DesktopAnyChatSessionInput,
@@ -17,7 +18,8 @@ import type {
   DesktopImageChatSessionInput,
   DesktopImageGenerationResponse,
   DesktopToolChatResponse,
-  DesktopToolChatSessionInput
+  DesktopToolChatSessionInput,
+  DesktopImageMemoryRetry
 } from './desktop-chat-session-contract'
 import { DEFAULT_IMAGE_MIME, isCancellationError } from '@offgrid/models'
 
@@ -28,6 +30,8 @@ export interface DesktopTurnExecution {
   imageResponse?: DesktopImageGenerationResponse
   generatedImages: DesktopImageGenerationResponse[]
   imageActive: boolean
+  /** The first tool-owned image the shared memory rule refused this turn. */
+  imageMemoryRetry?: DesktopImageMemoryRetry
 }
 
 export interface DesktopGenerationContext {
@@ -204,11 +208,18 @@ export class DesktopChatGenerationAdapter {
       })
     } catch (error) {
       const cancelled = isCancellationError(error, context.signal)
+      const refusal = imageMemoryRefusal(error, {
+        request: { prompt: request.prompt },
+        prompt: request.prompt,
+        conversationId: input.conversationId,
+        projectId: input.projectId
+      })
+      if (refusal) execution.imageMemoryRetry ??= refusal.retry
       this.setDeferredImageToolOutcome(execution, requestIndex, {
         status: cancelled ? 'cancelled' : 'failed',
         result: cancelled
           ? 'Image generation was cancelled.'
-          : `Image generation failed: ${this.errorMessage(error)}`
+          : `Image generation failed: ${refusal?.message ?? this.errorMessage(error)}`
       })
     }
   }

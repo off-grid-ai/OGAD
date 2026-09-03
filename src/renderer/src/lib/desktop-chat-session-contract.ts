@@ -150,10 +150,23 @@ export interface DesktopToolChatSessionInput extends DesktopChatSessionCommonInp
   imageAvailable: boolean
 }
 
+/**
+ * The "Run anyway" affordance: an image request the shared memory rule refused, re-runnable with the
+ * person's explicit override. One shape for the direct image path and the tool-owned one.
+ */
+export interface DesktopImageMemoryRetry {
+  request: ImageGenerationRequestContract
+  prompt: string
+  conversationId: string
+  projectId: string | null
+}
+
 export interface DesktopToolChatSessionResult {
   turn: ChatTurn
   response: DesktopToolChatResponse
   generatedImages: readonly DesktopImageGenerationResponse[]
+  /** Set when a tool-owned image was refused for memory; the turn's message offers "Run anyway". */
+  imageMemoryRetry?: DesktopImageMemoryRetry
 }
 
 export interface DesktopImageChatSessionInput extends DesktopChatSessionCommonInput {

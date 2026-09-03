@@ -185,7 +185,7 @@ export class DesktopChatSession {
     const generatedImages = execution?.generatedImages ?? []
     if (!response && turn.status === 'stopped') return { turn, response: {}, generatedImages }
     if (!response) throw new Error(`Desktop tool response is missing for turn ${input.turnId}`)
-    return { turn, response, generatedImages }
+    return { turn, response, generatedImages, imageMemoryRetry: execution?.imageMemoryRetry }
   }
 
   private chatResult(

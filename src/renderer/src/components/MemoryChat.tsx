@@ -112,9 +112,12 @@ import {
   subscribeDesktopChatStream,
   type DesktopChatSession
 } from '@renderer/lib/desktop-chat-session'
-import { desktopChatTurnProfile } from '@renderer/lib/desktop-chat-session-policy'
 import {
-  parseImageMemoryGuardError,
+  desktopChatTurnProfile,
+  imageMemoryRefusal
+} from '@renderer/lib/desktop-chat-session-policy'
+import type { DesktopImageMemoryRetry } from '@renderer/lib/desktop-chat-session-contract'
+import {
   type ImageGenerationJobContract,
   type ImageGenerationRequestContract
 } from '../../../shared/image-generation-contract'
@@ -241,12 +244,7 @@ type ChatMessage = {
   /** Keep the live Thinking row visible before the first reasoning token arrives. */
   reasoningRequested?: boolean
   cutoff?: ResponseCutoffContract
-  imageMemoryRetry?: {
-    request: ImageGenerationRequestContract
-    prompt: string
-    conversationId: string
-    projectId: string | null
-  }
+  imageMemoryRetry?: DesktopImageMemoryRetry
   streaming?: boolean
   activity?: { kind: string; counts?: Record<string, number>; name?: string }
   attachments?: { name: string; kind: string; text?: string; path?: string }[]
@@ -4003,9 +4001,14 @@ export function MemoryChat({
           )
         }
       } catch (e) {
-        const memoryGuard = parseImageMemoryGuardError(e)
+        const refusal = imageMemoryRefusal(e, {
+          request: imageRequest,
+          prompt: trimmed,
+          conversationId: convId,
+          projectId
+        })
         const errorContent =
-          memoryGuard?.message || (e as Error).message || 'Image generation failed.'
+          refusal?.message || (e as Error).message || 'Image generation failed.'
         // User-cancelled: just drop the loading state, no error bubble.
         if (!isCancellationError(e)) {
           console.error('Image generation failed', e)
@@ -4015,9 +4018,7 @@ export function MemoryChat({
               id: `a-${Date.now()}`,
               role: 'assistant',
               content: errorContent,
-              imageMemoryRetry: memoryGuard
-                ? { request: imageRequest, prompt: trimmed, conversationId: convId, projectId }
-                : undefined
+              imageMemoryRetry: refusal?.retry
             }
           ])
           try {
@@ -4077,7 +4078,8 @@ export function MemoryChat({
         const {
           response: tr,
           turn: sessionTurn,
-          generatedImages: toolGeneratedImages
+          generatedImages: toolGeneratedImages,
+          imageMemoryRetry: toolImageMemoryRetry
         } = await desktopChatSession.send({
           kind: 'tools',
           userMessage: {
@@ -4158,6 +4160,9 @@ export function MemoryChat({
                   content: answer,
                   context: toolCtxWithReasoning,
                   toolCalls,
+                  // A tool-owned image the memory rule refused offers the same "Run anyway" as the
+                  // direct path: one affordance shape, one owner (imageMemoryRefusal).
+                  imageMemoryRetry: toolImageMemoryRetry,
                   metrics: tr?.metrics,
                   activity: undefined,
                   streaming: false
