@@ -62,6 +62,7 @@
     "@langchain/core": "^1.2.9",
     "@langchain/langgraph": "^1.4.12",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@offgrid/application": "file:../shared/packages/application",
     "@offgrid/automation": "file:../shared/packages/automation",
     "@offgrid/clipboard": "file:./packages/clipboard",
     "@offgrid/design": "file:./packages/design",

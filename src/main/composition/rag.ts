@@ -1,34 +1,28 @@
-// Composition root: the shared RagService over Desktop's SQLite vector store, MiniLM embeddings,
-// and the Node/native extraction bridges. The Desktop subclass adds one port concern: every local
-// mutation is announced to the sync layer; a mutation that arrived FROM sync is not echoed back.
-import { DEFAULT_RAG_EMBEDDING_DIMENSION, RagService } from '@offgrid/rag'
-import type {
-  EmbeddingProvider,
-  ExtractionBridges,
-  IndexDocumentParams,
-  IndexResult,
-  RagDocument
-} from '@offgrid/rag'
-import { embeddings } from '../embeddings'
+// Compatibility adapter for existing Desktop callers. All RAG behavior runs through the global facade.
+import { createOffGridApplication, type RagFacade } from '@offgrid/application'
 import {
-  desktopVectorStore,
-  getRagDocument,
-  getRagDocumentBySyncId,
-  listAllRagDocuments,
-  projectExists
-} from '../rag/store'
+  DEFAULT_RAG_EMBEDDING_DIMENSION,
+  type EmbeddingProvider,
+  type ExtractionBridges,
+  type IndexDocumentParams,
+  type IndexResult,
+  type RagDocument,
+  type SearchResult
+} from '@offgrid/rag'
+import { desktopModelServices } from '../model-services'
+import { embeddings } from '../embeddings'
 import { desktopExtraction } from '../rag/extractors'
+import { desktopVectorStore, projectExists } from '../rag/store'
 import {
   emitKnowledgeDocumentMutation,
   type KnowledgeDocumentSnapshot
 } from '../sync-knowledge-document'
+import { desktopApplication, startDesktopApplication } from './application'
 
 const embeddingProvider: EmbeddingProvider = {
   dimension: DEFAULT_RAG_EMBEDDING_DIMENSION,
   embed: (text) => embeddings.generateEmbedding(text)
 }
-
-type SyncOrigin = 'local' | 'sync'
 
 function snapshot(document: RagDocument): KnowledgeDocumentSnapshot {
   return {
@@ -42,92 +36,111 @@ function snapshot(document: RagDocument): KnowledgeDocumentSnapshot {
   }
 }
 
-export class DesktopRagService extends RagService {
-  async indexDocument(
-    params: IndexDocumentParams & { origin?: SyncOrigin },
-    onProgress?: Parameters<RagService['indexDocument']>[1]
-  ): Promise<IndexResult> {
-    const result = await super.indexDocument(params, onProgress)
-    if (params.origin !== 'sync') {
-      const document = getRagDocument(result.docId)
-      if (document) emitKnowledgeDocumentMutation({ kind: 'indexed', document: snapshot(document) })
-    }
-    return result
+function forwardLocalMutation(event: Parameters<Parameters<RagFacade['events']>[0]>[0]): void {
+  if (event.type === 'document_indexed' && event.origin === 'local') {
+    emitKnowledgeDocumentMutation({ kind: 'indexed', document: snapshot(event.document) })
+  } else if (event.type === 'document_enabled' && event.origin === 'local') {
+    emitKnowledgeDocumentMutation({
+      kind: 'enabled',
+      syncId: event.document.syncId,
+      enabled: event.enabled
+    })
+  } else if (event.type === 'document_removed' && event.origin === 'local') {
+    emitKnowledgeDocumentMutation({ kind: 'deleted', syncId: event.document.syncId })
+  }
+}
+
+export class DesktopRagService {
+  constructor(
+    private readonly facade: RagFacade,
+    private readonly startApplication: () => Promise<unknown>
+  ) {
+    facade.events(forwardLocalMutation)
   }
 
-  async toggleDocument(
+  async ensureReady(): Promise<void> {
+    await this.startApplication()
+  }
+
+  indexDocument(
+    params: IndexDocumentParams & { origin?: 'local' | 'sync' },
+    onProgress?: (
+      stage: Parameters<NonNullable<Parameters<RagFacade['addDocument']>[1]>>[0]
+    ) => void
+  ): Promise<IndexResult> {
+    return this.facade.addDocument(params, onProgress)
+  }
+
+  toggleDocument(
     docId: number,
     enabled: boolean,
-    options: { origin?: SyncOrigin } = {}
+    options?: { origin?: 'local' | 'sync' }
   ): Promise<void> {
-    await super.toggleDocument(docId, enabled)
-    if (options.origin !== 'sync') {
-      const document = getRagDocument(docId)
-      if (document) {
-        emitKnowledgeDocumentMutation({ kind: 'enabled', syncId: document.syncId, enabled })
-      }
-    }
+    return this.facade.setDocumentEnabled(docId, enabled, options)
   }
 
-  async deleteDocument(docId: number, options: { origin?: SyncOrigin } = {}): Promise<void> {
-    const document = getRagDocument(docId)
-    await super.deleteDocument(docId)
-    if (document && options.origin !== 'sync') {
-      emitKnowledgeDocumentMutation({ kind: 'deleted', syncId: document.syncId })
-    }
+  deleteDocument(docId: number, options?: { origin?: 'local' | 'sync' }): Promise<void> {
+    return this.facade.removeDocument(docId, options)
+  }
+
+  listDocuments(projectId: string): Promise<RagDocument[]> {
+    return this.facade.listDocuments(projectId)
+  }
+
+  searchProject(
+    projectId: string,
+    query: string,
+    options?: { topK?: number; contextLength?: number }
+  ): Promise<SearchResult> {
+    return this.facade.search(projectId, query, options)
+  }
+
+  backfillEmbeddings(projectId: string): Promise<number> {
+    return this.facade.backfillEmbeddings(projectId)
+  }
+
+  formatForPrompt(result: SearchResult): string {
+    return this.facade.formatSearchResult(result)
+  }
+
+  getDocument(docId: number): Promise<RagDocument | undefined> {
+    return this.facade.document(docId)
   }
 
   getAllDocumentsForSync(): KnowledgeDocumentSnapshot[] {
-    return listAllRagDocuments().map(snapshot)
+    return this.facade.documentsForSync()
   }
 
-  async getDocumentBySyncId(syncId: string): Promise<RagDocument | undefined> {
-    return getRagDocumentBySyncId(syncId)
+  getDocumentBySyncId(syncId: string): Promise<RagDocument | undefined> {
+    return this.facade.documentBySyncId(syncId)
   }
 
-  async indexSyncedDocument(document: KnowledgeDocumentSnapshot): Promise<number> {
-    const existing = getRagDocumentBySyncId(document.syncId)
-    if (existing) {
-      if (existing.enabled !== document.enabled) {
-        await this.toggleDocument(existing.id, document.enabled, { origin: 'sync' })
-      }
-      return existing.id
-    }
-    if (!projectExists(document.projectId)) {
-      throw new Error('knowledge document project is not available')
-    }
-    const result = await this.indexDocument({
-      projectId: document.projectId,
-      path: document.filePath,
-      fileName: document.name,
-      size: document.fileSize,
-      syncId: document.syncId,
-      createdAt: document.createdAt,
-      enabled: document.enabled,
-      origin: 'sync'
-    })
-    return result.docId
+  indexSyncedDocument(document: KnowledgeDocumentSnapshot): Promise<number> {
+    return this.facade.indexSyncedDocument(document)
   }
 
-  async setSyncedDocumentEnabled(syncId: string, enabled: boolean): Promise<void> {
-    const document = getRagDocumentBySyncId(syncId)
-    if (document) await this.toggleDocument(document.id, enabled, { origin: 'sync' })
+  setSyncedDocumentEnabled(syncId: string, enabled: boolean): Promise<void> {
+    return this.facade.setSyncedDocumentEnabled(syncId, enabled)
   }
 
-  async deleteSyncedDocument(syncId: string): Promise<void> {
-    const document = getRagDocumentBySyncId(syncId)
-    if (document) await this.deleteDocument(document.id, { origin: 'sync' })
+  deleteSyncedDocument(syncId: string): Promise<void> {
+    return this.facade.removeSyncedDocument(syncId)
   }
 }
 
 export function createDesktopRagService(
   options: { embeddings?: EmbeddingProvider; extraction?: ExtractionBridges } = {}
 ): DesktopRagService {
-  return new DesktopRagService({
-    store: desktopVectorStore,
-    embeddings: options.embeddings ?? embeddingProvider,
-    extraction: options.extraction ?? desktopExtraction
+  const application = createOffGridApplication({
+    models: { workspace: desktopModelServices.workspace },
+    rag: {
+      store: desktopVectorStore,
+      embeddings: options.embeddings ?? embeddingProvider,
+      extraction: options.extraction ?? desktopExtraction,
+      projectExists: async (projectId) => projectExists(projectId)
+    }
   })
+  return new DesktopRagService(application.rag, () => application.start())
 }
 
-export const ragService = createDesktopRagService()
+export const ragService = new DesktopRagService(desktopApplication.rag, startDesktopApplication)

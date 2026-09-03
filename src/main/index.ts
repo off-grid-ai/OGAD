@@ -123,7 +123,6 @@ const restoreCanonicalProductName = beginProductIdentityBootstrap(app, process.p
     move(join(appData, 'my-memories'), 'memories.db')
     move(join(appData, 'My Memories'), 'memories.db')
     app.setPath('userData', canonical)
-    console.log('[userData] canonical path:', canonical)
   } catch (e) {
     console.error('[userData] unify failed', e)
   }
@@ -147,9 +146,6 @@ registerCoreShutdownOwners(applicationShutdown, {
     import('./model-services').then(({ desktopModelServices }) => desktopModelServices.shutdown()),
   stopModelDownloads: shutdownModelDownloads
 })
-
-// FORCE UPDATE VERIFICATION: 3 - SHELL OVERWRITE
-console.log('MAIN PROCESS: LOADING CUSTOM ENTRY POINT (SHELL OVERWRITE)')
 
 function createWindow(): void {
   // Open filling the screen, because this is a desktop-first, dense app: multi-column grids, master
@@ -428,6 +424,9 @@ app.whenReady().then(async () => {
       shutdown: () => clearInterval(entitlementRefresh)
     })
     setupIPC()
+    await import('./composition/application').then(({ startDesktopApplication }) =>
+      startDesktopApplication()
+    )
     setupRagIPC()
     setupMcpIpc() // basic MCP connectors (management + chat tool extension)
     registerNativeActionTools(registerToolExtension) // the assistant's tools (macOS full set; Windows Outlook subset)
@@ -463,7 +462,6 @@ app.whenReady().then(async () => {
         .then((m) => m.seedDemo(process.env.OFFGRID_SEED === 'force'))
         .catch((e) => console.error('[seed]', e))
     }
-    console.log('IPC Handlers Registered.')
   } catch (e) {
     console.error('FATAL: IPC Setup failed', e)
   }
