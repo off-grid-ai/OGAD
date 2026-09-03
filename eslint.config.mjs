@@ -37,9 +37,9 @@ const typedDeadBranchWarn = {
 // Hexagonal boundary (warn ratchet, see shared/docs/MODEL_FACADE_PLAN.md): app code composes its
 // model layer from the ONE shared facade, `@offgrid/models/workspace`, plus pure catalog constants
 // from `@offgrid/models/catalog`. Value imports from the package root are the second pipeline being
-// removed; each warning is one migration item. Types stay free. Ratchets to `error` at zero.
+// removed. Types stay free. The queue reached zero on 2026-09-02 and the rule is now an error.
 const modelBoundaryWarn = {
-  name: 'model facade boundary (warn ratchet)',
+  name: 'model facade boundary (error)',
   files: ['src/**/*.{ts,tsx}', 'pro/**/*.{ts,tsx}'],
   // The composition root is the ONE place shared services are constructed with this app's ports.
   ignores: [
@@ -57,7 +57,7 @@ const modelBoundaryWarn = {
     // ONE rule entry: a second config block with the same rule id would replace this one (flat
     // config merges per rule id), which silently hid the class 4 queue once.
     '@typescript-eslint/no-restricted-imports': [
-      'warn',
+      'error',
       {
         paths: [
           {
@@ -153,7 +153,7 @@ const modelBoundaryWarn = {
 // parameters. Class 3: image MIME / model-file literals. (Class 2, the id codecs, lives in the
 // import rule above.) Each warning is one decision to move into shared.
 const pipelineDecisionsWarn = {
-  name: 'model pipeline decisions (warn ratchet)',
+  name: 'model pipeline decisions (error)',
   files: ['src/**/*.{ts,tsx}', 'pro/**/*.{ts,tsx}'],
   ignores: [
     '**/*.{test,spec,dbtest}.{ts,tsx}',
@@ -168,7 +168,7 @@ const pipelineDecisionsWarn = {
   plugins: { '@typescript-eslint': tsESLint.plugin },
   rules: {
     'no-restricted-syntax': [
-      'warn',
+      'error',
       {
         selector:
           "Property[key.name=/^(maxTokens|temperature|topP|timeoutMs)$/][value.type='Literal'], Property[key.name='thinking'][value.type='Literal'][value.raw=/^(true|false)$/]",

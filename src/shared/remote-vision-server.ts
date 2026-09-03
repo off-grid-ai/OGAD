@@ -49,64 +49,6 @@ export interface RemoteVisionInventoryModel {
   remoteCapabilities?: Partial<RemoteModelCapabilities>
 }
 
-/** Stable inventory id for a model that belongs to a saved remote server. */
-export function remoteVisionModelId(serverId: string, modelId: string): string {
-  return sharedRemoteVisionModelId(serverId, modelId)
-}
-
-/** Parse only ids created by remoteVisionModelId. */
-export function parseRemoteVisionModelId(value: string): RemoteVisionModelReference | null {
-  return parseSharedRemoteVisionModelId(value)
-}
-
-/**
- * @deprecated No production caller. Remote rows are projected from the one workspace inventory
- * (`remoteCatalogEntries` in models-manager). Kept only until its unit test is retired at the test pass.
- *
- * The remote models a server contributes to the app's inventory: only the ones SELECTED for it
- * (one per modality). The full catalog belongs to the server's settings page; the inventory is what
- * can be used, so the Active models panel and the paired phone see one remote model per modality,
- * not every model a provider lists.
- */
-export function remoteVisionInventoryModels(
-  servers: RemoteVisionSavedServer[]
-): RemoteVisionInventoryModel[] {
-  const kindFor = (
-    modality: RemoteModelModality,
-    capabilities?: Partial<RemoteModelCapabilities>
-  ): RemoteVisionInventoryModel['kind'] =>
-    modality === 'text' ? (capabilities?.supportsVision ? 'vision' : 'text') : modality
-  return servers.flatMap((server) => {
-    if (server.enabled === false) return []
-    const selections = Object.entries(server.selections ?? {}).filter(
-      (entry): entry is [RemoteModelModality, string] => typeof entry[1] === 'string' && !!entry[1]
-    )
-    const selected = selections.length
-      ? selections
-      : server.model
-        ? [['text', server.model] as [RemoteModelModality, string]]
-        : []
-    return selected.map(([modality, modelId]) => {
-      const model = server.catalog?.[modality]?.find((candidate) => candidate.id === modelId) ?? {
-        id: modelId,
-        name: modelId
-      }
-      return {
-        id: remoteVisionModelId(server.id, model.id),
-        name: model.name,
-        kind: kindFor(modality, model.capabilities),
-        org: server.name,
-        description: `Runs through ${server.name}.`,
-        files: [],
-        tags: ['Remote'],
-        remoteServerId: server.id,
-        remoteModelId: model.id,
-        remoteCapabilities: model.capabilities
-      }
-    })
-  })
-}
-
 export interface RemoteVisionServerSettings {
   provider: RemoteVisionProvider
   endpoint: string
@@ -171,10 +113,4 @@ export function remoteVisionProviderForEndpoint(endpoint: string): RemoteVisionP
 export function remoteVisionApiBase(endpoint: string): string {
   return remoteApiBase(endpoint)
 }
-import {
-  inferRemoteProvider,
-  parseRemoteVisionModelId as parseSharedRemoteVisionModelId,
-  remoteApiBase,
-  remoteVisionModelId as sharedRemoteVisionModelId,
-  trimRemoteEndpoint
-} from '@offgrid/models'
+import { inferRemoteProvider, remoteApiBase, trimRemoteEndpoint } from '@offgrid/models'
