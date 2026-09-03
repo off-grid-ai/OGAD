@@ -198,38 +198,32 @@ const widenedPipelineDecisionSelectors = [
       'Class 1: a computed or defaulted generation parameter is still a pipeline decision. Name a generation profile or read the shared runtime policy.'
   },
   {
-    // A PascalCase or create* VALUE import from a shared package (other than the two pure facades)
-    // is a service class or factory: construct it in a composition root and inject the instance.
-    // Error classes are exempt: a port may throw or match the domain's error.
+    // A service class or create* factory (service-like suffix) imported as a VALUE from a shared
+    // service package is constructed only in a composition root; the instance is injected. Pure value
+    // constructors (createXStateFields, createXDescriptor, checksums) are data, not services, and pass.
+    // Error classes are exempt. No lookaheads: esquery does not support them.
     selector:
-      "ImportDeclaration:not([importKind='type'])[source.value=/^@offgrid\\/(sync|use|speech|rag|clipboard)(\\/.+)?$|^@offgrid\\/models\\/(?!workspace$|catalog$).+$/] > ImportSpecifier:not([importKind='type'])[imported.name=/^(?!.*Error$)([A-Z][a-z][A-Za-z]*|create[A-Z][A-Za-z]*)$/]",
+      "ImportDeclaration:not([importKind='type'])[source.value=/^@offgrid\\/(sync|use|speech|rag|clipboard)(\\/|$)/] > ImportSpecifier:not([importKind='type'])[imported.name=/(Service|Coordinator|Engine|Registry|Resolver|Bridge|Client|Runtime|Application|Orchestrator|Transport|Session|Manager|Controller|Queue|Cache|Workflow|Authority|Channel|Timer|Adapter|Workspace|Code)$/][imported.name=/^([A-Z][a-z][A-Za-z]*|create[A-Z][A-Za-z]*)$/][imported.name!=/Error$/]",
     message:
       'Class 4: shared services are constructed in src/main/composition/** or src/renderer/src/composition/**. Import the composed instance; import the type if you only need the type.'
+  },
+  {
+    // A deep entry of @offgrid/models bypasses the facade; only the two pure facades are allowed.
+    selector:
+      "ImportDeclaration:not([importKind='type'])[source.value=/^@offgrid\\/models\\//][source.value!=/^@offgrid\\/models\\/(workspace|catalog)$/] > ImportSpecifier:not([importKind='type'])[imported.name=/(Service|Coordinator|Engine|Registry|Resolver|Bridge|Client|Runtime|Application|Orchestrator|Transport|Session|Manager|Controller|Queue|Cache|Workflow|Authority|Channel|Timer|Adapter|Workspace|Code)$/][imported.name=/^([A-Z][a-z][A-Za-z]*|create[A-Z][A-Za-z]*)$/][imported.name!=/Error$/]",
+    message:
+      'Class 4: a deep entry of @offgrid/models bypasses the facade. Import from @offgrid/models, @offgrid/models/workspace, or @offgrid/models/catalog.'
   }
 ]
 
 // Core: every selector, as an error. The queue reached zero on 2026-09-03.
 const pipelineDecisions = {
   name: 'model pipeline decisions (error)',
-  files: ['src/**/*.{ts,tsx}'],
+  files: ['src/**/*.{ts,tsx}', 'pro/**/*.{ts,tsx}'],
   ignores: boundaryRootIgnores,
   plugins: { '@typescript-eslint': tsESLint.plugin },
   rules: {
     'no-restricted-syntax': ['error', ...pipelineDecisionSelectors, ...widenedPipelineDecisionSelectors]
-  }
-}
-
-// Pro (separate repo, owned by the pro worker): the original selectors stay an error; the widened
-// selectors are exempt here until the pro worker clears its hits (pro/main/generation.ts:80
-// allowFallback literal, pro/main/sync/macos-proximity.ts timeoutMs defaults). Flat config keeps
-// one rule entry per file match, so these two blocks never merge.
-const pipelineDecisionsPro = {
-  name: 'model pipeline decisions (pro, original selectors)',
-  files: ['pro/**/*.{ts,tsx}'],
-  ignores: boundaryRootIgnores,
-  plugins: { '@typescript-eslint': tsESLint.plugin },
-  rules: {
-    'no-restricted-syntax': ['error', ...pipelineDecisionSelectors]
   }
 }
 
@@ -328,8 +322,7 @@ export default defineConfig(
   typedDeadBranchWarn,
   modelBoundaryWarn,
   pipelineDecisions,
-  pipelineDecisionsPro,
-  {
+    {
     settings: {
       react: {
         version: 'detect'
