@@ -33,7 +33,7 @@ export function setupTtsIpc(): void {
       return await listVoiceCatalog()
     } catch (error) {
       console.error('[tts] voices failed', error)
-      return []
+      throw error
     }
   })
 
