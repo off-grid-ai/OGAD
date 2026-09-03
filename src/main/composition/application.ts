@@ -7,6 +7,7 @@ import { embeddings } from '../embeddings'
 import { desktopExtraction } from '../rag/extractors'
 import { desktopVectorStore, projectExists } from '../rag/store'
 import { applicationShutdown } from '../shutdown'
+import { registerDesktopApplication } from './application-access'
 
 export const desktopApplication = createOffGridApplication({
   models: { workspace: desktopModelServices.workspace },
@@ -21,6 +22,8 @@ export const desktopApplication = createOffGridApplication({
   },
   newId: randomUUID
 })
+
+registerDesktopApplication(desktopApplication)
 
 let starting: ReturnType<typeof desktopApplication.start> | null = null
 

@@ -70,6 +70,7 @@ import { ModelServerError } from './llm/http-post'
 import { writeDiagnosticLog } from './diagnostics-log'
 import { DEFAULT_IMAGE_MIME } from '@offgrid/models'
 import { gatewayAsyncRequests } from './composition/gateway'
+import { desktopModels } from './composition/application-access'
 
 const UPSTREAM_HOST = '127.0.0.1'
 // The upstream llama-server port is LIVE, not fixed: llm.getPort() moves off LLAMA_SERVER_PORT when
@@ -83,12 +84,13 @@ let server: http.Server | null = null
 
 async function liveGatewayModalities(imageAvailable: boolean): Promise<GatewayModalities> {
   try {
-    await desktopModelServices.refresh()
+    await desktopModels.refresh()
   } catch {
     /* unavailable model registry means optional modalities are not ready */
   }
-  const transcription = desktopModelServices.llm.active('transcription').model
-  const speech = desktopModelServices.llm.active('voice').model
+  const models = desktopModels.snapshot()
+  const transcription = models.active.transcription?.model
+  const speech = models.active.voice?.model
   const chat = llm.modelsExist()
   return buildGatewayModalities({
     chat,
@@ -295,7 +297,7 @@ function jsonWithId(res: http.ServerResponse, rid: string, result: unknown): voi
  * remote-vision id); the shared service resolves it, so an inactive remote is its error. */
 function chatRouteId(model: unknown): string | undefined {
   if (typeof model !== 'string') return undefined
-  return desktopModelServices.workspace.resolveRoute('text', model) ?? undefined
+  return desktopModels.resolveRoute('text', model) ?? undefined
 }
 
 /** HTTP status + error type for a failed shared generation, in the gateway's JSON envelope. */
@@ -491,7 +493,7 @@ async function handleEmbeddings(
 // that and fold in the active image, speech (TTS), and transcription (STT) models.
 // Each entry carries a non-standard `kind` (chat/vision/image/speech/transcription).
 async function handleModelsList(res: http.ServerResponse): Promise<void> {
-  await desktopModelServices.refresh()
+  await desktopModels.refresh()
   // Voices are the one fact the workspace cannot know: they belong to the speech engine.
   let voices: string[] = []
   try {
@@ -502,7 +504,7 @@ async function handleModelsList(res: http.ServerResponse): Promise<void> {
   json(
     res,
     200,
-    desktopModelServices.workspace.gatewayModelList({
+    desktopModels.gatewayModelList({
       created: Math.floor(Date.now() / 1000),
       voices
     })

@@ -38,6 +38,7 @@ import { getResidencyMode } from './runtime-residency'
 import './models-manager'
 import { registerDesktopModelServices, type DesktopModelServices } from './model-service-access'
 import { desktopModelManagerPorts } from './model-manager-ports'
+import { desktopModels, modelsFailureMessage } from './composition/application-access'
 export type { DesktopModelServices } from './model-service-access'
 
 interface DesktopInventoryModel {
@@ -152,7 +153,6 @@ export function desktopAdapterId(source: 'local' | 'remote', modality: ModelModa
   }
   return `${prefix}.${modality.replace('_', '-')}`
 }
-
 
 /**
  * Older Desktop selections can contain a primary filename. This read codec keeps
@@ -413,7 +413,8 @@ export function createDesktopModelServices(
   }
 
   const projectedId = (modality: ModelModality): string | null => {
-    const active = llm.active(modality)
+    const active = desktopModels.snapshot().active[modality]
+    if (!active) return null
     if (active.model?.source === 'remote' && active.model.serverId) {
       return active.model.routeId ?? runtimeModelRouteId(active.model)
     }
@@ -463,23 +464,30 @@ export function createDesktopModelServices(
     generation,
     residency: memory,
     generationObservations,
-    refresh: () => llm.refresh(),
+    async refresh() {
+      await desktopModels.refresh()
+      return [...desktopModels.snapshot().inventory]
+    },
     routeIdFor(modality, nativeModelId) {
       if (!nativeModelId) {
         return (
-          llm.active(modality).selectedRouteId ??
-          llm.list(modality).find((model) => model.ready)?.routeId
+          desktopModels.snapshot().active[modality]?.selectedRouteId ??
+          desktopModels
+            .snapshot()
+            .inventory.find((model) => model.modality === modality && model.ready)?.routeId
         )
       }
       const canonical = ids.canonical(nativeModelId)
-      return llm.list(modality).find((model) => model.id === canonical)?.routeId
+      return desktopModels.resolveRoute(modality, canonical ?? nativeModelId) ?? undefined
     },
     async select(modality, modelId) {
       try {
-        await llm.refresh()
+        await desktopModels.refresh()
         if (modelId === null) {
-          await workspace.select(modality, null)
-          return { success: true }
+          const outcome = await desktopModels.select({ modality, modelId: null })
+          return outcome.ok
+            ? { success: true }
+            : { success: false, error: modelsFailureMessage(outcome.failure) }
         }
         // Any id space (route, legacy remote, native, or a stale family alias) resolves to the one
         // route through the workspace; the legacy codec only maps aliases to native ids first.
@@ -487,11 +495,13 @@ export function createDesktopModelServices(
           ? await dependencies.resolveLegacyModelId(modelId)
           : modelId
         const selectedRoute =
-          workspace.resolveRoute(modality, modelId) ??
+          desktopModels.resolveRoute(modality, modelId) ??
           this.routeIdFor(modality, canonicalModelId)
         if (!selectedRoute) return { success: false, error: 'unknown model' }
-        await workspace.select(modality, selectedRoute)
-        return { success: true }
+        const outcome = await desktopModels.select({ modality, modelId: selectedRoute })
+        return outcome.ok
+          ? { success: true }
+          : { success: false, error: modelsFailureMessage(outcome.failure) }
       } catch (error) {
         return {
           success: false,
@@ -511,15 +521,15 @@ export function createDesktopModelServices(
         'embedding',
         'tool_selection'
       ] satisfies ModelModality[]) {
-        const selected = selectionPersistence.readCanonical(modality)
+        const selected = desktopModels.snapshot().active[modality]?.selectedRouteId
         const route = selected ? decodeModelRouteId(selected) : null
         if (route?.serverId !== serverId) continue
-        await workspace.select(modality, null)
+        await desktopModels.select({ modality, modelId: null })
       }
     },
     async warmText() {
-      await llm.refresh()
-      const model = llm.active('text').model
+      await desktopModels.refresh()
+      const model = desktopModels.snapshot().active.text?.model
       if (!model) {
         throw new Error(
           'Models not downloaded. Please complete onboarding to download the AI model.'
@@ -567,7 +577,7 @@ export function createDesktopModelServices(
       ])
     },
     async activeModelIds(): Promise<string[]> {
-      await llm.refresh()
+      await desktopModels.refresh()
       const active = SHARED_MODALITIES.flatMap((modality) => {
         const id = projectedId(modality)
         return id ? [id] : []
@@ -576,7 +586,7 @@ export function createDesktopModelServices(
     },
     activeModalities,
     async modelControlSnapshot() {
-      await llm.refresh()
+      await desktopModels.refresh()
       const catalogRead = dependencies.modelControlCatalog
         ? dependencies.modelControlCatalog()
         : dependencies.listCatalog().then((models) => ({
@@ -592,7 +602,7 @@ export function createDesktopModelServices(
       ])
       // Every projection decision (which catalog row an active route names, the active text
       // capabilities overlay) is the workspace's; this reads the ports and renders.
-      return workspace.controlSnapshot({ catalog, installed, computerUse })
+      return desktopModels.controlSnapshot({ catalog, installed, computerUse })
     }
   }
 }
