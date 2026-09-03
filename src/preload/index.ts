@@ -50,7 +50,9 @@ import {
 } from '../shared/speech-text-cleaning-contract'
 import {
   SPEECH_INTERRUPT_CHANNEL,
+  SPEECH_EVENT_CHANNEL,
   SPEECH_SPEAK_CHANNEL,
+  type DesktopSpeechEvent,
   type SpeechSpeakCommand,
   type SpeechSpeakOutcome
 } from '../shared/speech-command-contract'
@@ -782,7 +784,12 @@ const offGridApi = {
   speechCommands: {
     speak: (command: SpeechSpeakCommand): Promise<SpeechSpeakOutcome> =>
       ipcRenderer.invoke(SPEECH_SPEAK_CHANNEL, command),
-    interrupt: (): Promise<void> => ipcRenderer.invoke(SPEECH_INTERRUPT_CHANNEL)
+    interrupt: (): Promise<void> => ipcRenderer.invoke(SPEECH_INTERRUPT_CHANNEL),
+    onEvent: (callback: (event: DesktopSpeechEvent) => void) => {
+      const listener = (_event: unknown, event: DesktopSpeechEvent): void => callback(event)
+      ipcRenderer.on(SPEECH_EVENT_CHANNEL, listener)
+      return unsubscribe(SPEECH_EVENT_CHANNEL, listener)
+    }
   },
 
   // --- On-device image generation (stable-diffusion.cpp) ---

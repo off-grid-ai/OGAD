@@ -79,7 +79,7 @@ export function VoiceSettingsTab(): React.JSX.Element {
   const [testState, setTestState] = useState<TestState>('idle')
   const [settingsLoaded, setSettingsLoaded] = useState(false)
   const [preferences, setPreferences] = useState(DEFAULT_VOICE_PREFERENCES)
-  const testAudioRef = useRef<HTMLAudioElement | null>(null)
+  const testOperationRef = useRef<string | null>(null)
   const requestedVoiceRef = useRef('af_heart')
 
   const loadVoices = useCallback((): void => {
@@ -102,6 +102,13 @@ export function VoiceSettingsTab(): React.JSX.Element {
         setProgress({ percentage, ...next })
       }
     )
+    const stopSpeechEvents = window.api.speechCommands.onEvent((event) => {
+      if (event.type !== 'speech_finished' || event.operationId !== testOperationRef.current) return
+      testOperationRef.current = null
+      setTestState(
+        event.outcome.kind === 'spoken' || event.outcome.kind === 'interrupted' ? 'idle' : 'error'
+      )
+    })
     loadVoices()
     void window.api
       .getSettings()
@@ -117,7 +124,13 @@ export function VoiceSettingsTab(): React.JSX.Element {
       .finally(() => setSettingsLoaded(true))
     return () => {
       stopProgress()
-      testAudioRef.current?.pause()
+      stopSpeechEvents()
+      if (testOperationRef.current) {
+        testOperationRef.current = null
+        void window.api.speechCommands.interrupt().catch((error) => {
+          console.error('Could not stop the voice sample.', error)
+        })
+      }
     }
   }, [loadVoices])
 
@@ -200,15 +213,18 @@ export function VoiceSettingsTab(): React.JSX.Element {
   const testVoice = async (): Promise<void> => {
     setTestState('generating')
     try {
-      const result = await window.api.speak('This is the Off Grid AI voice.', voice)
-      if (!result?.dataUrl) throw new Error('No audio returned')
-      const audio = new Audio(result.dataUrl)
-      testAudioRef.current = audio
-      audio.playbackRate = preferences.speed
-      audio.onended = () => setTestState('idle')
-      audio.onerror = () => setTestState('error')
+      const outcome = await window.api.speechCommands.speak({
+        text: 'This is the Off Grid AI voice.',
+        voice,
+        language,
+        speed: preferences.speed
+      })
+      if (!outcome.ok) {
+        setTestState('error')
+        return
+      }
+      testOperationRef.current = outcome.value.operationId
       setTestState('playing')
-      await audio.play()
     } catch {
       setTestState('error')
     }

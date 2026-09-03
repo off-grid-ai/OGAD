@@ -1,9 +1,10 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron'
-import type { SpeakCommand } from '@offgrid/application'
+import type { OffGridApplication, SpeakCommand } from '@offgrid/application'
 import { getMainWindow } from './main-window'
 import { applicationShutdown } from './shutdown'
 import {
   SPEECH_INTERRUPT_CHANNEL,
+  SPEECH_EVENT_CHANNEL,
   SPEECH_SPEAK_CHANNEL,
   type SpeechSpeakOutcome
 } from '../shared/speech-command-contract'
@@ -47,6 +48,16 @@ function assertMainRenderer(event: IpcMainInvokeEvent): void {
 }
 
 let registered = false
+let stopEvents: (() => void) | null = null
+
+async function speechApplication(): Promise<OffGridApplication> {
+  const { desktopApplication } = await import('./composition/application')
+  stopEvents ??= desktopApplication.speech.events((event) => {
+    const contents = getMainWindow()?.webContents
+    if (contents && !contents.isDestroyed()) contents.send(SPEECH_EVENT_CHANNEL, event)
+  })
+  return desktopApplication
+}
 
 export function setupSpeechCommandIpc(): void {
   if (registered) return
@@ -57,13 +68,13 @@ export function setupSpeechCommandIpc(): void {
       assertMainRenderer(event)
       const command = parseSpeakCommand(value)
       if (!command) throw new Error('Invalid speech command.')
-      const { desktopApplication } = await import('./composition/application')
+      const desktopApplication = await speechApplication()
       return desktopApplication.speech.speak(command)
     }
   )
   ipcMain.handle(SPEECH_INTERRUPT_CHANNEL, async (event): Promise<void> => {
     assertMainRenderer(event)
-    const { desktopApplication } = await import('./composition/application')
+    const desktopApplication = await speechApplication()
     await desktopApplication.speech.interrupt()
   })
   applicationShutdown.register({
@@ -71,6 +82,8 @@ export function setupSpeechCommandIpc(): void {
     shutdown: () => {
       ipcMain.removeHandler(SPEECH_SPEAK_CHANNEL)
       ipcMain.removeHandler(SPEECH_INTERRUPT_CHANNEL)
+      stopEvents?.()
+      stopEvents = null
       registered = false
     }
   })
