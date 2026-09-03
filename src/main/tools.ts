@@ -14,7 +14,11 @@ import {
   ModelCapabilityError,
   boundedToolHistory,
   buildAgentToolMessages,
-  decodeSearchRedirect as decodeDdgHref,
+  braveSearchUrl,
+  duckDuckGoSearchUrl,
+  formatWebSearchResults,
+  parseBraveResults,
+  parseDuckDuckGoResults,
   definitionToOpenAITool,
   evaluateArithmetic,
   executePortableTool,
@@ -28,7 +32,6 @@ import {
   prepareToolCallWithQueryFallback,
   selectAvailableToolDefinitions,
   selectToolExtensions,
-  stripHtmlTags as stripTags,
   toolSchemaTokenBudget,
   ToolRoutingService,
   type RuntimeModel
@@ -201,23 +204,8 @@ const TOOLS: ToolDef[] = [
       const q = String(a.query ?? '').trim()
       if (!q) return 'Error: empty query.'
       try {
-        const res = await fetch('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(q), {
-          headers: { 'User-Agent': 'Mozilla/5.0' }
-        })
-        const html = await res.text()
-        const titles: { title: string; url: string }[] = []
-        const re = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g
-        let m: RegExpExecArray | null
-        while ((m = re.exec(html)) && titles.length < 6)
-          titles.push({ url: decodeDdgHref(m[1]!), title: stripTags(m[2]!) })
-        const snippets: string[] = []
-        const sre = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g
-        let s: RegExpExecArray | null
-        while ((s = sre.exec(html)) && snippets.length < 6) snippets.push(stripTags(s[1]!))
-        if (!titles.length) return 'No results found.'
-        return titles
-          .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${snippets[i] || ''}`)
-          .join('\n')
+        const res = await fetch(duckDuckGoSearchUrl(q), { headers: { 'User-Agent': 'Mozilla/5.0' } })
+        return formatWebSearchResults(parseDuckDuckGoResults(await res.text()), q)
       } catch (e) {
         return 'Error: search failed — ' + (e as Error).message
       }
@@ -236,31 +224,16 @@ const TOOLS: ToolDef[] = [
       const q = String(a.query ?? '').trim()
       if (!q) return 'Error: empty query.'
       try {
-        const res = await fetch(
-          'https://search.brave.com/search?q=' + encodeURIComponent(q) + '&source=web',
-          {
-            headers: {
-              'User-Agent':
-                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
-              'Accept-Language': 'en-US,en;q=0.9'
-            }
+        const res = await fetch(braveSearchUrl(q), {
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9'
           }
-        )
-        const html = await res.text()
-        const out: { title: string; url: string }[] = []
-        const seen = new Set<string>()
-        const re = /<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi
-        let m: RegExpExecArray | null
-        while ((m = re.exec(html)) && out.length < 6) {
-          const url = m[1]!
-          if (/brave\.com|search\.brave|\/settings|javascript:/i.test(url)) continue
-          const title = stripTags(m[2]!)
-          if (!title || title.length < 3 || seen.has(url)) continue
-          seen.add(url)
-          out.push({ title, url })
-        }
-        if (!out.length) return 'No results found (Brave markup may have changed — try web_search).'
-        return out.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}`).join('\n')
+        })
+        const results = parseBraveResults(await res.text())
+        if (!results.length) return 'No results found (Brave markup may have changed — try web_search).'
+        return formatWebSearchResults(results, q)
       } catch (e) {
         return 'Error: brave search failed — ' + (e as Error).message
       }
