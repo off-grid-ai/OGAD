@@ -6,8 +6,10 @@ import {
   type OffGridApplication,
   type PartialGenerationState,
   type RagFacade,
+  type SyncFacade,
   type UseFacade
 } from '@offgrid/application'
+import type { PairingQrRoute, SyncOutcome } from '@offgrid/sync'
 import type {
   GenerationEvents,
   GenerationLifecycleEvent,
@@ -59,6 +61,26 @@ export const desktopUse: UseFacade = new Proxy({} as UseFacade, {
   get: (_target, property) => {
     const facade = current().use
     const value = facade[property as keyof UseFacade]
+    return typeof value === 'function' ? value.bind(facade) : value
+  }
+})
+
+type DesktopSyncFacade = SyncFacade & {
+  readonly mesh: {
+    forgetMembership(deviceId: string, membershipId: string): Promise<SyncOutcome<boolean>>
+    reconnectAnnouncedRoutes(
+      deviceId: string,
+      routes: readonly PairingQrRoute[]
+    ): Promise<SyncOutcome<boolean>>
+    connectedDeviceIds(): readonly string[]
+  }
+}
+
+/** Stable access to the Shared Sync facade without constructing the application root. */
+export const desktopSync: DesktopSyncFacade = new Proxy({} as DesktopSyncFacade, {
+  get: (_target, property) => {
+    const facade = current().sync as DesktopSyncFacade
+    const value = facade[property as keyof DesktopSyncFacade]
     return typeof value === 'function' ? value.bind(facade) : value
   }
 })
