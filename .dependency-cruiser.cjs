@@ -101,12 +101,12 @@ module.exports = {
       to: { path: '^src/main' }
     },
     {
-      name: 'presentation-not-to-raw-rag-or-use',
+      name: 'presentation-not-to-raw-rag-use-or-automation',
       comment:
-        'Presentation reads RAG and Use through @offgrid/application facades. Shared domain packages are composition and platform-adapter dependencies, not renderer dependencies.',
+        'Presentation reads RAG, Use, and Automation through @offgrid/application facades. Shared domain packages are composition and platform-adapter dependencies, not renderer dependencies.',
       severity: 'error',
       from: { path: '^(src/renderer/|pro/renderer/)' },
-      to: { path: '^\\.\\./shared/packages/(rag|use)/' }
+      to: { path: '^\\.\\./shared/packages/(rag|use|automation)/' }
     },
     {
       name: 'not-to-test',
