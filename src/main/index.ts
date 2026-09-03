@@ -507,12 +507,14 @@ app.on('window-all-closed', () => {
 // (which blocked launching LM Studio without a reboot). Defer the actual quit until the engine is
 // terminated (SIGTERM → SIGKILL if it hangs on a Metal/GGML shutdown abort), then quit for real.
 let engineUnloaded = false
+let shutdownTask: Promise<void> | null = null
 app.on('before-quit', (event) => {
   if (engineUnloaded) {
     return
   }
   event.preventDefault()
-  void (async () => {
+  if (shutdownTask) return
+  shutdownTask = (async () => {
     // Stop the agent browser first so a playing video's audio dies immediately,
     // not whenever the process finally exits.
     try {
@@ -524,11 +526,14 @@ app.on('before-quit', (event) => {
     try {
       const { stopDesktopApplication } = await import('./composition/application')
       await stopDesktopApplication()
-    } catch {
-      /* best-effort — quit regardless so the app never hangs on exit */
+    } catch (error) {
+      console.error('[shutdown] application stop failed', error)
+      throw error
+    } finally {
+      engineUnloaded = true
+      commitApplicationRelaunch(app)
+      app.quit()
     }
-    engineUnloaded = true
-    commitApplicationRelaunch(app)
-    app.quit()
   })()
+  void shutdownTask
 })
