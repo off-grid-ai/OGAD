@@ -32,6 +32,7 @@ import {
   type ModelLibraryRemovalTarget,
   mergeCatalog,
   workspaceRouteId,
+  catalogEntryForIdentifier,
   installedIds,
   buildDiskEntry,
   primaryFileName,
@@ -287,13 +288,8 @@ export function projectModelIdentity(
   modelId: string,
   catalog: readonly ModelIdentityCatalogEntry[]
 ): ModelIdentity | null {
-  const known = desktopModelServices.workspace.lookup(modelId)
-  const model = known?.serverId
-    ? catalog.find(
-        (candidate) =>
-          candidate.remoteServerId === known.serverId && candidate.remoteModelId === known.id
-      )
-    : catalog.find((candidate) => candidate.id === (known?.id ?? modelId))
+  // Pure projection over the catalog rows; shared owns how an identifier names a row.
+  const model = catalogEntryForIdentifier(modelId, catalog)
   const modelName = model?.name?.trim()
   return model && modelName ? { modelId, modelName } : null
 }

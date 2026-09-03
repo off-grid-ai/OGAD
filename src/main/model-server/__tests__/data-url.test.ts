@@ -54,7 +54,7 @@ describe('mimeFromExt', () => {
   it('falls back to image/png for png and a genuinely-unknown/empty ext', () => {
     expect(mimeFromExt('png')).toBe('image/png')
     expect(mimeFromExt('')).toBe('image/png')
-    expect(mimeFromExt('tiff')).toBe('image/png')
+    expect(mimeFromExt('xyz')).toBe('image/png')
   })
 })
 

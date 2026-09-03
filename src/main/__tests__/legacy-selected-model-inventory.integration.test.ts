@@ -42,6 +42,8 @@ describe.sequential('legacy selected local artifact inventory migration', () => 
       ])
     )
 
+    // The catalog's remote rows are the workspace's; the composition root must be loaded first.
+    await import('../model-services')
     const { getCatalog, listInstalled } = await import('../models-manager')
     const catalog = (await getCatalog()).models as Array<{ id: string }>
     const installed = await listInstalled()

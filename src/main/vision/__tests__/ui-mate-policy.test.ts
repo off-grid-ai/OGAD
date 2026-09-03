@@ -1,3 +1,4 @@
+import { computerUseAdapterProfile } from '@offgrid/models/computer-use'
 import { describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
 import fixtures from '../model-adapters/ui-mate/__fixtures__/official-responses.json'
@@ -8,7 +9,6 @@ import {
   compactUIMateResponse,
   parseUIMateResponse,
   summarizeUIMateThinking,
-  UI_MATE_GENERATION_CONFIG,
   UI_MATE_MAX_HISTORY_STEPS,
   UI_MATE_SYSTEM_PROMPT,
   UI_MATE_TOOL_SCHEMA
@@ -40,7 +40,11 @@ describe('UI-Mate official response fixtures', () => {
 
 describe('UI-Mate policy', () => {
   it('uses the official base action schema', () => {
-    expect(UI_MATE_GENERATION_CONFIG).toEqual({ maxTokens: 16_384, temperature: 1, topP: 0.95 })
+    expect(computerUseAdapterProfile('ui-mate')).toMatchObject({
+      maxTokens: 16_384,
+      temperature: 1,
+      topP: 0.95
+    })
     expect(UI_MATE_TOOL_SCHEMA.function.parameters.properties.action.enum).toEqual([
       'left_click',
       'right_click',

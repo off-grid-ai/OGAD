@@ -71,7 +71,10 @@ describe('model execution architecture', () => {
           'src/main/browser/browser-playwright-policy.ts',
           'src/main/desktop-generation.ts',
           'src/main/ipc.ts',
-          'src/main/mcp-server.ts'
+          'src/main/mcp-server.ts',
+          // The HTTP gateway is a protocol boundary like the MCP server: it maps wire requests onto
+          // the shared generation service and nothing else.
+          'src/main/model-server.ts'
         ])
       )
     ).toEqual([])

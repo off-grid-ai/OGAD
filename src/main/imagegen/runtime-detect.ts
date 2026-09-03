@@ -5,6 +5,8 @@
 // Re-export so callers get the mflux id check from a single place alongside the
 // other runtime predicates (the concrete list lives in ../mflux).
 export { isMfluxModelId } from '../mflux'
+// The Z-Image family test is a model fact and lives in shared; kept on this path for its callers.
+export { isZImageModel } from '@offgrid/models'
 
 /** A Core ML model is a DIRECTORY that contains a compiled .mlmodelc resource.
  *  The caller passes the directory's entry names (fs.readdirSync result); this
