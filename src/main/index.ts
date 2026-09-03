@@ -523,17 +523,22 @@ app.on('before-quit', (event) => {
     } catch {
       /* best-effort — never block quit */
     }
+    let readLifecycleFailure: (() => unknown) | null = null
     try {
-      const { stopDesktopApplication } = await import('./composition/application')
+      const { desktopApplication, stopDesktopApplication } =
+        await import('./composition/application')
+      readLifecycleFailure = () => desktopApplication.snapshot().lifecycleFailure
       await stopDesktopApplication()
     } catch (error) {
-      console.error('[shutdown] application stop failed', error)
-      throw error
+      console.error('[shutdown] application stop failed', readLifecycleFailure?.() ?? error)
     } finally {
       engineUnloaded = true
-      commitApplicationRelaunch(app)
-      app.quit()
+      try {
+        commitApplicationRelaunch(app)
+      } finally {
+        app.quit()
+      }
     }
   })()
-  void shutdownTask
+  void shutdownTask.catch((error) => console.error('[shutdown] quit failed', error))
 })
