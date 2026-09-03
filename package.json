@@ -65,6 +65,7 @@
     "@offgrid/automation": "file:../shared/packages/automation",
     "@offgrid/clipboard": "file:./packages/clipboard",
     "@offgrid/design": "file:./packages/design",
+    "@offgrid/memory": "file:../shared/packages/memory",
     "@offgrid/models": "file:../shared/packages/models",
     "@offgrid/rag": "file:../shared/packages/rag",
     "@offgrid/speech": "file:../shared/packages/speech",
