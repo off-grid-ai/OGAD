@@ -1,11 +1,12 @@
 import {
-  ChatSessionService,
+  type ChatSessionService,
   type ChatQueueProjection,
   type ChatSessionEvent,
   type ChatTurn,
   type GenerationResult
 } from '@offgrid/models'
 import { DesktopChatCompaction } from './desktop-chat-compaction'
+import { chatSessionService } from '@renderer/composition/chat-session'
 import { DesktopTurnRepository } from './desktop-chat-session-repository'
 import { publishDesktopChatEvent } from './desktop-chat-session-events'
 import {
@@ -47,7 +48,7 @@ export class DesktopChatSession {
   constructor(private readonly boundary: DesktopChatSessionBoundary) {
     this.generation = new DesktopChatGenerationAdapter(boundary)
     this.compaction = new DesktopChatCompaction(boundary)
-    this.service = new ChatSessionService(
+    this.service = chatSessionService(
       {
         generate: (request, events) =>
           this.generate(request.identity?.turnId, {

@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import {
+import { useCallback, useEffect, useState } from 'react'
+import type {
   CaptureReadinessApplicationService,
-  type CaptureReadinessObservation,
-  type CaptureReadinessProjection
+  CaptureReadinessObservation,
+  CaptureReadinessProjection
 } from '@offgrid/models'
+import { captureReadinessApplication } from '@renderer/composition/capture-readiness'
 import type { ProgressLike } from '@offgrid/ui'
 import { useModelDownloadProgress } from '@renderer/hooks/useModelDownloadProgress'
 import { desktopModelControl } from '@renderer/lib/model-control-application'
@@ -54,6 +55,21 @@ async function observeCaptureReadiness(): Promise<CaptureReadinessObservation> {
   }
 }
 
+type CaptureReadinessPorts = ConstructorParameters<typeof CaptureReadinessApplicationService>[0]
+
+/** Electron observations and I/O only; shared decides readiness. */
+export function desktopCaptureReadinessPorts(): CaptureReadinessPorts {
+  return {
+    observe: observeCaptureReadiness,
+    downloadProjector: async (modelId) =>
+      (await window.api.downloadModel?.(modelId)) ?? {
+        success: false,
+        error: 'download unavailable'
+      },
+    openVisionModelPicker: openModels
+  }
+}
+
 export interface CaptureReadinessController {
   projection: CaptureReadinessProjection | null
   progress: ProgressLike | null
@@ -64,19 +80,7 @@ export interface CaptureReadinessController {
 export function useCaptureReadiness(isPro: boolean): CaptureReadinessController {
   const [projection, setProjection] = useState<CaptureReadinessProjection | null>(null)
   const [progress, setProgress] = useState<ProgressLike | null>(null)
-  const service = useMemo(
-    () =>
-      new CaptureReadinessApplicationService({
-        observe: observeCaptureReadiness,
-        downloadProjector: async (modelId) =>
-          (await window.api.downloadModel?.(modelId)) ?? {
-            success: false,
-            error: 'download unavailable'
-          },
-        openVisionModelPicker: openModels
-      }),
-    []
-  )
+  const service = captureReadinessApplication()
 
   const refresh = useCallback(async (): Promise<void> => {
     if (!isPro || !window.api.proInvoke) {

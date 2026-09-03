@@ -1,5 +1,5 @@
 import {
-  ModelControlApplicationService,
+  type ModelControlApplicationService,
   type ModelCapabilities,
   type ModelControlProjection,
   type ModelControlSurface,
@@ -56,11 +56,14 @@ export interface DesktopModelControlPreloadPort {
 
 const api = (): DesktopModelControlPreloadPort => window.api
 
-/** Renderer composition root. Shared owns every decision; Electron methods are I/O ports only. */
-export const desktopModelControl = new ModelControlApplicationService<
-  DesktopModelControlModel,
-  ComputerUseActiveModelProjection
->({
+type DesktopModelControlPorts = ConstructorParameters<
+  typeof ModelControlApplicationService<DesktopModelControlModel, ComputerUseActiveModelProjection>
+>[0]
+
+/** Electron methods as I/O ports only. Shared owns every decision; the instance is composed in
+ *  `@renderer/composition/model-control` and re-exported here for its callers. */
+export function desktopModelControlPorts(): DesktopModelControlPorts {
+  return {
   snapshot: async () => {
     return api().getModelControlSnapshot()
   },
@@ -73,4 +76,7 @@ export const desktopModelControl = new ModelControlApplicationService<
   remove: async (modelId) => {
     return api().deleteModel(modelId)
   }
-})
+  }
+}
+
+export { desktopModelControl } from '@renderer/composition/model-control'

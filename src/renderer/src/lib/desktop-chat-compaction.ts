@@ -1,10 +1,11 @@
 import {
-  ContextCompactionService,
+  type ContextCompactionService,
   type ChatCompactionContext,
   type CompactableGenerationMessage,
   type GenerationMessage
 } from '@offgrid/models'
 import type { DesktopChatSessionBoundary } from './desktop-chat-session-contract'
+import { chatContextCompactionService } from '@renderer/composition/chat-session'
 
 const DEFAULT_CONTEXT_LENGTH = 4096
 
@@ -20,7 +21,7 @@ export class DesktopChatCompaction {
   private readonly service: ContextCompactionService<CompactableGenerationMessage>
 
   constructor(private readonly boundary: DesktopChatSessionBoundary) {
-    this.service = new ContextCompactionService<CompactableGenerationMessage>({
+    this.service = chatContextCompactionService({
       clearContext: async () => undefined,
       contextLength: () => this.contextLength,
       // No tokenizer crosses the Desktop IPC; the shared character estimate is the budget.

@@ -48,7 +48,9 @@ const modelBoundaryWarn = {
     '**/*.d.ts',
     'src/main/model-services.ts',
     'src/main/composition/**',
-    'src/main/model-selection-persistence.ts'
+    'src/main/model-selection-persistence.ts',
+    'src/renderer/src/composition/**',
+    'pro/main/composition/**'
   ],
   plugins: { '@typescript-eslint': tsESLint.plugin },
   rules: {
@@ -159,7 +161,9 @@ const pipelineDecisionsWarn = {
     '**/*.d.ts',
     'src/main/model-services.ts',
     'src/main/composition/**',
-    'src/main/model-selection-persistence.ts'
+    'src/main/model-selection-persistence.ts',
+    'src/renderer/src/composition/**',
+    'pro/main/composition/**'
   ],
   plugins: { '@typescript-eslint': tsESLint.plugin },
   rules: {
