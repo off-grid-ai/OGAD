@@ -27,7 +27,7 @@ import {
   type SyncedTurnStatus,
   groupWorkRuns,
   type WorkRunStep
-} from '@offgrid/sync'
+} from '@offgrid/application'
 import {
   cleanImagePrompt,
   isCancellationError,
