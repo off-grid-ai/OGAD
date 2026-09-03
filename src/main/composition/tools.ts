@@ -1,7 +1,7 @@
 // Composition root: shared tool routing over Desktop's embedding engine.
 import { PersistentToolEmbeddingCache, ToolRoutingService } from '@offgrid/models'
 import { desktopToolEmbeddingPort } from '../tools/platform-ports'
-import { once } from './once'
+import { once } from '@offgrid/models'
 
 export const toolRoutingService = once(
   () =>

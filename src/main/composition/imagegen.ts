@@ -6,7 +6,7 @@ import {
   type DesktopImageSharedRequest
 } from '../imagegen/application-service'
 import { desktopModelServices } from '../model-service-access'
-import { once } from './once'
+import { once } from '@offgrid/models'
 
 export const imageGenerationApplication = once(
   () =>

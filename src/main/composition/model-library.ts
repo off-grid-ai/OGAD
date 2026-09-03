@@ -15,7 +15,7 @@ import {
   desktopModelTransferRegistrationPorts,
   type DesktopProjectorRepair
 } from '../models-manager'
-import { once } from './once'
+import { once } from '@offgrid/models'
 
 export const modelLibraryRemovalService = once(
   () => new ModelLibraryRemovalService(desktopModelLibraryRemovalPorts())
