@@ -18,8 +18,10 @@ import { createDesktopSpeechSelectionPort } from './speech-selection'
 import { setupSpeechMicrophoneIpc } from '../speech-microphone-ipc'
 import { setupSpeechPlaybackIpc } from '../speech-playback-ipc'
 import { setupSpeechTextCleaningIpc } from '../speech-text-cleaning-ipc'
+import { consumeDesktopApplicationExtensionPorts } from './application-extension-ports'
 
 const speechIo = createDesktopSpeechIoPorts()
+const extensionPorts = consumeDesktopApplicationExtensionPorts()
 
 export const desktopApplication = createOffGridApplication({
   models: {
@@ -38,6 +40,7 @@ export const desktopApplication = createOffGridApplication({
   },
   automation: createDesktopAutomationPorts(),
   use: createDesktopUsePorts(),
+  sync: extensionPorts.sync,
   speech: {
     ...speechIo,
     microphone: setupSpeechMicrophoneIpc(),
@@ -45,7 +48,10 @@ export const desktopApplication = createOffGridApplication({
     selection: createDesktopSpeechSelectionPort(),
     cleanForSpeech: setupSpeechTextCleaningIpc().clean
   },
-  pro: { sync: { state: desktopSyncStatePort } },
+  pro: {
+    ...extensionPorts.pro,
+    sync: { ...extensionPorts.pro?.sync, state: desktopSyncStatePort }
+  },
   newId: randomUUID
 })
 

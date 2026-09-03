@@ -18,7 +18,6 @@ protocol.registerSchemesAsPrivileged([
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { setupIPC } from './ipc' // IMPORT FROM IPC ONLY
-import { setupRagIPC } from './rag-ipc'
 import { setupMcpIpc } from './mcp-ipc'
 import { registerToolExtension } from './tools'
 import { registerNativeActionTools } from './tools/nativeActionToolExtension'
@@ -427,7 +426,7 @@ app.whenReady().then(async () => {
     await import('./composition/application').then(({ startDesktopApplication }) =>
       startDesktopApplication()
     )
-    setupRagIPC()
+    await import('./rag-ipc').then(({ setupRagIPC }) => setupRagIPC())
     setupMcpIpc() // basic MCP connectors (management + chat tool extension)
     registerNativeActionTools(registerToolExtension) // the assistant's tools (macOS full set; Windows Outlook subset)
     const { registerActionsIpc } = await import('./actions/actions-ipc')
