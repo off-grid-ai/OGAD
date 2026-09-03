@@ -9,6 +9,10 @@ import { desktopVectorStore, projectExists } from '../rag/store'
 import { applicationShutdown } from '../shutdown'
 import { registerDesktopApplication } from './application-access'
 import { desktopSyncStatePort } from '../sync-state-port'
+import {
+  createDesktopAutomationPorts,
+  forwardDesktopAutomationEvent
+} from '../tasks/task-history'
 
 export const desktopApplication = createOffGridApplication({
   models: { workspace: desktopModelWorkspace },
@@ -21,11 +25,13 @@ export const desktopApplication = createOffGridApplication({
     extraction: desktopExtraction,
     projectExists: async (projectId) => projectExists(projectId)
   },
+  automation: createDesktopAutomationPorts(),
   pro: { sync: { state: desktopSyncStatePort } },
   newId: randomUUID
 })
 
 registerDesktopApplication(desktopApplication)
+desktopApplication.automation.events(forwardDesktopAutomationEvent)
 
 let starting: ReturnType<typeof desktopApplication.start> | null = null
 

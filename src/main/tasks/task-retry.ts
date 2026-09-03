@@ -4,7 +4,7 @@
  * are `@offgrid/automation`'s (`TaskRetryService` inside `AutomationApplication`).
  */
 import type { TaskRetryAvailability, TaskRetryResult } from '@offgrid/automation'
-import { taskAutomation } from './task-history'
+import { desktopAutomation } from '../composition/application-access'
 
 export {
   retryPlanningGoal,
@@ -17,9 +17,9 @@ export {
 export { configureTaskRetryRunner } from './task-history'
 
 export function getTaskRetryAvailability(taskId: string): TaskRetryAvailability {
-  return taskAutomation().retryAvailability(taskId)
+  return desktopAutomation.retryAvailability(taskId)
 }
 
 export function retryTask(taskId: string): TaskRetryResult {
-  return taskAutomation().retry(taskId)
+  return desktopAutomation.retry(taskId)
 }

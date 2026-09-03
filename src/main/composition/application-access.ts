@@ -1,4 +1,5 @@
 import type {
+  AutomationFacade,
   ModelsFacade,
   ModelsFailure,
   OffGridApplication,
@@ -38,6 +39,15 @@ export const desktopRag: RagFacade = new Proxy({} as RagFacade, {
   get: (_target, property) => {
     const facade = current().rag
     const value = facade[property as keyof RagFacade]
+    return typeof value === 'function' ? value.bind(facade) : value
+  }
+})
+
+/** Stable access to the Shared Automation facade without a composition-root import cycle. */
+export const desktopAutomation: AutomationFacade = new Proxy({} as AutomationFacade, {
+  get: (_target, property) => {
+    const facade = current().automation
+    const value = facade[property as keyof AutomationFacade]
     return typeof value === 'function' ? value.bind(facade) : value
   }
 })

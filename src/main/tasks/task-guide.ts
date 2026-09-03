@@ -9,7 +9,7 @@ import type {
   TaskGuideInput,
   TaskGuideResult
 } from '@offgrid/automation'
-import { taskAutomation } from './task-history'
+import { desktopAutomation } from '../composition/application-access'
 
 export {
   TASK_GUIDANCE_APPLIED_TRACE,
@@ -20,13 +20,13 @@ export {
 } from '@offgrid/automation'
 
 export function registerTaskGuideHandler(taskId: string, handler: TaskGuideHandler): () => void {
-  return taskAutomation().registerGuideHandler(taskId, handler)
+  return desktopAutomation.registerGuideHandler(taskId, handler)
 }
 
 export function taskGuideAvailability(taskId: string): TaskGuideAvailability {
-  return taskAutomation().guideAvailability(taskId)
+  return desktopAutomation.guideAvailability(taskId)
 }
 
 export function guideTask(taskId: string, input: TaskGuideInput): Promise<TaskGuideResult> {
-  return taskAutomation().guide(taskId, input)
+  return desktopAutomation.guide(taskId, input)
 }

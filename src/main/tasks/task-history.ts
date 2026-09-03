@@ -13,7 +13,6 @@ import os from 'os'
 import path from 'path'
 import { app, BrowserWindow } from 'electron'
 import {
-  AutomationApplication,
   isLocalTaskRunMutation,
   retryGuidanceFromMessages,
   type AutomationEvent,
@@ -25,19 +24,15 @@ import {
   type TaskRunSnapshot,
   type TaskRunUpdate
 } from '@offgrid/automation'
+import type { AutomationPlatformPorts } from '@offgrid/application'
 import { getDB, getRagMessages } from '../database'
 import { CORE_SYNC_ENTITIES, emitSyncMutation } from '../sync-mutation'
 import { TaskHistoryStore } from './task-history-store'
 import { persistTaskResultInChat } from './task-result-chat'
 import { notifyRagConversationChanged } from '../rag-conversation-events'
 import { callHook, HOOKS } from '../bootstrap/hookRegistry'
+import { desktopAutomation } from '../composition/application-access'
 
-let application: AutomationApplication | null = null
-/** The device fact until the application exists; pro sync may configure it before first use. */
-let pendingDevice: TaskExecutionDevice = {
-  id: `desktop:${os.hostname()}`,
-  name: os.hostname() || 'This computer'
-}
 let configuredRunner: TaskRetryRunner | null = null
 let configuredControl: TaskControlPort | null = null
 
@@ -73,24 +68,22 @@ async function readGuidanceAttachment(
   return { kind: processed.kind, text: processed.text }
 }
 
-/** The application, constructed on first use over this process's ports. */
-export function taskAutomation(): AutomationApplication {
-  if (!application) {
-    const store = new TaskHistoryStore(getDB())
-    store.migrate()
-    application = new AutomationApplication({
-      history: store,
-      device: pendingDevice,
-      retryRunner: lateBoundRunner,
-      guidanceForTask: (task) =>
-        retryGuidanceFromMessages(task.taskId, getRagMessages(task.journeyId)),
-      attachments: { read: readGuidanceAttachment },
-      control: (taskId, intent) => configuredControl?.(taskId, intent) ?? false
-    })
-    application.subscribe(forwardAutomationEvent)
-    application.start()
+/** Desktop I/O for the one Automation application constructed by the Shared root. */
+export function createDesktopAutomationPorts(): AutomationPlatformPorts {
+  const store = new TaskHistoryStore(getDB())
+  store.migrate()
+  return {
+    history: store,
+    device: {
+      id: `desktop:${os.hostname()}`,
+      name: os.hostname() || 'This computer'
+    },
+    retryRunner: lateBoundRunner,
+    guidanceForTask: (task) =>
+      retryGuidanceFromMessages(task.taskId, getRagMessages(task.journeyId)),
+    attachments: { read: readGuidanceAttachment },
+    control: (taskId, intent) => configuredControl?.(taskId, intent) ?? false
   }
-  return application
 }
 
 /** Pro sync configures this with its stable mesh identity during activation. */
@@ -98,26 +91,25 @@ export function configureTaskExecutionDevice(device: TaskExecutionDevice): void 
   const id = device.id.trim()
   const name = device.name.trim()
   if (!id || !name) return
-  pendingDevice = { id, name }
-  application?.configureExecutionDevice(pendingDevice)
+  desktopAutomation.configureExecutionDevice({ id, name })
 }
 
 export function getTaskExecutionDevice(): Readonly<TaskExecutionDevice> {
-  return application?.executionDevice ?? pendingDevice
+  return desktopAutomation.executionDevice()
 }
 
 export function getTaskRun(taskId: string): TaskRunSnapshot | undefined {
-  return taskAutomation().get(taskId)
+  return desktopAutomation.get(taskId)
 }
 
 export function listTaskRuns(limit?: number): TaskRunSnapshot[] {
-  return taskAutomation().list(limit)
+  return [...desktopAutomation.list(limit)]
 }
 
 /** Stop one persisted local Web Use task when its in-memory browser owner is absent, such as
  * after a process restart. False for remote, terminal, native, and unknown tasks. */
 export function stopOrphanedLocalWebTask(taskId: string): boolean {
-  return taskAutomation().stopOrphanedLocalWebTask(taskId)
+  return desktopAutomation.stopOrphanedLocalWebTask(taskId)
 }
 
 function broadcast(snapshot: TaskRunSnapshot): void {
@@ -148,7 +140,7 @@ export function materializeSyncedTaskVisualStep(
   taskId: string,
   detail: ComputerUseStepDetail
 ): TaskRunSnapshot | undefined {
-  return taskAutomation().materializeSyncedVisualStep(taskId, detail)
+  return desktopAutomation.materializeSyncedVisualStep(taskId, detail)
 }
 
 /** Remove remote visual evidence after its immutable sync entity is tombstoned. */
@@ -156,10 +148,10 @@ export function removeSyncedTaskVisualStep(
   taskId: string,
   stepId: string
 ): TaskRunSnapshot | undefined {
-  const removedPath = taskAutomation()
+  const removedPath = desktopAutomation
     .get(taskId)
     ?.stepDetails?.find((detail) => detail.stepId === stepId)?.screenshot?.path
-  const snapshot = taskAutomation().removeSyncedVisualStep(taskId, stepId)
+  const snapshot = desktopAutomation.removeSyncedVisualStep(taskId, stepId)
   if (removedPath) fs.rmSync(removedPath, { force: true })
   return snapshot
 }
@@ -183,7 +175,7 @@ function pruneSnapshots(tasks: readonly TaskRunSnapshot[]): void {
   }
 }
 
-function forwardAutomationEvent(event: AutomationEvent): void {
+export function forwardDesktopAutomationEvent(event: AutomationEvent): void {
   if (event.type === 'execution_device_changed') return
   if (event.type === 'task_run_live' || !isLocalTaskRunMutation(event)) {
     broadcast(event.snapshot)
@@ -194,7 +186,7 @@ function forwardAutomationEvent(event: AutomationEvent): void {
     notifyRagConversationChanged({ conversationId: snapshot.journeyId })
   }
   callHook(HOOKS.actionsObserveTaskResult, snapshot)
-  pruneSnapshots(taskAutomation().list())
+  pruneSnapshots(desktopAutomation.list())
   broadcast(snapshot)
   emitSyncMutation({
     entity: CORE_SYNC_ENTITIES.taskRun,
@@ -204,14 +196,14 @@ function forwardAutomationEvent(event: AutomationEvent): void {
 }
 
 export function recordTaskRun(update: TaskRunUpdate): TaskRunSnapshot {
-  return taskAutomation().record(update)
+  return desktopAutomation.record(update)
 }
 
 /** Publish streaming progress; the application decides what is durable and what is display. */
 export function reportTaskProgress(
   update: TaskRunUpdate & Partial<Pick<TaskRunSnapshot, LiveTaskRunField>>
 ): void {
-  taskAutomation().reportProgress(update)
+  desktopAutomation.reportProgress(update)
 }
 
 export function appendTaskStep(
@@ -220,7 +212,7 @@ export function appendTaskStep(
   title: string,
   step: string
 ): TaskRunSnapshot {
-  return taskAutomation().appendStep(taskId, kind, title, step)
+  return desktopAutomation.appendStep(taskId, kind, title, step)
 }
 
 /** Persist one redacted, bounded planning-step record without changing orchestration state. */
@@ -239,16 +231,15 @@ export function appendTaskStepDetail(
   title: string,
   detail: ComputerUseStepDetail
 ): TaskRunSnapshot {
-  return taskAutomation().appendStepDetail(taskId, kind, title, detail)
+  return desktopAutomation.appendStepDetail(taskId, kind, title, detail)
 }
 
 /** Hydrate the history and close every task this device can no longer own. */
 export function initializeTaskHistory(): void {
-  taskAutomation()
+  desktopAutomation.snapshot()
 }
 
-/** Test seam for a simulated process restart. Live state is memory-only, so it goes too. */
+/** Compatibility seam. The Shared application root owns process lifecycle. */
 export function resetTaskHistoryForTests(): void {
-  application?.stop()
-  application = null
+  void desktopAutomation.stop()
 }
