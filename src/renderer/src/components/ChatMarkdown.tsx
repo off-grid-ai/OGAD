@@ -1,5 +1,4 @@
-import { preprocessChatMarkdown } from '@offgrid/sync'
-import { safeChatExternalUrl } from '@offgrid/sync'
+import { preprocessChatMarkdown, safeChatExternalUrl } from '@offgrid/application'
 import { openChatLink } from '@renderer/lib/chat-link'
 import { openTaskSidePanel } from '@renderer/lib/task-side-panel'
 import { useTaskSessions } from '@renderer/lib/task-session-store'

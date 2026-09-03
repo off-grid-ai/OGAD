@@ -1,4 +1,4 @@
-import { safeChatExternalUrl } from '@offgrid/sync'
+import { safeChatExternalUrl } from '@offgrid/application'
 import { openExternal } from '../constants/links'
 import { openTaskSidePanel } from './task-side-panel'
 
