@@ -293,7 +293,9 @@ describe('model gateway chat streaming', () => {
         model: inventoryId
       })
 
-      remote.deactivateRemoteVisionModel()
+      // Clearing the text selection goes through the one selection owner; nothing in the remote
+      // module decides selection any more.
+      await (await import('../model-services')).desktopModelServices.workspace.select('text', null)
       const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/models/activate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
