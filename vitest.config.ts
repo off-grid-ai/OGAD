@@ -172,8 +172,6 @@ export default defineConfig({
         'src/main/license-ipc.ts',
         'src/main/llm.ts', // spawns llama-server; pure bits in llm/* (tested)
         'src/main/mcp.ts',
-        'src/main/mcp-oauth.ts',
-        'src/main/mcp-server.ts', // MCP tool registration; parseDataUrl extracted+tested
         // Connector DB/network orchestration; pure schema/result rules are measured separately.
         'src/main/tools/mcpConnectorToolExtension.ts',
         'src/main/updater.ts',
@@ -192,7 +190,6 @@ export default defineConfig({
         'src/main/licensing/keygen-config.ts', // constants only
         'src/main/bootstrap/loadProFeaturesMain.ts', // dynamic-import loader; proEnabled() tested
         'src/main/search.ts', // DB orchestrator; ranking in search-ranking.ts (tested)
-        'src/main/setup.ts', // model-recommendation orchestrator; fusion via tested model-sizing
         'src/main/models-manager.ts', // catalog/install/activate IO; logic in models/* (tested)
         'src/main/skills.ts', // fs CRUD shell; parsers → skills-parse.ts (tested)
         'src/main/tools.ts', // agentic loop (tools-stream.test.ts) + parsers (tools-parsers.ts)
