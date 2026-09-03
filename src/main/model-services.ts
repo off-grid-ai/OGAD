@@ -1,15 +1,11 @@
 import { randomUUID } from 'crypto'
 import os from 'node:os'
 import {
+  localCatalogRuntimeModels,
   createModelWorkspace,
   decodeModelRouteId,
   runtimeModelRouteId,
   ModelAdmissionError,
-  inventoryModelCapabilities,
-  inventoryModelMemoryProfile,
-  resolveReasoningPlan,
-  runtimeModalityForModelKind,
-  runtimeResidencyLifecycle,
   type ModelInventoryAdapter,
   type ModelControlCatalogModel,
   type ModelCapabilities,
@@ -140,44 +136,6 @@ const SHARED_MODALITIES: readonly ModelModality[] = [
   'embedding'
 ]
 
-/** A text model also serves classification, tool selection and (with vision) computer use. */
-export function expandDesktopTextRoutes(base: RuntimeModel): RuntimeModel[] {
-  const route = (
-    routeModality: ModelModality,
-    adapterId: string,
-    capabilities: RuntimeModel['capabilities']
-  ): RuntimeModel => ({ ...base, modality: routeModality, adapterId, capabilities })
-  const prefix = base.source === 'remote' ? 'desktop.remote-chat' : 'desktop.llama'
-  return [
-    base,
-    route('classifier', `${prefix}.classifier`, { classification: true, streaming: true }),
-    ...(base.capabilities.tools
-      ? [
-          route('tool_selection', `${prefix}.tool-selection`, {
-            tools: true,
-            toolSelection: true,
-            thinking: base.capabilities.thinking,
-            streaming: true,
-            structuredOutput: true
-          })
-        ]
-      : []),
-    ...(base.capabilities.vision && base.capabilities.tools
-      ? [
-          route('computer_use', `${prefix}.computer-use`, {
-            vision: true,
-            computerUse: true,
-            tools: true,
-            toolSelection: true,
-            thinking: base.capabilities.thinking,
-            streaming: true,
-            structuredOutput: true
-          })
-        ]
-      : [])
-  ]
-}
-
 export function desktopAdapterId(source: 'local' | 'remote', modality: ModelModality): string {
   const prefix = source === 'remote' ? 'desktop.remote-chat' : 'desktop.llama'
   // Vision is a capability of the text runtime, not a second residency or
@@ -195,17 +153,6 @@ export function desktopAdapterId(source: 'local' | 'remote', modality: ModelModa
   return `${prefix}.${modality.replace('_', '-')}`
 }
 
-function runtimeSizes(model: DesktopInventoryModel): {
-  residentSizeMB?: number
-  peakSizeMB?: number
-} {
-  const bytes = (model.files ?? []).reduce((sum, file) => sum + (file.sizeBytes ?? 0), 0)
-  return inventoryModelMemoryProfile({
-    artifactBytes: bytes,
-    kind: model.kind,
-    remote: Boolean(model.remoteServerId)
-  })
-}
 
 /**
  * Older Desktop selections can contain a primary filename. This read codec keeps
@@ -321,65 +268,16 @@ class DesktopInventorySource {
         Promise.resolve({ installed: false, ready: false })
     ])
     this.ids.index(catalog)
-    const installed = new Set(installedIds)
-    const activeText = this.selections.read('text')
-    const activeTextRoute = activeText ? decodeModelRouteId(activeText) : null
-    const residencyLifecycle = (
-      modality: 'image' | 'stt'
-    ): NonNullable<RuntimeModel['residencyLifecycle']> =>
-      runtimeResidencyLifecycle(this.dependencies.residencySetting?.(modality) ?? 'on-demand')
-
-    // Remote routes come from the workspace's own adapter (one per saved server selection).
-    const catalogRoutes = catalog.flatMap((model): RuntimeModel[] => {
-      if (model.remoteServerId) return []
-      const modality = runtimeModalityForModelKind(model.kind)
-      if (!modality) return []
-      const runtimeManagedVoice = modality === 'voice' && model.artifactDelivery === 'runtime'
-      const isInstalled = runtimeManagedVoice ? localVoiceState.installed : installed.has(model.id)
-      const ready =
-        isInstalled &&
-        model.availability !== 'coming_soon' &&
-        (!runtimeManagedVoice || localVoiceState.ready)
-      const loaded =
-        modality === 'text' &&
-        (activeTextRoute?.modelId ?? activeText) === model.id &&
-        localTextState.loaded
-      const adapterId = desktopAdapterId('local', modality)
-      const reasoning =
-        modality === 'text' || modality === 'computer_use' ? localTextState.reasoning : undefined
-      const capabilities = inventoryModelCapabilities({ kind: model.kind, source: 'local' })
-      // `loaded` is only ever true for the text runtime.
-      if (loaded) {
-        capabilities.thinking =
-          resolveReasoningPlan({ enabled: true }, reasoning).disposition === 'controlled'
-      }
-      const base: RuntimeModel = {
-        id: model.id,
-        name: model.name?.trim() || model.id,
-        kind: (model.kind ?? 'text') as RuntimeModel['kind'],
-        modality,
-        source: 'local',
-        adapterId,
-        providerId: model.runtime ?? model.engine,
-        reasoning,
-        contextLength: modality === 'text' ? localTextState.contextLength : undefined,
-        ...runtimeSizes(model),
-        dirtyMemory: modality === 'image',
-        residencyLifecycle:
-          modality === 'image'
-            ? residencyLifecycle('image')
-            : modality === 'transcription'
-              ? residencyLifecycle('stt')
-              : modality === 'voice'
-                ? 'operation'
-                : 'persistent',
-        capabilities,
-        installed: isInstalled,
-        ready,
-        loaded
-      }
-      if (modality !== 'text') return [base]
-      return expandDesktopTextRoutes(base)
+    // Shared owns the local inventory projection (installed, ready, loaded, memory, residency,
+    // derived text routes); this root hands in facts and names the executors.
+    const catalogRoutes = localCatalogRuntimeModels({
+      catalog,
+      installedIds,
+      activeText: this.selections.read('text'),
+      textRuntime: localTextState,
+      voiceRuntime: localVoiceState,
+      adapterId: (modality) => desktopAdapterId('local', modality),
+      residencyPreference: (modality) => this.dependencies.residencySetting?.(modality)
     })
 
     const embeddingRoute: RuntimeModel = {
@@ -440,7 +338,6 @@ export function createDesktopModelServices(
     remoteServerId: randomUUID,
     remoteInventory: {
       adapterId: (modality) => desktopAdapterId('remote', modality),
-      expandText: expandDesktopTextRoutes,
       // Inventory never waits on the network: answer from the cache, probe in the background, and
       // refresh inventory when the dialect is known.
       reasoning: (server) => {
