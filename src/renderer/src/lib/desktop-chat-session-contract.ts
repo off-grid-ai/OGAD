@@ -113,7 +113,8 @@ interface DesktopChatSessionCommonInput {
   query: string
   history: { role: string; content: string }[]
   noMemory: boolean
-  thinking: boolean
+  /** The user's reasoning toggle for a text turn. Image turns never reason. */
+  thinking?: boolean
   images: string[]
   userPersistence?: { content: string; context?: unknown }
   replay?: 'regenerate' | 'edit'

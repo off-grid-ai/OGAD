@@ -227,9 +227,10 @@ async function streamAnswer(
     messages: generationMessages(prompt, images, llm.getSettings().systemPrompt ?? ''),
     identity: { conversationId: streamId ?? turnId, turnId },
     requiredCapabilities: {
-      ...(images.length ? { vision: true } : {}),
-      ...(thinking ? { thinking: true } : {})
+      ...(images.length ? { vision: true } : {})
     },
+    // The user's toggle; shared derives the thinking capability the route needs from it.
+    ...(thinking ? { reasoning: { enabled: true } } : {}),
     allowFallback: true,
     partialOutputPolicy: 'discard-and-fallback' as const,
     ...(signal ? { signal } : {})
@@ -321,9 +322,7 @@ async function classifyIntent(
     const raw = (
       await generateDesktopText(prompt, {
         operation: { type: 'classifier', input: query, labels: ['build', 'image', 'chat'] },
-        timeoutMs: 60_000,
-        maxTokens: 200,
-        thinking: false,
+        profile: 'structured-step',
         responseFormat: {
           type: 'json_schema',
           json_schema: { name: 'intent', schema: CHAT_INTENT_RESPONSE_SCHEMA, strict: true }
@@ -562,7 +561,7 @@ export async function summarizeSession(sessionId: string): Promise<string | null
   const prompt = getPrompt('sessionSummary', { CONVERSATION_TEXT: conversationText })
 
   try {
-    const summary = (await generateDesktopText(prompt, { timeoutMs: 120_000, maxTokens: 2_048 }))
+    const summary = (await generateDesktopText(prompt, { profile: 'long-form' }))
       .content
     upsertChatSummary(sessionId, summary)
 
@@ -697,7 +696,12 @@ export function setupIPC() {
   ipcMain.handle(
     'llm:generate-text',
     async (_, messages: GenerationMessage[], options?: { maxTokens?: number }) =>
-      (await generateDesktopMessages(messages, { maxTokens: options?.maxTokens, thinking: false }))
+      (
+        await generateDesktopMessages(messages, {
+          profile: 'compaction-summary',
+          maxTokens: options?.maxTokens
+        })
+      )
         .content
   )
 
@@ -760,11 +764,7 @@ export function setupIPC() {
       if (intent === 'image') {
         const imgPrompt = buildImagePromptEnhancementRequest(query)
         const desc = (
-          await generateDesktopText(imgPrompt, {
-            timeoutMs: 60_000,
-            maxTokens: 200,
-            thinking: false
-          })
+          await generateDesktopText(imgPrompt, { profile: 'prompt-enhancement' })
         ).content
         return { answer: formatDeferredImageAnswer(desc, query), context: undefined }
       }

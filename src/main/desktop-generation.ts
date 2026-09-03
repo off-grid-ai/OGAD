@@ -9,6 +9,7 @@ import type {
   GenerationToolChoice,
   GenerationToolDefinition,
   GenerationToolHandling,
+  GenerationProfileKind,
   ReasoningEffort
 } from '@offgrid/models'
 import { ModelCapabilityError, nativeToolPlannerUnavailableMessage } from '@offgrid/models'
@@ -18,6 +19,8 @@ import { desktopModelServices } from './model-service-access'
 import { desktopToolExecutor, type DesktopToolExecutionSession } from './desktop-tool-executor'
 
 export interface DesktopGenerationOptions {
+  /** The kind of work; shared resolves sampling, reasoning, timeout, and caps from it. */
+  profile?: GenerationProfileKind
   operation?: GenerationOperation
   images?: string[]
   responseFormat?: unknown
@@ -139,6 +142,7 @@ export async function generateDesktopMessages(
   )
   const turnId = options.identity?.turnId ?? `desktop:${randomUUID()}`
   const request: GenerationRequest = {
+    profile: options.profile,
     operation: options.operation ?? { type: 'text' },
     messages,
     identity: options.identity ?? { conversationId: turnId, turnId },
@@ -204,7 +208,7 @@ export async function generateDesktopOperation(
   operation: GenerationOperation,
   options: Pick<
     DesktopGenerationOptions,
-    'identity' | 'events' | 'signal' | 'timeoutMs' | 'allowFallback'
+    'profile' | 'identity' | 'events' | 'signal' | 'timeoutMs' | 'allowFallback'
   > & { routeId?: string } = {}
 ): Promise<GenerationResult> {
   await desktopModelServices.refresh()
@@ -214,6 +218,7 @@ export async function generateDesktopOperation(
   const turnId = options.identity?.turnId ?? `desktop:${randomUUID()}`
   return desktopModelServices.generation.generate(
     {
+      profile: options.profile,
       operation,
       identity: options.identity ?? { conversationId: turnId, turnId },
       routeId,

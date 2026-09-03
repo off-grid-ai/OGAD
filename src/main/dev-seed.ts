@@ -64,10 +64,8 @@ function extractCode(text: string): string | null {
 async function gen(prompt: string): Promise<string | null> {
   try {
     const out = await generateDesktopText(prompt, {
-      timeoutMs: 120_000,
-      maxTokens: 1500,
-      thinking: false,
-      allowFallback: false
+      allowFallback: false,
+      profile: 'long-form',
     })
     return out.content.trim() || null
   } catch (e) {

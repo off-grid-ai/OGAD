@@ -84,10 +84,10 @@ async function generateMcpText(
     operation,
     messages: promptMessages(prompt, images),
     identity: { conversationId: turnId, turnId },
+    profile: 'gateway-request',
+    // The external client's own cap; the profile applies no other.
     maxTokens,
-    timeoutMs: 300_000,
     signal,
-    requiredCapabilities: { thinking: false },
     allowFallback: true,
     partialOutputPolicy: 'discard-and-fallback'
   })

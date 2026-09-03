@@ -1,3 +1,4 @@
+import { computerUseAdapterProfile } from '@offgrid/models/computer-use'
 import { buildVisionPrompt, VISION_SYSTEM_PROMPT } from '../vision-prompt'
 import { parseVisionAction } from '../vision-action'
 import type { VisionModelAdapter, VisionPolicyDecision } from './types'
@@ -64,10 +65,7 @@ export const uiTarsAdapter: VisionModelAdapter = {
           ]
         }
       ],
-      maxTokens: 200,
-      timeoutMs: 60_000,
-      maxAttempts: 1,
-      disableThinking: true
+      ...computerUseAdapterProfile('ui-tars'),
     }
   },
   parseResponse: parseUiTarsPolicyResponse

@@ -1,3 +1,4 @@
+import { computerUseAdapterProfile } from '@offgrid/models/computer-use'
 import { WHEEL_STEP_PIXELS, type VisionAction } from '../vision-action'
 import { visionKeysSupported } from '../vision-keys'
 import { WEB_USE_CONTROL_INSTRUCTIONS } from '../../../shared/web-use-control'
@@ -6,7 +7,6 @@ import { assertUIMateModelCapabilities, UI_MATE_GGUF_REPOSITORIES } from './ui-m
 import {
   buildUIMateMessages,
   parseUIMateResponse,
-  UI_MATE_GENERATION_CONFIG,
   type UIMateAction
 } from './ui-mate/policy'
 import type { VisionModelAdapter, VisionPolicyDecision } from './types'
@@ -213,11 +213,7 @@ export const uiMateAdapter: VisionModelAdapter = {
         currentScreenshotDataUrl: input.currentScreenshotDataUrl,
         history: input.history
       }),
-      maxTokens: UI_MATE_GENERATION_CONFIG.maxTokens,
-      timeoutMs: 130_000,
-      maxAttempts: 2,
-      temperature: UI_MATE_GENERATION_CONFIG.temperature,
-      topP: UI_MATE_GENERATION_CONFIG.topP
+      ...computerUseAdapterProfile('ui-mate')
     }
   },
   parseResponse: uiMateDecision

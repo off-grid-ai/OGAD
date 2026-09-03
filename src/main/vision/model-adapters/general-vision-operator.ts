@@ -1,3 +1,4 @@
+import { computerUseAdapterProfile } from '@offgrid/models/computer-use'
 import { GENERAL_STEP_SYSTEM_PROMPT } from './canonical-vision-contract'
 import { WEB_USE_CONTROL_INSTRUCTIONS } from '../../../shared/web-use-control'
 import { NORMALIZED_COORDINATE_GRID_INSTRUCTION } from '../../../shared/vision-coordinate-grid'
@@ -81,14 +82,9 @@ export function buildCanonicalVisionOperatorRequest(
         ]
       }
     ],
-    maxTokens: 1_200,
-    timeoutMs: 90_000,
-    maxAttempts: 2,
+    ...computerUseAdapterProfile('general-vision'),
     tools: [...GENERAL_VISION_TOOLS],
     toolChoice: 'required',
-    temperature: 0.1,
-    topP: 0.9,
-    enableThinking: true,
     separateReasoning: true,
     validateResponse: (response) =>
       encoded ? generalVisionPolicyFailure(response, encoded) === undefined : false,

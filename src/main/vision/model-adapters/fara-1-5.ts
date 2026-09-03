@@ -1,3 +1,4 @@
+import { computerUseAdapterProfile } from '@offgrid/models/computer-use'
 import type { Bounds, VisionAction } from '../vision-action'
 import type {
   VisionModelAdapter,
@@ -262,13 +263,9 @@ function buildFaraRequest(
         ]
       }
     ],
-    maxTokens: 2_048,
-    timeoutMs: 90_000,
-    maxAttempts: 2,
+    ...computerUseAdapterProfile('fara'),
     tools: [faraComputerUseTool(bounds)],
     toolChoice: 'required',
-    temperature: 0,
-    enableThinking: true,
     separateReasoning: true,
     validateResponse: (response) => parseFaraPolicyResponse(response, bounds).kind !== 'invalid',
     responseValidationError: (response) => {

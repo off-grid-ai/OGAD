@@ -7,8 +7,6 @@
  */
 import { generateDesktopMessages } from '../desktop-generation'
 import {
-  DEFAULT_TOOL_PLAN_MAX_TOKENS,
-  DEFAULT_TOOL_PLAN_TIMEOUT_MS,
   generateToolPlan,
   type ToolPlan as Plan,
   type ToolPlanCatalogEntry as ToolCatalogEntry
@@ -49,10 +47,8 @@ export const planTask: PlanTask = makePlanner(async (prompt, schema, onReasoning
   const result = await generateDesktopMessages([{ role: 'user', content: prompt }], {
     operation: { type: 'tool_selection', input: prompt, limit: 1 },
     responseFormat: schema,
-    thinking: true,
+    profile: 'tool-plan',
     signal,
-    maxTokens: DEFAULT_TOOL_PLAN_MAX_TOKENS,
-    timeoutMs: DEFAULT_TOOL_PLAN_TIMEOUT_MS,
     events: {
       chunk: (chunk) => {
         if (chunk.reasoning) onReasoning?.(chunk.reasoning)

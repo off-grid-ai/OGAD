@@ -84,10 +84,9 @@ export const desktopExtraction: ExtractionBridges = {
     // Reuse the local vision model. Requires an active vision (mmproj) model.
     return (
       await generateDesktopText(IMAGE_PROMPT, {
+        profile: 'vision-caption',
         operation: { type: 'vision' },
-        images: [imagePath],
-        timeoutMs: 300_000,
-        maxTokens: 1_024
+        images: [imagePath]
       })
     ).content.trim()
   }

@@ -171,7 +171,7 @@ const pipelineDecisionsWarn = {
       'warn',
       {
         selector:
-          "Property[key.name=/^(maxTokens|temperature|topP|thinking|timeoutMs)$/][value.type='Literal']",
+          "Property[key.name=/^(maxTokens|temperature|topP|timeoutMs)$/][value.type='Literal'], Property[key.name='thinking'][value.type='Literal'][value.raw=/^(true|false)$/]",
         message:
           'Class 1: a generation parameter is a pipeline decision. Use a shared request builder (e.g. imageEnhancementGenerationRequest).'
       },

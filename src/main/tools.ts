@@ -640,7 +640,7 @@ export async function toolChat(
       operation: { type: 'text' },
       tools,
       toolChoice: 'auto',
-      temperature: 0.3,
+      profile: 'tool-loop',
       thinking: opts.thinking,
       signal: opts.signal,
       maxToolRounds,

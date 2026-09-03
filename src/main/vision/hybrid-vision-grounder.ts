@@ -1,3 +1,4 @@
+import { computerUseAdapterProfile } from '@offgrid/models/computer-use'
 import { TASK_GUIDANCE_APPLIED_TRACE } from '../tasks/task-guide'
 import { serializeComputerUsePolicyResponse } from '@offgrid/models'
 import type { VisionGroundingInput, VisionGroundingResult } from './vision-agent'
@@ -228,14 +229,9 @@ function reasonerRequest(input: VisionPolicyInput): VisionPolicyRequest {
         ]
       }
     ],
-    maxTokens: 900,
-    timeoutMs: 90_000,
-    maxAttempts: 2,
+    ...computerUseAdapterProfile('hybrid-reasoner'),
     tools: [...HYBRID_REASONER_TOOLS],
     toolChoice: 'required',
-    temperature: 0.1,
-    topP: 0.9,
-    enableThinking: true,
     separateReasoning: true,
     validateResponse: (response) => !('error' in reasonerOutcome(response)),
     responseValidationError: (response) => {

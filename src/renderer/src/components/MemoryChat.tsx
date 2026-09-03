@@ -3948,7 +3948,6 @@ export function MemoryChat({
           query: imageRequest.prompt,
           history: [],
           noMemory,
-          thinking: false,
           images: [],
           userPersistence,
           replay: opts?.sessionReplay?.type,

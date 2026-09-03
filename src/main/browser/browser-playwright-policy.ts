@@ -145,15 +145,13 @@ ${boundedSnapshot(request.snapshot)}
       ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
       { role: 'user', content: prompt }
     ],
+    profile: 'structured-step',
     responseFormat: {
       type: 'json_schema',
       name: PLAYWRIGHT_STEP_FORMAT.json_schema.name,
       schema: PLAYWRIGHT_STEP_FORMAT.json_schema.schema,
       strict: PLAYWRIGHT_STEP_FORMAT.json_schema.strict
     },
-    maxTokens: 420,
-    timeoutMs: 60_000,
-    requiredCapabilities: { thinking: false },
     allowFallback: true,
     partialOutputPolicy: 'discard-and-fallback',
     signal: request.signal

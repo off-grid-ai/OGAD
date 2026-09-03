@@ -338,10 +338,8 @@ class AxRailHost {
           })
           const generation = await generateDesktopText(prompt, {
             operation: { type: 'text' },
+            profile: 'structured-step',
             responseFormat: ELEMENT_STEP_FORMAT,
-            thinking: false,
-            timeoutMs: 60_000,
-            maxTokens: 400,
             signal: request.signal,
             allowFallback: false
           })

@@ -98,7 +98,7 @@ export class DesktopChatGenerationAdapter {
       images: input.images,
       imageAvailable: input.imageAvailable,
       streamId: input.turnId,
-      thinking: input.thinking
+      thinking: input.thinking ?? false
     })
     execution.toolResponse = response
     await this.generateDeferredImages(execution, context)
@@ -245,7 +245,7 @@ export class DesktopChatGenerationAdapter {
       input.conversationId,
       input.noMemory && !input.projectId,
       input.turnId,
-      input.thinking,
+      input.thinking ?? false,
       input.images
     )
     execution.response = response

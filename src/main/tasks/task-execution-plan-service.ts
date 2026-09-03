@@ -28,10 +28,8 @@ export async function createTaskExecutionPlan(
     (async (input: string, signal?: AbortSignal) =>
       (
         await generateDesktopText(input, {
-          timeoutMs: 45_000,
-          maxTokens: 280,
-          thinking: false,
           responseFormat: TASK_PLAN_RESPONSE_FORMAT,
+          profile: 'structured-step',
           signal
         })
       ).content)
