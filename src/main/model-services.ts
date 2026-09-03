@@ -5,14 +5,12 @@ import {
   createModelWorkspace,
   decodeModelRouteId,
   runtimeModelRouteId,
-  ModelAdmissionError,
   type ModelInventoryAdapter,
   type GenerationAdapter,
-  type ModelControlCatalogModel,
-  type ModelCapabilities,
   type ModelModality,
   type ModelSelectionStore,
   type ModelReasoningMetadata,
+  type ModelWorkspace,
   type RuntimeModel
 } from '@offgrid/models'
 import {
@@ -37,11 +35,8 @@ import {
 import { desktopToolExecutor } from './desktop-tool-executor'
 import { getResidencyMode } from './runtime-residency'
 import './models-manager'
-import { registerDesktopModelServices, type DesktopModelServices } from './model-service-access'
 import { desktopModelManagerPorts } from './model-manager-ports'
-import { desktopModels, modelsFailureMessage } from './composition/application-access'
 import { desktopModelLifecyclePorts } from './composition/model-lifecycle'
-export type { DesktopModelServices } from './model-service-access'
 
 interface DesktopInventoryModel {
   id: string
@@ -63,55 +58,8 @@ interface DesktopInventoryModel {
   artifactDelivery?: 'catalog' | 'runtime'
 }
 
-export type DesktopModelControlCatalogModel = Omit<ModelControlCatalogModel, 'files'> & {
-  files?: Array<{ name: string; role?: string }>
-  remoteModelId?: string
-  capabilities?: ModelCapabilities
-}
-
-function isModelControlCatalogModel(value: unknown): value is DesktopModelControlCatalogModel {
-  if (!value || typeof value !== 'object') return false
-  if (
-    !('id' in value) ||
-    typeof value.id !== 'string' ||
-    !('name' in value) ||
-    typeof value.name !== 'string' ||
-    !('kind' in value) ||
-    typeof value.kind !== 'string'
-  ) {
-    return false
-  }
-  const files = 'files' in value ? value.files : undefined
-  return (
-    files === undefined ||
-    (Array.isArray(files) &&
-      files.every(
-        (file) =>
-          Boolean(file) &&
-          typeof file === 'object' &&
-          'name' in file &&
-          typeof file.name === 'string'
-      ))
-  )
-}
-
-function requireModelControlCatalogModels(
-  values: readonly unknown[]
-): DesktopModelControlCatalogModel[] {
-  return values.map((value, index) => {
-    if (!isModelControlCatalogModel(value)) {
-      throw new Error(`Model-control catalog entry ${String(index)} is invalid.`)
-    }
-    return value
-  })
-}
-
-interface DesktopModelServicesDependencies {
+interface DesktopModelWorkspacePorts {
   listCatalog(): Promise<DesktopInventoryModel[]>
-  modelControlCatalog?(): Promise<{
-    kinds: readonly string[]
-    models: DesktopModelControlCatalogModel[]
-  }>
   listInstalled(): Promise<string[]>
   localTextRuntimeState(): Promise<{
     ready: boolean
@@ -125,19 +73,9 @@ interface DesktopModelServicesDependencies {
     load(): Promise<void>
     unload(): Promise<void>
   }
-  resolveLegacyModelId?(modelId: string): Promise<string>
   projectTextSelection?(modelId: string): Promise<{ success: boolean; error?: string }>
   residencySetting?(modality: 'image' | 'stt'): 'resident' | 'on-demand'
 }
-
-const SHARED_MODALITIES: readonly ModelModality[] = [
-  'text',
-  'computer_use',
-  'image',
-  'voice',
-  'transcription',
-  'embedding'
-]
 
 export function desktopAdapterId(source: 'local' | 'remote', modality: ModelModality): string {
   const prefix = source === 'remote' ? 'desktop.remote-chat' : 'desktop.llama'
@@ -247,7 +185,7 @@ export class DesktopModelSelectionStore implements ModelSelectionStore {
 class DesktopInventorySource {
   private inFlight: Promise<RuntimeModel[]> | null = null
   constructor(
-    private readonly dependencies: DesktopModelServicesDependencies,
+    private readonly ports: DesktopModelWorkspacePorts,
     private readonly ids: LegacyDesktopModelIdCodec,
     private readonly selections: DesktopModelSelectionStore
   ) {}
@@ -263,10 +201,10 @@ class DesktopInventorySource {
 
   private async readModels(): Promise<RuntimeModel[]> {
     const [catalog, installedIds, localTextState, localVoiceState] = await Promise.all([
-      this.dependencies.listCatalog(),
-      this.dependencies.listInstalled(),
-      this.dependencies.localTextRuntimeState(),
-      this.dependencies.localVoiceRuntimeState?.() ??
+      this.ports.listCatalog(),
+      this.ports.listInstalled(),
+      this.ports.localTextRuntimeState(),
+      this.ports.localVoiceRuntimeState?.() ??
         Promise.resolve({ installed: false, ready: false })
     ])
     this.ids.index(catalog)
@@ -279,7 +217,7 @@ class DesktopInventorySource {
       textRuntime: localTextState,
       voiceRuntime: localVoiceState,
       adapterId: (modality) => desktopAdapterId('local', modality),
-      residencyPreference: (modality) => this.dependencies.residencySetting?.(modality)
+      residencyPreference: (modality) => this.ports.residencySetting?.(modality)
     })
 
     const embeddingRoute: RuntimeModel = {
@@ -315,15 +253,15 @@ class DesktopModelInventoryAdapter implements ModelInventoryAdapter {
   }
 }
 
-export function createDesktopModelServices(
-  dependencies: DesktopModelServicesDependencies,
+export function createDesktopModelWorkspace(
+  ports: DesktopModelWorkspacePorts,
   selectionPersistence: DesktopModelSelectionPersistence = desktopModelSelectionPersistence
-): DesktopModelServices {
+): ModelWorkspace {
   const ids = new LegacyDesktopModelIdCodec()
   const selections = new DesktopModelSelectionStore(
     ids,
     selectionPersistence,
-    dependencies.projectTextSelection
+    ports.projectTextSelection
   )
   const lifecycleAdapters = new Map<string, GenerationAdapter>()
   let lifecycleWorkspace: ReturnType<typeof createModelWorkspace> | null = null
@@ -359,7 +297,7 @@ export function createDesktopModelServices(
         const known = peekRemoteReasoningMetadata(connection)
         if (!known) {
           void remoteReasoningMetadata(connection)
-            .then(() => desktopModels.refresh())
+            .then(() => lifecycleWorkspace?.refresh())
             .catch(() => undefined)
         }
         return known
@@ -368,7 +306,7 @@ export function createDesktopModelServices(
   })
   lifecycleWorkspace = workspace
   const llm = workspace.llm
-  const source = new DesktopInventorySource(dependencies, ids, selections)
+  const source = new DesktopInventorySource(ports, ids, selections)
   for (const adapterId of [
     'desktop.llama',
     'desktop.llama.classifier',
@@ -389,10 +327,8 @@ export function createDesktopModelServices(
   ]) {
     llm.registerAdapter(new DesktopModelInventoryAdapter(adapterId, source))
   }
-  const memory = workspace.residency
   const generation = workspace.generation
   const generationObservations = desktopGenerationObservations
-  const localGenerationAdapters = new Map<string, DesktopLocalGenerationAdapter>()
   for (const adapterId of [
     'desktop.llama',
     'desktop.llama.classifier',
@@ -402,9 +338,8 @@ export function createDesktopModelServices(
     const adapter = new DesktopLocalGenerationAdapter(
       generationObservations,
       adapterId,
-      dependencies.localTextLifecycle
+      ports.localTextLifecycle
     )
-    localGenerationAdapters.set(adapterId, adapter)
     lifecycleAdapters.set(adapterId, adapter)
     generation.registerAdapter(adapter)
   }
@@ -431,212 +366,13 @@ export function createDesktopModelServices(
     )
   }
 
-  const projectedId = (modality: ModelModality): string | null => {
-    const active = desktopModels.snapshot().active[modality]
-    if (!active) return null
-    if (active.model?.source === 'remote' && active.model.serverId) {
-      return active.model.routeId ?? runtimeModelRouteId(active.model)
-    }
-    const selectedRoute = active.selectedId ? decodeModelRouteId(active.selectedId) : null
-    if (selectedRoute?.serverId) return active.selectedId
-    return active.model?.id ?? selectedRoute?.modelId ?? ids.canonical(active.selectedId)
-  }
-
-  const activeModalities = (): ReturnType<DesktopModelServices['activeModalities']> => ({
-    text: projectedId('text'),
-    computer_use: projectedId('computer_use'),
-    image: projectedId('image'),
-    speech: projectedId('voice'),
-    transcription: projectedId('transcription')
-  })
-
-  const unloadNative = async (modality: ModelModality): Promise<void> => {
-    if (
-      modality === 'text' ||
-      modality === 'vision' ||
-      modality === 'classifier' ||
-      modality === 'tool_selection'
-    ) {
-      await (await import('./llm')).llm.unload()
-      return
-    }
-    if (modality === 'image') {
-      await (await import('./imagegen')).imageRuntime.evict()
-      return
-    }
-    if (modality === 'transcription') {
-      await (await import('./transcription/select')).sttRuntime.evict()
-      return
-    }
-    if (modality === 'voice') {
-      await (await import('./tts')).ttsRuntime.evict()
-      return
-    }
-    if (modality === 'embedding') {
-      await (await import('./embeddings')).embeddings.unloadNative()
-    }
-  }
-
-  return {
-    workspace,
-    llm,
-    generation,
-    residency: memory,
-    generationObservations,
-    async refresh() {
-      await desktopModels.refresh()
-      return [...desktopModels.snapshot().inventory]
-    },
-    routeIdFor(modality, nativeModelId) {
-      if (!nativeModelId) {
-        return (
-          desktopModels.snapshot().active[modality]?.selectedRouteId ??
-          desktopModels
-            .snapshot()
-            .inventory.find((model) => model.modality === modality && model.ready)?.routeId
-        )
-      }
-      const canonical = ids.canonical(nativeModelId)
-      return desktopModels.resolveRoute(modality, canonical ?? nativeModelId) ?? undefined
-    },
-    async select(modality, modelId) {
-      try {
-        await desktopModels.refresh()
-        if (modelId === null) {
-          const outcome = await desktopModels.select({ modality, modelId: null })
-          return outcome.ok
-            ? { success: true }
-            : { success: false, error: modelsFailureMessage(outcome.failure) }
-        }
-        // Any id space (route, legacy remote, native, or a stale family alias) resolves to the one
-        // route through the workspace; the legacy codec only maps aliases to native ids first.
-        const canonicalModelId = dependencies.resolveLegacyModelId
-          ? await dependencies.resolveLegacyModelId(modelId)
-          : modelId
-        const selectedRoute =
-          desktopModels.resolveRoute(modality, modelId) ??
-          this.routeIdFor(modality, canonicalModelId)
-        if (!selectedRoute) return { success: false, error: 'unknown model' }
-        const outcome = await desktopModels.select({ modality, modelId: selectedRoute })
-        return outcome.ok
-          ? { success: true }
-          : { success: false, error: modelsFailureMessage(outcome.failure) }
-      } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : 'The model could not be selected.'
-        }
-      }
-    },
-    // Through the shared authority, like every other selection change: one writer, one file.
-    async clearRemoteServerSelections(serverId) {
-      for (const modality of [
-        'text',
-        'vision',
-        'computer_use',
-        'image',
-        'transcription',
-        'voice',
-        'embedding',
-        'tool_selection'
-      ] satisfies ModelModality[]) {
-        const selected = desktopModels.snapshot().active[modality]?.selectedRouteId
-        const route = selected ? decodeModelRouteId(selected) : null
-        if (route?.serverId !== serverId) continue
-        await desktopModels.select({ modality, modelId: null })
-      }
-    },
-    async warmText() {
-      await desktopModels.refresh()
-      const model = desktopModels.snapshot().active.text?.model
-      if (!model) {
-        throw new Error(
-          'Models not downloaded. Please complete onboarding to download the AI model.'
-        )
-      }
-      if (model.source !== 'local') return false
-      const adapter = localGenerationAdapters.get(model.adapterId)
-      if (!adapter || !model.residentSizeMB) return false
-      const routeId = model.routeId ?? runtimeModelRouteId(model)
-      const key = `${model.modality}:${routeId}`
-      const lease = await memory.acquire(
-        {
-          key,
-          modelId: routeId,
-          type: model.modality,
-          sizeMB: model.peakSizeMB ?? model.residentSizeMB,
-          dirtyMemory: model.dirtyMemory,
-          residencyKey: model.residencyKey
-        },
-        {
-          load: () => adapter.load(),
-          unload: () => adapter.unload()
-        }
-      )
-      if (!lease.acquired) throw new ModelAdmissionError(model)
-      await lease.release()
-      return lease.loaded
-    },
-    async unload(modality) {
-      const residents = memory.getResidents().filter((resident) => resident.type === modality)
-      let freed = false
-      for (const resident of residents) {
-        freed = (await memory.evictByKey(resident.key)) || freed
-      }
-      return freed
-    },
-    async shutdown() {
-      for (const resident of memory.getResidents()) await memory.evictByKey(resident.key)
-      await Promise.allSettled([
-        unloadNative('text'),
-        unloadNative('image'),
-        unloadNative('transcription'),
-        unloadNative('voice'),
-        unloadNative('embedding')
-      ])
-    },
-    async activeModelIds(): Promise<string[]> {
-      await desktopModels.refresh()
-      const active = SHARED_MODALITIES.flatMap((modality) => {
-        const id = projectedId(modality)
-        return id ? [id] : []
-      })
-      return [...new Set(active)]
-    },
-    activeModalities,
-    async modelControlSnapshot() {
-      await desktopModels.refresh()
-      const catalogRead = dependencies.modelControlCatalog
-        ? dependencies.modelControlCatalog()
-        : dependencies.listCatalog().then((models) => ({
-            kinds: [...new Set(models.flatMap((model) => (model.kind ? [model.kind] : [])))],
-            models: requireModelControlCatalogModels(models)
-          }))
-      const [catalog, installed, computerUse] = await Promise.all([
-        catalogRead,
-        dependencies.listInstalled(),
-        import('./vision/vision-task-model-strategy').then((module) =>
-          module.getComputerUseActiveModelProjection()
-        )
-      ])
-      // Every projection decision (which catalog row an active route names, the active text
-      // capabilities overlay) is the workspace's; this reads the ports and renders.
-      return desktopModels.controlSnapshot({ catalog, installed, computerUse })
-    }
-  }
+  return workspace
 }
 
-export const desktopModelServices = createDesktopModelServices({
+export const desktopModelWorkspace = createDesktopModelWorkspace({
   listCatalog: async () => {
     const catalog = await desktopModelManagerPorts.getCatalog()
     return catalog.models as DesktopInventoryModel[]
-  },
-  modelControlCatalog: async () => {
-    const catalog = await desktopModelManagerPorts.getCatalog()
-    return {
-      kinds: catalog.kinds,
-      models: requireModelControlCatalogModels(catalog.models)
-    }
   },
   listInstalled: () => desktopModelManagerPorts.listInstalled(),
   localTextRuntimeState: async () => {
@@ -652,8 +388,6 @@ export const desktopModelServices = createDesktopModelServices({
     const { inspectTtsRuntimeState } = await import('./tts')
     return inspectTtsRuntimeState()
   },
-  resolveLegacyModelId: (modelId) =>
-    desktopModelManagerPorts.resolveCanonicalModelSelectionId(modelId),
   projectTextSelection: (modelId) =>
     desktopModelManagerPorts.projectActiveTextModelSelection(modelId),
   residencySetting: (modality) => {
@@ -664,5 +398,3 @@ export const desktopModelServices = createDesktopModelServices({
     }
   }
 })
-
-registerDesktopModelServices(desktopModelServices)

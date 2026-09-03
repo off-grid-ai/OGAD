@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto'
 import { createOffGridApplication } from '@offgrid/application'
 import { DEFAULT_RAG_EMBEDDING_DIMENSION } from '@offgrid/rag'
-import { desktopModelServices } from '../model-services'
+import { desktopModelWorkspace } from '../model-services'
 import { embeddings } from '../embeddings'
 import { desktopExtraction } from '../rag/extractors'
 import { desktopVectorStore, projectExists } from '../rag/store'
@@ -10,7 +10,7 @@ import { applicationShutdown } from '../shutdown'
 import { registerDesktopApplication } from './application-access'
 
 export const desktopApplication = createOffGridApplication({
-  models: { workspace: desktopModelServices.workspace },
+  models: { workspace: desktopModelWorkspace },
   rag: {
     store: desktopVectorStore,
     embeddings: {

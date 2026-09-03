@@ -34,6 +34,27 @@ function routeId(model: RuntimeModel): string {
   return model.routeId ?? runtimeModelRouteId(model)
 }
 
+function computerUseLifecycle(
+  modelId: string
+): Required<Pick<GenerationAdapter, 'load' | 'unload'>> {
+  return {
+    async load() {
+      const [{ loadComputerUseModel }, { llm }] = await Promise.all([
+        import('../models-manager'),
+        import('../llm')
+      ])
+      const projected = await loadComputerUseModel(modelId)
+      if (!projected.success) {
+        throw new Error(projected.error ?? 'The Computer Use model could not load.')
+      }
+      await llm.restart()
+    },
+    async unload() {
+      await (await import('../llm')).llm.unload()
+    }
+  }
+}
+
 /** Desktop supplies native lifecycle I/O. Shared owns admission, selection, and transactions. */
 export function desktopModelLifecyclePorts(
   workspace: ModelWorkspace,
@@ -42,7 +63,10 @@ export function desktopModelLifecyclePorts(
   return {
     resolveLoad(modality, identifier) {
       const model = localModel(workspace, modality, identifier)
-      const adapter = lifecycleAdapter(adapters, model)
+      const adapter =
+        modality === 'computer_use'
+          ? computerUseLifecycle(model.id)
+          : lifecycleAdapter(adapters, model)
       const id = routeId(model)
       return {
         routeId: id,

@@ -17,16 +17,11 @@
  */
 import {
   createGrounderApplicationService,
-  ModelAdmissionError,
-  runtimeModelRouteId,
   type GrounderApplicationPort,
-  type GrounderRunTiming,
-  type ModelModality,
-  type RuntimeModel
+  type GrounderRunTiming
 } from '@offgrid/models'
+import type { ModelsFacade } from '@offgrid/application'
 import { llm } from '../llm'
-import { getActiveModel, listInstalled, loadComputerUseModel } from '../models-manager'
-import { desktopModelServices, type DesktopModelServices } from '../model-service-access'
 import { isGrounderActive } from './vision-model-notice'
 import { getComputerUseSettings } from '../computer-use-settings'
 import { getActiveRemoteVisionServer } from './remote-vision-server'
@@ -34,7 +29,7 @@ import {
   currentRemoteScreenTaskSession,
   runWithRemoteScreenTaskSession
 } from '../actions/remote-screen-session'
-import { desktopModels } from '../composition/application-access'
+import { desktopModels, modelsFailureMessage } from '../composition/application-access'
 
 const DEFAULT_GROUNDER_MODEL_ID = 'mradermacher/UI-TARS-1.5-7B-GGUF'
 
@@ -44,7 +39,8 @@ export function selectedGrounderModelId(): string {
 }
 
 async function grounderInstalled(modelId: string): Promise<boolean> {
-  return (await listInstalled()).includes(modelId)
+  await desktopModels.refresh()
+  return desktopModels.lookup(modelId)?.ready ?? false
 }
 
 export type GrounderTiming = GrounderRunTiming
@@ -54,97 +50,32 @@ export function grounderSwapOverheadMs(t: GrounderTiming): number {
   return t.swapInMs + t.swapOutMs
 }
 
-const LLAMA_RUNTIME_RESIDENCY_KEY = 'desktop:llama-server'
-
-export interface GrounderNativeRuntime {
-  project(modelId: string): Promise<{ success: boolean; error?: string }>
-  restart(): Promise<void>
-  unload(): Promise<void>
-}
-
-type GrounderModelServices = Pick<
-  DesktopModelServices,
-  'llm' | 'refresh' | 'residency' | 'routeIdFor' | 'select' | 'unload' | 'warmText'
->
-
-function requireLocalModel(
-  services: GrounderModelServices,
-  modality: ModelModality,
-  modelId: string
-): RuntimeModel {
-  const routeId = services.routeIdFor(modality, modelId)
-  const model = routeId
-    ? services.llm
-        .list(modality)
-        .find((candidate) => (candidate.routeId ?? runtimeModelRouteId(candidate)) === routeId)
-    : undefined
-  if (!model || model.source !== 'local' || !model.ready) {
-    throw new Error(`The selected Computer Use model is not ready: ${modelId}.`)
-  }
-  return model
-}
-
 /** Shared model-control boundary around the Desktop llama-server adapter. */
 export function createGrounderLifecycle(
-  services: GrounderModelServices,
-  native: GrounderNativeRuntime
+  models: Pick<ModelsFacade, 'refresh' | 'select' | 'load' | 'unload' | 'prepare'>
 ): Pick<GrounderRunnerDependencies, 'load' | 'restoreLocal'> {
   return {
-    async load(modelId, nativeAlreadyLoaded = false) {
-      await services.refresh()
-      const selected = await services.select('computer_use', modelId)
-      if (!selected.success) {
-        throw new Error(selected.error ?? 'The Computer Use model could not be selected.')
+    async load(modelId) {
+      await models.refresh()
+      const selected = await models.select({ modality: 'computer_use', modelId })
+      if (!selected.ok) {
+        throw new Error(modelsFailureMessage(selected.failure))
       }
-      await services.refresh()
-      const model = requireLocalModel(services, 'computer_use', modelId)
-      const routeId = model.routeId ?? runtimeModelRouteId(model)
-      const sizeMB = model.peakSizeMB ?? model.residentSizeMB
-      if (!sizeMB) throw new Error(`The Computer Use model has no memory footprint: ${modelId}.`)
-
-      // One llama-server process owns both chat and grounding. Remove a tracked
-      // text resident before the native adapter projects different model files.
-      if (!nativeAlreadyLoaded) await services.unload('text')
-      const lease = await services.residency.acquire(
-        {
-          key: `computer_use:${routeId}`,
-          modelId: routeId,
-          type: 'computer_use',
-          sizeMB,
-          residencyKey: LLAMA_RUNTIME_RESIDENCY_KEY
-        },
-        {
-          load: async () => {
-            if (nativeAlreadyLoaded) return
-            const projected = await native.project(modelId)
-            if (!projected.success) {
-              throw new Error(projected.error ?? 'The Computer Use model could not load.')
-            }
-            await native.restart()
-          },
-          unload: () => native.unload()
-        }
-      )
-      if (!lease.acquired) throw new ModelAdmissionError(model)
-      await lease.release()
+      const loaded = await models.load({ modality: 'computer_use', modelId })
+      if (!loaded.ok) throw new Error(modelsFailureMessage(loaded.failure))
     },
     async restoreLocal(modelId) {
-      await services.unload('computer_use')
-      const selected = await services.select('text', modelId)
-      if (!selected.success)
-        throw new Error(selected.error ?? 'The chat model could not be restored.')
-      await services.warmText()
+      const unloaded = await models.unload({ modality: 'computer_use' })
+      if (!unloaded.ok) throw new Error(modelsFailureMessage(unloaded.failure))
+      const selected = await models.select({ modality: 'text', modelId })
+      if (!selected.ok) throw new Error(modelsFailureMessage(selected.failure))
+      const prepared = await models.prepare('text')
+      if (!prepared.ok) throw new Error(modelsFailureMessage(prepared.failure))
     }
   }
 }
 
-const productionGrounderLifecycle = createGrounderLifecycle(desktopModelServices, {
-  project: loadComputerUseModel,
-  restart: () => llm.restart(),
-  unload: async () => {
-    await llm.unload()
-  }
-})
+const productionGrounderLifecycle = createGrounderLifecycle(desktopModels)
 
 export interface GrounderRemoteSelection {
   id: string
@@ -159,7 +90,7 @@ const productionGrounderDependencies: GrounderRunnerDependencies = {
   selectedModelId: selectedGrounderModelId,
   installed: grounderInstalled,
   activeModel: () => llm.activeModelInfo(),
-  activeModelId: getActiveModel,
+  activeModelId: () => desktopModels.activeModelId('text'),
   activeRemote: () => {
     const session = currentRemoteScreenTaskSession()
     return session ? session.activeServer : getActiveRemoteVisionServer()

@@ -9,7 +9,7 @@ import {
   type RagDocument,
   type SearchResult
 } from '@offgrid/rag'
-import { desktopModelServices } from '../model-services'
+import { desktopModelWorkspace } from '../model-services'
 import { embeddings } from '../embeddings'
 import { desktopExtraction } from '../rag/extractors'
 import { desktopVectorStore, projectExists } from '../rag/store'
@@ -132,7 +132,7 @@ export function createDesktopRagService(
   options: { embeddings?: EmbeddingProvider; extraction?: ExtractionBridges } = {}
 ): DesktopRagService {
   const application = createOffGridApplication({
-    models: { workspace: desktopModelServices.workspace },
+    models: { workspace: desktopModelWorkspace },
     rag: {
       store: desktopVectorStore,
       embeddings: options.embeddings ?? embeddingProvider,
