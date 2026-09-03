@@ -5832,7 +5832,9 @@ export function MemoryChat({
                             Off Grid AI
                           </div>
                           {mode === 'image' || generatingImage ? (
-                            <div className="flex w-full flex-col items-start gap-2">
+                            /* Same width cap as a finished image message, so the card does not grow to
+                               the chat's full width while it forms. */
+                            <div className="flex w-full max-w-2xl flex-col items-start gap-2">
                               {imageJobStage === 'enhancing' || streamingEnhancedPrompt ? (
                                 <ChatThinkingBlock
                                   content={streamingEnhancedPrompt || 'Starting…'}
