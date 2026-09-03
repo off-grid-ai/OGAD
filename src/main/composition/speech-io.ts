@@ -10,6 +10,7 @@ import type {
   TranscriptionSource,
   Unsubscribe
 } from '@offgrid/speech'
+import { cleanTranscription } from '@offgrid/models'
 import { getActiveTranscription } from '../transcription/select'
 import { inspectTtsRuntimeState, synthesizeNative } from '../tts'
 
@@ -18,6 +19,7 @@ export interface DesktopSpeechIoPorts {
   synthesizer: SynthesizerPort
   files: FilesPort
   clock: SpeechClock
+  cleanTranscript(raw: string): string
 }
 
 function extensionOf(value: string): string {
@@ -127,6 +129,7 @@ export function createDesktopSpeechIoPorts(): DesktopSpeechIoPorts {
         const timer = setTimeout(callback, ms)
         return () => clearTimeout(timer)
       }
-    }
+    },
+    cleanTranscript: cleanTranscription
   }
 }
