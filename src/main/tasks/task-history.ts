@@ -2,8 +2,8 @@
  * Electron binding of `AutomationApplication` (`@offgrid/automation`), the one owner of task-run
  * state. This module supplies the ports (SQLite rows, the execution-device fact, the retry runner,
  * Chat guidance, attachment reading, the live task controller) and forwards the application's
- * events to the renderer (IPC), to sync (mutations), to the Chat that started the task, and to the
- * screenshot files on disk. It decides nothing about a task.
+ * events to the renderer (IPC), to the Chat that started the task, and to screenshot files on disk.
+ * It decides nothing about a task; Shared owns the Automation-to-Sync workflow.
  *
  * It keeps the function API its forty importers use during coexistence; construction moves into
  * the composition root when Agent A wires `AutomationFacade` (WIRING_C.md section 4).
@@ -26,7 +26,6 @@ import {
 } from '@offgrid/automation'
 import type { AutomationPlatformPorts } from '@offgrid/application'
 import { getDB, getRagMessages } from '../database'
-import { CORE_SYNC_ENTITIES, emitSyncMutation } from '../sync-mutation'
 import { TaskHistoryStore } from './task-history-store'
 import { persistTaskResultInChat } from './task-result-chat'
 import { notifyRagConversationChanged } from '../rag-conversation-events'
@@ -188,11 +187,6 @@ export function forwardDesktopAutomationEvent(event: AutomationEvent): void {
   callHook(HOOKS.actionsObserveTaskResult, snapshot)
   pruneSnapshots(desktopAutomation.list())
   broadcast(snapshot)
-  emitSyncMutation({
-    entity: CORE_SYNC_ENTITIES.taskRun,
-    entityId: snapshot.taskId,
-    kind: 'put'
-  })
 }
 
 export function recordTaskRun(update: TaskRunUpdate): TaskRunSnapshot {
