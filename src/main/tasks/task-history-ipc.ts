@@ -1,12 +1,18 @@
 /** Composition root for task history, guidance, and retry IPC. */
 import { ipcMain } from 'electron'
-import { initializeTaskHistory, listTaskRuns } from './task-history'
+import {
+  configureTaskControl,
+  configureTaskRetryRunner,
+  initializeTaskHistory,
+  listTaskRuns
+} from './task-history'
 import { registerTaskRetryIpc } from './task-retry-ipc'
 import { registerTaskGuideIpc } from './task-guide-ipc'
-import { configureTaskRetryRunner } from './task-retry'
+import { controlVisionTask } from '../vision/vision-controller'
 
 export function registerTaskHistoryIpc(): void {
   initializeTaskHistory()
+  configureTaskControl((taskId, intent) => controlVisionTask(intent, taskId))
   configureTaskRetryRunner({
     async web(task, taskId, checkpoint) {
       const { getBrowserRailHost } = await import('../browser/browser-host')
