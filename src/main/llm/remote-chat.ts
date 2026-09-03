@@ -1,6 +1,6 @@
 import {
   openAICompatibleCompletionPayload,
-  remoteProviderErrorMessage,
+  RemoteHttpError,
   reasoningMetadataForOllama,
   reasoningMetadataFromChatTemplate,
   reasoningMetadataFromOpenRouter,
@@ -205,9 +205,9 @@ export function remoteTextModelTransportError(error: unknown): Error {
   )
 }
 
-/** Preserve the provider's useful, non-secret failure reason. */
+/** Preserve the provider's useful, non-secret failure reason (the shared typed failure). */
 export function remoteTextModelProviderError(status: number, rawBody: string): Error {
-  return new Error(remoteProviderErrorMessage(status, rawBody))
+  return new RemoteHttpError(status, rawBody)
 }
 
 /** The OpenAI-compatible request body. Pure: what we send, with nothing about how we send it. */
@@ -313,9 +313,7 @@ function classifyStreamFailure(
   cause: { cancelled: boolean; timedOut: boolean }
 ): Error {
   if (cause.timedOut) return new Error('Remote text model request timed out.')
-  if (error instanceof Error && error.message.startsWith('Remote text model returned HTTP ')) {
-    return error
-  }
+  if (error instanceof RemoteHttpError) return error
   return remoteTextModelTransportError(error)
 }
 

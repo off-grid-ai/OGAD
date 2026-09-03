@@ -407,7 +407,7 @@ describe('active text model transport', () => {
         timeoutMs: 5_000,
         maxTokens: 200
       })
-    ).rejects.toThrow('Remote text model returned HTTP 429 from OpenRouter: Try again later.')
+    ).rejects.toThrow('Remote server returned HTTP 429 from OpenRouter: Try again later.')
     expect(requests).toHaveLength(1)
   })
 })

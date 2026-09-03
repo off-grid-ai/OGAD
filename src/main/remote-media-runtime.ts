@@ -10,7 +10,7 @@ import {
   remoteEmbeddingEndpoint,
   remoteImageGenerationPayload,
   remoteMediaEndpoint,
-  remoteProviderErrorMessage,
+  remoteErrorBodyMessage,
   remoteVoicePayload,
   remoteEmbeddingPayload,
   type GenerationRequest,
@@ -72,7 +72,7 @@ async function remoteRequest<T>(
     })
     if (!response.ok) {
       const body = await response.text().catch(() => '')
-      throw new Error(remoteProviderErrorMessage(response.status, body))
+      throw new Error(remoteErrorBodyMessage(body, response.status))
     }
     return await consume(response)
   } catch (error) {

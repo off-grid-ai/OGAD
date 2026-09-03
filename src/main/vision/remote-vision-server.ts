@@ -16,6 +16,7 @@ import { type WorkspaceRemoteServersPort,
   mergeRemoteSelections,
   hasRemoteServerSelection,
   remoteAuthorizationHeaders,
+  remoteErrorBodyMessage,
   remoteModelListUrl,
   type RemoteModelCatalog,
   type RemoteModalitySelections,
@@ -243,7 +244,7 @@ export const desktopRemoteServerPorts: Omit<RemoteServerApplicationPorts, 'selec
           signal: AbortSignal.timeout(10_000),
           redirect: REMOTE_FETCH_REDIRECT_POLICY
         })
-        if (!response.ok) throw new Error(`Server returned HTTP ${response.status}.`)
+        if (!response.ok) throw new Error(remoteErrorBodyMessage(await response.text(), response.status))
         const evidence = discoveryFromRemoteModelList(await response.json())
         if (!evidence) throw new Error('The server returned an invalid model list.')
         const catalog = catalogFromDiscovery(evidence)

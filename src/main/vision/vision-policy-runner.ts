@@ -33,25 +33,6 @@ export function remoteVisionTransportError(error: unknown): Error {
   )
 }
 
-interface RemoteVisionResponseBody {
-  error?: {
-    message?: string
-    code?: string | number
-    metadata?: { raw?: string; provider_name?: string }
-  }
-  choices?: { message?: { content?: string } }[]
-}
-
-/** Preserve the provider's useful, non-secret failure reason. Some gateways use
- * a generic top-level message and put the actionable cause in metadata.raw. */
-export function remoteVisionProviderError(status: number, body: RemoteVisionResponseBody): Error {
-  const detail = body.error?.metadata?.raw?.trim() || body.error?.message?.trim()
-  const provider = body.error?.metadata?.provider_name?.trim()
-  return new Error(
-    `Remote model server returned HTTP ${status}${provider ? ` from ${provider}` : ''}${detail ? `: ${detail}` : '.'}`
-  )
-}
-
 export async function runVisionPolicyRequest(
   request: VisionPolicyRequest,
   signal?: AbortSignal,

@@ -21,7 +21,6 @@ import {
   createVisionGrounder,
   modelScreenshot,
   previousClickMarker,
-  remoteVisionProviderError,
   remoteVisionTransportError,
   runVisionPolicyRequest
 } from '../vision-policy-runner'
@@ -589,10 +588,5 @@ describe('general vision native tool policy', () => {
       cause: Object.assign(new Error('the peer closed'), { code: 'UND_ERR_SOCKET' })
     })
     expect(remoteVisionTransportError(transport).message).toContain('the peer closed')
-    expect(
-      remoteVisionProviderError(429, {
-        error: { metadata: { raw: 'Rate limited.', provider_name: 'Provider' } }
-      }).message
-    ).toContain('Rate limited.')
   })
 })
