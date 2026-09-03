@@ -41,8 +41,9 @@ async function applySelectionSteps(steps: readonly SelectionStep[]): Promise<voi
   const applied: SelectionStep[] = []
   try {
     for (const step of steps) {
-      await step.apply()
+      // Register compensation first because a platform write can mutate durable state and then fail.
       applied.unshift(step)
+      await step.apply()
     }
   } catch (cause) {
     const failures: unknown[] = [cause]
