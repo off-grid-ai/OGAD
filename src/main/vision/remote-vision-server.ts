@@ -20,7 +20,6 @@ import {
   type RemoteModalitySelections,
   type PersistedRemoteServer
 } from '@offgrid/models'
-import { decodeModelRouteId } from '@offgrid/models'
 import { desktopModelSelectionPersistence } from '../model-selection-persistence'
 import { desktopModelServices } from '../model-service-access'
 import { deleteSecret, getSecret, setSecret } from '../secrets'
@@ -219,14 +218,10 @@ function publicServer(server: StoredRemoteVisionServer): RemoteVisionSavedServer
 export const desktopRemoteServerPorts: Omit<RemoteServerApplicationPorts, 'select' | 'clearSelections'> = {
     configuration: {
       read: () => {
-        const configuration = sharedConfiguration(readStored())
-        const selected = desktopModelSelectionPersistence.readCanonical('text')
-        const route = selected ? decodeModelRouteId(selected) : null
+        const stored = readStored()
         return {
-          ...configuration,
-          activeServerId: route?.adapterId === 'desktop.remote-chat'
-            ? route.serverId ?? null
-            : null
+          ...sharedConfiguration(stored),
+          activeServerId: selectedRemoteServer(stored)?.id ?? null
         }
       },
       async write(value) {
@@ -300,20 +295,9 @@ const desktopRemoteServerApplication: RemoteServerApplicationService = new Proxy
   }
 )
 
+/** "Use remote server" is the saved server's enabled fact, nothing else. */
 function selectedRemoteServer(stored: StoredRemoteVisionConfig): StoredRemoteVisionServer | null {
-  const selected = desktopModelSelectionPersistence.readCanonical('text')
-  const route = selected ? decodeModelRouteId(selected) : null
-  if (route?.adapterId === 'desktop.remote-chat' && route.serverId) {
-    return (
-      stored.servers.find(
-        (server) =>
-          server.enabled !== false &&
-          server.id === route.serverId &&
-          server.selections.text === route.modelId
-      ) ?? null
-    )
-  }
-  return null
+  return stored.servers.find((server) => server.enabled !== false) ?? null
 }
 
 export function getRemoteVisionServerSettings(): RemoteVisionServerSettings {

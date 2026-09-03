@@ -53,7 +53,7 @@ import { NativeAppTargeter } from './native-app-target'
 import { createMacNativeAppPlatform } from './native-app-macos'
 import { windowsNativeAppPlatform } from './native-app-windows'
 import { automationTaskReadStatus } from '@offgrid/automation'
-import { decodeModelRouteId } from '@offgrid/models'
+import { desktopModelServices } from '../model-service-access'
 
 const execFileAsync = promisify(execFile)
 
@@ -70,9 +70,11 @@ export async function resolveComputerUseModelIdentity(
   try {
     return await resolver(activeModel.id)
   } catch (error) {
-    const route = decodeModelRouteId(activeModel.id)
     console.error('[ax-rail] Model display identity unavailable; using selected model id.', error)
-    return { modelId: activeModel.id, modelName: route?.modelId ?? activeModel.id }
+    return {
+      modelId: activeModel.id,
+      modelName: desktopModelServices.workspace.lookup(activeModel.id)?.name ?? activeModel.id
+    }
   }
 }
 

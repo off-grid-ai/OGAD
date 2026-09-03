@@ -23,7 +23,6 @@ import {
 } from './downloaded-models'
 import { modelPackageIdentity, type TransferredModelManifest } from '@offgrid/sync'
 import {
-  decodeModelRouteId,
   artifactVerificationError,
   type LocalModelImportService,
   type ModelActivationService,
@@ -32,6 +31,7 @@ import {
   type ModelMetadataRepairCommandService,
   type ModelLibraryRemovalTarget,
   mergeCatalog,
+  workspaceRouteId,
   installedIds,
   buildDiskEntry,
   primaryFileName,
@@ -49,12 +49,7 @@ import {
   type Modality,
   type VisionStatus
 } from '@offgrid/models'
-import {
-  parseRemoteVisionModelId,
-  remoteVisionModelId,
-  type RemoteVisionInventoryModel
-} from '../shared/remote-vision-server'
-import { getRemoteVisionServer } from './vision/remote-vision-server'
+import type { RemoteVisionInventoryModel } from '../shared/remote-vision-server'
 import { desktopModelServices } from './model-service-access'
 import { registerDesktopModelManagerPorts } from './model-manager-ports'
 import { desktopModelSelectionPersistence } from './model-selection-persistence'
@@ -127,15 +122,15 @@ function downloadedVariant(models: DownloadedModel[], id: string): DownloadedMod
   return family.length === 1 ? family[0] : undefined
 }
 
+/** A route id, or any id that names a remote route, is already canonical (the workspace decides). */
+function isCanonicalSelectionId(modelId: string): boolean {
+  const model = desktopModelServices.workspace.lookup(modelId)
+  return Boolean(model && (model.source === 'remote' || workspaceRouteId(model) === modelId))
+}
+
 /** Resolve a stale family alias at the model-library adapter boundary. */
 export async function resolveCanonicalModelSelectionId(modelId: string): Promise<string> {
-  if (
-    modelId.startsWith('local:') ||
-    decodeModelRouteId(modelId) ||
-    parseRemoteVisionModelId(modelId)
-  ) {
-    return modelId
-  }
+  if (modelId.startsWith('local:') || isCanonicalSelectionId(modelId)) return modelId
   const { CATALOG } = await import('@offgrid/models')
   const downloaded = reconcileDownloadedModelRegistry(llm.getModelsDir(), CATALOG)
   return downloadedVariant(downloaded, modelId)?.id ?? modelId
@@ -237,50 +232,20 @@ function uniqueLegacySelectedInventory(
 }
 
 
-/**
- * Remote rows for the catalog surfaces, projected from the ONE inventory (the workspace's remote
- * adapter). There is no second builder: a disabled server, a changed selection, or a new server
- * shows here exactly as inventory sees it. Text routes are expanded in inventory (classifier, tool
- * selection, computer use); the catalog shows each remote model once.
- */
+/** Remote rows for the catalog surfaces: the workspace's rows plus Desktop presentation. */
 function remoteCatalogEntries(): RemoteVisionInventoryModel[] {
-  const seen = new Set<string>()
-  const entries: RemoteVisionInventoryModel[] = []
-  for (const model of desktopModelServices.llm.list()) {
-    if (model.source !== 'remote' || !model.serverId) continue
-    if (
-      model.modality !== 'text' &&
-      model.modality !== 'image' &&
-      model.modality !== 'transcription' &&
-      model.modality !== 'voice' &&
-      model.modality !== 'embedding'
-    ) {
-      continue
-    }
-    const id = remoteVisionModelId(model.serverId, model.id)
-    if (seen.has(id)) continue
-    seen.add(id)
-    const server = getRemoteVisionServer(model.serverId)
-    const kind =
-      model.modality === 'text' ? (model.capabilities.vision ? 'vision' : 'text') : model.modality
-    entries.push({
-      id,
-      name: model.name,
-      kind,
-      org: server?.name ?? 'Remote',
-      description: `Runs through ${server?.name ?? 'a remote server'}.`,
-      files: [],
-      tags: ['Remote'],
-      remoteServerId: model.serverId,
-      remoteModelId: model.id,
-      remoteCapabilities: {
-        supportsVision: model.capabilities.vision === true,
-        supportsToolCalling: model.capabilities.tools === true,
-        supportsThinking: model.capabilities.thinking === true
-      }
-    })
-  }
-  return entries
+  return desktopModelServices.workspace.remoteCatalogRows().map((row) => ({
+    id: row.id,
+    name: row.name,
+    kind: row.kind,
+    org: row.serverName,
+    description: `Runs through ${row.serverName}.`,
+    files: [],
+    tags: ['Remote'],
+    remoteServerId: row.remoteServerId,
+    remoteModelId: row.remoteModelId,
+    remoteCapabilities: row.remoteCapabilities
+  }))
 }
 
 export async function getCatalog(): Promise<{ kinds: readonly string[]; models: unknown[] }> {
@@ -321,17 +286,13 @@ export function projectModelIdentity(
   modelId: string,
   catalog: readonly ModelIdentityCatalogEntry[]
 ): ModelIdentity | null {
-  const route = decodeModelRouteId(modelId)
-  const legacyRemote = parseRemoteVisionModelId(modelId)
-  const remote = route?.serverId
-    ? { serverId: route.serverId, modelId: route.modelId }
-    : legacyRemote
-  const model = remote
+  const known = desktopModelServices.workspace.lookup(modelId)
+  const model = known?.serverId
     ? catalog.find(
         (candidate) =>
-          candidate.remoteServerId === remote.serverId && candidate.remoteModelId === remote.modelId
+          candidate.remoteServerId === known.serverId && candidate.remoteModelId === known.id
       )
-    : catalog.find((candidate) => candidate.id === (route?.modelId ?? modelId))
+    : catalog.find((candidate) => candidate.id === (known?.id ?? modelId))
   const modelName = model?.name?.trim()
   return model && modelName ? { modelId, modelName } : null
 }
@@ -831,17 +792,11 @@ async function resolveDesktopActivation(
   modelId: string,
   requestedKind?: string
 ): Promise<{ kind?: string; remote?: boolean; supportsRequestedKind?: boolean } | null> {
-  const route = decodeModelRouteId(modelId)
-  const remoteRef = route?.serverId
-    ? { serverId: route.serverId, modelId: route.modelId }
-    : parseRemoteVisionModelId(modelId)
-  if (remoteRef) {
+  const known = desktopModelServices.workspace.lookup(modelId)
+  if (known?.source === 'remote') {
     // A remote route's modality is an inventory fact; without it a caller that names no kind would
     // be routed to text and an image pick would silently fail.
-    const model = desktopModelServices.llm
-      .list()
-      .find((candidate) => candidate.serverId === remoteRef.serverId && candidate.id === remoteRef.modelId)
-    return { remote: true, ...(model ? { kind: model.kind } : {}) }
+    return { remote: true, kind: known.kind }
   }
   let kind: string | undefined
   let supportsRequestedKind = false
@@ -1176,7 +1131,8 @@ export async function getStorageInfo(): Promise<StorageInfo> {
     transcription: selected.transcription
   }
   const locals = getLocalModels()
-  const installed = (await listInstalled()).filter((id) => !parseRemoteVisionModelId(id))
+  const remoteIds = new Set(remoteCatalogEntries().map((model) => model.id))
+  const installed = (await listInstalled()).filter((id) => !remoteIds.has(id))
   const sizeOf = (name: string): number => fileSizeOf(dir, name)
   const downloaded = reconciledDownloaded
   const catalogIds = new Set(catalog.map((m) => m.id))

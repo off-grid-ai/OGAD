@@ -14,8 +14,8 @@ import {
 import { resolveVisionModelAdapterForStrategy } from '../vision/model-adapters'
 import { generalVisionOperatorAdapter } from '../vision/model-adapters/general-vision-operator'
 import type { VisionModelAdapter } from '../vision/model-adapters/types'
-import { getActiveRemoteVisionServer } from '../vision/remote-vision-server'
-import { remoteVisionModelId } from '../../shared/remote-vision-server'
+import { workspaceRouteId } from '@offgrid/models'
+import { desktopModelServices } from '../model-service-access'
 import { createVisionGrounder } from '../vision/vision-policy-runner'
 import { runVisionTaskGraph } from '../vision/vision-task-graph'
 import type { VisionGuard } from '../vision/vision-guard'
@@ -47,11 +47,11 @@ export interface ActiveBrowserVisionDependencies {
 /** Capture the adapter and model ID from one active-model read. The task host
  * persists this identity, so a later global selection cannot relabel the run. */
 export function resolveActiveBrowserVisionSelection(): BrowserVisionSelection {
-  const remote = getActiveRemoteVisionServer()
-  if (remote) {
+  const activeText = desktopModelServices.llm.active('text').model
+  if (activeText?.source === 'remote') {
     return {
       adapter: generalVisionOperatorAdapter,
-      modelId: remoteVisionModelId(remote.id, remote.model)
+      modelId: workspaceRouteId(activeText)
     }
   }
   const artifacts = llm.activeModelArtifacts()

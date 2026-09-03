@@ -31,15 +31,10 @@ import { randomUUID } from 'crypto'
 import {
   GatewayAsyncRequestStore,
   buildGatewayModalities,
-  decodeModelRouteId,
-  encodeModelRouteId,
-  runtimeModelRouteId,
   classifyGatewayImageReference as classifyRef,
   gatewayErrorBody as errBody,
   gatewayErrorMeta as errMeta,
   gatewayImageExtensionForMime as extForMime,
-  gatewayModelEntry as modelEntry,
-  gatewayOllamaModelMirror as ollamaMirror,
   matchGatewayPollRoute as matchPollRoute,
   parseGatewayMultipart as parseMultipart,
   parseGatewayTranscriptionOptions as transcriptionRequestOptions,
@@ -47,7 +42,6 @@ import {
   resolveGatewayImageDimensions as resolveDims,
   safeGatewayProxyResponse as safeProxyResponse,
   stripGatewayFileScheme as stripFileScheme,
-  tagGatewayLlmModels as tagLlmEntries,
   openAIChatCompletion,
   openAIChatRequestToGeneration,
   openAIChunkFrame,
@@ -61,7 +55,7 @@ import {
 } from '@offgrid/models'
 import { getActiveTranscription } from './transcription/select'
 import * as tts from './tts'
-import { generateImage, imageGenStatus, activeImageModel, type ImageGenParams } from './imagegen'
+import { generateImage, imageGenStatus, type ImageGenParams } from './imagegen'
 import { whisperModel } from './rag/extractors'
 import { desktopModelServices } from './model-services'
 import { embeddings } from './embeddings'
@@ -75,8 +69,6 @@ import { guardProxyStreams } from './stream-guards'
 import { decodeDataUrl, mimeFromExt, toDataUrl } from './model-server/image-bytes'
 import { ModelServerError } from './llm/http-post'
 import { writeDiagnosticLog } from './diagnostics-log'
-import { parseRemoteVisionModelId } from '../shared/remote-vision-server'
-import { getActiveRemoteVisionServer, getRemoteVisionServer } from './vision/remote-vision-server'
 
 const UPSTREAM_HOST = '127.0.0.1'
 // The upstream llama-server port is LIVE, not fixed: llm.getPort() moves off LLAMA_SERVER_PORT when
@@ -302,16 +294,7 @@ function jsonWithId(res: http.ServerResponse, rid: string, result: unknown): voi
  * remote-vision id); the shared service resolves it, so an inactive remote is its error. */
 function chatRouteId(model: unknown): string | undefined {
   if (typeof model !== 'string') return undefined
-  if (decodeModelRouteId(model)) return model
-  const legacy = parseRemoteVisionModelId(model)
-  if (!legacy) return undefined
-  const server = getRemoteVisionServer(legacy.serverId)
-  return encodeModelRouteId({
-    adapterId: 'desktop.remote-chat',
-    providerId: server?.provider,
-    serverId: legacy.serverId,
-    modelId: legacy.modelId
-  })
+  return desktopModelServices.workspace.resolveRoute('text', model) ?? undefined
 }
 
 /** HTTP status + error type for a failed shared generation, in the gateway's JSON envelope. */
@@ -506,119 +489,23 @@ async function handleEmbeddings(
 // llama-server's own /v1/models only knows the loaded text/vision LLM; we fetch
 // that and fold in the active image, speech (TTS), and transcription (STT) models.
 // Each entry carries a non-standard `kind` (chat/vision/image/speech/transcription).
-function fetchUpstreamModels(): Promise<Record<string, unknown>> {
-  return new Promise((resolve) => {
-    const r = http.request(
-      { hostname: UPSTREAM_HOST, port: upstreamPort(), path: '/v1/models', method: 'GET' },
-      (pr) => {
-        let b = ''
-        pr.on('data', (d) => (b += d))
-        pr.on('end', () => {
-          try {
-            resolve(JSON.parse(b))
-          } catch {
-            resolve({})
-          }
-        })
-      }
-    )
-    r.on('error', () => resolve({}))
-    r.end()
-  })
-}
-
 async function handleModelsList(res: http.ServerResponse): Promise<void> {
   await desktopModelServices.refresh()
-  const now = Math.floor(Date.now() / 1000)
-  const upstream = await fetchUpstreamModels()
-  const upData = Array.isArray(upstream.data) ? (upstream.data as Record<string, unknown>[]) : []
-  // Tag the LLM entries chat vs vision from their advertised capabilities.
-  let text: Record<string, unknown>[] = tagLlmEntries(upData)
-  const activeRemote = getActiveRemoteVisionServer()
-  if (activeRemote) {
-    text = [
-      {
-        id: encodeModelRouteId({
-          adapterId: 'desktop.remote-chat',
-          providerId: activeRemote.provider,
-          serverId: activeRemote.id,
-          modelId: activeRemote.model
-        }),
-        name: activeRemote.model,
-        object: 'model',
-        created: now,
-        owned_by: activeRemote.name,
-        kind: 'chat',
-        remote: true,
-        // The Desktop gateway has already validated this OpenAI-compatible route.
-        // Mobile must not probe the local llama /props endpoint for capabilities of
-        // this remote model, because that reports the wrong active model.
-        capabilities: ['vision', 'tools']
-      }
-    ]
-  }
-  // Fall back to the on-disk active model when the upstream llama-server hasn't
-  // loaded one yet (idle app, headless gateway, or a server that came up without
-  // a model). Without this, /v1/models reports an empty chat model even though one
-  // is installed and would load on the next request.
-  if (!activeRemote && text.length === 0) {
-    const info = llm.activeModelInfo()
-    if (info) {
-      text = [
-        {
-          id: info.id,
-          object: 'model',
-          created: now,
-          owned_by: 'off-grid',
-          kind: info.vision ? 'vision' : 'chat'
-        }
-      ]
-    }
-  }
-
-  const tag = (
-    id: string,
-    kind: string,
-    extra: Record<string, unknown> = {}
-  ): Record<string, unknown> => modelEntry(id, kind, now, extra)
-
-  // Active image model: a remote route is advertised by its stable route id so a paired phone
-  // can name it; a local pick by its native id.
-  const activeImage = desktopModelServices.llm.active('image').model
-  const imgId =
-    activeImage?.source === 'remote' && activeImage.serverId
-      ? (activeImage.routeId ?? runtimeModelRouteId(activeImage))
-      : activeImageModel()
-  const images = imgId
-    ? [tag(imgId, 'image', activeImage?.source === 'remote' ? { name: activeImage.name, remote: true } : {})]
-    : []
-
-  // Active speech (TTS) model + its available voices.
+  // Voices are the one fact the workspace cannot know: they belong to the speech engine.
   let voices: string[] = []
   try {
     voices = await tts.listVoices()
   } catch {
     /* TTS may be unavailable */
   }
-  const speechModel =
-    desktopModelServices.llm.active('voice').model ??
-    desktopModelServices.llm.list('voice').find((model) => model.ready)
-  const speechId = speechModel?.id ?? (voices.length ? 'kokoro' : null)
-  const speech = speechId ? [tag(speechId, 'speech', { voices })] : []
-
-  // Active transcription (STT) model (chosen pick, else the resolved whisper model).
-  const transcriptionModel =
-    desktopModelServices.llm.active('transcription').model ??
-    desktopModelServices.llm.list('transcription').find((model) => model.ready)
-  const sttId =
-    transcriptionModel?.id ?? (whisperModel() ? path.basename(whisperModel() as string) : null)
-  const transcription = sttId ? [tag(sttId, 'transcription')] : []
-
-  const data: Record<string, unknown>[] = [...text, ...images, ...speech, ...transcription]
-  // Mirror into the ollama-style `models` array some clients read, so both shapes
-  // stay in sync.
-  const models = ollamaMirror(data)
-  json(res, 200, { object: 'list', data, models })
+  json(
+    res,
+    200,
+    desktopModelServices.workspace.gatewayModelList({
+      created: Math.floor(Date.now() / 1000),
+      voices
+    })
+  )
 }
 
 // ─── Speech-to-text (whisper) ────────────────────────────────────────────────

@@ -6,7 +6,6 @@ import type {
   ComputerUseActiveModelProjection,
   ComputerUseModelStrategy
 } from '../../shared/computer-use-settings'
-import { parseRemoteVisionModelId, remoteVisionModelId } from '../../shared/remote-vision-server'
 import { withGrounder, selectedGrounderModelId } from './grounder-loader'
 import {
   createHybridVisionGrounder,
@@ -95,7 +94,7 @@ export async function getComputerUseActiveModelProjection(
   const strategy = dependencies.strategy()
   const remote = dependencies.activeRemote()
   const chatModelId = remote
-    ? remoteVisionModelId(remote.id, remote.model)
+    ? remoteChatRouteId(remote)
     : dependencies.selectedChatId()
   const projection = resolveComputerUseRoleProjection({
     strategy,
@@ -119,7 +118,7 @@ function activeChatSelection(
   if (remote) {
     return {
       adapter: generalVisionOperatorAdapter,
-      modelId: remoteVisionModelId(remote.id, remote.model)
+      modelId: remoteChatRouteId(remote)
     }
   }
   const artifacts = dependencies.activeArtifacts()
@@ -185,17 +184,24 @@ export function computerUseRouteIdFromInventory(
   return selected.routeId
 }
 
+/** A remote server's chat model, named by the route this device lists for it. */
+function remoteChatRouteId(remote: { id: string; model: string }): string {
+  const route = desktopModelServices.workspace.remoteModelRoute(remote.id, remote.model, 'text')
+  if (!route) throw new Error('The remote chat model is not in this device\'s inventory.')
+  return route
+}
+
 async function computerUseRouteId(modelId: string, requiredThinking = false): Promise<string> {
   await desktopModelServices.refresh()
-  const remote = parseRemoteVisionModelId(modelId)
+  const known = desktopModelServices.workspace.lookup(modelId)
   const matches = desktopModelServices.llm
     .list('computer_use')
     .filter((model) =>
-      remote
-        ? model.serverId === remote.serverId && model.id === remote.modelId
+      known?.serverId
+        ? model.serverId === known.serverId && model.id === known.id
         : !model.serverId && model.id === modelId
     )
-  return computerUseRouteIdFromInventory(matches, remote?.modelId ?? modelId, requiredThinking)
+  return computerUseRouteIdFromInventory(matches, known?.id ?? modelId, requiredThinking)
 }
 
 function createVisionTaskModelService(

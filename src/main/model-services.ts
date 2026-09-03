@@ -76,46 +76,6 @@ export type DesktopModelControlCatalogModel = Omit<ModelControlCatalogModel, 'fi
   capabilities?: ModelCapabilities
 }
 
-/** A persisted runtime route cannot be presented as a ready model-control selection. */
-export class DesktopModelProjectionError extends Error {
-  readonly code = 'model_control_route_unresolved' as const
-
-  constructor(readonly routeId: string) {
-    super('The active model route is unavailable in the model-control catalog.')
-    this.name = 'DesktopModelProjectionError'
-  }
-}
-
-function projectActiveTextCapabilities(
-  models: readonly DesktopModelControlCatalogModel[],
-  activeModelId: string | null,
-  capabilities: ModelCapabilities | null
-): DesktopModelControlCatalogModel[] {
-  if (!activeModelId || !capabilities) return [...models]
-  return models.map((model) =>
-    model.id === activeModelId ? { ...model, capabilities: { ...capabilities } } : model
-  )
-}
-
-/** Convert the runtime route identity into the catalog identity used by model-control clients. */
-export function projectActiveTextCatalogId(
-  models: readonly DesktopModelControlCatalogModel[],
-  selectedId: string | null
-): string | null {
-  if (!selectedId) return null
-  const route = decodeModelRouteId(selectedId)
-  const selected = route
-    ? route.serverId
-      ? models.find(
-          (model) =>
-            model.remoteServerId === route.serverId && model.remoteModelId === route.modelId
-        )
-      : models.find((model) => model.id === route.modelId)
-    : models.find((model) => model.id === selectedId)
-  if (!selected) throw new DesktopModelProjectionError(selectedId)
-  return selected.id
-}
-
 function isModelControlCatalogModel(value: unknown): value is DesktopModelControlCatalogModel {
   if (!value || typeof value !== 'object') return false
   if (
@@ -740,7 +700,6 @@ export function createDesktopModelServices(
     activeModalities,
     async modelControlSnapshot() {
       await llm.refresh()
-      const runtimeActive = activeModalities()
       const catalogRead = dependencies.modelControlCatalog
         ? dependencies.modelControlCatalog()
         : dependencies.listCatalog().then((models) => ({
@@ -754,34 +713,9 @@ export function createDesktopModelServices(
           module.getComputerUseActiveModelProjection()
         )
       ])
-      const activeTextCapabilities = llm.active('text').model?.capabilities ?? null
-      // Every modality's active id is projected onto the catalog's id space (a remote route
-      // becomes its catalog entry), so the panel marks and picks remote models like local ones.
-      const projectCatalogId = (selectedId: string | null): string | null => {
-        try {
-          return projectActiveTextCatalogId(catalog.models, selectedId)
-        } catch {
-          return selectedId
-        }
-      }
-      const active = {
-        text: projectActiveTextCatalogId(catalog.models, runtimeActive.text),
-        computer_use: projectCatalogId(runtimeActive.computer_use),
-        image: projectCatalogId(runtimeActive.image),
-        speech: projectCatalogId(runtimeActive.speech),
-        transcription: projectCatalogId(runtimeActive.transcription)
-      }
-      const activeIds = [
-        ...new Set(Object.values(active).filter((id): id is string => Boolean(id)))
-      ]
-      return {
-        kinds: [...catalog.kinds],
-        models: projectActiveTextCapabilities(catalog.models, active.text, activeTextCapabilities),
-        installed,
-        activeIds,
-        active,
-        computerUse
-      }
+      // Every projection decision (which catalog row an active route names, the active text
+      // capabilities overlay) is the workspace's; this reads the ports and renders.
+      return workspace.controlSnapshot({ catalog, installed, computerUse })
     }
   }
 }
