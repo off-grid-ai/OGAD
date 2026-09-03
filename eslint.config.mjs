@@ -178,6 +178,10 @@ const pipelineDecisionsWarn = {
       {
         selector: "Literal[value=/^image\\/(png|jpe?g|webp)$/]",
         message: 'Class 3: image MIME types are an artifact fact owned by shared.'
+      },
+      {
+        selector: "Literal[value=/\\.(gguf|safetensors)$/i], Literal[regex.pattern=/\\\\.(gguf|safetensors)/]",
+        message: 'Class 3: model file types are an artifact fact owned by shared (isGgufFile, MODEL_FILE_EXTENSION).'
       }
     ]
   }
