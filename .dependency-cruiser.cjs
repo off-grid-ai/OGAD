@@ -74,7 +74,7 @@ module.exports = {
       severity: 'error',
       from: {
         pathNot:
-          '(loadProFeaturesMain|loadProFeaturesRenderer|main\\.tsx|bootstrap/proStub|\\.(test|spec)\\.[tj]sx?$|/__tests__/)'
+          '(^pro/|loadProFeaturesMain|loadProFeaturesRenderer|main\\.tsx|bootstrap/proStub|\\.(test|spec)\\.[tj]sx?$|/__tests__/)'
       },
       to: { path: 'bootstrap/proStub\\.ts$|(^|/)pro/(main|renderer)/' }
     },
@@ -127,6 +127,18 @@ module.exports = {
           '(__tests__/|\\.(test|spec)\\.[tj]sx?$)|^src/renderer/src/lib/(capture-readiness-ports|desktop-chat-generation-adapter|desktop-chat-session-repository)\\.ts$'
       },
       to: { path: '^\\.\\./shared/packages/models/' }
+    },
+    {
+      name: 'presentation-not-to-raw-sync',
+      comment:
+        'Presentation reads Sync through @offgrid/application. The renderer Sync state adapter is the only raw domain seam.',
+      severity: 'error',
+      from: {
+        path: '^(src/renderer/src/(components|lib|screens)/|pro/renderer/)',
+        pathNot:
+          '(__tests__/|\\.(test|spec)\\.[tj]sx?$)|^pro/renderer/sync-state\\.ts$'
+      },
+      to: { path: '^\\.\\./shared/packages/sync/' }
     },
     {
       name: 'not-to-test',
