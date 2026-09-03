@@ -136,6 +136,9 @@ beforeAll(async () => {
   executable(ffmpegPath, "process.stdout.write('ffmpeg version integration\\n')")
   executable(whisperPath, "process.stdout.write('usage: whisper-cli [options]\\n')")
 
+  // The system health snapshot reads the active model from the composition root, as the app does
+  // after boot; load it before the IPC surface.
+  await import('../../../../../main/model-services')
   setupSystemStatusIpc(boundary)
   ;(globalThis as unknown as { window: { api: unknown } }).window.api = {
     systemHealth: async () => {
