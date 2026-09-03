@@ -34,6 +34,14 @@ import {
   type SpeechPlaybackRequest,
   type SpeechPlaybackResult
 } from '../shared/speech-playback-contract'
+import {
+  SPEECH_MICROPHONE_LEVEL_CHANNEL,
+  SPEECH_MICROPHONE_REQUEST_CHANNEL,
+  SPEECH_MICROPHONE_RESULT_CHANNEL,
+  type SpeechMicrophoneLevel,
+  type SpeechMicrophoneRequest,
+  type SpeechMicrophoneResult
+} from '../shared/speech-microphone-contract'
 
 console.log('PRELOAD SCRIPT LOADED')
 
@@ -733,6 +741,20 @@ const offGridApi = {
     },
     sendResult: (result: SpeechPlaybackResult): void => {
       ipcRenderer.send(SPEECH_PLAYBACK_RESULT_CHANNEL, result)
+    }
+  },
+  speechMicrophone: {
+    onRequest: (callback: (request: SpeechMicrophoneRequest) => void) => {
+      const listener = (_event: unknown, request: SpeechMicrophoneRequest): void =>
+        callback(request)
+      ipcRenderer.on(SPEECH_MICROPHONE_REQUEST_CHANNEL, listener)
+      return unsubscribe(SPEECH_MICROPHONE_REQUEST_CHANNEL, listener)
+    },
+    sendResult: (result: SpeechMicrophoneResult): void => {
+      ipcRenderer.send(SPEECH_MICROPHONE_RESULT_CHANNEL, result)
+    },
+    sendLevel: (level: SpeechMicrophoneLevel): void => {
+      ipcRenderer.send(SPEECH_MICROPHONE_LEVEL_CHANNEL, level)
     }
   },
 
