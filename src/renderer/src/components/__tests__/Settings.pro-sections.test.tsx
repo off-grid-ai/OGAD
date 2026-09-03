@@ -39,7 +39,15 @@ function stubApi(platform = 'darwin'): void {
         }
         if (prop === 'getRemoteVisionServer') {
           return () =>
-            Promise.resolve({ provider: 'local', endpoint: '', model: '', hasApiKey: false })
+            // The shape main returns today (v4): the renderer no longer migrates a legacy record.
+            Promise.resolve({
+              provider: 'local',
+              endpoint: '',
+              model: '',
+              hasApiKey: false,
+              activeServerId: null,
+              servers: []
+            })
         }
         if (prop === 'setupPlan') return () => Promise.resolve(null)
         if (prop === 'systemHealth') {
