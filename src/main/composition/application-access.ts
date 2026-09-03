@@ -1,11 +1,12 @@
-import type {
-  AutomationFacade,
-  ModelsFacade,
-  ModelsFailure,
-  OffGridApplication,
-  PartialGenerationState,
-  RagFacade,
-  UseFacade
+import {
+  modelsFailureMessage,
+  type ModelsFailure,
+  type AutomationFacade,
+  type ModelsFacade,
+  type OffGridApplication,
+  type PartialGenerationState,
+  type RagFacade,
+  type UseFacade
 } from '@offgrid/application'
 import type {
   GenerationEvents,
@@ -62,25 +63,7 @@ export const desktopUse: UseFacade = new Proxy({} as UseFacade, {
   }
 })
 
-export function modelsFailureMessage(failure: ModelsFailure): string {
-  switch (failure.kind) {
-    case 'unknown_model':
-      return `Unknown model: ${failure.identifier}`
-    case 'not_ready':
-    case 'unsupported_capability':
-    case 'memory_refused':
-    case 'timeout':
-      return failure.reason
-    case 'remote_http':
-      return failure.reason ?? `The remote model returned HTTP ${failure.status}.`
-    case 'context_full':
-      return 'The model context is full.'
-    case 'cancelled':
-      return 'The model operation was cancelled.'
-    case 'runtime':
-      return failure.message
-  }
-}
+export { modelsFailureMessage }
 
 export class DesktopModelsOperationError extends Error {
   constructor(
