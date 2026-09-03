@@ -227,6 +227,79 @@ const pipelineDecisions = {
   }
 }
 
+// File-size ratchet (2026-09-03): the mobile limits (500 lines per file, 350 per function) are errors
+// here too. Files already over the limit are listed so they cannot grow the list; each removal is a
+// burn-down step (see HEXAGONAL_FIX_PROGRAM_2026-09-03.md, SRP items). Add nothing to this list.
+const oversizeBurnDown = [
+  'pro/main/clipboard-store.ts',
+  'pro/main/clipboard.ts',
+  'pro/main/crm/extract.ts',
+  'pro/main/crm/resolve.ts',
+  'pro/main/dev-seed.ts',
+  'pro/main/dictation/controller.ts',
+  'pro/main/licensing/license-service.ts',
+  'pro/main/meeting-native.ts',
+  'pro/main/meetings.ts',
+  'pro/main/services.ts',
+  'pro/main/sync-ipc.ts',
+  'pro/main/sync/macos-proximity.ts',
+  'pro/main/sync/model-transfer-service.ts',
+  'pro/main/sync/shared-file-sync-service.ts',
+  'pro/main/sync/state-bridge.ts',
+  'pro/main/sync/sync-service.ts',
+  'pro/main/sync/sync-store.ts',
+  'pro/renderer/screens/ActionsScreen.tsx',
+  'pro/renderer/screens/DayView.tsx',
+  'pro/renderer/screens/DevicesScreen.tsx',
+  'pro/renderer/screens/EntitiesScreen.tsx',
+  'pro/renderer/screens/MeetingsScreen.tsx',
+  'pro/renderer/screens/NotificationList.tsx',
+  'pro/renderer/screens/ReflectScreen.tsx',
+  'pro/renderer/screens/ReplayScreen.tsx',
+  'pro/renderer/screens/VaultScreen.tsx',
+  'pro/renderer/screens/VoiceScreen.tsx',
+  'pro/renderer/settings-sections.tsx',
+  'src/main/accessibility/ax-agent.ts',
+  'src/main/api-docs.ts',
+  'src/main/browser/browser-driver.ts',
+  'src/main/browser/browser-host.ts',
+  'src/main/database.ts',
+  'src/main/imagegen.ts',
+  'src/main/index.ts',
+  'src/main/ipc.ts',
+  'src/main/llm.ts',
+  'src/main/model-server.ts',
+  'src/main/model-services.ts',
+  'src/main/models-manager.ts',
+  'src/main/tasks/task-history-store.ts',
+  'src/main/tools.ts',
+  'src/main/vision/model-adapters/ui-mate/policy.ts',
+  'src/main/vision/vision-task-graph.ts',
+  'src/preload/index.ts',
+  'src/renderer/src/App.tsx',
+  'src/renderer/src/components/ChatDetail.tsx',
+  'src/renderer/src/components/connectorCatalog.ts',
+  'src/renderer/src/components/ConnectorsScreen.tsx',
+  'src/renderer/src/components/explore/presetCatalog.ts',
+  'src/renderer/src/components/MemoryChat.tsx',
+  'src/renderer/src/components/ModelsScreen.tsx',
+  'src/renderer/src/components/Onboarding.tsx',
+  'src/renderer/src/components/ProjectsScreen.tsx',
+  'src/renderer/src/components/RemoteVisionSettingsTab.tsx',
+  'src/renderer/src/components/SettingsPanel.tsx',
+  'src/renderer/src/components/setup/StoragePanel.tsx',
+  'src/renderer/src/components/use-chat-voice-turns.ts',
+]
+const fileSizeLimits = {
+  name: 'file size limits (error, mobile parity)',
+  files: ['src/**/*.{ts,tsx}', 'pro/**/*.{ts,tsx}'],
+  ignores: ['**/*.{test,spec,dbtest}.{ts,tsx}', '**/__tests__/**', '**/*.d.ts', ...oversizeBurnDown],
+  rules: {
+    'max-lines': ['error', { max: 500, skipBlankLines: true, skipComments: true }],
+    'max-lines-per-function': ['error', { max: 350, skipBlankLines: true, skipComments: true }]
+  }
+}
+
 // Sonar-grade rules (bugs, cognitive complexity, duplicated branches, dead code)
 // scoped to pro/** ONLY. Core src is covered by SonarCloud Automatic Analysis, so
 // running sonarjs there too would be redundant — but SonarCloud (public project)
@@ -322,6 +395,7 @@ export default defineConfig(
   typedDeadBranchWarn,
   modelBoundaryWarn,
   pipelineDecisions,
+  fileSizeLimits,
     {
     settings: {
       react: {
