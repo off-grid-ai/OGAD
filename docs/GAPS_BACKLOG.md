@@ -1998,3 +1998,11 @@ fixing; the fix is to isolate the composer's state, not to memoize the cards.
 `vision/model-adapters/ui-tars.ts`. On a reasoning model the cap is spent before the answer (the
 image-enhancement cap cut prompts to seven words on Gemini). Each request shape belongs in shared, like
 `imageEnhancementGenerationRequest`.
+
+## Profile Desktop startup (open, 2026-09-03, not scheduled)
+
+Reported live: the app is extremely slow to start. Not profiled. Use the SIGUSR1 live-profiling recipe
+(see the main-thread CPU diagnosis note) from bootstrap.started to the first painted chat, and list the
+top main-process and renderer costs before touching anything. Likely suspects to confirm or rule out,
+not to assume: inventory refresh with network probes at boot, capture drain, embeddings warm-up, and
+the renderer's initial catalog fetches.
