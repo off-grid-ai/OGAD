@@ -81,34 +81,12 @@ function formFromServer(server: RemoteVisionSavedServer): ServerForm {
   }
 }
 
+/** A server saved without a name is called by its host (main applies the same default). */
 function serverNameFromEndpoint(endpoint: string): string {
   try {
     return new URL(endpoint).host
   } catch {
     return 'Remote server'
-  }
-}
-
-function normalizeSettings(value: RemoteVisionServerSettings): RemoteVisionServerSettings {
-  if (Array.isArray(value.servers)) return value
-  const legacyServer: RemoteVisionSavedServer | null =
-    value.provider !== 'local' && value.endpoint && value.model
-      ? {
-          id: 'migrated-server',
-          name: serverNameFromEndpoint(value.endpoint),
-          provider: value.provider,
-          endpoint: value.endpoint,
-          model: value.model,
-          hasApiKey: value.hasApiKey,
-          screenFramesAllowed: false,
-          selections: { text: value.model },
-          catalog: { text: [{ id: value.model, name: value.model }] }
-        }
-      : null
-  return {
-    ...value,
-    activeServerId: legacyServer?.id ?? null,
-    servers: legacyServer ? [legacyServer] : []
   }
 }
 
@@ -140,8 +118,9 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
     setStatus(server.id === settings.activeServerId ? 'This server is active.' : 'Ready to edit.')
   }
 
-  const applySettings = (value: RemoteVisionServerSettings): void => {
-    const normalized = normalizeSettings(value)
+  // Main returns the version 4 shape (a server list with a derived active id); the legacy singleton
+  // is migrated there by the shared migration, so nothing is reshaped here.
+  const applySettings = (normalized: RemoteVisionServerSettings): void => {
     setSettings(normalized)
     setRemoteEnabled(normalized.activeServerId !== null)
     const selected =
@@ -158,8 +137,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
   useEffect(() => {
     window.api
       .getRemoteVisionServer()
-      .then((value: RemoteVisionServerSettings) => {
-        const normalized = normalizeSettings(value)
+      .then((normalized: RemoteVisionServerSettings) => {
         setSettings(normalized)
         setRemoteEnabled(normalized.activeServerId !== null)
         const selected =

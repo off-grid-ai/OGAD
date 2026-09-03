@@ -6,6 +6,7 @@ import {
   REMOTE_FETCH_REDIRECT_POLICY,
   type RemoteServerApplicationService,
   type RemoteServerApplicationPorts,
+  activeRemoteServer,
   canReconcileCredentialedEndpoint,
   catalogFromDiscovery,
   defaultRemoteSelections,
@@ -50,9 +51,12 @@ interface StoredRemoteVisionServer {
   enabled?: boolean
 }
 
+/**
+ * On disk since version 4. Files written before 2026-09-03 also carry an `activeServerId`; the
+ * active server is derived from the list (shared `activeRemoteServer`), so that field is read past.
+ */
 interface StoredRemoteVisionConfig {
   version: 4
-  activeServerId: string | null
   servers: StoredRemoteVisionServer[]
 }
 
@@ -95,7 +99,7 @@ function normalizeServer(
   if (!validProvider(value.provider)) return null
   const normalized = normalizeRemoteServerConfiguration({
     ...value,
-    provider: value.provider === 'ogad' ? 'offgrid-desktop' : value.provider
+    provider: sharedProvider(value.provider)
   })
   if (
     !normalized ||
@@ -104,17 +108,10 @@ function normalizeServer(
     )
   )
     return null
-  const desktopProvider =
-    normalized.provider === 'offgrid-desktop'
-      ? 'ogad'
-      : normalized.provider === 'openai-compatible' || normalized.provider === 'anthropic'
-        ? 'custom'
-        : normalized.provider
-  if (!validProvider(desktopProvider)) return null
   return {
     id: normalized.id,
     name: normalized.name,
-    provider: desktopProvider,
+    provider: desktopProvider(normalized.provider),
     endpoint: normalized.endpoint,
     model: normalized.selections?.text?.trim() || '',
     selections: normalized.selections ?? {},
@@ -129,25 +126,34 @@ function sharedConfiguration(
 ): ReturnType<typeof migrateRemoteServerConfiguration> {
   return {
     version: 1,
-    activeServerId: stored.activeServerId,
-    servers: stored.servers.map((server) => ({
-      ...server,
-      provider: server.provider === 'ogad' ? 'offgrid-desktop' : server.provider
-    }))
+    activeServerId: activeRemoteServer(stored.servers)?.id ?? null,
+    servers: stored.servers.map((server) => ({ ...server, provider: sharedProvider(server.provider) }))
   }
 }
 
-function desktopProvider(provider: PersistedRemoteServer['provider']): RemoteVisionProvider {
+// Desktop's provider vocabulary ('ogad', 'custom') and shared's ('offgrid-desktop',
+// 'openai-compatible', 'anthropic') meet in these two functions and nowhere else in this file.
+function desktopProvider(
+  provider: PersistedRemoteServer['provider']
+): Exclude<RemoteVisionProvider, 'local'> {
   if (provider === 'offgrid-desktop') return 'ogad'
   if (provider === 'ollama' || provider === 'lmstudio' || provider === 'openrouter') return provider
   return 'custom'
+}
+
+function sharedProvider(
+  provider: Exclude<RemoteVisionProvider, 'local'>
+): PersistedRemoteServer['provider'] {
+  if (provider === 'ogad') return 'offgrid-desktop'
+  if (provider === 'custom') return 'openai-compatible'
+  return provider
 }
 
 function storedFromShared(server: PersistedRemoteServer): StoredRemoteVisionServer {
   return {
     id: server.id,
     name: server.name,
-    provider: desktopProvider(server.provider) as Exclude<RemoteVisionProvider, 'local'>,
+    provider: desktopProvider(server.provider),
     endpoint: server.endpoint,
     model: server.selections?.text ?? '',
     selections: server.selections ?? {},
@@ -166,25 +172,14 @@ function readStored(): StoredRemoteVisionConfig {
     const servers = migrated.servers.flatMap((server) => {
       const normalized = normalizeServer({
         ...server,
-        provider:
-          server.provider === 'offgrid-desktop'
-            ? 'ogad'
-            : server.provider === 'openai-compatible' || server.provider === 'anthropic'
-              ? 'custom'
-              : server.provider,
+        provider: desktopProvider(server.provider),
         model: server.selections?.text ?? ''
       })
       return normalized ? [normalized] : []
     })
-    return {
-      version: CONFIG_VERSION,
-      activeServerId: servers.some((server) => server.id === migrated.activeServerId)
-        ? migrated.activeServerId
-        : null,
-      servers
-    }
+    return { version: CONFIG_VERSION, servers }
   } catch {
-    return { version: CONFIG_VERSION, activeServerId: null, servers: [] }
+    return { version: CONFIG_VERSION, servers: [] }
   }
 }
 
@@ -217,19 +212,9 @@ function publicServer(server: StoredRemoteVisionServer): RemoteVisionSavedServer
  */
 export const desktopRemoteServerPorts: Omit<RemoteServerApplicationPorts, 'select' | 'clearSelections'> = {
     configuration: {
-      read: () => {
-        const stored = readStored()
-        return {
-          ...sharedConfiguration(stored),
-          activeServerId: selectedRemoteServer(stored)?.id ?? null
-        }
-      },
+      read: () => sharedConfiguration(readStored()),
       async write(value) {
-        writeStored({
-          version: CONFIG_VERSION,
-          activeServerId: null,
-          servers: value.servers.map(storedFromShared)
-        })
+        writeStored({ version: CONFIG_VERSION, servers: value.servers.map(storedFromShared) })
         await desktopModelServices.refresh()
       }
     },
@@ -295,14 +280,9 @@ const desktopRemoteServerApplication: RemoteServerApplicationService = new Proxy
   }
 )
 
-/** "Use remote server" is the saved server's enabled fact, nothing else. */
-function selectedRemoteServer(stored: StoredRemoteVisionConfig): StoredRemoteVisionServer | null {
-  return stored.servers.find((server) => server.enabled !== false) ?? null
-}
-
 export function getRemoteVisionServerSettings(): RemoteVisionServerSettings {
   const stored = readStored()
-  const active = selectedRemoteServer(stored)
+  const active = activeRemoteServer(stored.servers)
   return {
     provider: active?.provider ?? 'local',
     endpoint: active?.endpoint ?? '',
@@ -315,7 +295,7 @@ export function getRemoteVisionServerSettings(): RemoteVisionServerSettings {
 
 export function getActiveRemoteVisionServer(): RemoteVisionServerConnection | null {
   const stored = readStored()
-  const active = selectedRemoteServer(stored)
+  const active = activeRemoteServer(stored.servers)
   return active ? { ...active, apiKey: transportApiKey(active) } : null
 }
 
@@ -349,14 +329,15 @@ export async function setRemoteVisionServerSettings(
   const catalog =
     update.catalog ??
     existing?.catalog ??
-    (model ? { text: [{ id: model, name: model, capabilities: { supportsVision: true } }] } : {})
+    // A model named without a catalog row is listed by name only; its capabilities come from the
+    // shared capability policy once the server is probed, never from a guess written to disk.
+    (model ? { text: [{ id: model, name: model }] } : {})
   const selections = update.selections ?? existing?.selections ?? (model ? { text: model } : {})
   if (!hasRemoteServerSelection({ selections })) throw new Error('Select at least one remote model.')
   await desktopRemoteServerApplication.save({
     id,
     name: update.name?.trim() || defaultServerName(endpoint),
-    provider: update.provider === 'ogad' ? 'offgrid-desktop' : update.provider === 'custom'
-      ? 'openai-compatible' : update.provider,
+    provider: sharedProvider(update.provider),
     endpoint,
     selections,
     catalog,
@@ -395,8 +376,7 @@ export async function testRemoteVisionServer(
     id: update.serverId || 'connection-test',
     name: update.name?.trim() || defaultServerName(endpoint),
     endpoint,
-    provider: update.provider === 'ogad' ? 'offgrid-desktop' : update.provider === 'custom'
-      ? 'openai-compatible' : update.provider,
+    provider: sharedProvider(update.provider),
     selections: current?.selections ?? {},
     catalog: current?.catalog ?? {},
     ...(update.provider === 'ogad' ? { modelManagement: 'offgrid-desktop-v1' as const } : {})
