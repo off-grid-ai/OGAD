@@ -6,6 +6,7 @@ import {
   type GenerationResult
 } from '@offgrid/models'
 import { DesktopChatCompaction } from './desktop-chat-compaction'
+import { desktopChatTurnProfile } from './desktop-chat-session-policy'
 import { chatSessionService } from '@renderer/composition/chat-session'
 import { DesktopTurnRepository } from './desktop-chat-session-repository'
 import { publishDesktopChatEvent } from './desktop-chat-session-events'
@@ -148,8 +149,7 @@ export class DesktopChatSession {
           : input.images.length
             ? { type: 'vision' }
             : { type: 'text' },
-      allowFallback: input.kind !== 'image',
-      partialOutputPolicy: 'preserve-and-stop'
+      request: { profile: desktopChatTurnProfile(input.kind) }
     }
   }
 

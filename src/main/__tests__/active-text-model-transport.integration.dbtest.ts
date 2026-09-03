@@ -351,7 +351,7 @@ describe('active text model transport', () => {
           ],
           toolHandling: 'return',
           timeoutMs: 5_000,
-          allowFallback: false
+          profile: 'tool-loop'
         })
       ).rejects.toThrow('UI-TARS 1.5 7B cannot act as the Chat tool planner')
       expect(requests).toHaveLength(0)
@@ -403,9 +403,9 @@ describe('active text model transport', () => {
 
     await expect(
       generateDesktopMessages([{ role: 'user', content: 'Use the selected model.' }], {
+        profile: 'chat',
         timeoutMs: 5_000,
-        maxTokens: 200,
-        allowFallback: false
+        maxTokens: 200
       })
     ).rejects.toThrow('Remote text model returned HTTP 429 from OpenRouter: Try again later.')
     expect(requests).toHaveLength(1)

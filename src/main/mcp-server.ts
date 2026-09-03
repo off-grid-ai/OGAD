@@ -88,9 +88,7 @@ async function generateMcpText(
     profile: 'gateway-request',
     // The external client's own cap; the profile applies no other.
     maxTokens,
-    signal,
-    allowFallback: true,
-    partialOutputPolicy: 'discard-and-fallback'
+    signal
   })
   return result.content
 }

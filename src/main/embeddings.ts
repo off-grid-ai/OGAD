@@ -86,7 +86,7 @@ class EmbeddingService {
   async generateEmbedding(text: string): Promise<number[]> {
     const result = await generateDesktopOperation(
       { type: 'embedding', inputs: [text] },
-      { profile: 'embedding', allowFallback: true }
+      { profile: 'embedding' }
     )
     if (result.output.type !== 'embedding' || !result.output.vectors[0]) {
       throw new Error('The embedding engine returned no vector.')

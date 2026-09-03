@@ -145,10 +145,9 @@ export function getGenerationTranscription(
           timestamps: options.timestamps
         },
         {
+          profile: 'transcription',
           routeId,
-          signal: options.signal,
-          allowFallback: true,
-          timeoutMs: 30 * 60 * 1000
+          signal: options.signal
         }
       )
       if (result.output.type !== 'transcription') {

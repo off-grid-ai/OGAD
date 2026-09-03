@@ -232,8 +232,8 @@ async function streamAnswer(
     },
     // The user's toggle asks for a route that can reason; shared derives the capability from it.
     ...(thinking ? { reasoning: { enabled: true, requireCapableRoute: true } } : {}),
-    allowFallback: true,
-    partialOutputPolicy: 'discard-and-fallback' as const,
+    // A person's own turn: the chat profile decides fallback and partial-output handling.
+    profile: 'chat',
     ...(signal ? { signal } : {})
   })
   const response = (

@@ -72,7 +72,7 @@ let remoteRequests = 0
 
 async function generatedText(prompt: string, images: string[] = []): Promise<string> {
   const { generateDesktopText } = await import('../desktop-generation')
-  return (await generateDesktopText(prompt, { images, allowFallback: false })).content
+  return (await generateDesktopText(prompt, { images, profile: 'chat' })).content
 }
 
 function executable(file: string, source: string): void {

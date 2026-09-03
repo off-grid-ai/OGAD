@@ -259,9 +259,8 @@ export function desktopImageApplicationPorts(): ImageGenerationApplicationPorts<
       const turnId = input.request.requestId ?? randomUUID()
       const result = await generateDesktopOperation(operation, {
         routeId: routeIdentity(input.model),
+        profile: 'image-generation',
         identity: { conversationId: input.request.conversationId ?? turnId, turnId },
-        timeoutMs: 24 * 60 * 60 * 1000,
-        allowFallback: false,
         signal: input.signal,
         events: {
           chunk(chunk) {

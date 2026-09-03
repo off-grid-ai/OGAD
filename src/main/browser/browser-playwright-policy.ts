@@ -152,8 +152,6 @@ ${boundedSnapshot(request.snapshot)}
       schema: PLAYWRIGHT_STEP_FORMAT.json_schema.schema,
       strict: PLAYWRIGHT_STEP_FORMAT.json_schema.strict
     },
-    allowFallback: true,
-    partialOutputPolicy: 'discard-and-fallback',
     signal: request.signal
   })
   const raw = result.content

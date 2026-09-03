@@ -337,8 +337,7 @@ class AxRailHost {
             operation: { type: 'text' },
             profile: 'structured-step',
             responseFormat: ELEMENT_STEP_FORMAT,
-            signal: request.signal,
-            allowFallback: false
+            signal: request.signal
           })
           const raw = generation.content
           console.log(`[ax-rail] model reply: ${JSON.stringify(raw.slice(0, 400))}`)

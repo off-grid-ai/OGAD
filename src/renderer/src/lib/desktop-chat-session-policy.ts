@@ -1,5 +1,10 @@
 import { DEFAULT_IMAGE_MIME, generationMessageText as sharedGenerationMessageText } from '@offgrid/models'
-import type { GenerationMessage, GenerationResult, RuntimeModel } from '@offgrid/models'
+import type {
+  GenerationMessage,
+  GenerationProfileKind,
+  GenerationResult,
+  RuntimeModel
+} from '@offgrid/models'
 import type { DesktopImageGenerationResponse } from './desktop-chat-session-contract'
 
 export const DESKTOP_CHAT_ROUTE: RuntimeModel = {
@@ -13,6 +18,15 @@ export const DESKTOP_CHAT_ROUTE: RuntimeModel = {
   installed: true,
   ready: true,
   loaded: true
+}
+
+/**
+ * The kind of work a chat turn is. Shared's profile table decides fallback, partial output, and
+ * timeout from it; the app names the kind and nothing else.
+ */
+export function desktopChatTurnProfile(kind: 'chat' | 'tools' | 'image' | undefined): GenerationProfileKind {
+  if (kind === 'image') return 'image-generation'
+  return kind === 'tools' ? 'tool-loop' : 'chat'
 }
 
 export function desktopImageResult(

@@ -34,9 +34,9 @@ export interface DesktopGenerationOptions {
   maxTokens?: number
   maxToolRounds?: number
   maxToolCalls?: number
+  /** A caller-owned bound (a test fence). Production sites name a profile instead. */
   timeoutMs?: number
   signal?: AbortSignal
-  allowFallback?: boolean
   routeId?: string
   identity?: GenerationRequest['identity']
   events?: GenerationEvents
@@ -135,7 +135,6 @@ export async function generateDesktopMessages(
 ): Promise<GenerationResult> {
   await desktopModelServices.refresh()
   const settings = llm.getSettings()
-  const activeTextModel = desktopModelServices.llm.active('text').model
   const needsVision = messages.some(
     (message) =>
       Array.isArray(message.content) && message.content.some((part) => part.type === 'image')
@@ -176,14 +175,8 @@ export async function generateDesktopMessages(
       ...(needsVision ? { vision: true } : {}),
       ...(options.thinking === undefined ? {} : { thinking: options.thinking })
     },
-    // A selected remote route is an explicit provider boundary. Shared still owns capability and
-    // route resolution, but it must report an unsupported selected route instead of silently
-    // substituting another catalog model from that provider.
-    allowFallback:
-      options.allowFallback ??
-      ((options.operation?.type ?? 'text') !== 'text' || activeTextModel?.source !== 'remote'),
-    routeId: options.routeId,
-    partialOutputPolicy: 'discard-and-fallback'
+    // Fallback and partial-output handling are profile facts; shared fills them at the entry.
+    routeId: options.routeId
   }
   const unregister = options.toolExecution
     ? desktopToolExecutor.register(turnId, options.toolExecution)
@@ -206,10 +199,9 @@ export function generateDesktopText(
 
 export async function generateDesktopOperation(
   operation: GenerationOperation,
-  options: Pick<
-    DesktopGenerationOptions,
-    'profile' | 'identity' | 'events' | 'signal' | 'timeoutMs' | 'allowFallback'
-  > & { routeId?: string } = {}
+  options: Pick<DesktopGenerationOptions, 'profile' | 'identity' | 'events' | 'signal'> & {
+    routeId?: string
+  } = {}
 ): Promise<GenerationResult> {
   await desktopModelServices.refresh()
   const modality = operation.type === 'classifier' ? 'classifier' : operation.type
@@ -222,9 +214,7 @@ export async function generateDesktopOperation(
       operation,
       identity: options.identity ?? { conversationId: turnId, turnId },
       routeId,
-      allowFallback: options.allowFallback ?? false,
-      signal: options.signal,
-      timeoutMs: options.timeoutMs
+      signal: options.signal
     },
     options.events
   )

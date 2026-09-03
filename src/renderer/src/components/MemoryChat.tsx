@@ -111,6 +111,7 @@ import {
   subscribeDesktopChatStream,
   type DesktopChatSession
 } from '@renderer/lib/desktop-chat-session'
+import { desktopChatTurnProfile } from '@renderer/lib/desktop-chat-session-policy'
 import {
   parseImageMemoryGuardError,
   type ImageGenerationJobContract,
@@ -630,9 +631,7 @@ function restoredChatSessionTurns(
           operation: imageOperation
             ? { type: 'image', prompt: userMessage.content }
             : { type: 'text' },
-          allowFallback: !imageOperation,
-          partialOutputPolicy: 'preserve-and-stop',
-          request: {}
+          request: { profile: desktopChatTurnProfile(imageOperation ? 'image' : 'chat') }
         }
       }
     ]

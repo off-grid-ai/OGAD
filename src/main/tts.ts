@@ -177,9 +177,8 @@ export async function synthesize(
     const result = await generateDesktopOperation(
       { type: 'voice', text, voice },
       {
-        identity: { conversationId: turnId, turnId },
-        timeoutMs: 10 * 60 * 1000,
-        allowFallback: false
+        profile: 'voice-synthesis',
+        identity: { conversationId: turnId, turnId }
       }
     )
     if (result.output.type !== 'voice') throw new Error('The voice engine returned no audio.')
