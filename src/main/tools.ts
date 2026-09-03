@@ -50,6 +50,7 @@ import { DEFAULT_MAX_TOOL_CALLS } from '@offgrid/models'
 import { generateDesktopMessages } from './desktop-generation'
 import { desktopGenerationObservations } from './model-generation-adapters'
 import { desktopRag } from './composition/application-access'
+import { requireApplicationOutcome } from './composition/application-outcome'
 import type { GenerationMetrics } from '../shared/generation-metrics'
 import {
   desktopToolCallLimit,
@@ -331,7 +332,8 @@ const TOOLS: ToolDef[] = [
       }
       try {
         const handler = makeSearchKnowledgeBaseHandler({
-          searchProject: (projectId, query) => desktopRag.search(projectId, query)
+          searchProject: async (projectId, query) =>
+            requireApplicationOutcome(await desktopRag.search(projectId, query))
         })
         return { text: await handler({ query: String(a.query ?? '') }, ctx.projectId) }
       } catch (e) {

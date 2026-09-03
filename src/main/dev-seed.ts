@@ -19,11 +19,8 @@ import { createProject, deleteProject } from './rag/store'
 import { saveArtifact, listArtifacts, deleteArtifact } from './artifacts'
 import { saveSkill } from './skills'
 import { addConnector, listConnectors } from './mcp'
-import {
-  desktopModels,
-  desktopRag,
-  modelsFailureMessage
-} from './composition/application-access'
+import { desktopModels, desktopRag, modelsFailureMessage } from './composition/application-access'
+import { requireApplicationOutcome } from './composition/application-outcome'
 import { generateDesktopText } from './desktop-generation'
 import { generateImage, listImageModels } from './imagegen'
 
@@ -142,9 +139,11 @@ async function seedKnowledge(): Promise<void> {
     try {
       f.write()
       const p = path.join(dir, f.name)
-      await desktopRag.addDocument(
-        { projectId: PROJECT_ID, path: p, fileName: f.name, size: fs.statSync(p).size },
-        () => {}
+      requireApplicationOutcome(
+        await desktopRag.addDocument(
+          { projectId: PROJECT_ID, path: p, fileName: f.name, size: fs.statSync(p).size },
+          () => undefined
+        )
       )
       console.log('[seed] indexed', f.name)
     } catch (e) {

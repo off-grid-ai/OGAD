@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { listProjects, createProject, updateProject, deleteProject } from './rag'
 import { desktopRag } from './composition/application-access'
 import { desktopApplication } from './composition/application'
+import { requireApplicationOutcome } from './composition/application-outcome'
 import { attachmentPickerExtensions } from '@offgrid/sync'
 
 // Built from the shared attachment classifier (@offgrid/sync) so the picker allowlist
@@ -37,8 +38,8 @@ export function setupRagIPC(): void {
   })
 
   // --- Knowledge base (documents) ------------------------------------------
-  ipcMain.handle('projects:list-documents', (_e, projectId: string) =>
-    desktopRag.listDocuments(projectId)
+  ipcMain.handle('projects:list-documents', async (_e, projectId: string) =>
+    requireApplicationOutcome(await desktopRag.listDocuments(projectId))
   )
 
   ipcMain.handle('projects:add-documents', async (e, projectId: string) => {
@@ -53,19 +54,15 @@ export function setupRagIPC(): void {
     let added = 0
     for (const filePath of result.filePaths) {
       const name = filePath.split('/').pop() ?? filePath
-      let size = 0
       try {
-        size = fs.statSync(filePath).size
-      } catch {
-        /* ignore */
-      }
-      try {
-        await desktopRag.addDocument(
+        const size = fs.statSync(filePath).size
+        const indexed = await desktopRag.addDocument(
           { projectId, path: filePath, fileName: name, size },
           (stage) => {
             e.sender.send('projects:index-progress', { projectId, name, stage })
           }
         )
+        requireApplicationOutcome(indexed)
         added++
       } catch (err) {
         e.sender.send('projects:index-progress', {
@@ -79,11 +76,11 @@ export function setupRagIPC(): void {
     return { added }
   })
 
-  ipcMain.handle('projects:toggle-document', (_e, docId: number, enabled: boolean) =>
-    desktopRag.setDocumentEnabled(docId, enabled)
+  ipcMain.handle('projects:toggle-document', async (_e, docId: number, enabled: boolean) =>
+    requireApplicationOutcome(await desktopRag.setDocumentEnabled(docId, enabled))
   )
 
-  ipcMain.handle('projects:delete-document', (_e, docId: number) =>
-    desktopRag.removeDocument(docId)
+  ipcMain.handle('projects:delete-document', async (_e, docId: number) =>
+    requireApplicationOutcome(await desktopRag.removeDocument(docId))
   )
 }

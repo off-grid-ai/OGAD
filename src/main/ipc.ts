@@ -108,6 +108,7 @@ import {
   unloadDesktopModel
 } from './composition/application-access'
 import { desktopGenerationObservations } from './model-generation-adapters'
+import { requireApplicationOutcome } from './composition/application-outcome'
 // import { llm } from './llm'; // Moved to dynamic import to support ESM
 
 type ResponseGenerationResult = NormalizedTextResponse<GenerationMetrics>
@@ -836,7 +837,8 @@ export function setupIPC() {
         )
         const { generation: completion, context } = await runProjectChatTurn(
           {
-            searchProject: (id, message, options) => desktopRag.search(id, message, options),
+            searchProject: async (id, message, options) =>
+              requireApplicationOutcome(await desktopRag.search(id, message, options)),
             generate: ({ prompt }) => streamAnswer(event, streamId, prompt, thinking, imgs)
           },
           {
