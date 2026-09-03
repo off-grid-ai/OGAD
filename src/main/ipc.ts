@@ -230,8 +230,8 @@ async function streamAnswer(
     requiredCapabilities: {
       ...(images.length ? { vision: true } : {})
     },
-    // The user's toggle; shared derives the thinking capability the route needs from it.
-    ...(thinking ? { reasoning: { enabled: true } } : {}),
+    // The user's toggle asks for a route that can reason; shared derives the capability from it.
+    ...(thinking ? { reasoning: { enabled: true, requireCapableRoute: true } } : {}),
     allowFallback: true,
     partialOutputPolicy: 'discard-and-fallback' as const,
     ...(signal ? { signal } : {})
