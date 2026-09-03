@@ -25,11 +25,11 @@ import { modelPackageIdentity, type TransferredModelManifest } from '@offgrid/sy
 import {
   decodeModelRouteId,
   artifactVerificationError,
-  LocalModelImportService,
-  ModelActivationService,
-  ModelLibraryRemovalService,
-  ModelTransferRegistrationService,
-  ModelMetadataRepairCommandService,
+  type LocalModelImportService,
+  type ModelActivationService,
+  type ModelLibraryRemovalService,
+  type ModelTransferRegistrationService,
+  type ModelMetadataRepairCommandService,
   type ModelLibraryRemovalTarget,
   mergeCatalog,
   installedIds,
@@ -58,6 +58,13 @@ import { getRemoteVisionServer } from './vision/remote-vision-server'
 import { desktopModelServices } from './model-service-access'
 import { registerDesktopModelManagerPorts } from './model-manager-ports'
 import { desktopModelSelectionPersistence } from './model-selection-persistence'
+import {
+  activeProjectorRepairService,
+  localModelImportService,
+  modelActivationService,
+  modelLibraryRemovalService,
+  modelTransferRegistration
+} from './composition/model-library'
 import { platformFetch } from '@offgrid/models/fetch'
 import { desktopImageRuntimeIdentity } from './models/image-runtime-identity'
 import { LocalModelRegistry, type LocalModelRegistryEntry } from './models/local-model-registry'
@@ -569,7 +576,9 @@ async function resolveDesktopRemoval(modelId: string): Promise<DesktopRemovalTar
     : null
 }
 
-const modelLibraryRemoval = new ModelLibraryRemovalService({
+/** Desktop file, runtime, and registry I/O for model removal. Shared owns the transaction. */
+export function desktopModelLibraryRemovalPorts(): ConstructorParameters<typeof ModelLibraryRemovalService>[0] {
+  return {
   resolve: resolveDesktopRemoval,
   selected: selectedModelRoutes,
   async removeFile(fileName) {
@@ -600,11 +609,14 @@ const modelLibraryRemoval = new ModelLibraryRemovalService({
     }
   },
   clearSelection: (modality) => desktopModelServices.select(modality, null)
-})
+}
+}
+
+const modelLibraryRemoval = (): ModelLibraryRemovalService => modelLibraryRemovalService()
 
 /** Delete a model package through the Shared removal and selection-cleanup transaction. */
 export function deleteModel(modelId: string): Promise<DeleteModelResult> {
-  return modelLibraryRemoval.remove(modelId)
+  return modelLibraryRemoval().remove(modelId)
 }
 
 async function setActiveLlamaModel(
@@ -779,15 +791,24 @@ async function resolveActiveModelProjectorRepair(): Promise<{
   }
 }
 
-const activeProjectorRepair = new ModelMetadataRepairCommandService({
+export type DesktopProjectorRepair = Awaited<ReturnType<typeof resolveActiveModelProjectorRepair>> extends infer R | null ? NonNullable<R> : never
+
+export function desktopActiveProjectorRepairPorts(): ConstructorParameters<
+  typeof ModelMetadataRepairCommandService<DesktopProjectorRepair>
+>[0] {
+  return {
   resolve: resolveActiveModelProjectorRepair,
   persist: (repair) => desktopModelSelectionPersistence.projectLegacyTextConfig(repair),
   reload: () => llm.reloadModel(),
   refresh: () => desktopModelServices.refresh().then(() => undefined)
-})
+}
+}
+
+const activeProjectorRepair = (): ModelMetadataRepairCommandService<DesktopProjectorRepair> =>
+  activeProjectorRepairService()
 
 export function reconcileActiveModelProjector(): Promise<boolean> {
-  return activeProjectorRepair.execute()
+  return activeProjectorRepair().execute()
 }
 
 /**
@@ -841,23 +862,27 @@ async function resolveDesktopActivation(
   return kind ? { kind, supportsRequestedKind } : null
 }
 
-const modelActivation = new ModelActivationService({
+export function desktopModelActivationPorts(): ConstructorParameters<typeof ModelActivationService>[0] {
+  return {
   resolve: resolveDesktopActivation,
   select: (modality, modelId) => desktopModelServices.select(modality, modelId)
-})
+}
+}
+
+const modelActivation = (): ModelActivationService => modelActivationService()
 
 export function activateModel(
   modelId: string,
   requestedKind?: string
 ): Promise<{ success: boolean; error?: string }> {
-  return modelActivation.activate(modelId, requestedKind)
+  return modelActivation().activate(modelId, requestedKind)
 }
 
 export function setActiveModalChoice(
   kind: string,
   modelId: string | null
 ): Promise<{ success: boolean; error?: string }> {
-  return modelActivation.selectModal(kind, modelId)
+  return modelActivation().selectModal(kind, modelId)
 }
 
 export function getActiveModalities(): { text: string | null } & Record<Modality, string | null> {
@@ -924,11 +949,16 @@ async function transferredFilesOnDisk(
   return { files: resolved }
 }
 
-const transferredModelRegistration = new ModelTransferRegistrationService({
+/** Registry and filesystem I/O for a transferred model, scoped to one models directory. */
+export function desktopModelTransferRegistrationPorts(
+  dir: () => string,
+  afterRegistered?: () => Promise<void>
+): ConstructorParameters<typeof ModelTransferRegistrationService>[0] {
+  return {
   validateFiles: async (manifest) =>
     (
       await transferredFilesOnDisk(
-        llm.getModelsDir(),
+        dir(),
         manifest.files.map((file) => ({ name: file.name, sizeBytes: file.sizeBytes }))
       )
     ).error ?? null,
@@ -936,13 +966,17 @@ const transferredModelRegistration = new ModelTransferRegistrationService({
     const { CATALOG } = await import('@offgrid/models')
     return CATALOG.find((model) => model.id === modelId)?.files.map((file) => file.name) ?? null
   },
-  readLocalModels: () => getLocalModels(),
-  writeLocalModels: (models) => saveLocalModels([...models]),
-  recordDownloaded: (model) => recordDownloaded(llm.getModelsDir(), model),
-  hasDownloaded: (id) => Boolean(findDownloaded(llm.getModelsDir(), id)),
+  readLocalModels: () => getLocalModels(dir()),
+  writeLocalModels: (models) => saveLocalModels([...models], dir()),
+  recordDownloaded: (model) => recordDownloaded(dir(), model),
+  hasDownloaded: (id) => Boolean(findDownloaded(dir(), id)),
   packageIdentity: (manifest) => modelPackageIdentity(manifest as TransferredModelManifest),
-  afterRegistered: finalizeInstalledModelArtifacts
-})
+  ...(afterRegistered ? { afterRegistered } : {})
+}
+}
+
+const transferredModelRegistration = (): ModelTransferRegistrationService =>
+  modelTransferRegistration(() => llm.getModelsDir(), finalizeInstalledModelArtifacts)
 
 /**
  * Resolve one installed, file-backed model for device transfer. Runtime caches such as mflux are
@@ -1001,7 +1035,7 @@ export async function registerTransferredModel(
 ): Promise<{ success: boolean; error?: string; id?: string }> {
   if (dir === llm.getModelsDir()) {
     try {
-      return await transferredModelRegistration.register(manifest)
+      return await transferredModelRegistration().register(manifest)
     } catch (error) {
       return {
         success: false,
@@ -1012,24 +1046,7 @@ export async function registerTransferredModel(
       }
     }
   }
-  const scoped = new ModelTransferRegistrationService({
-    validateFiles: async (input) =>
-      (
-        await transferredFilesOnDisk(
-          dir,
-          input.files.map((file) => ({ name: file.name, sizeBytes: file.sizeBytes }))
-        )
-      ).error ?? null,
-    async catalogFiles(modelId) {
-      const { CATALOG } = await import('@offgrid/models')
-      return CATALOG.find((model) => model.id === modelId)?.files.map((file) => file.name) ?? null
-    },
-    readLocalModels: () => getLocalModels(dir),
-    writeLocalModels: (models) => saveLocalModels([...models], dir),
-    recordDownloaded: (model) => recordDownloaded(dir, model),
-    hasDownloaded: (id) => Boolean(findDownloaded(dir, id)),
-    packageIdentity: (input) => modelPackageIdentity(input as TransferredModelManifest)
-  })
+  const scoped = modelTransferRegistration(() => dir)
   return scoped.register(manifest)
 }
 
@@ -1044,7 +1061,8 @@ function localProtectedNames(): Set<string> {
   return s
 }
 
-const localModelImports = new LocalModelImportService({
+export function desktopLocalModelImportPorts(): ConstructorParameters<typeof LocalModelImportService>[0] {
+  return {
   async inspect(source) {
     if (!source || !source.toLowerCase().endsWith('.gguf')) {
       return { fileName: '', sizeBytes: 0, valid: false, error: 'Not a .gguf file' }
@@ -1089,14 +1107,17 @@ const localModelImports = new LocalModelImportService({
   },
   readLocalModels: () => getLocalModels(),
   writeLocalModels: (models) => saveLocalModels([...models])
-})
+}
+}
+
+const localModelImports = (): LocalModelImportService => localModelImportService()
 
 /** Import and register one local GGUF through the Shared model-library transaction. */
 export function importLocalModel(
   source: string,
   onProgress?: ProgressCb
 ): Promise<{ success: boolean; error?: string; id?: string }> {
-  return localModelImports.import(source, onProgress)
+  return localModelImports().import(source, onProgress)
 }
 
 // ---------------------------------------------------------------------------
