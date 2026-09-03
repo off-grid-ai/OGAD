@@ -4,7 +4,8 @@
 import { ipcMain, dialog, BrowserWindow } from 'electron'
 import fs from 'fs'
 import { randomUUID } from 'node:crypto'
-import { ragService, listProjects, createProject, updateProject, deleteProject } from './rag'
+import { listProjects, createProject, updateProject, deleteProject } from './rag'
+import { desktopRag } from './composition/application-access'
 import { attachmentPickerExtensions } from '@offgrid/sync'
 
 // Built from the shared attachment classifier (@offgrid/sync) so the picker allowlist
@@ -33,7 +34,7 @@ export function setupRagIPC(): void {
 
   // --- Knowledge base (documents) ------------------------------------------
   ipcMain.handle('projects:list-documents', (_e, projectId: string) =>
-    ragService.listDocuments(projectId)
+    desktopRag.listDocuments(projectId)
   )
 
   ipcMain.handle('projects:add-documents', async (e, projectId: string) => {
@@ -55,7 +56,7 @@ export function setupRagIPC(): void {
         /* ignore */
       }
       try {
-        await ragService.indexDocument(
+        await desktopRag.addDocument(
           { projectId, path: filePath, fileName: name, size },
           (stage) => {
             e.sender.send('projects:index-progress', { projectId, name, stage })
@@ -75,10 +76,10 @@ export function setupRagIPC(): void {
   })
 
   ipcMain.handle('projects:toggle-document', (_e, docId: number, enabled: boolean) =>
-    ragService.toggleDocument(docId, enabled)
+    desktopRag.setDocumentEnabled(docId, enabled)
   )
 
   ipcMain.handle('projects:delete-document', (_e, docId: number) =>
-    ragService.deleteDocument(docId)
+    desktopRag.removeDocument(docId)
   )
 }

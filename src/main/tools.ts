@@ -49,6 +49,7 @@ import { callHookAsync, HOOKS } from './bootstrap/hookRegistry'
 import { DEFAULT_MAX_TOOL_CALLS } from '@offgrid/models'
 import { generateDesktopMessages } from './desktop-generation'
 import { desktopGenerationObservations } from './model-generation-adapters'
+import { desktopRag } from './composition/application-access'
 import type { GenerationMetrics } from '../shared/generation-metrics'
 import {
   desktopToolCallLimit,
@@ -329,8 +330,9 @@ const TOOLS: ToolDef[] = [
         return { text: 'No active project — the knowledge base needs an open project.' }
       }
       try {
-        const { ragService } = await import('./rag')
-        const handler = makeSearchKnowledgeBaseHandler(ragService)
+        const handler = makeSearchKnowledgeBaseHandler({
+          searchProject: (projectId, query) => desktopRag.search(projectId, query)
+        })
         return { text: await handler({ query: String(a.query ?? '') }, ctx.projectId) }
       } catch (e) {
         return { text: 'Error searching the knowledge base: ' + (e as Error).message }

@@ -8,6 +8,7 @@ import { desktopExtraction } from '../rag/extractors'
 import { desktopVectorStore, projectExists } from '../rag/store'
 import { applicationShutdown } from '../shutdown'
 import { registerDesktopApplication } from './application-access'
+import { connectDesktopRagMutations } from './rag'
 
 export const desktopApplication = createOffGridApplication({
   models: { workspace: desktopModelWorkspace },
@@ -26,13 +27,19 @@ export const desktopApplication = createOffGridApplication({
 registerDesktopApplication(desktopApplication)
 
 let starting: ReturnType<typeof desktopApplication.start> | null = null
+let disconnectRagMutations: (() => void) | null = null
 
 export function startDesktopApplication(): ReturnType<typeof desktopApplication.start> {
-  starting ??= desktopApplication.start()
+  starting ??= desktopApplication.start().then((result) => {
+    disconnectRagMutations ??= connectDesktopRagMutations(desktopApplication.rag)
+    return result
+  })
   return starting
 }
 
 export async function stopDesktopApplication(): Promise<void> {
+  disconnectRagMutations?.()
+  disconnectRagMutations = null
   await desktopApplication.stop()
   starting = null
 }

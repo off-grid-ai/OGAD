@@ -2,7 +2,8 @@ import type {
   ModelsFacade,
   ModelsFailure,
   OffGridApplication,
-  PartialGenerationState
+  PartialGenerationState,
+  RagFacade
 } from '@offgrid/application'
 import type {
   GenerationEvents,
@@ -28,6 +29,15 @@ export const desktopModels: ModelsFacade = new Proxy({} as ModelsFacade, {
   get: (_target, property) => {
     const facade = current().models
     const value = facade[property as keyof ModelsFacade]
+    return typeof value === 'function' ? value.bind(facade) : value
+  }
+})
+
+/** Stable access to the Shared RAG facade without a composition-root import cycle. */
+export const desktopRag: RagFacade = new Proxy({} as RagFacade, {
+  get: (_target, property) => {
+    const facade = current().rag
+    const value = facade[property as keyof RagFacade]
     return typeof value === 'function' ? value.bind(facade) : value
   }
 })

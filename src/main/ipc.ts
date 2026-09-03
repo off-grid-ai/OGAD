@@ -98,6 +98,7 @@ import { ModelServerError } from './llm/http-post'
 import { mimeForExt } from './mime'
 import {
   desktopModels,
+  desktopRag,
   generateWithDesktopModels,
   selectDesktopModel,
   unloadDesktopModel
@@ -815,7 +816,6 @@ export function setupIPC() {
       // Project-scoped chat: retrieve from the project's knowledge base (uploaded
       // docs + optionally captured memory) AND reference sibling chats in the project.
       if (projectId) {
-        const { ragService } = await import('./rag')
         const { listProjects } = await import('./rag/store')
         const { getProjectChatHistory } = await import('./database')
         const { PROJECT_CHAT_POLICY, runProjectChatTurn } = await import('@offgrid/rag')
@@ -828,7 +828,7 @@ export function setupIPC() {
         )
         const { generation: completion, context } = await runProjectChatTurn(
           {
-            searchProject: (id, message, options) => ragService.searchProject(id, message, options),
+            searchProject: (id, message, options) => desktopRag.search(id, message, options),
             generate: ({ prompt }) => streamAnswer(event, streamId, prompt, thinking, imgs)
           },
           {
