@@ -312,7 +312,10 @@ export type UpdateCheckResult =
  * Run a one-shot update check and resolve with a definite outcome (instead of the
  * fire-and-forget event model), so the Settings button can show a clear result.
  */
-export function checkForUpdates(timeoutMs = 30_000): Promise<UpdateCheckResult> {
+/** A software update check is an HTTP round trip to the release feed, not model work. */
+const UPDATE_CHECK_TIMEOUT_MS = 30_000
+
+export function checkForUpdates(timeoutMs = UPDATE_CHECK_TIMEOUT_MS): Promise<UpdateCheckResult> {
   // electron-updater only works in a packaged, signed app (it reads app-update.yml,
   // bundled at build time). In a dev/unpackaged run there's nothing to check
   // against, so it would silently hang to the timeout — surface the real reason

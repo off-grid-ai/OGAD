@@ -11,8 +11,7 @@
  * the app is single-instance, so there is never a second live worker).
  */
 import {
-  HandlerRegistry,
-  UseEngine,
+  type HandlerRegistry,
   type ActionSource,
   type ProposeOutcome,
   type Rail,
@@ -22,6 +21,7 @@ import {
   type TerminalChatActionOutcome
 } from '@offgrid/use'
 import { getDB } from '../database'
+import { createHandlerRegistry, createUseEngine } from '../composition/use-engine'
 import { callHook, hasHook, HOOKS, type ChatActionResult } from '../bootstrap/hookRegistry'
 import { shell } from 'electron'
 import { makeUseDriver } from './use-driver'
@@ -73,7 +73,7 @@ export interface ActionsRuntime {
 }
 
 export function buildRegistry(run: typeof runNativeAction): HandlerRegistry {
-  const registry = new HandlerRegistry()
+  const registry = createHandlerRegistry()
   const verifiers = makeReadBackVerifiers(run)
   /** Undo = delete the exact effect the create returned (Approval UX v2):
    *  the capability that makes these reversible, which is what lets them
@@ -297,7 +297,7 @@ export function getActionsRuntime(): ActionsRuntime {
       forcedRail: parseForcedRail(process.env.OFFGRID_COMPUTER_RAIL)
     })(action)
   }
-  const engine = new UseEngine({
+  const engine = createUseEngine({
     driver: makeUseDriver(getDB()),
     // Read-back verification reads the world back through the platform's own
     // surface: the Swift helper's list verbs on macOS, Outlook COM on

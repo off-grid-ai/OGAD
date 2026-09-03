@@ -29,7 +29,6 @@ import os from 'os'
 import path from 'path'
 import { randomUUID } from 'crypto'
 import {
-  GatewayAsyncRequestStore,
   buildGatewayModalities,
   classifyGatewayImageReference as classifyRef,
   gatewayErrorBody as errBody,
@@ -70,6 +69,7 @@ import { decodeDataUrl, mimeFromExt, toDataUrl } from './model-server/image-byte
 import { ModelServerError } from './llm/http-post'
 import { writeDiagnosticLog } from './diagnostics-log'
 import { DEFAULT_IMAGE_MIME } from '@offgrid/models'
+import { gatewayAsyncRequests } from './composition/gateway'
 
 const UPSTREAM_HOST = '127.0.0.1'
 // The upstream llama-server port is LIVE, not fixed: llm.getPort() moves off LLAMA_SERVER_PORT when
@@ -116,7 +116,7 @@ function json(res: http.ServerResponse, status: number, body: unknown): void {
 // We model the long operation as a *resource you read*, not a `/poll` verb —
 // that's the RESTful async request-reply pattern.
 
-const requests = new GatewayAsyncRequestStore()
+const requests = gatewayAsyncRequests()
 
 /** 202 Accepted with the request resource + Location for polling. */
 function dispatchAsync(res: http.ServerResponse, r: GatewayAsyncRequest): void {

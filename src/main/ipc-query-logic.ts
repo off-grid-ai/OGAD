@@ -52,15 +52,15 @@ export const STOPWORDS = new Set([
 ])
 
 /** Tokenise a free-text query: lowercase, split on whitespace, strip punctuation
- *  (keep a-z0-9_-), drop tokens < 3 chars and STOPWORDS, de-dup, cap at maxTokens. */
-export function tokenizeQuery(query: string, maxTokens: number = 6): string[] {
+ *  (keep a-z0-9_-), drop tokens < 3 chars and STOPWORDS, de-dup, cap at maxTerms. */
+export function tokenizeQuery(query: string, maxTerms: number = 6): string[] {
   const tokens = query
     .toLowerCase()
     .split(/\s+/)
     .map((t) => t.replace(/[^a-z0-9_-]/g, ''))
     .filter((t) => t.length >= 3)
     .filter((t) => !STOPWORDS.has(t))
-  return Array.from(new Set(tokens)).slice(0, maxTokens)
+  return Array.from(new Set(tokens)).slice(0, maxTerms)
 }
 
 /** Quote one term as an FTS5 phrase literal, doubling any embedded quote per FTS5 escaping.
@@ -75,8 +75,8 @@ function quoteFtsPhrase(term: string): string {
  *  whole rag:chat retrieval; quoting removes that entire class of syntax error. When tokenisation
  *  yields nothing (all stopwords / too short), fall back to the whole text as one quoted phrase so
  *  the fallback can't throw either. */
-export function ftsMatchExpression(query: string, maxTokens: number = 6): string {
-  const tokens = tokenizeQuery(query, maxTokens)
+export function ftsMatchExpression(query: string, maxTerms: number = 6): string {
+  const tokens = tokenizeQuery(query, maxTerms)
   if (tokens.length > 0) {
     return tokens.map(quoteFtsPhrase).join(' OR ')
   }

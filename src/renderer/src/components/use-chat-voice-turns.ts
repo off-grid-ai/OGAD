@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { transcriptionRecoveryMessage } from '@offgrid/models'
 import {
-  SpeechEndpointTimer,
   audioFilename,
   chooseRecorderMime,
+  type SpeechEndpointTimer,
   type VoiceTurnMode
 } from '@offgrid/speech'
+import { createSpeechEndpointTimer } from '@renderer/composition/speech-endpoint'
 
 /*
  * These effects are transition inputs to one voice state machine: mode, generation, playback, and
@@ -342,7 +343,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
           analyser.fftSize = 2048
           source.connect(analyser)
           const samples = new Float32Array(analyser.fftSize)
-          const endpoint = new SpeechEndpointTimer(() => finishCaptureRef.current(false))
+          const endpoint = createSpeechEndpointTimer(() => finishCaptureRef.current(false))
           endpoint.begin(Date.now(), {
             handsFree: mode === 'handsfree',
             silenceAfterSpeechMs: current.silenceAfterSpeechMs

@@ -35,6 +35,9 @@ import {
 /** Off the LLM's 8439 so both engines can bind (they never run at once, but a
  *  lingering LLM shouldn't block the image server's port either). */
 const SD_SERVER_PORT = 8440
+/** How long sd-server may take to load a model before this device treats it as failed (see the
+ *  matching whisper-server rule; both belong in one shared engine readiness policy). */
+const SD_SERVER_READY_TIMEOUT_MS = 90_000
 
 /** Context (launch-time) knobs that pin a resident model. A change here means the
  *  server must be restarted to take effect. */
@@ -305,7 +308,7 @@ class SdServerService {
     this.activeKey = key
   }
 
-  private async waitForReady(timeoutMs = 90_000): Promise<void> {
+  private async waitForReady(timeoutMs = SD_SERVER_READY_TIMEOUT_MS): Promise<void> {
     const start = Date.now()
     for (;;) {
       let probeReady = false

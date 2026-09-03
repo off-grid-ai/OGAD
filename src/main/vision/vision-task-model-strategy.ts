@@ -29,10 +29,11 @@ import type { VisionGroundingInput, VisionGroundingResult } from './vision-agent
 import { currentRemoteScreenTaskSession } from '../actions/remote-screen-session'
 import { desktopModelServices } from '../model-services'
 import {
-  ComputerUseSessionApplicationService,
   resolveComputerUseRoleProjection,
-  type ComputerUseRoleSelection
+  type ComputerUseRoleSelection,
+  type ComputerUseSessionApplicationService
 } from '@offgrid/models/computer-use'
+import { createComputerUseSessionApplication } from '../composition/computer-use-session'
 
 export interface VisionTaskModelSession {
   adapter: VisionModelAdapter
@@ -212,7 +213,7 @@ function createVisionTaskModelService(
   VisionGroundingInput,
   VisionGroundingResult
 > {
-  return new ComputerUseSessionApplicationService({
+  return createComputerUseSessionApplication({
     strategy: dependencies.strategy,
     observeChatModel: () => observeModel(activeChatSelection(dependencies), dependencies, true),
     observeSpecialistModel: () => observeModel(specialistFamily(dependencies), dependencies),

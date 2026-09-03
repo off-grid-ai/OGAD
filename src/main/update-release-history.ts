@@ -1,5 +1,8 @@
 import { clean, lt, prerelease, rcompare, valid } from 'semver'
 
+/** Reading the release feed is an HTTP round trip, not model work. */
+const RELEASE_HISTORY_TIMEOUT_MS = 10_000
+
 const RELEASES_URL =
   'https://api.github.com/repos/off-grid-ai/off-grid-ai-desktop/releases?per_page=50'
 const RELEASE_DOWNLOAD_PREFIXES = [
@@ -100,7 +103,7 @@ export async function listPreviousUpdateReleases({
   currentVersion,
   platform,
   fetchImpl = fetch,
-  timeoutMs = 10_000
+  timeoutMs = RELEASE_HISTORY_TIMEOUT_MS
 }: ListPreviousUpdateReleasesOptions): Promise<PreviousUpdateRelease[]> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)

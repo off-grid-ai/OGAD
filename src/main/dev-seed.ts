@@ -302,7 +302,7 @@ export async function seedDemo(live = false): Promise<void> {
     let madeAny = false
     for (const model of models) {
       try {
-        const out = await generateImage({ prompt, model, width: 768, height: 512, steps: 18 })
+        const out = await generateImage({ prompt, model, width: 768, height: 512 })
         const id = chatTurn(
           `image-${slugify(model)}`,
           `Image · ${pretty(model)}`,

@@ -48,7 +48,14 @@ export type SetupProgress = GuidedSetupProgress
 export type SetupProgressCb = (p: SetupProgress) => void
 
 /** GET a localhost endpoint, parse JSON, with a short timeout. null on any failure. */
-function pingJson(port: number, path = '/health', timeoutMs = 1500): Promise<unknown | null> {
+/** An engine health probe answers in well under a second on a healthy machine; a slow answer is a failure. */
+const HEALTH_PROBE_TIMEOUT_MS = 1500
+
+function pingJson(
+  port: number,
+  path = '/health',
+  timeoutMs = HEALTH_PROBE_TIMEOUT_MS
+): Promise<unknown | null> {
   return new Promise((resolve) => {
     const req = http.get({ host: '127.0.0.1', port, path, timeout: timeoutMs }, (res) => {
       if (!res.statusCode || res.statusCode >= 400) {

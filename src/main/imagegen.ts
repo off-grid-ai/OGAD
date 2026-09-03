@@ -7,7 +7,7 @@ import { spawn, type ChildProcess } from 'child_process'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
-import { NodeDownloadBridge } from '@offgrid/models/node'
+import { nodeDownloadBridge } from './composition/node-download-bridge'
 import {
   generatedImageSidecarPath,
   readGeneratedImageSidecar,
@@ -249,7 +249,7 @@ export async function downloadLora(
   const dest = resolveOwnedDestination(dir, filename)
   if (!dest || !hasCheckpointExt(filename)) throw new Error('Invalid LoRA filename.')
   if (fs.existsSync(dest) && fs.statSync(dest).size > 0) return dest
-  const bridge = new NodeDownloadBridge(dir)
+  const bridge = nodeDownloadBridge(dir)
   await bridge.download(url, dest, {
     onProgress: (written, total) => {
       if (total > 0) onProgress?.(Math.round((written / total) * 100))
