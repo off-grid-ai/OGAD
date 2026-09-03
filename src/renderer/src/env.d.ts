@@ -238,7 +238,7 @@ interface RendererAPIOverrides {
   // Keygen licensing (activation + status for the upgrade/settings UI)
   license?: {
     status: () => Promise<ProLicenseInfo>
-    activate: (key: string) => Promise<import('@offgrid/sync').PersonalMeshActivationResult>
+    activate: (key: string) => Promise<import('@offgrid/application').PersonalMeshActivationResult>
     listDevices: () => Promise<
       Array<{
         id: string
