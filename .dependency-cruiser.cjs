@@ -101,6 +101,14 @@ module.exports = {
       to: { path: '^src/main' }
     },
     {
+      name: 'presentation-not-to-raw-rag-or-use',
+      comment:
+        'Presentation reads RAG and Use through @offgrid/application facades. Shared domain packages are composition and platform-adapter dependencies, not renderer dependencies.',
+      severity: 'error',
+      from: { path: '^(src/renderer/|pro/renderer/)' },
+      to: { path: '^\\.\\./shared/packages/(rag|use)/' }
+    },
+    {
       name: 'not-to-test',
       comment:
         'Production code must not import test files (they would ship, dragging fixtures in).',
