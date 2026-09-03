@@ -120,7 +120,8 @@ function normalizeServer(
     model: normalized.selections?.text?.trim() || '',
     selections: normalized.selections ?? {},
     catalog: normalized.catalog ?? {},
-    screenFramesAllowed: normalized.screenFramesAllowed === true
+    screenFramesAllowed: normalized.screenFramesAllowed === true,
+    ...(normalized.enabled === false ? { enabled: false } : {})
   }
 }
 
