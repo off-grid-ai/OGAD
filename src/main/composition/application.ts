@@ -14,9 +14,10 @@ import {
   forwardDesktopAutomationEvent
 } from '../tasks/task-history'
 import { createDesktopUsePorts, observeActionOutcome } from '../actions/use-runtime'
+import { createDesktopGuidedSetupPorts } from './guided-setup'
 
 export const desktopApplication = createOffGridApplication({
-  models: { workspace: desktopModelWorkspace },
+  models: { workspace: desktopModelWorkspace, guidedSetup: createDesktopGuidedSetupPorts() },
   rag: {
     store: desktopVectorStore,
     embeddings: {
