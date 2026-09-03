@@ -1,4 +1,5 @@
 import type { ChatStreamTool, ProjectedSyncedTool } from '@offgrid/sync'
+import { toolWorkStatus, type ToolWorkStatus } from '@offgrid/models'
 import { CaretDown, Check, Circle, Warning, Wrench, X } from '@phosphor-icons/react'
 import { ChatMarkdown } from './ChatMarkdown'
 import { ChatThinkingBlock } from './ChatThinkingBlock'
@@ -31,7 +32,7 @@ interface ChatToolRowsProps {
   liveTask?: TaskSession
 }
 
-type WorkStatus = 'running' | 'complete' | 'failed' | 'cancelled' | 'needs attention'
+type WorkStatus = ToolWorkStatus
 
 const PROPOSAL_STAGE_LABELS: Record<string, string> = {
   start: 'Started proposal',
@@ -121,18 +122,14 @@ function workStepLabel(tool: DisplayTool): string {
   return TOOL_LABELS[key] ?? titleFromIdentifier(key)
 }
 
+/** Project this row's shape onto the one shared rule for what a tool call's status means. */
 function workStatus(tool: DisplayTool): WorkStatus {
-  const result = visibleToolResult(tool.result)
-  const key = normalizedToolKey(tool.name)
-  if ('error' in tool && tool.error?.trim()) return 'failed'
-  if (/^\s*(error|failed)\s*:/i.test(result)) return 'failed'
-  if (tool.status === 'failed') return 'failed'
-  if (tool.status === 'cancelled' && (key === 'request_approval' || key === 'action_approval'))
-    return 'needs attention'
-  if (tool.status === 'cancelled') return 'cancelled'
-  if (tool.status === 'pending') return 'needs attention'
-  if (tool.status === 'running') return 'running'
-  return 'complete'
+  return toolWorkStatus({
+    name: normalizedToolKey(tool.name),
+    status: tool.status,
+    result: visibleToolResult(tool.result),
+    error: 'error' in tool ? tool.error : undefined
+  })
 }
 
 function shortResult(tool: DisplayTool, status = workStatus(tool), taskSummary?: string): string {

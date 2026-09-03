@@ -242,7 +242,12 @@ export class ChatBoundary {
       transcription: null,
       computer_use: null
     })),
-    imageGenStatus: vi.fn(async () => ({ available: false, models: [], active: '' })),
+    imageGenStatus: vi.fn(async () => ({
+      available: false,
+      models: [],
+      active: '',
+      defaultModel: null
+    })),
     cancelImageGen: vi.fn(),
     cancelRag: this.cancelRag,
     tasks: {

@@ -35,7 +35,11 @@ import {
   type FitTier,
   fitLevel,
   FIT_OK_FRAC,
-  modelControlSurfaceForKind
+  modelControlSurfaceForKind,
+  catalogEntryRank,
+  catalogTagTone,
+  visibleCatalogTags,
+  type CatalogTagTone
 } from '@offgrid/models'
 import {
   filterAndSort,
@@ -192,17 +196,12 @@ function fmtReleaseDate(iso?: string): string {
   return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
 }
 
-function featureRank(
-  m: { id?: string; credibility?: string; tags?: string[] },
-  recommendedId?: string | null
-): number {
-  // The model recommended for THIS machine's RAM sorts to the very top (above a
-  // plain 'Fast' pick). Then distilled few-step models (tagged "Fast") render in
-  // ~30s vs ~100s, so surface them next. Then our own org's models, then the rest.
-  if (recommendedId && m.id === recommendedId) return -1
-  if (m.tags?.some((t) => /^fast/i.test(t))) return 0
-  if (m.credibility !== 'offgrid') return 2
-  return 1
+// What a tag means is shared (catalogTagTone); how this surface paints it is not.
+const TAG_TONE_CLASS: Record<CatalogTagTone, string> = {
+  fast: 'border border-green-500/60 text-green-500',
+  light: 'border border-emerald-300/50 text-emerald-300',
+  challenger: 'text-amber-400',
+  plain: 'bg-neutral-800 text-neutral-500'
 }
 
 const MODE_LABELS: Record<string, string> = { txt2img: 'Text→Image', img2img: 'Image→Image' }
@@ -577,7 +576,8 @@ export function ModelsScreen({
       const rank = (x: { id: string }): number =>
         isActive(x.id) ? 0 : installed.includes(x.id) ? 1 : 2
       return (
-        rank(a) - rank(b) || featureRank(a, recommendedImageId) - featureRank(b, recommendedImageId)
+        rank(a) - rank(b) ||
+        catalogEntryRank(a, recommendedImageId) - catalogEntryRank(b, recommendedImageId)
       )
     })
 
@@ -625,7 +625,7 @@ export function ModelsScreen({
       .filter(Boolean)
       .join(' · ')
     const tier: FitTier = isHf ? 'easy' : ramTier(m)
-    const tags = (m.tags ?? []).filter((t) => !/tight|risky|fit/i.test(t))
+    const tags = visibleCatalogTags(m.tags)
     const comingSoon = m.availability === 'coming_soon'
     // The single image pick best-suited to THIS machine's RAM (Light on <=16GB,
     // full above) — a prominent filled-emerald badge, distinct from the outlined tags.
@@ -693,15 +693,7 @@ export function ModelsScreen({
               // the emerald brand accent so it reads as the recommended quick pick.
               // "Light" = a smaller/lower-memory quant — amber outline so it reads
               // as the memory-friendly variant (distinct from the emerald "Fast").
-              const isFast = /^fast/i.test(t)
-              const isLight = /^light$/i.test(t)
-              const cls = isFast
-                ? 'border border-green-500/60 text-green-500'
-                : isLight
-                  ? 'border border-emerald-300/50 text-emerald-300'
-                  : /challenger/i.test(t)
-                    ? 'text-amber-400'
-                    : 'bg-neutral-800 text-neutral-500'
+              const cls = TAG_TONE_CLASS[catalogTagTone(t)]
               return (
                 <span
                   key={t}

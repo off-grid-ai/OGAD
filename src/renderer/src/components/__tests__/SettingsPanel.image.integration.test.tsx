@@ -21,6 +21,7 @@ describe('<SettingsPanel/> image settings', () => {
       imageGenStatus: async () => ({
         available: true,
         active: 'dreamshaper-xl-v2-turbo.gguf',
+        defaultModel: 'dreamshaper-xl-v2-turbo.gguf',
         models: ['dreamshaper-xl-v2-turbo.gguf', 'juggernaut-xl-v9.gguf']
       }),
       getSettings: async () => ({

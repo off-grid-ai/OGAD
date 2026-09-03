@@ -19,7 +19,7 @@ import type {
   DesktopToolChatResponse,
   DesktopToolChatSessionInput
 } from './desktop-chat-session-contract'
-import { DEFAULT_IMAGE_MIME } from '@offgrid/models'
+import { DEFAULT_IMAGE_MIME, isCancellationError } from '@offgrid/models'
 
 export interface DesktopTurnExecution {
   input: DesktopAnyChatSessionInput
@@ -203,7 +203,7 @@ export class DesktopChatGenerationAdapter {
         ]
       })
     } catch (error) {
-      const cancelled = Boolean(context.signal?.aborted) || /cancel/i.test(this.errorMessage(error))
+      const cancelled = isCancellationError(error, context.signal)
       this.setDeferredImageToolOutcome(execution, requestIndex, {
         status: cancelled ? 'cancelled' : 'failed',
         result: cancelled

@@ -292,7 +292,8 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     imageGenStatus: vi.fn(async () => ({
       available: true,
       models: opts.models,
-      active: opts.active
+      active: opts.active,
+      defaultModel: opts.active
     })),
     cancelImageGen,
     // --- main-owned image job (the reattach-on-remount path) ---

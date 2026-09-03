@@ -30,7 +30,12 @@ function installApi(): { addRagMessage: AddRag } {
   const api = {
     isPro: false,
     ...preloadCapabilityFakes(),
-    imageGenStatus: vi.fn(async () => ({ available: true, models: ['sd'], active: 'sd' })),
+    imageGenStatus: vi.fn(async () => ({
+      available: true,
+      models: ['sd'],
+      active: 'sd',
+      defaultModel: 'sd'
+    })),
     cancelImageGen: vi.fn(),
     cancelRag: vi.fn(),
     onImageGenProgress: vi.fn(() => () => {}),

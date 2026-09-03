@@ -31,7 +31,7 @@ export function ImageSettingsTab(): React.JSX.Element {
     void Promise.all([window.api.imageGenStatus(), window.api.getSettings()])
       .then(([status, settings]) => {
         const available = status?.models ?? []
-        const active = status?.active ?? available[0] ?? ''
+        const active = status?.defaultModel ?? ''
         const saved = settings as ImageSettings
         setModels(available)
         setModel(active)

@@ -40,7 +40,12 @@ function installApi(): { addRagMessage: AddRagMessageBoundary } {
   const api = {
     isPro: false,
     ...preloadCapabilityFakes(),
-    imageGenStatus: vi.fn(async () => ({ available: false, models: [], active: '' })),
+    imageGenStatus: vi.fn(async () => ({
+      available: false,
+      models: [],
+      active: '',
+      defaultModel: null
+    })),
     cancelImageGen: vi.fn(),
     onImageGenProgress: vi.fn(() => () => {}),
     getRagConversations: vi.fn(async () => []),

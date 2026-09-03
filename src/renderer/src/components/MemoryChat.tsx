@@ -31,6 +31,7 @@ import {
 import type { VoiceTurnMode } from '@offgrid/speech'
 import {
   cleanImagePrompt,
+  isCancellationError,
   shouldAutoRouteImage,
   type ChatTurn,
   compactionNoticeText,
@@ -3144,18 +3145,8 @@ export function MemoryChat({
         ? rawModels.filter((model: unknown): model is string => typeof model === 'string')
         : []
       setImgModels(models)
-      // Skip the parked/slow Core ML dir (it would otherwise win on an "sdxl" name
-      // match and default the composer to a non-distilled model).
-      const usable = models.filter((m) => !/coreml/i.test(m))
-      const preferred =
-        usable.find((m) => /dreamshaper/i.test(m)) ||
-        usable.find((m) => /lightning|turbo/i.test(m)) ||
-        usable.find((m) => /z[-_]?image/i.test(m)) ||
-        usable.find((m) => /sdxl|xl/i.test(m)) ||
-        usable[0] ||
-        models[0] ||
-        ''
-      setImgModel(s.active || preferred)
+      // Main resolves which installed model a composer starts on (the shared default rule).
+      setImgModel(typeof s.defaultModel === 'string' ? s.defaultModel : '')
     } catch {
       /* engine may be down; leave prior state */
     }
@@ -4016,7 +4007,7 @@ export function MemoryChat({
         const errorContent =
           memoryGuard?.message || (e as Error).message || 'Image generation failed.'
         // User-cancelled: just drop the loading state, no error bubble.
-        if (!/cancel/i.test(errorContent)) {
+        if (!isCancellationError(e)) {
           console.error('Image generation failed', e)
           setConvMessages(convId, (prev) => [
             ...prev,

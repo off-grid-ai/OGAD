@@ -12,6 +12,7 @@ import {
   IconChevronLeft,
   IconX
 } from '@tabler/icons-react'
+import { connectorFailureReason } from '@offgrid/models'
 import {
   CONNECTOR_CATALOG,
   CATEGORY_ORDER,
@@ -104,18 +105,6 @@ const LOGO_SLUGS: Record<string, string> = {
 }
 
 // How to obtain credentials for token-based connectors (shown in the connect form).
-
-// Turn raw transport errors into something human.
-function cleanError(detail: string): string {
-  const d = detail || ''
-  if (
-    /invalid_token|Missing or invalid access token|401|unauthorized|Authorization required/i.test(d)
-  )
-    return 'Sign-in required — click Test to authorize in your browser.'
-  if (/<!DOCTYPE html|<html|404|not found/i.test(d)) return 'Endpoint not reachable.'
-  if (/ENOTFOUND|ECONNREFUSED|fetch failed|network/i.test(d)) return 'Could not reach the server.'
-  return d.length > 140 ? d.slice(0, 140) + '…' : d
-}
 
 function Badge({
   id,
@@ -237,7 +226,7 @@ async function settleConnectionAttempt(
   }
   if (result?.ok) return { connected: true }
   await removePendingConnector(id)
-  return { connected: false, error: cleanError(result?.error ?? 'Could not connect') }
+  return { connected: false, error: connectorFailureReason(result?.error ?? 'Could not connect') }
 }
 
 export function ConnectorsScreen(): ReactElement {
@@ -545,7 +534,9 @@ export function ConnectorsScreen(): ReactElement {
                   </p>
                 )}
                 {!dNotReady && detail.status === 'error' && detail.status_detail && (
-                  <p className="text-[11px] text-red-400/80">{cleanError(detail.status_detail)}</p>
+                  <p className="text-[11px] text-red-400/80">
+                    {connectorFailureReason(detail.status_detail)}
+                  </p>
                 )}
 
                 {!dNotReady && detail.status === 'ok' && (

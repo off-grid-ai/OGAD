@@ -1,3 +1,5 @@
+import { isMMProjFile } from '@offgrid/models'
+
 // A download can fetch just a COMPANION file (e.g. adding a vision projector to a model
 // whose weights are already on disk — the downloader skips present files). Without a
 // label that reads as a full re-download of the whole model. Turn the current filename
@@ -9,7 +11,7 @@ export function companionDownloadLabel(currentFile?: string | null): string | nu
   if (!currentFile) {
     return null
   }
-  if (/mmproj|clip/i.test(currentFile)) {
+  if (isMMProjFile(currentFile)) {
     return 'vision projector'
   }
   return null

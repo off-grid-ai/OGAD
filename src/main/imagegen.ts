@@ -56,8 +56,13 @@ import {
   registerDesktopImageInspectionBoundary
 } from './imagegen/application-service'
 import { desktopImageRuntimeIdentity } from './models/image-runtime-identity'
-import { isGeneratedImageFile } from '@offgrid/models'
-import { Z_IMAGE_TEXT_ENCODER_PATTERN, Z_IMAGE_VAE_PATTERN, isGgufFile, isZImageModel } from '@offgrid/models'
+import { isGeneratedImageFile, selectInstalledImageModel } from '@offgrid/models'
+import {
+  Z_IMAGE_TEXT_ENCODER_PATTERN,
+  Z_IMAGE_VAE_PATTERN,
+  isGgufFile,
+  isZImageModel
+} from '@offgrid/models'
 
 function findSdCli(): string | null {
   for (const r of binRoots()) {
@@ -408,9 +413,7 @@ export async function inspectImageNativeExecution(input: {
   const zImageTextEncoder = zImage
     ? (findInModels(Z_IMAGE_TEXT_ENCODER_PATTERN) ?? undefined)
     : undefined
-  const zImageVae = zImage
-    ? (findInModels(Z_IMAGE_VAE_PATTERN) ?? undefined)
-    : undefined
+  const zImageVae = zImage ? (findInModels(Z_IMAGE_VAE_PATTERN) ?? undefined) : undefined
   const fullCheckpoint = coreml || zImage || ggufIsFullCheckpoint(model)
   const sourceDimensions = await inspectSourceDimensions(input.sourceImageUri)
 
@@ -454,20 +457,27 @@ export function imageGenStatus(): {
   available: boolean
   models: string[]
   active: string | null
+  /** The model a composer starts on: the active pick when installed, else the shared default rule. */
+  defaultModel: string | null
   reason?: string
 } {
   const models = listImageModels()
-  // The model an incoming request would actually load (the user's active pick,
-  // else the resolver default) — so the composer can default its picker to it and
-  // match the Active-models panel, instead of guessing from a name heuristic (which
-  // used to land on the parked Core ML model).
+  // The model an incoming request would actually load (the user's active pick) - so the composer
+  // can default its picker to it and match the Active-models panel.
   const active = activeImageModel()
+  // Which installed model to start a person on when nothing is active is one shared rule (it skips
+  // the parked Core ML directory and prefers the distilled quant that fits this machine's RAM).
+  const defaultModel = selectInstalledImageModel({
+    installed: models,
+    active,
+    ramGb: os.totalmem() / 1e9
+  })
   // Available if EITHER runtime is usable: sd-cli (with a model) or MLX/mflux.
   if (!findSdCli() && !mfluxAvailable())
-    return { available: false, models, active, reason: 'no image runtime found' }
+    return { available: false, models, active, defaultModel, reason: 'no image runtime found' }
   if (!models.length)
-    return { available: false, models, active, reason: 'no image model installed' }
-  return { available: true, models, active }
+    return { available: false, models, active, defaultModel, reason: 'no image model installed' }
+  return { available: true, models, active, defaultModel }
 }
 
 export type ImageGenParams = ImageGenerationRequestContract
