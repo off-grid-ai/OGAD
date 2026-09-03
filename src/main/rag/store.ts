@@ -215,6 +215,18 @@ export const desktopVectorStore: VectorStore = {
     )
   },
 
+  async listDocumentPage(afterId, limit) {
+    ensureRagStoreSchema()
+    const rows = getDB()
+      .prepare(`${DOCUMENT_SELECT} WHERE id > ? ORDER BY id ASC LIMIT ?`)
+      .all(afterId ?? 0, limit + 1) as RagDocumentRow[]
+    const page = rows.slice(0, limit)
+    return {
+      documents: page.map(mapDocument),
+      nextAfterId: rows.length > limit ? (page.at(-1)?.id ?? null) : null
+    }
+  },
+
   async setDocumentEnabled(docId, enabled) {
     ensureRagStoreSchema()
     getDB()
@@ -276,13 +288,6 @@ export function getRagDocumentBySyncId(syncId: string): RagDocument | undefined 
     | RagDocumentRow
     | undefined
   return row ? mapDocument(row) : undefined
-}
-
-export function listAllRagDocuments(): RagDocument[] {
-  ensureRagStoreSchema()
-  return (
-    getDB().prepare(`${DOCUMENT_SELECT} ORDER BY created_at ASC`).all() as RagDocumentRow[]
-  ).map(mapDocument)
 }
 
 export function projectExists(projectId: string): boolean {
