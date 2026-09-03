@@ -95,6 +95,7 @@ import { notifyRagConversationChanged } from './rag-conversation-events'
 import { readImages } from './llm/read-images'
 import { generateDesktopMessages, generateDesktopText } from './desktop-generation'
 import { ModelServerError } from './llm/http-post'
+import { mimeForExt } from './mime'
 // import { llm } from './llm'; // Moved to dynamic import to support ESM
 
 type ResponseGenerationResult = NormalizedTextResponse<GenerationMetrics>
@@ -1983,14 +1984,7 @@ export function setupIPC() {
       if (resolved !== root && !resolved.startsWith(root + path.sep)) return null
       const buf = await fs.promises.readFile(resolved)
       const ext = (resolved.split('.').pop() || '').toLowerCase()
-      const mime =
-        ext === 'pdf'
-          ? 'application/pdf'
-          : ext === 'png'
-            ? 'image/png'
-            : /^jpe?g$/.test(ext)
-              ? 'image/jpeg'
-              : 'application/octet-stream'
+      const mime = mimeForExt(ext, 'application/octet-stream')
       return `data:${mime};base64,${buf.toString('base64')}`
     } catch {
       return null

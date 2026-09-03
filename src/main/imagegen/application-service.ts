@@ -18,7 +18,11 @@ import {
   type ImageNativeExecutionFacts,
   type ImageRuntimeInspection,
   type RuntimeModel,
-  imageEnhancementGenerationRequest
+  imageEnhancementGenerationRequest,
+  imageMimeForPath,
+  persistedImageMime,
+  persistedImageMimeFromSignature,
+  type PersistedImageMime
 } from '@offgrid/models'
 import type {
   ImageGenerationJobStage,
@@ -112,53 +116,12 @@ function localImageArtifactPath(value: string, generatedImagesRoot: string): str
   return resolveExistingOwnedPath(generatedImagesRoot, candidate)
 }
 
-type PersistedImageMime = 'image/png' | 'image/jpeg' | 'image/webp'
-
-function imageMimeType(filePath: string): PersistedImageMime | null {
-  switch (path.extname(filePath).toLowerCase()) {
-    case '.png':
-      return 'image/png'
-    case '.jpg':
-    case '.jpeg':
-      return 'image/jpeg'
-    case '.webp':
-      return 'image/webp'
-    default:
-      return null
-  }
-}
-
-function supportedImageMime(value: string | null | undefined): PersistedImageMime | null {
-  const mime = value?.split(';', 1)[0]?.trim().toLowerCase()
-  return mime === 'image/png' || mime === 'image/jpeg' || mime === 'image/webp' ? mime : null
-}
-
-function imageMimeFromSignature(bytes: Buffer): PersistedImageMime | null {
-  if (
-    bytes.length >= 8 &&
-    bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
-  ) {
-    return 'image/png'
-  }
-  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
-    return 'image/jpeg'
-  }
-  if (
-    bytes.length >= 12 &&
-    bytes.subarray(0, 4).toString('ascii') === 'RIFF' &&
-    bytes.subarray(8, 12).toString('ascii') === 'WEBP'
-  ) {
-    return 'image/webp'
-  }
-  return null
-}
-
 function validateImageArtifact(bytes: Buffer, declaredMime: string | null | undefined): PersistedImageMime {
-  const expected = supportedImageMime(declaredMime)
+  const expected = persistedImageMime(declaredMime)
   if (!expected) {
     throw new Error('The image engine returned an unsupported image content type.')
   }
-  const detected = imageMimeFromSignature(bytes)
+  const detected = persistedImageMimeFromSignature(bytes)
   if (!detected) {
     throw new Error('The image engine returned unsupported or damaged image data.')
   }
@@ -176,7 +139,7 @@ export async function persistImageGenerationOutput(
   const localPath = localImageArtifactPath(output.path, directory)
   if (localPath) {
     const bytes = await fs.promises.readFile(localPath)
-    const mime = validateImageArtifact(bytes, imageMimeType(localPath))
+    const mime = validateImageArtifact(bytes, imageMimeForPath(localPath))
     return {
       ...output,
       path: localPath,

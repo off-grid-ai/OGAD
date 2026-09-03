@@ -1,4 +1,4 @@
-import { generationMessageText as sharedGenerationMessageText } from '@offgrid/models'
+import { DEFAULT_IMAGE_MIME, generationMessageText as sharedGenerationMessageText } from '@offgrid/models'
 import type { GenerationMessage, GenerationResult, RuntimeModel } from '@offgrid/models'
 import type { DesktopImageGenerationResponse } from './desktop-chat-session-contract'
 
@@ -32,7 +32,7 @@ export function desktopImageResult(
         {
           id: response.syncId,
           uri: response.path,
-          mimeType: 'image/png',
+          mimeType: DEFAULT_IMAGE_MIME,
           seed: response.seed
         }
       ]

@@ -69,6 +69,7 @@ import { guardProxyStreams } from './stream-guards'
 import { decodeDataUrl, mimeFromExt, toDataUrl } from './model-server/image-bytes'
 import { ModelServerError } from './llm/http-post'
 import { writeDiagnosticLog } from './diagnostics-log'
+import { DEFAULT_IMAGE_MIME } from '@offgrid/models'
 
 const UPSTREAM_HOST = '127.0.0.1'
 // The upstream llama-server port is LIVE, not fixed: llm.getPort() moves off LLAMA_SERVER_PORT when
@@ -196,7 +197,7 @@ function fetchImage(ref: string): Promise<{ data: Buffer; mime: string }> {
         resp.on('end', () =>
           resolve({
             data: Buffer.concat(chunks),
-            mime: String(resp.headers['content-type'] || 'image/png')
+            mime: String(resp.headers['content-type'] || DEFAULT_IMAGE_MIME)
           })
         )
       })

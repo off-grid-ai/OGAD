@@ -19,6 +19,7 @@ import type {
   DesktopToolChatResponse,
   DesktopToolChatSessionInput
 } from './desktop-chat-session-contract'
+import { DEFAULT_IMAGE_MIME } from '@offgrid/models'
 
 export interface DesktopTurnExecution {
   input: DesktopAnyChatSessionInput
@@ -196,7 +197,7 @@ export class DesktopChatGenerationAdapter {
             type: 'image',
             id: image.syncId,
             uri: image.path,
-            mimeType: 'image/png',
+            mimeType: DEFAULT_IMAGE_MIME,
             seed: image.seed
           }
         ]

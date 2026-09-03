@@ -19,6 +19,7 @@ import type { StreamResult } from './llm/stream'
 import type { GenerationMetrics } from '../shared/generation-metrics'
 import { getRemoteVisionServer } from './vision/remote-vision-server'
 import { reportDesktopImageProgress, reportDesktopVoiceProgress } from './generation-progress'
+import { DEFAULT_IMAGE_MIME } from '@offgrid/models'
 export { registerDesktopImageProgress, registerDesktopVoiceProgress } from './generation-progress'
 
 class GenerationChunkChannel {
@@ -251,7 +252,7 @@ export class DesktopImageGenerationAdapter extends DesktopTypedGenerationAdapter
               stage: update.stage,
               enhancedPrompt,
               ...(progress?.preview
-                ? { preview: { mimeType: 'image/png', uri: progress.preview } }
+                ? { preview: { mimeType: DEFAULT_IMAGE_MIME, uri: progress.preview } }
                 : {})
             }
           })
@@ -265,7 +266,7 @@ export class DesktopImageGenerationAdapter extends DesktopTypedGenerationAdapter
             type: 'image',
             images: [
               {
-                mimeType: 'image/png',
+                mimeType: DEFAULT_IMAGE_MIME,
                 id: output.model,
                 uri: output.path,
                 data: output.dataUrl.split(',', 2)[1],
@@ -385,7 +386,7 @@ export class DesktopRemoteImageGenerationAdapter extends DesktopTypedGenerationA
         images: [
           {
             id: model.id,
-            mimeType: image.mimeType ?? 'image/png',
+            mimeType: image.mimeType ?? DEFAULT_IMAGE_MIME,
             ...(image.base64 ? { data: image.base64 } : {}),
             ...(image.url ? { uri: image.url } : {})
           }

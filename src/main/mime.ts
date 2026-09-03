@@ -1,3 +1,4 @@
+import { IMAGE_MIME_BY_EXTENSION } from '@offgrid/models'
 // Single source of truth: file-extension -> MIME type.
 //
 // Three call sites used to keep their own divergent copies of this map — the
@@ -22,12 +23,7 @@ const EXT_MIME: Record<string, string> = {
   ogg: 'audio/ogg',
   // image — must cover every ext the shared attachment classifier accepts, or an
   // accepted upload gets mislabelled (the webp bug this map was created to fix).
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  webp: 'image/webp',
-  gif: 'image/gif',
-  bmp: 'image/bmp',
+  ...IMAGE_MIME_BY_EXTENSION,
   heic: 'image/heic',
   heif: 'image/heif',
   tiff: 'image/tiff',

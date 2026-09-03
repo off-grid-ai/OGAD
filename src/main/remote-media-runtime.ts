@@ -20,6 +20,7 @@ import {
   parseRemoteImageResponse
 } from '@offgrid/models'
 import { getRemoteVisionServer } from './vision/remote-vision-server'
+import { DEFAULT_IMAGE_MIME, imageExtensionForMime } from '@offgrid/models'
 
 export interface RemoteMediaConnection {
   endpoint: string
@@ -89,9 +90,13 @@ function imageBytes(source: { mimeType?: string; uri?: string; data?: string }):
   mimeType: string
   name: string
 } {
-  const mimeType = source.mimeType || 'image/png'
+  const mimeType = source.mimeType || DEFAULT_IMAGE_MIME
   if (source.data) {
-    return { bytes: Buffer.from(source.data, 'base64'), mimeType, name: 'source.png' }
+    return {
+      bytes: Buffer.from(source.data, 'base64'),
+      mimeType,
+      name: `source.${imageExtensionForMime(mimeType)}`
+    }
   }
   const rawPath = source.uri?.startsWith('file://') ? source.uri.slice(7) : source.uri
   if (!rawPath || /^https?:\/\//i.test(rawPath)) {

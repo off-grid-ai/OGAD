@@ -56,6 +56,7 @@ import {
   registerDesktopImageInspectionBoundary
 } from './imagegen/application-service'
 import { desktopImageRuntimeIdentity } from './models/image-runtime-identity'
+import { isGeneratedImageFile } from '@offgrid/models'
 
 function findSdCli(): string | null {
   for (const r of binRoots()) {
@@ -92,8 +93,6 @@ function isCoreMLModelDir(p: string): boolean {
 }
 
 /** All image models on disk: GGUFs, custom .safetensors checkpoints, Core ML dirs. */
-/** Every image type the library persists (persistImageGenerationOutput). One rule for listing, ownership, export. */
-const GENERATED_IMAGE_FILE = /\.(png|jpe?g|webp)$/i
 
 export function listImageModels(): string[] {
   const dir = modelsDir()
@@ -130,7 +129,7 @@ export function listGeneratedImages(scope?: GeneratedImageScope): {
   try {
     let all = fs
       .readdirSync(dir)
-      .filter((f) => GENERATED_IMAGE_FILE.test(f) && !f.startsWith('preview-'))
+      .filter((f) => isGeneratedImageFile(f) && !f.startsWith('preview-'))
       .flatMap((f) => {
         const ownedImage = resolveExistingOwnedEntry(dir, f)
         if (!ownedImage) return []
@@ -163,7 +162,7 @@ export function deleteGeneratedImage(p: string): boolean {
   try {
     const dir = path.join(dataDir(), 'generated-images')
     const ownedImage = resolveExistingOwnedPath(dir, p)
-    if (!ownedImage || !GENERATED_IMAGE_FILE.test(ownedImage)) return false
+    if (!ownedImage || !isGeneratedImageFile(ownedImage)) return false
     fs.unlinkSync(ownedImage)
     fs.rmSync(generatedImageSidecarPath(ownedImage), { force: true })
     return true
@@ -502,7 +501,7 @@ export interface GeneratedImageScope {
 export function saveGeneratedImageScope(imagePath: string, facts: GeneratedImageSidecar): void {
   const dir = path.join(dataDir(), 'generated-images')
   const ownedImage = resolveExistingOwnedPath(dir, imagePath)
-  if (!ownedImage || !GENERATED_IMAGE_FILE.test(ownedImage)) {
+  if (!ownedImage || !isGeneratedImageFile(ownedImage)) {
     throw new Error('Generated image is outside the app image library.')
   }
 
@@ -555,7 +554,7 @@ export function preserveGeneratedImageSource(syncId: string, sourcePath: string)
 export async function exportGeneratedImage(imagePath: string, destination: string): Promise<void> {
   const dir = path.join(dataDir(), 'generated-images')
   const ownedImage = resolveExistingOwnedPath(dir, imagePath)
-  if (!ownedImage || !GENERATED_IMAGE_FILE.test(ownedImage)) {
+  if (!ownedImage || !isGeneratedImageFile(ownedImage)) {
     throw new Error('Generated image is outside the app image library.')
   }
 

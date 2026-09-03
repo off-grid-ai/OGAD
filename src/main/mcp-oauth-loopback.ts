@@ -1,4 +1,5 @@
 import http from 'http'
+import { IMAGE_MIME } from '@offgrid/models'
 
 interface PendingAuthorization {
   resolve: (code: string) => void
@@ -158,7 +159,7 @@ export class OAuthLoopbackServer {
       response.end()
       return
     }
-    response.writeHead(200, { 'Content-Type': 'image/png' })
+    response.writeHead(200, { 'Content-Type': IMAGE_MIME.png })
     response.end(bytes)
   }
 

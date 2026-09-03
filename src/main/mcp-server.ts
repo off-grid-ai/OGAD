@@ -29,6 +29,7 @@ import { mayRunRemoteTask } from './remote-task-permission'
 import { getTaskExecutionDevice } from './tasks/task-history'
 import { promptMessages } from './desktop-generation'
 import { desktopModelServices } from './model-services'
+import { DEFAULT_IMAGE_MIME } from '@offgrid/models'
 
 const EXECUTION_DEVICE_DESCRIPTION =
   'Exact paired Desktop name or alias. Omit to select any enabled connected Desktop.'
@@ -193,7 +194,7 @@ export function buildMcpServer(
         model
       })
       const b64 = out.dataUrl.slice(out.dataUrl.indexOf(',') + 1)
-      return { content: [{ type: 'image', data: b64, mimeType: 'image/png' }] }
+      return { content: [{ type: 'image', data: b64, mimeType: DEFAULT_IMAGE_MIME }] }
     }
   )
 
@@ -221,7 +222,7 @@ export function buildMcpServer(
       try {
         const out = await generateImage({ prompt, initImage, strength })
         const b64 = out.dataUrl.slice(out.dataUrl.indexOf(',') + 1)
-        return { content: [{ type: 'image', data: b64, mimeType: 'image/png' }] }
+        return { content: [{ type: 'image', data: b64, mimeType: DEFAULT_IMAGE_MIME }] }
       } finally {
         if (initImage.includes('offgrid-mcp-')) fs.promises.unlink(initImage).catch(() => {})
       }

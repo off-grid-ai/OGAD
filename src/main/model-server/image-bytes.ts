@@ -1,4 +1,4 @@
-import { formatGatewayDataUrl, parseGatewayDataUrl } from '@offgrid/models'
+import { DEFAULT_IMAGE_MIME, formatGatewayDataUrl, parseGatewayDataUrl } from '@offgrid/models'
 import { mimeForExt } from '../mime'
 
 /** Node byte adapter for the shared data-URL contract. */
@@ -12,7 +12,7 @@ export function decodeDataUrl(url: string): { data: Buffer; mime: string } {
 }
 
 export function mimeFromExt(ext: string): string {
-  return mimeForExt(ext, 'image/png')
+  return mimeForExt(ext, DEFAULT_IMAGE_MIME)
 }
 
 export function toDataUrl(data: Buffer, mime: string): string {

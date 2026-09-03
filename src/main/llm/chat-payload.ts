@@ -18,6 +18,7 @@ import {
   type OpenAICompatibleContentPart,
   type OpenAICompatibleMessage
 } from '@offgrid/models'
+import { DEFAULT_IMAGE_MIME } from '@offgrid/models'
 
 export type ContentPart = OpenAICompatibleContentPart
 export type DecodedImage = DecodedImagePayload
@@ -29,7 +30,7 @@ export type ChatMessage = OpenAICompatibleMessage
  *  reject a declared type that doesn't match the bytes). */
 export function imageMime(imgPath: string): string {
   const ext = imgPath.split('.').pop() ?? ''
-  return mimeForExt(ext, 'image/png')
+  return mimeForExt(ext, DEFAULT_IMAGE_MIME)
 }
 
 /** Build the OpenAI-style multimodal content array: the text part first, then one
