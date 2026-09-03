@@ -1,43 +1,10 @@
 import { callHook, HOOKS } from './bootstrap/hookRegistry'
-import {
-  ACTION_APPROVAL_ENTITY,
-  KNOWLEDGE_DOCUMENT_ENTITY,
-  SHARED_FILE_ENTITY,
-  TASK_CONTROL_ENTITY,
-  TASK_LAUNCH_ENTITY,
-  TASK_RUN_ENTITY,
-  TASK_VISUAL_STEP_ENTITY
-} from '@offgrid/sync'
+import { CORE_SYNC_ENTITIES, type SyncMutation } from '@offgrid/sync'
 import { encodeChangedModelSettings } from '@offgrid/models'
 export { SYNCABLE_COMPUTER_USE_SETTING_KEYS, SYNCABLE_LLM_SETTING_KEYS } from '@offgrid/models'
-
-/**
- * Stable desktop entity names shared by the core writers and the private sync materializer.
- * Values are wire identities, so changing one requires a cross-platform migration.
- */
-export const CORE_SYNC_ENTITIES = {
-  conversation: 'conversation',
-  message: 'message',
-  project: 'project',
-  knowledgeDocument: KNOWLEDGE_DOCUMENT_ENTITY,
-  sharedFile: SHARED_FILE_ENTITY,
-  modelSetting: 'model_setting',
-  actionApproval: ACTION_APPROVAL_ENTITY,
-  taskLaunch: TASK_LAUNCH_ENTITY,
-  taskRun: TASK_RUN_ENTITY,
-  taskControl: TASK_CONTROL_ENTITY,
-  taskVisualStep: TASK_VISUAL_STEP_ENTITY
-} as const
-
-export type CoreSyncEntity = (typeof CORE_SYNC_ENTITIES)[keyof typeof CORE_SYNC_ENTITIES]
-
-export interface SyncMutation {
-  entity: CoreSyncEntity
-  entityId: string
-  kind: 'put' | 'delete'
-  /** Optional canonical fields for a committed owner that is not backed by the core SQLite DB. */
-  fields?: Record<string, unknown>
-}
+// The committed-mutation contract (entity table, mutation shape) is shared with Off Grid Mobile.
+export { CORE_SYNC_ENTITIES } from '@offgrid/sync'
+export type { CoreSyncEntity, SyncMutation } from '@offgrid/sync'
 
 export function emitChangedLlmSettings(
   before: Record<string, unknown>,
