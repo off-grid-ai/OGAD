@@ -22,7 +22,9 @@ import {
   definitionToOpenAITool,
   evaluateArithmetic,
   executePortableTool,
-  htmlToReadableText as htmlToText,
+  htmlToMarkdown,
+  normalizeToolUrl,
+  readUrlResultText,
   catalogEntryToDefinition,
   findToolCatalogEntry,
   normalizeMaxToolCalls,
@@ -178,11 +180,10 @@ export async function searchMemoryToolResult(
 // Fetch a URL and return its readable text (shared by the read_url tool and the
 // deterministic "read this URL, then build" flow). Works for localhost too.
 export async function readUrlText(url: string): Promise<string> {
-  let u = url.trim()
-  if (!/^https?:\/\//i.test(u)) u = 'https://' + u
-  const res = await fetch(u, { headers: { 'User-Agent': 'Mozilla/5.0' } })
+  const target = normalizeToolUrl(url)
+  const res = await fetch(target, { headers: { 'User-Agent': 'Mozilla/5.0' } })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return htmlToText(await res.text())
+  return htmlToMarkdown(await res.text())
 }
 
 // --- Built-in tools --------------------------------------------------------
@@ -235,14 +236,11 @@ const TOOLS: ToolDef[] = [
     description: readUrlTool.description ?? '',
     parameters: readUrlTool.inputSchema,
     run: async (a) => {
-      let url = String(a.url ?? '').trim()
-      if (!url) return 'Error: empty url.'
-      if (!/^https?:\/\//i.test(url)) url = 'https://' + url
+      const raw = String(a.url ?? '').trim()
+      if (!raw) return 'Error: empty url.'
       try {
-        const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
-        if (!res.ok) return `Error: HTTP ${res.status}`
-        const text = htmlToText(await res.text())
-        return text ? text.slice(0, 6000) : 'No readable text on the page.'
+        const url = normalizeToolUrl(raw)
+        return readUrlResultText(await readUrlText(url), { url })
       } catch (e) {
         return 'Error: could not fetch — ' + (e as Error).message
       }
