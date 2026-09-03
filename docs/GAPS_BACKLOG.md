@@ -1587,7 +1587,7 @@ reaching Activity even for the file that DID have a row.
 
 ---
 
-## MTP is a mobile feature, and it should be a `@offgrid/models` one
+## MTP is a mobile feature, and it should be a `@offgrid/models` one (SHARED SIDE DONE 2026-09-03: `runtime/mtp-policy.ts` `modelDeclaresMtp`/`speculativeDecodingAllowed`, mobile consumes it; desktop consumption still open)
 
 **Status:** open. Filed 2026-08-12. Deliberately NOT in the current PR - it is a package extraction,
 not a fix, and folding it in would bloat a release branch that is about sync feedback.
@@ -1859,7 +1859,7 @@ Local evidence on commit `bcb86a09675cca8a60da68ff2afb571510454b9f` plus this di
 
 ---
 
-## Tool-owned image generation has no Run anyway when memory admission fails
+## Tool-owned image generation has no Run anyway when memory admission fails (RESOLVED 2026-09-03: one refusal reading `imageMemoryRefusal`, the tool turn's message carries the same `imageMemoryRetry` as the direct path; desktop 9cc0f3e1)
 
 **Status:** open, found 2026-09-02 by the chat-memory E2E on a loaded Mac.
 
@@ -1992,7 +1992,7 @@ shown. Not yet profiled. Suspect: the composer's input state lives in the chat g
 keystroke re-renders the whole screen including the card grid. Verify with the React profiler before
 fixing; the fix is to isolate the composer's state, not to memoize the cards.
 
-## Output token caps are policy numbers living in Desktop (open, 2026-09-03)
+## Output token caps are policy numbers living in Desktop (RESOLVED 2026-09-03: generation profiles own caps, fallback, partial output, and timeouts; desktop 08d2bf04)
 
 `maxTokens: 200` in `ipc.ts` (two sites), `280` in `tasks/task-execution-plan-service.ts`, `200` in
 `vision/model-adapters/ui-tars.ts`. On a reasoning model the cap is spent before the answer (the
