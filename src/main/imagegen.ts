@@ -92,6 +92,9 @@ function isCoreMLModelDir(p: string): boolean {
 }
 
 /** All image models on disk: GGUFs, custom .safetensors checkpoints, Core ML dirs. */
+/** Every image type the library persists (persistImageGenerationOutput). One rule for listing, ownership, export. */
+const GENERATED_IMAGE_FILE = /\.(png|jpe?g|webp)$/i
+
 export function listImageModels(): string[] {
   const dir = modelsDir()
   let files: string[] = []
@@ -127,7 +130,7 @@ export function listGeneratedImages(scope?: GeneratedImageScope): {
   try {
     let all = fs
       .readdirSync(dir)
-      .filter((f) => /\.png$/i.test(f) && !f.startsWith('preview-'))
+      .filter((f) => GENERATED_IMAGE_FILE.test(f) && !f.startsWith('preview-'))
       .flatMap((f) => {
         const ownedImage = resolveExistingOwnedEntry(dir, f)
         if (!ownedImage) return []
@@ -160,7 +163,7 @@ export function deleteGeneratedImage(p: string): boolean {
   try {
     const dir = path.join(dataDir(), 'generated-images')
     const ownedImage = resolveExistingOwnedPath(dir, p)
-    if (!ownedImage || !/\.png$/i.test(ownedImage)) return false
+    if (!ownedImage || !GENERATED_IMAGE_FILE.test(ownedImage)) return false
     fs.unlinkSync(ownedImage)
     fs.rmSync(generatedImageSidecarPath(ownedImage), { force: true })
     return true
@@ -177,7 +180,7 @@ export function listStyleThumbs(): Record<string, string> {
     const directory = path.join(resources, 'style-thumbs')
     try {
       for (const file of fs.readdirSync(directory)) {
-        const match = file.match(/^(.+)\.png$/i)
+        const match = file.match(/^(.+)\.(png|jpe?g|webp)$/i)
         if (match && !out[match[1]!]) out[match[1]!] = path.join(directory, file)
       }
     } catch {
@@ -499,7 +502,7 @@ export interface GeneratedImageScope {
 export function saveGeneratedImageScope(imagePath: string, facts: GeneratedImageSidecar): void {
   const dir = path.join(dataDir(), 'generated-images')
   const ownedImage = resolveExistingOwnedPath(dir, imagePath)
-  if (!ownedImage || !/\.png$/i.test(ownedImage)) {
+  if (!ownedImage || !GENERATED_IMAGE_FILE.test(ownedImage)) {
     throw new Error('Generated image is outside the app image library.')
   }
 
@@ -552,7 +555,7 @@ export function preserveGeneratedImageSource(syncId: string, sourcePath: string)
 export async function exportGeneratedImage(imagePath: string, destination: string): Promise<void> {
   const dir = path.join(dataDir(), 'generated-images')
   const ownedImage = resolveExistingOwnedPath(dir, imagePath)
-  if (!ownedImage || !/\.png$/i.test(ownedImage)) {
+  if (!ownedImage || !GENERATED_IMAGE_FILE.test(ownedImage)) {
     throw new Error('Generated image is outside the app image library.')
   }
 
