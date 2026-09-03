@@ -36,14 +36,11 @@ import {
   residentEngineKey,
   transcriptLanguage
 } from '@offgrid/models'
+import { WHISPER_SERVER_READY_TIMEOUT_MS } from '@offgrid/speech'
 
 // Off the LLM (8439) and image (8440) ports so the resident STT engine can bind
 // alongside them - they may all be warm at once (chat + dictation together).
 const WHISPER_SERVER_PORT = 8441
-/** How long whisper-server may take to load a model before this device treats it as failed. A
- *  desktop engine readiness rule the shared runtime policy does not hold yet (mobile has
- *  nativeInitTimeoutMs); move it there when the second app needs it. */
-const WHISPER_SERVER_READY_TIMEOUT_MS = 60_000
 
 /** Launch-time context that pins the resident model. A change here means the
  *  server must be restarted to take effect (part of the context key). */
