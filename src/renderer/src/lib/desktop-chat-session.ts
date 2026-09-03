@@ -4,7 +4,7 @@ import {
   type ChatSessionEvent,
   type ChatTurn,
   type GenerationResult
-} from '@offgrid/models'
+} from '@offgrid/application'
 import { DesktopChatCompaction } from './desktop-chat-compaction'
 import { desktopChatTurnProfile } from './desktop-chat-session-policy'
 import { chatSessionService } from '@renderer/composition/chat-session'

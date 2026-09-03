@@ -2,13 +2,13 @@ import {
   DEFAULT_IMAGE_MIME,
   generationMessageText as sharedGenerationMessageText,
   parseImageMemoryGuardError
-} from '@offgrid/models'
+} from '@offgrid/application'
 import type {
   GenerationMessage,
   GenerationProfileKind,
   GenerationResult,
   RuntimeModel
-} from '@offgrid/models'
+} from '@offgrid/application'
 import type {
   DesktopImageGenerationResponse,
   DesktopImageMemoryRetry

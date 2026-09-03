@@ -1,4 +1,4 @@
-import type { ChatTurn, GenerationMessage, RuntimeModel } from '@offgrid/models'
+import type { ChatTurn, GenerationMessage, RuntimeModel } from '@offgrid/application'
 import type { ImageGenerationRequestContract } from '../../../shared/image-generation-contract'
 import type { RagChatResultContract } from '../../../shared/ipc-contracts'
 import type { SearchHit } from '../types'

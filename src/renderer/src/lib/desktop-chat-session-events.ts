@@ -1,4 +1,4 @@
-import type { ChatSessionEvent } from '@offgrid/models'
+import type { ChatSessionEvent } from '@offgrid/application'
 import type {
   DesktopChatSessionBoundary,
   DesktopAnyChatSessionInput

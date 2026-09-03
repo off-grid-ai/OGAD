@@ -11,7 +11,7 @@
 //   readReasoning(ctx) → string | undefined              (read path)
 import type { ResponseCutoffContract } from '../../../shared/ipc-contracts'
 import type { GenerationMetrics } from '../../../shared/generation-metrics'
-import type { ChatTurnStatus, GenerationMessage } from '@offgrid/models'
+import type { ChatTurnStatus, GenerationMessage } from '@offgrid/application'
 
 export interface PersistedChatSessionTurn {
   turnId: string

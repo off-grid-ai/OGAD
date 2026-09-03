@@ -3,7 +3,7 @@ import {
   type ChatCompactionContext,
   type CompactableGenerationMessage,
   type GenerationMessage
-} from '@offgrid/models'
+} from '@offgrid/application'
 import type { DesktopChatSessionBoundary } from './desktop-chat-session-contract'
 import { chatContextCompactionService } from '@renderer/composition/chat-session'
 
