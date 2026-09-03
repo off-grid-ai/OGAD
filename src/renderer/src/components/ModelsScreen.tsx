@@ -39,7 +39,8 @@ import {
   catalogEntryRank,
   catalogTagTone,
   visibleCatalogTags,
-  type CatalogTagTone
+  type CatalogTagTone,
+  isLocalLibraryModelId
 } from '@offgrid/models'
 import {
   filterAndSort,
@@ -1174,7 +1175,7 @@ export function ModelsScreen({
         {detail &&
           (() => {
             const m = detail
-            const isLocal = m.id.startsWith('local:')
+            const isLocal = isLocalLibraryModelId(m.id)
             const hfRepo = m.sourceModelId ?? m.id
             const hfUrl =
               !isLocal && hfRepo.includes('/') ? `https://huggingface.co/${hfRepo}` : null

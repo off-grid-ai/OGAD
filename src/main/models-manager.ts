@@ -48,7 +48,8 @@ import {
   type CatalogEntry,
   type ModelModality,
   type Modality,
-  type VisionStatus
+  type VisionStatus,
+  isLocalLibraryModelId
 } from '@offgrid/models'
 import type { RemoteVisionInventoryModel } from '../shared/remote-vision-server'
 import { desktopModelServices } from './model-service-access'
@@ -132,7 +133,7 @@ function isCanonicalSelectionId(modelId: string): boolean {
 
 /** Resolve a stale family alias at the model-library adapter boundary. */
 export async function resolveCanonicalModelSelectionId(modelId: string): Promise<string> {
-  if (modelId.startsWith('local:') || isCanonicalSelectionId(modelId)) return modelId
+  if (isLocalLibraryModelId(modelId) || isCanonicalSelectionId(modelId)) return modelId
   const { CATALOG } = await import('@offgrid/models')
   const downloaded = reconcileDownloadedModelRegistry(llm.getModelsDir(), CATALOG)
   return downloadedVariant(downloaded, modelId)?.id ?? modelId
@@ -483,7 +484,7 @@ function selectedModelRoutes(): Partial<Record<ModelModality, string | null>> {
 
 async function resolveDesktopRemoval(modelId: string): Promise<DesktopRemovalTarget | null> {
   const dir = llm.getModelsDir()
-  if (modelId.startsWith('local:')) {
+  if (isLocalLibraryModelId(modelId)) {
     const local = getLocalModels().find((model) => model.id === modelId)
     return local
       ? {
@@ -583,7 +584,7 @@ async function setActiveLlamaModel(
   expectedKind: string
 ): Promise<{ success: boolean; error?: string }> {
   // Imported local model: resolve from the local registry (not the catalog).
-  if (modelId.startsWith('local:')) {
+  if (isLocalLibraryModelId(modelId)) {
     const lm = getLocalModels().find((m) => m.id === modelId)
     if (!lm) return { success: false, error: 'unknown local model' }
     const refusal = modelSelectionRefusal({
@@ -797,7 +798,7 @@ async function resolveDesktopActivation(
   }
   let kind: string | undefined
   let supportsRequestedKind = false
-  if (modelId.startsWith('local:')) {
+  if (isLocalLibraryModelId(modelId)) {
     kind = getLocalModels().find((m) => m.id === modelId)?.kind
   } else {
     const { CATALOG, modelSupportsKind, resolveHuggingFaceModel } = await import('@offgrid/models')
