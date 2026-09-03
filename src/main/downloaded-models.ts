@@ -5,11 +5,12 @@
 import fs from 'fs'
 import path from 'path'
 import { modelPackageIdentity } from '@offgrid/sync'
-import {
+import type {
   DownloadedModelRegistryService,
-  type DownloadedModelRecord,
-  type DownloadedRegistryCatalogEntry
+  DownloadedModelRecord,
+  DownloadedRegistryCatalogEntry
 } from '@offgrid/models'
+import { downloadedModelRegistry } from './composition/downloaded-models'
 
 export type DownloadedModel = DownloadedModelRecord
 export type { DownloadedRegistryCatalogEntry }
@@ -18,8 +19,11 @@ function registryPath(dir: string): string {
   return path.join(dir, 'downloaded-models.json')
 }
 
-function registry(dir: string): DownloadedModelRegistryService {
-  return new DownloadedModelRegistryService({
+type DownloadedRegistryPorts = ConstructorParameters<typeof DownloadedModelRegistryService>[0]
+
+/** JSON persistence, file sizes, and package identity for one models directory. I/O only. */
+export function desktopDownloadedRegistryPorts(dir: string): DownloadedRegistryPorts {
+  return {
     read: () => {
       try {
         const rows: unknown = JSON.parse(fs.readFileSync(registryPath(dir), 'utf-8'))
@@ -46,7 +50,11 @@ function registry(dir: string): DownloadedModelRegistryService {
       ...input,
       files: input.files as [typeof input.files[number], ...Array<typeof input.files[number]>]
     })
-  })
+  }
+}
+
+function registry(dir: string): DownloadedModelRegistryService {
+  return downloadedModelRegistry(dir)
 }
 
 export function readDownloaded(dir: string): DownloadedModel[] {

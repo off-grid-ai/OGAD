@@ -28,12 +28,10 @@ import {
   normalizeMaxToolCalls,
   openAIToolToDefinition,
   parseToolArguments,
-  PersistentToolEmbeddingCache,
   prepareToolCallWithQueryFallback,
   selectAvailableToolDefinitions,
   selectToolExtensions,
   toolSchemaTokenBudget,
-  ToolRoutingService,
   type RuntimeModel
 } from '@offgrid/models'
 
@@ -51,19 +49,10 @@ import { generateDesktopMessages } from './desktop-generation'
 import {
   desktopToolCallLimit,
   desktopToolContextSize,
-  desktopToolEmbeddingPort,
   readSupportedToolImages
 } from './tools/platform-ports'
+import { toolRoutingService } from './composition/tools'
 import type { GenerationToolCall, GenerationToolDefinition } from '@offgrid/models'
-
-const toolEmbeddingCache = new PersistentToolEmbeddingCache({
-  read: async () => undefined,
-  write: async () => undefined
-})
-const toolRoutingService = new ToolRoutingService({
-  embedding: desktopToolEmbeddingPort,
-  embeddingCache: toolEmbeddingCache
-})
 
 const sharedToolDefinition = (name: string): ReturnType<typeof catalogEntryToDefinition> =>
   catalogEntryToDefinition(findToolCatalogEntry(name)!)
@@ -591,7 +580,7 @@ export async function toolChat(
     proposalDeckAvailable: false
   })
   const toolBudget = toolSchemaTokenBudget(desktopToolContextSize())
-  const routed = await toolRoutingService.select({
+  const routed = await toolRoutingService().select({
     messages: buildAgentToolMessages({ query, history }),
     builtInTools: builtins,
     externalTools: extensions,

@@ -4,7 +4,6 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  ImageGenerationApplicationService,
   ImageExecutionPlanError,
   IMAGE_CANCELLED_MESSAGE,
   ModelAdmissionError,
@@ -38,6 +37,7 @@ import { dataDir } from '../runtime-env'
 import { enhanceImagePrompt } from '@offgrid/models'
 import { resolveExistingOwnedPath } from './owned-path'
 import { decodeDataUrl, toDataUrl } from '../model-server/image-bytes'
+import { imageGenerationApplication } from '../composition/imagegen'
 
 let nativeCancelBoundary: () => void | Promise<void> = () => undefined
 let nativeInspectionBoundary: (input: {
@@ -210,7 +210,10 @@ export async function persistImageGenerationOutput(
   }
 }
 
-function applicationPorts(): ImageGenerationApplicationPorts<
+export type DesktopImageSharedRequest = ReturnType<typeof sharedRequest>
+
+/** Desktop's image I/O: engine, persistence, cancel boundary, eviction. Shared owns the pipeline. */
+export function desktopImageApplicationPorts(): ImageGenerationApplicationPorts<
   ImageGenerationOutputContract,
   ImageGenerationOutputContract,
   ReturnType<typeof sharedRequest>
@@ -329,14 +332,7 @@ function applicationPorts(): ImageGenerationApplicationPorts<
   }
 }
 
-const application = new ImageGenerationApplicationService<
-  ImageGenerationOutputContract,
-  ImageGenerationOutputContract,
-  ReturnType<typeof sharedRequest>
->(
-  { resolveRoute: (requirements) => desktopModelServices.llm.resolveRoute(requirements) },
-  applicationPorts()
-)
+const application = (): ReturnType<typeof imageGenerationApplication> => imageGenerationApplication()
 
 function pipelineStage(
   snapshot: ImageApplicationSnapshot<ImageGenerationOutputContract>
@@ -362,11 +358,11 @@ function imageApplicationError(
 }
 
 export const desktopImageApplication = {
-  status: () => application.status(),
+  status: () => application().status(),
   onChange: (
     listener: (snapshot: ImageApplicationSnapshot<ImageGenerationOutputContract>) => void
-  ) => application.onChange(listener),
-  isRunning: () => isImageApplicationInFlight(application.status().phase),
+  ) => application().onChange(listener),
+  isRunning: () => isImageApplicationInFlight(application().status().phase),
   async start(
     request: DesktopImageApplicationRequest,
     onUpdate?: (update: ImageGenerationPipelineUpdateContract) => void,
@@ -375,7 +371,7 @@ export const desktopImageApplication = {
     const requestId = request.requestId ?? randomUUID()
     const normalized = sharedRequest({ ...request, requestId })
     const off = onUpdate
-      ? application.onChange((snapshot) => {
+      ? application().onChange((snapshot) => {
           if (snapshot.requestId !== requestId || !isImageApplicationInFlight(snapshot.phase))
             return
           onUpdate({
@@ -399,9 +395,9 @@ export const desktopImageApplication = {
         })
       : undefined
     try {
-      const result = await application.start(normalized, input)
+      const result = await application().start(normalized, input)
       if (result) return result
-      const snapshot = application.status()
+      const snapshot = application().status()
       if (snapshot.phase === 'error') {
         throw imageApplicationError(snapshot)
       }
@@ -411,5 +407,5 @@ export const desktopImageApplication = {
       off?.()
     }
   },
-  cancel: () => application.cancel()
+  cancel: () => application().cancel()
 }

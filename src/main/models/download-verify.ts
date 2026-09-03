@@ -8,12 +8,8 @@
 // on load with a blank "Chat model Down" (the exact class CLAUDE.md warns about).
 import fs from 'fs'
 import crypto from 'crypto'
-import {
-  ArtifactVerificationService,
-  artifactVerificationError,
-  type ArtifactVerificationRequest
-} from '@offgrid/models'
-import { desktopArtifactVerificationFiles } from './gguf'
+import { artifactVerificationError, type ArtifactVerificationRequest } from '@offgrid/models'
+import { artifactVerification } from '../composition/artifact-verification'
 
 /** Reason a just-downloaded file must NOT be promoted to installed, or null if it
  *  passes. Checks the byte count (when the server reported a length) and, for a
@@ -43,11 +39,7 @@ export async function verifyDownloadedPart(
     resumeSupported: true,
     removeInvalid: true
   }
-  const service = new ArtifactVerificationService({
-    ...desktopArtifactVerificationFiles(fs),
-    sha256: sha256File
-  })
-  const result = await service.verify(request)
+  const result = await artifactVerification(fs, sha256File).verify(request)
   return result.valid ? null : artifactVerificationError(request, result)
 }
 

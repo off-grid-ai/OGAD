@@ -15,9 +15,10 @@ import type { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js
 import type { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import {
   DEFAULT_CONNECTOR_OPERATION_TIMEOUT_MS,
-  McpConnectorApplicationService,
+  type McpConnectorApplicationService,
   type McpConnectorStatus
 } from '@offgrid/models'
+import { mcpConnectorApplication } from './composition/mcp'
 
 // Provider-specific quirks (e.g. Google's MCP endpoints) are a Pro concern and
 // register these hooks; in the free build they return undefined → generic MCP.
@@ -122,7 +123,7 @@ export function addConnector(c: NewConnector): number {
 }
 
 export function setConnectorEnabled(id: number, enabled: boolean): void {
-  connectorApplication.setEnabled(id, enabled)
+  mcpConnectorApplication().setEnabled(id, enabled)
 }
 
 /** Compatibility wrapper. Shared owns the status transition; Desktop persists it. */
@@ -131,11 +132,11 @@ export function setConnectorStatus(
   status: McpConnectorStatus,
   detail?: string | null
 ): void {
-  connectorApplication.setStatus(id, status, detail ?? undefined)
+  mcpConnectorApplication().setStatus(id, status, detail ?? undefined)
 }
 
 export function removeConnector(id: number): void {
-  connectorApplication.remove(id)
+  mcpConnectorApplication().remove(id)
 }
 
 function getConnector(id: number): Connector | undefined {
@@ -299,7 +300,11 @@ async function discoverConnectorTools(
   }
 }
 
-const connectorApplication = new McpConnectorApplicationService<Connector>({
+type McpConnectorPorts = ConstructorParameters<typeof McpConnectorApplicationService<Connector>>[0]
+
+/** SQLite repository, OAuth cancellation, and MCP transport. I/O only; shared owns the lifecycle. */
+export function desktopMcpConnectorPorts(): McpConnectorPorts {
+  return {
   repository: {
     find: getConnector,
     setEnabled(id, enabled) {
@@ -336,13 +341,15 @@ const connectorApplication = new McpConnectorApplicationService<Connector>({
   transport: {
     discover: discoverConnectorTools
   }
-})
+  }
+}
+
 
 /** Connect, list tools, cache them + status. Returns the discovered tools. */
 export async function testConnector(
   id: number
 ): Promise<{ ok: boolean; tools: { name: string; description?: string }[]; error?: string }> {
-  return connectorApplication.verifyAndDiscover(id)
+  return mcpConnectorApplication().verifyAndDiscover(id)
 }
 
 // A background tool load must never hang the chat turn it runs inside: one dead or
@@ -354,7 +361,7 @@ export const FETCH_TOOLS_TIMEOUT_MS = DEFAULT_CONNECTOR_OPERATION_TIMEOUT_MS
 /** Full tool definitions (incl. inputSchema) for a connected connector. Rejects if
  *  the connect+list exceeds FETCH_TOOLS_TIMEOUT_MS. */
 export async function fetchTools(id: number): Promise<ConnectorToolDefinition[]> {
-  return connectorApplication.discoverInBackground(id)
+  return mcpConnectorApplication().discoverInBackground(id)
 }
 
 export function getConnectorMeta(

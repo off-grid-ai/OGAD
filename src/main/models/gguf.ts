@@ -1,11 +1,11 @@
 import type fs from 'fs'
 import path from 'path'
-import {
-  ArtifactVerificationService,
-  type ArtifactOrigin,
-  type ArtifactVerification,
-  type ArtifactVerificationFilePort
+import type {
+  ArtifactOrigin,
+  ArtifactVerification,
+  ArtifactVerificationFilePort
 } from '@offgrid/models'
+import { artifactVerification } from '../composition/artifact-verification'
 
 /** The subset of `fs` this check needs — injected so the read path is testable
  *  against a real temp file (or a fake) without importing node fs into callers'
@@ -55,7 +55,7 @@ export function verifyArtifactFile(
   removeInvalid = false,
   expectedBytes?: number
 ): Promise<ArtifactVerification> {
-  return new ArtifactVerificationService(desktopArtifactVerificationFiles(nativeFs)).verify({
+  return artifactVerification(nativeFs).verify({
     path: candidate,
     name: path.basename(candidate),
     origin,

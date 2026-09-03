@@ -4,7 +4,7 @@ import {
   DOWNLOAD_INTERRUPTED_ERROR,
   aggregateDownloadProgress,
   isActiveDownloadStatus,
-  ModelDownloadCoordinator,
+  type ModelDownloadCoordinator,
   type ModelEntry,
   type ModelArtifactManifest,
   type ModelModality,
@@ -14,6 +14,7 @@ import { platformFetch } from '@offgrid/models/fetch'
 import { recordDownloaded } from '../downloaded-models'
 import { writeDiagnosticLog } from '../diagnostics-log'
 import { createNodeModelDownloadPorts } from './node-artifact-download-adapter'
+import { modelDownloadCoordinator } from '../composition/model-downloads'
 import { DownloadRecoveryStore, type DownloadRecoveryHealth } from './download-recovery-store'
 
 export interface DownloadProgress {
@@ -107,7 +108,7 @@ export class DesktopModelDownloadService {
     this.recovery = new DownloadRecoveryStore(this.downloadsFile(), (event, error) =>
       writeDiagnosticLog('models.download-recovery', event, { error }, 'error')
     )
-    this.coordinator = new ModelDownloadCoordinator({
+    this.coordinator = modelDownloadCoordinator({
       persistence: {
         read: () => this.readPersistedDownloads(),
         write: (records) => this.writePersistedDownloads(records)
