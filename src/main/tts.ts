@@ -9,7 +9,12 @@ import {
   speechCapabilities,
   type DownloadProgress
 } from '@offgrid/executorch-speech'
-import { kokoroVoiceLabel, speechLanguageLabel, type RuntimeSpeechVoice } from '@offgrid/speech'
+import {
+  admitSpeechInput,
+  kokoroVoiceLabel,
+  speechLanguageLabel,
+  type RuntimeSpeechVoice
+} from '@offgrid/speech'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -122,9 +127,9 @@ export async function synthesizeNative(
     supported: SUPPORTED_VOICES,
     fallback: DEFAULT_SPEECH_VOICE
   })
-  const input = (text || '').trim()
-  if (!input) throw new Error('Nothing to speak.')
-  if (busy) throw new Error('Already generating speech. Please wait.')
+  const admission = admitSpeechInput({ text, busy })
+  if (!admission.ok) throw new Error(admission.message)
+  const input = admission.text
 
   busy = true
   const requestId = `speak-${process.pid}-${Date.now()}`
@@ -138,7 +143,7 @@ export async function synthesizeNative(
 
   try {
     await runtime().synthesize({
-      text: input.slice(0, 2000),
+      text: input,
       voiceId: chosenVoice,
       outputPath,
       onDownloadProgress: options.onProgress,
