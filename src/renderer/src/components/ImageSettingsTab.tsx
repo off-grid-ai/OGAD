@@ -8,7 +8,7 @@ import {
 import { announceImageSettingsChanged } from '@renderer/lib/image-settings-events'
 import { SettingsSelect } from './SettingsSelect'
 import { desktopModelControl } from '@renderer/composition/model-control'
-import { modelFileDisplayName } from '@offgrid/models'
+import { modelFileDisplayName } from '@offgrid/application'
 
 type ImageSettings = {
   imageParams?: ImageParamStore

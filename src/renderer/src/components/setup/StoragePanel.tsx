@@ -15,7 +15,7 @@ import { projectProgress } from '@offgrid/ui'
 import { downloadTimeRemaining } from '@renderer/lib/download-progress'
 import { type DesktopModelControlProjection } from '@renderer/lib/model-control-application'
 import { desktopModelControl } from '@renderer/composition/model-control'
-import { modelControlSurfaceForKind } from '@offgrid/models'
+import { modelControlSurfaceForKind } from '@offgrid/application'
 import {
   useModelDownloadProgress,
   type ModelDownloadProgressEvent

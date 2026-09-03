@@ -4,7 +4,7 @@ import {
   type RemoteModelCatalog,
   type RemoteModelModality,
   type RemoteModalitySelections
-} from '@offgrid/models'
+} from '@offgrid/application'
 import {
   remoteVisionApiBase,
   remoteVisionProviderForEndpoint,

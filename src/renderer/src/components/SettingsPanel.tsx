@@ -13,7 +13,7 @@ import {
   reasoningBudgetLabel,
   optionsWithinCeiling,
   reconcileBudgets
-} from '@offgrid/models'
+} from '@offgrid/application'
 import { gpuLayersHint, type EngineAccelerator } from '@offgrid/core/shared/engine-accelerator'
 import {
   contextWindowOptions,
