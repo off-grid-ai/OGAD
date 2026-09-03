@@ -211,21 +211,26 @@ export function VoiceSettingsTab(): React.JSX.Element {
   }
 
   const testVoice = async (): Promise<void> => {
+    const operationId = crypto.randomUUID()
+    testOperationRef.current = operationId
     setTestState('generating')
     try {
       const outcome = await window.api.speechCommands.speak({
         text: 'This is the Off Grid AI voice.',
         voice,
         language,
-        speed: preferences.speed
+        speed: preferences.speed,
+        operationId
       })
+      if (testOperationRef.current !== operationId) return
       if (!outcome.ok) {
+        testOperationRef.current = null
         setTestState('error')
         return
       }
-      testOperationRef.current = outcome.value.operationId
       setTestState('playing')
     } catch {
+      if (testOperationRef.current === operationId) testOperationRef.current = null
       setTestState('error')
     }
   }

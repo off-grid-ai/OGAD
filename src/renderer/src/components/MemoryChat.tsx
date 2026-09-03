@@ -3024,9 +3024,11 @@ export function MemoryChat({
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
-  const audioRef = useRef<HTMLAudioElement | null>(null)
   const voiceMountedRef = useRef(true)
   const speechRequestRef = useRef(0)
+  const manualSpeechRef = useRef<{ messageId: string; operationId: string } | null>(null)
+  const pendingSpeechOperationsRef = useRef(new Set<string>())
+  const finishedSpeechOperationsRef = useRef(new Set<string>())
   const pendingVariantsRef = useRef<string[] | null>(null) // prior answers to keep when regenerating
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -3118,12 +3120,40 @@ export function MemoryChat({
   const cancelledRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
+    const requestSequence = speechRequestRef
+    const pendingOperations = pendingSpeechOperationsRef.current
+    const finishedOperations = finishedSpeechOperationsRef.current
     voiceMountedRef.current = true
+    const stopSpeechEvents = window.api.speechCommands.onEvent((event) => {
+      const active = manualSpeechRef.current
+      if (event.type !== 'speech_finished' || event.operationId !== active?.operationId) return
+      if (pendingOperations.has(event.operationId)) {
+        finishedOperations.add(event.operationId)
+      }
+      manualSpeechRef.current = null
+      setSpeakLoadingId((current) => (current === active.messageId ? null : current))
+      setSpeakingId((current) => (current === active.messageId ? null : current))
+      if (event.outcome.kind !== 'spoken' && event.outcome.kind !== 'interrupted') {
+        setSpeakError({
+          id: active.messageId,
+          message:
+            'Speech could not be generated. Check that Text-to-speech is installed in Settings, then try again.'
+        })
+      }
+    })
     return () => {
+      const activeManualSpeech = manualSpeechRef.current
       voiceMountedRef.current = false
-      speechRequestRef.current++
-      audioRef.current?.pause()
-      audioRef.current = null
+      requestSequence.current++
+      stopSpeechEvents()
+      manualSpeechRef.current = null
+      pendingOperations.clear()
+      finishedOperations.clear()
+      if (activeManualSpeech) {
+        void window.api.speechCommands.interrupt().catch((error) => {
+          console.error('[tts] interrupt failed', error)
+        })
+      }
     }
   }, [])
 
@@ -4676,50 +4706,82 @@ export function MemoryChat({
     }
   }
 
-  // Voice output: synthesize a message on-device (Kokoro) and play it. Toggling
-  // the same message stops playback.
-  const speakMessage = useCallback(
-    async (id: string, text: string) => {
-      const request = ++speechRequestRef.current
-      if (audioRef.current) {
-        audioRef.current.pause()
-        audioRef.current = null
-      }
-      // Toggle off if this message is already loading or playing.
-      if (speakingId === id || speakLoadingId === id) {
-        setSpeakingId(null)
-        setSpeakLoadingId(null)
-        setSpeakError(null)
-        return
-      }
-      setSpeakError(null)
-      setSpeakLoadingId(id) // generating on-device — show a loading state
+  const interruptManualSpeech = useCallback(
+    async (id: string, request: number): Promise<boolean> => {
       try {
-        const { dataUrl } = await window.api.speak(messageToSpeakable(text))
-        if (!voiceMountedRef.current || speechRequestRef.current !== request) return
-        if (!dataUrl) throw new Error('empty dataUrl')
-        const audio = new Audio(dataUrl)
-        audioRef.current = audio
-        audio.onended = () => {
-          setSpeakingId((cur) => (cur === id ? null : cur))
-          if (audioRef.current === audio) audioRef.current = null
-        }
-        audio.onerror = () => {
-          console.error('[tts] audio element error', audio.error)
-          setSpeakingId((cur) => (cur === id ? null : cur))
-          setSpeakLoadingId((cur) => (cur === id ? null : cur))
+        await window.api.speechCommands.interrupt()
+        return true
+      } catch (error) {
+        console.error('[tts] interrupt failed', error)
+        if (voiceMountedRef.current && speechRequestRef.current === request) {
           setSpeakError({
             id,
             message:
               'Speech could not be played. Check your audio output, then try speaking the reply again.'
           })
         }
-        await audio.play()
+        return false
+      }
+    },
+    []
+  )
+
+  // Voice output: synthesize a message on-device (Kokoro) and play it. Toggling
+  // the same message stops playback.
+  const speakMessage = useCallback(
+    async (id: string, text: string): Promise<void> => {
+      const request = ++speechRequestRef.current
+      // Toggle off if this message is already loading or playing.
+      if (speakingId === id || speakLoadingId === id) {
+        manualSpeechRef.current = null
+        setSpeakingId(null)
+        setSpeakLoadingId(null)
+        setSpeakError(null)
+        await interruptManualSpeech(id, request)
+        return
+      }
+      if (manualSpeechRef.current && !(await interruptManualSpeech(id, request))) return
+      const operationId = crypto.randomUUID()
+      const activeManualSpeech = { messageId: id, operationId }
+      manualSpeechRef.current = activeManualSpeech
+      pendingSpeechOperationsRef.current.add(operationId)
+      setSpeakError(null)
+      setSpeakLoadingId(id) // generating on-device — show a loading state
+      try {
+        const outcome = await window.api.speechCommands.speak({
+          text,
+          speed: ttsSpeed,
+          operationId
+        })
+        pendingSpeechOperationsRef.current.delete(operationId)
+        if (
+          !voiceMountedRef.current ||
+          speechRequestRef.current !== request ||
+          manualSpeechRef.current !== activeManualSpeech
+        ) {
+          if (outcome.ok && !finishedSpeechOperationsRef.current.delete(operationId)) {
+            await window.api.speechCommands.interrupt()
+          }
+          return
+        }
+        if (!outcome.ok) {
+          manualSpeechRef.current = null
+          setSpeakLoadingId((cur) => (cur === id ? null : cur))
+          setSpeakError({
+            id,
+            message:
+              'Speech could not be generated. Check that Text-to-speech is installed in Settings, then try again.'
+          })
+          return
+        }
         setSpeakLoadingId((cur) => (cur === id ? null : cur))
-        setSpeakingId(id) // now actually speaking
+        setSpeakingId(id)
       } catch (e) {
+        pendingSpeechOperationsRef.current.delete(operationId)
+        finishedSpeechOperationsRef.current.delete(operationId)
         console.error('[tts] failed', e)
         if (!voiceMountedRef.current || speechRequestRef.current !== request) return
+        manualSpeechRef.current = null
         setSpeakLoadingId((cur) => (cur === id ? null : cur))
         setSpeakingId((cur) => (cur === id ? null : cur))
         setSpeakError({
@@ -4729,7 +4791,7 @@ export function MemoryChat({
         })
       }
     },
-    [speakingId, speakLoadingId]
+    [interruptManualSpeech, speakingId, speakLoadingId, ttsSpeed]
   )
 
   const refreshGallery = useCallback(async () => {
