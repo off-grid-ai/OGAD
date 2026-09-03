@@ -90,11 +90,11 @@ export function configureTaskExecutionDevice(device: TaskExecutionDevice): void 
   const id = device.id.trim()
   const name = device.name.trim()
   if (!id || !name) return
-  desktopAutomation.configureExecutionDevice({ id, name })
+  desktopAutomation.execution.configureDevice({ id, name })
 }
 
 export function getTaskExecutionDevice(): Readonly<TaskExecutionDevice> {
-  return desktopAutomation.executionDevice()
+  return desktopAutomation.execution.device()
 }
 
 export function getTaskRun(taskId: string): TaskRunSnapshot | undefined {
@@ -108,7 +108,7 @@ export function listTaskRuns(limit?: number): TaskRunSnapshot[] {
 /** Stop one persisted local Web Use task when its in-memory browser owner is absent, such as
  * after a process restart. False for remote, terminal, native, and unknown tasks. */
 export function stopOrphanedLocalWebTask(taskId: string): boolean {
-  return desktopAutomation.stopOrphanedLocalWebTask(taskId)
+  return desktopAutomation.execution.stopOrphanedLocalWebTask(taskId)
 }
 
 function broadcast(snapshot: TaskRunSnapshot): void {
@@ -139,7 +139,7 @@ export function materializeSyncedTaskVisualStep(
   taskId: string,
   detail: ComputerUseStepDetail
 ): TaskRunSnapshot | undefined {
-  return desktopAutomation.materializeSyncedVisualStep(taskId, detail)
+  return desktopAutomation.execution.materializeSyncedVisualStep(taskId, detail)
 }
 
 /** Remove remote visual evidence after its immutable sync entity is tombstoned. */
@@ -150,7 +150,7 @@ export function removeSyncedTaskVisualStep(
   const removedPath = desktopAutomation
     .get(taskId)
     ?.stepDetails?.find((detail) => detail.stepId === stepId)?.screenshot?.path
-  const snapshot = desktopAutomation.removeSyncedVisualStep(taskId, stepId)
+  const snapshot = desktopAutomation.execution.removeSyncedVisualStep(taskId, stepId)
   if (removedPath) fs.rmSync(removedPath, { force: true })
   return snapshot
 }
@@ -190,14 +190,14 @@ export function forwardDesktopAutomationEvent(event: AutomationEvent): void {
 }
 
 export function recordTaskRun(update: TaskRunUpdate): TaskRunSnapshot {
-  return desktopAutomation.record(update)
+  return desktopAutomation.execution.record(update)
 }
 
 /** Publish streaming progress; the application decides what is durable and what is display. */
 export function reportTaskProgress(
   update: TaskRunUpdate & Partial<Pick<TaskRunSnapshot, LiveTaskRunField>>
 ): void {
-  desktopAutomation.reportProgress(update)
+  desktopAutomation.execution.reportProgress(update)
 }
 
 export function appendTaskStep(
@@ -206,7 +206,7 @@ export function appendTaskStep(
   title: string,
   step: string
 ): TaskRunSnapshot {
-  return desktopAutomation.appendStep(taskId, kind, title, step)
+  return desktopAutomation.execution.appendStep(taskId, kind, title, step)
 }
 
 /** Persist one redacted, bounded planning-step record without changing orchestration state. */
@@ -225,7 +225,7 @@ export function appendTaskStepDetail(
   title: string,
   detail: ComputerUseStepDetail
 ): TaskRunSnapshot {
-  return desktopAutomation.appendStepDetail(taskId, kind, title, detail)
+  return desktopAutomation.execution.appendStepDetail(taskId, kind, title, detail)
 }
 
 /** Hydrate the history and close every task this device can no longer own. */

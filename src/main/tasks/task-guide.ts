@@ -20,7 +20,7 @@ export {
 } from '@offgrid/automation'
 
 export function registerTaskGuideHandler(taskId: string, handler: TaskGuideHandler): () => void {
-  return desktopAutomation.registerGuideHandler(taskId, handler)
+  return desktopAutomation.execution.registerGuideHandler(taskId, handler)
 }
 
 export function taskGuideAvailability(taskId: string): TaskGuideAvailability {
