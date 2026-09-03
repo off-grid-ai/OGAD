@@ -28,15 +28,16 @@ import {
   groupWorkRuns,
   type WorkRunStep
 } from '@offgrid/sync'
-import type { VoiceTurnMode } from '@offgrid/application'
 import {
   cleanImagePrompt,
   isCancellationError,
   shouldAutoRouteImage,
   type ChatTurn,
   compactionNoticeText,
-  fallbackNoticeText
-} from '@offgrid/models'
+  fallbackNoticeText,
+  modelFileDisplayName,
+  type VoiceTurnMode
+} from '@offgrid/application'
 import ReactMarkdown, { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -133,7 +134,6 @@ import {
 } from '@renderer/lib/task-session-store'
 import { submitTaskGuidance } from '@renderer/lib/task-guidance-client'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
-import { modelFileDisplayName } from '@offgrid/models'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -4592,7 +4592,7 @@ export function MemoryChat({
         persistContext?: Record<string, unknown>
         cutoff?: ResponseCutoffContract
         toolCalls?: ChatMessage['toolCalls']
-        sessionTurn?: import('@offgrid/models').ChatTurn
+        sessionTurn?: ChatTurn
       }
     ): Promise<void> => {
       const reasoning = reasoningByStream.current[streamId]?.trim() || undefined

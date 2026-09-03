@@ -41,7 +41,7 @@ import {
   visibleCatalogTags,
   type CatalogTagTone,
   isLocalLibraryModelId
-} from '@offgrid/models'
+} from '@offgrid/application'
 import {
   filterAndSort,
   parseParamCount,
@@ -56,7 +56,7 @@ import {
   type FilterState,
   type Credibility,
   type ModelKind
-} from '@offgrid/models'
+} from '@offgrid/application'
 import {
   type DesktopModelControlModel,
   type DesktopModelControlProjection
@@ -71,7 +71,7 @@ import {
   internalTabRoutes,
   internalTabSubroute
 } from '@renderer/lib/internal-tab-route'
-import { MODEL_FILE_EXTENSION } from '@offgrid/models'
+import { MODEL_FILE_EXTENSION } from '@offgrid/application'
 
 function Sel({
   value,

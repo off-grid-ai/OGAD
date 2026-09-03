@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type {
   CaptureReadinessApplicationService,
   CaptureReadinessProjection
-} from '@offgrid/models'
+} from '@offgrid/application'
 import { captureReadinessApplication } from '@renderer/composition/capture-readiness'
 import type { ProgressLike } from '@offgrid/ui'
 import { useModelDownloadProgress } from '@renderer/hooks/useModelDownloadProgress'

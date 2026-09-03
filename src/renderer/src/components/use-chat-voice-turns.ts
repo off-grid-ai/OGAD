@@ -4,9 +4,9 @@ import {
   type Outcome,
   type SpeechEndpointTimer,
   type SpeechFailure,
-  type VoiceTurnMode
+  type VoiceTurnMode,
+  transcriptionRecoveryMessage
 } from '@offgrid/application'
-import { transcriptionRecoveryMessage } from '@offgrid/models'
 import { createSpeechEndpointTimer } from '@renderer/composition/speech-endpoint'
 
 /*

@@ -117,6 +117,18 @@ module.exports = {
       to: { path: '^\\.\\./shared/packages/speech/' }
     },
     {
+      name: 'presentation-not-to-raw-models',
+      comment:
+        'Presentation reads Models through @offgrid/application. Renderer composition and platform adapters may depend on the raw domain contract.',
+      severity: 'error',
+      from: {
+        path: '^(src/renderer/src/(components|lib|screens)/|pro/renderer/)',
+        pathNot:
+          '(__tests__/|\\.(test|spec)\\.[tj]sx?$)|^src/renderer/src/lib/(capture-readiness-ports|desktop-chat-generation-adapter|desktop-chat-session-repository)\\.ts$'
+      },
+      to: { path: '^\\.\\./shared/packages/models/' }
+    },
+    {
       name: 'not-to-test',
       comment:
         'Production code must not import test files (they would ship, dragging fixtures in).',

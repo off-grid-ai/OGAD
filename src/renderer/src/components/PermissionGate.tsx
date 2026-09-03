@@ -12,7 +12,7 @@ import { projectProgress, type ProgressLike } from '@offgrid/ui'
 import { formatStorageBytes } from './setup/storage-format'
 import { useTaskWorkspaceOpen } from '@renderer/lib/task-side-panel'
 import { useCaptureReadiness } from './use-capture-readiness'
-import type { CaptureReadinessProjection } from '@offgrid/models'
+import type { CaptureReadinessProjection } from '@offgrid/application'
 
 interface PermissionGateProps {
   children: React.ReactNode
