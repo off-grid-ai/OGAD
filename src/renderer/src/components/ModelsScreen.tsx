@@ -22,7 +22,7 @@ import { SidePanel } from './SidePanel'
 import { deviceNoun } from '@renderer/lib/device'
 import { collectTags, matchesAllTags, toggleTag } from '@renderer/lib/model-tag-filter'
 import { companionDownloadLabel } from '@renderer/lib/download-label'
-import { formatTransferSpeed } from '@offgrid/sync'
+import { formatTransferSpeed } from '@offgrid/application'
 import { projectProgress } from '@offgrid/ui'
 import { downloadTimeRemaining } from '@renderer/lib/download-progress'
 import {

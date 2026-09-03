@@ -10,7 +10,7 @@ import {
 } from '@renderer/lib/model-settings-panel'
 import { CacheCleanupControl } from './CacheCleanupControl'
 import { formatStorageBytes } from './storage-format'
-import { formatTransferSpeed } from '@offgrid/sync'
+import { formatTransferSpeed } from '@offgrid/application'
 import { projectProgress } from '@offgrid/ui'
 import { downloadTimeRemaining } from '@renderer/lib/download-progress'
 import { type DesktopModelControlProjection } from '@renderer/lib/model-control-application'

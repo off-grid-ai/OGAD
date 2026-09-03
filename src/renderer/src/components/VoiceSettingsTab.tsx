@@ -23,7 +23,7 @@ import {
 import { SettingsRow } from './SettingsRow'
 import { SettingsSelect } from './SettingsSelect'
 import { LoadingDots } from './ui/loading-dots'
-import { formatTransferSpeed } from '@offgrid/sync'
+import { formatTransferSpeed } from '@offgrid/application'
 import { projectProgress } from '@offgrid/ui'
 import { formatStorageBytes } from './setup/storage-format'
 
