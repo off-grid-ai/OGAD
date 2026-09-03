@@ -142,9 +142,7 @@ export default defineConfig({
         // sibling modules that ARE covered (imagegen/*, models/*, transcription/classify,
         // model-server/*); these husks spawn binaries / bind sockets - exercised via
         // `npm run smoke` + e2e, not unit tests. Mirrors the excluded model-server.ts.
-        'src/main/imagegen.ts',
         'src/main/mflux.ts',
-        'src/main/sd-server.ts',
         'src/main/model-server.ts',
         // Cross-platform orphan-port reaper: execSync(netstat/lsof/tasklist/ps) + process.kill
         // — an OS-boundary shell, verified by the real macOS/Windows run, not in-process.
