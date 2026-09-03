@@ -42,7 +42,7 @@ import {
 const WHISPER_SERVER_PORT = 8441
 /** How long whisper-server may take to load a model before this device treats it as failed. A
  *  desktop engine readiness rule the shared runtime policy does not hold yet (mobile has
- *  mobileNativeInitTimeoutMs); move it there when the second app needs it. */
+ *  nativeInitTimeoutMs); move it there when the second app needs it. */
 const WHISPER_SERVER_READY_TIMEOUT_MS = 60_000
 
 /** Launch-time context that pins the resident model. A change here means the

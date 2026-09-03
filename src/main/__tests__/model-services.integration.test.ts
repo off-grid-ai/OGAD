@@ -258,7 +258,7 @@ describe('Desktop shared model-service composition', () => {
       (model) => model.id === text.id && model.modality === 'text'
     )?.routeId
     if (!startupTextRoute) throw new Error('The startup text fixture needs a canonical route.')
-    await startupServices.llm.select('text', startupTextRoute)
+    await startupServices.workspace.select('text', startupTextRoute)
     await expect(startupServices.warmText()).resolves.toBe(true)
     await expect(startupServices.warmText()).resolves.toBe(false)
     expect(nativeLoads).toBe(1)
@@ -286,7 +286,7 @@ describe('Desktop shared model-service composition', () => {
       }
     })
     await failingStartupServices.refresh()
-    await failingStartupServices.llm.select('text', startupTextRoute)
+    await failingStartupServices.workspace.select('text', startupTextRoute)
     await expect(failingStartupServices.warmText()).rejects.toBe(startupError)
     expect(failingStartupServices.residency.getResidents()).toEqual([])
 

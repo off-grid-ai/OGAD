@@ -478,7 +478,7 @@ export function createDesktopModelServices(
       try {
         await llm.refresh()
         if (modelId === null) {
-          await llm.select(modality, null)
+          await workspace.select(modality, null)
           return { success: true }
         }
         // Any id space (route, legacy remote, native, or a stale family alias) resolves to the one
@@ -490,7 +490,7 @@ export function createDesktopModelServices(
           workspace.resolveRoute(modality, modelId) ??
           this.routeIdFor(modality, canonicalModelId)
         if (!selectedRoute) return { success: false, error: 'unknown model' }
-        await llm.select(modality, selectedRoute)
+        await workspace.select(modality, selectedRoute)
         return { success: true }
       } catch (error) {
         return {
@@ -514,7 +514,7 @@ export function createDesktopModelServices(
         const selected = selectionPersistence.readCanonical(modality)
         const route = selected ? decodeModelRouteId(selected) : null
         if (route?.serverId !== serverId) continue
-        await llm.select(modality, null)
+        await workspace.select(modality, null)
       }
     },
     async warmText() {

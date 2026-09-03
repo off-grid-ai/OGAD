@@ -1,6 +1,6 @@
 import type {
   WorkspaceGenerationPort,
-  LLMService,
+  WorkspaceRoutingPort,
   ModelCapabilities,
   ModelControlApplicationSnapshot,
   ModelModality,
@@ -18,7 +18,7 @@ export interface DesktopGenerationObservationPort {
 export interface DesktopModelServices {
   /** The one shared facade; `llm`, `generation`, `residency` below are its parts (migration). */
   workspace: ModelWorkspace
-  llm: LLMService
+  llm: WorkspaceRoutingPort
   generation: WorkspaceGenerationPort
   residency: ModelResidencyManager
   generationObservations: DesktopGenerationObservationPort
