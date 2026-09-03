@@ -2,21 +2,20 @@ import {
   modelsFailureMessage,
   type ModelsFailure,
   type AutomationFacade,
+  type GenerationEvents,
+  type GenerationLifecycleEvent,
+  type GenerationRequest,
+  type GenerationResult,
+  type ModelModality,
   type ModelsFacade,
   type OffGridApplication,
+  type PairingQrRoute,
   type PartialGenerationState,
   type RagFacade,
   type SyncFacade,
+  type SyncOutcome,
   type UseFacade
 } from '@offgrid/application'
-import type { PairingQrRoute, SyncOutcome } from '@offgrid/sync'
-import type {
-  GenerationEvents,
-  GenerationLifecycleEvent,
-  GenerationRequest,
-  GenerationResult,
-  ModelModality
-} from '@offgrid/models'
 
 let application: OffGridApplication | null = null
 
