@@ -28,6 +28,12 @@ import type {
 import type { TaskGuideInput } from '../shared/task-guidance'
 import type { RemoteVisionServerUpdate } from '../shared/remote-vision-server'
 import type { TaskRunSnapshot } from '../main/tasks/task-history-store'
+import {
+  SPEECH_PLAYBACK_REQUEST_CHANNEL,
+  SPEECH_PLAYBACK_RESULT_CHANNEL,
+  type SpeechPlaybackRequest,
+  type SpeechPlaybackResult
+} from '../shared/speech-playback-contract'
 
 console.log('PRELOAD SCRIPT LOADED')
 
@@ -719,6 +725,16 @@ const offGridApi = {
     return unsubscribe('tts:voice-progress', listener)
   },
   speak: (text: string, voice?: string) => ipcRenderer.invoke('tts:speak', text, voice),
+  speechPlayback: {
+    onRequest: (callback: (request: SpeechPlaybackRequest) => void) => {
+      const listener = (_event: unknown, request: SpeechPlaybackRequest): void => callback(request)
+      ipcRenderer.on(SPEECH_PLAYBACK_REQUEST_CHANNEL, listener)
+      return unsubscribe(SPEECH_PLAYBACK_REQUEST_CHANNEL, listener)
+    },
+    sendResult: (result: SpeechPlaybackResult): void => {
+      ipcRenderer.send(SPEECH_PLAYBACK_RESULT_CHANNEL, result)
+    }
+  },
 
   // --- On-device image generation (stable-diffusion.cpp) ---
   imageGenStatus: () => ipcRenderer.invoke('imagegen:status'),
