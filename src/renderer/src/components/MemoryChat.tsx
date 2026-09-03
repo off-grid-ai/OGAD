@@ -840,7 +840,6 @@ function VoiceMessageRow({
         transcript={messageToSpeakable(message.content)}
         audioUrl={recordedClipUrl(message)}
         durationSeconds={message.audioDuration}
-        synthesize={(text) => window.api.speak(text)}
         onPlaybackStateChange={reportPlayback}
         copied={copied}
         onCopy={(text) => onCopy(text, message.id)}
@@ -874,7 +873,6 @@ function VoiceMessageRow({
           autoPlay={autoPlay}
           showTranscriptInitially={showTranscriptInitially}
           defaultSpeed={playbackSpeed}
-          synthesize={(text) => window.api.speak(text)}
           onPlaybackStateChange={reportPlayback}
           copied={copied}
           onCopy={(text) => onCopy(text, message.id)}

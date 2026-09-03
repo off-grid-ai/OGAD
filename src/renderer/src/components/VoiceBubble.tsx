@@ -8,9 +8,8 @@
  *
  *  - User voice notes carry a recorded clip (`audioUrl`) → we decode its REAL
  *    envelope and play the file directly.
- *  - Assistant replies have no file → we synthesize on-device (Kokoro) the first
- *    time Play is pressed, cache the result, and draw a deterministic
- *    transcript-derived envelope (stable before/during playback).
+ *  - Assistant replies have no file → Shared Speech owns synthesis and playback;
+ *    this component projects its correlated lifecycle events.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Play, Pause, CaretDown, Copy, ArrowsClockwise, Check } from '@phosphor-icons/react'
@@ -19,6 +18,49 @@ import { LoadingDots } from './ui/loading-dots'
 
 const WAVEFORM_BARS = 48
 const SPEED_STEPS = [0.5, 0.8, 1.0, 1.25, 1.5, 2.0]
+type VoiceStatus = 'idle' | 'loading' | 'playing' | 'paused'
+
+function useSpeechEvents({
+  operationRef,
+  setStatus,
+  setCurrentTime,
+  setPlaybackError
+}: {
+  operationRef: React.MutableRefObject<string | null>
+  setStatus: React.Dispatch<React.SetStateAction<VoiceStatus>>
+  setCurrentTime: React.Dispatch<React.SetStateAction<number>>
+  setPlaybackError: React.Dispatch<React.SetStateAction<string | null>>
+}): void {
+  useEffect(() => {
+    return window.api.speechCommands.onEvent((event) => {
+      if (
+        event.type !== 'speech_started' &&
+        event.type !== 'speech_finished' &&
+        event.type !== 'interrupted'
+      )
+        return
+      const operationId = operationRef.current
+      if (!operationId || event.operationId !== operationId) return
+      if (event.type === 'speech_started') {
+        setStatus('playing')
+        return
+      }
+      operationRef.current = null
+      setStatus('idle')
+      setCurrentTime(0)
+      if (
+        event.type === 'speech_finished' &&
+        event.outcome.kind !== 'spoken' &&
+        event.outcome.kind !== 'interrupted' &&
+        event.outcome.kind !== 'nothing-to-speak'
+      ) {
+        setPlaybackError(
+          'Speech could not be generated. Check that Text-to-speech is installed in Settings, then try again.'
+        )
+      }
+    })
+  }, [operationRef, setCurrentTime, setPlaybackError, setStatus])
+}
 
 function formatDuration(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return '0:00'
@@ -93,8 +135,8 @@ interface VoiceBubbleProps {
   isUser?: boolean
   /** Assistant reply still generating — a quiet waveform placeholder, no playback. */
   isLoading?: boolean
-  /** Synthesize text → playable dataUrl on-device (assistant replies). */
-  synthesize: (text: string) => Promise<{ dataUrl: string }>
+  /** @deprecated Generated playback is owned by the Shared Speech facade. */
+  synthesize?: (text: string) => Promise<{ dataUrl: string }>
   /** Play once automatically when ready (a just-finished assistant reply). */
   autoPlay?: boolean
   /** The latest assistant voice reply opens its transcript without another click. */
@@ -116,7 +158,6 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
   transcript,
   isUser = false,
   isLoading = false,
-  synthesize,
   autoPlay = false,
   showTranscriptInitially = false,
   defaultSpeed = 1,
@@ -126,14 +167,20 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
   onRetry
 }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null)
-  const srcRef = useRef<string | null>(null) // cached synthesized dataUrl
-  const [status, setStatus] = useState<'idle' | 'loading' | 'playing' | 'paused'>('idle')
+  const speechOperationRef = useRef<string | null>(null)
+  const [status, setStatus] = useState<VoiceStatus>('idle')
   const [currentTime, setCurrentTime] = useState(0)
   const [loadedDuration, setLoadedDuration] = useState(0)
   const [speed, setSpeed] = useState(defaultSpeed)
   const [showTranscript, setShowTranscript] = useState(showTranscriptInitially)
   const [playbackError, setPlaybackError] = useState<string | null>(null)
   const playbackActive = status === 'loading' || status === 'playing'
+  useSpeechEvents({
+    operationRef: speechOperationRef,
+    setStatus,
+    setCurrentTime,
+    setPlaybackError
+  })
 
   useEffect(() => {
     if (showTranscriptInitially && transcript && !isLoading) setShowTranscript(true)
@@ -188,13 +235,26 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
         audioRef.current.pause()
         setStatus('paused')
       }
+      if (id !== messageId && speechOperationRef.current) {
+        void window.api.speechCommands.interrupt().catch((error) => {
+          console.error('[voice] interrupt failed', error)
+          setPlaybackError('Speech could not be stopped. Check your audio output, then try again.')
+        })
+      }
     })
   }, [messageId])
 
   useEffect(
     () => () => {
+      const activeSpeechOperation = speechOperationRef.current
       audioRef.current?.pause()
       audioRef.current = null
+      speechOperationRef.current = null
+      if (activeSpeechOperation) {
+        void window.api.speechCommands.interrupt().catch((error) => {
+          console.error('[voice] interrupt failed', error)
+        })
+      }
     },
     []
   )
@@ -217,6 +277,19 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
 
   const handlePlayPause = useCallback(async () => {
     const audio = audioRef.current
+    if (!audioUrl && speechOperationRef.current) {
+      const operationId = speechOperationRef.current
+      try {
+        await window.api.speechCommands.interrupt()
+        if (speechOperationRef.current === operationId) speechOperationRef.current = null
+        setStatus('idle')
+        setCurrentTime(0)
+      } catch (error) {
+        console.error('[voice] interrupt failed', error)
+        setPlaybackError('Speech could not be stopped. Check your audio output, then try again.')
+      }
+      return
+    }
     if (status === 'playing' && audio) {
       audio.pause()
       setStatus('paused')
@@ -228,18 +301,34 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
       setStatus('playing')
       return
     }
-    // idle → resolve a source (cached synth / recording), then play.
+    // Shared owns generated speech. Record the ID before the command so a fast
+    // terminal event cannot arrive before this component can correlate it.
     setPlaybackError(null)
     setStatus('loading')
-    try {
-      let src = audioUrl || srcRef.current
-      if (!src) {
-        const { dataUrl } = await synthesize(transcript)
-        if (!dataUrl) throw new Error('no audio')
-        srcRef.current = dataUrl
-        src = dataUrl
+    if (!audioUrl) {
+      const operationId = crypto.randomUUID()
+      speechOperationRef.current = operationId
+      claimVoicePlayback(messageId)
+      try {
+        await window.api.speechCommands.feedStream({
+          operationId,
+          delta: transcript,
+          speed
+        })
+        await window.api.speechCommands.finishStream(operationId)
+      } catch (error) {
+        console.error('[voice] speech stream failed', error)
+        if (speechOperationRef.current !== operationId) return
+        speechOperationRef.current = null
+        setStatus('idle')
+        setPlaybackError(
+          'Speech could not be generated. Check that Text-to-speech is installed in Settings, then try again.'
+        )
       }
-      const audioEl = new Audio(src)
+      return
+    }
+    try {
+      const audioEl = new Audio(audioUrl)
       audioRef.current = audioEl
       wire(audioEl)
       claimVoicePlayback(messageId)
@@ -254,7 +343,7 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
           : 'Speech could not be generated. Check that Text-to-speech is installed in Settings, then try again.'
       )
     }
-  }, [status, audioUrl, transcript, synthesize, wire, messageId])
+  }, [status, audioUrl, transcript, speed, wire, messageId])
 
   const cycleSpeed = useCallback(() => {
     setSpeed((prev) => {

@@ -1,10 +1,12 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron'
-import type { OffGridApplication, SpeakCommand } from '@offgrid/application'
+import type { OffGridApplication, SpeakCommand, StreamSpeechCommand } from '@offgrid/application'
 import { getMainWindow } from './main-window'
 import { applicationShutdown } from './shutdown'
 import {
-  SPEECH_INTERRUPT_CHANNEL,
   SPEECH_EVENT_CHANNEL,
+  SPEECH_FEED_STREAM_CHANNEL,
+  SPEECH_FINISH_STREAM_CHANNEL,
+  SPEECH_INTERRUPT_CHANNEL,
   SPEECH_SPEAK_CHANNEL,
   type SpeechSpeakOutcome
 } from '../shared/speech-command-contract'
@@ -41,6 +43,33 @@ function parseSpeakCommand(value: unknown): SpeakCommand | null {
   }
 }
 
+function parseStreamCommand(value: unknown): StreamSpeechCommand | null {
+  if (!value || typeof value !== 'object') return null
+  const command = value as Record<string, unknown>
+  if (
+    typeof command.operationId !== 'string' ||
+    command.operationId.length === 0 ||
+    command.operationId.length > 256 ||
+    typeof command.delta !== 'string' ||
+    command.delta.length > MAX_SPEECH_TEXT_LENGTH ||
+    !optionalString(command.voice, 256) ||
+    !optionalString(command.language, 64) ||
+    !optionalSpeed(command.speed)
+  )
+    return null
+  return {
+    operationId: command.operationId,
+    delta: command.delta,
+    ...(typeof command.voice === 'string' ? { voice: command.voice } : {}),
+    ...(typeof command.language === 'string' ? { language: command.language } : {}),
+    ...(typeof command.speed === 'number' ? { speed: command.speed } : {})
+  }
+}
+
+function parseOperationId(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 && value.length <= 256 ? value : null
+}
+
 function assertMainRenderer(event: IpcMainInvokeEvent): void {
   if (event.sender !== getMainWindow()?.webContents) {
     throw new Error('Speech commands are only available to the main renderer.')
@@ -72,6 +101,20 @@ export function setupSpeechCommandIpc(): void {
       return desktopApplication.speech.speak(command)
     }
   )
+  ipcMain.handle(SPEECH_FEED_STREAM_CHANNEL, async (event, value: unknown): Promise<void> => {
+    assertMainRenderer(event)
+    const command = parseStreamCommand(value)
+    if (!command) throw new Error('Invalid speech stream command.')
+    const desktopApplication = await speechApplication()
+    desktopApplication.speech.feedStream(command)
+  })
+  ipcMain.handle(SPEECH_FINISH_STREAM_CHANNEL, async (event, value: unknown): Promise<void> => {
+    assertMainRenderer(event)
+    const operationId = parseOperationId(value)
+    if (!operationId) throw new Error('Invalid speech stream operation ID.')
+    const desktopApplication = await speechApplication()
+    desktopApplication.speech.finishStream(operationId)
+  })
   ipcMain.handle(SPEECH_INTERRUPT_CHANNEL, async (event): Promise<void> => {
     assertMainRenderer(event)
     const desktopApplication = await speechApplication()
@@ -81,6 +124,8 @@ export function setupSpeechCommandIpc(): void {
     name: 'speech:command-transport',
     shutdown: () => {
       ipcMain.removeHandler(SPEECH_SPEAK_CHANNEL)
+      ipcMain.removeHandler(SPEECH_FEED_STREAM_CHANNEL)
+      ipcMain.removeHandler(SPEECH_FINISH_STREAM_CHANNEL)
       ipcMain.removeHandler(SPEECH_INTERRUPT_CHANNEL)
       stopEvents?.()
       stopEvents = null
