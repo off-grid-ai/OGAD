@@ -1,5 +1,16 @@
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { afterAll, afterEach, beforeEach } from 'vitest'
 import { installCompatibleGenerationModel } from './compatible-generation-model'
+
+// The data dir is pinned for the whole suite before any main module loads. runtime-env resolves it from
+// this variable first; without it a journey that never set its own dir read and WROTE the developer's
+// real profile (<cwd>/.offgrid: active-model.json, mmproj.gguf, downloads.json). A file that needs its
+// own dir still sets the variable itself before its imports, as tools-search does.
+if (!process.env.OFFGRID_DATA_DIR) {
+  process.env.OFFGRID_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-db-suite-'))
+}
 
 let removeCompatibleGenerationModel: (() => void) | null = null
 

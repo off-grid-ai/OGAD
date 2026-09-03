@@ -10,7 +10,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { startFakeLlamaServer, type FakeLlamaServer } from './harness/fake-llama-server'
+import { startFakeLlamaServer, type FakeLlamaServer,
+  installFakeActiveTextModel
+} from './harness/fake-llama-server'
 
 interface IpcEvent {
   sender: { send: (channel: string, payload: unknown) => void }
@@ -19,6 +21,9 @@ interface IpcEvent {
 type IpcHandler = (event: IpcEvent, ...args: unknown[]) => unknown
 
 const PROFILE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-memory-rag-lifecycle-'))
+// Pin the data dir before any main module loads: runtime-env resolves it from this variable, so an
+// unpinned test would read and WRITE the developer's real profile (<cwd>/.offgrid).
+process.env.OFFGRID_DATA_DIR = PROFILE_DIR
 const handlers = new Map<string, IpcHandler>()
 const boundary = vi.hoisted(() => ({ selectedPaths: [] as string[] }))
 
@@ -105,6 +110,9 @@ function lastModelPrompt(): string {
 }
 
 beforeAll(async () => {
+  // The chat route is the one durable selection the real shared inventory reads; the socket stays
+  // the only inference fake.
+  installFakeActiveTextModel(PROFILE_DIR)
   fake = await startFakeLlamaServer()
   await bootApplicationModules()
 })

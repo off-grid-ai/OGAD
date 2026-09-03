@@ -8,9 +8,16 @@ import { describe, it, expect, afterAll, beforeAll, beforeEach, vi } from 'vites
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { startFakeLlamaServer, type FakeLlamaServer } from './harness/fake-llama-server'
+import {
+  installFakeActiveTextModel,
+  startFakeLlamaServer,
+  type FakeLlamaServer
+} from './harness/fake-llama-server'
 
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-vision-it-'))
+// Pin the data dir before any main module loads: runtime-env resolves it from this variable, so an
+// unpinned test would read and WRITE the developer's real profile (<cwd>/.offgrid).
+process.env.OFFGRID_DATA_DIR = TMP_DIR
 vi.mock('electron', () => ({
   app: { getPath: () => TMP_DIR, isPackaged: false, getAppPath: () => process.cwd() },
   safeStorage: {
@@ -26,35 +33,23 @@ import { modelsDir } from '../runtime-env'
 
 let fake: FakeLlamaServer
 let imgPath: string
-let activeModelFile: string
-let mmprojFile: string
 
 beforeAll(async () => {
+  // The selected model is installed through the one durable selection the real shared inventory
+  // reads, before the first inventory refresh; each test only decides whether its projector file exists.
+  installFakeActiveTextModel(TMP_DIR)
   fake = await startFakeLlamaServer()
   const svc = llm as unknown as { port: number; initialized: boolean; paused: boolean }
   svc.port = fake.port
   svc.initialized = true
   svc.paused = false
   fs.mkdirSync(modelsDir(), { recursive: true })
-  activeModelFile = path.join(modelsDir(), 'active-model.json')
-  mmprojFile = path.join(modelsDir(), 'mmproj.gguf')
   // A real (tiny) image file the guard reads + base64-embeds when vision is on.
   imgPath = path.join(TMP_DIR, 'shot.png')
   fs.writeFileSync(imgPath, Buffer.from([0x89, 0x50, 0x4e, 0x47])) // PNG magic bytes
 })
 beforeEach(() => {
   fake.reset()
-  // Reset the active-model selection each test; the specific test sets what it needs.
-  try {
-    fs.rmSync(activeModelFile)
-  } catch {
-    /* absent */
-  }
-  try {
-    fs.rmSync(mmprojFile)
-  } catch {
-    /* absent */
-  }
 })
 afterAll(async () => {
   await fake.close()
@@ -67,8 +62,8 @@ afterAll(async () => {
 
 describe('vision guard (D16) — real hasVision() drives image embedding', () => {
   it('does NOT embed the image when the active model has NO vision projector', async () => {
-    // active-model.json with no mmproj -> resolveModel sets mmProjPath '' -> hasVision() false.
-    fs.writeFileSync(activeModelFile, JSON.stringify({ primary: 'text-model.gguf' }))
+    // The selected model's projector file is absent -> hasVision() false.
+    installFakeActiveTextModel(TMP_DIR, { projector: false })
     fake.enqueue({ content: 'ok' })
     await toolChat('describe this', [], { images: [imgPath] })
     const body = JSON.stringify(fake.requests[0]?.messages ?? [])
@@ -76,12 +71,8 @@ describe('vision guard (D16) — real hasVision() drives image embedding', () =>
   })
 
   it('embeds the image when the active model HAS a vision projector present on disk', async () => {
-    // A real mmproj file + active-model.json referencing it -> hasVision() true.
-    fs.writeFileSync(mmprojFile, Buffer.from([0x67, 0x67, 0x75, 0x66])) // GGUF magic
-    fs.writeFileSync(
-      activeModelFile,
-      JSON.stringify({ primary: 'vision-model.gguf', mmproj: 'mmproj.gguf' })
-    )
+    // The same selection with its projector file on disk -> hasVision() true.
+    installFakeActiveTextModel(TMP_DIR)
     fake.enqueue({ content: 'A cat.' })
     const r = await toolChat('describe this', [], { images: [imgPath] })
     const body = JSON.stringify(fake.requests[0]?.messages ?? [])

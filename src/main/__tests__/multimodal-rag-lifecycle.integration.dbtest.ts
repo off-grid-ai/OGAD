@@ -186,11 +186,6 @@ beforeAll(async () => {
   )
   fs.chmodSync(whisper, 0o755)
   fs.writeFileSync(path.join(PROFILE_DIR, 'models', 'ggml-base.bin'), 'synthetic model boundary')
-  fs.writeFileSync(path.join(PROFILE_DIR, 'models', 'mmproj.gguf'), Buffer.from('gguf'))
-  fs.writeFileSync(
-    path.join(PROFILE_DIR, 'models', 'active-model.json'),
-    JSON.stringify({ primary: 'vision-model.gguf', mmproj: 'mmproj.gguf' })
-  )
 
   const { configureRuntime } = await import('../runtime-env')
   configureRuntime({ dataDir: PROFILE_DIR, binRoots: [BIN_DIR] })

@@ -22,11 +22,18 @@ const FAKE_TEXT_PROJECTOR_FILE = 'mmproj-Qwen3.5-0.8B-BF16.gguf'
  * Install the minimum durable model selection needed by the real shared inventory.
  * The socket remains the only inference fake; model discovery and routing stay real.
  */
-export function installFakeActiveTextModel(profileDir: string): void {
+export function installFakeActiveTextModel(
+  profileDir: string,
+  options: { projector?: boolean } = {}
+): void {
   const modelsDir = path.join(profileDir, 'models')
   fs.mkdirSync(modelsDir, { recursive: true })
   fs.writeFileSync(path.join(modelsDir, FAKE_TEXT_MODEL_FILE), 'fake native model boundary')
-  fs.writeFileSync(path.join(modelsDir, FAKE_TEXT_PROJECTOR_FILE), 'fake projector boundary')
+  // The vision projector is a file on disk: present, the selected model can read images; absent,
+  // it cannot. Tests that exercise the vision guard choose which world they are in here.
+  const projector = path.join(modelsDir, FAKE_TEXT_PROJECTOR_FILE)
+  if (options.projector === false) fs.rmSync(projector, { force: true })
+  else fs.writeFileSync(projector, 'fake projector boundary')
   fs.writeFileSync(
     path.join(modelsDir, 'active-model.json'),
     JSON.stringify({
