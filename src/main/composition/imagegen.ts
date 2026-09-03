@@ -5,7 +5,7 @@ import {
   desktopImageApplicationPorts,
   type DesktopImageSharedRequest
 } from '../imagegen/application-service'
-import { desktopModelServices } from '../model-service-access'
+import { desktopModels } from './application-access'
 import { once } from '@offgrid/models'
 
 export const imageGenerationApplication = once(
@@ -15,7 +15,7 @@ export const imageGenerationApplication = once(
       ImageGenerationOutputContract,
       DesktopImageSharedRequest
     >(
-      { resolveRoute: (requirements) => desktopModelServices.llm.resolveRoute(requirements) },
+      { resolveRoute: (requirements) => desktopModels.resolve(requirements) },
       desktopImageApplicationPorts()
     )
 )

@@ -37,7 +37,11 @@ import {
 } from '../../shared/image-generation-contract'
 import { generateDesktopOperation } from '../desktop-generation'
 import { getSetting } from '../database'
-import { desktopModelServices } from '../model-service-access'
+import {
+  desktopModels,
+  DesktopModelsOperationError,
+  generateWithDesktopModels
+} from '../composition/application-access'
 import { dataDir } from '../runtime-env'
 import { enhanceImagePrompt } from '@offgrid/models'
 import { resolveExistingOwnedPath } from './owned-path'
@@ -89,9 +93,9 @@ function routeIdentity(model: RuntimeModel): string {
 
 function localRuntimeInspection(model: RuntimeModel, threads: number): ImageRuntimeInspection {
   const identity = routeIdentity(model)
-  const resident = desktopModelServices.residency
-    .getResidents()
-    .find((candidate) => candidate.modelId === identity || candidate.modelId === model.id)
+  const resident = desktopModels
+    .snapshot()
+    .residents.find((candidate) => candidate.modelId === identity || candidate.modelId === model.id)
   return {
     loaded: Boolean(resident),
     loadedIdentity: resident ? identity : null,
@@ -116,7 +120,10 @@ function localImageArtifactPath(value: string, generatedImagesRoot: string): str
   return resolveExistingOwnedPath(generatedImagesRoot, candidate)
 }
 
-function validateImageArtifact(bytes: Buffer, declaredMime: string | null | undefined): PersistedImageMime {
+function validateImageArtifact(
+  bytes: Buffer,
+  declaredMime: string | null | undefined
+): PersistedImageMime {
   const expected = persistedImageMime(declaredMime)
   if (!expected) {
     throw new Error('The image engine returned an unsupported image content type.')
@@ -183,12 +190,12 @@ export function desktopImageApplicationPorts(): ImageGenerationApplicationPorts<
   ReturnType<typeof sharedRequest>
 > {
   return {
-    refreshInventory: () => desktopModelServices.refresh().then(() => undefined),
+    refreshInventory: () => desktopModels.refresh(),
     resolveRouteId: (request) =>
       request.routeId ??
       (request.model
-        ? desktopModelServices.routeIdFor('image', request.model)
-        : (desktopModelServices.llm.active('image').selectedRouteId ?? undefined)),
+        ? (desktopModels.resolveRoute('image', request.model) ?? undefined)
+        : (desktopModels.snapshot().active.image?.selectedRouteId ?? undefined)),
     createId: randomUUID,
     resolveSettings(request, model) {
       // The user's per-model overrides (Settings > Image, the composer) apply to EVERY path that
@@ -225,16 +232,14 @@ export function desktopImageApplicationPorts(): ImageGenerationApplicationPorts<
         },
         // Shared decides the whole request; this port only runs it and streams text back.
         generate: (_instruction, onText) =>
-          desktopModelServices.generation
-            .generate(
-              imageEnhancementGenerationRequest(
-                request.prompt,
-                { conversationId: request.conversationId ?? turnId, turnId },
-                { signal }
-              ),
-              { chunk: (chunk) => chunk.content && onText(chunk.content) }
-            )
-            .then((result) => result.content)
+          generateWithDesktopModels(
+            imageEnhancementGenerationRequest(
+              request.prompt,
+              { conversationId: request.conversationId ?? turnId, turnId },
+              { signal }
+            ),
+            { chunk: (chunk) => chunk.content && onText(chunk.content) }
+          ).then((result) => result.content)
       })
     },
     inspectRuntime: async (model, settings) => localRuntimeInspection(model, settings.threads),
@@ -291,16 +296,21 @@ export function desktopImageApplicationPorts(): ImageGenerationApplicationPorts<
     },
     persist: ({ output }) => persistImageGenerationOutput(output),
     cancelBoundary: async () => nativeCancelBoundary(),
-    ejectForRetry: () => desktopModelServices.unload('image').then(() => undefined),
+    ejectForRetry: async () => {
+      const outcome = await desktopModels.unload({ modality: 'image', keepSelection: true })
+      if (!outcome.ok) throw new DesktopModelsOperationError(outcome.failure)
+    },
     isForceLoadError: (error) =>
       parseImageMemoryGuardError(error) !== null ||
       error instanceof ModelAdmissionError ||
+      (error instanceof DesktopModelsOperationError && error.failure.kind === 'memory_refused') ||
       (error instanceof ImageExecutionPlanError && error.code === 'memory-limit'),
     retainCancelledState: true
   }
 }
 
-const application = (): ReturnType<typeof imageGenerationApplication> => imageGenerationApplication()
+const application = (): ReturnType<typeof imageGenerationApplication> =>
+  imageGenerationApplication()
 
 function pipelineStage(
   snapshot: ImageApplicationSnapshot<ImageGenerationOutputContract>
@@ -317,6 +327,9 @@ function imageApplicationError(
   const cause = snapshot.failure?.cause
   if (cause instanceof ModelAdmissionError) {
     return new Error(imageMemoryGuardErrorMessage(imageModelAdmissionMessage(cause.model.name)))
+  }
+  if (cause instanceof DesktopModelsOperationError && cause.failure.kind === 'memory_refused') {
+    return new Error(imageMemoryGuardErrorMessage(cause.failure.reason))
   }
   if (cause instanceof ImageExecutionPlanError && cause.code === 'memory-limit') {
     return new Error(imageMemoryGuardErrorMessage(cause.message))

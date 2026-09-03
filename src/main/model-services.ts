@@ -7,6 +7,7 @@ import {
   runtimeModelRouteId,
   ModelAdmissionError,
   type ModelInventoryAdapter,
+  type GenerationAdapter,
   type ModelControlCatalogModel,
   type ModelCapabilities,
   type ModelModality,
@@ -39,6 +40,7 @@ import './models-manager'
 import { registerDesktopModelServices, type DesktopModelServices } from './model-service-access'
 import { desktopModelManagerPorts } from './model-manager-ports'
 import { desktopModels, modelsFailureMessage } from './composition/application-access'
+import { desktopModelLifecyclePorts } from './composition/model-lifecycle'
 export type { DesktopModelServices } from './model-service-access'
 
 interface DesktopInventoryModel {
@@ -323,6 +325,8 @@ export function createDesktopModelServices(
     selectionPersistence,
     dependencies.projectTextSelection
   )
+  const lifecycleAdapters = new Map<string, GenerationAdapter>()
+  let lifecycleWorkspace: ReturnType<typeof createModelWorkspace> | null = null
   const workspace = createModelWorkspace({
     selection: selections,
     memory: {
@@ -341,6 +345,10 @@ export function createDesktopModelServices(
       const id = desktopModelSelectionPersistence.readLegacyTextConfig().id
       return typeof id === 'string' ? id : undefined
     },
+    lifecycle: () => {
+      if (!lifecycleWorkspace) throw new Error('Desktop model workspace is not initialized.')
+      return desktopModelLifecyclePorts(lifecycleWorkspace, lifecycleAdapters)
+    },
     remoteInventory: {
       adapterId: (modality) => desktopAdapterId('remote', modality),
       // Inventory never waits on the network: answer from the cache, probe in the background, and
@@ -358,6 +366,7 @@ export function createDesktopModelServices(
       }
     }
   })
+  lifecycleWorkspace = workspace
   const llm = workspace.llm
   const source = new DesktopInventorySource(dependencies, ids, selections)
   for (const adapterId of [
@@ -396,15 +405,20 @@ export function createDesktopModelServices(
       dependencies.localTextLifecycle
     )
     localGenerationAdapters.set(adapterId, adapter)
+    lifecycleAdapters.set(adapterId, adapter)
     generation.registerAdapter(adapter)
   }
-  generation.registerAdapter(new DesktopImageGenerationAdapter())
+  const imageAdapter = new DesktopImageGenerationAdapter()
+  const voiceAdapter = new DesktopVoiceGenerationAdapter()
+  const transcriptionAdapter = new DesktopTranscriptionGenerationAdapter()
+  const embeddingAdapter = new DesktopEmbeddingGenerationAdapter()
+  for (const adapter of [imageAdapter, voiceAdapter, transcriptionAdapter, embeddingAdapter]) {
+    lifecycleAdapters.set(adapter.id, adapter)
+    generation.registerAdapter(adapter)
+  }
   generation.registerAdapter(new DesktopRemoteImageGenerationAdapter())
-  generation.registerAdapter(new DesktopVoiceGenerationAdapter())
   generation.registerAdapter(new DesktopRemoteVoiceGenerationAdapter())
-  generation.registerAdapter(new DesktopTranscriptionGenerationAdapter())
   generation.registerAdapter(new DesktopRemoteTranscriptionGenerationAdapter())
-  generation.registerAdapter(new DesktopEmbeddingGenerationAdapter())
   generation.registerAdapter(new DesktopRemoteEmbeddingGenerationAdapter())
   for (const adapterId of [
     'desktop.remote-chat',
