@@ -42,15 +42,16 @@ import type {
   BrowserNavigationState,
   BrowserTaskPointer,
   BrowserTaskStatus
-} from '../../shared/browser-session'
+} from '@offgrid/automation'
 import {
-  BROWSER_REGION_PRIORITY,
+  NEW_TAB_TITLE,
+  winningBrowserRegionOwner,
   fitWebUseDesktopRegion,
   isBrowserRegionOwner,
   webUseDesktopZoomFactor,
   type BrowserRegionOwner
-} from '../../shared/browser-session'
-import { encodeTaskPhase } from '../../shared/task-execution-plan'
+} from '@offgrid/automation'
+import { encodeTaskPhase } from '@offgrid/automation'
 import { prepareTaskExecutionPlan } from '../tasks/task-execution-plan-service'
 import { retryPlanningGoal, TASK_RETRY_TRACE } from '../tasks/task-retry'
 import { runBrowserVisualTask, withActiveBrowserVision } from './browser-visual-task'
@@ -202,7 +203,7 @@ class BrowserHost implements BrowserRailHost {
     const navigationHistory = contents.navigationHistory
     return {
       url: contents.getURL(),
-      title: contents.getTitle() || 'New tab',
+      title: contents.getTitle() || NEW_TAB_TITLE,
       canGoBack: navigationHistory.canGoBack(),
       canGoForward: navigationHistory.canGoForward(),
       isLoading: contents.isLoading()
@@ -352,12 +353,8 @@ class BrowserHost implements BrowserRailHost {
   }
 
   private winningRegion(): Rect | null {
-    let winner: { rect: Rect; priority: number } | null = null
-    for (const [owner, rect] of this.regions) {
-      const priority = BROWSER_REGION_PRIORITY[owner]
-      if (!winner || priority > winner.priority) winner = { rect, priority }
-    }
-    return winner?.rect ?? null
+    const winner = winningBrowserRegionOwner(this.regions.keys())
+    return winner ? (this.regions.get(winner) ?? null) : null
   }
 
   private createSession(input: {

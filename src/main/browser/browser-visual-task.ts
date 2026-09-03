@@ -2,9 +2,9 @@ import type { WebContentsView } from 'electron'
 import { llm } from '../llm'
 import { getComputerUseSettings } from '../computer-use-settings'
 import { appendTaskStepDetail, getTaskExecutionDevice } from '../tasks/task-history'
-import type { ComputerUseStepDetail } from '../tasks/task-step-details'
-import type { TaskExecutionPlan } from '../../shared/task-execution-plan'
-import { resolveComputerUseContextTokens } from '../../shared/computer-use-settings'
+import type { ComputerUseStepDetail } from '@offgrid/automation'
+import type { TaskExecutionPlan } from '@offgrid/automation'
+import { resolveComputerUseContextTokens } from '@offgrid/automation'
 import { recentVisualFacts } from '../vision/visual-context'
 import {
   type VisionStepObservation,

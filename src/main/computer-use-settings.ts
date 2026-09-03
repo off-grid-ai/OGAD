@@ -6,7 +6,7 @@ import {
   type ComputerUseSettingsPatch,
   type ComputerUseSettingsPortResult,
   type ComputerUseSettings
-} from '../shared/computer-use-settings'
+} from '@offgrid/automation'
 import { CORE_SYNC_ENTITIES, emitSyncMutation } from './sync-mutation'
 
 export function getComputerUseSettings(): ComputerUseSettings {

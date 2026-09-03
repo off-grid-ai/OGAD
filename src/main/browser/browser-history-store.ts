@@ -1,5 +1,10 @@
+import {
+  MANUAL_BROWSER_HISTORY_LIMIT,
+  manualBrowserHistoryEntry,
+  manualBrowserHistoryPageSize,
+  type ManualBrowserHistoryEntry
+} from '@offgrid/automation'
 import type { TaskHistoryDatabase } from '../tasks/task-history-store'
-import type { ManualBrowserHistoryEntry } from '../../shared/browser-session'
 
 interface ManualBrowserHistoryRow {
   history_id: string
@@ -8,9 +13,10 @@ interface ManualBrowserHistoryRow {
   updated_at: number
 }
 
-export const MANUAL_BROWSER_HISTORY_LIMIT = 50
+export { MANUAL_BROWSER_HISTORY_LIMIT } from '@offgrid/automation'
 
-/** Durable recents for user-created browser tabs. These are not task runs. */
+/** Durable recents for user-created browser tabs. These are not task runs. The entry shape, the
+ * title fallback, the limit, and the page-size clamp are `@offgrid/automation`'s. */
 export class BrowserHistoryStore {
   constructor(
     private readonly db: TaskHistoryDatabase,
@@ -36,14 +42,7 @@ export class BrowserHistoryStore {
     url: string
     at?: number
   }): ManualBrowserHistoryEntry {
-    const entry = {
-      historyId: input.historyId,
-      kind: 'manual' as const,
-      status: 'closed' as const,
-      title: input.title.trim() || 'New tab',
-      url: input.url,
-      updatedAt: input.at ?? this.now()
-    }
+    const entry = manualBrowserHistoryEntry({ ...input, at: input.at ?? this.now() })
     this.db
       .prepare(
         `INSERT INTO manual_browser_history (history_id, title, url, updated_at)
@@ -65,12 +64,11 @@ export class BrowserHistoryStore {
     return row ? this.toEntry(row) : undefined
   }
 
-  list(limit = MANUAL_BROWSER_HISTORY_LIMIT): ManualBrowserHistoryEntry[] {
-    const safeLimit = Math.max(1, Math.min(MANUAL_BROWSER_HISTORY_LIMIT, Math.floor(limit)))
+  list(limit?: number): ManualBrowserHistoryEntry[] {
     return (
       this.db
         .prepare('SELECT * FROM manual_browser_history ORDER BY updated_at DESC LIMIT ?')
-        .all(safeLimit) as ManualBrowserHistoryRow[]
+        .all(manualBrowserHistoryPageSize(limit)) as ManualBrowserHistoryRow[]
     ).map((row) => this.toEntry(row))
   }
 

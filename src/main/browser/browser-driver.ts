@@ -19,7 +19,7 @@ import {
   WEB_USE_BLOCKED_CHROME_HINT,
   WEB_USE_SHORTCUTS,
   type WebUseChromeCommand
-} from '../../shared/web-use-control'
+} from '@offgrid/automation'
 import type { VisionAction } from '../vision/vision-action'
 
 export interface CdpTransport {

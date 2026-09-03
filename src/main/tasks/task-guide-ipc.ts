@@ -1,5 +1,5 @@
 import type { TaskGuideAvailability, TaskGuideResult } from './task-guide'
-import type { TaskGuideInput } from '../../shared/task-guidance'
+import type { TaskGuideInput } from '@offgrid/automation'
 
 type GuideIpcHandler = (_event: unknown, ...args: unknown[]) => Promise<unknown> | unknown
 

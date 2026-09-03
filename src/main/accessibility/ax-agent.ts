@@ -17,15 +17,15 @@ import { extractJsonObject } from '../json-extract'
 import {
   computerUseHistoryTokenBudget,
   tailWithinTokenBudget
-} from '../../shared/computer-use-settings'
-import { DEFAULT_COMPUTER_USE_STEP_BUDGET } from '../../shared/computer-use-limits'
-import type { TaskExecutionPlan } from '../../shared/task-execution-plan'
+} from '@offgrid/automation'
+import { DEFAULT_COMPUTER_USE_STEP_BUDGET } from '@offgrid/automation'
+import type { TaskExecutionPlan } from '@offgrid/automation'
 import {
   createTaskPhaseReporter,
   formatTaskExecutionPlanContext
 } from '../tasks/task-execution-plan-service'
 import { TASK_GUIDANCE_TRACE } from '../tasks/task-guide'
-import { CurrentTaskBrief } from '../tasks/current-task-brief'
+import { TaskBrief } from '@offgrid/automation'
 import type { GuardSnapshot } from '../vision/vision-guard'
 
 export interface ElementActuator {
@@ -307,7 +307,7 @@ export async function runElementTask(
   // A type action without Enter only changes the draft. Do not accept a model
   // claim that the task is done until a later action submits that draft.
   let draftAwaitingSubmit = false
-  const taskBrief = new CurrentTaskBrief(goal)
+  const taskBrief = new TaskBrief(goal)
   let consecutiveParseFailures = 0
   const requireFreshVerification = (): void => {
     if (deps.control && !deps.control.isVerifying) deps.control.beginVerification()
