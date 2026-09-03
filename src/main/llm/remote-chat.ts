@@ -127,6 +127,13 @@ async function discoverCompatibleReasoningMetadata(
   }
 }
 
+/** The learned reasoning dialect for a server, or undefined until the background probe lands. */
+export function peekRemoteReasoningMetadata(
+  remote: RemoteTextModelConnection
+): ModelReasoningMetadata | undefined {
+  return reasoningCapabilities.peek(capabilityKey(remote))
+}
+
 export function remoteReasoningMetadata(
   remote: RemoteTextModelConnection
 ): Promise<ModelReasoningMetadata> {

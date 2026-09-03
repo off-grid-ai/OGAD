@@ -28,7 +28,7 @@ import {
   getRemoteVisionServer,
   desktopRemoteServerPorts
 } from './vision/remote-vision-server'
-import { remoteReasoningMetadata } from './llm/remote-chat'
+import { peekRemoteReasoningMetadata, remoteReasoningMetadata } from './llm/remote-chat'
 import { parseRemoteVisionModelId } from '../shared/remote-vision-server'
 import {
   DesktopLocalGenerationAdapter,
@@ -497,9 +497,18 @@ export function createDesktopModelServices(
     remoteInventory: {
       adapterId: (modality) => desktopAdapterId('remote', modality),
       expandText: expandDesktopTextRoutes,
-      reasoning: async (server) => {
+      // Inventory never waits on the network: answer from the cache, probe in the background, and
+      // refresh inventory when the dialect is known.
+      reasoning: (server) => {
         const connection = getRemoteVisionServer(server.id)
-        return connection ? remoteReasoningMetadata(connection) : undefined
+        if (!connection) return undefined
+        const known = peekRemoteReasoningMetadata(connection)
+        if (!known) {
+          void remoteReasoningMetadata(connection)
+            .then(() => desktopModelServices.refresh())
+            .catch(() => undefined)
+        }
+        return known
       }
     }
   })
