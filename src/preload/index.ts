@@ -42,6 +42,12 @@ import {
   type SpeechMicrophoneRequest,
   type SpeechMicrophoneResult
 } from '../shared/speech-microphone-contract'
+import {
+  SPEECH_TEXT_CLEAN_REQUEST_CHANNEL,
+  SPEECH_TEXT_CLEAN_RESULT_CHANNEL,
+  type SpeechTextCleanRequest,
+  type SpeechTextCleanResult
+} from '../shared/speech-text-cleaning-contract'
 
 console.log('PRELOAD SCRIPT LOADED')
 
@@ -755,6 +761,16 @@ const offGridApi = {
     },
     sendLevel: (level: SpeechMicrophoneLevel): void => {
       ipcRenderer.send(SPEECH_MICROPHONE_LEVEL_CHANNEL, level)
+    }
+  },
+  speechTextCleaning: {
+    onRequest: (callback: (request: SpeechTextCleanRequest) => void) => {
+      const listener = (_event: unknown, request: SpeechTextCleanRequest): void => callback(request)
+      ipcRenderer.on(SPEECH_TEXT_CLEAN_REQUEST_CHANNEL, listener)
+      return unsubscribe(SPEECH_TEXT_CLEAN_REQUEST_CHANNEL, listener)
+    },
+    sendResult: (result: SpeechTextCleanResult): void => {
+      ipcRenderer.send(SPEECH_TEXT_CLEAN_RESULT_CHANNEL, result)
     }
   },
 

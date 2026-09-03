@@ -15,6 +15,7 @@ import App from './App'
 import { TooltipProvider } from './components/ui/tooltip'
 import { attachSpeechPlaybackAdapter } from './composition/speech-playback-adapter'
 import { attachSpeechMicrophoneAdapter } from './composition/speech-microphone-adapter'
+import { attachSpeechTextCleaningAdapter } from './composition/speech-text-cleaning-adapter'
 
 // The quick-paste popup is a Pro feature; its component lives in the pro package.
 // The Vite alias resolves `@offgrid/pro/renderer` to a stub in free builds (which
@@ -39,9 +40,11 @@ const isCuSupervisor = hash === '#cu-supervisor'
 if (!isClipPopup && !isDictation && !isCuSupervisor) {
   const disposeSpeechPlayback = attachSpeechPlaybackAdapter(window.api.speechPlayback)
   const disposeSpeechMicrophone = attachSpeechMicrophoneAdapter(window.api.speechMicrophone)
+  const disposeSpeechTextCleaning = attachSpeechTextCleaningAdapter(window.api.speechTextCleaning)
   window.addEventListener(
     'pagehide',
     () => {
+      disposeSpeechTextCleaning()
       disposeSpeechMicrophone()
       disposeSpeechPlayback()
     },

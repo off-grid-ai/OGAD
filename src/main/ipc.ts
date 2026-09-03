@@ -57,6 +57,7 @@ import {
 import { setupSystemStatusIpc } from './system-status-ipc'
 import { setupSpeechPlaybackIpc } from './speech-playback-ipc'
 import { setupSpeechMicrophoneIpc } from './speech-microphone-ipc'
+import { setupSpeechTextCleaningIpc } from './speech-text-cleaning-ipc'
 import { CACHE_CLEANUP_CHANNEL } from '../shared/ipc-contracts'
 import {
   CHAT_INTENT_RESPONSE_SCHEMA,
@@ -598,6 +599,7 @@ export function setupIPC() {
   setupVoiceTranscriptionIpc()
   setupSpeechPlaybackIpc()
   setupSpeechMicrophoneIpc()
+  setupSpeechTextCleaningIpc()
   const db = getDB()
   setupTtsIpc()
   setupSystemStatusIpc(ipcMain, {
