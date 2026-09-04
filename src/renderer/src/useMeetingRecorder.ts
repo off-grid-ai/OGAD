@@ -1,8 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const api = (window as any).api
-
 export interface MeetingRecorder {
   recording: boolean
   busy: boolean // transcribing after stop
@@ -33,6 +30,23 @@ const EMPTY: MeetingState = {
   error: ''
 }
 
+function isMeetingState(value: unknown): value is MeetingState {
+  if (!value || typeof value !== 'object') return false
+  const state = value as Record<string, unknown>
+  return (
+    typeof state.recording === 'boolean' &&
+    typeof state.busy === 'boolean' &&
+    (typeof state.platform === 'string' || state.platform === null) &&
+    typeof state.startedAt === 'number' &&
+    typeof state.warnUntil === 'number' &&
+    typeof state.error === 'string'
+  )
+}
+
+function reportCommandFailure(command: string, error: unknown): void {
+  console.error(`Meeting ${command} failed:`, error)
+}
+
 /**
  * Thin VIEW of the meeting recorder. The lifecycle (detect → record → warn → stop →
  * finalize) lives entirely in the main-process MeetingController; this hook only
@@ -48,16 +62,19 @@ export function useMeetingRecorder(): MeetingRecorder {
   // Subscribe to the controller's broadcast + seed from current state on mount.
   useEffect(() => {
     let alive = true
-    api
-      .meetingGetState?.()
-      .then((s: MeetingState | undefined) => {
-        if (alive && s) setSt(s)
+    window.api
+      .meetingGetState()
+      .then((state: unknown) => {
+        if (alive && isMeetingState(state)) setSt(state)
       })
-      .catch(() => {})
-    const off = api.onMeetingState?.((s: MeetingState) => setSt(s))
+      .catch((error: unknown) => reportCommandFailure('state read', error))
+    const off = window.api.onMeetingState((state: unknown) => {
+      if (isMeetingState(state)) setSt(state)
+      else console.error('Meeting state update was invalid:', state)
+    })
     return () => {
       alive = false
-      off?.()
+      off()
     }
   }, [])
 
@@ -66,8 +83,6 @@ export function useMeetingRecorder(): MeetingRecorder {
   // ticks down each second instead of showing a frozen "20s".
   useEffect(() => {
     if (!st.recording || !st.startedAt) {
-      setElapsed(0)
-      setWarningSecondsLeft(0)
       return
     }
     const tick = (): void => {
@@ -77,26 +92,36 @@ export function useMeetingRecorder(): MeetingRecorder {
         st.warnUntil > 0 ? Math.max(0, Math.round((st.warnUntil - now) / 1000)) : 0
       )
     }
-    tick()
+    const frameId = window.requestAnimationFrame(tick)
     const id = setInterval(tick, 1000)
-    return () => clearInterval(id)
+    return () => {
+      window.cancelAnimationFrame(frameId)
+      clearInterval(id)
+    }
   }, [st.recording, st.startedAt, st.warnUntil])
 
   const start = useCallback((platform?: string): void => {
-    void api.meetingStart?.(platform)
+    void window.api
+      .meetingStart(platform)
+      .catch((error: unknown) => reportCommandFailure('start', error))
   }, [])
   const stop = useCallback((): void => {
-    void api.meetingStop?.()
+    void window.api.meetingStop().catch((error: unknown) => reportCommandFailure('stop', error))
   }, [])
   const keepAlive = useCallback((): void => {
-    void api.meetingKeepAlive?.()
+    void window.api
+      .meetingKeepAlive()
+      .catch((error: unknown) => reportCommandFailure('keep-alive', error))
   }, [])
+
+  const visibleElapsed = st.recording && st.startedAt ? elapsed : 0
+  const visibleWarningSecondsLeft = st.recording && st.startedAt ? warningSecondsLeft : 0
 
   return {
     recording: st.recording,
     busy: st.busy,
-    elapsed,
-    warningSecondsLeft,
+    elapsed: visibleElapsed,
+    warningSecondsLeft: visibleWarningSecondsLeft,
     platform: st.platform,
     error: st.error,
     start,
