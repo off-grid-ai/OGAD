@@ -76,7 +76,10 @@ import { SidePanel } from './SidePanel'
 import { ConversationTitleActions } from './ConversationTitleActions'
 import { ImageLightbox } from './media/ImageLightbox'
 import { resolveImageParams, setOverride, type ImageParamStore } from '@renderer/lib/image-params'
-import { IMAGE_SETTINGS_CHANGED_EVENT } from '@renderer/lib/image-settings-events'
+import {
+  subscribeActiveImageModel,
+  subscribeImageSettings
+} from '@renderer/lib/image-settings-store'
 import {
   DISPLAY_SETTINGS_INVALIDATED_EVENT,
   LLM_SETTINGS_INVALIDATED_EVENT
@@ -2882,29 +2885,36 @@ export function MemoryChat({
       /* engine may be down; leave prior state */
     }
   }, [])
+  // The composer applies the image settings that were committed, and only those. It used to
+  // re-read EVERY setting and the image engine's status on each change, so one character typed in
+  // the settings panel re-rendered this whole screen.
   useEffect(() => {
-    const refreshImageSettings = (): void => {
-      void Promise.all([window.api.getSettings(), refreshImageModel()]).then(([settings]) => {
-        if (settings.imageParams && typeof settings.imageParams === 'object') {
-          persistedPreferenceValues.current.imageParams = settings.imageParams
-          setImgParamStore(settings.imageParams as ImageParamStore)
-        }
-        if (typeof settings.imgSeed === 'string') {
-          persistedPreferenceValues.current.imgSeed = settings.imgSeed
-          setImgSeed(settings.imgSeed)
-        }
-        if (typeof settings.imgNegative === 'string') {
-          persistedPreferenceValues.current.imgNegative = settings.imgNegative
-          setImgNegative(settings.imgNegative)
-        }
-        if (typeof settings.enhanceImagePrompts === 'boolean') {
-          persistedPreferenceValues.current.enhanceImagePrompts = settings.enhanceImagePrompts
-          setEnhanceImg(settings.enhanceImagePrompts)
-        }
-      })
-    }
-    window.addEventListener(IMAGE_SETTINGS_CHANGED_EVENT, refreshImageSettings)
-    return () => window.removeEventListener(IMAGE_SETTINGS_CHANGED_EVENT, refreshImageSettings)
+    return subscribeImageSettings((committed) => {
+      if (committed.imageParams) {
+        persistedPreferenceValues.current.imageParams = committed.imageParams
+        setImgParamStore(committed.imageParams)
+      }
+      if (typeof committed.imgSeed === 'string') {
+        persistedPreferenceValues.current.imgSeed = committed.imgSeed
+        setImgSeed(committed.imgSeed)
+      }
+      if (typeof committed.imgNegative === 'string') {
+        persistedPreferenceValues.current.imgNegative = committed.imgNegative
+        setImgNegative(committed.imgNegative)
+      }
+      if (typeof committed.enhanceImagePrompts === 'boolean') {
+        persistedPreferenceValues.current.enhanceImagePrompts = committed.enhanceImagePrompts
+        setEnhanceImg(committed.enhanceImagePrompts)
+      }
+    })
+  }, [])
+
+  // A change of ACTIVE IMAGE MODEL is the one image change that does need engine status, and it
+  // arrives on its own channel so preference edits never trigger this read.
+  useEffect(() => {
+    return subscribeActiveImageModel(() => {
+      void refreshImageModel()
+    })
   }, [refreshImageModel])
   // When the model picker closes it may have changed the active image model
   // (setActiveModalModel). Re-read so the composer reflects the single source of

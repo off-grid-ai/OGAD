@@ -5,18 +5,18 @@ import {
   type ImageParamOverride,
   type ImageParamStore
 } from '@renderer/lib/image-params'
-import { announceImageSettingsChanged } from '@renderer/lib/image-settings-events'
+import {
+  publishActiveImageModelChanged,
+  publishImageSettings,
+  type ImageSettingKey,
+  type ImageSettingsProjection
+} from '@renderer/lib/image-settings-store'
 import { SettingsSelect } from './SettingsSelect'
 import { SettingsTextField, type SettingsWriteOutcome } from './SettingsTextField'
 import { desktopModelControl } from '@renderer/composition/model-control'
 import { failed, modelFileDisplayName, ok } from '@offgrid/application'
 
-type ImageSettings = {
-  imageParams?: ImageParamStore
-  imgSeed?: string
-  imgNegative?: string
-  enhanceImagePrompts?: boolean
-}
+type ImageSettings = ImageSettingsProjection
 
 const modelLabel = modelFileDisplayName
 
@@ -49,17 +49,26 @@ export function ImageSettingsTab(): React.JSX.Element {
 
   // One write path for this tab: save, then tell the rest of the app what changed. A failed
   // write is returned as a typed failure so the field or the tab can show it, never dropped.
-  const save = useCallback(async (key: string, value: unknown): Promise<SettingsWriteOutcome> => {
-    try {
-      await window.api.saveSetting(key, value)
-      announceImageSettingsChanged()
-      return ok(undefined)
-    } catch {
-      return failed({ message: 'This setting could not be saved.' })
-    }
-  }, [])
+  const save = useCallback(
+    async <K extends ImageSettingKey>(
+      key: K,
+      value: NonNullable<ImageSettingsProjection[K]>
+    ): Promise<SettingsWriteOutcome> => {
+      try {
+        await window.api.saveSetting(key, value)
+        publishImageSettings({ [key]: value } as ImageSettingsProjection)
+        return ok(undefined)
+      } catch {
+        return failed({ message: 'This setting could not be saved.' })
+      }
+    },
+    []
+  )
 
-  const persist = (key: string, value: unknown): void => {
+  const persist = <K extends ImageSettingKey>(
+    key: K,
+    value: NonNullable<ImageSettingsProjection[K]>
+  ): void => {
     void save(key, value).then((outcome) => {
       setSaveFailure(outcome.ok ? '' : outcome.failure.message)
     })
@@ -74,7 +83,7 @@ export function ImageSettingsTab(): React.JSX.Element {
     void desktopModelControl
       .execute({ type: 'select', surface: 'image', modelId: nextModel })
       .then((result) => {
-        if (result.status === 'completed') announceImageSettingsChanged()
+        if (result.status === 'completed') publishActiveImageModelChanged()
         else setModel(previous)
       })
       .catch(() => setModel(previous))
