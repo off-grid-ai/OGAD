@@ -19,7 +19,7 @@ import { createProject, deleteProject } from './rag/store'
 import { saveArtifact, listArtifacts, deleteArtifact } from './artifacts'
 import { saveSkill } from './skills'
 import { addConnector, listConnectors } from './mcp'
-import { desktopModels, desktopRag, modelsFailureMessage } from './composition/application-access'
+import { desktopRag } from './composition/application-access'
 import { requireApplicationOutcome } from './composition/application-outcome'
 import { generateDesktopText } from './desktop-generation'
 import { generateImage, listImageModels } from './imagegen'
@@ -135,6 +135,7 @@ async function seedKnowledge(): Promise<void> {
         )
     }
   ]
+  const failures: unknown[] = []
   for (const f of files) {
     try {
       f.write()
@@ -148,8 +149,10 @@ async function seedKnowledge(): Promise<void> {
       console.log('[seed] indexed', f.name)
     } catch (e) {
       console.error('[seed] index failed', f.name, e)
+      failures.push(e)
     }
   }
+  if (failures.length) throw new AggregateError(failures, 'Demo knowledge indexing failed.')
 }
 
 function cleanup(): void {
@@ -162,12 +165,28 @@ function cleanup(): void {
   }
 }
 
-export async function seedDemo(live = false): Promise<void> {
-  if (!live && getSetting<boolean>('demo:seeded', false)) {
+/**
+ * @param force Re-seed even if this profile is already seeded. What `OFFGRID_SEED=force` means.
+ * @param modelReady Whether the ONE startup text prepare settled successfully. Decides whether
+ *   artifacts are generated live or written from their curated fallbacks - it never re-seeds less.
+ */
+export async function seedDemo(force = false, modelReady = false): Promise<void> {
+  if (!force && getSetting<boolean>('demo:seeded', false)) {
     console.log('[seed] already seeded — skipping')
     return
   }
+  // Live generation needs BOTH: the caller asked to re-seed, and the model actually became
+  // resident. The seeder never prepares one itself - startup owns the single prepare, and a
+  // duplicate here claimed the newest-wins lane and refused startup's own request.
+  const generateLive = force && modelReady
+  console.log(
+    generateLive
+      ? '[seed] model ready — generating demo artifacts live'
+      : `[seed] curated demo artifacts (${force ? 'model not ready' : 'seed-once mode'})`
+  )
   try {
+    // A failed forced replacement must not leave the prior success marker over partial data.
+    saveSetting('demo:seeded', false)
     cleanup()
     createProject({
       id: PROJECT_ID,
@@ -175,15 +194,6 @@ export async function seedDemo(live = false): Promise<void> {
       description: 'Demo workspace showcasing Off Grid AI.',
       icon: '🟢'
     })
-    if (live) {
-      try {
-        const outcome = await desktopModels.prepare('text')
-        if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
-      } catch (e) {
-        console.error('[seed] llm init', e)
-      }
-    }
-
     // Knowledge base: index a few docs (md + txt + pdf) into the project.
     await seedKnowledge()
 
@@ -198,7 +208,7 @@ export async function seedDemo(live = false): Promise<void> {
       fallback: string
     ): Promise<void> => {
       let code = fallback
-      if (live) {
+      if (generateLive) {
         const out = await gen(prompt)
         const c = out && extractCode(out)
         if (c) code = c
@@ -256,7 +266,7 @@ export async function seedDemo(live = false): Promise<void> {
       const u = 'we run AI models on your computer without the internet'
       let a =
         'Off Grid AI runs open models entirely on your device — no cloud, no accounts, nothing ever leaves your machine.'
-      if (live) {
+      if (generateLive) {
         const out = await gen(
           `Rewrite as one confident Off Grid AI sentence (private, on-device, no cloud; no hype, no emojis): "${u}"`
         )
@@ -299,7 +309,9 @@ export async function seedDemo(live = false): Promise<void> {
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .slice(0, 28)
-    const models = live
+    // Image generation has its own models and does not use the text prepare, so this follows the
+    // caller's live INTENT rather than text readiness - a curated text seed can still render images.
+    const models = force
       ? listImageModels().filter((m) => /\.(gguf|safetensors)$/i.test(m) && !/^ae\./i.test(m))
       : []
     let madeAny = false
@@ -355,8 +367,9 @@ export async function seedDemo(live = false): Promise<void> {
     }
 
     saveSetting('demo:seeded', true)
-    console.log(`[seed] demo project seeded ✓ (live=${live})`)
+    console.log(`[seed] demo project seeded ✓ (force=${force} generateLive=${generateLive})`)
   } catch (e) {
     console.error('[seed] failed', e)
+    throw e
   }
 }

@@ -740,7 +740,10 @@ for (const file of files) {
       'image adapter declares a local negative-prompt default'
     )
   }
-  if (fileName === 'src/main/index.ts' && /from\s+['"]\.\/models\/download-queue['"]/.test(text)) {
+  if (
+    ['src/main/index.ts', 'src/main/application-main.ts'].includes(fileName) &&
+    /from\s+['"]\.\/models\/download-queue['"]/.test(text)
+  ) {
     report(
       'desktop-model-download-coordinator-is-shared',
       fileName,
