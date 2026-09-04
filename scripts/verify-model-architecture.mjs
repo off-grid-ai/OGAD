@@ -317,6 +317,189 @@ function checkDownloadOwnerImports(fileName, source) {
   inspect(source)
 }
 
+/**
+ * ---- models-facade-owns-shared-model-services ---------------------------------------------------
+ *
+ * THE INVARIANT: an `@offgrid/models` application service whose construction the shared facade
+ * layer (`@offgrid/application`) already owns has exactly ONE constructor. Desktop reaches that
+ * capability as a command on `ModelsFacade` and never constructs the service a second time.
+ *
+ * WHAT THIS RULE DOES AND DOES NOT FORBID. It does NOT forbid constructing a shared service at an
+ * app composition root - measured, that is the normal legal pattern here: 24 `new X()` sites in
+ * `src/**` + `pro/**` construct a runtime import of `@offgrid/models`, 14 of them a `*Service`, and
+ * ten of those are legitimate roots (`composition/imagegen.ts`, `composition/mcp.ts`,
+ * `composition/tools.ts`, `composition/artifact-verification.ts`, `pro/main/composition/*`, ...).
+ * A rule on that SHAPE alone would need a ten-entry-and-growing exemption list, which is the
+ * codebase, not an exemption. The hazard is not the construction - it is a SECOND OWNER. So this
+ * rule forbids exactly the duplicate: constructing what the facade layer already constructs.
+ *
+ * THE ESCAPE IT CLOSES. Every other model rule here anchors on an ENGINE MODULE specifier or on a
+ * hand-written list of two owner exports, so an app composition root importing and constructing a
+ * shared application service looked legitimate to all of them. That is how
+ * `ModelMetadataRepairCommandService` came to have two owners with the gate green:
+ * `src/main/composition/model-library.ts` constructed it while
+ * `@offgrid/application/src/models/download-metadata-repair.ts:15` already did. Found statically
+ * here (two constructors of one facade-owned class) and independently found behaviourally (two
+ * instances over one `activeProjectorRepairPorts` object, composed at
+ * `src/main/models/desktop-model-download-ports.ts` and handed to the root by `models-manager.ts`).
+ * This rule catches the CLASS without needing that port analysis, which is what makes it a gate
+ * rather than a one-time finding.
+ *
+ * WHY THE SET IS DERIVED AND NOT LISTED. A hand-list of today's names is precisely how the gate
+ * came to miss this: it falls behind the day a fifth service is added, silently. So the forbidden
+ * set is derived at gate time from the facade layer's OWN source - every identifier that
+ * `@offgrid/application/src/**` constructs and imports from `@offgrid/models`. A fifth facade-owned
+ * service is forbidden in app code the moment the facade owns it, with no edit to this file.
+ *
+ * WHY THE FACADE LAYER AND NOT `@offgrid/models` ITSELF. Deriving from the models package's own
+ * internals was measured too: it adds `ArtifactVerificationService` and
+ * `ImageGenerationApplicationService`, which two desktop roots construct with no shared owner -
+ * two findings that are not duplicate ownership and could only be silenced by an allowlist entry.
+ * The facade layer is the layer that OWNS, so it is the only honest derivation source.
+ *
+ * FAILURE DIRECTION. If the derivation source cannot be read, or derives to nothing, this rule
+ * REPORTS instead of passing: a derived set that cannot be derived is a dead gate, and a dead gate
+ * that reports success is worse than no gate.
+ *
+ * WHAT THIS RULE CANNOT SEE. Written here rather than discovered later:
+ *
+ * 1. AN INJECTED OR FACTORY-PASSED INSTANCE. A file handed an already-constructed service has no
+ *    import and no `new` to anchor on. The import graph (dependency-cruiser) is what narrows this.
+ * 2. A LOCAL RE-EXPORT BARREL. `export { LocalModelImportService } from '@offgrid/models'` in an
+ *    intermediate module, constructed from there: this rule anchors on the package specifier and
+ *    does not resolve re-export chains.
+ * 3. AN ALIASED LOCAL VALUE or INDIRECT CONSTRUCTION - `const S = Svc; new S()`,
+ *    `new registry[name]()`, `Reflect.construct(Svc, ...)`.
+ * 4. AN OWNER THAT MOVES DOWN. If the facade layer stops constructing a service because the
+ *    construction moved into `@offgrid/models` internals, that name silently LEAVES the derived
+ *    set. The derivation follows ownership; it cannot tell a relocation from an abandonment.
+ * 5. TYPE-ONLY POSITIONS, deliberately. `ConstructorParameters<typeof ModelLibraryRemovalService>`
+ *    is how a root declares its port shape and must stay legal.
+ * 6. ANYTHING OUTSIDE TYPESCRIPT, and any CROSS-PROCESS path - a renderer reaching a service only
+ *    through IPC is catchable at the main-side handler, not here.
+ */
+const facadeLayerSourceRoot = path.join(repoRoot, 'node_modules/@offgrid/application/src')
+const modelsPackage = '@offgrid/models'
+
+/** Local bindings a file obtains from `@offgrid/models`, mapped to the name it imported. */
+function modelsRuntimeBindings(source) {
+  const named = new Map()
+  const namespaces = new Set()
+  const bind = (local, imported) => {
+    if (local && imported) named.set(local, imported)
+  }
+  const collect = (node) => {
+    if (
+      ts.isImportDeclaration(node) &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      node.moduleSpecifier.text.startsWith(modelsPackage) &&
+      node.importClause &&
+      !node.importClause.isTypeOnly
+    ) {
+      const bindings = node.importClause.namedBindings
+      if (bindings && ts.isNamedImports(bindings)) {
+        for (const element of bindings.elements) {
+          if (!element.isTypeOnly)
+            bind(element.name.text, (element.propertyName ?? element.name).text)
+        }
+      }
+      if (bindings && ts.isNamespaceImport(bindings)) namespaces.add(bindings.name.text)
+      if (node.importClause.name) bind(node.importClause.name.text, node.importClause.name.text)
+    }
+    // `const { LocalModelImportService: alias } = await import('@offgrid/models')`
+    if (ts.isVariableDeclaration(node) && node.initializer) {
+      const initializer = ts.isAwaitExpression(node.initializer)
+        ? node.initializer.expression
+        : node.initializer
+      if (
+        ts.isCallExpression(initializer) &&
+        initializer.expression.kind === ts.SyntaxKind.ImportKeyword &&
+        initializer.arguments[0] &&
+        ts.isStringLiteral(initializer.arguments[0]) &&
+        initializer.arguments[0].text.startsWith(modelsPackage)
+      ) {
+        if (ts.isObjectBindingPattern(node.name)) {
+          for (const element of node.name.elements) {
+            if (!ts.isIdentifier(element.name)) continue
+            const imported =
+              element.propertyName && ts.isIdentifier(element.propertyName)
+                ? element.propertyName.text
+                : element.name.text
+            bind(element.name.text, imported)
+          }
+        } else if (ts.isIdentifier(node.name)) {
+          namespaces.add(node.name.text)
+        }
+      }
+    }
+    ts.forEachChild(node, collect)
+  }
+  collect(source)
+  return { named, namespaces }
+}
+
+/** Every `@offgrid/models` export a file constructs, as `{ imported, node }`. */
+function constructedModelsExports(source) {
+  const { named, namespaces } = modelsRuntimeBindings(source)
+  if (named.size === 0 && namespaces.size === 0) return []
+  const constructed = []
+  const inspect = (node) => {
+    if (ts.isNewExpression(node)) {
+      const callee = node.expression
+      if (ts.isIdentifier(callee) && named.has(callee.text)) {
+        constructed.push({ imported: named.get(callee.text), node })
+      } else if (
+        ts.isPropertyAccessExpression(callee) &&
+        ts.isIdentifier(callee.expression) &&
+        namespaces.has(callee.expression.text)
+      ) {
+        constructed.push({ imported: callee.name.text, node })
+      }
+    }
+    ts.forEachChild(node, inspect)
+  }
+  inspect(source)
+  return constructed
+}
+
+function deriveFacadeOwnedModelServices() {
+  const owned = new Set()
+  if (!fs.existsSync(facadeLayerSourceRoot)) return { owned, failure: 'source root is missing' }
+  for (const file of sourceFiles(facadeLayerSourceRoot)) {
+    const text = fs.readFileSync(file, 'utf8')
+    if (!text.includes(modelsPackage)) continue
+    const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true)
+    for (const { imported } of constructedModelsExports(source)) owned.add(imported)
+  }
+  return {
+    owned,
+    failure: owned.size === 0 ? 'derived to nothing, so the rule would enforce nothing' : null
+  }
+}
+
+const facadeOwned = deriveFacadeOwnedModelServices()
+if (facadeOwned.failure) {
+  findings.push({
+    rule: 'models-facade-owns-shared-model-services',
+    file: 'scripts/verify-model-architecture.mjs',
+    line: 1,
+    detail: `cannot derive facade-owned services from @offgrid/application: ${facadeOwned.failure}`
+  })
+}
+
+function checkFacadeOwnedServiceConstruction(fileName, source) {
+  for (const { imported, node } of constructedModelsExports(source)) {
+    if (!facadeOwned.owned.has(imported)) continue
+    report(
+      'models-facade-owns-shared-model-services',
+      fileName,
+      source,
+      node,
+      `second owner of ${imported}: @offgrid/application already constructs it, so reach it as a ModelsFacade command`
+    )
+  }
+}
+
 function report(rule, file, source, node, detail) {
   findings.push({ rule, file, line: lineOf(source, node), detail })
 }
@@ -780,6 +963,7 @@ for (const file of files) {
   checkResidencyAdmission(fileName, source)
   checkModelOwnerConstruction(fileName, source)
   checkDownloadOwnerImports(fileName, source)
+  checkFacadeOwnedServiceConstruction(fileName, source)
 
   const visit = (node) => {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
