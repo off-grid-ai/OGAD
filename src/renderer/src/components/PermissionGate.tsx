@@ -28,7 +28,7 @@ function openModelLibrary(): void {
   window.history.replaceState(null, '', '/models')
 }
 
-export function PermissionGate({ children }: PermissionGateProps) {
+export function PermissionGate({ children }: PermissionGateProps): React.JSX.Element {
   const { isPro } = useRendererEntitlement()
   const [modelStatus, setModelStatus] = useState<{ downloaded: boolean; modelsDir: string } | null>(
     null
@@ -50,7 +50,6 @@ export function PermissionGate({ children }: PermissionGateProps) {
   const checkModelStatus = useCallback(async () => {
     try {
       const status = await window.api.checkModelStatus()
-      console.log('Model status:', status)
       setModelStatus(status)
       return status.downloaded
     } catch (e) {
@@ -61,7 +60,8 @@ export function PermissionGate({ children }: PermissionGateProps) {
 
   // Initial check
   useEffect(() => {
-    checkModelStatus()
+    const timeoutId = window.setTimeout(() => void checkModelStatus(), 0)
+    return () => window.clearTimeout(timeoutId)
   }, [checkModelStatus])
 
   // Permission polling is owned by usePermissionController. Keep model polling here
@@ -264,27 +264,27 @@ function SetupNudge({
   progress?: ProgressLike | null
   onOpen: () => void
   onDismiss: () => void
-}) {
+}): React.JSX.Element | null {
   const taskWorkspaceOpen = useTaskWorkspaceOpen()
   const [taskLeft, setTaskLeft] = useState<number | null>(null)
 
   useEffect(() => {
-    if (!taskWorkspaceOpen) {
-      setTaskLeft(null)
-      return
-    }
+    if (!taskWorkspaceOpen) return
     const taskPane = document.querySelector<HTMLElement>('[data-testid="task-side-panel"]')
     if (!taskPane) return
     const measure = (): void => setTaskLeft(taskPane.getBoundingClientRect().left)
-    measure()
+    const frameId = window.requestAnimationFrame(measure)
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
     observer?.observe(taskPane)
     window.addEventListener('resize', measure)
     return () => {
+      window.cancelAnimationFrame(frameId)
       observer?.disconnect()
       window.removeEventListener('resize', measure)
     }
   }, [taskWorkspaceOpen])
+
+  const visibleTaskLeft = taskWorkspaceOpen ? taskLeft : null
 
   // Model-first wording. Missing a model is the thing that actually blocks you, and
   // "Configure for me" handles it in one click — so lead with that for both tiers.
@@ -325,7 +325,7 @@ function SetupNudge({
   // When Tasks consumes the whole usable workspace, defer this non-blocking
   // prompt. In split mode, keep it wholly inside Chat and away from native
   // browser content.
-  if (taskLeft !== null && taskLeft < 520) return null
+  if (visibleTaskLeft !== null && visibleTaskLeft < 520) return null
 
   return (
     <motion.div
@@ -333,7 +333,7 @@ function SetupNudge({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] }}
       className="fixed bottom-14 z-50 flex max-w-[min(560px,calc(100vw-2rem))] items-center gap-3 rounded-xl border border-green-500/30 bg-background/95 px-4 py-3 text-foreground shadow-xl backdrop-blur-xl"
-      style={{ right: taskLeft === null ? 16 : window.innerWidth - taskLeft + 16 }}
+      style={{ right: visibleTaskLeft === null ? 16 : window.innerWidth - visibleTaskLeft + 16 }}
     >
       <Cpu className="h-4 w-4 shrink-0 text-green-500" />
       <div className="text-xs leading-tight">
