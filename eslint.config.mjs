@@ -416,6 +416,25 @@ export default defineConfig(
   },
   intentionalUnusedParameters,
   {
+    name: 'JavaScript files have no TypeScript return annotations',
+    files: [
+      'e2e/fixtures/app143-approval-llama-server.mjs',
+      'e2e/fixtures/app242-backup-rag-llama-server.mjs',
+      'e2e/fixtures/app250-actions-helper.mjs',
+      'e2e/fixtures/app250-actions-llama-server.mjs',
+      'e2e/fixtures/computer-use-hybrid-llama-server.mjs',
+      'scripts/bench-capture.mjs',
+      'scripts/bench-chat.mjs',
+      'scripts/lib/app-support.mjs',
+      'scripts/seed-e2e-license.mjs',
+      'scripts/stage-native.mjs',
+      'scripts/verify-model-architecture.mjs'
+    ],
+    rules: {
+      '@typescript-eslint/explicit-function-return-type': 'off'
+    }
+  },
+  {
     name: 'CommonJS build hooks',
     files: ['scripts/resign.js'],
     rules: {
