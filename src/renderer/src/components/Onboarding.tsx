@@ -4,7 +4,8 @@ import { LampContainer } from './ui/lamp'
 import { OrbitingCircles } from './ui/orbiting-circles'
 import { GridBackdrop } from './ui/grid-backdrop'
 import { cn } from '@renderer/lib/utils'
-import { deviceNoun } from '@renderer/lib/device'
+import { deviceNoun, shortcutLabel } from '@renderer/lib/device'
+import { DEFAULT_DICTATION_ACCELERATOR } from '@offgrid/core/shared/dictation-defaults'
 import logo from '@/assets/logo.png'
 import {
   ArrowRight,
@@ -136,7 +137,7 @@ const PRO_GRID = [
   {
     icon: Waveform,
     label: 'Voice',
-    line: 'Hold Option+Space and talk - transcribed locally and pasted at your cursor, so you type with your voice anywhere.'
+    line: `Hold ${shortcutLabel(DEFAULT_DICTATION_ACCELERATOR)} and talk - transcribed locally and pasted at your cursor, so you type with your voice anywhere.`
   }
 ]
 

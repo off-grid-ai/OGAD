@@ -13,13 +13,11 @@ import { useEffect, useRef, useState } from 'react'
 import { Microphone, Square } from '@phosphor-icons/react'
 import { voice } from '@renderer/lib/voiceApi'
 import { shortcutLabel } from '@renderer/lib/device'
+// Fallback when the settings read returns no accelerator: the one owner of the default chord,
+// in Electron's REGISTRATION format, which `shortcutLabel` turns into per-platform copy.
+import { DEFAULT_DICTATION_ACCELERATOR } from '@offgrid/core/shared/dictation-defaults'
 
 type Phase = 'recording' | 'transcribing'
-
-/** Fallback when the settings read returns no accelerator. Electron's REGISTRATION format, the
- *  same shape the dictation controller registers, so one renderer turns it into per-platform copy
- *  (macOS reads 'Option+Space'). */
-const DEFAULT_DICTATION_ACCELERATOR = 'Alt+Space'
 
 export function DictationOverlay(): React.JSX.Element | null {
   const [active, setActive] = useState(false)

@@ -15,6 +15,7 @@ import {
 import type { ComponentType } from 'react'
 import { deviceNoun, primaryModifier, shortcutLabel } from '@renderer/lib/device'
 import { isMac, type DevicePlatform } from '@offgrid/core/shared/device'
+import { DEFAULT_DICTATION_ACCELERATOR } from '@offgrid/core/shared/dictation-defaults'
 import { PRO_PURCHASE_URL } from '@offgrid/core/shared/product-links'
 
 // Static catalogue of the Pro features. This ships in the OPEN build so the free
@@ -49,18 +50,6 @@ export interface ProFeature {
    */
   platforms: DevicePlatform[]
 }
-
-/**
- * The dictation shortcut as the dictation controller REGISTERS it (Electron accelerator format),
- * which is not how any keyboard labels it: `shortcutLabel` turns this into the per-platform
- * spelling so a Windows or Linux reader is never told to hold a key their keyboard has no name for.
- *
- * This is the DEFAULT chord. The catalogue is a static, import-time module - it advertises Pro in
- * the OPEN build, where the dictation settings (and any rebound chord) are not readable - so a user
- * who rebound dictation reads the default here. Making this copy follow a custom chord needs the
- * catalogue to become settings-aware; it is not, and this constant is deliberately not plumbed.
- */
-const DEFAULT_DICTATION_ACCELERATOR = 'Alt+Space'
 
 export const PRO_FEATURES: ProFeature[] = [
   {
