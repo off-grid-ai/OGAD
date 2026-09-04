@@ -230,10 +230,10 @@ export function createDesktopModelWorkspacePorts(
       const id = selectionPersistence.readLegacyTextConfig().id
       return typeof id === 'string' ? id : undefined
     },
-    // Shared composes these on demand. The lifecycle ports reach routing through the Models facade,
-    // so building them needs no workspace - and the residency reads shared offers this factory are
-    // not needed here, because every capability these ports use is routing.
-    lifecycle: () => desktopModelLifecyclePorts(lifecycleAdapters),
+    // Shared composes these on demand and hands in the routing it owns, so the ports never reach
+    // back into the Models facade that holds them. Desktop supplies only the native lifecycle
+    // adapters.
+    lifecycle: (_residency, routing) => desktopModelLifecyclePorts(lifecycleAdapters, routing),
     remoteInventory: {
       adapterId: (modality) => desktopAdapterId('remote', modality),
       // Inventory never waits on the network: answer from the cache, probe in the background, and
