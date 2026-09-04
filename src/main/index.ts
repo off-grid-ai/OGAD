@@ -60,6 +60,7 @@ import { repairMissingDefaultKeychainAtBootstrap } from './secure-storage-bootst
 import { runIndependentStartupStages, runStartupStage } from './startup-stages'
 import { startupProjection } from './startup-projection'
 import { registerStartupStatusIpc } from './startup-ipc'
+import { observeWorkflowFailures } from './workflow-failure-observer'
 import {
   flushDiagnosticLog,
   installDiagnosticConsoleCapture,
@@ -529,6 +530,13 @@ app.whenReady().then(async () => {
     applicationShutdown.register({
       name: 'startup:application-lifecycle',
       shutdown: startupProjection.observe(applicationRoot.value.desktopApplication)
+    })
+    // The standing workflow bridges have no caller to fail to, so this subscription is the only
+    // place their failures can surface. Registered with the application object, before its domains
+    // start, so a bridge that fails during startup is not missed.
+    applicationShutdown.register({
+      name: 'workflows:failure-observer',
+      shutdown: observeWorkflowFailures(applicationRoot.value.desktopApplication)
     })
   }
   setupMcpIpc() // basic MCP connectors (management + chat tool extension)
