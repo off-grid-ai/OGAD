@@ -208,6 +208,65 @@ export function searchFacets(query: string): { source: string; count: number }[]
 }
 
 // ---------------------------------------------------------------------------
+// Superseding a query stream
+// ---------------------------------------------------------------------------
+
+/**
+ * A search box issues one request per settled query, and the newest one is the only answer anybody
+ * will ever look at. Dropping the older ANSWER (which the renderer already does) still pays for it:
+ * the embedding, the vector search, one source-of-truth probe per semantic hit, the fusion and
+ * ranking, and one thumbnail query per result all run to completion and compete for the same CPU
+ * that has to paint the next keystroke. So the older WORK stops instead.
+ *
+ * Superseding is per stream, and a stream is one surface's typing: the Search screen's box must not
+ * cancel a retrieval a chat turn is waiting on, and vice versa. A caller that is not a stream of
+ * queries (a one-shot tool call, a RAG retrieval) passes no stream and is never superseded.
+ */
+export class SupersededSearchError extends Error {
+  constructor(stream: string) {
+    super(`Search on "${stream}" stopped: a newer query superseded it.`)
+    this.name = 'SupersededSearchError'
+  }
+}
+
+/** Asserts, at each point work could be abandoned, that this request is still the newest one. */
+interface SearchStreamClaim {
+  readonly check: () => void
+}
+
+let issuedSearches = 0
+/** Newest token per stream. One entry per surface, so it is bounded by the number of surfaces. */
+const newestPerStream = new Map<string, number>()
+
+/** No stream named: nothing can supersede this request, so every checkpoint passes. */
+const NEVER_SUPERSEDED: SearchStreamClaim = { check: () => undefined }
+
+function claimStream(stream: string | undefined): SearchStreamClaim {
+  if (!stream) return NEVER_SUPERSEDED
+  issuedSearches += 1
+  const mine = issuedSearches
+  newestPerStream.set(stream, mine)
+  return {
+    check: (): void => {
+      if (newestPerStream.get(stream) !== mine) throw new SupersededSearchError(stream)
+    }
+  }
+}
+
+/**
+ * Hand the event loop back for one macrotask before starting expensive work.
+ *
+ * A newer `search:universal` message can already be sitting in the IPC queue while this request is
+ * running its (synchronous) keyword pass. Yielding lets that message be handled first, so the token
+ * moves and the next checkpoint abandons this request BEFORE it asks the embedding model for a
+ * vector nobody will use. Without the yield the older request reaches the model first and, because
+ * embeddings are serialized onto one worker, makes the newest query wait behind it.
+ */
+function yieldToQueuedRequests(): Promise<void> {
+  return new Promise<void>((resolve) => setImmediate(resolve))
+}
+
+// ---------------------------------------------------------------------------
 // Query: keyword (FTS5) + semantic (LanceDB), fused with RRF
 // ---------------------------------------------------------------------------
 
@@ -397,8 +456,36 @@ export async function searchSemanticSources(vector: number[], limit: number): Pr
   }))
 }
 
-async function semanticHits(query: string, limit: number): Promise<RawHit[]> {
+/**
+ * The semantic list for a query, and the policy for when there isn't one.
+ *
+ * Two failures land here and they are not the same thing. Superseded means this request was told
+ * to stop, so it propagates and the whole search ends. Anything else means the embedding model is
+ * not ready, and the keyword half is still a good answer - an empty list contributes nothing to
+ * the rank fusion, so the search continues on keywords alone.
+ */
+async function semanticHitsOrEmpty(
+  query: string,
+  limit: number,
+  claim: SearchStreamClaim
+): Promise<RawHit[]> {
+  try {
+    return await semanticHits(query, limit, claim)
+  } catch (error) {
+    if (error instanceof SupersededSearchError) throw error
+    return []
+  }
+}
+
+async function semanticHits(
+  query: string,
+  limit: number,
+  claim: SearchStreamClaim
+): Promise<RawHit[]> {
+  await yieldToQueuedRequests()
+  claim.check() // don't embed for a query the user has already typed past
   const vector = await embeddings.generateEmbedding(query)
+  claim.check() // don't search vectors, or probe SQLite per hit, for a dead query
   return searchSemanticSources(vector, limit)
 }
 
@@ -438,8 +525,11 @@ export async function universalSearch(
     collapseScreenMoments?: boolean
     sort?: SearchSort
     excludeChatId?: string
+    /** Names this caller's stream of queries, so a newer one abandons this one. See claimStream. */
+    stream?: string
   } = {}
 ): Promise<SearchResult[]> {
+  const claim = claimStream(opts.stream)
   ensureRagStoreSchema()
   const q = query.trim()
   if (!q) return []
@@ -447,14 +537,14 @@ export async function universalSearch(
   // When filtering by source, cast a wider net per source so enough survive the filter.
   const perSource = opts.sources?.length ? 80 : Math.min(40, limit + 10)
 
+  // The keyword pass is synchronous SQL: it cannot be abandoned part-way and nothing newer can
+  // arrive while it runs, so the first checkpoint that can fire is inside the semantic pass.
   const lists = keywordHits(q, perSource)
-  if (opts.semantic !== false) {
-    try {
-      lists.push(await semanticHits(q, perSource))
-    } catch {
-      /* embedding model not ready — keyword results still fine */
-    }
-  }
+  if (opts.semantic !== false) lists.push(await semanticHitsOrEmpty(q, perSource, claim))
+
+  // Fusion, ranking and one thumbnail query per result are the rest of the bill. Nothing below
+  // awaits, so this is the last point at which a query the user has moved on from can be dropped.
+  claim.check()
 
   // Reciprocal-rank fusion across all lists, keyed by the unique chunk key.
   const fused = fuseHits(lists)
