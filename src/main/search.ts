@@ -563,6 +563,13 @@ async function semanticHitsOrDegrade(
 ): Promise<RawHit[]> {
   try {
     const hits = await semanticHits(query, limit, claim)
+    // Checked HERE, not only inside the callee. The callee checks before it resolves, but this
+    // caller resumes in a later microtask - and another request can claim the stream in that gap,
+    // so a check that passed there can already be stale by the time we publish. The same reason the
+    // failure path checks before reporting: nothing about a query nobody is waiting for may reach
+    // application health, and clearing a degradation that is still true for the LIVE query is the
+    // worst version of that.
+    claim.check()
     reportSemanticStatus(null)
     return hits
   } catch (error) {
