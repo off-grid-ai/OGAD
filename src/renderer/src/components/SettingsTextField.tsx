@@ -13,6 +13,11 @@ interface SettingsTextFieldProps {
   readonly label: string
   /** The persisted value at mount. The field owns the draft from then on. */
   readonly initialValue: string
+  /**
+   * The persisted value as it stands, for a field whose setting can also be changed elsewhere.
+   * A change to it takes over the draft; the field is otherwise left alone to be typed in.
+   */
+  readonly persistedValue?: string
   readonly placeholder?: string
   /** Rows makes this a textarea; without it the field is a single-line input. */
   readonly rows?: number
@@ -35,6 +40,7 @@ export function SettingsTextField({
   id,
   label,
   initialValue,
+  persistedValue,
   placeholder,
   rows,
   className,
@@ -55,6 +61,15 @@ export function SettingsTextField({
       setFailure(outcome.ok ? '' : outcome.failure.message)
     })
   }
+
+  // The same setting changed somewhere else - the settings panel while the composer is open -
+  // replaces what this field shows. Writing to the draft store is how this field is told; it is
+  // not a render-time state update.
+  useEffect(() => {
+    if (persistedValue === undefined || persistedValue === committed.current) return
+    committed.current = persistedValue
+    store.set(persistedValue)
+  }, [persistedValue, store])
 
   // A field unmounted mid-typing (the panel closes) still saves what the user typed.
   useEffect(() => {

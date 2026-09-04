@@ -11,6 +11,8 @@ import { useActiveModelSummary } from '@renderer/hooks/useActiveModelSummary'
 import { admitThinkingRequest } from '@renderer/lib/model-summary'
 import { shouldFollowBottom } from '@renderer/lib/scroll-follow'
 import {
+  failed as failedOutcome,
+  ok as okOutcome,
   attachmentKindFor,
   describeAttachment,
   isPromptEnhancementReasoningLabel,
@@ -52,6 +54,7 @@ import { VoiceBubble } from './VoiceBubble'
 import { stopAllVoicePlayback } from '@renderer/lib/voice-playback-bus'
 import { ChatVoiceComposer, VoiceModeControl } from './ChatVoiceComposer'
 import { ChatDraftInput, ChatDraftSendButton, type ChatDraftInputHandle } from './ChatDraftInput'
+import { SettingsTextField, type SettingsWriteOutcome } from './SettingsTextField'
 import { createTextDraftStore } from '@renderer/lib/text-draft-store'
 import { ExploreSection } from './explore/ExploreSection'
 import { PresetSetup } from './explore/PresetSetup'
@@ -810,6 +813,9 @@ function MessageEditor({
     </div>
   )
 }
+
+/** A seed is a number; anything else typed into the field is dropped as it is typed. */
+const digitsOnly = (value: string): string => value.replace(/[^0-9]/g, '')
 
 const markdownComponents = chatMarkdownComponents
 
@@ -2500,6 +2506,40 @@ export function MemoryChat({
     persistedPreferenceValues.current[key] = value
     void window.api.saveSetting(key, value)
   }, [])
+  /**
+   * Write one image preference the user has settled on, and say whether it stored.
+   *
+   * The seed and negative-prompt fields used to hold their text in this component and persist it
+   * from an effect, so a character typed into either one re-rendered the whole chat AND wrote to
+   * SQLite. They own their text now and call this once, with the value they settled on.
+   */
+  const commitImagePreference = useCallback(
+    async (key: 'imgSeed' | 'imgNegative', value: string): Promise<SettingsWriteOutcome> => {
+      if (Object.is(persistedPreferenceValues.current[key], value)) return okOutcome(undefined)
+      persistedPreferenceValues.current[key] = value
+      try {
+        await window.api.saveSetting(key, value)
+        return okOutcome(undefined)
+      } catch {
+        return failedOutcome({ message: 'This could not be saved.' })
+      }
+    },
+    []
+  )
+  const commitImgSeed = useCallback(
+    (value: string): Promise<SettingsWriteOutcome> => {
+      setImgSeed(value)
+      return commitImagePreference('imgSeed', value)
+    },
+    [commitImagePreference]
+  )
+  const commitImgNegative = useCallback(
+    (value: string): Promise<SettingsWriteOutcome> => {
+      setImgNegative(value)
+      return commitImagePreference('imgNegative', value)
+    },
+    [commitImagePreference]
+  )
   useEffect(() => {
     ;(async () => {
       try {
@@ -2594,12 +2634,6 @@ export function MemoryChat({
   }, [])
   // Persist the global image-composer params only when they differ from the latest
   // main-owned values. Hydration and settings invalidations update the snapshot first.
-  useEffect(() => {
-    persistChangedPreference('imgSeed', imgSeed)
-  }, [imgSeed, persistChangedPreference])
-  useEffect(() => {
-    persistChangedPreference('imgNegative', imgNegative)
-  }, [imgNegative, persistChangedPreference])
   useEffect(() => {
     persistChangedPreference('enhanceImagePrompts', enhanceImg)
   }, [enhanceImg, persistChangedPreference])
@@ -5559,16 +5593,23 @@ export function MemoryChat({
                         </label>
                         <label className="flex items-center gap-1.5">
                           Seed
-                          <input
-                            value={imgSeed}
-                            onChange={(e) => setImgSeed(e.target.value.replace(/[^0-9]/g, ''))}
+                          <SettingsTextField
+                            id="composer-image-seed"
+                            label="Seed"
+                            initialValue={imgSeed}
+                            persistedValue={imgSeed}
+                            sanitize={digitsOnly}
+                            commit={commitImgSeed}
                             placeholder="random"
                             className="w-20 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-300 placeholder-neutral-700 outline-none focus:border-green-500"
                           />
                         </label>
-                        <input
-                          value={imgNegative}
-                          onChange={(e) => setImgNegative(e.target.value)}
+                        <SettingsTextField
+                          id="composer-image-negative-prompt"
+                          label="Negative prompt"
+                          initialValue={imgNegative}
+                          persistedValue={imgNegative}
+                          commit={commitImgNegative}
                           placeholder="Negative prompt"
                           className="min-w-[10rem] flex-1 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-300 placeholder-neutral-700 outline-none focus:border-green-500"
                         />
