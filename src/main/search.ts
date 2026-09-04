@@ -3,7 +3,9 @@
 // fused with reciprocal-rank fusion. Plus a background backfill that embeds the
 // observation/frame/transcript backlog (using the in-app MiniLM model) so the
 // semantic half actually covers your captured life. All local, all offline.
+import { reportDesktopApplicationDegraded } from './composition/application-access'
 import { getDB } from './database'
+import { writeDiagnosticLog } from './diagnostics-log'
 import { embeddings } from './embeddings'
 import { ensureRagStoreSchema } from './rag/store'
 import { addChunks, searchVectors, vectorCount, type VecChunk } from './vectors'
@@ -456,23 +458,72 @@ export async function searchSemanticSources(vector: number[], limit: number): Pr
   }))
 }
 
+/** One reporter, one key, so a standing "semantic search is not running" clears when it runs again. */
+export const SEMANTIC_SEARCH_DEGRADATION_SOURCE = 'search-semantic'
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * Publish, on the one degradation projection this application has, that the semantic half of a
+ * search did not run - and why.
+ *
+ * The report must never be able to fail the caller: it reaches shared application health, which can
+ * be unavailable (before the application root is registered, for one), and a search that still has
+ * good keyword hits must not be turned into a rejection by its own reporting. Not swallowed - the
+ * report's own failure gets its OWN diagnostic under its own event name, so it is distinguishable
+ * from the semantic fault that triggered it.
+ */
+function publishSemanticDegradation(reason: string | null): void {
+  try {
+    reportDesktopApplicationDegraded({
+      domain: 'rag',
+      source: SEMANTIC_SEARCH_DEGRADATION_SOURCE,
+      reason
+    })
+  } catch (reportError) {
+    writeDiagnosticLog(
+      'search',
+      'semantic.degradation-report-failed',
+      { reason: reason ?? '', error: describe(reportError) },
+      'error'
+    )
+  }
+}
+
 /**
  * The semantic list for a query, and the policy for when there isn't one.
  *
- * Two failures land here and they are not the same thing. Superseded means this request was told
- * to stop, so it propagates and the whole search ends. Anything else means the embedding model is
- * not ready, and the keyword half is still a good answer - an empty list contributes nothing to
- * the rank fusion, so the search continues on keywords alone.
+ * Three outcomes land here and they are NOT the same thing:
+ *
+ * - Superseded means this request was told to stop. That is not a failure - it is a query the user
+ *   typed past - so it propagates untouched and the whole search ends. Nothing is reported.
+ * - A pass that ran returns its hits, and clears this reporter's degradation entry. Zero hits is a
+ *   real answer here: the query genuinely had no semantic neighbours.
+ * - Any other fault - the embedding model unavailable, a vector-store or I/O error, a malformed
+ *   response, a bug - means the semantic half DID NOT RUN. The keyword half is still a good answer,
+ *   so this returns an empty list and the search continues on keywords alone; that fallback is the
+ *   point and must not regress into a failed search. But the empty list is then indistinguishable
+ *   from "no semantic matches existed", which is the defect this exists to prevent: the fault is
+ *   recorded in the diagnostics log AND published on the `rag` degradation projection, so a surface
+ *   can say the semantic half of search is not running, and why, instead of silently showing half
+ *   the results as if they were all of them.
  */
-async function semanticHitsOrEmpty(
+async function semanticHitsOrDegrade(
   query: string,
   limit: number,
   claim: SearchStreamClaim
 ): Promise<RawHit[]> {
   try {
-    return await semanticHits(query, limit, claim)
+    const hits = await semanticHits(query, limit, claim)
+    publishSemanticDegradation(null)
+    return hits
   } catch (error) {
     if (error instanceof SupersededSearchError) throw error
+    const reason = describe(error)
+    writeDiagnosticLog('search', 'semantic.failed', { reason }, 'error')
+    publishSemanticDegradation(`Semantic search did not run: ${reason}`)
     return []
   }
 }
@@ -540,7 +591,7 @@ export async function universalSearch(
   // The keyword pass is synchronous SQL: it cannot be abandoned part-way and nothing newer can
   // arrive while it runs, so the first checkpoint that can fire is inside the semantic pass.
   const lists = keywordHits(q, perSource)
-  if (opts.semantic !== false) lists.push(await semanticHitsOrEmpty(q, perSource, claim))
+  if (opts.semantic !== false) lists.push(await semanticHitsOrDegrade(q, perSource, claim))
 
   // Fusion, ranking and one thumbnail query per result are the rest of the bill. Nothing below
   // awaits, so this is the last point at which a query the user has moved on from can be dropped.
