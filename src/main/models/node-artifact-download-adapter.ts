@@ -2,8 +2,8 @@ import fs from 'fs'
 import path from 'path'
 import { createHash } from 'crypto'
 import {
+  DownloadAbortedError,
   NonRecoverableDownloadError,
-  modelDownloadFailureMessage,
   planResumedTransfer,
   type DownloadFilePort,
   type DownloadTransferPort
@@ -18,6 +18,33 @@ export interface DesktopModelDownloadPorts {
 
 function isMissing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT'
+}
+
+/**
+ * A native abort identifies ITSELF: `fetch` and the response body reader both reject with an
+ * `AbortError` when the signal fires. Classifying on that name - and never on `signal.aborted` -
+ * is the whole point of the frozen contract. The signal only says a stop was REQUESTED; the
+ * error's name says the transport actually stopped for it.
+ *
+ * That distinction is not academic here. This transfer does more than move bytes: after the
+ * abortable part it verifies integrity and promotes the file into place. Asking the signal
+ * reported every one of those outcomes - a corrupt artifact our own verifier caught, a failed
+ * rename - as the person's own cancellation whenever a cancel happened to be in flight.
+ *
+ * A write fault (ENOSPC, EIO) is not named `AbortError`, so it stays the fault it is.
+ */
+function isNativeAbort(error: unknown): boolean {
+  return (error as { name?: string } | undefined)?.name === 'AbortError'
+}
+
+/**
+ * The transfer port's two reporting rules, in one place so both abortable steps obey the same
+ * one: a stop is reported ONLY as `DownloadAbortedError`, and every other rejection is passed
+ * through UNCHANGED so its `code` still reaches the downstream classifier. It always throws.
+ */
+function reportTransferRejection(error: unknown): never {
+  if (isNativeAbort(error)) throw new DownloadAbortedError()
+  throw error
 }
 
 async function sha256(filePath: string): Promise<string> {
@@ -90,9 +117,11 @@ export function createNodeModelDownloadPorts(
             headers: resumeFrom > 0 ? { Range: `bytes=${resumeFrom}-` } : undefined
           })
         } catch (error) {
-          // Translate native transport errors at the adapter boundary. The
-          // coordinator and both renderers receive one stable domain message.
-          throw new Error(modelDownloadFailureMessage(error))
+          // This used to rethrow `new Error(modelDownloadFailureMessage(error))`, which flattened
+          // the cause: it erased the `name` that identified an abort - the reason the lane had to
+          // guess from the signal at all - and dropped the `code` that classifies ENOSPC and
+          // network conditions. The coordinator still renders one stable message from it.
+          reportTransferRejection(error)
         }
         if (!response.ok || !response.body) {
           throw new Error(`HTTP ${response.status} for ${path.basename(input.destination)}`)
@@ -105,10 +134,18 @@ export function createNodeModelDownloadPorts(
         input.onStarted?.(input.id)
         let writtenBytes = transfer.writtenBytes
         const output = fs.createWriteStream(partPath, transfer.append ? { flags: 'a' } : {})
-        await pumpToFile(response.body.getReader(), output, (bytes) => {
-          writtenBytes += bytes
-          input.onProgress({ bytesDownloaded: writtenBytes, totalBytes: transfer.totalBytes })
-        })
+        try {
+          await pumpToFile(response.body.getReader(), output, (bytes) => {
+            writtenBytes += bytes
+            input.onProgress({ bytesDownloaded: writtenBytes, totalBytes: transfer.totalBytes })
+          })
+        } catch (error) {
+          // The abort that matters in practice arrives HERE, not at the header fetch: a person
+          // cancels while bytes are moving, and the body reader rejects with `AbortError`. Left
+          // unclassified it reached the lane as an ordinary fault, so a real cancel of an active
+          // download reported `failed`. A write fault keeps its own error and its `code`.
+          reportTransferRejection(error)
+        }
         const integrityError = await verifyDownloadedPart({
           name: path.basename(input.destination),
           writtenBytes,
@@ -122,7 +159,9 @@ export function createNodeModelDownloadPorts(
         return { transferId: input.id }
       },
       async cancel() {
-        // The coordinator aborts the owning signal. fetch and pump observe that signal.
+        // The coordinator aborts the owning signal; fetch and the body reader observe it and
+        // reject with `AbortError`, which `start` reports as `DownloadAbortedError`. Nothing to
+        // throw here: `cancel` is the request, not the transfer whose outcome is being reported.
       }
     }
   }
