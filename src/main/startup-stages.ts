@@ -284,11 +284,29 @@ function settleFailure<T>(
     'error'
   )
   if (stage.domain) {
-    reportDesktopApplicationDegraded({
-      domain: stage.domain,
-      source: STARTUP_DEGRADATION_SOURCE,
-      reason: `${stage.name}: ${error}`
-    })
+    // The degradation report must never be able to fail the FAILURE HANDLER. It reaches shared
+    // application health, which can be unavailable - and when it threw, `settleFailure` rejected,
+    // so the stage's diagnostic never finished, the startup projection was never updated, and the
+    // observable result was an unhandled rejection instead of a reported failure. A reporting
+    // problem was hiding the very problem it was reporting.
+    //
+    // Not swallowed: the report's own failure gets its OWN diagnostic, under its own event name, so
+    // it is distinguishable from the stage failure that triggered it. And no second health store is
+    // created for it - there is one owner of degradation, it was simply unreachable.
+    try {
+      reportDesktopApplicationDegraded({
+        domain: stage.domain,
+        source: STARTUP_DEGRADATION_SOURCE,
+        reason: `${stage.name}: ${error}`
+      })
+    } catch (reportError) {
+      writeDiagnosticLog(
+        'startup',
+        'stage.degradation-report-failed',
+        { stage: stage.name, domain: stage.domain, error: describe(reportError) },
+        'error'
+      )
+    }
   }
   startupProjection.stageSettled({
     name: stage.name,
