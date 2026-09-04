@@ -45,3 +45,50 @@ export function isMac(platform: DevicePlatform): boolean {
 export function primaryModifier(platform: DevicePlatform): string {
   return isMac(platform) ? 'Cmd' : 'Ctrl'
 }
+
+/**
+ * The modifier tokens Electron accepts in an accelerator, and the label to SHOW for each.
+ *
+ * Electron's registration vocabulary is not the vocabulary printed on the keys: it registers
+ * `Alt`, and macOS labels that key Option. Anything not in this table is not a modifier - a key
+ * name, a custom chord's own spelling - and is shown exactly as the setting spells it.
+ *
+ * Keys are lowercased so the two spellings Electron allows for one modifier (`Cmd`/`Command`,
+ * `Ctrl`/`Control`) land on one label, and a setting that used the other casing still reads right.
+ */
+const MODIFIER_LABELS: Readonly<Record<string, (platform: DevicePlatform) => string>> = {
+  commandorcontrol: primaryModifier,
+  cmdorctrl: primaryModifier,
+  command: () => 'Cmd',
+  cmd: () => 'Cmd',
+  control: () => 'Ctrl',
+  ctrl: () => 'Ctrl',
+  // The reported defect: 'Alt+Space' told Mac users to release a key their keyboard calls Option.
+  alt: (platform) => (isMac(platform) ? 'Option' : 'Alt'),
+  option: (platform) => (isMac(platform) ? 'Option' : 'Alt'),
+  altgr: () => 'AltGr',
+  shift: () => 'Shift',
+  super: (platform) => (isMac(platform) ? 'Cmd' : 'Super'),
+  meta: (platform) => (isMac(platform) ? 'Cmd' : 'Super')
+}
+
+/** One accelerator token as the user should read it. Non-modifiers are returned untouched. */
+export function modifierLabel(token: string, platform: DevicePlatform): string {
+  return MODIFIER_LABELS[token.toLowerCase()]?.(platform) ?? token
+}
+
+/**
+ * An Electron accelerator as shortcut copy for this platform: `'Alt+Space'` -> `'Option+Space'`
+ * on macOS, `'Alt+Space'` everywhere else.
+ *
+ * Naming only. It does not parse, validate, reorder or re-register anything, so a customized
+ * shortcut survives token for token and in its own order - `'Ctrl+Shift+K'` still reads as
+ * itself. Same single source of truth as `primaryModifier`, which it reuses for
+ * `CommandOrControl`, so what the UI prints cannot drift from the key that was registered.
+ */
+export function shortcutLabel(accelerator: string, platform: DevicePlatform): string {
+  return accelerator
+    .split('+')
+    .map((token) => modifierLabel(token, platform))
+    .join('+')
+}
