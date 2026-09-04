@@ -432,7 +432,8 @@ export default defineConfig(
       'scripts/seed-e2e-license.mjs',
       'scripts/stage-native.mjs',
       'scripts/verify-lint-ratchet.mjs',
-      'scripts/verify-model-architecture.mjs'
+      'scripts/verify-model-architecture.mjs',
+      'scripts/verify-shared-consumer-contract.mjs'
     ],
     rules: {
       '@typescript-eslint/explicit-function-return-type': 'off'

@@ -115,16 +115,12 @@ jobs:
           # A LOCKED install, and no fallback: an unlocked install would resolve a different graph and let the
           # later gates run against dependencies nobody committed. A drifted lock should stop the build.
           npm --prefix ../shared ci
-          # Every shared package this app declares as a file: dependency, in dependency order
-          # (sync builds on automation). A package left out here has no dist on the runner, and the
-          # typecheck reports it as "Cannot find module" - which is how @offgrid/rag failed this gate.
-          npm --prefix ../shared/packages/automation run build
-          npm --prefix ../shared/packages/models run build
-          npm --prefix ../shared/packages/rag run build
-          npm --prefix ../shared/packages/speech run build
-          npm --prefix ../shared/packages/sync run build
-          npm --prefix ../shared/packages/ui run build
-          npm --prefix ../shared/packages/use run build
+          # Shared's OWN ordered workspace build, not a hand-listed copy of its dependency graph.
+          # The list that used to live here had already drifted: it omitted @offgrid/application and
+          # @offgrid/memory, both of which this app declares as file: dependencies, so their dist
+          # never existed on the runner. Shared knows its own build order; asking it removes the
+          # second, silently-rotting copy of that order.
+          npm --prefix ../shared run build
       - name: Check out the private Desktop speech runtime
         uses: actions/checkout@v4
         with:
@@ -148,6 +144,12 @@ jobs:
           rm -rf ../executorch-speech
           mv _executorch_speech ../executorch-speech
       - run: npm ci
+      # Before the typecheck, because a stale or incomplete shared dist makes every failure after
+      # this point a lie: the typecheck reports "Cannot find module" or passes against declarations
+      # that do not describe the runtime the app will load.
+      - name: Shared consumer contract
+        timeout-minutes: 3
+        run: npm run verify:shared-contract
       # Hard gates: types + the full test suite.
       - name: Typecheck (core)
         timeout-minutes: 6
