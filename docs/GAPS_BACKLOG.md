@@ -2673,3 +2673,49 @@ Combined production diagnostics, run after the development declaration refresh:
   is claimed.**
 
 Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
+
+## Startup contract gate passed when it could not tell (RESOLVED 2026-09-04)
+
+`desktop/scripts/verify-shared-consumer-contract.mjs` guards against a Desktop start that dies on a
+missing shared export. Its freshness check caught errors and returned 0, so an unreadable or missing
+artifact was indistinguishable from a fresh one - the worst state passed. A gate that passes when it
+cannot tell is worse than no gate: it teaches everyone to trust it.
+
+Now every path fails closed and reports by name - unreadable manifest, no declared ESM/types entry,
+missing dist, unperformable freshness check - and continues to the next package rather than
+swallowing. It also validates the DECLARATION and CommonJS entries, not just the ESM one (a runtime
+bundle can exist while the `.d.ts` consumers typecheck against is absent or older), and compares the
+OLDEST built entry against the NEWEST of source and manifest so it errs toward reporting staleness.
+Entries are read from the manifest instead of a guessed filename, since shared packages disagree on
+it. Two genuinely missing startup exports were added: `OFFGRID_SYNC_PORT` and
+`captureInteractionReportIntervalMs`.
+
+Evidence it works: the first run flagged `@offgrid/application` as stale against its sources -
+correctly, because shared source had moved since the last development refresh. After a rebuild the
+gate passes 0/6 packages, read-only, with no mutation or build of its own.
+
+NOT PROVEN, deliberately not claimed:
+- Freshness is MTIME-based, not content-hashed. A touched-but-unchanged file reports stale, and an
+  edit that preserves mtime would not be caught.
+- Comparing a package's own sources to its own artifacts is not a full dependency proof. A package
+  rebuilt against a STALE DEPENDENCY still looks fresh here, which is the failure mode most likely to
+  bite during a multi-package migration.
+
+## Pro-catalogue dictation copy still shows the default chord (OPEN)
+
+Half of the shortcut defect is closed: both catalogue sites derive the platform spelling through the
+shared formatter, so a Windows or Linux reader is no longer told to hold Option. But `PRO_FEATURES` is
+a static import-time array that ships in the OPEN build to advertise Pro, where dictation settings are
+not readable - the configured accelerator is read asynchronously over IPC, as the dictation overlay
+and Voice screen do. So a user who REBOUND dictation still reads the default chord in this copy.
+Closing it needs the catalogue to become settings-aware; threading settings plumbing through a static
+catalogue to fix a copy string would have been the wrong trade.
+
+Related SSOT gap found in the same pass: `'Alt+Space'` is now spelled in three unconnected places -
+`DictationOverlay.tsx` (not exported), `pro/main/dictation/controller.ts`, and the catalogue. One
+exported constant is the fix; it needs files outside that worker's scope.
+
+Also still hardcoded and NOT in this fix: `src/renderer/src/components/Onboarding.tsx:139` carries the
+identical "Hold Option+Space" string. It sits in another owner's reserved domain this round.
+
+Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
