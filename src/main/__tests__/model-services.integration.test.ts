@@ -9,17 +9,61 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { CATALOG } from '@offgrid/models'
+import type { OffGridApplication } from '@offgrid/application'
 
 const previousDataDir = process.env.OFFGRID_DATA_DIR
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-model-services-'))
 const modelDirectory = path.join(profile, 'models')
+const applications: OffGridApplication[] = []
+
+type DesktopModelTestPorts = Parameters<
+  typeof import('../model-services').createDesktopModelWorkspacePorts
+>[0]
+
+async function createModelsApplication(
+  ports: DesktopModelTestPorts,
+  selectionPersistence?: import('../model-selection-persistence').DesktopModelSelectionPersistence
+): Promise<OffGridApplication> {
+  const [applicationModule, modelServices, applicationAccess] = await Promise.all([
+    import('@offgrid/application'),
+    import('../model-services'),
+    import('../composition/application-access')
+  ])
+  const application = applicationModule.createOffGridApplication({
+    models: modelServices.createDesktopModelWorkspacePorts(ports, selectionPersistence)
+  })
+  applicationAccess.registerDesktopApplication(application)
+  applications.push(application)
+  await application.start()
+  return application
+}
+
+async function createComposedDesktopApplication(): Promise<OffGridApplication> {
+  const [applicationModule, modelServices, applicationAccess, modelManager] = await Promise.all([
+    import('@offgrid/application'),
+    import('../model-services'),
+    import('../composition/application-access'),
+    import('../models-manager')
+  ])
+  const application = applicationModule.createOffGridApplication({
+    models: {
+      ...modelServices.desktopModelWorkspacePorts,
+      activation: { resolve: modelManager.resolveDesktopActivation }
+    }
+  })
+  applicationAccess.registerDesktopApplication(application)
+  applications.push(application)
+  await application.start()
+  return application
+}
 
 beforeAll(() => {
   process.env.OFFGRID_DATA_DIR = profile
   fs.mkdirSync(modelDirectory, { recursive: true })
 })
 
-afterAll(() => {
+afterAll(async () => {
+  await Promise.all(applications.splice(0).map((application) => application.stop()))
   if (previousDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
   else process.env.OFFGRID_DATA_DIR = previousDataDir
   fs.rmSync(profile, { recursive: true, force: true })
@@ -48,40 +92,41 @@ describe('Desktop shared model-service composition', () => {
   })
 
   it('fails selection and warm-up truthfully when no model route is available', async () => {
-    const { createDesktopModelServices } = await import('../model-services')
-    const services = createDesktopModelServices({
+    const application = await createModelsApplication({
       listCatalog: async () => [],
       listInstalled: async () => [],
-      localTextRuntimeState: async () => ({ ready: false, loaded: false }),
-      resolveLegacyModelId: async () => {
-        throw new Error('Legacy model lookup failed.')
-      }
+      localTextRuntimeState: async () => ({ ready: false, loaded: false })
     })
 
-    await expect(services.select('text', 'missing-model')).resolves.toEqual({
-      success: false,
-      error: 'Legacy model lookup failed.'
+    await expect(
+      application.models.select({ modality: 'text', modelId: 'missing-model' })
+    ).resolves.toEqual({
+      ok: false,
+      failure: { kind: 'unknown_model', identifier: 'missing-model' }
     })
-    await expect(services.warmText()).rejects.toThrow('Models not downloaded')
+    await expect(application.models.prepare('text')).resolves.toMatchObject({
+      ok: false,
+      failure: { kind: 'unknown_model', identifier: '(no selection)' }
+    })
   })
 
   // The panel's projection (active route -> catalog row, remote reference, or native id) is the
   // workspace's and is pinned in shared/packages/models/test/workspace.test.mjs.
 
   it('publishes runtime-managed speech readiness from the native adapter', async () => {
-    const { createDesktopModelServices } = await import('../model-services')
     const voice = CATALOG.find(
       (model) => model.kind === 'voice' && model.artifactDelivery === 'runtime'
     )
     if (!voice) throw new Error('The catalog needs a runtime-managed voice fixture.')
 
-    const readyServices = createDesktopModelServices({
+    const readyApplication = await createModelsApplication({
       listCatalog: async () => [voice],
       listInstalled: async () => [],
       localTextRuntimeState: async () => ({ ready: false, loaded: false }),
       localVoiceRuntimeState: async () => ({ installed: true, ready: true })
     })
-    const readyInventory = await readyServices.refresh()
+    await readyApplication.models.refresh()
+    const readyInventory = readyApplication.models.snapshot().inventory
     expect(readyInventory).toContainEqual(
       expect.objectContaining({
         id: voice.id,
@@ -92,21 +137,21 @@ describe('Desktop shared model-service composition', () => {
       })
     )
     expect(
-      readyServices.llm.resolveRoute({
+      readyApplication.models.resolve({
         modality: 'voice',
         requiredCapabilities: { speechSynthesis: true }
       }).candidates[0]
     ).toMatchObject({ id: voice.id, adapterId: 'desktop.tts' })
 
-    const unavailableServices = createDesktopModelServices({
+    const unavailableApplication = await createModelsApplication({
       listCatalog: async () => [voice],
       listInstalled: async () => [voice.id],
       localTextRuntimeState: async () => ({ ready: false, loaded: false }),
       localVoiceRuntimeState: async () => ({ installed: false, ready: false })
     })
-    await unavailableServices.refresh()
+    await unavailableApplication.models.refresh()
     expect(
-      unavailableServices.llm.resolveRoute({
+      unavailableApplication.models.resolve({
         modality: 'voice',
         requiredCapabilities: { speechSynthesis: true }
       }).candidates
@@ -149,15 +194,17 @@ describe('Desktop shared model-service composition', () => {
     )
 
     const manager = await import('../models-manager')
-    const { createDesktopModelServices, desktopModelServices } = await import('../model-services')
-    const inventory = await desktopModelServices.refresh()
+    const desktopApplication = await createComposedDesktopApplication()
+    await desktopApplication.models.refresh()
+    const inventory = desktopApplication.models.snapshot().inventory
 
-    const visionRouteServices = createDesktopModelServices({
+    const visionRouteApplication = await createModelsApplication({
       listCatalog: async () => [{ ...text, kind: 'vision' }],
       listInstalled: async () => [text.id],
       localTextRuntimeState: async () => ({ ready: true, loaded: true })
     })
-    const visionRouteInventory = await visionRouteServices.refresh()
+    await visionRouteApplication.models.refresh()
+    const visionRouteInventory = visionRouteApplication.models.snapshot().inventory
     expect(
       visionRouteInventory.some((model) => model.id === text.id && model.modality === 'vision')
     ).toBe(false)
@@ -171,7 +218,7 @@ describe('Desktop shared model-service composition', () => {
       )?.capabilities
     ).toMatchObject({ vision: true, computerUse: true, thinking: false })
 
-    const thinkingRouteServices = createDesktopModelServices({
+    const thinkingRouteApplication = await createModelsApplication({
       listCatalog: async () => [{ ...text, kind: 'vision' }],
       listInstalled: async () => [text.id],
       localTextRuntimeState: async () => ({
@@ -180,7 +227,8 @@ describe('Desktop shared model-service composition', () => {
         reasoning: { transport: 'llama-server', control: 'enable-thinking' }
       })
     })
-    const thinkingRouteInventory = await thinkingRouteServices.refresh()
+    await thinkingRouteApplication.models.refresh()
+    const thinkingRouteInventory = thinkingRouteApplication.models.snapshot().inventory
     expect(
       thinkingRouteInventory.find(
         (model) => model.id === text.id && model.modality === 'computer_use'
@@ -218,8 +266,12 @@ describe('Desktop shared model-service composition', () => {
         (image.files.reduce((sum, file) => sum + (file.sizeBytes ?? 0), 0) / (1024 * 1024)) * 1.4
       )
     )
-    expect(desktopModelServices.llm.active('text').selectedId).toMatch(/^model-route:v1:/)
-    expect(desktopModelServices.llm.active('image').selectedId).toMatch(/^model-route:v1:/)
+    expect(desktopApplication.models.snapshot().active.text?.selectedRouteId).toMatch(
+      /^model-route:v1:/
+    )
+    expect(desktopApplication.models.snapshot().active.image?.selectedRouteId).toMatch(
+      /^model-route:v1:/
+    )
     const migratedSelections = JSON.parse(
       fs.readFileSync(path.join(modelDirectory, 'model-selections.json'), 'utf8')
     ) as { text: string; image: string }
@@ -233,13 +285,13 @@ describe('Desktop shared model-service composition', () => {
     let nativeReady = false
     let nativeLoads = 0
     let nativeUnloads = 0
-    const startupServices = createDesktopModelServices({
+    const startupApplication = await createModelsApplication({
       listCatalog: async () => [text],
       listInstalled: async () => [text.id],
       localTextRuntimeState: async () => ({ ready: nativeReady, loaded: nativeReady }),
       localTextLifecycle: {
         async load() {
-          expect(startupServices.residency.getResidents()).toEqual([])
+          expect(startupApplication.models.snapshot().residents).toEqual([])
           nativeLoads += 1
           nativeReady = true
         },
@@ -250,7 +302,8 @@ describe('Desktop shared model-service composition', () => {
       }
     })
 
-    const startupInventory = await startupServices.refresh()
+    await startupApplication.models.refresh()
+    const startupInventory = startupApplication.models.snapshot().inventory
     expect(startupInventory.map((model) => [model.id, model.modality, model.ready])).toContainEqual(
       [text.id, 'text', true]
     )
@@ -258,23 +311,32 @@ describe('Desktop shared model-service composition', () => {
       (model) => model.id === text.id && model.modality === 'text'
     )?.routeId
     if (!startupTextRoute) throw new Error('The startup text fixture needs a canonical route.')
-    await startupServices.workspace.select('text', startupTextRoute)
-    await expect(startupServices.warmText()).resolves.toBe(true)
-    await expect(startupServices.warmText()).resolves.toBe(false)
+    await expect(
+      startupApplication.models.select({ modality: 'text', modelId: startupTextRoute })
+    ).resolves.toMatchObject({ ok: true })
+    await expect(
+      startupApplication.models.load({ modality: 'text', modelId: startupTextRoute })
+    ).resolves.toMatchObject({ ok: true })
+    await expect(
+      startupApplication.models.load({ modality: 'text', modelId: startupTextRoute })
+    ).resolves.toMatchObject({ ok: true })
     expect(nativeLoads).toBe(1)
-    expect(startupServices.residency.getResidents()).toEqual([
+    expect(startupApplication.models.snapshot().residents).toEqual([
       expect.objectContaining({
         key: expect.stringMatching(/^text:model-route:v1:/),
         modelId: expect.stringMatching(/^model-route:v1:/),
         type: 'text'
       })
     ])
-    await expect(startupServices.unload('text')).resolves.toBe(true)
+    await expect(startupApplication.models.unload({ modality: 'text' })).resolves.toMatchObject({
+      ok: true,
+      value: true
+    })
     expect(nativeUnloads).toBe(1)
-    expect(startupServices.residency.getResidents()).toEqual([])
+    expect(startupApplication.models.snapshot().residents).toEqual([])
 
     const startupError = new Error('Native text runtime failed to start.')
-    const failingStartupServices = createDesktopModelServices({
+    const failingStartupApplication = await createModelsApplication({
       listCatalog: async () => [text],
       listInstalled: async () => [text.id],
       localTextRuntimeState: async () => ({ ready: false, loaded: false }),
@@ -285,37 +347,46 @@ describe('Desktop shared model-service composition', () => {
         unload: async () => undefined
       }
     })
-    await failingStartupServices.refresh()
-    await failingStartupServices.workspace.select('text', startupTextRoute)
-    await expect(failingStartupServices.warmText()).rejects.toBe(startupError)
-    expect(failingStartupServices.residency.getResidents()).toEqual([])
+    await failingStartupApplication.models.refresh()
+    await expect(
+      failingStartupApplication.models.select({ modality: 'text', modelId: startupTextRoute })
+    ).resolves.toMatchObject({ ok: true })
+    await expect(
+      failingStartupApplication.models.load({ modality: 'text', modelId: startupTextRoute })
+    ).resolves.toMatchObject({
+      ok: false,
+      failure: { kind: 'runtime', message: startupError.message }
+    })
+    expect(failingStartupApplication.models.snapshot().residents).toEqual([])
 
+    const { registerDesktopApplication } = await import('../composition/application-access')
+    registerDesktopApplication(desktopApplication)
     await expect(manager.activateModel(image.id)).resolves.toEqual({ success: true })
     const persistedRoutes = JSON.parse(
       fs.readFileSync(path.join(modelDirectory, 'model-selections.json'), 'utf8')
     ) as { image: string }
     expect(persistedRoutes.image).toMatch(/^model-route:v1:/)
-    expect(desktopModelServices.llm.active('image')).toMatchObject({
-      selectedId: persistedRoutes.image,
+    expect(desktopApplication.models.snapshot().active.image).toMatchObject({
+      selectedRouteId: persistedRoutes.image,
       model: { id: image.id, adapterId: 'desktop.image' }
     })
     expect(
       JSON.parse(fs.readFileSync(path.join(modelDirectory, 'active-modalities.json'), 'utf8')).image
     ).toBe(image.id)
 
-    expect(desktopModelServices.llm.active('image').selectedId).toBe(persistedRoutes.image)
+    expect(desktopApplication.models.snapshot().active.image?.selectedRouteId).toBe(
+      persistedRoutes.image
+    )
 
-    vi.resetModules()
-    const [{ desktopModelServices: relaunchedServices }, { activeImageModel }] = await Promise.all([
-      import('../model-services'),
-      import('../imagegen')
-    ])
-    await relaunchedServices.refresh()
-    expect(relaunchedServices.activeModalities().image).toBe(image.id)
+    await Promise.all(applications.splice(0).map((application) => application.stop()))
+    const relaunchedApplication = await createComposedDesktopApplication()
+    const { activeImageModel } = await import('../imagegen')
+    await relaunchedApplication.models.refresh()
+    expect(relaunchedApplication.models.activeModelId('image')).toBe(image.id)
     expect(activeImageModel()).toBe(imagePrimary)
   })
 
-  it('does not downgrade catalog filesystem failures to a raw model name', async () => {
+  it('does not downgrade installed-inventory filesystem failures to absence', async () => {
     const manager = await import('../models-manager')
     const artifact = CATALOG.flatMap((model) => model.files).find((file) => file.name)
     if (!artifact) throw new Error('The catalog needs a file-backed model fixture.')
@@ -328,15 +399,10 @@ describe('Desktop shared model-service composition', () => {
     }) as typeof fs.statSync)
 
     try {
-      await expect(manager.resolveModelIdentity('unknown-model')).rejects.toMatchObject({
-        name: 'ModelIdentityResolutionError',
-        code: 'MODEL_IDENTITY_RESOLUTION_FAILED',
-        modelId: 'unknown-model',
-        cause: expect.objectContaining({
-          name: 'ModelFilesystemProbeError',
-          code: 'MODEL_FILESYSTEM_PROBE_FAILED',
-          filePath: target
-        })
+      await expect(manager.listInstalled()).rejects.toMatchObject({
+        name: 'ModelFilesystemProbeError',
+        code: 'MODEL_FILESYSTEM_PROBE_FAILED',
+        filePath: target
       })
     } finally {
       stat.mockRestore()
