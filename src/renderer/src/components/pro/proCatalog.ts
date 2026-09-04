@@ -51,6 +51,33 @@ export interface ProFeature {
   platforms: DevicePlatform[]
 }
 
+function dictationCopy(
+  accelerator: string | null,
+  source: 'configured' | 'default' = 'configured'
+): Pick<ProFeature, 'description' | 'highlights'> {
+  const shortcut = accelerator
+    ? `the ${source} ${shortcutLabel(accelerator)} shortcut`
+    : 'your Voice shortcut'
+  return {
+    description: `Use ${shortcut} and speak. Off Grid AI Desktop transcribes on-device and pastes text into the app you are using. Set hold or toggle mode in Voice. Recordings and transcripts stay in a searchable library on this ${deviceNoun()}.`,
+    highlights: [
+      accelerator
+        ? `${source === 'default' ? 'Default' : 'Configured'} shortcut: ${shortcutLabel(accelerator)}`
+        : 'Choose your shortcut in Voice',
+      'Paste at your cursor and search saved recordings',
+      'Transcribe audio and video files on-device'
+    ]
+  }
+}
+
+/** Runtime copy is a projection; the static catalogue still describes the canonical default. */
+export function projectConfiguredShortcut(
+  feature: ProFeature,
+  accelerator: string | null
+): ProFeature {
+  return feature.route === 'voice' ? { ...feature, ...dictationCopy(accelerator) } : feature
+}
+
 export const PRO_FEATURES: ProFeature[] = [
   {
     route: 'day',
@@ -170,12 +197,7 @@ export const PRO_FEATURES: ProFeature[] = [
     label: 'Voice',
     icon: Waveform,
     tagline: 'Talk instead of type, fully local.',
-    description: `Hold ${shortcutLabel(DEFAULT_DICTATION_ACCELERATOR)} and speak — Off Grid AI Desktop transcribes on-device with whisper.cpp and pastes the text into whatever app you are in. Tap to toggle, hold to push-to-talk. Every recording and transcript is kept in a searchable library, and you can drop in any audio or video file to transcribe it. Runs in your ${deviceNoun()}'s RAM; nothing leaves the device.`,
-    highlights: [
-      `${shortcutLabel(DEFAULT_DICTATION_ACCELERATOR)} push-to-talk or toggle, anywhere`,
-      'Paste-at-cursor + a searchable recordings library',
-      'Transcribe any audio/video file, all on-device'
-    ],
+    ...dictationCopy(DEFAULT_DICTATION_ACCELERATOR, 'default'),
     platforms: ['darwin']
   },
   {

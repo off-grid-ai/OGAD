@@ -5,7 +5,7 @@ import { OrbitingCircles } from './ui/orbiting-circles'
 import { GridBackdrop } from './ui/grid-backdrop'
 import { cn } from '@renderer/lib/utils'
 import { deviceNoun, shortcutLabel } from '@renderer/lib/device'
-import { DEFAULT_DICTATION_ACCELERATOR } from '@offgrid/core/shared/dictation-defaults'
+import { useDictationShortcut } from '@renderer/lib/use-dictation-shortcut'
 import logo from '@/assets/logo.png'
 import {
   ArrowRight,
@@ -137,7 +137,10 @@ const PRO_GRID = [
   {
     icon: Waveform,
     label: 'Voice',
-    line: `Hold ${shortcutLabel(DEFAULT_DICTATION_ACCELERATOR)} and talk - transcribed locally and pasted at your cursor, so you type with your voice anywhere.`
+    line: (accelerator: string | null) =>
+      accelerator
+        ? `Use your configured ${shortcutLabel(accelerator)} shortcut and talk - transcribed locally and pasted at your cursor, so you type with your voice anywhere.`
+        : 'Use your Voice shortcut to transcribe locally and paste text at your cursor.'
   }
 ]
 
@@ -165,6 +168,7 @@ const SYNC_GRID = [
 ]
 
 export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
+  const dictationShortcut = useDictationShortcut()
   const [currentStep, setCurrentStep] = useState(restoredStep)
 
   const handleNext = (): void => {
@@ -340,7 +344,12 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                     <h3 className="mb-1 text-[13px] font-medium uppercase tracking-wide text-white">
                       {label}
                     </h3>
-                    <p className="text-xs leading-relaxed text-neutral-500">{line}</p>
+                    <p className="text-xs leading-relaxed text-neutral-500">
+                      {typeof line === 'function' ? line(dictationShortcut.accelerator) : line}
+                      {typeof line === 'function' &&
+                        dictationShortcut.message &&
+                        ` ${dictationShortcut.message}`}
+                    </p>
                   </motion.div>
                 ))}
               </div>

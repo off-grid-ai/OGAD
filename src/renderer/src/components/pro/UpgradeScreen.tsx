@@ -9,7 +9,14 @@ import {
   Clock,
   Desktop
 } from '@phosphor-icons/react'
-import { PRO_PAY_URL, PRO_FEATURES, featureSupportsPlatform, type ProFeature } from './proCatalog'
+import {
+  PRO_PAY_URL,
+  PRO_FEATURES,
+  featureSupportsPlatform,
+  projectConfiguredShortcut,
+  type ProFeature
+} from './proCatalog'
+import { useDictationShortcut } from '@renderer/lib/use-dictation-shortcut'
 import { OFF_GRID_MOBILE_URL, OFF_GRID_WEBSITE_URL, openExternal } from '../../constants/links'
 import { deviceNoun, currentPlatform } from '@renderer/lib/device'
 import { projectPersonalMeshActivationFailure } from '@offgrid/application'
@@ -107,7 +114,8 @@ export function UpgradeScreen({
   feature?: ProFeature
   variant?: 'upgrade' | 'coming-soon'
 }): React.ReactElement {
-  const f = feature
+  const dictationShortcut = useDictationShortcut()
+  const f = feature ? projectConfiguredShortcut(feature, dictationShortcut.accelerator) : undefined
   const comingSoon = variant === 'coming-soon'
   // Whether to warn a prospective buyer that Pro isn't fully live on their device
   // yet. Per-feature: if this writeup is for a specific feature, only warn when THAT
@@ -165,6 +173,12 @@ export function UpgradeScreen({
               ? f.description
               : 'Pro adds the layer that sees, remembers, and acts — always on, it never forgets, makes everything findable with unified search, and a proactive secretary surfaces what matters and acts for you. Screen capture, your private CRM, meetings, and connectors included. All on-device.'}
           </p>
+
+          {f?.route === 'voice' && dictationShortcut.message && (
+            <p role="status" className="text-xs text-neutral-500">
+              {dictationShortcut.message}
+            </p>
+          )}
 
           {f && (
             <ul className="grid gap-2 sm:grid-cols-2">
