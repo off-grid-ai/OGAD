@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion } from 'motion/react'
 import { GridBackdrop } from './ui/grid-backdrop'
 import { X, Cpu } from '@phosphor-icons/react'
@@ -30,12 +30,14 @@ function openModelLibrary(): void {
 
 export function PermissionGate({ children }: PermissionGateProps): React.JSX.Element {
   const { isPro } = useRendererEntitlement()
-  const [modelStatus, setModelStatus] = useState<{ downloaded: boolean; modelsDir: string } | null>(
-    null
-  )
+  const [modelStatus, setModelStatus] = useState<Awaited<
+    ReturnType<typeof window.api.checkModelStatus>
+  > | null>(null)
   // Pro setup is NON-blocking: users go straight into the shell to look around.
   // The detailed setup screen opens on demand; a slim nudge can be dismissed.
   const [showSetup, setShowSetup] = useState(false)
+  const [modelStatusError, setModelStatusError] = useState<string | null>(null)
+  const checkingModel = useRef(false)
   const [setupDismissed, setSetupDismissed] = useState(false)
   const permissions = usePermissionController(isPro)
   const permissionStatus = permissions.status
@@ -48,13 +50,26 @@ export function PermissionGate({ children }: PermissionGateProps): React.JSX.Ele
   const permsOk = isPro ? (permissionStatus?.allGranted ?? false) : true
 
   const checkModelStatus = useCallback(async () => {
+    if (checkingModel.current) return undefined
+    checkingModel.current = true
+    let deadline: ReturnType<typeof setTimeout> | undefined
     try {
-      const status = await window.api.checkModelStatus()
+      const status = await Promise.race([
+        window.api.checkModelStatus(),
+        new Promise<never>((_resolve, reject) => {
+          deadline = setTimeout(() => reject(new Error('Setup status timed out.')), 10000)
+        })
+      ])
       setModelStatus(status)
-      return status.downloaded
+      setModelStatusError(null)
+      return status.configured
     } catch (e) {
       console.error('Failed to check model status:', e)
-      return false
+      setModelStatusError('Your saved setup could not be checked.')
+      return undefined
+    } finally {
+      if (deadline) clearTimeout(deadline)
+      checkingModel.current = false
     }
   }, [])
 
@@ -67,14 +82,14 @@ export function PermissionGate({ children }: PermissionGateProps): React.JSX.Ele
   // Permission polling is owned by usePermissionController. Keep model polling here
   // because model readiness is a separate setup boundary.
   useEffect(() => {
-    if (modelStatus?.downloaded) return
+    if (modelStatus?.configured || modelStatusError) return
 
     const interval = setInterval(() => {
       checkModelStatus()
     }, 2000)
 
     return () => clearInterval(interval)
-  }, [modelStatus?.downloaded, checkModelStatus])
+  }, [modelStatus?.configured, modelStatusError, checkModelStatus])
 
   // Loading state
   if (isChecking && !permissionStatus) {
@@ -99,7 +114,7 @@ export function PermissionGate({ children }: PermissionGateProps): React.JSX.Ele
   // free this is just "has a model". Either way it's a dismissible nudge, never a
   // wall — so free users also get the "Configure for me" prompt when they have no
   // model yet (the most useful first-run action).
-  const ready = permsOk && !!modelStatus?.downloaded
+  const ready = permsOk && !!modelStatus?.configured
 
   // Default (NON-blocking): drop straight into the shell so people can look around.
   // Show a slim, dismissible nudge when capture perms or a model are still missing.
@@ -107,9 +122,17 @@ export function PermissionGate({ children }: PermissionGateProps): React.JSX.Ele
     return (
       <>
         {children}
-        {!ready && !setupDismissed && (
+        {modelStatusError && (
+          <div role="alert" className="fixed bottom-4 right-4 z-50 border p-3 font-mono text-xs">
+            {modelStatusError}
+            <button className="ml-2 underline" onClick={() => void checkModelStatus()}>
+              Retry
+            </button>
+          </div>
+        )}
+        {!ready && !modelStatusError && !setupDismissed && (
           <SetupNudge
-            missingModel={!modelStatus?.downloaded}
+            missingModel={modelStatus?.status === 'needs-setup'}
             missingLocalNetwork={isPro && permissionStatus?.localNetwork === false}
             onOpen={() => setShowSetup(true)}
             onDismiss={() => setSetupDismissed(true)}

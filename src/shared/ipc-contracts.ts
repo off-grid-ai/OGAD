@@ -1,5 +1,11 @@
 /** Electron IPC payloads shared by main, preload, and renderer type-checks. */
 import type { RuntimeModel } from '@offgrid/models'
+import type { SetupReadiness } from '@offgrid/application'
+
+export interface ModelSetupStatusContract extends SetupReadiness {
+  readonly downloaded: boolean
+  readonly modelsDir: string
+}
 import type { GenerationMetrics } from './generation-metrics'
 
 export interface UserProfileContract {

@@ -20,8 +20,14 @@ import type { GuidedSetupResult } from '@offgrid/models'
 import { projectProgress } from '@offgrid/ui'
 import { formatStorageBytes } from './storage-format'
 import { modelControlClient } from '@renderer/lib/model-control-client'
+import { invalidateLlmSettings } from '@renderer/lib/settings-invalidation'
 
 type Mode = 'conservative' | 'balanced' | 'extreme'
+
+function savedMode(value: unknown): Mode {
+  if (value === 'conservative' || value === 'balanced' || value === 'extreme') return value
+  throw new Error('The saved resource mode could not be read.')
+}
 
 const MODES: { id: Mode; label: string; hint: string }[] = [
   {
@@ -148,7 +154,11 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState<SetupProgress | null>(null)
   const [outcome, setOutcome] = useState<SetupOutcome | null>(null)
-  const [mode, setMode] = useState<Mode>('balanced')
+  const [mode, setMode] = useState<Mode | null>(null)
+  const [savingMode, setSavingMode] = useState(false)
+  const [modeError, setModeError] = useState<string | null>(null)
+  const planRequest = useRef(0)
+  const mounted = useRef(false)
   const [plan, setPlan] = useState<SetupPlan | null>(null)
   const downloadProgress = progress?.phase === 'download' ? projectProgress(progress) : null
   const downloading = downloadProgress !== null
@@ -159,31 +169,49 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
 
   const loadPlan = useCallback(
     async (m: Mode) => {
+      const request = ++planRequest.current
+      setPlan(null)
       try {
         const p = (await api.setupPlan(m)) as SetupPlan | null
-        setPlan(p ?? null)
-      } catch {
-        setPlan(null)
+        if (!p) throw new Error('The model plan is unavailable.')
+        if (mounted.current && request === planRequest.current) setPlan(p)
+      } catch (error) {
+        if (mounted.current && request === planRequest.current) {
+          setModeError(
+            'Your mode is saved, but its model plan could not be loaded. Reopen setup to retry.'
+          )
+          reportSetupFailure('resource-plan loading', error)
+        }
       }
     },
     [api]
   )
 
-  // Initial: read the saved mode, then preview its full plan.
-  useEffect(() => {
-    const initialize = async (): Promise<void> => {
-      let m: Mode = 'balanced'
-      try {
-        const s = (await api.getLlmSettings()) as { performanceMode?: Mode } | undefined
-        if (s?.performanceMode) m = s.performanceMode
-      } catch {
-        /* default */
-      }
+  const initialize = useCallback(async (): Promise<void> => {
+    const request = ++planRequest.current
+    setModeError(null)
+    try {
+      const s = await api.getLlmSettings()
+      const m = savedMode(s?.performanceMode)
+      if (!mounted.current || request !== planRequest.current) return
       setMode(m)
       await loadPlan(m)
+    } catch (error) {
+      if (!mounted.current || request !== planRequest.current) return
+      setModeError('Your saved resource mode could not be loaded. Reopen setup to retry.')
+      reportSetupFailure('resource-mode loading', error)
     }
-    initialize().catch((error: unknown) => reportSetupFailure('initialization', error))
   }, [api, loadPlan])
+
+  // Each mount owns its read. Strict Mode cleanup invalidates the previous response.
+  useEffect(() => {
+    mounted.current = true
+    initialize().catch((error: unknown) => reportSetupFailure('initialization', error))
+    return () => {
+      mounted.current = false
+      ++planRequest.current
+    }
+  }, [initialize])
 
   // Progress stream for the whole lifetime.
   useEffect(() => {
@@ -204,20 +232,42 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
   }, [api])
 
   const pickMode = (m: Mode): void => {
-    setMode(m)
-    // One committed save. A refusal is a value, so it is reported rather than resolving as a
-    // success that stored nothing.
+    if (running || savingMode || mode === null) return
+    setSavingMode(true)
+    setModeError(null)
     void api
       .setLlmSettings({ performanceMode: m })
-      .then((saved) => {
-        if (!saved.ok) reportSetupFailure('resource-mode persistence', saved.failure)
+      .then(async (saved) => {
+        if (!mounted.current) return
+        if (!saved.ok) {
+          setModeError(modelsFailureMessage(saved.failure))
+          reportSetupFailure('resource-mode persistence', saved.failure)
+          return
+        }
+        const committed = savedMode(saved.value.settings.performanceMode)
+        setMode(committed)
+        if (saved.value.changed.length > 0) invalidateLlmSettings()
+        if (saved.value.launch?.status === 'failed') {
+          setModeError(`Saved, but the model could not restart: ${saved.value.launch.message}`)
+        } else if (saved.value.syncFailure) {
+          setModeError('Saved on this device, but it could not be shared with your other devices.')
+        }
+        await loadPlan(committed)
       })
-      .catch((error: unknown) => reportSetupFailure('resource-mode persistence', error))
-    loadPlan(m).catch((error: unknown) => reportSetupFailure('resource-plan loading', error))
+      .catch((error: unknown) => {
+        if (!mounted.current) return
+        setModeError(
+          'The resource mode could not be confirmed. Reopen setup to check the saved value.'
+        )
+        reportSetupFailure('resource-mode persistence', error)
+      })
+      .finally(() => {
+        if (mounted.current) setSavingMode(false)
+      })
   }
 
   const configure = async (): Promise<void> => {
-    if (running) return
+    if (running || savingMode || mode === null || plan === null) return
     const run: { target: string | null } = { target: null }
     activeRun.current = run
     setOutcome(null)
@@ -279,7 +329,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
           </div>
           <button
             onClick={configure}
-            disabled={running}
+            disabled={running || savingMode || mode === null || plan === null}
             className={cn(
               'shrink-0 whitespace-nowrap rounded-lg px-4 py-2 text-xs font-medium transition-colors',
               'bg-green-600 text-white hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-60'
@@ -323,6 +373,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
                 key={m.id}
                 onClick={() => pickMode(m.id)}
                 aria-pressed={mode === m.id}
+                disabled={running || savingMode || mode === null}
                 className={cn(
                   'flex-1 px-2 py-1.5 text-xs transition-colors',
                   mode === m.id
@@ -336,7 +387,21 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
           </div>
           <div className="mt-1.5 text-[11px] text-neutral-500">
             {MODES.find((m) => m.id === mode)?.hint}
+            {savingMode && ' Saving your mode...'}
           </div>
+          {modeError && (
+            <div className="mt-2 text-xs text-neutral-300">
+              <p role="alert">{modeError}</p>
+              <button
+                type="button"
+                disabled={savingMode || running}
+                onClick={() => void initialize()}
+                className="mt-1 underline"
+              >
+                Retry
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Exactly which models it will set up — the full baseline, no surprises */}

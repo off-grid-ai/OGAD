@@ -153,7 +153,7 @@ export function Settings({
             {/* Each section is a collapsed-by-default accordion (SettingsCard). */}
             <SettingsCard
               title="Setup & health"
-              summary="Set up your local AI, manage storage, and see live component health."
+          summary="See or change your resource mode, set up local AI, and manage storage."
               delay={0.13}
             >
               <SetupPanel />

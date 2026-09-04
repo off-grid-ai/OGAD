@@ -1505,6 +1505,67 @@ function App(): React.ReactElement {
   const [onboarded, setOnboarded] = useState(
     () => localStorage.getItem('onboarding_completed') === 'true'
   )
+  const [setupChecked, setSetupChecked] = useState(false)
+  const [setupCheckError, setSetupCheckError] = useState<string | null>(null)
+  const [setupRetry, setSetupRetry] = useState(0)
+
+  useEffect(() => {
+    if (onboarded) return
+    let disposed = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const deadline = setTimeout(() => {
+      if (disposed) return
+      disposed = true
+      if (timer) clearTimeout(timer)
+      setSetupCheckError('Checking your saved setup took too long. Retry when startup is ready.')
+    }, 30000)
+    const check = async (): Promise<void> => {
+      try {
+        const status = await window.api.checkModelStatus()
+        if (disposed) return
+        if (status.status === 'loading') {
+          timer = setTimeout(() => void check(), 2000)
+          return
+        }
+        if (status.configured) {
+          localStorage.setItem('onboarding_completed', 'true')
+          setOnboarded(true)
+        }
+        setSetupCheckError(null)
+        setSetupChecked(true)
+        clearTimeout(deadline)
+      } catch (error) {
+        if (disposed) return
+        console.error('Failed to read saved setup:', error)
+        clearTimeout(deadline)
+        setSetupCheckError('Your saved setup could not be checked.')
+      }
+    }
+    void check()
+    return () => {
+      disposed = true
+      if (timer) clearTimeout(timer)
+      clearTimeout(deadline)
+    }
+  }, [onboarded, setupRetry])
+
+  if (!onboarded && !setupChecked)
+    return (
+      <div className="p-6 font-mono text-sm" role="status">
+        {setupCheckError ?? 'Checking your saved setup...'}
+        {setupCheckError && (
+          <button
+            className="ml-3 underline"
+            onClick={() => {
+              setSetupCheckError(null)
+              setSetupRetry((value) => value + 1)
+            }}
+          >
+            Retry
+          </button>
+        )}
+      </div>
+    )
 
   if (!onboarded) return <Onboarding onComplete={() => setOnboarded(true)} />
 

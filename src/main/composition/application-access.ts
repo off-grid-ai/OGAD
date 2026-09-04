@@ -30,6 +30,10 @@ function current(): OffGridApplication {
   return application
 }
 
+export function desktopApplicationStatus(): OffGridApplicationSnapshot['status'] {
+  return current().snapshot().status
+}
+
 /** Stable access to the Shared Models facade without a composition-root import cycle. */
 export const desktopModels: ModelsFacade = new Proxy({} as ModelsFacade, {
   get: (_target, property) => {

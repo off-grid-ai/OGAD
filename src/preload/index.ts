@@ -6,6 +6,7 @@ type PublicDownloadEvent = Extract<ModelsEvent, { type: 'download' }>['event']
 import {
   CACHE_CLEANUP_CHANNEL,
   type ArtifactKindContract,
+  type ModelSetupStatusContract,
   type ActiveChatStreamContract,
   type CacheCleanupResultContract,
   type RagChatResultContract,
@@ -505,7 +506,7 @@ const offGridApi = {
   openExternal: (url: string) => ipcRenderer.invoke('app:open-external', url),
 
   // Model Download APIs
-  checkModelStatus: () => ipcRenderer.invoke('model:check-status'),
+  checkModelStatus: (): Promise<ModelSetupStatusContract> => ipcRenderer.invoke('model:check-status'),
   // Off Grid AI model catalog (text, vision, image, voice, transcription)
   getModelControlProjection: () => ipcRenderer.invoke('models:control-projection'),
   controlModel: (intent: import('@offgrid/application').ModelControlIntent) =>

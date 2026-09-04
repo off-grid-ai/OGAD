@@ -104,6 +104,7 @@ import {
   type ModelsFacade
 } from '@offgrid/application'
 import { mimeForExt } from './mime'
+import { readDesktopSetupReadiness } from './setup-readiness'
 import {
   desktopModels,
   desktopRag,
@@ -1478,10 +1479,7 @@ export function setupIPC(): void {
 
   ipcMain.handle('model:check-status', async () => {
     const { llm } = await import('./llm')
-    return {
-      downloaded: llm.modelsExist(),
-      modelsDir: llm.getModelsDir()
-    }
+    return readDesktopSetupReadiness(llm.modelsExist(), llm.getModelsDir())
   })
 
   // === Off Grid AI MODEL CATALOG (text, vision, image, voice, transcription) ===
