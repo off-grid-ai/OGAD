@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { buildSendHistory } from '@renderer/lib/chat-history'
 import { waitingLabel } from '@renderer/lib/chat-labels'
-import { parseSqliteUtc, shiftLocalDay, startOfLocalDay, timeAgo } from '@renderer/lib/time'
 import { writeClipboardWithFallback } from '@renderer/lib/clipboard-write'
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
@@ -12,7 +11,6 @@ import { useActiveModelSummary } from '@renderer/hooks/useActiveModelSummary'
 import { admitThinkingRequest } from '@renderer/lib/model-summary'
 import { shouldFollowBottom } from '@renderer/lib/scroll-follow'
 import {
-  chatListPreviewLine,
   attachmentKindFor,
   describeAttachment,
   isPromptEnhancementReasoningLabel,
@@ -73,7 +71,7 @@ import { OPEN_ACTIVE_MODELS_PANEL_EVENT } from '@renderer/lib/model-settings-pan
 import { desktopModelControl } from '@renderer/composition/model-control'
 import { LoadingDots } from './ui/loading-dots'
 import { SidePanel } from './SidePanel'
-import { ConversationTitleActions } from './ConversationTitleActions'
+import { ConversationSearchList } from './ConversationSearchList'
 import { ImageLightbox } from './media/ImageLightbox'
 import { resolveImageParams, setOverride, type ImageParamStore } from '@renderer/lib/image-params'
 import {
@@ -2340,30 +2338,6 @@ export function MemoryChat({
   const [askSel, setAskSel] = useState<Record<string, string[]>>({})
   const [loading, setLoading] = useState(false)
   const [conversations, setConversations] = useState<Conversation[]>([])
-  const [convSearch, setConvSearch] = useState('')
-  // Conversation ids whose MESSAGE CONTENT matches the sidebar search (title is
-  // matched client-side; content needs a debounced backend query).
-  const [contentMatchIds, setContentMatchIds] = useState<Set<string>>(new Set())
-  useEffect(() => {
-    const q = convSearch.trim()
-    if (!q) {
-      setContentMatchIds(new Set())
-      return
-    }
-    let live = true
-    const t = setTimeout(async () => {
-      try {
-        const ids = await window.api.searchRagConversationIds(q)
-        if (live) setContentMatchIds(new Set(ids ?? []))
-      } catch {
-        /* keep title-only matches */
-      }
-    }, 200)
-    return () => {
-      live = false
-      clearTimeout(t)
-    }
-  }, [convSearch])
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   useEffect(() => {
     onActiveConversationChange?.(activeConversationId)
@@ -5207,132 +5181,13 @@ export function MemoryChat({
                       New chat
                     </button>
                   </div>
-                  {conversations.length > 0 && (
-                    <div className="px-2 pb-2">
-                      <div className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-950 px-2.5 py-1.5 focus-within:border-neutral-600">
-                        <svg
-                          className="h-3.5 w-3.5 shrink-0 text-neutral-600"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                          />
-                        </svg>
-                        <input
-                          value={convSearch}
-                          onChange={(e) => setConvSearch(e.target.value)}
-                          placeholder="Search conversations…"
-                          className="w-full bg-transparent text-xs text-neutral-200 placeholder-neutral-600 outline-none"
-                        />
-                        {convSearch && (
-                          <button
-                            onClick={() => setConvSearch('')}
-                            className="shrink-0 text-neutral-600 hover:text-neutral-300"
-                          >
-                            ✕
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  <div className="flex-1 overflow-y-auto px-2 pb-2">
-                    {(() => {
-                      const q = convSearch.trim().toLowerCase()
-                      const filtered = q
-                        ? conversations.filter(
-                            (c) =>
-                              (c.title || '').toLowerCase().includes(q) || contentMatchIds.has(c.id)
-                          )
-                        : conversations
-                      if (conversations.length === 0)
-                        return (
-                          <p className="px-2 py-4 text-center text-xs text-neutral-600">
-                            No conversations yet
-                          </p>
-                        )
-                      if (filtered.length === 0)
-                        return (
-                          <p className="px-2 py-4 text-center text-xs text-neutral-600">
-                            No matches
-                          </p>
-                        )
-                      const today = startOfLocalDay(new Date())
-                      const startToday = today.getTime()
-                      const startYesterday = shiftLocalDay(today, -1).getTime()
-                      const startThisWeek = shiftLocalDay(today, -6).getTime()
-                      const groups: { label: string; items: Conversation[] }[] = [
-                        { label: 'Today', items: [] },
-                        { label: 'Yesterday', items: [] },
-                        { label: 'This week', items: [] },
-                        { label: 'Older', items: [] }
-                      ]
-                      // Read through parseSqliteUtc, the SAME parser the row's label uses. These
-                      // timestamps are UTC with no zone marker, and `new Date('2026-08-10 14:00:00')`
-                      // reads a space-separated string as LOCAL - so the position said one thing and the
-                      // words said another, off by the whole timezone offset. In IST that put "just now"
-                      // below "5h ago" and dropped this morning's chats into Yesterday.
-                      const ordered = [...filtered].sort(
-                        (a, b) =>
-                          parseSqliteUtc(b.updated_at).getTime() -
-                          parseSqliteUtc(a.updated_at).getTime()
-                      )
-                      for (const c of ordered) {
-                        const t = parseSqliteUtc(c.updated_at).getTime()
-                        if (t >= startToday) groups[0]!.items.push(c)
-                        else if (t >= startYesterday) groups[1]!.items.push(c)
-                        else if (t >= startThisWeek) groups[2]!.items.push(c)
-                        else groups[3]!.items.push(c)
-                      }
-                      return groups
-                        .filter((g) => g.items.length)
-                        .map((g) => (
-                          <div key={g.label} className="mb-2">
-                            <div className="px-1 py-1 text-[10px] uppercase tracking-wider text-neutral-600">
-                              {g.label}
-                            </div>
-                            {g.items.map((conv) => (
-                              <div
-                                key={conv.id}
-                                onClick={() => switchConversation(conv.id)}
-                                className={`group flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-2 text-left transition-colors ${
-                                  activeConversationId === conv.id
-                                    ? 'border-neutral-800 bg-neutral-900'
-                                    : 'border-transparent hover:bg-neutral-900/50'
-                                }`}
-                              >
-                                <div className="min-w-0 flex-1">
-                                  <ConversationTitleActions
-                                    conversation={conv}
-                                    onRenamed={conversationRenamed}
-                                    onDelete={() => deleteConversation(conv.id)}
-                                  />
-                                  {/* The last thing said, from the shared rule the phone's list uses. A
-                                title alone told you nothing about a conversation you had elsewhere. */}
-                                  {chatListPreviewLine(conv.last_role, conv.last_content) ? (
-                                    <p className="mt-0.5 truncate text-[11px] text-neutral-500">
-                                      {chatListPreviewLine(conv.last_role, conv.last_content)}
-                                    </p>
-                                  ) : null}
-                                  <div className="mt-0.5 flex items-center gap-2">
-                                    <span className="text-[10px] text-neutral-600">
-                                      {timeAgo(conv.updated_at)}
-                                    </span>
-                                    {conv.project_id && (
-                                      <span className="text-[10px] text-green-500/70">project</span>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ))
-                    })()}
-                  </div>
+                  <ConversationSearchList
+                    conversations={conversations}
+                    activeConversationId={activeConversationId}
+                    onSelect={switchConversation}
+                    onRenamed={conversationRenamed}
+                    onDelete={deleteConversation}
+                  />
                 </div>
               </aside>
             </Panel>
