@@ -37,9 +37,12 @@ export const desktopExtraction: ExtractionBridges = {
 
   async extractPdf(p, maxChars) {
     // pdf-parse has a debug side-effect on import, so load it only when needed.
-    const pdfParse = loadCjsDependency('pdf-parse') as (b: Buffer) => Promise<{ text: string }>
+    const pdfParse = loadCjsDependency('pdf-parse') as (
+      bytes: Uint8Array
+    ) => Promise<{ text: string }>
     const buf = await fs.promises.readFile(p)
-    const { text } = await pdfParse(buf)
+    // Pass owned plain bytes: pdf-parse can reject valid PDFs when given a Node Buffer directly.
+    const { text } = await pdfParse(new Uint8Array(buf))
     return maxChars ? text.slice(0, maxChars) : text
   },
 
