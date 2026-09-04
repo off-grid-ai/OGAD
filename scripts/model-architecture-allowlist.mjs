@@ -5,17 +5,6 @@
  */
 export const temporaryModelArchitectureAllowlist = [
   {
-    key: 'residency-admission-has-one-owner|src/main/composition/guided-setup.ts|native lifecycle call outside the residency adapter: llm.restart() on the llama text engine',
-    owner: 'Seat A',
-    reason:
-      'Guided setup supplies `startChat: () => llm.restart()` as a port to the shared setup flow. A ' +
-      'restart respawns llama-server and reloads the chat model, so it puts model memory back ' +
-      'without asking residency for admission. Real bypass, not a false positive.',
-    removeWhen:
-      'guided setup asks ModelsFacade to make the chat model resident instead of restarting the ' +
-      'engine directly, so admission and the memory budget are consulted.'
-  },
-  {
     key: 'residency-admission-has-one-owner|src/main/ipc.ts|native lifecycle call outside the residency adapter: llm.restart() on the llama text engine',
     owner: 'Seat D',
     reason:
