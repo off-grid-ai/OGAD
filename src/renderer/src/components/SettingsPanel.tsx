@@ -12,7 +12,9 @@ import {
   REASONING_BUDGET_OPTIONS,
   reasoningBudgetLabel,
   optionsWithinCeiling,
-  reconcileBudgets
+  reconcileBudgets,
+  failed,
+  ok
 } from '@offgrid/application'
 import { gpuLayersHint, type EngineAccelerator } from '@offgrid/core/shared/engine-accelerator'
 import {
@@ -34,6 +36,8 @@ import { SidePanel } from './SidePanel'
 import { VoiceSettingsTab } from './VoiceSettingsTab'
 import { RemoteVisionSettingsTab } from './RemoteVisionSettingsTab'
 import { SettingsRow as Row } from './SettingsRow'
+import { SettingsSlider } from './SettingsSlider'
+import type { SettingsWriteOutcome } from './SettingsTextField'
 import { SettingsSelect } from './SettingsSelect'
 import type { SpeechLanguage } from '@offgrid/application'
 import { X } from '@phosphor-icons/react'
@@ -44,6 +48,11 @@ const MAX_OUTPUT_AUTO = MAX_TOKENS_AUTO
 // The values THIS picker offers. The nesting rule they obey is shared (@offgrid/models); which
 // discrete steps to show is a desktop rendering choice, and OGAM uses sliders instead.
 const MAX_OUTPUT_OPTIONS = [2048, 4096, 8192, 16384, 32768]
+
+/** Zero threads is llama.cpp choosing for itself, which reads better than "0". */
+function threadsLabel(threads: number): string {
+  return threads === 0 ? 'auto' : String(threads)
+}
 
 /** The ceiling on thinking: the response length it must fit inside, which for an auto output cap
  *  is the context window. Mirrors reconcileBudgets so the options offered match what is kept. */
@@ -212,6 +221,41 @@ export function SettingsPanel({
           .catch(() => {})
       })
   }
+
+  /**
+   * Write one launch-time engine setting and report the outcome.
+   *
+   * Sliders commit through this rather than `set`, because a launch argument change costs a model
+   * restart: the caller needs to know whether the value it is showing is the value the engine took,
+   * and a failure has to be visible instead of dropped.
+   */
+  const commitLaunchSetting = useCallback(
+    async (patch: LlmSettings): Promise<SettingsWriteOutcome> => {
+      try {
+        await Promise.resolve(window.api.setLlmSettings(patch))
+        invalidateLlmSettings()
+        const next = await window.api.getLlmSettings()
+        if (next) setS(next)
+        return ok(undefined)
+      } catch {
+        return failed({ message: 'This setting could not be applied to the engine.' })
+      }
+    },
+    []
+  )
+
+  const commitGpuLayers = useCallback(
+    (gpuLayers: number) => commitLaunchSetting({ gpuLayers }),
+    [commitLaunchSetting]
+  )
+  const commitThreads = useCallback(
+    (threads: number) => commitLaunchSetting({ threads }),
+    [commitLaunchSetting]
+  )
+  const commitBatchSize = useCallback(
+    (batchSize: number) => commitLaunchSetting({ batchSize }),
+    [commitLaunchSetting]
+  )
 
   const resetDefaults = (): void => {
     setS((prev) => ({ ...prev, ...DEFAULTS }))
@@ -589,51 +633,37 @@ export function SettingsPanel({
                 {s.flashAttn ? 'Enabled' : 'Disabled'}
               </button>
             </Row>
-            <Row
+            <SettingsSlider
+              id="llm-gpu-layers"
               label="GPU layers"
-              value={String(s.gpuLayers ?? 99)}
               hint={gpuLayersHint(s.gpuAccelerator ?? null)}
-            >
-              <input
-                type="range"
-                min={0}
-                max={99}
-                step={1}
-                value={s.gpuLayers ?? 99}
-                onChange={(e) => set({ gpuLayers: Number(e.target.value) })}
-                className="w-full accent-green-500"
-              />
-            </Row>
-            <Row
+              min={0}
+              max={99}
+              step={1}
+              value={s.gpuLayers ?? 99}
+              commit={commitGpuLayers}
+            />
+            <SettingsSlider
+              id="llm-threads"
               label="CPU threads"
-              value={(s.threads ?? 0) === 0 ? 'auto' : String(s.threads)}
               hint="0 = auto (let llama.cpp choose)."
-            >
-              <input
-                type="range"
-                min={0}
-                max={16}
-                step={1}
-                value={s.threads ?? 0}
-                onChange={(e) => set({ threads: Number(e.target.value) })}
-                className="w-full accent-green-500"
-              />
-            </Row>
-            <Row
+              min={0}
+              max={16}
+              step={1}
+              value={s.threads ?? 0}
+              format={threadsLabel}
+              commit={commitThreads}
+            />
+            <SettingsSlider
+              id="llm-batch-size"
               label="Batch size"
-              value={String(s.batchSize ?? 512)}
               hint="Tokens processed per batch during prompt ingest."
-            >
-              <input
-                type="range"
-                min={64}
-                max={2048}
-                step={64}
-                value={s.batchSize ?? 512}
-                onChange={(e) => set({ batchSize: Number(e.target.value) })}
-                className="w-full accent-green-500"
-              />
-            </Row>
+              min={64}
+              max={2048}
+              step={64}
+              value={s.batchSize ?? 512}
+              commit={commitBatchSize}
+            />
 
             <button
               onClick={resetDefaults}
