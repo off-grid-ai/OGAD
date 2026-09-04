@@ -1,6 +1,6 @@
 /** Desktop composition root. Shared owns application behavior; Desktop supplies device I/O. */
 import { randomUUID } from 'node:crypto'
-import { createOffGridApplication } from '@offgrid/application'
+import { createOffGridApplication, type OffGridApplication } from '@offgrid/application'
 import { DEFAULT_RAG_EMBEDDING_DIMENSION } from '@offgrid/rag'
 import { desktopModelWorkspace } from '../model-services'
 import { resolveDesktopActivation } from '../models-manager'
@@ -20,6 +20,7 @@ import { setupSpeechPlaybackIpc } from '../speech-playback-ipc'
 import { setupSpeechTextCleaningIpc } from '../speech-text-cleaning-ipc'
 import { consumeDesktopApplicationExtensionPorts } from './application-extension-ports'
 import { claimDesktopSyncRuntime } from '../sync-runtime-owner'
+import { writeDiagnosticLog } from '../diagnostics-log'
 
 const speechIo = createDesktopSpeechIoPorts()
 const extensionPorts = consumeDesktopApplicationExtensionPorts()
@@ -64,15 +65,58 @@ desktopApplication.use.events((event) => {
 
 let starting: ReturnType<typeof desktopApplication.start> | null = null
 let releaseSyncRuntime: (() => void) | null = null
+let releaseFailureObserver: (() => void) | null = null
+
+function describeFailure(failure: unknown): string {
+  try {
+    return JSON.stringify(failure)
+  } catch {
+    return String(failure)
+  }
+}
+
+function observeApplicationFailures(): void {
+  releaseFailureObserver ??= desktopApplication.events(({ domain, event }) => {
+    if ((domain !== 'rag' && domain !== 'sync') || event.type !== 'operation_failed') return
+    writeDiagnosticLog(
+      'application',
+      'domain.operation_failed',
+      {
+        domain,
+        operation: event.operation,
+        failure: describeFailure(event.failure)
+      },
+      'error'
+    )
+  })
+}
+
+function reportDegradedStart(
+  result: Awaited<ReturnType<OffGridApplication['start']>>
+): Awaited<ReturnType<OffGridApplication['start']>> {
+  for (const { domain, reason } of result.degraded) {
+    writeDiagnosticLog('application', 'lifecycle.start.degraded', { domain, reason }, 'error')
+  }
+  return result
+}
+
+observeApplicationFailures()
 
 export function startDesktopApplication(): ReturnType<typeof desktopApplication.start> {
   if (starting) return starting
 
   const startPromise = (async () => {
+    observeApplicationFailures()
     releaseSyncRuntime = claimDesktopSyncRuntime('application')
     try {
-      return await desktopApplication.start()
+      return reportDegradedStart(await desktopApplication.start())
     } catch (error) {
+      writeDiagnosticLog(
+        'application',
+        'lifecycle.start.failed',
+        { error: error instanceof Error ? error.message : String(error) },
+        'error'
+      )
       releaseSyncRuntime()
       releaseSyncRuntime = null
       starting = null
@@ -87,6 +131,8 @@ export async function stopDesktopApplication(): Promise<void> {
   try {
     await desktopApplication.stop()
   } finally {
+    releaseFailureObserver?.()
+    releaseFailureObserver = null
     releaseSyncRuntime?.()
     releaseSyncRuntime = null
     starting = null
