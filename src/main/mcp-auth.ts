@@ -112,7 +112,7 @@ export function isActionAuthorized(req: http.IncomingMessage): boolean {
 export function logActionTokenForDev(mcpUrl: string): void {
   // `app` is undefined when the gateway is booted outside Electron (integration
   // tests). No app -> no userData -> nothing to log; and never in a real build.
-  if (!app || app.isPackaged) {
+  if (app.isPackaged) {
     return
   }
   console.log(`[mcp] ${mcpUrl} — action tools need: Authorization: Bearer ${getActionToken()}`)

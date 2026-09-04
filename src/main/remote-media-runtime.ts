@@ -171,28 +171,20 @@ export function createRemoteMediaRuntime(
         seed: operation.seed
       })
       const source = operation.sourceImage
-      let body: BodyInit
-      let headers: HeadersInit | undefined
-      if (source) {
-        const image = imageBytes(source)
-        const form = new FormData()
-        for (const [key, value] of Object.entries(payload)) form.append(key, String(value))
-        if (operation.strength !== undefined) form.append('strength', String(operation.strength))
-        form.append(
-          'image',
-          new Blob([Uint8Array.from(image.bytes)], { type: image.mimeType }),
-          image.name
-        )
-        body = form
-      } else {
-        body = JSON.stringify(payload)
-        headers = { 'Content-Type': 'application/json' }
-      }
+      const image = imageBytes(source)
+      const body = new FormData()
+      for (const [key, value] of Object.entries(payload)) body.append(key, String(value))
+      if (operation.strength !== undefined) body.append('strength', String(operation.strength))
+      body.append(
+        'image',
+        new Blob([Uint8Array.from(image.bytes)], { type: image.mimeType }),
+        image.name
+      )
       return remoteRequest(
         {
           connection,
-          url: remoteImageEndpoint(connection.endpoint, Boolean(source)),
-          init: { method: 'POST', headers, body },
+          url: remoteImageEndpoint(connection.endpoint, true),
+          init: { method: 'POST', body },
           request,
           consume: async (response) => parseRemoteImageGenerationResponse(await response.json())
         },

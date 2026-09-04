@@ -59,7 +59,7 @@ export function buildMessages(
 export function thinkingPayload(
   thinking: boolean,
   dialect: ModelReasoningMetadata['control'] = 'enable-thinking'
-) {
+): ReturnType<typeof llamaServerThinkingPayload> {
   return llamaServerThinkingPayload(thinking, dialect)
 }
 

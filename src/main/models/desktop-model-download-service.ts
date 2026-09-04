@@ -51,7 +51,7 @@ function manifestForDesktopDownload(
     artifacts: entry.files.map((file) => ({
       name: file.name,
       id: `${entry.id}:${file.name}`,
-      url: file.url ?? '',
+      url: file.url,
       sizeBytes: file.sizeBytes,
       sha256: file.sha256,
       role:
@@ -116,7 +116,7 @@ export class DesktopModelDownloadService {
       ...createNodeModelDownloadPorts(this.options.modelsDir(), (destination) => {
         const localName = path.basename(destination)
         return this.coordinator
-          ?.list()
+          .list()
           .flatMap((record) => record.manifest.artifacts)
           .find((artifact) => artifact.localName === localName)?.sha256
       }),
