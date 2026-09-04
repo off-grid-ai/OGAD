@@ -1,8 +1,43 @@
-import type { SpeechPlatformPorts } from '@offgrid/application'
-import type { ModelWorkspace } from '@offgrid/models'
+import type { ModelModality, RuntimeModel, SpeechPlatformPorts } from '@offgrid/application'
 import type { SpeechModel } from '@offgrid/speech'
 import { getSetting, saveSetting } from '../database'
-import { desktopModelWorkspace } from '../model-services'
+import { DesktopModelsOperationError, desktopModels } from './application-access'
+
+type SpeechModality = Extract<ModelModality, 'transcription' | 'voice'>
+
+/**
+ * The only model routing this port needs. It used to hold the desktop `ModelWorkspace` INSTANCE,
+ * which made it a second holder of the workspace beside the composition root - so the Models arm
+ * could never be reduced to a ports bundle without handing the app two routing/residency owners.
+ * Now the three capabilities come from the Models FACADE, and this narrow shape keeps the module
+ * unit-testable without a workspace, a database or the application root.
+ */
+export interface SpeechModelRouting {
+  /** The persisted route identity for a speech modality, or null when nothing is selected. */
+  activeRoute(modality: SpeechModality): string | null
+  lookup(routeId: string): RuntimeModel | null
+  select(modality: SpeechModality, routeId: string | null): Promise<void>
+}
+
+/**
+ * Facade-backed routing. `snapshot().active[modality]` is the same `{ selectedRouteId, selectedId }`
+ * the workspace's `active()` returned, so the identity this port reads and writes back is
+ * unchanged - deliberately NOT `activeModelId`, which answers a different question (the stable
+ * client-facing identity, which for a plain local route is the model id rather than the route id).
+ */
+const facadeRouting: SpeechModelRouting = {
+  activeRoute(modality) {
+    const active = desktopModels.snapshot().active[modality]
+    return active ? (active.selectedRouteId ?? active.selectedId) : null
+  },
+  lookup: (routeId) => desktopModels.lookup(routeId),
+  async select(modality, routeId) {
+    const outcome = await desktopModels.select({ modality, modelId: routeId })
+    // The port's apply/rollback compensation is driven by a throw, so a typed failure must not be
+    // swallowed into a silent no-op selection.
+    if (!outcome.ok) throw new DesktopModelsOperationError(outcome.failure)
+  }
+}
 
 type SelectionPort = SpeechPlatformPorts['selection']
 type Selection = Awaited<ReturnType<SelectionPort['read']>>
@@ -12,20 +47,12 @@ interface SelectionStep {
   rollback(): void | Promise<void>
 }
 
-const activeRoute = (
-  workspace: ModelWorkspace,
-  modality: 'transcription' | 'voice'
-): string | null => {
-  const active = workspace.active(modality)
-  return active.selectedRouteId ?? active.selectedId
-}
-
 const describeModel = (
-  workspace: ModelWorkspace,
+  routing: SpeechModelRouting,
   modality: 'stt' | 'tts',
   routeId: string
 ): SpeechModel | null => {
-  const model = workspace.lookup(routeId)
+  const model = routing.lookup(routeId)
   const expected = modality === 'stt' ? 'transcription' : 'voice'
   if (!model || model.modality !== expected) return null
   return {
@@ -60,11 +87,11 @@ async function applySelectionSteps(steps: readonly SelectionStep[]): Promise<voi
 }
 
 export function createDesktopSpeechSelectionPort(
-  workspace: ModelWorkspace = desktopModelWorkspace
+  routing: SpeechModelRouting = facadeRouting
 ): SelectionPort {
   const read = async (): Promise<Selection> => ({
-    stt: activeRoute(workspace, 'transcription'),
-    tts: activeRoute(workspace, 'voice'),
+    stt: routing.activeRoute('transcription'),
+    tts: routing.activeRoute('voice'),
     voice: getSetting<string>('ttsVoice', '') || null
   })
 
@@ -75,14 +102,14 @@ export function createDesktopSpeechSelectionPort(
       const steps: SelectionStep[] = []
       if (next.stt !== previous.stt) {
         steps.push({
-          apply: () => workspace.select('transcription', next.stt),
-          rollback: () => workspace.select('transcription', previous.stt)
+          apply: () => routing.select('transcription', next.stt),
+          rollback: () => routing.select('transcription', previous.stt)
         })
       }
       if (next.tts !== previous.tts) {
         steps.push({
-          apply: () => workspace.select('voice', next.tts),
-          rollback: () => workspace.select('voice', previous.tts)
+          apply: () => routing.select('voice', next.tts),
+          rollback: () => routing.select('voice', previous.tts)
         })
       }
       if (next.voice !== previous.voice) {
@@ -93,6 +120,6 @@ export function createDesktopSpeechSelectionPort(
       }
       await applySelectionSteps(steps)
     },
-    describe: (modality, routeId) => describeModel(workspace, modality, routeId)
+    describe: (modality, routeId) => describeModel(routing, modality, routeId)
   }
 }
