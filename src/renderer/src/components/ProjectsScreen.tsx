@@ -124,6 +124,17 @@ function fmtSize(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
 
+/**
+ * The reason a delete was refused, without the IPC plumbing around it: Electron wraps a
+ * main-process error as "Error invoking remote method '...': Error: <reason>", and the reason is
+ * the only part that means anything to the user.
+ */
+function deleteFailureMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error)
+  const reason = raw.split('Error: ').pop()?.trim()
+  return reason && reason.length > 0 ? reason : 'This project could not be deleted.'
+}
+
 export function ProjectsScreen({
   onOpenChat,
   selectedProjectId,
@@ -134,6 +145,7 @@ export function ProjectsScreen({
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
   const [view, setView] = useState<'chat' | 'artifacts' | 'config'>('chat')
+  const [deleteFailure, setDeleteFailure] = useState('')
 
   const applyProjects = useCallback((list: Project[]): Project[] => {
     setProjects(list)
@@ -182,7 +194,16 @@ export function ProjectsScreen({
     ) {
       return
     }
-    await api.deleteProject?.(id)
+    setDeleteFailure('')
+    try {
+      await api.deleteProject?.(id)
+    } catch (error) {
+      // The delete is refused when the project's knowledge base or its sync cleanup only partly
+      // succeeded: the project is still there, deliberately, and the user has to be told why
+      // rather than watching the row survive a delete that reported nothing.
+      setDeleteFailure(deleteFailureMessage(error))
+      return
+    }
     selectProject(null)
     await refreshProjects()
   }
@@ -201,6 +222,11 @@ export function ProjectsScreen({
             <IconPlus className="h-4 w-4" />
           </button>
         </div>
+        {deleteFailure ? (
+          <p role="alert" className="mx-4 mb-2 text-[11px] text-red-400">
+            {deleteFailure}
+          </p>
+        ) : null}
         <div className="flex-1 overflow-y-auto px-2">
           {creating && (
             <input
