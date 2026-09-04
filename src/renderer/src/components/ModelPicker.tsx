@@ -8,7 +8,8 @@ import { SettingsSelect } from './SettingsSelect'
 import {
   modelsFailureMessage,
   type ModelControlCatalogModel,
-  type ModelControlProjection
+  type ModelControlProjection,
+  type ModelControlSuccess
 } from '@offgrid/application'
 import { modelControlClient } from '@renderer/lib/model-control-client'
 
@@ -42,6 +43,165 @@ type SectionRead =
   | { readonly state: 'read' }
   | { readonly state: 'unavailable'; readonly message: string }
 
+// Which row's spinner is showing, and WHICH REQUEST owns it. Two clicks on the same model are
+// two requests, so the model id cannot be the identity: an older reply would clear a newer
+// request's spinner. The model id stays the display key; the operationId is the identity.
+interface BusyRequest {
+  readonly modelId: string
+  readonly operationId: string
+}
+
+// An outstanding load confirmation. `message` is the domain's own text and is rendered verbatim.
+interface PendingConfirmation {
+  readonly confirmationId: string
+  readonly message: string
+  readonly modelId: string
+}
+
+/** The outstanding confirmation an activate answered with, if it answered with one. */
+function pendingConfirmationOf(result: ModelControlSuccess): PendingConfirmation | null {
+  return result.status === 'confirmation_required'
+    ? {
+        confirmationId: result.confirmation.confirmationId,
+        message: result.confirmation.message,
+        modelId: result.confirmation.modelId
+      }
+    : null
+}
+
+/** The consent affordance for a `caution` load. The message is the domain's, rendered verbatim. */
+function LoadConfirmationNotice({
+  confirmation,
+  onConfirm,
+  onDecline
+}: {
+  confirmation: PendingConfirmation
+  onConfirm: () => void
+  onDecline: () => void
+}): React.ReactElement {
+  return (
+    <div role="alert" className="px-2 py-1.5 text-xs text-amber-400">
+      <div>{confirmation.message}</div>
+      <div className="mt-1 flex gap-3">
+        <button type="button" onClick={onConfirm} className="underline hover:text-amber-300">
+          Load anyway
+        </button>
+        <button type="button" onClick={onDecline} className="underline hover:text-neutral-300">
+          Keep current model
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** Pending is not empty and neither is unavailable — one message per state, never merged. */
+function InventoryEmptyState({
+  read,
+  label
+}: {
+  read: SectionRead
+  label: string
+}): React.ReactElement {
+  return (
+    <p className="px-2 py-1.5 text-xs text-neutral-600">
+      {read.state === 'pending' ? (
+        <IconLoader2 className="h-3.5 w-3.5 animate-spin text-neutral-500" />
+      ) : read.state === 'read' ? (
+        `No ${label.toLowerCase()} model downloaded — get one in Models.`
+      ) : (
+        `Your ${label.toLowerCase()} models could not be read — this list is unavailable, not empty.`
+      )}
+    </p>
+  )
+}
+
+/** The Computer Use section. Its own three-state read; it never blanks the model inventory. */
+function ComputerUseSection({
+  read,
+  computerUse,
+  models,
+  installed,
+  busy,
+  onChoose
+}: {
+  read: SectionRead
+  computerUse: ComputerUseActiveModelProjection | null
+  models: ModelEntry[]
+  installed: string[]
+  busy: BusyRequest | null
+  onChoose: (modelId: string) => void
+}): React.ReactElement {
+  return (
+    <section aria-label="Computer Use">
+      <div className="mb-1.5 flex items-center justify-between gap-3">
+        <span className="text-[10px] uppercase tracking-wide text-neutral-600">Computer Use</span>
+        {computerUse ? (
+          <span className="text-[10px] text-neutral-500">{computerUse.strategyLabel}</span>
+        ) : null}
+      </div>
+      {read.state === 'unavailable' ? (
+        <p role="alert" className="px-2 py-1.5 text-xs text-amber-400">
+          {`Your Computer Use models could not be read — this section is unavailable, not empty. ${read.message}`}
+        </p>
+      ) : read.state === 'pending' ? (
+        <p className="px-2 py-1.5 text-xs text-neutral-600">
+          <IconLoader2 className="h-3.5 w-3.5 animate-spin text-neutral-500" />
+        </p>
+      ) : computerUse?.models.length ? (
+        <div className="space-y-1">
+          {computerUse.models.map((model) => (
+            <div
+              key={model.role}
+              className="flex items-center justify-between gap-3 rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs"
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block text-[9px] uppercase tracking-wide text-neutral-600">
+                  {model.role === 'reasoner' ? 'Reasoner' : 'Grounding specialist'}
+                </span>
+                {model.role === 'grounding_specialist' ? (
+                  <SettingsSelect<string>
+                    id="active-computer-use-model"
+                    label="Active Computer Use model"
+                    value={model.modelId}
+                    disabled={busy !== null}
+                    onValueChange={onChoose}
+                    options={[
+                      ...models
+                        .filter(
+                          (candidate) =>
+                            installed.includes(candidate.id) &&
+                            candidate.availability !== 'coming_soon' &&
+                            (candidate.kind === 'computer_use' || candidate.grounder === true)
+                        )
+                        .map((candidate) => ({ value: candidate.id, label: candidate.name })),
+                      ...(models.some((candidate) => candidate.id === model.modelId)
+                        ? []
+                        : [{ value: model.modelId, label: model.modelName }])
+                    ]}
+                  />
+                ) : (
+                  <span className="block truncate text-neutral-200">{model.modelName}</span>
+                )}
+              </span>
+              {model.remote ? (
+                <span className="shrink-0 rounded-sm border border-green-500/50 px-1 py-px text-[8px] uppercase tracking-wide text-green-500">
+                  Remote
+                </span>
+              ) : (
+                <span className="shrink-0 text-[9px] uppercase tracking-wide text-neutral-600">
+                  On device
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="px-2 py-1.5 text-xs text-neutral-600">No Computer Use model is selected.</p>
+      )}
+    </section>
+  )
+}
+
 function openSettings(onClose: () => void): void {
   onClose()
   openModelSettingsPanel('model')
@@ -51,7 +211,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
   const [models, setModels] = useState<ModelEntry[]>([])
   const [installed, setInstalled] = useState<string[]>([])
   const [active, setActive] = useState<Record<string, string | null>>({})
-  const [busy, setBusy] = useState<string | null>(null)
+  const [busy, setBusy] = useState<BusyRequest | null>(null)
   const [unload, setUnload] = useState<Record<string, UnloadStatus>>({})
   const [computerUse, setComputerUse] = useState<ComputerUseActiveModelProjection | null>(null)
   // An inventory still in flight is NOT an empty one and NOT a failed one. Only a projection
@@ -62,6 +222,9 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
   // The optional Computer Use read owns its own state: it is never collapsed into "no model
   // selected", never filled with a guessed empty list, and never called failed while pending.
   const [computerUseRead, setComputerUseRead] = useState<SectionRead>({ state: 'pending' })
+  // A `caution` memory advice answers `confirmation_required` instead of loading. The token is
+  // single-use and domain-owned; we hold it until the user consents or declines.
+  const [confirmation, setConfirmation] = useState<PendingConfirmation | null>(null)
 
   // One store, one writer: the most recently ISSUED control request owns it. An answer to a
   // request nobody is waiting for any more — a mount refresh resolving after an activate — must
@@ -72,6 +235,12 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
   const claimControl = useCallback((): string => {
     const operationId = crypto.randomUUID()
     controlOwner.current = operationId
+    // An outstanding consent question belongs to the claim that produced it, so ISSUING any
+    // newer command retires it here — at issue, not at reply, and whether or not that newer
+    // command later succeeds. Consent the user gave for one model must never stay actionable
+    // after they have moved on to another. The confirm leg passes its token by value, so
+    // minting its own claim cannot invalidate the very confirmation it is carrying.
+    setConfirmation(null)
     return operationId
   }, [])
   const ownsControl = useCallback(
@@ -146,11 +315,39 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
       return next
     })
 
+  // The consent leg of the same journey. It is a SECOND command, so it claims ownership in its
+  // own right: its answer publishes, and any answer to a superseded request still does not.
+  const confirmActivation = async (pending: PendingConfirmation): Promise<void> => {
+    // `pending` is held BY VALUE, so claiming below (which retires the notice) cannot strand
+    // this leg: the single-use token travels in the argument, never read back from state.
+    const operationId = claimControl()
+    setBusy({ modelId: pending.modelId, operationId })
+    try {
+      const outcome = await modelControlClient.control({
+        type: 'confirm-activation',
+        confirmationId: pending.confirmationId,
+        operationId
+      })
+      if (!outcome.ok) {
+        if (!ownsControl(operationId)) return
+        setFailure(modelsFailureMessage(outcome.failure))
+        return
+      }
+      if (!ownsControl(outcome.value.operationId)) return
+      setFailure(null)
+      applyProjection(outcome.value.projection)
+    } catch (cause) {
+      if (!ownsControl(operationId)) return
+      setFailure(transportFailureMessage(cause))
+    } finally {
+      setBusy((current) => (current?.operationId === operationId ? null : current))
+    }
+  }
+
   const choose = async (mode: PickerMode, m: ModelEntry): Promise<void> => {
-    const busyId = m.id
-    setBusy(busyId)
     clearUnloadStatus(mode) // re-selecting reloads this modality on next use
     const operationId = claimControl()
+    setBusy({ modelId: m.id, operationId })
     try {
       const outcome = await modelControlClient.control({
         type: 'activate',
@@ -166,6 +363,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
       if (!ownsControl(outcome.value.operationId)) return
       setFailure(null)
       applyProjection(outcome.value.projection)
+      setConfirmation(pendingConfirmationOf(outcome.value))
     } catch (cause) {
       if (!ownsControl(operationId)) return
       // A rejected IPC (bridge missing, main process gone, serialization failure) would
@@ -173,15 +371,14 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
       setFailure(transportFailureMessage(cause))
     } finally {
       // Clear only THIS request's spinner; a stale answer must not clear a newer one's.
-      setBusy((current) => (current === busyId ? null : current))
+      setBusy((current) => (current?.operationId === operationId ? null : current))
     }
   }
 
   const chooseComputerUse = async (modelId: string): Promise<void> => {
     if (!modelId) return
-    const busyId = modelId
-    setBusy(busyId)
     const operationId = claimControl()
+    setBusy({ modelId, operationId })
     try {
       const outcome = await modelControlClient.control({
         type: 'activate',
@@ -197,12 +394,13 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
       if (!ownsControl(outcome.value.operationId)) return
       setFailure(null)
       applyProjection(outcome.value.projection)
+      setConfirmation(pendingConfirmationOf(outcome.value))
     } catch (cause) {
       if (!ownsControl(operationId)) return
       setFailure(transportFailureMessage(cause))
     } finally {
       // Clear only THIS request's spinner; a stale answer must not clear a newer one's.
-      setBusy((current) => (current === busyId ? null : current))
+      setBusy((current) => (current?.operationId === operationId ? null : current))
     }
   }
 
@@ -259,77 +457,21 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
             {failure}
           </p>
         ) : null}
-        <section aria-label="Computer Use">
-          <div className="mb-1.5 flex items-center justify-between gap-3">
-            <span className="text-[10px] uppercase tracking-wide text-neutral-600">
-              Computer Use
-            </span>
-            {computerUse ? (
-              <span className="text-[10px] text-neutral-500">{computerUse.strategyLabel}</span>
-            ) : null}
-          </div>
-          {computerUseRead.state === 'unavailable' ? (
-            <p role="alert" className="px-2 py-1.5 text-xs text-amber-400">
-              {`Your Computer Use models could not be read — this section is unavailable, not empty. ${computerUseRead.message}`}
-            </p>
-          ) : computerUseRead.state === 'pending' ? (
-            <p className="px-2 py-1.5 text-xs text-neutral-600">
-              <IconLoader2 className="h-3.5 w-3.5 animate-spin text-neutral-500" />
-            </p>
-          ) : computerUse?.models.length ? (
-            <div className="space-y-1">
-              {computerUse.models.map((model) => (
-                <div
-                  key={model.role}
-                  className="flex items-center justify-between gap-3 rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs"
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-[9px] uppercase tracking-wide text-neutral-600">
-                      {model.role === 'reasoner' ? 'Reasoner' : 'Grounding specialist'}
-                    </span>
-                    {model.role === 'grounding_specialist' ? (
-                      <SettingsSelect<string>
-                        id="active-computer-use-model"
-                        label="Active Computer Use model"
-                        value={model.modelId}
-                        disabled={busy !== null}
-                        onValueChange={(modelId) => void chooseComputerUse(modelId)}
-                        options={[
-                          ...models
-                            .filter(
-                              (candidate) =>
-                                installed.includes(candidate.id) &&
-                                candidate.availability !== 'coming_soon' &&
-                                (candidate.kind === 'computer_use' || candidate.grounder === true)
-                            )
-                            .map((candidate) => ({ value: candidate.id, label: candidate.name })),
-                          ...(models.some((candidate) => candidate.id === model.modelId)
-                            ? []
-                            : [{ value: model.modelId, label: model.modelName }])
-                        ]}
-                      />
-                    ) : (
-                      <span className="block truncate text-neutral-200">{model.modelName}</span>
-                    )}
-                  </span>
-                  {model.remote ? (
-                    <span className="shrink-0 rounded-sm border border-green-500/50 px-1 py-px text-[8px] uppercase tracking-wide text-green-500">
-                      Remote
-                    </span>
-                  ) : (
-                    <span className="shrink-0 text-[9px] uppercase tracking-wide text-neutral-600">
-                      On device
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="px-2 py-1.5 text-xs text-neutral-600">
-              No Computer Use model is selected.
-            </p>
-          )}
-        </section>
+        {confirmation ? (
+          <LoadConfirmationNotice
+            confirmation={confirmation}
+            onConfirm={() => void confirmActivation(confirmation)}
+            onDecline={() => setConfirmation(null)}
+          />
+        ) : null}
+        <ComputerUseSection
+          read={computerUseRead}
+          computerUse={computerUse}
+          models={models}
+          installed={installed}
+          busy={busy}
+          onChoose={(modelId) => void chooseComputerUse(modelId)}
+        />
         {MODALITIES.map(({ label, kinds, mode }) => {
           const list = models.filter((m) => kinds.includes(m.kind) && installed.includes(m.id))
           const cur = active[mode]
@@ -367,15 +509,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
                 )}
               </div>
               {list.length === 0 ? (
-                <p className="px-2 py-1.5 text-xs text-neutral-600">
-                  {inventoryRead.state === 'pending' ? (
-                    <IconLoader2 className="h-3.5 w-3.5 animate-spin text-neutral-500" />
-                  ) : inventoryRead.state === 'read' ? (
-                    `No ${label.toLowerCase()} model downloaded — get one in Models.`
-                  ) : (
-                    `Your ${label.toLowerCase()} models could not be read — this list is unavailable, not empty.`
-                  )}
-                </p>
+                <InventoryEmptyState read={inventoryRead} label={label} />
               ) : (
                 <div className="space-y-1">
                   {list.map((m) => (
@@ -396,7 +530,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
                           </span>
                         ) : null}
                       </span>
-                      {busy === m.id ? (
+                      {busy?.modelId === m.id ? (
                         <IconLoader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-neutral-500" />
                       ) : isActive(m) && status === 'unloaded' ? (
                         // Still the active selection, but freed from memory — one coherent
