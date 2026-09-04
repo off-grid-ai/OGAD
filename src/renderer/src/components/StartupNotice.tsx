@@ -34,21 +34,85 @@ function pendingLabel(running: readonly string[]): string {
   return 'Starting up'
 }
 
+/**
+ * The parts of the app a degradation can name, in the user's words. A report identifies its domain
+ * internally ('rag', 'use'); nobody outside this codebase knows what those are, so nothing raw from
+ * a report is ever shown. Keys are the six `OffGridDomain` values, so this is exhaustive - an
+ * unrecognised one falls back to the vague sentence rather than leaking a codeword.
+ */
+const DOMAIN_LABELS: Readonly<Record<string, string>> = {
+  models: 'Your models',
+  sync: 'Sync',
+  rag: 'Search',
+  speech: 'Voice',
+  automation: 'Automated tasks',
+  use: 'Assistant actions'
+}
+
+/**
+ * Every part named by a degradation, once each, in the order they were reported.
+ *
+ * Reports are keyed by REPORTER, not by domain, so two owners of one domain produce two entries -
+ * de-duplicated here so a user is never told "Search and Search". Report order is preserved as-is:
+ * entries arrive from different places at different times (startup stages during boot, runtime
+ * failures like search losing its embedding half long after), and which of those matters more to
+ * the person reading is not something this strip can know, so it does not rank them.
+ */
+function degradedNames(degraded: StartupSnapshotContract['degraded']): string[] {
+  const names: string[] = []
+  for (const entry of degraded) {
+    const label = DOMAIN_LABELS[entry.domain]
+    if (label && !names.includes(label)) names.push(label)
+  }
+  return names
+}
+
+/** 'Search' / 'Search and Voice' / 'Your models, Search, and Voice'. */
+function joinNames(names: readonly string[]): string {
+  if (names.length <= 2) return names.join(' and ')
+  return `${names.slice(0, -1).join(', ')}, and ${names.at(-1) ?? ''}`
+}
+
+/**
+ * LIMITED, never "unavailable". A degradation is defined by its own contract as a domain that is
+ * "up but not whole" - reduced, not gone - so "unavailable" asserts a state the app is not in.
+ * Search is the clearest case: it publishes a degradation when its semantic half cannot run, and
+ * the keyword half still returns real results, so a user told search was unavailable would be able
+ * to search anyway. One weaker word, true for every domain, beats a stronger one that is false for
+ * some. The word stays uniform because the snapshot does not say WHICH capability of a domain is
+ * reduced, and inventing a per-domain fallback claim would be the same defect again.
+ */
+function limitedSentence(names: readonly string[]): string {
+  return `${joinNames(names)} ${names.length === 1 ? 'is' : 'are'} limited.`
+}
+
 function degradedLabel(snapshot: StartupSnapshotContract): string {
+  const parts: string[] = []
+
   const failed = snapshot.stages.find(
     (stage) => stage.status === 'failed' || stage.status === 'timeout'
   )
   const failedLabel = failed ? STAGE_LABELS[failed.name] : undefined
-  if (failedLabel) return `${failedLabel} didn't finish. Everything else works.`
   // Something arrived after its deadline. Worth saying, because the app took longer than it
   // should have and the user may have watched it happen - but it is here, so it is not a failure.
   const late = snapshot.stages.find((stage) => stage.status === 'late')
   const lateLabel = late ? STAGE_LABELS[late.name] : undefined
-  if (lateLabel) return `${lateLabel} took longer than expected, but it's ready.`
-  const domain = snapshot.degraded[0]?.domain
-  return domain
-    ? `${domain} is unavailable. Everything else works.`
-    : 'Part of the app is unavailable. Everything else works.'
+  if (failedLabel) parts.push(`${failedLabel} didn't finish.`)
+  else if (lateLabel) parts.push(`${lateLabel} took longer than expected, but it's ready.`)
+
+  // Appended, never substituted. A stage problem used to be the whole sentence, which hid every
+  // degradation reported after boot - so the one thing the user could act on was the one thing
+  // they were not told about. Both are said now, and each named part is said.
+  //
+  // Nothing is added about the REST of the app. This strip is handed a list of what is reduced; it
+  // is never told that nothing else is, so it used to close with "Everything else works." - a claim
+  // about the whole application derived from a list that cannot support it. It says what it knows
+  // and stops.
+  const names = degradedNames(snapshot.degraded)
+  if (names.length > 0) parts.push(limitedSentence(names))
+  else if (parts.length === 0) parts.push('Part of the app is limited.')
+
+  return parts.join(' ')
 }
 
 export function StartupNotice(): React.JSX.Element | null {
