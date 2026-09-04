@@ -262,6 +262,7 @@ export class ChatBoundary {
     },
     vision: { control: this.stopComputerTask },
     onImageGenProgress: vi.fn(() => () => {}),
+    onImageGenJobState: vi.fn(() => () => {}),
     onRagConversationsChanged: vi.fn(
       (callback: (change: { conversationId: string; projectId?: string | null }) => void) => {
         this.conversationChangedCallback = callback
@@ -326,6 +327,17 @@ export class ChatBoundary {
       interrupt: vi.fn(async () => {}),
       onEvent: vi.fn(() => () => {})
     },
+    // Namespaced preload doors Chat and the settings panel it hosts subscribe to on mount. A
+    // namespace has to be named: a missing one fails inside a mount effect as
+    // "window.api.<name>.<door> is not a function" and tears the render down before any
+    // assertion is reached.
+    askByVoice: {
+      start: vi.fn(async () => {}),
+      cancel: vi.fn(async () => {}),
+      onEvent: vi.fn(() => () => {})
+    },
+    voiceTurn: { onRequest: vi.fn(() => () => {}), respond: vi.fn() },
+    getTranscriptionInfo: vi.fn(async () => null),
     getSettings: vi.fn(async () => ({})),
     getModelControlProjection: vi.fn(() => this.modelControlSnapshot()),
     saveSetting: vi.fn(async () => {}),

@@ -16,7 +16,7 @@ describe('rendered storage usage', () => {
     onModelProgress: ReturnType<typeof vi.fn>
     retryDownload: ReturnType<typeof vi.fn>
     cancelModelDownload: ReturnType<typeof vi.fn>
-    getModelControlSnapshot: ReturnType<typeof vi.fn>
+    getModelControlProjection: ReturnType<typeof vi.fn>
     estimateModelFit: ReturnType<typeof vi.fn>
     activateModel: ReturnType<typeof vi.fn>
     clearAppCache: ReturnType<typeof vi.fn>
@@ -74,7 +74,7 @@ describe('rendered storage usage', () => {
       onModelProgress: vi.fn(() => () => {}),
       retryDownload: vi.fn(async () => ({ success: false })),
       cancelModelDownload: vi.fn(async () => true),
-      getModelControlSnapshot: vi.fn(async () => ({
+      getModelControlProjection: vi.fn(async () => ({
         kinds: ['text', 'vision'],
         models: [
           { id: 'text-model', name: 'Local text model', kind: 'text', files: [] },
@@ -144,7 +144,7 @@ describe('rendered storage usage', () => {
   })
 
   it('uses the canonical model-control identity when the storage projection is stale', async () => {
-    api.getModelControlSnapshot.mockResolvedValue({
+    api.getModelControlProjection.mockResolvedValue({
       kinds: ['text', 'vision'],
       models: [
         { id: 'text-model', name: 'Local text model', kind: 'text', files: [] },

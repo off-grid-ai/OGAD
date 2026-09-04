@@ -10,23 +10,32 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { PermissionGate } from '../PermissionGate'
 import { modelControlSnapshot } from './harness/model-control-snapshot'
+import { ok } from '@offgrid/application'
 
 const MODEL_ID = 'unsloth/gemma-4-E2B-it-GGUF'
 let visionStatus: Record<string, { supportsVision: boolean; projectorInstalled: boolean }>
-let downloadModel: ReturnType<typeof vi.fn>
+let controlModel: ReturnType<typeof vi.fn>
 let captureStatus: { running: boolean; paused: boolean; visionReady: boolean }
 let proListeners: Map<string, () => void>
 let modelProgress:
   | ((progress: {
       modelId: string
       percent?: number
+      downloadedBytes?: number
+      totalBytes?: number
       status?: 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled'
     }) => void)
   | null
 
 beforeEach(() => {
   visionStatus = {}
-  downloadModel = vi.fn(async () => ({ success: true }))
+  controlModel = vi.fn(async () =>
+    ok({
+      status: 'completed' as const,
+      operationId: 'repair-projector',
+      projection: modelControlSnapshot({ kinds: ['vision'], models: [] })
+    })
+  )
   captureStatus = { running: true, paused: false, visionReady: false }
   proListeners = new Map()
   modelProgress = null
@@ -41,7 +50,7 @@ beforeEach(() => {
         allGranted: true
       }),
       checkModelStatus: async () => ({ downloaded: true, modelsDir: '/tmp/models' }),
-      getModelControlSnapshot: async () =>
+      getModelControlProjection: async () =>
         modelControlSnapshot({
           kinds: ['vision'],
           models: [{ id: MODEL_ID, name: 'Gemma 4', kind: 'vision', files: [] }],
@@ -68,7 +77,7 @@ beforeEach(() => {
           modelProgress = null
         }
       },
-      downloadModel
+      controlModel
     }
   })
 })
@@ -90,7 +99,7 @@ describe('<PermissionGate/> Pro capture vision recovery', () => {
       screen.getByText('Gemma 4 can read images after its vision projector is downloaded.')
     ).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Download vision support' }))
-    expect(downloadModel).toHaveBeenCalledWith(MODEL_ID)
+    expect(controlModel).toHaveBeenCalledWith({ type: 'repair-projector', modelId: MODEL_ID })
   })
 
   it('routes a text-only active model to model selection', async () => {
@@ -144,7 +153,7 @@ describe('<PermissionGate/> Pro capture vision recovery', () => {
 
   it('shows projector download progress and restores the action after failure or cancellation', async () => {
     visionStatus = { [MODEL_ID]: { supportsVision: true, projectorInstalled: false } }
-    downloadModel.mockImplementationOnce(() => new Promise(() => {}))
+    controlModel.mockImplementationOnce(() => new Promise(() => {}))
     const user = userEvent.setup()
     render(
       <PermissionGate>
@@ -157,7 +166,13 @@ describe('<PermissionGate/> Pro capture vision recovery', () => {
       (screen.getByRole('button', { name: 'Downloading 0%' }) as HTMLButtonElement).disabled
     ).toBe(true)
 
-    modelProgress?.({ modelId: MODEL_ID, percent: 42, status: 'downloading' })
+    modelProgress?.({
+      modelId: MODEL_ID,
+      percent: 42,
+      status: 'downloading',
+      downloadedBytes: 42,
+      totalBytes: 100
+    })
     expect(
       ((await screen.findByRole('button', { name: 'Downloading 42%' })) as HTMLButtonElement)
         .disabled

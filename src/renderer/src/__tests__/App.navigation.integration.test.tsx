@@ -29,6 +29,7 @@ import {
   installAppBrowserBoundary,
   installAppStorage
 } from './harness/app-boundary'
+import { modelControlSnapshot } from '../components/__tests__/harness/model-control-snapshot'
 
 const rendererActivation = vi.hoisted(() => ({
   load: vi.fn<() => Promise<void>>()
@@ -41,38 +42,6 @@ vi.mock('../bootstrap/loadProFeaturesRenderer', () => ({
 let App: typeof import('../App').default
 
 const MODEL_KINDS = ['text', 'image', 'computer_use', 'voice', 'transcription']
-
-function modelControlSnapshot(
-  overrides: {
-    kinds?: string[]
-    models?: unknown[]
-    installed?: string[]
-    activeIds?: string[]
-    active?: Partial<{
-      text: string | null
-      image: string | null
-      speech: string | null
-      transcription: string | null
-      computer_use: string | null
-    }>
-  } = {}
-): Record<string, unknown> {
-  return {
-    kinds: overrides.kinds ?? MODEL_KINDS,
-    models: overrides.models ?? [],
-    installed: overrides.installed ?? [],
-    activeIds: overrides.activeIds ?? [],
-    active: {
-      text: null,
-      image: null,
-      speech: null,
-      transcription: null,
-      computer_use: null,
-      ...overrides.active
-    },
-    computerUse: null
-  }
-}
 
 function routedTabButton(label: string): HTMLButtonElement {
   const button = screen
@@ -88,7 +57,7 @@ describe('<App/> desktop navigation integration', () => {
     // module initialization. Install that real boundary once, then keep module
     // loading outside the interaction assertion's timeout budget.
     installAppBoundary({
-      getModelControlSnapshot: async () => modelControlSnapshot()
+      getModelControlProjection: async () => modelControlSnapshot({ kinds: MODEL_KINDS, models: [] })
     })
     installAppBrowserBoundary()
     ;({ default: App } = await import('../App'))
@@ -414,7 +383,7 @@ describe('<App/> desktop navigation integration', () => {
       llmSettings = { ...llmSettings, ...patch, effectiveCtxSize: patch.ctxSize ?? 32768 }
     })
     installAppBoundary({
-      getModelControlSnapshot: async () =>
+      getModelControlProjection: async () =>
         modelControlSnapshot({
           kinds: ['vision'],
           models: [
@@ -561,7 +530,7 @@ describe('<App/> desktop navigation integration', () => {
       registerProView(proView)
       installAppBoundary({
         isPro: true,
-        getModelControlSnapshot: async () => modelControlSnapshot(),
+        getModelControlProjection: async () => modelControlSnapshot({ kinds: MODEL_KINDS, models: [] }),
         crmListEntities: async () => [],
         proInvoke: async (channel: string) => {
           if (channel === 'pro:sync:status') return undefined
@@ -618,7 +587,7 @@ describe('<App/> desktop navigation integration', () => {
       registerProView(proView)
       installAppBoundary({
         isPro: true,
-        getModelControlSnapshot: async () => modelControlSnapshot(),
+        getModelControlProjection: async () => modelControlSnapshot({ kinds: MODEL_KINDS, models: [] }),
         crmListEntities: async () => [],
         proInvoke: async (channel: string) => {
           if (channel === 'pro:sync:status') return undefined

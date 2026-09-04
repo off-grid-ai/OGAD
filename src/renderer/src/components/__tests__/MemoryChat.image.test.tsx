@@ -10,8 +10,8 @@
 // `generateImage`. Unlike the sibling image-params-wiring.test.ts — which replays a
 // hand-written replica of the composer's state machine — nothing here re-implements the
 // component: if the send path reads a stale local `imgSteps`, if the `[imgModel]` effect
-// stops resolving the override, or if the dropdown's onChange stops routing through
-// `setActiveModalModel`, this test goes RED because the REAL component produced the
+// stops resolving the override, or if the dropdown's onChange stops routing through the one
+// model-control write door, this test goes RED because the REAL component produced the
 // wrong payload.
 //
 // The two bugs this guards (both were user-visible):
@@ -31,6 +31,10 @@ import {
   imageMemoryGuardErrorMessage,
   type ImageGenerationJobContract
 } from '../../../../shared/image-generation-contract'
+import {
+  modelControlBoundary,
+  type ModelControlBoundary
+} from './harness/model-control-snapshot'
 import { invalidateLlmSettings } from '../../lib/settings-invalidation'
 
 // The real app mounts MemoryChat inside a global TooltipProvider (App shell). Mirror
@@ -134,9 +138,13 @@ type InstalledApi = {
   generateImage: Mock<(payload: GenPayload) => Promise<ImageResult>>
   emitConversationUpdated: (conversationId: string) => void
   emitJobState: (job: ImageGenerationJobContract) => void
-  setActiveModalModel: Mock<
-    (kind: string, model: string) => Promise<{ success: true; activeModelId: string }>
-  >
+  /**
+   * The one model-control write door. `setActiveModalModel` was deleted by the model-control
+   * cutover; the composer dropdown now issues `control({ type: 'select', surface: 'image' })`.
+   * The boundary APPLIES that intent, so a test asserts the route the composer really reached
+   * instead of asserting that a since-deleted function was called.
+   */
+  modelControl: ModelControlBoundary<{ id: string }>
   toolChat: Mock<
     (...args: unknown[]) => Promise<{
       answer: string
@@ -172,8 +180,8 @@ function deferred<T>(): Deferred<T> {
 
 /** Build a full in-process fake of the preload `window.api` bridge. Every method the
  *  component touches on mount / send is stubbed at the TRUE boundary (the IPC bridge),
- *  so the component code under test is 100% real. `generateImage` + `setActiveModalModel`
- *  are the assertion subjects; the rest resolve to inert defaults. */
+ *  so the component code under test is 100% real. `generateImage` and the model-control
+ *  boundary are the assertion subjects; the rest resolve to inert defaults. */
 function installApi(opts: InstallApiOptions): InstalledApi {
   const settings: Record<string, unknown> = { ...(opts.settings ?? {}) }
   const conversations = [...(opts.conversations ?? [])]
@@ -208,10 +216,24 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     })
     return result
   })
-  const setActiveModalModel = vi.fn(async (_kind: string, model: string) => ({
-    success: true as const,
-    activeModelId: model
-  }))
+  // One owner for the model-control read AND write. The image runtime filenames are also the
+  // catalog ids in this focused renderer fixture.
+  const modelControl = modelControlBoundary({
+    kinds: ['image'],
+    models: opts.models.map((model) => ({
+      id: model,
+      name: model,
+      kind: 'image',
+      files: [{ name: model, role: 'primary' }],
+      capabilities: opts.thinking === undefined ? undefined : { thinking: opts.thinking }
+    })),
+    installed: [...opts.models],
+    activeIds: [opts.active],
+    active: {
+      text: opts.thinking === undefined ? null : opts.active,
+      image: opts.active
+    }
+  })
   // The agentic path's single entry point. Returns a benign text answer with no
   // imageRequest, so if the turn reaches the agent no generateImage call follows —
   // making "generateImage was/ wasn't called" an unambiguous terminal artifact.
@@ -265,29 +287,8 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     isPro: opts.isPro ?? false,
     // --- assertion subjects ---
     generateImage,
-    setActiveModalModel,
-    // Canonical model-control read boundary used after a selection command. The image
-    // runtime filenames are also the catalog ids in this focused renderer fixture.
-    getModelControlSnapshot: vi.fn(async () => ({
-      kinds: ['image'],
-      models: opts.models.map((model) => ({
-        id: model,
-        name: model,
-        kind: 'image',
-        files: [{ name: model, role: 'primary' }],
-        capabilities: opts.thinking === undefined ? undefined : { thinking: opts.thinking }
-      })),
-      installed: [...opts.models],
-      activeIds: [opts.active],
-      active: {
-        text: opts.thinking === undefined ? null : opts.active,
-        image: opts.active,
-        speech: null,
-        transcription: null,
-        computer_use: null
-      },
-      computerUse: null
-    })),
+    controlModel: modelControl.controlModel,
+    getModelControlProjection: modelControl.getModelControlProjection,
     // --- image engine probe (drives imgModels + imgModel on mount) ---
     imageGenStatus: vi.fn(async () => ({
       available: true,
@@ -348,6 +349,24 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     getSettings: vi.fn(async () => settings),
     saveSetting,
     // --- misc mount-time calls (inert) ---
+    // Namespaced preload doors Chat subscribes to on mount. These have to be objects: a missing
+    // namespace fails as "window.api.speechCommands.onEvent is not a function" inside a mount
+    // effect, which tears down the whole render before any image assertion is reached.
+    speechCommands: {
+      transcribe: vi.fn(),
+      cancelTranscription: vi.fn(),
+      speak: vi.fn(async () => ({ kind: 'spoken' as const })),
+      feedStream: vi.fn(async () => {}),
+      finishStream: vi.fn(async () => {}),
+      interrupt: vi.fn(async () => {}),
+      onEvent: vi.fn(() => () => {})
+    },
+    askByVoice: {
+      start: vi.fn(async () => {}),
+      cancel: vi.fn(async () => {}),
+      onEvent: vi.fn(() => () => {})
+    },
+    voiceTurn: { onRequest: vi.fn(() => () => {}), respond: vi.fn() },
     listProjects: vi.fn(async () => []),
     listArtifacts: vi.fn(async () => []),
     listGeneratedImages,
@@ -362,7 +381,7 @@ function installApi(opts: InstallApiOptions): InstalledApi {
   ;(globalThis as unknown as { window: { api: unknown } }).window.api = api
   return {
     generateImage,
-    setActiveModalModel,
+    modelControl,
     toolChat,
     exportGeneratedImage,
     getRagMessages,
@@ -636,7 +655,7 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
   it('carries the USER-typed steps (10), not the model default (28), and the picked model', async () => {
     const user = userEvent.setup()
     // Engine reports the full checkpoint (default 28) active, plus the few-step one.
-    const { generateImage, setActiveModalModel } = installApi({
+    const { generateImage, modelControl } = installApi({
       active: FULL,
       models: [FULL, FEW_STEP]
     })
@@ -663,8 +682,8 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     // The model is the active/picked one, carried through to the engine.
     expect(payload.model).toBe(FULL)
     // Bug (b): the composer binds to the shared owner. On mount it reads active; a
-    // dropdown change writes through setActiveModalModel (asserted in the next test).
-    expect(setActiveModalModel).toBeTruthy()
+    // dropdown change writes through the one model-control door (asserted in the next test).
+    expect(modelControl).toBeTruthy()
   })
 
   it('reattaches an in-flight image job on remount and shows the progress panel (survives navigation)', async () => {
@@ -712,9 +731,9 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     expect(await screen.findByText('Generating image · Step 3 of 20')).toBeTruthy()
   })
 
-  it('picking a different model in the dropdown routes through setActiveModalModel and reaches the payload', async () => {
+  it('picking a different model in the dropdown routes through the one model-control door and reaches the payload', async () => {
     const user = userEvent.setup()
-    const { generateImage, setActiveModalModel } = installApi({
+    const { generateImage, modelControl } = installApi({
       active: FULL,
       models: [FULL, FEW_STEP]
     })
@@ -731,7 +750,9 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
 
     // Divergence fix: the dropdown MUST write through the same owner as the
     // Active-models panel, or the two silently disagree on which model runs.
-    await waitFor(() => expect(setActiveModalModel).toHaveBeenCalledWith('image', FEW_STEP))
+    await waitFor(() =>
+      expect(modelControl.projection().active.image.modelId).toBe(FEW_STEP)
+    )
 
     await sendPrompt(user, 'a mountain lake')
     await waitFor(() => expect(generateImage).toHaveBeenCalledTimes(1))
@@ -751,9 +772,7 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     const modelSelect = screen.getByLabelText('Model') as HTMLSelectElement
     await firstUser.selectOptions(modelSelect, FEW_STEP)
     await firstUser.selectOptions(modelSelect, FULL)
-    await waitFor(() =>
-      expect(boundary.setActiveModalModel).toHaveBeenLastCalledWith('image', FULL)
-    )
+    await waitFor(() => expect(boundary.modelControl.projection().active.image.modelId).toBe(FULL))
 
     const sizeSelect = screen.getByLabelText('Size') as HTMLSelectElement
     await firstUser.selectOptions(sizeSelect, '768')
