@@ -5,11 +5,11 @@
 // clicking it downloads the model (which fetches only the missing projector). Real
 // ModelsScreen; only window.api is faked. ModelsScreen captures window.api at module
 // load, so it's set before a dynamic import and methods read mutable per-test state.
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, screen } from '@testing-library/react'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { cleanup, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { render } from '@testing-library/react'
-import { modelControlSnapshot } from './harness/model-control-snapshot'
+import { modelControlBoundary } from './harness/model-control-snapshot'
 
 type VisionStatus = Record<string, { supportsVision: boolean; projectorInstalled: boolean }>
 
@@ -25,24 +25,22 @@ const VISION_MODEL = {
   ]
 }
 
-let downloadModel = vi.fn()
 let visionStatus: VisionStatus = {}
+const modelControl = modelControlBoundary({
+  kinds: ['text', 'vision'],
+  models: [VISION_MODEL],
+  installed: [VISION_MODEL.id]
+})
 
 ;(globalThis as unknown as { window: { api: unknown } }).window.api = {
   systemHealth: async () => ({ ramGb: 32 }),
-  getModelControlSnapshot: async () =>
-    modelControlSnapshot({
-      kinds: ['text', 'vision'],
-      models: [VISION_MODEL],
-      installed: [VISION_MODEL.id]
-    }),
+  ...modelControl,
   getModelCatalog: async () => ({ kinds: ['text', 'vision'], models: [VISION_MODEL] }),
   getInstalledModels: async () => [VISION_MODEL.id],
   getModelVisionStatus: async () => visionStatus,
   getActiveModelIds: async () => [],
   onModelProgress: () => () => {},
-  estimateModelFit: async () => ({ level: 'ok' }),
-  downloadModel: (id: string) => downloadModel(id)
+  estimateModelFit: async () => ({ level: 'ok' })
 }
 
 let ModelsScreen: () => React.JSX.Element
@@ -50,7 +48,7 @@ beforeAll(async () => {
   ModelsScreen = (await import('../ModelsScreen')).ModelsScreen
 })
 beforeEach(() => {
-  downloadModel = vi.fn()
+  modelControl.reset()
 })
 afterEach(cleanup)
 
@@ -62,7 +60,13 @@ describe('<ModelsScreen/> — Add vision support', () => {
 
     const btn = await screen.findByRole('button', { name: /add vision support/i })
     await user.click(btn)
-    expect(downloadModel).toHaveBeenCalledWith(VISION_MODEL.id)
+    // The projector arrives through the one model-control command, named for this model.
+    await waitFor(() =>
+      expect(modelControl.intents).toEqual([
+        { type: 'refresh' },
+        { type: 'download', modelId: VISION_MODEL.id }
+      ])
+    )
   })
 
   it('does NOT show it once the projector is installed', async () => {

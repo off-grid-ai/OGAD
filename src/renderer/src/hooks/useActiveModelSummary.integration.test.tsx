@@ -2,6 +2,7 @@
 
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { modelControlSnapshot } from '../components/__tests__/harness/model-control-snapshot'
 import { useActiveModelSummary } from './useActiveModelSummary'
 
 function SummaryProbe({ revision }: { revision: number }): React.JSX.Element {
@@ -23,33 +24,27 @@ describe('useActiveModelSummary', () => {
   })
 
   it('clears the current projection and exposes a typed failure when refresh fails', async () => {
-    const getModelControlSnapshot = vi.fn(async () => ({
-      kinds: ['text'],
-      models: [
-        {
-          id: 'remote:openrouter:qwen',
-          name: 'Qwen Remote',
-          kind: 'text',
-          remoteServerId: 'openrouter',
-          files: [],
-          capabilities: { thinking: true }
-        }
-      ],
-      installed: [],
-      activeIds: ['remote:openrouter:qwen'],
-      active: {
-        text: 'remote:openrouter:qwen',
-        image: null,
-        speech: null,
-        transcription: null,
-        computer_use: null
-      },
-      computerUse: null
-    }))
+    const getModelControlProjection = vi.fn(async () =>
+      modelControlSnapshot({
+        kinds: ['text'],
+        models: [
+          {
+            id: 'remote:openrouter:qwen',
+            name: 'Qwen Remote',
+            kind: 'text',
+            remoteServerId: 'openrouter',
+            files: [],
+            capabilities: { thinking: true }
+          }
+        ],
+        activeIds: ['remote:openrouter:qwen'],
+        active: { text: 'remote:openrouter:qwen' }
+      })
+    )
     Object.defineProperty(window, 'api', {
       configurable: true,
       value: {
-        getModelControlSnapshot,
+        getModelControlProjection,
         getLlmSettings: vi.fn(async () => ({}))
       }
     })
@@ -60,7 +55,7 @@ describe('useActiveModelSummary', () => {
     expect(screen.getByLabelText('name').textContent).toBe('Qwen Remote')
     expect(screen.getByLabelText('thinking').textContent).toBe('supported')
 
-    getModelControlSnapshot.mockRejectedValueOnce(new Error('snapshot unavailable'))
+    getModelControlProjection.mockRejectedValueOnce(new Error('snapshot unavailable'))
     view.rerender(<SummaryProbe revision={1} />)
 
     await waitFor(() => expect(screen.getByLabelText('status').textContent).toBe('failed'))

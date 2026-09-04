@@ -7,43 +7,28 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { CATALOG, MODEL_KINDS, modelsByKind } from '@offgrid/models'
+import { modelControlBoundary } from './harness/model-control-snapshot'
 
 const computerUseModels = modelsByKind('computer_use')
 const uiMate = computerUseModels.find((model) => model.id === 'bartowski/tencent_UI-Mate-9B-GGUF')
 const uiTars = computerUseModels.find((model) => model.id === 'mradermacher/UI-TARS-1.5-7B-GGUF')
 if (!uiMate || !uiTars) throw new Error('Computer Use catalog fixtures are missing')
 
-let activeIds: string[] = []
-let activationRequests: Array<[string, string?]> = []
+const modelControl = modelControlBoundary({
+  kinds: MODEL_KINDS,
+  models: CATALOG,
+  installed: [uiMate.id],
+  holdDownloads: true
+})
 
 ;(globalThis as unknown as { window: { api: unknown } }).window.api = {
   systemHealth: async () => ({ ramGb: 34 }),
-  getModelControlSnapshot: async () => ({
-    kinds: MODEL_KINDS,
-    models: CATALOG,
-    installed: [uiMate.id],
-    activeIds,
-    active: {
-      text: null,
-      image: null,
-      speech: null,
-      transcription: null,
-      computer_use: activeIds[0] ?? null
-    },
-    computerUse: null
-  }),
+  ...modelControl,
   getModelCatalog: async () => ({ kinds: MODEL_KINDS, models: CATALOG }),
   getInstalledModels: async () => [uiMate.id],
   getModelVisionStatus: async () => ({}),
-  getActiveModelIds: async () => activeIds,
+  getActiveModelIds: async () => modelControl.projection().activeIds,
   estimateModelFit: async () => ({ level: 'ok' }),
-  activateModel: async (id: string, requestedKind?: string) => {
-    activationRequests.push([id, requestedKind])
-    activeIds = [id]
-    return { success: true }
-  },
-  downloadModel: async () => new Promise(() => {}),
-  cancelModelDownload: async () => true,
   searchModels: async () => [],
   onModelProgress: () => () => {}
 }
@@ -53,8 +38,7 @@ beforeAll(async () => {
   ModelsScreen = (await import('../ModelsScreen')).ModelsScreen
 })
 afterEach(() => {
-  activeIds = []
-  activationRequests = []
+  modelControl.reset()
   cleanup()
 })
 
@@ -117,7 +101,8 @@ describe('<ModelsScreen/> Computer Use catalog journey', () => {
 
     await user.click(screen.getByRole('button', { name: 'Use' }))
     expect(await screen.findByText('Active')).toBeTruthy()
-    expect(activationRequests.at(-1)).toEqual([uiMate.id, 'computer_use'])
+    // The Computer Use surface really holds this route now — the card is not guessing.
+    expect(modelControl.projection().active.computer_use.modelId).toBe(uiMate.id)
 
     const uiTarsCard = screen.getByText('UI-TARS-1.5-7B').closest('[role="listitem"]')
     expect(uiTarsCard).toBeTruthy()

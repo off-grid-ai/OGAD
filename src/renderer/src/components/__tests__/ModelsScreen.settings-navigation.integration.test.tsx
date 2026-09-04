@@ -8,7 +8,7 @@
 import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { modelControlSnapshot } from './harness/model-control-snapshot'
+import { modelControlBoundary } from './harness/model-control-snapshot'
 
 const ACTIVE_ID = 'offgrid/active-model'
 const ACTIVE_IMAGE_ID = 'offgrid/active-image-model'
@@ -56,29 +56,22 @@ const MODELS = [
   }
 ]
 
-const activateModel = vi.fn(async () => ({ success: true }))
+const modelControl = modelControlBoundary({
+  kinds: ['text', 'image', 'voice', 'transcription'],
+  models: MODELS,
+  installed: [ACTIVE_ID, INSTALLED_ID, ACTIVE_IMAGE_ID, ACTIVE_VOICE_ID, ACTIVE_TRANSCRIPTION_ID],
+  activeIds: [ACTIVE_ID, ACTIVE_IMAGE_ID, ACTIVE_VOICE_ID, ACTIVE_TRANSCRIPTION_ID],
+  active: {
+    text: ACTIVE_ID,
+    image: ACTIVE_IMAGE_ID,
+    speech: ACTIVE_VOICE_ID,
+    transcription: ACTIVE_TRANSCRIPTION_ID
+  }
+})
 
 ;(window as unknown as { api: unknown }).api = {
   systemHealth: async () => ({ ramGb: 32 }),
-  getModelControlSnapshot: async () =>
-    modelControlSnapshot({
-      kinds: ['text', 'image', 'voice', 'transcription'],
-      models: MODELS,
-      installed: [
-        ACTIVE_ID,
-        INSTALLED_ID,
-        ACTIVE_IMAGE_ID,
-        ACTIVE_VOICE_ID,
-        ACTIVE_TRANSCRIPTION_ID
-      ],
-      activeIds: [ACTIVE_ID, ACTIVE_IMAGE_ID, ACTIVE_VOICE_ID, ACTIVE_TRANSCRIPTION_ID],
-      active: {
-        text: ACTIVE_ID,
-        image: ACTIVE_IMAGE_ID,
-        speech: ACTIVE_VOICE_ID,
-        transcription: ACTIVE_TRANSCRIPTION_ID
-      }
-    }),
+  ...modelControl,
   getModelCatalog: async () => ({
     kinds: ['text', 'image', 'voice', 'transcription'],
     models: MODELS
@@ -99,8 +92,7 @@ const activateModel = vi.fn(async () => ({ success: true }))
   getModelVisionStatus: async () => ({}),
   onModelProgress: () => () => {},
   searchModels: async () => [],
-  estimateModelFit: async () => ({ level: 'ok', message: '' }),
-  activateModel
+  estimateModelFit: async () => ({ level: 'ok', message: '' })
 }
 
 let ModelsScreen: () => React.JSX.Element
@@ -110,7 +102,7 @@ beforeAll(async () => {
 })
 
 beforeEach(() => {
-  activateModel.mockClear()
+  modelControl.reset()
 })
 
 afterEach(cleanup)
@@ -147,7 +139,8 @@ describe('<ModelsScreen/> active model settings', () => {
 
     expect(openSettings).toHaveBeenCalledOnce()
     expect((openSettings.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({ tab: 'model' })
-    expect(activateModel).not.toHaveBeenCalled()
+    // Opening settings is not a selection: nothing but the initial catalog read crossed the bridge.
+    expect(modelControl.intents).toEqual([{ type: 'refresh' }])
   })
 
   it.each([

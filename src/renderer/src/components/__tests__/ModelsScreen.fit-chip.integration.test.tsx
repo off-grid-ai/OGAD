@@ -11,7 +11,7 @@
  */
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
-import { modelControlSnapshot } from './harness/model-control-snapshot'
+import { modelControlBoundary } from './harness/model-control-snapshot'
 
 interface Entry {
   id: string
@@ -43,10 +43,10 @@ const HUGE: Entry = {
 // installed before the first import and the RAM value is mutated per test (the
 // mount always re-reads systemHealth). This is the correct pattern for this app.
 let ramGbValue = 16
+const modelControl = modelControlBoundary({ kinds: ['language'], models: [SMALL, HUGE] })
 ;(window as unknown as { api: unknown }).api = {
   systemHealth: async () => ({ ramGb: ramGbValue }),
-  getModelControlSnapshot: async () =>
-    modelControlSnapshot({ kinds: ['language'], models: [SMALL, HUGE] }),
+  ...modelControl,
   getModelCatalog: async () => ({ kinds: ['language'], models: [SMALL, HUGE] }),
   getInstalledModels: async () => [],
   getActiveModelIds: async () => [],

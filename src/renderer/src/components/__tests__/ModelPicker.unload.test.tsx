@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import { ModelPicker } from '../ModelPicker'
 import { modelControlSnapshot } from './harness/model-control-snapshot'
+import { ok } from '@offgrid/application'
 
 function stubApi(): void {
   const models = [
@@ -10,23 +11,30 @@ function stubApi(): void {
       id: 'kokoro',
       name: 'Kokoro TTS 82M',
       kind: 'voice',
-      files: [{ name: 'kokoro.onnx', role: 'primary' }]
+      artifacts: [{ name: 'kokoro.onnx', role: 'primary' }]
     },
     {
       id: 'whisper',
       name: 'Whisper Tiny',
       kind: 'transcription',
-      files: [{ name: 'whisper.bin', role: 'primary' }]
+      artifacts: [{ name: 'whisper.bin', role: 'primary' }]
     }
   ]
-  ;(globalThis as unknown as { window: { api: unknown } }).window.api = {
-    getModelControlSnapshot: async () =>
-      modelControlSnapshot({
+  const projection = modelControlSnapshot({
         kinds: ['voice', 'transcription'],
         models,
         installed: ['kokoro', 'whisper'],
         active: { speech: 'kokoro', transcription: 'whisper' }
-      }),
+      })
+  ;(globalThis as unknown as { window: { api: unknown } }).window.api = {
+    getModelControlProjection: async () => projection,
+    controlModel: async () =>
+      ok({ status: 'completed', operationId: 'test-operation', projection }),
+    getComputerUseActiveModels: async () => ({
+      strategy: 'separate_specialist',
+      strategyLabel: 'Separate specialist',
+      models: []
+    }),
     getModelCatalog: async () => ({
       models
     }),

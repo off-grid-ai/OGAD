@@ -1,16 +1,11 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { modelControlSnapshot } from './harness/model-control-snapshot'
+import { modelControlBoundary } from './harness/model-control-snapshot'
 
 const REMOTE_ID = 'remote-vision:home:google%2Fgemma-4'
-let activeIds: string[] = []
-const activateModel = vi.fn(async (id: string) => {
-  activeIds = [id]
-  return { success: true }
-})
 
 const REMOTE_MODEL = {
   id: REMOTE_ID,
@@ -23,25 +18,23 @@ const REMOTE_MODEL = {
   remoteModelId: 'google/gemma-4'
 }
 
+const modelControl = modelControlBoundary({
+  kinds: ['text', 'vision'],
+  models: [REMOTE_MODEL],
+  installed: [REMOTE_ID]
+})
+
 ;(globalThis as unknown as { window: { api: unknown } }).window.api = {
   systemHealth: async () => ({ ramGb: 32 }),
-  getModelControlSnapshot: async () =>
-    modelControlSnapshot({
-      kinds: ['text', 'vision'],
-      models: [REMOTE_MODEL],
-      installed: [REMOTE_ID],
-      activeIds,
-      active: { text: activeIds[0] ?? null }
-    }),
+  ...modelControl,
   getModelCatalog: async () => ({
     kinds: ['text', 'vision'],
     models: [REMOTE_MODEL]
   }),
   getInstalledModels: async () => [REMOTE_ID],
   getModelVisionStatus: async () => ({}),
-  getActiveModelIds: async () => activeIds,
+  getActiveModelIds: async () => modelControl.projection().activeIds,
   estimateModelFit: async () => ({ level: 'ok' }),
-  activateModel,
   searchModels: async () => [],
   onModelProgress: () => () => {}
 }
@@ -51,8 +44,7 @@ beforeAll(async () => {
   ModelsScreen = (await import('../ModelsScreen')).ModelsScreen
 })
 afterEach(() => {
-  activeIds = []
-  activateModel.mockClear()
+  modelControl.reset()
   cleanup()
 })
 
@@ -68,7 +60,9 @@ describe('<ModelsScreen/> remote inventory', () => {
     expect(within(card as HTMLElement).queryByTitle('Delete from disk')).toBeNull()
 
     await user.click(within(card as HTMLElement).getByRole('button', { name: 'Use' }))
-    await waitFor(() => expect(activateModel).toHaveBeenCalledWith(REMOTE_ID, undefined))
+    // The card reads Active because the boundary really activated this route, not because the
+    // screen was told a call happened.
     expect(await within(card as HTMLElement).findByText('Active')).toBeTruthy()
+    expect(modelControl.projection().active.text.modelId).toBe(REMOTE_ID)
   })
 })

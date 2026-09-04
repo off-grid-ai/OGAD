@@ -31,6 +31,12 @@ interface ModelControlSnapshot<Model> {
   active: Record<keyof ActiveModels, { modelId: string | null; routeId: string | null; ready: boolean }>
   downloads: readonly unknown[]
   downloadDurability: { status: 'healthy' }
+  /**
+   * The Computer Use strategy the picker renders. Carried through from the input: it used to be
+   * accepted and then dropped, which rendered every Computer Use region as "No Computer Use model
+   * is selected" no matter what a fixture supplied.
+   */
+  computerUse: unknown
 }
 
 /** Canonical renderer boundary fixture for the single model-control read contract. */
@@ -53,7 +59,8 @@ export function modelControlSnapshot<Model>(
       computer_use: activeEntry(input.active?.computer_use ?? null)
     },
     downloads: [],
-    downloadDurability: { status: 'healthy' }
+    downloadDurability: { status: 'healthy' },
+    computerUse: input.computerUse ?? null
   }
 }
 
