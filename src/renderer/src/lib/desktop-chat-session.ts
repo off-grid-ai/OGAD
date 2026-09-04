@@ -5,6 +5,13 @@ import {
   type ChatTurn,
   type GenerationResult
 } from '@offgrid/application'
+import {
+  createActiveTurnStore,
+  type ActiveTurn,
+  type ActiveTurnProjection,
+  type ActiveTurnStore
+} from './active-turn-store'
+import type { StreamEvent } from './stream-reducer'
 import { DesktopChatCompaction } from './desktop-chat-compaction'
 import { desktopChatTurnProfile } from './desktop-chat-session-policy'
 import { chatSessionService } from '@renderer/composition/chat-session'
@@ -40,6 +47,12 @@ export type {
 
 export class DesktopChatSession {
   private readonly repository = new DesktopTurnRepository()
+  /**
+   * The live turn's buffer belongs to the session, not to a component: the session is what knows
+   * a turn is in flight, and one owner is what makes "at most one visual publication per frame" a
+   * property of the product rather than of whichever component happened to create a store.
+   */
+  private readonly activeTurns: ActiveTurnStore = createActiveTurnStore()
   private readonly executions = new Map<string, DesktopTurnExecution>()
   private readonly listeners = new Set<(event: ChatSessionEvent) => void>()
   private readonly service: ChatSessionService
@@ -65,6 +78,41 @@ export class DesktopChatSession {
         compaction: { compact: (context) => this.compaction.compact(context) }
       }
     )
+  }
+
+  /** The narrow read side of the live turn, for the view. Stable identity. */
+  liveTurns(): ActiveTurnProjection {
+    return this.activeTurns.projection()
+  }
+
+  /** Open a live turn. `seed` carries a stream that was already running when the view mounted. */
+  beginLiveTurn(streamId: string, seed?: Partial<ActiveTurn>): void {
+    this.activeTurns.begin(streamId, seed)
+  }
+
+  /** Fold one stream event into the live turn. Nothing above the streaming leaf re-renders. */
+  applyLiveTurnEvent(streamId: string, event: StreamEvent): void {
+    this.activeTurns.apply(streamId, event)
+  }
+
+  /**
+   * Close the live turn and hand back what only the stream saw.
+   *
+   * The final CONTENT is not read from here - the send path already has the authoritative answer
+   * from the generation result. This is for the tool calls and the activity the stream accumulated.
+   */
+  finishLiveTurn(streamId: string): ActiveTurn | null {
+    return this.activeTurns.finish(streamId)
+  }
+
+  /** Drop the live turn: stopped, failed, or its content replaced by something else. */
+  cancelLiveTurn(streamId: string): void {
+    this.activeTurns.cancel(streamId)
+  }
+
+  /** Drop every live turn and any scheduled publication. */
+  disposeLiveTurns(): void {
+    this.activeTurns.dispose()
   }
 
   subscribe(listener: (event: ChatSessionEvent) => void): () => void {

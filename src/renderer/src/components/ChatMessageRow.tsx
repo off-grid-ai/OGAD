@@ -6,6 +6,7 @@
  * only state inside it is the editor's own draft.
  */
 import { useCallback, useEffect, useState } from 'react'
+import { useActiveTurn } from '@renderer/hooks/useActiveTurn'
 import { hasLiveStreamActivity } from '@renderer/lib/stream-reducer'
 import { type WorkRunStep } from '@offgrid/application'
 import { ChatLoadingCard } from './ChatLoadingCard'
@@ -414,7 +415,21 @@ function StandardMessageRow({
  * Kind comes from the shared attachment-kind rule rather than an extension check here, so desktop
  * and mobile agree on what counts as audio.
  */
-export function MessageRow({
+/**
+ * The row for a turn, live or committed.
+ *
+ * This shell is the ONLY subscriber to a generating turn: its text, reasoning, tool calls and
+ * activity come from the session's active-turn projection rather than from the transcript, so a
+ * token wakes this leaf and nothing above it. A committed row passes `null`, subscribes to
+ * nothing, and keeps the object identity the transcript gave it.
+ */
+export function MessageRow(props: MessageRowProps): React.JSX.Element {
+  const live = useActiveTurn(props.message.streaming ? props.message.id : null)
+  const message = live ? { ...props.message, ...live } : props.message
+  return <MessageRowBody {...props} message={message} />
+}
+
+function MessageRowBody({
   message,
   liveTask,
   voiceMode,

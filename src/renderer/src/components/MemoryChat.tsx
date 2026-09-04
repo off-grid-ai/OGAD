@@ -5,7 +5,6 @@ import { writeClipboardWithFallback } from '@renderer/lib/clipboard-write'
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 import { isAgenticTurn } from '@renderer/lib/agentic-active'
-import { applyStreamEvent } from '@renderer/lib/stream-reducer'
 import { useActiveModelSummary } from '@renderer/hooks/useActiveModelSummary'
 import { admitThinkingRequest } from '@renderer/lib/model-summary'
 import { shouldFollowBottom } from '@renderer/lib/scroll-follow'
@@ -34,14 +33,8 @@ import {
   SYNC_SUBSCRIBE_INCOMING_FILES_HOOK,
   type IncomingSharedFile
 } from '@renderer/lib/sync-hooks'
-import {
-  AudioPane,
-  DocumentPane
-} from './ChatMessageAttachments'
-import {
-  MessageRow,
-  ToolMessageTimelineRow
-} from './ChatMessageRow'
+import { AudioPane, DocumentPane } from './ChatMessageAttachments'
+import { MessageRow, ToolMessageTimelineRow } from './ChatMessageRow'
 import {
   type ContextNavigation,
   type MessageRowActions,
@@ -49,6 +42,7 @@ import {
   generationErrorContent,
   isPromptEnhancementMessage
 } from './chat-message-projection'
+import { ActiveTurnContext } from '@renderer/hooks/useActiveTurn'
 import { ChatLoadingCard } from './ChatLoadingCard'
 import { ChatThinkingBlock } from './ChatThinkingBlock'
 import { ArtifactCanvas } from './ArtifactCanvas'
@@ -62,11 +56,7 @@ import { ExploreSection } from './explore/ExploreSection'
 import { PresetSetup } from './explore/PresetSetup'
 import { ApprovalIntakeFailure, ApprovalSetup } from './actions/ApprovalSetup'
 import { loadApprovalIntake, type ApprovalIntakeState } from '@renderer/lib/approval-intake'
-import {
-  REQUEST_FORM_URL,
-  presetById,
-  type DemoPreset
-} from './explore/presetCatalog'
+import { REQUEST_FORM_URL, presetById, type DemoPreset } from './explore/presetCatalog'
 import { useChatVoiceTurns, type ChatVoicePhase } from './use-chat-voice-turns'
 import { SkillsPanel } from './SkillsPanel'
 import { ModelPicker } from './ModelPicker'
@@ -490,6 +480,8 @@ export function MemoryChat({
     desktopChatSessionRef.current = createDesktopChatSession()
   }
   const desktopChatSession = desktopChatSessionRef.current
+  // The read side of the live turn, handed to the transcript below. Stable for the session's life.
+  const liveTurns = desktopChatSession.liveTurns()
   const { isPro } = useRendererEntitlement()
   const { tasks: taskSessions } = useTaskSessions()
   // Messages are kept PER CONVERSATION so a background tab keeps its own thread and
@@ -1353,7 +1345,7 @@ export function MemoryChat({
     [loadProjects, assignProject]
   )
 
-  useEffect(() => {
+  const followBottom = useCallback((): void => {
     // Follow the stream to the bottom ONLY while the user hasn't scrolled up. followBottomRef is
     // driven by the container's onScroll (below), so it reflects the user's intent — not a
     // mid-animation position. Instant (not smooth): a smooth animation kept scrollTop near the
@@ -1362,7 +1354,14 @@ export function MemoryChat({
     if (followBottomRef.current) {
       bottomRef.current?.scrollIntoView({ block: 'end' })
     }
-  }, [messages, loading])
+  }, [])
+  useEffect(() => {
+    followBottom()
+  }, [followBottom, messages, loading])
+  // Following a live turn is a DOM effect, not a render: this subscribes to the session's
+  // publications (at most one per frame) so growing text still scrolls without the transcript
+  // re-rendering to make it happen.
+  useEffect(() => liveTurns.subscribeAll(followBottom), [followBottom, liveTurns])
 
   // Opening / switching a chat lands you at the latest message (after it loads).
   const justSwitched = useRef(false)
@@ -1520,7 +1519,6 @@ export function MemoryChat({
       })()
     })
     return () => off?.()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeConversationId, refreshConversationMessages, scheduleConversationListRefresh])
 
   // Task guidance is written to the originating conversation by the Tasks
@@ -1784,7 +1782,7 @@ export function MemoryChat({
           if (sk) {
             const rest = sm[2]!.trim()
             modelQuery =
-              `${attBlock ? attBlock + '\n\n' : ''}# Skill: ${sk.name}\n${sk.instructions}\n\n${rest}`.trim()
+              `${attBlock ? `${attBlock}\n\n` : ''}# Skill: ${sk.name}\n${sk.instructions}\n\n${rest}`.trim()
           }
         } catch (e) {
           console.error('skill load failed', e)
@@ -1799,7 +1797,7 @@ export function MemoryChat({
     // Create new conversation if none active
     if (!convId) {
       convId = crypto.randomUUID()
-      const title = trimmed.length > 50 ? trimmed.slice(0, 47) + '...' : trimmed
+      const title = trimmed.length > 50 ? `${trimmed.slice(0, 47)}...` : trimmed
       try {
         await window.api.createRagConversation(convId, title, projectId)
         setActiveConversationId(convId)
@@ -2085,6 +2083,7 @@ export function MemoryChat({
         const toolStreamId = opts?.sessionReplay?.turnId ?? `a-${Date.now()}`
         activeStreamId = toolStreamId
         streamConvRef.current.set(toolStreamId, convId!)
+        desktopChatSession.beginLiveTurn(toolStreamId)
         setConvMessages(convId, (prev) => [
           ...prev,
           {
@@ -2163,6 +2162,9 @@ export function MemoryChat({
         const toolReasoning = reasoningByStream.current[toolStreamId]
         delete reasoningByStream.current[toolStreamId] // done with this stream — free it
         delete answerByStream.current[toolStreamId]
+        // The tool loop returns its own authoritative `toolCalls` below, so the live buffer is
+        // only closed here.
+        desktopChatSession.finishLiveTurn(toolStreamId)
         const toolCtxWithReasoning = buildAssistantContext(toolCtx, {
           reasoning: toolReasoning,
           metrics: tr.metrics,
@@ -2300,6 +2302,7 @@ export function MemoryChat({
       const streamId = opts?.sessionReplay?.turnId ?? `a-${Date.now()}`
       activeStreamId = streamId // expose to finally for cleanup
       streamConvRef.current.set(streamId, convId!)
+      desktopChatSession.beginLiveTurn(streamId)
       setConvMessages(convId, (prev) => [
         ...prev,
         {
@@ -2353,6 +2356,8 @@ export function MemoryChat({
       // Shared recognized and executed the model's image hand-off. This component projects it.
       const ragImage = ragGeneratedImages[0]
       if (ragImage) {
+        // The streamed text is replaced by the image card, so the live turn is discarded.
+        desktopChatSession.cancelLiveTurn(streamId)
         const imgPrompt = ragImage.prompt ?? assistantContent
         setConvMessages(convId, (prev) =>
           prev.map((m) =>
@@ -2409,6 +2414,9 @@ export function MemoryChat({
         const ragReasoning = reasoningByStream.current[streamId]
         delete reasoningByStream.current[streamId] // done with this stream — free it
         delete answerByStream.current[streamId]
+        // The tool calls and the last activity are the one thing only the stream saw: the answer
+        // itself comes from the generation result, as it always did.
+        const ragLiveTurn = desktopChatSession.finishLiveTurn(streamId)
         const assistantContext = buildAssistantContext(resultContext, {
           reasoning: ragReasoning,
           cutoff: result.cutoff,
@@ -2426,6 +2434,8 @@ export function MemoryChat({
                   ...m,
                   content: assistantContent,
                   context: assistantContext,
+                  toolCalls: ragLiveTurn?.toolCalls.length ? ragLiveTurn.toolCalls : m.toolCalls,
+                  activity: undefined,
                   cutoff: result.cutoff,
                   // On the LIVE message too, not only in the persisted context: the numbers are
                   // about the turn that just finished, so waiting for a reload to show them defeats
@@ -2485,6 +2495,7 @@ export function MemoryChat({
       const errorContent = generationErrorContent(e)
       // Update the streaming placeholder to show the error — never append a second bubble.
       const sid = activeStreamId
+      if (sid) desktopChatSession.cancelLiveTurn(sid)
       setConvMessages(convId, (prev) => {
         const hasPlaceholder = sid && prev.some((m) => m.id === sid)
         if (hasPlaceholder)
@@ -2592,6 +2603,9 @@ export function MemoryChat({
       const streamed = answerByStream.current[streamId] || ''
       delete reasoningByStream.current[streamId]
       delete answerByStream.current[streamId]
+      // A stop clears the live turn's pending publication and its subscriptions; what the stream
+      // had accumulated is committed onto the row below.
+      const stoppedLiveTurn = desktopChatSession.finishLiveTurn(streamId)
 
       const answer = (settled?.answer ?? streamed).trim()
       if (!answer && !reasoning) {
@@ -2608,7 +2622,9 @@ export function MemoryChat({
                 reasoning,
                 context: settled?.context ?? m.context,
                 cutoff: settled?.cutoff ?? m.cutoff,
-                toolCalls: settled?.toolCalls ?? m.toolCalls,
+                toolCalls:
+                  settled?.toolCalls ??
+                  (stoppedLiveTurn?.toolCalls.length ? stoppedLiveTurn.toolCalls : m.toolCalls),
                 activity: undefined,
                 streaming: false
               }
@@ -2858,7 +2874,7 @@ export function MemoryChat({
       setMessages((prev) =>
         prev.map((m) =>
           m.imagePath === path
-            ? { ...m, image: undefined, imagePath: undefined, content: m.content + '  (deleted)' }
+            ? { ...m, image: undefined, imagePath: undefined, content: `${m.content}  (deleted)` }
             : m
         )
       )
@@ -2904,11 +2920,10 @@ export function MemoryChat({
         answerByStream.current[data.streamId] =
           (answerByStream.current[data.streamId] || '') + (data.text || '')
       }
-      setConvMessages(cid, (prev) =>
-        prev.map((m) =>
-          m.id === data.streamId && m.streaming ? (applyStreamEvent(m, data) as ChatMessage) : m
-        )
-      )
+      // The live turn is the session's state, not the transcript's. This used to be
+      // `setConvMessages(cid, prev => prev.map(...))`: a new conversation array and a re-render of
+      // this entire component, per token. Now one leaf hears about it.
+      desktopChatSession.applyLiveTurnEvent(data.streamId, data)
     })
     void (window.api.getActiveRagStreams?.() ?? Promise.resolve([]))
       .then((streams) => {
@@ -2918,6 +2933,18 @@ export function MemoryChat({
           reasoningByStream.current[stream.streamId] = stream.reasoning
           answerByStream.current[stream.streamId] = stream.content
           markGenerating(stream.conversationId, true)
+          // Seed the live turn with what the stream had already produced, so the reattached row
+          // continues from where it is instead of restarting from empty.
+          desktopChatSession.beginLiveTurn(stream.streamId, {
+            content: stream.content,
+            reasoning: stream.reasoning,
+            toolCalls:
+              stream.tools?.map((tool) => ({
+                name: tool.name,
+                result: tool.result ?? '',
+                status: tool.status
+              })) ?? []
+          })
           setConvMessages(stream.conversationId, (previous) => {
             const restored: ChatMessage = {
               id: stream.streamId,
@@ -2944,8 +2971,10 @@ export function MemoryChat({
     return () => {
       disposed = true
       off()
+      // The view is going away: drop every live turn and any publication scheduled for it.
+      desktopChatSession.disposeLiveTurns()
     }
-  }, [activeConversationId, markGenerating, setConvMessages])
+  }, [activeConversationId, desktopChatSession, markGenerating, setConvMessages])
 
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
   const copyText = useCallback(async (t: string, key?: string) => {
@@ -3295,323 +3324,690 @@ export function MemoryChat({
     : null
 
   return (
-    <div
-      className="flex h-full flex-col font-mono bg-neutral-950 transition-[padding] duration-200"
-      style={{
-        // Only the code/artifact canvas reflows content beside it (a deliberate
-        // side-by-side edit surface). The drawers (settings, models, skills, gallery,
-        // lightbox) are fixed overlays with their own opaque backdrop — they draw ON
-        // TOP, so reserving width here just squeezed the chat to one word per line.
-        paddingRight: canvasArtifact
-          ? canvasWidth
-            ? `${canvasWidth}px` // canvas open + resized → reflow content to its width
-            : 'max(360px, 30vw)'
-          : undefined
-      }}
-    >
-      {/* Header */}
-      <header className="flex items-center gap-3 border-b border-neutral-900 px-6 py-4">
-        <button
-          onClick={toggleConversationList}
-          className="rounded-md border border-neutral-800 p-1.5 text-neutral-500 transition-colors hover:border-green-500 hover:text-green-500"
-          title={conversationsToggleLabel}
-          aria-label={conversationsToggleLabel}
-        >
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <rect x="3" y="4" width="18" height="16" rx="2" strokeWidth={2} />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 4v16" />
-          </svg>
-        </button>
-        <div className="flex h-8 w-8 items-center justify-center rounded-md border border-neutral-800 bg-neutral-900">
-          <svg
-            className="h-4 w-4 text-green-500"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
-            />
-          </svg>
-        </div>
-        <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-medium tracking-wide text-neutral-200">Off Grid AI</h2>
-          {activeProjectId && activeProjectName ? (
-            <button
-              onClick={() => onOpenProject?.(activeProjectId)}
-              title={`Open project “${activeProjectName}”`}
-              className="flex max-w-full items-center gap-1 truncate text-xs text-neutral-500 transition-colors hover:text-green-500"
-            >
-              <FolderOpen className="h-3 w-3 shrink-0" />
-              <span className="truncate">In {activeProjectName}</span>
-            </button>
-          ) : (
-            <p className="truncate text-xs text-neutral-500">
-              Private, on-device — chat, generate, and build
-            </p>
-          )}
-        </div>
-
-        {/* Active models — pick the model per modality (text/image/voice/STT) */}
-        <button
-          onClick={() => {
-            closePanels()
-            setModelPickerOpen(true)
-          }}
-          className={`rounded-md border p-1.5 transition-colors ${modelPickerOpen ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
-          title="Active models"
-        >
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <rect x="4" y="4" width="16" height="16" rx="2" strokeWidth={2} />
-            <path
-              strokeLinecap="round"
-              strokeWidth={2}
-              d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"
-            />
-          </svg>
-        </button>
-
-        {/* Keep the conversation in place while its model settings drawer is open. */}
-        <button
-          onClick={() => {
-            closePanels()
-            setSettingsInitialTab('model')
-            setSettingsOpen(true)
-          }}
-          className={`rounded-md border p-1.5 transition-colors ${settingsOpen ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
-          title="Settings"
-        >
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-            />
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-            />
-          </svg>
-        </button>
-        <button
-          ref={galleryTriggerRef}
-          onClick={openGallery}
-          className={`rounded-md border p-1.5 transition-colors ${showGallery ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
-          title="Generated images"
-        >
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M4 5a1 1 0 011-1h14a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5z"
-            />
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M4 15l4-4 4 4 3-3 5 5"
-            />
-            <circle cx="9" cy="9" r="1.5" fill="currentColor" />
-          </svg>
-        </button>
-        <TaskPanelTrigger conversationId={activeConversationId} />
-      </header>
-
-      {/* Body */}
-      <PanelGroup
-        direction="horizontal"
-        className="min-h-0 flex-1"
-        data-testid="main-task-workspace"
+    // The live turn's read side reaches the streaming row through here. The chat root never reads
+    // it: it publishes into the session and renders committed rows.
+    <ActiveTurnContext.Provider value={liveTurns}>
+      <div
+        className="flex h-full flex-col font-mono bg-neutral-950 transition-[padding] duration-200"
+        style={{
+          // Only the code/artifact canvas reflows content beside it (a deliberate
+          // side-by-side edit surface). The drawers (settings, models, skills, gallery,
+          // lightbox) are fixed overlays with their own opaque backdrop — they draw ON
+          // TOP, so reserving width here just squeezed the chat to one word per line.
+          paddingRight: canvasArtifact
+            ? canvasWidth
+              ? `${canvasWidth}px` // canvas open + resized → reflow content to its width
+              : 'max(360px, 30vw)'
+            : undefined
+        }}
       >
-        <Panel
-          ref={chatBodyRef}
-          id="chat-body-workspace"
-          order={1}
-          defaultSize={52}
-          minSize={28}
-          collapsible
-          collapsedSize={0}
-          style={{ transition: taskWorkspaceTransition }}
-          onCollapse={() => setChatBodyVisibility(true)}
-          onExpand={() => setChatBodyVisibility(false)}
-          className="min-w-0"
-        >
-          <PanelGroup
-            direction="horizontal"
-            autoSaveId="offgrid-memory-chat-layout"
-            className="min-h-0 flex-1"
+        {/* Header */}
+        <header className="flex items-center gap-3 border-b border-neutral-900 px-6 py-4">
+          <button
+            onClick={toggleConversationList}
+            className="rounded-md border border-neutral-800 p-1.5 text-neutral-500 transition-colors hover:border-green-500 hover:text-green-500"
+            title={conversationsToggleLabel}
+            aria-label={conversationsToggleLabel}
           >
-            <Panel
-              ref={historyPanelRef}
-              id="conversation-history"
-              order={1}
-              defaultSize={20}
-              minSize={14}
-              maxSize={40}
-              collapsible
-              collapsedSize={0}
-              onCollapse={() => setConversationsVisible(false)}
-              onExpand={() => setConversationsVisible(true)}
-              className="min-w-0 overflow-hidden transition-[flex-grow] duration-200 ease-out motion-reduce:transition-none"
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <rect x="3" y="4" width="18" height="16" rx="2" strokeWidth={2} />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 4v16" />
+            </svg>
+          </button>
+          <div className="flex h-8 w-8 items-center justify-center rounded-md border border-neutral-800 bg-neutral-900">
+            <svg
+              className="h-4 w-4 text-green-500"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
             >
-              <aside className="h-full overflow-hidden border-r border-neutral-900">
-                <div className="flex h-full min-w-0 flex-col">
-                  <div className="px-2 pb-2 pt-3">
-                    <button
-                      onClick={startNewConversation}
-                      className="flex w-full items-center justify-center gap-2 rounded-md border border-neutral-800 px-3 py-2 text-xs text-neutral-300 transition-colors hover:border-green-500 hover:text-green-500"
-                    >
-                      <svg
-                        className="h-4 w-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
+              />
+            </svg>
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm font-medium tracking-wide text-neutral-200">Off Grid AI</h2>
+            {activeProjectId && activeProjectName ? (
+              <button
+                onClick={() => onOpenProject?.(activeProjectId)}
+                title={`Open project “${activeProjectName}”`}
+                className="flex max-w-full items-center gap-1 truncate text-xs text-neutral-500 transition-colors hover:text-green-500"
+              >
+                <FolderOpen className="h-3 w-3 shrink-0" />
+                <span className="truncate">In {activeProjectName}</span>
+              </button>
+            ) : (
+              <p className="truncate text-xs text-neutral-500">
+                Private, on-device — chat, generate, and build
+              </p>
+            )}
+          </div>
+
+          {/* Active models — pick the model per modality (text/image/voice/STT) */}
+          <button
+            onClick={() => {
+              closePanels()
+              setModelPickerOpen(true)
+            }}
+            className={`rounded-md border p-1.5 transition-colors ${modelPickerOpen ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
+            title="Active models"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <rect x="4" y="4" width="16" height="16" rx="2" strokeWidth={2} />
+              <path
+                strokeLinecap="round"
+                strokeWidth={2}
+                d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"
+              />
+            </svg>
+          </button>
+
+          {/* Keep the conversation in place while its model settings drawer is open. */}
+          <button
+            onClick={() => {
+              closePanels()
+              setSettingsInitialTab('model')
+              setSettingsOpen(true)
+            }}
+            className={`rounded-md border p-1.5 transition-colors ${settingsOpen ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
+            title="Settings"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+              />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+              />
+            </svg>
+          </button>
+          <button
+            ref={galleryTriggerRef}
+            onClick={openGallery}
+            className={`rounded-md border p-1.5 transition-colors ${showGallery ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
+            title="Generated images"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 5a1 1 0 011-1h14a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5z"
+              />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 15l4-4 4 4 3-3 5 5"
+              />
+              <circle cx="9" cy="9" r="1.5" fill="currentColor" />
+            </svg>
+          </button>
+          <TaskPanelTrigger conversationId={activeConversationId} />
+        </header>
+
+        {/* Body */}
+        <PanelGroup
+          direction="horizontal"
+          className="min-h-0 flex-1"
+          data-testid="main-task-workspace"
+        >
+          <Panel
+            ref={chatBodyRef}
+            id="chat-body-workspace"
+            order={1}
+            defaultSize={52}
+            minSize={28}
+            collapsible
+            collapsedSize={0}
+            style={{ transition: taskWorkspaceTransition }}
+            onCollapse={() => setChatBodyVisibility(true)}
+            onExpand={() => setChatBodyVisibility(false)}
+            className="min-w-0"
+          >
+            <PanelGroup
+              direction="horizontal"
+              autoSaveId="offgrid-memory-chat-layout"
+              className="min-h-0 flex-1"
+            >
+              <Panel
+                ref={historyPanelRef}
+                id="conversation-history"
+                order={1}
+                defaultSize={20}
+                minSize={14}
+                maxSize={40}
+                collapsible
+                collapsedSize={0}
+                onCollapse={() => setConversationsVisible(false)}
+                onExpand={() => setConversationsVisible(true)}
+                className="min-w-0 overflow-hidden transition-[flex-grow] duration-200 ease-out motion-reduce:transition-none"
+              >
+                <aside className="h-full overflow-hidden border-r border-neutral-900">
+                  <div className="flex h-full min-w-0 flex-col">
+                    <div className="px-2 pb-2 pt-3">
+                      <button
+                        onClick={startNewConversation}
+                        className="flex w-full items-center justify-center gap-2 rounded-md border border-neutral-800 px-3 py-2 text-xs text-neutral-300 transition-colors hover:border-green-500 hover:text-green-500"
                       >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M12 4v16m8-8H4"
-                        />
-                      </svg>
-                      New chat
-                    </button>
-                  </div>
-                  <ConversationSearchList
-                    conversations={conversations}
-                    activeConversationId={activeConversationId}
-                    onSelect={switchConversation}
-                    onRenamed={conversationRenamed}
-                    onDelete={deleteConversation}
-                  />
-                </div>
-              </aside>
-            </Panel>
-
-            <PanelResizeHandle
-              aria-label="Resize conversation list"
-              title="Resize conversation list"
-              className="group relative w-2 shrink-0 cursor-col-resize focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-green-500"
-            >
-              <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-neutral-800 group-hover:bg-green-500/50 group-focus-visible:bg-green-500 group-data-[resize-handle-state=drag]:bg-green-500" />
-            </PanelResizeHandle>
-
-            {/* Main column */}
-            <Panel
-              id="chat"
-              order={2}
-              defaultSize={80}
-              minSize={40}
-              className="min-w-0 transition-[flex-grow] duration-200 ease-out motion-reduce:transition-none"
-            >
-              <div className="flex h-full min-w-0 flex-col">
-                {/* Chat tabs — quick-switch between open conversations */}
-                {(openTabs.length > 0 || activeConversationId) && (
-                  <div className="flex items-center gap-1 overflow-x-auto border-b border-neutral-900 px-2 py-1">
-                    {openTabs.map((id) => {
-                      const t = conversations.find((c) => c.id === id)
-                      const active = activeConversationId === id
-                      return (
-                        <div
-                          key={id}
-                          className={`group flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-xs transition-colors ${active ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900'}`}
+                        <svg
+                          className="h-4 w-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
                         >
-                          <button
-                            onClick={() => switchConversation(id)}
-                            className="max-w-[12rem] truncate"
-                          >
-                            {t?.title || 'Untitled'}
-                          </button>
-                          <button
-                            onClick={() => closeTab(id)}
-                            className="text-neutral-600 transition-colors hover:text-red-400"
-                            title="Close tab"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      )
-                    })}
-                    {!activeConversationId && (
-                      <div className="flex shrink-0 items-center rounded-md bg-neutral-800 px-2.5 py-1 text-xs text-neutral-100">
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M12 4v16m8-8H4"
+                          />
+                        </svg>
                         New chat
-                      </div>
-                    )}
-                    <button
-                      onClick={startNewConversation}
-                      className="shrink-0 rounded-md px-2 py-1 text-neutral-500 transition-colors hover:text-green-500"
-                      title="New tab"
-                    >
-                      +
-                    </button>
+                      </button>
+                    </div>
+                    <ConversationSearchList
+                      conversations={conversations}
+                      activeConversationId={activeConversationId}
+                      onSelect={switchConversation}
+                      onRenamed={conversationRenamed}
+                      onDelete={deleteConversation}
+                    />
                   </div>
-                )}
-                {/* Messages */}
-                <div ref={scrollRef} onScroll={onScrollFollow} className="flex-1 overflow-y-auto">
-                  {approvalIntake.status === 'loading' ? (
-                    <div
-                      role="status"
-                      className="flex min-h-full w-full items-center justify-center gap-2 px-6 py-6 text-xs text-muted-foreground"
-                    >
-                      Loading approval
-                      <LoadingDots />
+                </aside>
+              </Panel>
+
+              <PanelResizeHandle
+                aria-label="Resize conversation list"
+                title="Resize conversation list"
+                className="group relative w-2 shrink-0 cursor-col-resize focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-green-500"
+              >
+                <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-neutral-800 group-hover:bg-green-500/50 group-focus-visible:bg-green-500 group-data-[resize-handle-state=drag]:bg-green-500" />
+              </PanelResizeHandle>
+
+              {/* Main column */}
+              <Panel
+                id="chat"
+                order={2}
+                defaultSize={80}
+                minSize={40}
+                className="min-w-0 transition-[flex-grow] duration-200 ease-out motion-reduce:transition-none"
+              >
+                <div className="flex h-full min-w-0 flex-col">
+                  {/* Chat tabs — quick-switch between open conversations */}
+                  {(openTabs.length > 0 || activeConversationId) && (
+                    <div className="flex items-center gap-1 overflow-x-auto border-b border-neutral-900 px-2 py-1">
+                      {openTabs.map((id) => {
+                        const t = conversations.find((c) => c.id === id)
+                        const active = activeConversationId === id
+                        return (
+                          <div
+                            key={id}
+                            className={`group flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-xs transition-colors ${active ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900'}`}
+                          >
+                            <button
+                              onClick={() => switchConversation(id)}
+                              className="max-w-[12rem] truncate"
+                            >
+                              {t?.title || 'Untitled'}
+                            </button>
+                            <button
+                              onClick={() => closeTab(id)}
+                              className="text-neutral-600 transition-colors hover:text-red-400"
+                              title="Close tab"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        )
+                      })}
+                      {!activeConversationId && (
+                        <div className="flex shrink-0 items-center rounded-md bg-neutral-800 px-2.5 py-1 text-xs text-neutral-100">
+                          New chat
+                        </div>
+                      )}
+                      <button
+                        onClick={startNewConversation}
+                        className="shrink-0 rounded-md px-2 py-1 text-neutral-500 transition-colors hover:text-green-500"
+                        title="New tab"
+                      >
+                        +
+                      </button>
                     </div>
-                  ) : approvalIntake.status === 'error' ? (
-                    <div className="flex min-h-full w-full flex-col items-center justify-center px-6 py-6 text-center">
-                      <ApprovalIntakeFailure
-                        message={approvalIntake.message}
-                        onCancel={() => setApprovalIntake({ status: 'idle' })}
-                        onRetry={() => openApprovalIntake(approvalIntake.approvalId)}
-                      />
-                    </div>
-                  ) : approvalIntake.status === 'ready' ? (
-                    <div className="flex min-h-full w-full flex-col items-center justify-center px-6 py-6 text-center">
-                      <ApprovalSetup
-                        key={approvalIntake.record.id}
-                        record={approvalIntake.record}
-                        onCancel={() => setApprovalIntake({ status: 'idle' })}
-                        onSubmit={(prompt) => {
-                          void (async () => {
-                            const approved = await window.api.proInvoke?.(
-                              'approvals:approve-for-chat',
-                              approvalIntake.record.id
-                            )
-                            if (!approved) return
-                            setApprovalIntake({ status: 'idle' })
-                            await sendMessage(prompt, { asUserInput: true })
-                          })()
-                        }}
-                      />
-                    </div>
-                  ) : messages.length === 0 ? (
-                    <div className="flex min-h-full w-full flex-col items-center justify-center px-6 py-6 text-center">
-                      {presetSetup ? (
-                        <PresetSetup
-                          key={presetSetup.id}
-                          preset={presetSetup}
-                          onCancel={() => setPresetSetup(null)}
-                          onOpenConnectors={onOpenConnectors}
+                  )}
+                  {/* Messages */}
+                  <div ref={scrollRef} onScroll={onScrollFollow} className="flex-1 overflow-y-auto">
+                    {approvalIntake.status === 'loading' ? (
+                      <div
+                        role="status"
+                        className="flex min-h-full w-full items-center justify-center gap-2 px-6 py-6 text-xs text-muted-foreground"
+                      >
+                        Loading approval
+                        <LoadingDots />
+                      </div>
+                    ) : approvalIntake.status === 'error' ? (
+                      <div className="flex min-h-full w-full flex-col items-center justify-center px-6 py-6 text-center">
+                        <ApprovalIntakeFailure
+                          message={approvalIntake.message}
+                          onCancel={() => setApprovalIntake({ status: 'idle' })}
+                          onRetry={() => openApprovalIntake(approvalIntake.approvalId)}
+                        />
+                      </div>
+                    ) : approvalIntake.status === 'ready' ? (
+                      <div className="flex min-h-full w-full flex-col items-center justify-center px-6 py-6 text-center">
+                        <ApprovalSetup
+                          key={approvalIntake.record.id}
+                          record={approvalIntake.record}
+                          onCancel={() => setApprovalIntake({ status: 'idle' })}
                           onSubmit={(prompt) => {
-                            setPresetSetup(null)
-                            void sendMessage(prompt, { asUserInput: true })
+                            void (async () => {
+                              const approved = await window.api.proInvoke?.(
+                                'approvals:approve-for-chat',
+                                approvalIntake.record.id
+                              )
+                              if (!approved) return
+                              setApprovalIntake({ status: 'idle' })
+                              await sendMessage(prompt, { asUserInput: true })
+                            })()
                           }}
                         />
-                      ) : (
-                        <>
-                          <div className="mx-auto flex max-w-2xl flex-col items-center">
+                      </div>
+                    ) : messages.length === 0 ? (
+                      <div className="flex min-h-full w-full flex-col items-center justify-center px-6 py-6 text-center">
+                        {presetSetup ? (
+                          <PresetSetup
+                            key={presetSetup.id}
+                            preset={presetSetup}
+                            onCancel={() => setPresetSetup(null)}
+                            onOpenConnectors={onOpenConnectors}
+                            onSubmit={(prompt) => {
+                              setPresetSetup(null)
+                              void sendMessage(prompt, { asUserInput: true })
+                            }}
+                          />
+                        ) : (
+                          <>
+                            <div className="mx-auto flex max-w-2xl flex-col items-center">
+                              <div
+                                data-testid="chat-empty-hero"
+                                className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-card shadow-sm"
+                              >
+                                <svg
+                                  className="h-8 w-8 text-primary"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={1.5}
+                                    d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
+                                  />
+                                </svg>
+                              </div>
+                              <h2 className="text-3xl font-semibold tracking-tight text-foreground">
+                                {mode === 'image' ? 'Create an image' : 'Start a conversation'}
+                              </h2>
+                              <p className="mt-3 max-w-md text-sm text-muted-foreground">
+                                {mode === 'image'
+                                  ? 'Pick a style, then describe your subject — generated on-device.'
+                                  : activeProjectName
+                                    ? `Grounded in the “${activeProjectName}” knowledge base.`
+                                    : isPro
+                                      ? 'Ask across your memories, chats, and entities from every source.'
+                                      : 'Ask anything, generate images, or build — all on-device.'}
+                              </p>
+                            </div>
+                            {mode !== 'image' ? (
+                              <ExploreSection
+                                onRun={setPresetSetup}
+                                requestUrl={REQUEST_FORM_URL}
+                                className="mt-6 w-full text-left"
+                              />
+                            ) : null}
+                            {mode === 'image' ? (
+                              <StylePresetPicker
+                                activeStyle={activeStyle}
+                                styleThumbs={styleThumbs}
+                                onChange={setActiveStyle}
+                              />
+                            ) : (
+                              <div className="mt-6 grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
+                                {examples.map((ex) => (
+                                  <button
+                                    key={ex}
+                                    onClick={() => sendMessage(ex)}
+                                    className="rounded-md border border-border bg-background px-3 py-2.5 text-left text-xs text-muted-foreground transition-colors hover:border-primary hover:bg-accent hover:text-foreground"
+                                  >
+                                    {ex}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="w-full px-6 py-5">
+                        {groupWorkRuns(messages).map((entry, entryIndex, entries) => {
+                          if (entry.kind === 'work') {
+                            return <ToolMessageTimelineRow key={entry.id} steps={entry.steps} />
+                          }
+                          const { message } = entry
+                          const next = entries[entryIndex + 1]
+                          return (
+                            <MessageRow
+                              key={message.id}
+                              message={message}
+                              nextMessageRole={next?.kind === 'work' ? 'tool' : next?.message.role}
+                              liveTask={
+                                message.streaming ? (liveJourneyTask ?? undefined) : undefined
+                              }
+                              voiceMode={voiceMode}
+                              state={{
+                                autoPlayId,
+                                copiedKey,
+                                editingId,
+                                loading,
+                                speakingId,
+                                speakLoadingId,
+                                speakError,
+                                ttsEnabled,
+                                ttsSpeed,
+                                latestVoiceAssistantId,
+                                askSelections: askSel,
+                                incomingFiles: incomingFilesFor(message.id),
+                                showGenerationDetails,
+                                regenerationDisabled:
+                                  !!activeConversationId &&
+                                  generatingConvs.has(activeConversationId)
+                              }}
+                              actions={messageActions}
+                              navigation={messageNavigation}
+                            />
+                          )
+                        })}
+                        {/* A reply generating on another one of your devices, streaming here live. Pro
+                    registers the renderer; the free build has no slot and this is nothing. */}
+                        {ChatMessagesFooter && activeConversationId ? (
+                          <ChatMessagesFooter
+                            conversationId={activeConversationId}
+                            promptEnhancementActive={promptEnhancementActive}
+                            promptEnhancementComplete={promptEnhancementComplete}
+                          />
+                        ) : null}
+                        {/* The in-flight image card shows whenever an image job owns this chat, including a
+                          tool-invoked image while the assistant turn is still streaming. Only the text
+                          placeholder waits for streaming to end. */}
+                        {!!activeConversationId &&
+                        !liveJourneyTask &&
+                        generatingConvs.has(activeConversationId) &&
+                        (imageGenConv === activeConversationId ||
+                          !messages.some((m) => m.streaming)) ? (
+                          <div className="mb-5 flex flex-col items-start">
+                            <div className="mb-1 text-[10px] uppercase tracking-wider text-neutral-600">
+                              Off Grid AI
+                            </div>
+                            {mode === 'image' || generatingImage ? (
+                              /* Same width cap as a finished image message, so the card does not grow to
+                               the chat's full width while it forms. */
+                              <div className="flex w-full max-w-2xl flex-col items-start gap-2">
+                                {imageJobStage === 'enhancing' || streamingEnhancedPrompt ? (
+                                  <ChatThinkingBlock
+                                    content={streamingEnhancedPrompt || 'Starting…'}
+                                    live={imageJobStage === 'enhancing'}
+                                    label={
+                                      imageJobStage === 'enhancing'
+                                        ? 'Enhancing prompt…'
+                                        : 'Enhanced prompt'
+                                    }
+                                  />
+                                ) : null}
+                                <div className="w-full rounded-md border border-neutral-800 bg-neutral-900/40 p-3">
+                                  {imgProgress?.preview ? (
+                                    <img
+                                      src={imgProgress.preview}
+                                      alt="forming"
+                                      className="mb-2 aspect-square w-full rounded-md border border-neutral-800 object-cover"
+                                    />
+                                  ) : (
+                                    <div className="mb-2 flex aspect-square w-full items-center justify-center rounded-md border border-neutral-800 text-[11px] text-neutral-600">
+                                      Preparing image…
+                                    </div>
+                                  )}
+                                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-neutral-500">
+                                    <span>{imageProgressLabel(imageJobStage, imgProgress)}</span>
+                                    {imgProgress ? (
+                                      <span className="text-neutral-600">
+                                        · ~
+                                        {Math.max(
+                                          0,
+                                          Math.round(
+                                            (imgProgress.total - imgProgress.step) *
+                                              imgProgress.secPerStep
+                                          )
+                                        )}
+                                        s left
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-neutral-800">
+                                    <div
+                                      className="h-full bg-green-500 transition-all duration-300"
+                                      style={{
+                                        width: imgProgress
+                                          ? `${(imgProgress.step / imgProgress.total) * 100}%`
+                                          : '5%'
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <ChatLoadingCard
+                                label={waitingLabel({ noMemory, hasProject: !!activeProjectId })}
+                              />
+                            )}
+                          </div>
+                        ) : null}
+                        <div ref={bottomRef} className="h-2" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Composer */}
+                  <div className="border-t border-neutral-900 px-6 py-3">
+                    <div className="w-full">
+                      {/* Image options (image mode, expandable) */}
+                      {mode === 'image' && showImageOptions && (
+                        <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-neutral-800 px-3 py-2 text-[11px] text-neutral-500">
+                          {imgModels.length > 1 && (
+                            <label className="flex items-center gap-1.5">
+                              Model
+                              <select
+                                value={imgModel}
+                                onChange={(e) => chooseImageModel(e.target.value)}
+                                className="max-w-[12rem] rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-300 outline-none focus:border-green-500"
+                              >
+                                {imgModels.map((m) => (
+                                  <option key={m} value={m}>
+                                    {modelFileDisplayName(m)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          )}
+                          <label className="flex items-center gap-1.5">
+                            Size
+                            <select
+                              value={imgSize}
+                              onChange={(e) => setSizeOverride(Number(e.target.value))}
+                              className="rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-300 outline-none focus:border-green-500"
+                            >
+                              <option value={256}>256</option>
+                              <option value={512}>512</option>
+                              <option value={640}>640</option>
+                              <option value={768}>768</option>
+                              <option value={1024}>1024</option>
+                            </select>
+                          </label>
+                          <label className="flex items-center gap-1.5">
+                            Steps
+                            <input
+                              type="number"
+                              min={4}
+                              max={50}
+                              value={imgSteps}
+                              onChange={(e) =>
+                                setStepsOverride(
+                                  Math.max(4, Math.min(50, Number(e.target.value) || 16))
+                                )
+                              }
+                              className="w-14 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-300 outline-none focus:border-green-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                            />
+                          </label>
+                          <label className="flex items-center gap-1.5">
+                            Guidance
+                            <input
+                              type="number"
+                              min={0}
+                              max={20}
+                              step={0.5}
+                              value={imgCfgScale}
+                              onChange={(e) =>
+                                setCfgScaleOverride(
+                                  Math.max(0, Math.min(20, Number(e.target.value) || 0))
+                                )
+                              }
+                              className="w-14 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-300 outline-none focus:border-green-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                            />
+                          </label>
+                          <label className="flex items-center gap-1.5">
+                            Seed
+                            <SettingsTextField
+                              id="composer-image-seed"
+                              label="Seed"
+                              initialValue={imgSeed}
+                              persistedValue={imgSeed}
+                              sanitize={digitsOnly}
+                              commit={commitImgSeed}
+                              placeholder="random"
+                              className="w-20 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-300 placeholder-neutral-700 outline-none focus:border-green-500"
+                            />
+                          </label>
+                          <SettingsTextField
+                            id="composer-image-negative-prompt"
+                            label="Negative prompt"
+                            initialValue={imgNegative}
+                            persistedValue={imgNegative}
+                            commit={commitImgNegative}
+                            placeholder="Negative prompt"
+                            className="min-w-[10rem] flex-1 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-300 placeholder-neutral-700 outline-none focus:border-green-500"
+                          />
+                          <label
+                            className="flex items-center gap-1.5"
+                            title="Rewrite your prompt with the local model for richer, more detailed images"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={enhanceImg}
+                              onChange={(e) => setEnhanceImg(e.target.checked)}
+                              className="accent-green-500"
+                            />
+                            Enhance
+                          </label>
+                          {imgInit ? (
+                            <span className="flex items-center gap-2 rounded-md border border-green-500/40 px-2 py-1 text-green-500">
+                              {imgInit.split('/').pop()}
+                              <label
+                                className="flex items-center gap-1 text-neutral-500"
+                                title="img2img strength: how much to change the init image (0.1 = subtle, 1 = ignore it)"
+                              >
+                                Strength
+                                <input
+                                  type="number"
+                                  min={0.1}
+                                  max={1}
+                                  step={0.05}
+                                  value={imgStrength}
+                                  onChange={(e) =>
+                                    setImgStrength(
+                                      Math.max(0.1, Math.min(1, Number(e.target.value) || 0.6))
+                                    )
+                                  }
+                                  className="w-14 rounded border border-neutral-800 bg-neutral-950 px-1.5 py-0.5 text-neutral-300 outline-none focus:border-green-500"
+                                />
+                              </label>
+                              <button
+                                onClick={() => setImgInit(null)}
+                                className="text-neutral-500 hover:text-red-400"
+                              >
+                                ✕
+                              </button>
+                            </span>
+                          ) : (
+                            <button
+                              onClick={async () => {
+                                const p = await window.api.pickImageForGen()
+                                if (p) setImgInit(p)
+                              }}
+                              className="rounded-md border border-neutral-800 px-2 py-1 text-neutral-400 transition-colors hover:border-green-500 hover:text-green-500"
+                            >
+                              + Init image
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      <AnimatePresence initial={false}>
+                        {mode === 'image' && messages.length > 0 ? (
+                          <motion.div
+                            key="inline-image-style-picker"
+                            role="region"
+                            aria-label="Image style presets"
+                            className="overflow-hidden"
+                            initial={{ height: 0, opacity: 0, y: 8 }}
+                            animate={{ height: 'auto', opacity: 1, y: 0 }}
+                            exit={{ height: 0, opacity: 0, y: 6 }}
+                            transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
+                          >
+                            <StylePresetPicker
+                              compact
+                              activeStyle={activeStyle}
+                              styleThumbs={styleThumbs}
+                              onChange={setActiveStyle}
+                            />
+                          </motion.div>
+                        ) : null}
+                      </AnimatePresence>
+
+                      {projCreating && (
+                        <NewProjectNameField
+                          onCreate={createAndAssignProject}
+                          onCancel={() => setProjCreating(false)}
+                        />
+                      )}
+
+                      {activeQueuedTurns.length > 0 && (
+                        <div className="mb-2 flex flex-col gap-1">
+                          {activeQueuedTurns.map((q) => (
                             <div
-                              data-testid="chat-empty-hero"
-                              className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-card shadow-sm"
+                              key={q.turnId}
+                              className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-1.5 text-[11px] text-neutral-400"
                             >
                               <svg
-                                className="h-8 w-8 text-primary"
+                                className="h-3 w-3 shrink-0 text-neutral-600"
                                 fill="none"
                                 stroke="currentColor"
                                 viewBox="0 0 24 24"
@@ -3619,381 +4015,39 @@ export function MemoryChat({
                                 <path
                                   strokeLinecap="round"
                                   strokeLinejoin="round"
-                                  strokeWidth={1.5}
-                                  d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
+                                  strokeWidth={2}
+                                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
                                 />
                               </svg>
-                            </div>
-                            <h2 className="text-3xl font-semibold tracking-tight text-foreground">
-                              {mode === 'image' ? 'Create an image' : 'Start a conversation'}
-                            </h2>
-                            <p className="mt-3 max-w-md text-sm text-muted-foreground">
-                              {mode === 'image'
-                                ? 'Pick a style, then describe your subject — generated on-device.'
-                                : activeProjectName
-                                  ? `Grounded in the “${activeProjectName}” knowledge base.`
-                                  : isPro
-                                    ? 'Ask across your memories, chats, and entities from every source.'
-                                    : 'Ask anything, generate images, or build — all on-device.'}
-                            </p>
-                          </div>
-                          {mode !== 'image' ? (
-                            <ExploreSection
-                              onRun={setPresetSetup}
-                              requestUrl={REQUEST_FORM_URL}
-                              className="mt-6 w-full text-left"
-                            />
-                          ) : null}
-                          {mode === 'image' ? (
-                            <StylePresetPicker
-                              activeStyle={activeStyle}
-                              styleThumbs={styleThumbs}
-                              onChange={setActiveStyle}
-                            />
-                          ) : (
-                            <div className="mt-6 grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
-                              {examples.map((ex) => (
-                                <button
-                                  key={ex}
-                                  onClick={() => sendMessage(ex)}
-                                  className="rounded-md border border-border bg-background px-3 py-2.5 text-left text-xs text-muted-foreground transition-colors hover:border-primary hover:bg-accent hover:text-foreground"
+                              <span className="flex-1 select-text cursor-text whitespace-pre-wrap break-words">
+                                {q.text ||
+                                  `(${q.attachmentCount} attachment${q.attachmentCount > 1 ? 's' : ''})`}
+                              </span>
+                              {q.attachmentCount > 0 ? (
+                                <span
+                                  className="flex shrink-0 items-center gap-1 text-neutral-500"
+                                  title={`${q.attachmentCount} queued attachment${q.attachmentCount > 1 ? 's' : ''}`}
                                 >
-                                  {ex}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="w-full px-6 py-5">
-                      {groupWorkRuns(messages).map((entry, entryIndex, entries) => {
-                        if (entry.kind === 'work') {
-                          return <ToolMessageTimelineRow key={entry.id} steps={entry.steps} />
-                        }
-                        const { message } = entry
-                        const next = entries[entryIndex + 1]
-                        return (
-                          <MessageRow
-                            key={message.id}
-                            message={message}
-                            nextMessageRole={next?.kind === 'work' ? 'tool' : next?.message.role}
-                            liveTask={
-                              message.streaming ? (liveJourneyTask ?? undefined) : undefined
-                            }
-                            voiceMode={voiceMode}
-                            state={{
-                              autoPlayId,
-                              copiedKey,
-                              editingId,
-                              loading,
-                              speakingId,
-                              speakLoadingId,
-                              speakError,
-                              ttsEnabled,
-                              ttsSpeed,
-                              latestVoiceAssistantId,
-                              askSelections: askSel,
-                              incomingFiles: incomingFilesFor(message.id),
-                              showGenerationDetails,
-                              regenerationDisabled:
-                                !!activeConversationId && generatingConvs.has(activeConversationId)
-                            }}
-                            actions={messageActions}
-                            navigation={messageNavigation}
-                          />
-                        )
-                      })}
-                      {/* A reply generating on another one of your devices, streaming here live. Pro
-                    registers the renderer; the free build has no slot and this is nothing. */}
-                      {ChatMessagesFooter && activeConversationId ? (
-                        <ChatMessagesFooter
-                          conversationId={activeConversationId}
-                          promptEnhancementActive={promptEnhancementActive}
-                          promptEnhancementComplete={promptEnhancementComplete}
-                        />
-                      ) : null}
-                      {/* The in-flight image card shows whenever an image job owns this chat, including a
-                          tool-invoked image while the assistant turn is still streaming. Only the text
-                          placeholder waits for streaming to end. */}
-                      {!!activeConversationId &&
-                      !liveJourneyTask &&
-                      generatingConvs.has(activeConversationId) &&
-                      (imageGenConv === activeConversationId ||
-                        !messages.some((m) => m.streaming)) ? (
-                        <div className="mb-5 flex flex-col items-start">
-                          <div className="mb-1 text-[10px] uppercase tracking-wider text-neutral-600">
-                            Off Grid AI
-                          </div>
-                          {mode === 'image' || generatingImage ? (
-                            /* Same width cap as a finished image message, so the card does not grow to
-                               the chat's full width while it forms. */
-                            <div className="flex w-full max-w-2xl flex-col items-start gap-2">
-                              {imageJobStage === 'enhancing' || streamingEnhancedPrompt ? (
-                                <ChatThinkingBlock
-                                  content={streamingEnhancedPrompt || 'Starting…'}
-                                  live={imageJobStage === 'enhancing'}
-                                  label={
-                                    imageJobStage === 'enhancing'
-                                      ? 'Enhancing prompt…'
-                                      : 'Enhanced prompt'
-                                  }
-                                />
+                                  <svg
+                                    className="h-3 w-3"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      strokeWidth={2}
+                                      d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
+                                    />
+                                  </svg>
+                                  {q.attachmentCount}
+                                </span>
                               ) : null}
-                              <div className="w-full rounded-md border border-neutral-800 bg-neutral-900/40 p-3">
-                                {imgProgress?.preview ? (
-                                  <img
-                                    src={imgProgress.preview}
-                                    alt="forming"
-                                    className="mb-2 aspect-square w-full rounded-md border border-neutral-800 object-cover"
-                                  />
-                                ) : (
-                                  <div className="mb-2 flex aspect-square w-full items-center justify-center rounded-md border border-neutral-800 text-[11px] text-neutral-600">
-                                    Preparing image…
-                                  </div>
-                                )}
-                                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-neutral-500">
-                                  <span>{imageProgressLabel(imageJobStage, imgProgress)}</span>
-                                  {imgProgress ? (
-                                    <span className="text-neutral-600">
-                                      · ~
-                                      {Math.max(
-                                        0,
-                                        Math.round(
-                                          (imgProgress.total - imgProgress.step) *
-                                            imgProgress.secPerStep
-                                        )
-                                      )}
-                                      s left
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-neutral-800">
-                                  <div
-                                    className="h-full bg-green-500 transition-all duration-300"
-                                    style={{
-                                      width: imgProgress
-                                        ? `${(imgProgress.step / imgProgress.total) * 100}%`
-                                        : '5%'
-                                    }}
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          ) : (
-                            <ChatLoadingCard
-                              label={waitingLabel({ noMemory, hasProject: !!activeProjectId })}
-                            />
-                          )}
-                        </div>
-                      ) : null}
-                      <div ref={bottomRef} className="h-2" />
-                    </div>
-                  )}
-                </div>
-
-                {/* Composer */}
-                <div className="border-t border-neutral-900 px-6 py-3">
-                  <div className="w-full">
-                    {/* Image options (image mode, expandable) */}
-                    {mode === 'image' && showImageOptions && (
-                      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-neutral-800 px-3 py-2 text-[11px] text-neutral-500">
-                        {imgModels.length > 1 && (
-                          <label className="flex items-center gap-1.5">
-                            Model
-                            <select
-                              value={imgModel}
-                              onChange={(e) => chooseImageModel(e.target.value)}
-                              className="max-w-[12rem] rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-300 outline-none focus:border-green-500"
-                            >
-                              {imgModels.map((m) => (
-                                <option key={m} value={m}>
-                                  {modelFileDisplayName(m)}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        )}
-                        <label className="flex items-center gap-1.5">
-                          Size
-                          <select
-                            value={imgSize}
-                            onChange={(e) => setSizeOverride(Number(e.target.value))}
-                            className="rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-300 outline-none focus:border-green-500"
-                          >
-                            <option value={256}>256</option>
-                            <option value={512}>512</option>
-                            <option value={640}>640</option>
-                            <option value={768}>768</option>
-                            <option value={1024}>1024</option>
-                          </select>
-                        </label>
-                        <label className="flex items-center gap-1.5">
-                          Steps
-                          <input
-                            type="number"
-                            min={4}
-                            max={50}
-                            value={imgSteps}
-                            onChange={(e) =>
-                              setStepsOverride(
-                                Math.max(4, Math.min(50, Number(e.target.value) || 16))
-                              )
-                            }
-                            className="w-14 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-300 outline-none focus:border-green-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                          />
-                        </label>
-                        <label className="flex items-center gap-1.5">
-                          Guidance
-                          <input
-                            type="number"
-                            min={0}
-                            max={20}
-                            step={0.5}
-                            value={imgCfgScale}
-                            onChange={(e) =>
-                              setCfgScaleOverride(
-                                Math.max(0, Math.min(20, Number(e.target.value) || 0))
-                              )
-                            }
-                            className="w-14 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-300 outline-none focus:border-green-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                          />
-                        </label>
-                        <label className="flex items-center gap-1.5">
-                          Seed
-                          <SettingsTextField
-                            id="composer-image-seed"
-                            label="Seed"
-                            initialValue={imgSeed}
-                            persistedValue={imgSeed}
-                            sanitize={digitsOnly}
-                            commit={commitImgSeed}
-                            placeholder="random"
-                            className="w-20 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-300 placeholder-neutral-700 outline-none focus:border-green-500"
-                          />
-                        </label>
-                        <SettingsTextField
-                          id="composer-image-negative-prompt"
-                          label="Negative prompt"
-                          initialValue={imgNegative}
-                          persistedValue={imgNegative}
-                          commit={commitImgNegative}
-                          placeholder="Negative prompt"
-                          className="min-w-[10rem] flex-1 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-300 placeholder-neutral-700 outline-none focus:border-green-500"
-                        />
-                        <label
-                          className="flex items-center gap-1.5"
-                          title="Rewrite your prompt with the local model for richer, more detailed images"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={enhanceImg}
-                            onChange={(e) => setEnhanceImg(e.target.checked)}
-                            className="accent-green-500"
-                          />
-                          Enhance
-                        </label>
-                        {imgInit ? (
-                          <span className="flex items-center gap-2 rounded-md border border-green-500/40 px-2 py-1 text-green-500">
-                            {imgInit.split('/').pop()}
-                            <label
-                              className="flex items-center gap-1 text-neutral-500"
-                              title="img2img strength: how much to change the init image (0.1 = subtle, 1 = ignore it)"
-                            >
-                              Strength
-                              <input
-                                type="number"
-                                min={0.1}
-                                max={1}
-                                step={0.05}
-                                value={imgStrength}
-                                onChange={(e) =>
-                                  setImgStrength(
-                                    Math.max(0.1, Math.min(1, Number(e.target.value) || 0.6))
-                                  )
-                                }
-                                className="w-14 rounded border border-neutral-800 bg-neutral-950 px-1.5 py-0.5 text-neutral-300 outline-none focus:border-green-500"
-                              />
-                            </label>
-                            <button
-                              onClick={() => setImgInit(null)}
-                              className="text-neutral-500 hover:text-red-400"
-                            >
-                              ✕
-                            </button>
-                          </span>
-                        ) : (
-                          <button
-                            onClick={async () => {
-                              const p = await window.api.pickImageForGen()
-                              if (p) setImgInit(p)
-                            }}
-                            className="rounded-md border border-neutral-800 px-2 py-1 text-neutral-400 transition-colors hover:border-green-500 hover:text-green-500"
-                          >
-                            + Init image
-                          </button>
-                        )}
-                      </div>
-                    )}
-
-                    <AnimatePresence initial={false}>
-                      {mode === 'image' && messages.length > 0 ? (
-                        <motion.div
-                          key="inline-image-style-picker"
-                          role="region"
-                          aria-label="Image style presets"
-                          className="overflow-hidden"
-                          initial={{ height: 0, opacity: 0, y: 8 }}
-                          animate={{ height: 'auto', opacity: 1, y: 0 }}
-                          exit={{ height: 0, opacity: 0, y: 6 }}
-                          transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
-                        >
-                          <StylePresetPicker
-                            compact
-                            activeStyle={activeStyle}
-                            styleThumbs={styleThumbs}
-                            onChange={setActiveStyle}
-                          />
-                        </motion.div>
-                      ) : null}
-                    </AnimatePresence>
-
-                    {projCreating && (
-                      <NewProjectNameField
-                        onCreate={createAndAssignProject}
-                        onCancel={() => setProjCreating(false)}
-                      />
-                    )}
-
-                    {activeQueuedTurns.length > 0 && (
-                      <div className="mb-2 flex flex-col gap-1">
-                        {activeQueuedTurns.map((q) => (
-                          <div
-                            key={q.turnId}
-                            className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-1.5 text-[11px] text-neutral-400"
-                          >
-                            <svg
-                              className="h-3 w-3 shrink-0 text-neutral-600"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                              />
-                            </svg>
-                            <span className="flex-1 select-text cursor-text whitespace-pre-wrap break-words">
-                              {q.text ||
-                                `(${q.attachmentCount} attachment${q.attachmentCount > 1 ? 's' : ''})`}
-                            </span>
-                            {q.attachmentCount > 0 ? (
-                              <span
-                                className="flex shrink-0 items-center gap-1 text-neutral-500"
-                                title={`${q.attachmentCount} queued attachment${q.attachmentCount > 1 ? 's' : ''}`}
+                              <button
+                                onClick={() => copyText(q.text)}
+                                className="shrink-0 cursor-pointer text-neutral-600 transition-colors hover:text-green-500"
+                                title="Copy"
                               >
                                 <svg
                                   className="h-3 w-3"
@@ -4005,271 +4059,386 @@ export function MemoryChat({
                                     strokeLinecap="round"
                                     strokeLinejoin="round"
                                     strokeWidth={2}
-                                    d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
+                                    d="M8 16h8M8 12h8m-7 8h6a2 2 0 002-2V6a2 2 0 00-2-2h-3.586a1 1 0 00-.707.293l-2.414 2.414A1 1 0 009 7.414V18a2 2 0 002 2z"
                                   />
                                 </svg>
-                                {q.attachmentCount}
-                              </span>
-                            ) : null}
-                            <button
-                              onClick={() => copyText(q.text)}
-                              className="shrink-0 cursor-pointer text-neutral-600 transition-colors hover:text-green-500"
-                              title="Copy"
-                            >
-                              <svg
-                                className="h-3 w-3"
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth={2}
-                                  d="M8 16h8M8 12h8m-7 8h6a2 2 0 002-2V6a2 2 0 00-2-2h-3.586a1 1 0 00-.707.293l-2.414 2.414A1 1 0 009 7.414V18a2 2 0 002 2z"
-                                />
-                              </svg>
-                            </button>
-                            <span className="shrink-0 text-neutral-600">queued</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Unified composer — the SAME toolbar (attach / image / project /
-                  skills / tools / memory scope / thinking) serves chat and voice
-                  mode; only the input surface (textarea vs. mic) differs. */}
-                    <div
-                      data-testid="chat-composer"
-                      data-focus-surface="chat-composer"
-                      onDragOver={(e) => {
-                        e.preventDefault()
-                        if (!dragOver) setDragOver(true)
-                      }}
-                      onDragLeave={(e) => {
-                        if (e.currentTarget === e.target) setDragOver(false)
-                      }}
-                      onDrop={(e) => {
-                        e.preventDefault()
-                        setDragOver(false)
-                        if (e.dataTransfer.files.length) void addFiles(e.dataTransfer.files)
-                      }}
-                      className={`relative rounded-xl border bg-card text-card-foreground shadow-sm transition-colors ${dragOver ? 'border-primary' : 'border-input focus-within:border-ring'}`}
-                    >
-                      {dragOver ? (
-                        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-xl bg-card/80 text-xs text-primary">
-                          Drop files to attach
-                        </div>
-                      ) : null}
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        multiple
-                        className="hidden"
-                        onChange={(e) => {
-                          if (e.target.files?.length) void addFiles(e.target.files)
-                          e.target.value = ''
-                        }}
-                      />
-                      <input
-                        ref={imageInputRef}
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        className="hidden"
-                        onChange={(e) => {
-                          if (e.target.files?.length) void addFiles(e.target.files)
-                          e.target.value = ''
-                        }}
-                      />
-                      {attachWarn && (
-                        <div className="mx-3 mt-3 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
-                          <WarningCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" weight="fill" />
-                          <span className="flex-1">{attachWarn}</span>
-                          <button
-                            onClick={() => setAttachWarn(null)}
-                            className="shrink-0 text-amber-400/70 hover:text-amber-200"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      )}
-                      {attachments.length > 0 && (
-                        <div className="flex flex-wrap gap-2 px-3 pt-3">
-                          {attachments.map((a) => (
-                            <div
-                              key={a.id}
-                              className="group relative flex w-40 flex-col gap-1 rounded-lg border border-neutral-800 bg-neutral-900 p-2"
-                            >
-                              <button
-                                onClick={() => removeAttachment(a.id)}
-                                className="absolute -right-1.5 -top-1.5 z-10 flex h-4 w-4 items-center justify-center rounded-full border border-neutral-700 bg-neutral-950 text-[10px] text-neutral-400 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
-                              >
-                                ✕
                               </button>
-                              {a.kind === 'image' ? (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const url =
-                                      a.preview || (a.path ? captureUrlForPath(a.path) : '')
-                                    if (url) {
-                                      closePanels()
-                                      setLightbox({ url, path: a.path })
-                                    }
-                                  }}
-                                  title="Click to view"
-                                  className="relative h-[2.6rem] overflow-hidden rounded-md"
-                                >
-                                  <img
-                                    src={a.preview || (a.path ? captureUrlForPath(a.path) : '')}
-                                    alt={a.name}
-                                    className="h-full w-full object-cover"
-                                  />
-                                  {a.status === 'loading' ? (
-                                    <span className="absolute inset-0 flex items-center justify-center bg-neutral-950/50 text-[9px] text-neutral-300">
-                                      Reading…
-                                    </span>
-                                  ) : a.status === 'error' ? (
-                                    <span className="absolute inset-0 flex items-center justify-center bg-neutral-950/85 px-2 text-center text-[9px] text-red-300">
-                                      {a.error || 'Could not read this image.'}
-                                    </span>
-                                  ) : null}
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  disabled={!a.text}
-                                  onClick={() => {
-                                    if (a.text || a.path) {
-                                      closePanels()
-                                      setViewer({
-                                        title: a.kind === 'pasted' ? 'Pasted text' : a.name,
-                                        text: a.text || '',
-                                        path: a.path,
-                                        kind: a.kind
-                                      })
-                                    }
-                                  }}
-                                  title={a.text ? 'Click to expand' : undefined}
-                                  className="line-clamp-3 h-[2.6rem] overflow-hidden text-left text-[10px] leading-snug text-neutral-500 enabled:hover:text-neutral-300"
-                                >
-                                  {a.status === 'loading'
-                                    ? 'Processing…'
-                                    : a.status === 'error'
-                                      ? a.error || 'Could not read this file.'
-                                      : a.text.slice(0, 140) || a.name}
-                                </button>
-                              )}
-                              <div className="flex items-center justify-between">
-                                <span
-                                  className="truncate text-[10px] text-neutral-400"
-                                  title={a.name}
-                                >
-                                  {a.kind === 'pasted' ? '' : a.name}
-                                </span>
-                                <span className="rounded-sm border border-neutral-700 px-1 py-0.5 text-[9px] uppercase tracking-wide text-neutral-400">
-                                  {a.kind === 'pasted' ? 'Pasted' : a.kind}
-                                </span>
-                              </div>
+                              <span className="shrink-0 text-neutral-600">queued</span>
                             </div>
                           ))}
                         </div>
                       )}
-                      {/* Approval UX v2: pending gate cards + outcomes, in-flow above the composer */}
-                      <ActionGateDock conversationId={activeConversationId} />
-                      {/* Vision rail: the supervisor overlay slides in during a computer-use task */}
-                      {TaskSupervisorOverlay ? <TaskSupervisorOverlay /> : null}
-                      {voiceTurns.microphoneDenied && (
-                        <div
-                          role="alert"
-                          className="mx-2 mb-2 flex items-center justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100"
-                        >
-                          <span>
-                            Microphone access is off. Allow Off Grid AI Desktop in System Settings,
-                            then try again.
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => void window.api.openMicrophoneSettings()}
-                            className="shrink-0 text-amber-300 underline underline-offset-2 transition-colors hover:text-amber-100"
-                          >
-                            Open System Settings
-                          </button>
-                        </div>
-                      )}
-                      {voiceTurns.error && !voiceTurns.microphoneDenied && !voiceMode && (
-                        <div
-                          role="alert"
-                          className="mx-2 mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100"
-                        >
-                          {voiceTurns.error}
-                        </div>
-                      )}
-                      {voiceMode ? (
-                        <ChatVoiceComposer
-                          phase={voiceTurns.phase}
-                          turnMode={voiceTurnMode}
-                          suspended={voiceTurns.suspended}
-                          transcriptionLabel={voiceTurns.transcriptionLabel}
-                          error={voiceTurns.error}
-                          onToggleRecording={toggleRecording}
+
+                      {/* Unified composer — the SAME toolbar (attach / image / project /
+                  skills / tools / memory scope / thinking) serves chat and voice
+                  mode; only the input surface (textarea vs. mic) differs. */}
+                      <div
+                        data-testid="chat-composer"
+                        data-focus-surface="chat-composer"
+                        onDragOver={(e) => {
+                          e.preventDefault()
+                          if (!dragOver) setDragOver(true)
+                        }}
+                        onDragLeave={(e) => {
+                          if (e.currentTarget === e.target) setDragOver(false)
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault()
+                          setDragOver(false)
+                          if (e.dataTransfer.files.length) void addFiles(e.dataTransfer.files)
+                        }}
+                        className={`relative rounded-xl border bg-card text-card-foreground shadow-sm transition-colors ${dragOver ? 'border-primary' : 'border-input focus-within:border-ring'}`}
+                      >
+                        {dragOver ? (
+                          <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-xl bg-card/80 text-xs text-primary">
+                            Drop files to attach
+                          </div>
+                        ) : null}
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          multiple
+                          className="hidden"
+                          onChange={(e) => {
+                            if (e.target.files?.length) void addFiles(e.target.files)
+                            e.target.value = ''
+                          }}
                         />
-                      ) : (
-                        <ChatDraftInput
-                          ref={draftInputRef}
-                          store={draftStore}
-                          skills={skills}
-                          mode={mode}
-                          activeProjectName={activeProjectName}
-                          attachmentPending={attachments.some(
-                            (attachment) => attachment.status === 'loading'
-                          )}
-                          onPaste={handlePaste}
-                          onSubmit={() => void sendMessage()}
+                        <input
+                          ref={imageInputRef}
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          className="hidden"
+                          onChange={(e) => {
+                            if (e.target.files?.length) void addFiles(e.target.files)
+                            e.target.value = ''
+                          }}
                         />
-                      )}
-                      <div className="flex flex-wrap items-center justify-between gap-y-2 gap-x-2 px-2.5 pb-2.5 pt-1">
-                        {/* Chips wrap to a new line on narrow widths instead of overflowing the composer
-                      (the Image chip used to clip off the right edge). */}
-                        <div className="flex min-w-0 flex-wrap items-center gap-2">
-                          {/* "+" menu — attach / image / project / tools */}
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="icon"
-                                aria-label="Composer options"
-                                className="size-8 rounded-full"
-                              >
-                                <Plus className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent
-                              align="start"
-                              side="top"
-                              sideOffset={8}
-                              className="w-56"
+                        {attachWarn && (
+                          <div className="mx-3 mt-3 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
+                            <WarningCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" weight="fill" />
+                            <span className="flex-1">{attachWarn}</span>
+                            <button
+                              onClick={() => setAttachWarn(null)}
+                              className="shrink-0 text-amber-400/70 hover:text-amber-200"
                             >
-                              <DropdownMenuItem onSelect={() => fileInputRef.current?.click()}>
-                                <Paperclip /> Attach files
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onSelect={() => imageInputRef.current?.click()}>
-                                <ImageIcon /> Add image
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                disabled={!imageAvailable}
-                                onSelect={() => setMode('image')}
+                              ✕
+                            </button>
+                          </div>
+                        )}
+                        {attachments.length > 0 && (
+                          <div className="flex flex-wrap gap-2 px-3 pt-3">
+                            {attachments.map((a) => (
+                              <div
+                                key={a.id}
+                                className="group relative flex w-40 flex-col gap-1 rounded-lg border border-neutral-800 bg-neutral-900 p-2"
                               >
-                                <Sparkles /> Generate image
-                              </DropdownMenuItem>
-                              {projects.length > 0 ? (
-                                <DropdownMenuSub>
-                                  <DropdownMenuSubTrigger>
-                                    <FolderOpen /> Add to project
-                                  </DropdownMenuSubTrigger>
-                                  <DropdownMenuSubContent className="max-h-72 w-52 overflow-y-auto">
+                                <button
+                                  onClick={() => removeAttachment(a.id)}
+                                  className="absolute -right-1.5 -top-1.5 z-10 flex h-4 w-4 items-center justify-center rounded-full border border-neutral-700 bg-neutral-950 text-[10px] text-neutral-400 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
+                                >
+                                  ✕
+                                </button>
+                                {a.kind === 'image' ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const url =
+                                        a.preview || (a.path ? captureUrlForPath(a.path) : '')
+                                      if (url) {
+                                        closePanels()
+                                        setLightbox({ url, path: a.path })
+                                      }
+                                    }}
+                                    title="Click to view"
+                                    className="relative h-[2.6rem] overflow-hidden rounded-md"
+                                  >
+                                    <img
+                                      src={a.preview || (a.path ? captureUrlForPath(a.path) : '')}
+                                      alt={a.name}
+                                      className="h-full w-full object-cover"
+                                    />
+                                    {a.status === 'loading' ? (
+                                      <span className="absolute inset-0 flex items-center justify-center bg-neutral-950/50 text-[9px] text-neutral-300">
+                                        Reading…
+                                      </span>
+                                    ) : a.status === 'error' ? (
+                                      <span className="absolute inset-0 flex items-center justify-center bg-neutral-950/85 px-2 text-center text-[9px] text-red-300">
+                                        {a.error || 'Could not read this image.'}
+                                      </span>
+                                    ) : null}
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    disabled={!a.text}
+                                    onClick={() => {
+                                      if (a.text || a.path) {
+                                        closePanels()
+                                        setViewer({
+                                          title: a.kind === 'pasted' ? 'Pasted text' : a.name,
+                                          text: a.text || '',
+                                          path: a.path,
+                                          kind: a.kind
+                                        })
+                                      }
+                                    }}
+                                    title={a.text ? 'Click to expand' : undefined}
+                                    className="line-clamp-3 h-[2.6rem] overflow-hidden text-left text-[10px] leading-snug text-neutral-500 enabled:hover:text-neutral-300"
+                                  >
+                                    {a.status === 'loading'
+                                      ? 'Processing…'
+                                      : a.status === 'error'
+                                        ? a.error || 'Could not read this file.'
+                                        : a.text.slice(0, 140) || a.name}
+                                  </button>
+                                )}
+                                <div className="flex items-center justify-between">
+                                  <span
+                                    className="truncate text-[10px] text-neutral-400"
+                                    title={a.name}
+                                  >
+                                    {a.kind === 'pasted' ? '' : a.name}
+                                  </span>
+                                  <span className="rounded-sm border border-neutral-700 px-1 py-0.5 text-[9px] uppercase tracking-wide text-neutral-400">
+                                    {a.kind === 'pasted' ? 'Pasted' : a.kind}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {/* Approval UX v2: pending gate cards + outcomes, in-flow above the composer */}
+                        <ActionGateDock conversationId={activeConversationId} />
+                        {/* Vision rail: the supervisor overlay slides in during a computer-use task */}
+                        {TaskSupervisorOverlay ? <TaskSupervisorOverlay /> : null}
+                        {voiceTurns.microphoneDenied && (
+                          <div
+                            role="alert"
+                            className="mx-2 mb-2 flex items-center justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100"
+                          >
+                            <span>
+                              Microphone access is off. Allow Off Grid AI Desktop in System
+                              Settings, then try again.
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => void window.api.openMicrophoneSettings()}
+                              className="shrink-0 text-amber-300 underline underline-offset-2 transition-colors hover:text-amber-100"
+                            >
+                              Open System Settings
+                            </button>
+                          </div>
+                        )}
+                        {voiceTurns.error && !voiceTurns.microphoneDenied && !voiceMode && (
+                          <div
+                            role="alert"
+                            className="mx-2 mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100"
+                          >
+                            {voiceTurns.error}
+                          </div>
+                        )}
+                        {voiceMode ? (
+                          <ChatVoiceComposer
+                            phase={voiceTurns.phase}
+                            turnMode={voiceTurnMode}
+                            suspended={voiceTurns.suspended}
+                            transcriptionLabel={voiceTurns.transcriptionLabel}
+                            error={voiceTurns.error}
+                            onToggleRecording={toggleRecording}
+                          />
+                        ) : (
+                          <ChatDraftInput
+                            ref={draftInputRef}
+                            store={draftStore}
+                            skills={skills}
+                            mode={mode}
+                            activeProjectName={activeProjectName}
+                            attachmentPending={attachments.some(
+                              (attachment) => attachment.status === 'loading'
+                            )}
+                            onPaste={handlePaste}
+                            onSubmit={() => void sendMessage()}
+                          />
+                        )}
+                        <div className="flex flex-wrap items-center justify-between gap-y-2 gap-x-2 px-2.5 pb-2.5 pt-1">
+                          {/* Chips wrap to a new line on narrow widths instead of overflowing the composer
+                      (the Image chip used to clip off the right edge). */}
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            {/* "+" menu — attach / image / project / tools */}
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="icon"
+                                  aria-label="Composer options"
+                                  className="size-8 rounded-full"
+                                >
+                                  <Plus className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent
+                                align="start"
+                                side="top"
+                                sideOffset={8}
+                                className="w-56"
+                              >
+                                <DropdownMenuItem onSelect={() => fileInputRef.current?.click()}>
+                                  <Paperclip /> Attach files
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onSelect={() => imageInputRef.current?.click()}>
+                                  <ImageIcon /> Add image
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  disabled={!imageAvailable}
+                                  onSelect={() => setMode('image')}
+                                >
+                                  <Sparkles /> Generate image
+                                </DropdownMenuItem>
+                                {projects.length > 0 ? (
+                                  <DropdownMenuSub>
+                                    <DropdownMenuSubTrigger>
+                                      <FolderOpen /> Add to project
+                                    </DropdownMenuSubTrigger>
+                                    <DropdownMenuSubContent className="max-h-72 w-52 overflow-y-auto">
+                                      {projects.map((p) => (
+                                        <DropdownMenuItem
+                                          key={p.id}
+                                          onSelect={() => {
+                                            setNoMemory(false)
+                                            assignProject(p.id)
+                                          }}
+                                        >
+                                          <FolderOpen />{' '}
+                                          <span className="flex-1 truncate">{p.name}</span>
+                                          {activeProjectId === p.id && (
+                                            <Check className="h-3.5 w-3.5 text-primary" />
+                                          )}
+                                        </DropdownMenuItem>
+                                      ))}
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuItem onSelect={() => setProjCreating(true)}>
+                                        <FolderPlus /> New project
+                                      </DropdownMenuItem>
+                                    </DropdownMenuSubContent>
+                                  </DropdownMenuSub>
+                                ) : (
+                                  <DropdownMenuItem onSelect={() => setProjCreating(true)}>
+                                    <FolderPlus /> Add to project
+                                  </DropdownMenuItem>
+                                )}
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onSelect={() => {
+                                    closePanels()
+                                    setSkillsOpen(true)
+                                  }}
+                                >
+                                  <Lightning /> Skills
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onSelect={(e) => {
+                                    e.preventDefault()
+                                    setToolsOn((t) => !t)
+                                  }}
+                                >
+                                  <Wrench /> <span className="flex-1">Tools</span>
+                                  <span
+                                    className={`text-xs ${toolsOn ? 'text-primary' : 'text-muted-foreground'}`}
+                                  >
+                                    {toolsOn ? 'On' : 'Off'}
+                                  </span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onSelect={(e) => {
+                                    e.preventDefault()
+                                    setConnectorsOn((t) => !t)
+                                  }}
+                                >
+                                  <Plug /> <span className="flex-1">Connectors</span>
+                                  <span
+                                    className={`text-xs ${connectorsOn ? 'text-primary' : 'text-muted-foreground'}`}
+                                  >
+                                    {connectorsOn ? 'On' : 'Off'}
+                                  </span>
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                            {/* Scope — Off Grid AI (default) or a project */}
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  title="Choose what this chat can draw on: your memory, nothing, or a project"
+                                  className={`h-8 gap-1.5 rounded-full ${activeProjectId || (isPro && !noMemory) ? 'border-green-500 text-primary' : 'text-neutral-400'}`}
+                                >
+                                  {activeProjectId ? (
+                                    <FolderOpen className="h-3.5 w-3.5" />
+                                  ) : (
+                                    <Brain className="h-3.5 w-3.5" />
+                                  )}
+                                  <span className="max-w-[9rem] truncate">
+                                    {activeProjectName ?? (noMemory ? 'No memory' : 'All memory')}
+                                  </span>
+                                  <CaretDown className="h-3 w-3 opacity-60" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent
+                                align="start"
+                                side="top"
+                                sideOffset={8}
+                                className="w-56"
+                              >
+                                <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                  Memory for this chat
+                                </DropdownMenuLabel>
+                                {isPro && (
+                                  <DropdownMenuItem
+                                    onSelect={() => {
+                                      setNoMemory(false)
+                                      assignProject(null)
+                                    }}
+                                  >
+                                    <Brain />
+                                    <span
+                                      className={`flex-1 ${!activeProjectId && !noMemory ? 'text-primary' : ''}`}
+                                    >
+                                      All memory
+                                    </span>
+                                    {!activeProjectId && !noMemory && (
+                                      <Check className="h-3.5 w-3.5 text-primary" />
+                                    )}
+                                  </DropdownMenuItem>
+                                )}
+                                <DropdownMenuItem
+                                  onSelect={() => {
+                                    setNoMemory(true)
+                                    assignProject(null)
+                                  }}
+                                >
+                                  <Prohibit />
+                                  <span
+                                    className={`flex-1 ${!activeProjectId && noMemory ? 'text-primary' : ''}`}
+                                  >
+                                    No memory{' '}
+                                    <span className="text-[10px] text-muted-foreground">
+                                      · plain chat
+                                    </span>
+                                  </span>
+                                  {!activeProjectId && noMemory && (
+                                    <Check className="h-3.5 w-3.5 text-primary" />
+                                  )}
+                                </DropdownMenuItem>
+                                {projects.length > 0 && (
+                                  <>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                      Project memory
+                                    </DropdownMenuLabel>
                                     {projects.map((p) => (
                                       <DropdownMenuItem
                                         key={p.id}
@@ -4278,723 +4447,597 @@ export function MemoryChat({
                                           assignProject(p.id)
                                         }}
                                       >
-                                        <FolderOpen />{' '}
-                                        <span className="flex-1 truncate">{p.name}</span>
+                                        <FolderOpen />
+                                        <span
+                                          className={`flex-1 truncate ${activeProjectId === p.id ? 'text-primary' : ''}`}
+                                        >
+                                          {p.name}
+                                        </span>
                                         {activeProjectId === p.id && (
                                           <Check className="h-3.5 w-3.5 text-primary" />
                                         )}
                                       </DropdownMenuItem>
                                     ))}
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem onSelect={() => setProjCreating(true)}>
-                                      <FolderPlus /> New project
-                                    </DropdownMenuItem>
-                                  </DropdownMenuSubContent>
-                                </DropdownMenuSub>
-                              ) : (
+                                  </>
+                                )}
+                                <DropdownMenuSeparator />
                                 <DropdownMenuItem onSelect={() => setProjCreating(true)}>
-                                  <FolderPlus /> Add to project
+                                  <FolderPlus /> New project
                                 </DropdownMenuItem>
-                              )}
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                onSelect={() => {
-                                  closePanels()
-                                  setSkillsOpen(true)
-                                }}
-                              >
-                                <Lightning /> Skills
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onSelect={(e) => {
-                                  e.preventDefault()
-                                  setToolsOn((t) => !t)
-                                }}
-                              >
-                                <Wrench /> <span className="flex-1">Tools</span>
-                                <span
-                                  className={`text-xs ${toolsOn ? 'text-primary' : 'text-muted-foreground'}`}
-                                >
-                                  {toolsOn ? 'On' : 'Off'}
-                                </span>
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onSelect={(e) => {
-                                  e.preventDefault()
-                                  setConnectorsOn((t) => !t)
-                                }}
-                              >
-                                <Plug /> <span className="flex-1">Connectors</span>
-                                <span
-                                  className={`text-xs ${connectorsOn ? 'text-primary' : 'text-muted-foreground'}`}
-                                >
-                                  {connectorsOn ? 'On' : 'Off'}
-                                </span>
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                          {/* Scope — Off Grid AI (default) or a project */}
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                title="Choose what this chat can draw on: your memory, nothing, or a project"
-                                className={`h-8 gap-1.5 rounded-full ${activeProjectId || (isPro && !noMemory) ? 'border-green-500 text-primary' : 'text-neutral-400'}`}
-                              >
-                                {activeProjectId ? (
-                                  <FolderOpen className="h-3.5 w-3.5" />
-                                ) : (
-                                  <Brain className="h-3.5 w-3.5" />
-                                )}
-                                <span className="max-w-[9rem] truncate">
-                                  {activeProjectName ?? (noMemory ? 'No memory' : 'All memory')}
-                                </span>
-                                <CaretDown className="h-3 w-3 opacity-60" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent
-                              align="start"
-                              side="top"
-                              sideOffset={8}
-                              className="w-56"
-                            >
-                              <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                                Memory for this chat
-                              </DropdownMenuLabel>
-                              {isPro && (
-                                <DropdownMenuItem
-                                  onSelect={() => {
-                                    setNoMemory(false)
-                                    assignProject(null)
-                                  }}
-                                >
-                                  <Brain />
-                                  <span
-                                    className={`flex-1 ${!activeProjectId && !noMemory ? 'text-primary' : ''}`}
-                                  >
-                                    All memory
-                                  </span>
-                                  {!activeProjectId && !noMemory && (
-                                    <Check className="h-3.5 w-3.5 text-primary" />
-                                  )}
-                                </DropdownMenuItem>
-                              )}
-                              <DropdownMenuItem
-                                onSelect={() => {
-                                  setNoMemory(true)
-                                  assignProject(null)
-                                }}
-                              >
-                                <Prohibit />
-                                <span
-                                  className={`flex-1 ${!activeProjectId && noMemory ? 'text-primary' : ''}`}
-                                >
-                                  No memory{' '}
-                                  <span className="text-[10px] text-muted-foreground">
-                                    · plain chat
-                                  </span>
-                                </span>
-                                {!activeProjectId && noMemory && (
-                                  <Check className="h-3.5 w-3.5 text-primary" />
-                                )}
-                              </DropdownMenuItem>
-                              {projects.length > 0 && (
-                                <>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                                    Project memory
-                                  </DropdownMenuLabel>
-                                  {projects.map((p) => (
-                                    <DropdownMenuItem
-                                      key={p.id}
-                                      onSelect={() => {
-                                        setNoMemory(false)
-                                        assignProject(p.id)
-                                      }}
-                                    >
-                                      <FolderOpen />
-                                      <span
-                                        className={`flex-1 truncate ${activeProjectId === p.id ? 'text-primary' : ''}`}
-                                      >
-                                        {p.name}
-                                      </span>
-                                      {activeProjectId === p.id && (
-                                        <Check className="h-3.5 w-3.5 text-primary" />
-                                      )}
-                                    </DropdownMenuItem>
-                                  ))}
-                                </>
-                              )}
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem onSelect={() => setProjCreating(true)}>
-                                <FolderPlus /> New project
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                          {/* Active model + context window — click to change (opens the same
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                            {/* Active model + context window — click to change (opens the same
                         ModelPicker as the header). Mirrors what the Active-models panel shows. */}
-                          {modelSummary.status === 'loading' ? (
-                            <span role="status" className="px-1 text-[10px] text-muted-foreground">
-                              Loading model status
-                            </span>
-                          ) : null}
-                          {modelSummary.status === 'failed' ? (
-                            <span
-                              role="alert"
-                              title={modelSummary.failure?.message}
-                              className="px-1 text-[10px] text-destructive"
-                            >
-                              Model status unavailable
-                            </span>
-                          ) : null}
-                          {modelSummary.name && (
+                            {modelSummary.status === 'loading' ? (
+                              <span
+                                role="status"
+                                className="px-1 text-[10px] text-muted-foreground"
+                              >
+                                Loading model status
+                              </span>
+                            ) : null}
+                            {modelSummary.status === 'failed' ? (
+                              <span
+                                role="alert"
+                                title={modelSummary.failure?.message}
+                                className="px-1 text-[10px] text-destructive"
+                              >
+                                Model status unavailable
+                              </span>
+                            ) : null}
+                            {modelSummary.name && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setModelPickerOpen(true)}
+                                    className="h-8 max-w-[14rem] gap-1.5 rounded-full text-neutral-400"
+                                  >
+                                    <Cpu className="h-3.5 w-3.5 shrink-0" />
+                                    <span className="truncate">{modelSummary.name}</span>
+                                    {modelSummary.ctx && (
+                                      <span className="shrink-0 text-neutral-600">
+                                        · {modelSummary.ctx}
+                                      </span>
+                                    )}
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  {`Active model: ${modelSummary.name}${
+                                    modelSummary.ctx ? ` · ${modelSummary.ctx} context window` : ''
+                                  }. Click to change.`}
+                                </TooltipContent>
+                              </Tooltip>
+                            )}
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <Button
                                   type="button"
                                   variant="outline"
                                   size="sm"
-                                  onClick={() => setModelPickerOpen(true)}
-                                  className="h-8 max-w-[14rem] gap-1.5 rounded-full text-neutral-400"
+                                  disabled={!thinkingAvailable}
+                                  aria-label={thinkingControlLabel}
+                                  onClick={() => setThinkingEnabled((t) => !t)}
+                                  className={`h-8 gap-1.5 rounded-full ${thinkingRequested ? 'border-green-500 text-primary' : 'text-neutral-400'}`}
                                 >
-                                  <Cpu className="h-3.5 w-3.5 shrink-0" />
-                                  <span className="truncate">{modelSummary.name}</span>
-                                  {modelSummary.ctx && (
-                                    <span className="shrink-0 text-neutral-600">
-                                      · {modelSummary.ctx}
-                                    </span>
-                                  )}
+                                  <Brain className="h-3.5 w-3.5" /> Thinking
                                 </Button>
                               </TooltipTrigger>
                               <TooltipContent>
-                                {`Active model: ${modelSummary.name}${
-                                  modelSummary.ctx ? ` · ${modelSummary.ctx} context window` : ''
-                                }. Click to change.`}
+                                {modelSummary.status === 'loading'
+                                  ? 'Thinking stays off until the active model is ready.'
+                                  : modelSummary.status === 'failed'
+                                    ? `Thinking stays off because the model status could not load${modelSummary.failure?.message ? `: ${modelSummary.failure.message}` : '.'}`
+                                    : !thinkingAvailable
+                                      ? `${modelSummary.name ?? 'The active model'} does not support Thinking.`
+                                      : thinkingRequested
+                                        ? 'Reasoning on — the model thinks step by step (slower)'
+                                        : 'Reasoning off — direct answers (faster)'}
                               </TooltipContent>
                             </Tooltip>
-                          )}
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                disabled={!thinkingAvailable}
-                                aria-label={thinkingControlLabel}
-                                onClick={() => setThinkingEnabled((t) => !t)}
-                                className={`h-8 gap-1.5 rounded-full ${thinkingRequested ? 'border-green-500 text-primary' : 'text-neutral-400'}`}
-                              >
-                                <Brain className="h-3.5 w-3.5" /> Thinking
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              {modelSummary.status === 'loading'
-                                ? 'Thinking stays off until the active model is ready.'
-                                : modelSummary.status === 'failed'
-                                  ? `Thinking stays off because the model status could not load${modelSummary.failure?.message ? `: ${modelSummary.failure.message}` : '.'}`
-                                  : !thinkingAvailable
-                                    ? `${modelSummary.name ?? 'The active model'} does not support Thinking.`
-                                    : thinkingRequested
-                                      ? 'Reasoning on — the model thinks step by step (slower)'
-                                      : 'Reasoning off — direct answers (faster)'}
-                            </TooltipContent>
-                          </Tooltip>
-                          <VoiceModeControl
-                            active={voiceMode}
-                            onToggle={() => setVoiceMode((current) => !current)}
-                            onOpenSettings={() => {
-                              closePanels()
-                              setSettingsInitialTab('voice')
-                              setSettingsOpen(true)
-                            }}
-                          />
-                          {/* Image toggle — always available; turning it on makes the next
+                            <VoiceModeControl
+                              active={voiceMode}
+                              onToggle={() => setVoiceMode((current) => !current)}
+                              onOpenSettings={() => {
+                                closePanels()
+                                setSettingsInitialTab('voice')
+                                setSettingsOpen(true)
+                              }}
+                            />
+                            {/* Image toggle — always available; turning it on makes the next
                       prompt generate an image instead of a chat reply. */}
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                  const on = mode !== 'image'
-                                  setMode(on ? 'image' : 'ask')
-                                  if (!on) setShowImageOptions(false)
-                                }}
-                                className={`h-8 gap-1.5 rounded-full ${mode === 'image' ? 'border-green-500 text-primary' : 'text-neutral-400'}`}
-                              >
-                                <Sparkles className="h-3.5 w-3.5" /> Image
-                                {mode === 'image' && <X className="h-3.5 w-3.5 opacity-70" />}
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              {mode === 'image'
-                                ? 'Image mode on — your prompt generates an image (click to return to chat)'
-                                : 'Generate an image from your prompt'}
-                            </TooltipContent>
-                          </Tooltip>
-                          {mode === 'image' && (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setShowImageOptions((o) => !o)}
-                              className={`h-8 gap-1.5 rounded-full ${showImageOptions ? 'text-primary' : ''}`}
-                            >
-                              <SlidersHorizontal className="h-3.5 w-3.5" /> Image options
-                            </Button>
-                          )}
-                          {activeQueuedTurns.length > 0 && (
-                            <span className="flex h-8 items-center rounded-full border border-neutral-800 px-2.5 text-[11px] text-neutral-400">
-                              {activeQueuedTurns.length} queued
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="flex shrink-0 items-center gap-1.5">
-                          {!voiceMode && (
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <Button
                                   type="button"
                                   variant="outline"
-                                  size="icon"
-                                  aria-label={textRecordButtonLabel}
-                                  onClick={toggleRecording}
-                                  className={`size-8 ${recording ? 'border-red-500/50 text-red-400' : ''}`}
+                                  size="sm"
+                                  onClick={() => {
+                                    const on = mode !== 'image'
+                                    setMode(on ? 'image' : 'ask')
+                                    if (!on) setShowImageOptions(false)
+                                  }}
+                                  className={`h-8 gap-1.5 rounded-full ${mode === 'image' ? 'border-green-500 text-primary' : 'text-neutral-400'}`}
                                 >
-                                  {transcribing ? (
-                                    <span className="relative flex items-center justify-center">
-                                      <svg
-                                        className="h-4 w-4 animate-spin"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                      >
-                                        <circle
-                                          className="opacity-25"
-                                          cx="12"
-                                          cy="12"
-                                          r="10"
-                                          stroke="currentColor"
-                                          strokeWidth="4"
-                                        />
-                                        <path
-                                          className="opacity-75"
-                                          fill="currentColor"
-                                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                                        />
-                                      </svg>
-                                      <X className="absolute h-2.5 w-2.5" weight="bold" />
-                                    </span>
-                                  ) : recording ? (
-                                    <svg
-                                      className="h-4 w-4"
-                                      fill="currentColor"
-                                      viewBox="0 0 24 24"
-                                    >
-                                      <rect x="6" y="6" width="12" height="12" rx="2" />
-                                    </svg>
-                                  ) : (
-                                    <svg
-                                      className="h-4 w-4"
-                                      fill="none"
-                                      stroke="currentColor"
-                                      viewBox="0 0 24 24"
-                                    >
-                                      <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M19 11a7 7 0 01-14 0m7 7v3m0-3a4 4 0 01-4-4V5a4 4 0 018 0v6a4 4 0 01-4 4z"
-                                      />
-                                    </svg>
-                                  )}
+                                  <Sparkles className="h-3.5 w-3.5" /> Image
+                                  {mode === 'image' && <X className="h-3.5 w-3.5 opacity-70" />}
                                 </Button>
                               </TooltipTrigger>
-                              <TooltipContent>{textRecordTooltip}</TooltipContent>
+                              <TooltipContent>
+                                {mode === 'image'
+                                  ? 'Image mode on — your prompt generates an image (click to return to chat)'
+                                  : 'Generate an image from your prompt'}
+                              </TooltipContent>
                             </Tooltip>
-                          )}
-                          {/* Stop shows for the WHOLE generating window — the pre-stream
-                        "Searching your memory…" phase as well as a live token stream —
-                        so an in-flight turn is always cancellable. Image gen has its own
-                        labeled Stop just below, so skip this icon in that mode. */}
-                          {!!activeConversationId &&
-                            generatingConvs.has(activeConversationId) &&
-                            !(loading && generatingImage) && (
+                            {mode === 'image' && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setShowImageOptions((o) => !o)}
+                                className={`h-8 gap-1.5 rounded-full ${showImageOptions ? 'text-primary' : ''}`}
+                              >
+                                <SlidersHorizontal className="h-3.5 w-3.5" /> Image options
+                              </Button>
+                            )}
+                            {activeQueuedTurns.length > 0 && (
+                              <span className="flex h-8 items-center rounded-full border border-neutral-800 px-2.5 text-[11px] text-neutral-400">
+                                {activeQueuedTurns.length} queued
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex shrink-0 items-center gap-1.5">
+                            {!voiceMode && (
                               <Tooltip>
                                 <TooltipTrigger asChild>
                                   <Button
                                     type="button"
                                     variant="outline"
                                     size="icon"
-                                    aria-label="Stop generating"
-                                    onClick={() =>
-                                      void stopGeneration(activeConversationId, liveJourneyTask)
-                                    }
-                                    className="size-8 rounded-full border-red-500/50 text-red-400 hover:bg-red-500/10"
+                                    aria-label={textRecordButtonLabel}
+                                    onClick={toggleRecording}
+                                    className={`size-8 ${recording ? 'border-red-500/50 text-red-400' : ''}`}
                                   >
-                                    <svg
-                                      className="h-3.5 w-3.5"
-                                      fill="currentColor"
-                                      viewBox="0 0 24 24"
-                                    >
-                                      <rect x="6" y="6" width="12" height="12" rx="2" />
-                                    </svg>
+                                    {transcribing ? (
+                                      <span className="relative flex items-center justify-center">
+                                        <svg
+                                          className="h-4 w-4 animate-spin"
+                                          fill="none"
+                                          viewBox="0 0 24 24"
+                                        >
+                                          <circle
+                                            className="opacity-25"
+                                            cx="12"
+                                            cy="12"
+                                            r="10"
+                                            stroke="currentColor"
+                                            strokeWidth="4"
+                                          />
+                                          <path
+                                            className="opacity-75"
+                                            fill="currentColor"
+                                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                                          />
+                                        </svg>
+                                        <X className="absolute h-2.5 w-2.5" weight="bold" />
+                                      </span>
+                                    ) : recording ? (
+                                      <svg
+                                        className="h-4 w-4"
+                                        fill="currentColor"
+                                        viewBox="0 0 24 24"
+                                      >
+                                        <rect x="6" y="6" width="12" height="12" rx="2" />
+                                      </svg>
+                                    ) : (
+                                      <svg
+                                        className="h-4 w-4"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        viewBox="0 0 24 24"
+                                      >
+                                        <path
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                          strokeWidth={2}
+                                          d="M19 11a7 7 0 01-14 0m7 7v3m0-3a4 4 0 01-4-4V5a4 4 0 018 0v6a4 4 0 01-4 4z"
+                                        />
+                                      </svg>
+                                    )}
                                   </Button>
                                 </TooltipTrigger>
-                                <TooltipContent>Stop generating</TooltipContent>
+                                <TooltipContent>{textRecordTooltip}</TooltipContent>
                               </Tooltip>
                             )}
-                          {loading && generatingImage ? (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={() => {
-                                void stopGeneration(activeConversationId, liveJourneyTask)
-                              }}
-                              className="h-8 gap-1.5 border-red-500/50 text-red-400 hover:bg-red-500/10"
-                            >
-                              <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
-                                <rect x="6" y="6" width="12" height="12" rx="2" />
-                              </svg>
-                              Stop
-                            </Button>
-                          ) : voiceMode ? null : (
-                            <ChatDraftSendButton
-                              store={draftStore}
-                              hasAttachments={attachments.length > 0}
-                              attachmentPending={attachments.some(
-                                (attachment) => attachment.status === 'loading'
+                            {/* Stop shows for the WHOLE generating window — the pre-stream
+                        "Searching your memory…" phase as well as a live token stream —
+                        so an in-flight turn is always cancellable. Image gen has its own
+                        labeled Stop just below, so skip this icon in that mode. */}
+                            {!!activeConversationId &&
+                              generatingConvs.has(activeConversationId) &&
+                              !(loading && generatingImage) && (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="icon"
+                                      aria-label="Stop generating"
+                                      onClick={() =>
+                                        void stopGeneration(activeConversationId, liveJourneyTask)
+                                      }
+                                      className="size-8 rounded-full border-red-500/50 text-red-400 hover:bg-red-500/10"
+                                    >
+                                      <svg
+                                        className="h-3.5 w-3.5"
+                                        fill="currentColor"
+                                        viewBox="0 0 24 24"
+                                      >
+                                        <rect x="6" y="6" width="12" height="12" rx="2" />
+                                      </svg>
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Stop generating</TooltipContent>
+                                </Tooltip>
                               )}
-                              onSubmit={() => void sendMessage()}
-                            />
-                          )}
+                            {loading && generatingImage ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => {
+                                  void stopGeneration(activeConversationId, liveJourneyTask)
+                                }}
+                                className="h-8 gap-1.5 border-red-500/50 text-red-400 hover:bg-red-500/10"
+                              >
+                                <svg
+                                  className="h-3.5 w-3.5"
+                                  fill="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <rect x="6" y="6" width="12" height="12" rx="2" />
+                                </svg>
+                                Stop
+                              </Button>
+                            ) : voiceMode ? null : (
+                              <ChatDraftSendButton
+                                store={draftStore}
+                                hasAttachments={attachments.length > 0}
+                                attachmentPending={attachments.some(
+                                  (attachment) => attachment.status === 'loading'
+                                )}
+                                onSubmit={() => void sendMessage()}
+                              />
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            </Panel>
-          </PanelGroup>
-        </Panel>
-        {TaskWorkspace ? (
-          <PanelResizeHandle
-            aria-label="Resize Chat and task"
-            title="Drag to resize Chat and task"
-            className={`group relative w-2 shrink-0 cursor-col-resize border-x border-neutral-800 bg-neutral-950 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-green-500 ${
-              taskWorkspaceVisible ? '' : 'hidden'
-            }`}
-            onDragging={setTaskWorkspaceDragging}
-            onKeyDown={(event) => {
-              if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-              event.preventDefault()
-              event.stopPropagation()
-              resizeTaskWorkspaceFromKeyboard(event.key)
-            }}
-            aria-valuemin={32}
-            aria-valuemax={68}
-            aria-valuenow={Math.round(taskWorkspaceSize)}
-            aria-valuetext={`Task workspace ${Math.round(taskWorkspaceSize)} percent`}
-          >
-            <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px bg-transparent group-hover:bg-green-500/50 group-focus-visible:bg-green-500 group-data-[resize-handle-state=drag]:bg-green-500" />
-          </PanelResizeHandle>
-        ) : null}
-        {TaskWorkspace ? (
-          <Panel
-            ref={taskWorkspaceRef}
-            id="task-workspace"
-            order={2}
-            defaultSize={48}
-            minSize={32}
-            collapsible
-            collapsedSize={0}
-            className="min-w-0"
-            style={{ transition: taskWorkspaceTransition }}
-            onResize={reportTaskSize}
-          >
-            <TaskWorkspace
-              mainWorkspaceCollapsed={chatBodyCollapsed}
-              onToggleMainWorkspace={toggleChatBodyVisibility}
-              onDetailModeChange={handleTaskDetailModeChange}
-              routeActive
-              conversationId={activeConversationId}
-            />
+              </Panel>
+            </PanelGroup>
           </Panel>
-        ) : null}
-      </PanelGroup>
+          {TaskWorkspace ? (
+            <PanelResizeHandle
+              aria-label="Resize Chat and task"
+              title="Drag to resize Chat and task"
+              className={`group relative w-2 shrink-0 cursor-col-resize border-x border-neutral-800 bg-neutral-950 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-green-500 ${
+                taskWorkspaceVisible ? '' : 'hidden'
+              }`}
+              onDragging={setTaskWorkspaceDragging}
+              onKeyDown={(event) => {
+                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+                event.preventDefault()
+                event.stopPropagation()
+                resizeTaskWorkspaceFromKeyboard(event.key)
+              }}
+              aria-valuemin={32}
+              aria-valuemax={68}
+              aria-valuenow={Math.round(taskWorkspaceSize)}
+              aria-valuetext={`Task workspace ${Math.round(taskWorkspaceSize)} percent`}
+            >
+              <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px bg-transparent group-hover:bg-green-500/50 group-focus-visible:bg-green-500 group-data-[resize-handle-state=drag]:bg-green-500" />
+            </PanelResizeHandle>
+          ) : null}
+          {TaskWorkspace ? (
+            <Panel
+              ref={taskWorkspaceRef}
+              id="task-workspace"
+              order={2}
+              defaultSize={48}
+              minSize={32}
+              collapsible
+              collapsedSize={0}
+              className="min-w-0"
+              style={{ transition: taskWorkspaceTransition }}
+              onResize={reportTaskSize}
+            >
+              <TaskWorkspace
+                mainWorkspaceCollapsed={chatBodyCollapsed}
+                onToggleMainWorkspace={toggleChatBodyVisibility}
+                onDetailModeChange={handleTaskDetailModeChange}
+                routeActive
+                conversationId={activeConversationId}
+              />
+            </Panel>
+          ) : null}
+        </PanelGroup>
 
-      <AnimatePresence>
-        {/* Canvas — sandboxed render of a model-generated artifact */}
-        {canvasArtifact && (
-          <ArtifactCanvas
-            key="artifact-canvas"
-            artifact={canvasArtifact}
-            onClose={() => setCanvasArtifact(null)}
-            width={canvasWidth}
-            onResize={setCanvasWidth}
-          />
-        )}
+        <AnimatePresence>
+          {/* Canvas — sandboxed render of a model-generated artifact */}
+          {canvasArtifact && (
+            <ArtifactCanvas
+              key="artifact-canvas"
+              artifact={canvasArtifact}
+              onClose={() => setCanvasArtifact(null)}
+              width={canvasWidth}
+              onResize={setCanvasWidth}
+            />
+          )}
 
-        {/* Skills — view / create / edit reusable instruction packs */}
-        {skillsOpen && (
-          <SkillsPanel
-            key={`skills-${selectedSkillName ?? 'list'}`}
-            initialSkillName={selectedSkillName}
-            onClose={() => {
-              setSkillsOpen(false)
-              setSelectedSkillName(undefined)
-            }}
-            onChanged={() =>
-              window.api
-                .listSkills()
-                .then((listedSkills) => setSkills(Array.isArray(listedSkills) ? listedSkills : []))
-                .catch(() => setSkills([]))
-            }
-          />
-        )}
+          {/* Skills — view / create / edit reusable instruction packs */}
+          {skillsOpen && (
+            <SkillsPanel
+              key={`skills-${selectedSkillName ?? 'list'}`}
+              initialSkillName={selectedSkillName}
+              onClose={() => {
+                setSkillsOpen(false)
+                setSelectedSkillName(undefined)
+              }}
+              onChanged={() =>
+                window.api
+                  .listSkills()
+                  .then((listedSkills) =>
+                    setSkills(Array.isArray(listedSkills) ? listedSkills : [])
+                  )
+                  .catch(() => setSkills([]))
+              }
+            />
+          )}
 
-        {modelPickerOpen && (
-          <ModelPicker
-            key="model-picker"
-            onClose={() => {
-              setModelPickerOpen(false)
-              refreshChatVision()
-            }}
-          />
-        )}
+          {modelPickerOpen && (
+            <ModelPicker
+              key="model-picker"
+              onClose={() => {
+                setModelPickerOpen(false)
+                refreshChatVision()
+              }}
+            />
+          )}
 
-        {settingsOpen && (
-          <SettingsPanel
-            key={`model-settings-${settingsInitialTab}`}
-            initialTab={settingsInitialTab}
-            onClose={() => setSettingsOpen(false)}
-          />
-        )}
-      </AnimatePresence>
+          {settingsOpen && (
+            <SettingsPanel
+              key={`model-settings-${settingsInitialTab}`}
+              initialTab={settingsInitialTab}
+              onClose={() => setSettingsOpen(false)}
+            />
+          )}
+        </AnimatePresence>
 
-      {/* Attachment viewer — same full-screen overlay layout as the image lightbox
+        {/* Attachment viewer — same full-screen overlay layout as the image lightbox
           (floating Download/Close top-right, content centered), for text/PDF/docs.
           Backdrop fades + blurs in; the panel springs up (aceternity modal pattern). */}
-      <AnimatePresence>
-        {viewer && (
-          <motion.div
-            key="viewer"
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-10 font-mono"
-            role="dialog"
-            aria-modal="true"
-            aria-label={viewer.title}
-            tabIndex={-1}
-            initial={{ opacity: 0, backdropFilter: 'blur(0px)' }}
-            animate={{ opacity: 1, backdropFilter: 'blur(8px)' }}
-            exit={{ opacity: 0, backdropFilter: 'blur(0px)' }}
-            transition={{ duration: 0.18, ease: [0.4, 0, 0.2, 1] }}
-            onClick={(event) => {
-              if (event.target === event.currentTarget) setViewer(null)
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') setViewer(null)
-            }}
-          >
-            <div className="absolute right-4 top-4 z-10 flex items-center gap-2">
-              <span className="mr-2 max-w-[40vw] truncate self-center text-xs text-neutral-400">
-                {viewer.title}
-              </span>
-              {viewer.path && (
+        <AnimatePresence>
+          {viewer && (
+            <motion.div
+              key="viewer"
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-10 font-mono"
+              role="dialog"
+              aria-modal="true"
+              aria-label={viewer.title}
+              tabIndex={-1}
+              initial={{ opacity: 0, backdropFilter: 'blur(0px)' }}
+              animate={{ opacity: 1, backdropFilter: 'blur(8px)' }}
+              exit={{ opacity: 0, backdropFilter: 'blur(0px)' }}
+              transition={{ duration: 0.18, ease: [0.4, 0, 0.2, 1] }}
+              onClick={(event) => {
+                if (event.target === event.currentTarget) setViewer(null)
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') setViewer(null)
+              }}
+            >
+              <div className="absolute right-4 top-4 z-10 flex items-center gap-2">
+                <span className="mr-2 max-w-[40vw] truncate self-center text-xs text-neutral-400">
+                  {viewer.title}
+                </span>
+                {viewer.path && (
+                  <button
+                    onClick={() => downloadImage(viewer.path, viewer.title)}
+                    className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:border-green-500 hover:text-green-500"
+                  >
+                    Download
+                  </button>
+                )}
                 <button
-                  onClick={() => downloadImage(viewer.path, viewer.title)}
+                  onClick={() => setViewer(null)}
+                  className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:text-white"
+                >
+                  Close
+                </button>
+              </div>
+              {viewer.renderer === 'audio' && viewer.path ? (
+                <AudioPane path={viewer.path} title={viewer.title} />
+              ) : viewer.renderer === 'document' && viewer.path ? (
+                // A document renders from its BYTES. main already serves them as a data URL for
+                // exactly this - Chromium draws the PDF itself - and the old code path never called
+                // it, so every PDF fell through to the text pane below and showed an empty page.
+                <DocumentPane path={viewer.path} title={viewer.title} />
+              ) : (
+                <motion.pre
+                  initial={{ opacity: 0, scale: 0.96, y: 8 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.98, y: 4 }}
+                  transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                  className="max-h-full w-full max-w-3xl overflow-auto whitespace-pre-wrap break-words rounded-md border border-neutral-800 bg-neutral-950 p-5 text-sm leading-relaxed text-neutral-200"
+                >
+                  {viewer.text}
+                </motion.pre>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <ImageLightbox
+          image={
+            lightbox
+              ? {
+                  url: lightbox.url,
+                  alt: 'Generated preview',
+                  dialogLabel: 'Generated image preview'
+                }
+              : null
+          }
+          onClose={() => setLightbox(null)}
+          actions={
+            lightbox?.path ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => downloadImage(lightbox.path!, lightbox.path?.split('/').pop())}
                   className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:border-green-500 hover:text-green-500"
                 >
                   Download
                 </button>
-              )}
-              <button
-                onClick={() => setViewer(null)}
-                className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:text-white"
-              >
-                Close
-              </button>
-            </div>
-            {viewer.renderer === 'audio' && viewer.path ? (
-              <AudioPane path={viewer.path} title={viewer.title} />
-            ) : viewer.renderer === 'document' && viewer.path ? (
-              // A document renders from its BYTES. main already serves them as a data URL for
-              // exactly this - Chromium draws the PDF itself - and the old code path never called
-              // it, so every PDF fell through to the text pane below and showed an empty page.
-              <DocumentPane path={viewer.path} title={viewer.title} />
-            ) : (
-              <motion.pre
-                initial={{ opacity: 0, scale: 0.96, y: 8 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.98, y: 4 }}
-                transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-                className="max-h-full w-full max-w-3xl overflow-auto whitespace-pre-wrap break-words rounded-md border border-neutral-800 bg-neutral-950 p-5 text-sm leading-relaxed text-neutral-200"
-              >
-                {viewer.text}
-              </motion.pre>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <ImageLightbox
-        image={
-          lightbox
-            ? {
-                url: lightbox.url,
-                alt: 'Generated preview',
-                dialogLabel: 'Generated image preview'
-              }
-            : null
-        }
-        onClose={() => setLightbox(null)}
-        actions={
-          lightbox?.path ? (
-            <>
-              <button
-                type="button"
-                onClick={() => downloadImage(lightbox.path!, lightbox.path?.split('/').pop())}
-                className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:border-green-500 hover:text-green-500"
-              >
-                Download
-              </button>
-              <button
-                type="button"
-                onClick={() => deleteImage(lightbox.path!)}
-                className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:border-red-500 hover:text-red-400"
-              >
-                Delete
-              </button>
-            </>
-          ) : undefined
-        }
-      />
-
-      {/* Gallery — everything generated on-device: images + artifacts */}
-      <AnimatePresence>
-        {showGallery && (
-          <SidePanel
-            key="gallery"
-            ariaLabel="Gallery"
-            onClose={() => setShowGallery(false)}
-            className="w-[min(720px,92vw)] overflow-hidden text-white"
-            restoreFocusRef={galleryTriggerRef}
-          >
-            <header className="flex items-center justify-between border-b border-neutral-900 px-4 py-3 text-left">
-              <h2 className="text-sm font-normal text-neutral-200">Gallery</h2>
-              <button
-                type="button"
-                onClick={() => setShowGallery(false)}
-                aria-label="Close gallery"
-                className="rounded p-1 text-neutral-500 transition-colors hover:bg-neutral-900 hover:text-white"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </header>
-            <div className="flex items-center gap-1 border-b border-neutral-900 px-3 py-2">
-              {(['images', 'artifacts'] as const).map((tab) => (
                 <button
-                  key={tab}
-                  onClick={() => setGalleryTab(tab)}
-                  className={`rounded px-3 py-1 text-xs capitalize transition-colors ${galleryTab === tab ? 'bg-neutral-800 text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
+                  type="button"
+                  onClick={() => deleteImage(lightbox.path!)}
+                  className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:border-red-500 hover:text-red-400"
                 >
-                  {tab} {tab === 'images' ? `(${gallery.length})` : `(${artifacts.length})`}
+                  Delete
                 </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-1 border-b border-neutral-900 px-3 py-1.5">
-              {(['chat', 'project', 'all'] as const).map((sc) => (
+              </>
+            ) : undefined
+          }
+        />
+
+        {/* Gallery — everything generated on-device: images + artifacts */}
+        <AnimatePresence>
+          {showGallery && (
+            <SidePanel
+              key="gallery"
+              ariaLabel="Gallery"
+              onClose={() => setShowGallery(false)}
+              className="w-[min(720px,92vw)] overflow-hidden text-white"
+              restoreFocusRef={galleryTriggerRef}
+            >
+              <header className="flex items-center justify-between border-b border-neutral-900 px-4 py-3 text-left">
+                <h2 className="text-sm font-normal text-neutral-200">Gallery</h2>
                 <button
-                  key={sc}
-                  onClick={() => setGalleryScope(sc)}
-                  disabled={sc === 'project' && !activeProjectId}
-                  className={`rounded px-2 py-0.5 text-[10px] capitalize transition-colors disabled:opacity-30 ${galleryScope === sc ? 'bg-neutral-800 text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
+                  type="button"
+                  onClick={() => setShowGallery(false)}
+                  aria-label="Close gallery"
+                  className="rounded p-1 text-neutral-500 transition-colors hover:bg-neutral-900 hover:text-white"
                 >
-                  {sc === 'chat' ? 'This chat' : sc}
+                  <X className="h-4 w-4" />
                 </button>
-              ))}
-            </div>
-            <div className="flex-1 overflow-y-auto p-3">
-              {galleryTab === 'images' ? (
-                gallery.length === 0 ? (
-                  <p className="py-10 text-center text-xs text-neutral-600">
-                    No images generated yet.
-                  </p>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2">
-                    {gallery.map((g) => (
-                      <button
-                        key={g.path}
-                        onClick={() =>
-                          setLightbox({ url: captureUrlForPath(g.path), path: g.path })
-                        }
-                        className="overflow-hidden rounded-md border border-neutral-800 transition-colors hover:border-green-500"
-                      >
-                        <img
-                          src={captureUrlForPath(g.path)}
-                          alt={g.name}
-                          className="aspect-square w-full object-cover"
-                        />
-                      </button>
-                    ))}
-                  </div>
-                )
-              ) : (
-                <>
-                  {artifacts.length === 0 ? (
+              </header>
+              <div className="flex items-center gap-1 border-b border-neutral-900 px-3 py-2">
+                {(['images', 'artifacts'] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setGalleryTab(tab)}
+                    className={`rounded px-3 py-1 text-xs capitalize transition-colors ${galleryTab === tab ? 'bg-neutral-800 text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
+                  >
+                    {tab} {tab === 'images' ? `(${gallery.length})` : `(${artifacts.length})`}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-1 border-b border-neutral-900 px-3 py-1.5">
+                {(['chat', 'project', 'all'] as const).map((sc) => (
+                  <button
+                    key={sc}
+                    onClick={() => setGalleryScope(sc)}
+                    disabled={sc === 'project' && !activeProjectId}
+                    className={`rounded px-2 py-0.5 text-[10px] capitalize transition-colors disabled:opacity-30 ${galleryScope === sc ? 'bg-neutral-800 text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
+                  >
+                    {sc === 'chat' ? 'This chat' : sc}
+                  </button>
+                ))}
+              </div>
+              <div className="flex-1 overflow-y-auto p-3">
+                {galleryTab === 'images' ? (
+                  gallery.length === 0 ? (
                     <p className="py-10 text-center text-xs text-neutral-600">
-                      No artifacts in this {galleryScope === 'all' ? 'app' : galleryScope}.
+                      No images generated yet.
                     </p>
                   ) : (
-                    <div className="flex flex-col gap-2">
-                      {artifacts.map((a) => (
-                        <div
-                          key={a.id}
-                          className="group flex items-center gap-2 rounded-md border border-neutral-800 p-2 transition-colors hover:border-green-500"
+                    <div className="grid grid-cols-2 gap-2">
+                      {gallery.map((g) => (
+                        <button
+                          key={g.path}
+                          onClick={() =>
+                            setLightbox({ url: captureUrlForPath(g.path), path: g.path })
+                          }
+                          className="overflow-hidden rounded-md border border-neutral-800 transition-colors hover:border-green-500"
                         >
-                          <button
-                            onClick={() =>
-                              a.kind === 'image'
-                                ? (closePanels(),
-                                  setLightbox({ url: captureUrlForPath(a.code), path: a.code }))
-                                : a.kind === 'text'
-                                  ? (closePanels(), setViewer({ title: a.title, text: a.code }))
-                                  : openCanvas({ kind: a.kind, code: a.code, title: a.title })
-                            }
-                            className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                          >
-                            {a.kind === 'image' ? (
-                              <img
-                                src={captureUrlForPath(a.code)}
-                                alt=""
-                                className="h-8 w-8 shrink-0 rounded-sm border border-neutral-800 object-cover"
-                              />
-                            ) : (
-                              <span className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-green-500">
-                                {a.kind === 'text' ? 'input' : a.kind}
-                              </span>
-                            )}
-                            <span className="truncate text-xs text-neutral-200">{a.title}</span>
-                          </button>
-                          <button
-                            onClick={() => deleteArtifact(a.id)}
-                            className="text-neutral-600 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
-                            title="Delete"
-                          >
-                            ✕
-                          </button>
-                        </div>
+                          <img
+                            src={captureUrlForPath(g.path)}
+                            alt={g.name}
+                            className="aspect-square w-full object-cover"
+                          />
+                        </button>
                       ))}
                     </div>
-                  )}
-                </>
-              )}
-            </div>
-          </SidePanel>
-        )}
-      </AnimatePresence>
-    </div>
+                  )
+                ) : (
+                  <>
+                    {artifacts.length === 0 ? (
+                      <p className="py-10 text-center text-xs text-neutral-600">
+                        No artifacts in this {galleryScope === 'all' ? 'app' : galleryScope}.
+                      </p>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        {artifacts.map((a) => (
+                          <div
+                            key={a.id}
+                            className="group flex items-center gap-2 rounded-md border border-neutral-800 p-2 transition-colors hover:border-green-500"
+                          >
+                            <button
+                              onClick={() =>
+                                a.kind === 'image'
+                                  ? (closePanels(),
+                                    setLightbox({ url: captureUrlForPath(a.code), path: a.code }))
+                                  : a.kind === 'text'
+                                    ? (closePanels(), setViewer({ title: a.title, text: a.code }))
+                                    : openCanvas({ kind: a.kind, code: a.code, title: a.title })
+                              }
+                              className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                            >
+                              {a.kind === 'image' ? (
+                                <img
+                                  src={captureUrlForPath(a.code)}
+                                  alt=""
+                                  className="h-8 w-8 shrink-0 rounded-sm border border-neutral-800 object-cover"
+                                />
+                              ) : (
+                                <span className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-green-500">
+                                  {a.kind === 'text' ? 'input' : a.kind}
+                                </span>
+                              )}
+                              <span className="truncate text-xs text-neutral-200">{a.title}</span>
+                            </button>
+                            <button
+                              onClick={() => deleteArtifact(a.id)}
+                              className="text-neutral-600 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
+                              title="Delete"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </SidePanel>
+          )}
+        </AnimatePresence>
+      </div>
+    </ActiveTurnContext.Provider>
   )
 }
