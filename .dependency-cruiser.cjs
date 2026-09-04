@@ -10,6 +10,16 @@
 // code without blocking). Run: `npm run depcruise`.
 module.exports = {
   forbidden: [
+    {
+      name: 'models-facade-owns-download-control-plane',
+      comment:
+        'Desktop supplies download I/O ports to the Models facade. Production modules must not depend on the deleted app-owned coordinator or service.',
+      severity: 'error',
+      from: { path: '^(src|pro)/', pathNot: '\\.(test|spec|dbtest)\\.[jt]sx?$|/__tests__/' },
+      to: {
+        path: '^src/main/(?:composition/model-downloads|models/desktop-model-download-service)\\.ts$'
+      }
+    },
     // --- structural bug-catchers ------------------------------------------------
     {
       name: 'not-to-unresolvable',

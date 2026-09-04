@@ -27,6 +27,8 @@ const lineOf = (source, node) =>
   source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1
 const keyOf = (finding) => `${finding.rule}|${finding.file}|${finding.detail}`
 const findings = []
+const forbiddenModelOwnerExports = new Set(['createModelWorkspace', 'ModelResidencyManager'])
+const forbiddenDownloadOwnerExports = new Set(['ModelDownloadCoordinator', 'ModelDownloadHandle'])
 
 const legacyDownloadQueue = path.join(repoRoot, 'src/main/models/download-queue.ts')
 if (fs.existsSync(legacyDownloadQueue)) {
@@ -36,6 +38,20 @@ if (fs.existsSync(legacyDownloadQueue)) {
     line: 1,
     detail: 'restored app-owned download queue compatibility surface'
   })
+}
+
+for (const legacyOwner of [
+  'src/main/models/desktop-model-download-service.ts',
+  'src/main/composition/model-downloads.ts'
+]) {
+  if (fs.existsSync(path.join(repoRoot, legacyOwner))) {
+    findings.push({
+      rule: 'models-facade-owns-download-lifecycle',
+      file: legacyOwner,
+      line: 1,
+      detail: 'app-owned model download coordinator/control plane remains'
+    })
+  }
 }
 
 /**
@@ -210,6 +226,97 @@ function checkResidencyAdmission(fileName, source) {
   inspect(source)
 }
 
+/** The application root is the only owner allowed to construct the workspace or residency manager. */
+function checkModelOwnerConstruction(fileName, source) {
+  const inspect = (node) => {
+    if (
+      ts.isImportDeclaration(node) &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      node.moduleSpecifier.text.startsWith('@offgrid/models') &&
+      node.importClause &&
+      !node.importClause.isTypeOnly &&
+      node.importClause.namedBindings &&
+      ts.isNamedImports(node.importClause.namedBindings)
+    ) {
+      for (const element of node.importClause.namedBindings.elements) {
+        const imported = (element.propertyName ?? element.name).text
+        if (!element.isTypeOnly && forbiddenModelOwnerExports.has(imported)) {
+          report(
+            'application-root-owns-model-workspace',
+            fileName,
+            source,
+            element,
+            `runtime import of ${imported}`
+          )
+        }
+      }
+    }
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isObjectBindingPattern(node.name) &&
+      node.initializer
+    ) {
+      const initializer = ts.isAwaitExpression(node.initializer)
+        ? node.initializer.expression
+        : node.initializer
+      if (
+        ts.isCallExpression(initializer) &&
+        initializer.expression.kind === ts.SyntaxKind.ImportKeyword &&
+        initializer.arguments[0] &&
+        ts.isStringLiteral(initializer.arguments[0]) &&
+        initializer.arguments[0].text.startsWith('@offgrid/models')
+      ) {
+        for (const element of node.name.elements) {
+          const imported =
+            element.propertyName && ts.isIdentifier(element.propertyName)
+              ? element.propertyName.text
+              : ts.isIdentifier(element.name)
+                ? element.name.text
+                : ''
+          if (forbiddenModelOwnerExports.has(imported)) {
+            report(
+              'application-root-owns-model-workspace',
+              fileName,
+              source,
+              element,
+              `dynamic runtime import of ${imported}`
+            )
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, inspect)
+  }
+  inspect(source)
+}
+
+function checkDownloadOwnerImports(fileName, source) {
+  const inspect = (node) => {
+    if (
+      ts.isImportDeclaration(node) &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      node.moduleSpecifier.text.startsWith('@offgrid/models') &&
+      node.importClause?.namedBindings &&
+      ts.isNamedImports(node.importClause.namedBindings)
+    ) {
+      for (const element of node.importClause.namedBindings.elements) {
+        const imported = (element.propertyName ?? element.name).text
+        if (forbiddenDownloadOwnerExports.has(imported)) {
+          report(
+            'models-facade-owns-download-lifecycle',
+            fileName,
+            source,
+            element,
+            `import of ${imported}`
+          )
+        }
+      }
+    }
+    ts.forEachChild(node, inspect)
+  }
+  inspect(source)
+}
+
 function report(rule, file, source, node, detail) {
   findings.push({ rule, file, line: lineOf(source, node), detail })
 }
@@ -235,8 +342,8 @@ for (const file of files) {
     'pro/renderer/components/voice/TranscriptionModels.tsx'
   ])
   if (
-    fileName === 'src/renderer/src/lib/model-control-application.ts' &&
-    (!/\bgetModelControlSnapshot\b/.test(text) ||
+    fileName === 'src/renderer/src/lib/model-control-client.ts' &&
+    (!/\bgetModelControlProjection\b/.test(text) ||
       /\bapi\(\)\.(?:getActiveModel|getActiveModelIds|getActiveModalities|getModelCatalog|getInstalledModels|getComputerUseActiveModels)\b/.test(
         text
       ))
@@ -251,7 +358,7 @@ for (const file of files) {
   }
   if (
     isRendererProduction &&
-    fileName !== 'src/renderer/src/lib/model-control-application.ts' &&
+    fileName !== 'src/renderer/src/lib/model-control-client.ts' &&
     /\b(?:getModelCatalog|getInstalledModels|getActiveModel|getActiveModelIds|getActiveModalities)\s*(?:\?\.)?\s*\(/.test(
       text
     )
@@ -266,7 +373,7 @@ for (const file of files) {
   }
   if (
     isRendererProduction &&
-    fileName !== 'src/renderer/src/lib/model-control-application.ts' &&
+    fileName !== 'src/renderer/src/lib/model-control-client.ts' &&
     /\b(?:window\.)?api\s*(?:\?\.|\.)\s*(?:activateModel|setActiveModalModel|cancelModelDownload)\s*(?:\?\.)?\s*\(/.test(
       text
     )
@@ -281,10 +388,9 @@ for (const file of files) {
   }
   if (
     fileName === 'src/main/models-manager.ts' &&
-    (!/\bDesktopModelDownloadService\b/.test(text) ||
-      /\b(?:ModelLibraryDownloadService|DownloadStatusLedger|ModelDownloadQueue|runSequentialArtifactDownload)\b/.test(
-        text
-      ))
+    /\b(?:DesktopModelDownloadService|ModelLibraryDownloadService|DownloadStatusLedger|ModelDownloadQueue|runSequentialArtifactDownload)\b/.test(
+      text
+    )
   ) {
     report(
       'desktop-model-download-coordinator-is-shared',
@@ -292,21 +398,6 @@ for (const file of files) {
       source,
       source,
       'deprecated or app-owned download workflow'
-    )
-  }
-  if (
-    fileName === 'src/main/models/desktop-model-download-service.ts' &&
-    (!/\bModelDownloadCoordinator\b/.test(text) ||
-      /\b(?:ModelLibraryDownloadService|DownloadStatusLedger|runSequentialArtifactDownload)\b/.test(
-        text
-      ))
-  ) {
-    report(
-      'desktop-model-download-coordinator-is-shared',
-      fileName,
-      source,
-      source,
-      'Desktop download composition bypasses the canonical Shared coordinator'
     )
   }
   if (
@@ -358,7 +449,8 @@ for (const file of files) {
   }
   if (
     modelControlComponents.has(fileName) &&
-    (!/\bdesktopModelControl\.execute\b/.test(text) ||
+    (!/\bmodelControlClient\.control\b/.test(text) ||
+      /\bdesktopModelControl\b/.test(text) ||
       /\b(?:ModelActivationCommandService|ModelInstallActivationCommandService|primaryFile)\b|\bapi(?:\(\))?\??\.(?:activateModel|downloadModel|cancelModelDownload|unloadRuntime|getActiveModel|getActiveModelIds|getActiveModalities|getInstalledModels)\b/.test(
         text
       ))
@@ -447,7 +539,8 @@ for (const file of files) {
   }
   if (
     fileName === 'src/renderer/src/components/use-capture-readiness.ts' &&
-    !/\bCaptureReadinessApplicationService\b/.test(text)
+    (!/\bcaptureReadinessClient\b/.test(text) ||
+      /\bcaptureReadinessApplication\b|@renderer\/composition\/capture-readiness/.test(text))
   ) {
     report(
       'desktop-capture-readiness-is-shared',
@@ -685,6 +778,8 @@ for (const file of files) {
   }
 
   checkResidencyAdmission(fileName, source)
+  checkModelOwnerConstruction(fileName, source)
+  checkDownloadOwnerImports(fileName, source)
 
   const visit = (node) => {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
