@@ -28,6 +28,20 @@ import type {
 import type { TaskGuideInput } from '../shared/task-guidance'
 import type { RemoteVisionServerUpdate } from '../shared/remote-vision-server'
 import type { StartupSnapshotContract } from '../shared/startup-contract'
+import {
+  ASK_BY_VOICE_CANCEL_CHANNEL,
+  ASK_BY_VOICE_EVENT_CHANNEL,
+  ASK_BY_VOICE_START_CHANNEL,
+  type AskByVoiceEventMessage,
+  type AskByVoiceStartCommand,
+  type AskByVoiceStarted
+} from '../shared/ask-by-voice-contract'
+import {
+  VOICE_TURN_REQUEST_CHANNEL,
+  VOICE_TURN_RESULT_CHANNEL,
+  type VoiceTurnHostMessage,
+  type VoiceTurnHostResult
+} from '../shared/voice-turn-contract'
 import type { TaskRunSnapshot } from '../main/tasks/task-history-store'
 import {
   SPEECH_PLAYBACK_REQUEST_CHANNEL,
@@ -813,6 +827,43 @@ const offGridApi = {
     },
     sendResult: (result: SpeechTextCleanResult): void => {
       ipcRenderer.send(SPEECH_TEXT_CLEAN_RESULT_CHANNEL, result)
+    }
+  },
+  /**
+   * Ask a question by voice: hand over the captured audio, then watch the workflow's own events.
+   *
+   * The renderer sequences nothing here. Transcription, the turn, speaking the answer, the deadline
+   * and the cancel are all `workflows.askByVoice` in main, under one correlated operation id.
+   */
+  askByVoice: {
+    start: (command: AskByVoiceStartCommand): Promise<AskByVoiceStarted> =>
+      ipcRenderer.invoke(ASK_BY_VOICE_START_CHANNEL, command),
+    /** The run's signal is the one cancellation; the workflow issues no second stop for a turn. */
+    cancel: (operationId: string): Promise<void> =>
+      ipcRenderer.invoke(ASK_BY_VOICE_CANCEL_CHANNEL, operationId),
+    onEvent: (callback: (message: AskByVoiceEventMessage) => void) => {
+      const listener = (_event: unknown, message: AskByVoiceEventMessage): void =>
+        callback(message)
+      ipcRenderer.on(ASK_BY_VOICE_EVENT_CHANNEL, listener)
+      return unsubscribe(ASK_BY_VOICE_EVENT_CHANNEL, listener)
+    }
+  },
+  /**
+   * The other direction: main asking this window to run the turn a voice question earned.
+   *
+   * Desktop's chat session lives here, so this is where a turn with persisted rows, retrieval
+   * context, tools and sync can actually happen. `respond` reports how it ended - including
+   * cancelled - because the workflow does not compensate on the host's behalf, and the rows are
+   * this side's to keep.
+   */
+  voiceTurn: {
+    onRequest: (callback: (message: VoiceTurnHostMessage) => void) => {
+      const listener = (_event: unknown, message: VoiceTurnHostMessage): void => callback(message)
+      ipcRenderer.on(VOICE_TURN_REQUEST_CHANNEL, listener)
+      return unsubscribe(VOICE_TURN_REQUEST_CHANNEL, listener)
+    },
+    respond: (result: VoiceTurnHostResult): void => {
+      ipcRenderer.send(VOICE_TURN_RESULT_CHANNEL, result)
     }
   },
   speechCommands: {

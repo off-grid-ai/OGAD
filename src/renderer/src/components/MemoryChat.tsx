@@ -58,6 +58,7 @@ import { ApprovalIntakeFailure, ApprovalSetup } from './actions/ApprovalSetup'
 import { loadApprovalIntake, type ApprovalIntakeState } from '@renderer/lib/approval-intake'
 import { REQUEST_FORM_URL, presetById, type DemoPreset } from './explore/presetCatalog'
 import { useChatVoiceTurns, type ChatVoicePhase } from './use-chat-voice-turns'
+import { useVoiceQuestion } from './use-voice-question'
 import { SkillsPanel } from './SkillsPanel'
 import { ModelPicker } from './ModelPicker'
 import { SettingsPanel } from './SettingsPanel'
@@ -901,7 +902,6 @@ export function MemoryChat({
   useEffect(() => {
     persistChangedPreference('imgStyle', activeStyle)
   }, [activeStyle, persistChangedPreference])
-  const [autoPlayId, setAutoPlayId] = useState<string | null>(null) // assistant reply to auto-speak once
   const [speakingId, setSpeakingId] = useState<string | null>(null)
   const [speakLoadingId, setSpeakLoadingId] = useState<string | null>(null)
   const [speakError, setSpeakError] = useState<{ id: string; message: string } | null>(null)
@@ -1702,6 +1702,16 @@ export function MemoryChat({
       }
       /** A form submission is user input even though its text is supplied as an argument. */
       asUserInput?: boolean
+      /**
+       * The answer this turn settled on, for a caller that needs it rather than just the rendered
+       * rows - the voice workflow, which speaks it.
+       *
+       * A sink rather than a return value on purpose: this function settles through several paths
+       * (a plain reply, the tool loop, a stop, an error) and each one already knows its own
+       * authoritative answer at the point it commits it. Threading a return type through all of
+       * them would put the same decision in four places.
+       */
+      onAnswer?: (answer: string) => void
     }
   ): Promise<void> => {
     const isInput = override === undefined || opts?.asUserInput === true
@@ -2156,6 +2166,7 @@ export function MemoryChat({
           return
         }
         const answer = tr.answer || 'No response returned.'
+        opts?.onAnswer?.(answer)
         // Reasoning read from the ref (populated as it streamed) — deterministic,
         // unlike reading it out of the setConvMessages updater. Rides the persisted
         // context blob so the 'Thinking' block survives reload (T1f).
@@ -2212,7 +2223,6 @@ export function MemoryChat({
                 message.id === toolStreamId ? { ...message, id: stored.uuid } : message
               )
             )
-            if (voiceMode) setAutoPlayId(stored.uuid)
           } catch (error) {
             console.error('[chat-image] could not persist the tool answer', {
               conversationId: convId,
@@ -2227,7 +2237,6 @@ export function MemoryChat({
                   : message
               )
             )
-            if (voiceMode) setAutoPlayId(toolStreamId)
           }
           for (const [index, img] of toolGeneratedImages.entries()) {
             const prompt = imageRequests[index]?.prompt ?? img.prompt ?? modelQuery
@@ -2273,7 +2282,6 @@ export function MemoryChat({
               message.id === toolStreamId ? { ...message, id: stored.uuid } : message
             )
           )
-          if (voiceMode) setAutoPlayId(stored.uuid)
         } catch (error) {
           console.error('[chat] could not persist the tool answer', {
             conversationId: convId,
@@ -2288,7 +2296,6 @@ export function MemoryChat({
                 : message
             )
           )
-          if (voiceMode) setAutoPlayId(toolStreamId)
         }
         return
       }
@@ -2352,6 +2359,7 @@ export function MemoryChat({
         return
       }
       const assistantContent = result.answer || 'No response returned.'
+      opts?.onAnswer?.(assistantContent)
 
       // Shared recognized and executed the model's image hand-off. This component projects it.
       const ragImage = ragGeneratedImages[0]
@@ -2476,10 +2484,8 @@ export function MemoryChat({
               message.id === streamId ? { ...message, id: stored.uuid } : message
             )
           )
-          if (voiceMode) setAutoPlayId(stored.uuid)
         } catch (e) {
           console.error('Failed to persist assistant message:', e)
-          if (voiceMode) setAutoPlayId(streamId)
         }
       }
     } catch (e) {
@@ -2529,6 +2535,25 @@ export function MemoryChat({
     setVoicePlaybackOwner((current) => nextVoicePlaybackOwner(current, messageId, active))
   }, [])
 
+  // One voice question, coordinated by `workflows.askByVoice` in main. This side captures audio,
+  // holds the run's id so it can be cancelled, and runs the turn the question earned.
+  const voiceQuestion = useVoiceQuestion({
+    voiceMode,
+    conversationId: activeConversationId,
+    projectId: activeProjectId,
+    speak: ttsEnabled,
+    onTranscriptForDraft: (text) => draftStore.update((p) => `${p}${p ? ' ' : ''}${text}`),
+    runTurn: (request, onAnswer) =>
+      sendMessage(request.text, {
+        conversationId: request.conversationId,
+        projectIdOverride: request.projectId,
+        asUserInput: true,
+        ...(request.clip ? { voiceClip: request.clip } : {}),
+        onAnswer
+      }),
+    stopTurn: (conversationId) => void stopGeneration(conversationId, null)
+  })
+
   const voiceTurns = useChatVoiceTurns({
     voiceMode,
     mode: voiceMode ? voiceTurnMode : 'tap',
@@ -2536,22 +2561,16 @@ export function MemoryChat({
     speakerDrainMs: voiceSpeakerDrainMs,
     isGenerating: Boolean(activeConversationId && generatingConvs.has(activeConversationId)),
     isPlaybackActive: voicePlaybackOwner !== null,
-    transcribeAudio: (audio, mimeType, operationId) =>
-      window.api.speechCommands.transcribe({
-        source: { kind: 'bytes', bytes: audio, mimeType },
-        operationId
-      }),
-    cancelTranscription: (operationId) =>
-      window.api.speechCommands.cancelTranscription(operationId),
     getTranscriptionLabel: () => window.api.getTranscriptionInfo(),
-    onTranscript: (text, clip) => {
-      if (voiceMode && clip) {
-        void sendMessage(text, { voiceClip: clip })
-        return
-      }
-      draftStore.update((previous) => `${previous}${previous ? ' ' : ''}${text}`)
-    }
+    onCapture: voiceQuestion.capture,
+    onAbandon: voiceQuestion.abandon
   })
+  /**
+   * One line for the composer. Capture problems come from the hook, everything after the hand-off
+   * comes from the run - a failed transcription, a refused turn, a workflow that timed out - and
+   * the newest of the two is what the user needs to read.
+   */
+  const voiceMessage = voiceQuestion.error ?? voiceTurns.error
   const recording =
     voiceTurns.phase === 'starting' ||
     voiceTurns.phase === 'listening' ||
@@ -3716,7 +3735,6 @@ export function MemoryChat({
                               }
                               voiceMode={voiceMode}
                               state={{
-                                autoPlayId,
                                 copiedKey,
                                 editingId,
                                 loading,
@@ -4231,12 +4249,12 @@ export function MemoryChat({
                             </button>
                           </div>
                         )}
-                        {voiceTurns.error && !voiceTurns.microphoneDenied && !voiceMode && (
+                        {voiceMessage && !voiceTurns.microphoneDenied && !voiceMode && (
                           <div
                             role="alert"
                             className="mx-2 mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100"
                           >
-                            {voiceTurns.error}
+                            {voiceMessage}
                           </div>
                         )}
                         {voiceMode ? (
@@ -4245,7 +4263,7 @@ export function MemoryChat({
                             turnMode={voiceTurnMode}
                             suspended={voiceTurns.suspended}
                             transcriptionLabel={voiceTurns.transcriptionLabel}
-                            error={voiceTurns.error}
+                            error={voiceMessage}
                             onToggleRecording={toggleRecording}
                           />
                         ) : (

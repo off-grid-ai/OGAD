@@ -204,7 +204,6 @@ export type ContextNavigation = Readonly<{
 }>
 
 export type MessageRowState = Readonly<{
-  autoPlayId: string | null
   copiedKey: string | null
   editingId: string | null
   loading: boolean

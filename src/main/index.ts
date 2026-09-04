@@ -539,6 +539,22 @@ app.whenReady().then(async () => {
   // own handlers, so their import and setup latency is paid once, not eleven times over.
   await runIndependentStartupStages([
     {
+      // The voice question's caller. Registered beside the shell rather than in front of it: the
+      // window can open before a voice turn is possible, and the projection says so.
+      name: 'voice.ask-by-voice.ipc',
+      deadlineMs: 10_000,
+      domain: 'speech',
+      run: ({ commit }) =>
+        import('./ask-by-voice-ipc').then((m) =>
+          commit('voice.ask-by-voice.handlers', () =>
+            m.setupAskByVoiceIpc(async () => {
+              const { desktopApplication } = await import('./composition/application')
+              return desktopApplication
+            })
+          )
+        )
+    },
+    {
       name: 'rag.ipc',
       deadlineMs: 10_000,
       domain: 'rag',

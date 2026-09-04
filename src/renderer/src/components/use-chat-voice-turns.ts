@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   chooseRecorderMime,
-  type Outcome,
   type SpeechEndpointTimer,
-  type SpeechFailure,
-  type VoiceTurnMode,
-  transcriptionRecoveryMessage
+  type VoiceTurnMode
 } from '@offgrid/application'
 import { createSpeechEndpointTimer } from '@renderer/composition/speech-endpoint'
 
@@ -30,14 +27,17 @@ interface ChatVoiceTurnOptions {
   speakerDrainMs: number
   isGenerating: boolean
   isPlaybackActive: boolean
-  transcribeAudio: (
-    audio: Uint8Array,
-    mimeType: string,
-    operationId: string
-  ) => Promise<Outcome<{ text: string }, SpeechFailure>>
-  cancelTranscription?: (operationId: string) => Promise<Outcome<void, SpeechFailure>>
   getTranscriptionLabel?: () => Promise<{ label: string }>
-  onTranscript: (text: string, clip: ChatVoiceClip | null) => void
+  /**
+   * The captured audio, handed over once.
+   *
+   * This hook used to transcribe it, judge the transcript, and then start a chat turn - three
+   * phases of a sequence `workflows.askByVoice` owns. It captures now, and nothing else: what
+   * happens to the audio, and every failure along the way, belongs to the run its owner starts.
+   */
+  onCapture: (audio: Uint8Array, mimeType: string, clip: ChatVoiceClip | null) => void
+  /** The user discarded the capture. The owner cancels whatever run it started for it. */
+  onAbandon?: () => void
 }
 
 interface CaptureResources {
@@ -119,18 +119,6 @@ function microphoneFailure(cause: unknown): { denied: boolean; message: string }
   }
 }
 
-function transcriptionFailureMessage(failure: SpeechFailure): string | null {
-  if (failure.kind === 'cancelled') return null
-  if (failure.kind === 'runtime') {
-    return (
-      transcriptionRecoveryMessage(failure.message) ?? `Transcription failed: ${failure.message}`
-    )
-  }
-  if (failure.kind === 'permission_denied') {
-    return 'Microphone access is off. Allow Off Grid AI Desktop in System Settings, then try again.'
-  }
-  return 'Transcription failed. Check the speech-to-text model in Settings > Setup & health.'
-}
 
 /**
  * One owner for a chat voice turn.
@@ -167,7 +155,6 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
   const sawPlaybackRef = useRef(false)
   const previousPlaybackRef = useRef(false)
   const rearmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const transcriptionRequestRef = useRef<string | null>(null)
 
   const updatePhase = useCallback((next: ChatVoicePhase): void => {
     phaseRef.current = next
@@ -200,24 +187,10 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
   const discardCapture = useCallback(
     (notify = true): void => {
       sequenceRef.current += 1
-      const transcriptionRequest = transcriptionRequestRef.current
-      transcriptionRequestRef.current = null
-      if (transcriptionRequest) {
-        void optionsRef.current
-          .cancelTranscription?.(transcriptionRequest)
-          .then((outcome) => {
-            if (outcome.ok) return
-            console.error('Transcription cancellation failed', outcome.failure)
-            const message = transcriptionFailureMessage(outcome.failure)
-            if (notify && mountedRef.current && message) setError(message)
-          })
-          .catch((cause) => {
-            console.error('Transcription cancellation failed', cause)
-            if (notify && mountedRef.current) {
-              setError('Transcription could not be stopped. Try again.')
-            }
-          })
-      }
+      // One canceller: the owner holds the run's id, and the run's signal is what stops the phase
+      // in flight - transcription, the turn, or the answer being spoken. This hook cancelling a
+      // transcription id of its own would be a second stop for one turn.
+      optionsRef.current.onAbandon?.()
       const resources = resourcesRef.current
       resourcesRef.current = null
       chunksRef.current = []
@@ -238,7 +211,15 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
     [stopAnalysis, stopTracks]
   )
 
-  const transcribeRecording = useCallback(
+  /**
+   * Hand the recording over. The one thing this hook does with audio.
+   *
+   * Empty audio is still judged here, because that is a fact about the CAPTURE - the microphone
+   * produced nothing - and starting a run for zero bytes would ask the workflow to transcribe
+   * silence. Everything after the hand-off, including "didn't catch that" and every transcription
+   * failure, arrives as a workflow event and is the owner's to show.
+   */
+  const handOffRecording = useCallback(
     async ({ sequence, chunks, mime, duration }: CompletedCapture): Promise<void> => {
       const blob = new Blob(chunks, { type: mime })
       if (blob.size === 0) {
@@ -252,25 +233,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
 
       try {
         const bytes = new Uint8Array(await blob.arrayBuffer())
-        const operationId = crypto.randomUUID()
-        transcriptionRequestRef.current = operationId
-        const outcome = await optionsRef.current.transcribeAudio(bytes, mime, operationId)
         if (!mountedRef.current || sequence !== sequenceRef.current) return
-        if (!outcome.ok) {
-          const message = transcriptionFailureMessage(outcome.failure)
-          if (message) setError(message)
-          updateSuspended(optionsRef.current.mode === 'handsfree')
-          updatePhase('idle')
-          return
-        }
-        const text = outcome.value.text.trim()
-        if (!text) {
-          setError("Didn't catch that. Tap the microphone and try again.")
-          updateSuspended(optionsRef.current.mode === 'handsfree')
-          updatePhase('idle')
-          return
-        }
-
         setError(null)
         updatePhase('idle')
         if (optionsRef.current.voiceMode) {
@@ -278,21 +241,18 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
           sawPlaybackRef.current = false
           setAwaitingReply(true)
         }
-        optionsRef.current.onTranscript(
-          text,
+        optionsRef.current.onCapture(
+          bytes,
+          mime,
           optionsRef.current.voiceMode ? { url: URL.createObjectURL(blob), duration } : null
         )
       } catch (cause) {
-        console.error('Transcription failed', cause)
+        // Reading the recorder's own blob failed: a capture problem, not a speech one.
+        console.error('Reading the recording failed', cause)
         if (!mountedRef.current || sequence !== sequenceRef.current) return
-        setError(
-          transcriptionRecoveryMessage(cause) ??
-            'Transcription failed. Check the speech-to-text model in Settings > Setup & health.'
-        )
+        setError('The recording could not be read. Tap the microphone and try again.')
         updateSuspended(optionsRef.current.mode === 'handsfree')
         updatePhase('idle')
-      } finally {
-        if (sequence === sequenceRef.current) transcriptionRequestRef.current = null
       }
     },
     [updatePhase, updateSuspended]
@@ -365,7 +325,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
           if (discardRef.current || sequence !== sequenceRef.current) return
           const chunks = chunksRef.current
           chunksRef.current = []
-          void transcribeRecording({
+          void handOffRecording({
             sequence,
             chunks,
             mime: mimeRef.current,
@@ -417,7 +377,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
       refreshTranscriptionLabel,
       stopAnalysis,
       stopTracks,
-      transcribeRecording,
+      handOffRecording,
       updatePhase,
       updateSuspended
     ]

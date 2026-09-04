@@ -67,7 +67,6 @@ export function ToolMessageTimelineRow({
 
 function VoiceMessageRow({
   message,
-  autoPlay,
   copied,
   showTranscriptInitially,
   playbackSpeed,
@@ -77,7 +76,6 @@ function VoiceMessageRow({
   onRegenerate
 }: Readonly<{
   message: ChatMessage
-  autoPlay: boolean
   copied: boolean
   showTranscriptInitially: boolean
   playbackSpeed: number
@@ -130,7 +128,6 @@ function VoiceMessageRow({
           messageId={message.id}
           transcript={messageToSpeakable(selectedMessageContent(message))}
           isLoading={Boolean(message.streaming)}
-          autoPlay={autoPlay}
           showTranscriptInitially={showTranscriptInitially}
           defaultSpeed={playbackSpeed}
           onPlaybackStateChange={reportPlayback}
@@ -448,7 +445,6 @@ function MessageRowBody({
     body = (
       <VoiceMessageRow
         message={message}
-        autoPlay={state.autoPlayId === message.id}
         copied={state.copiedKey === message.id}
         showTranscriptInitially={state.latestVoiceAssistantId === message.id}
         playbackSpeed={state.ttsSpeed}
