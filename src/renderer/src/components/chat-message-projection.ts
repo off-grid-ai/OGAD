@@ -6,12 +6,22 @@
  * `MessageRowState` in, the intent `MessageRowActions` out.
  */
 import { toSpeakableText } from '@renderer/lib/speakable'
-import { attachmentKindFor, isPromptEnhancementStatus, isSupportingChatContext, preprocessChatMarkdown, type SyncedMessageRole } from '@offgrid/application'
+import {
+  attachmentKindFor,
+  isPromptEnhancementStatus,
+  isSupportingChatContext,
+  preprocessChatMarkdown,
+  type SyncedMessageRole
+} from '@offgrid/application'
 import { type IncomingSharedFile } from '@renderer/lib/sync-hooks'
 import { chatMarkdownComponents } from './chat-markdown-components'
 import { type Artifact } from '@renderer/lib/artifact-parser'
 import { type DemoPreset } from './explore/presetCatalog'
-import { type AskBlock, type ChatMessage, type RagContext } from '@renderer/lib/chat-transcript-types'
+import {
+  type AskBlock,
+  type ChatMessage,
+  type RagContext
+} from '@renderer/lib/chat-transcript-types'
 import { navigateSearchHit } from '@renderer/lib/search-navigation'
 import { runningToolLabel } from '@renderer/lib/tool-display'
 import { type TaskSession } from '@renderer/lib/task-session-store'
@@ -67,6 +77,20 @@ export function messageToSpeakable(raw: string): string {
   )
 }
 
+function memoryActivityLabel(counts: Record<string, number> = {}): string {
+  const total =
+    (counts.memories ?? 0) +
+    (counts.summaries ?? 0) +
+    (counts.entities ?? 0) +
+    (counts.facts ?? 0) +
+    (counts.unified ?? 0)
+  return `Searched your memory — ${total} result${total === 1 ? '' : 's'}`
+}
+
+function projectActivityLabel(counts: Record<string, number> = {}): string {
+  return `Searched project — ${counts.sources ?? 0} sources · ${counts.projectChats ?? 0} chats`
+}
+
 // Human label for a live retrieval/activity step shown while the model works.
 export function activityLabel(a?: {
   kind: string
@@ -78,16 +102,8 @@ export function activityLabel(a?: {
   if (a.kind === 'running_tool') return runningToolLabel(a.name)
   if (a.kind === 'reading') return `Reading the page${(a.counts?.urls ?? 0) > 1 ? 's' : ''}…`
   if (a.kind === 'searching') return 'Searching your memory…'
-  if (a.kind === 'memory') {
-    const c = a.counts || {}
-    const total =
-      (c.memories || 0) + (c.summaries || 0) + (c.entities || 0) + (c.facts || 0) + (c.unified || 0)
-    return `Searched your memory — ${total} result${total === 1 ? '' : 's'}`
-  }
-  if (a.kind === 'project') {
-    const c = a.counts || {}
-    return `Searched project — ${c.sources || 0} sources · ${c.projectChats || 0} chats`
-  }
+  if (a.kind === 'memory') return memoryActivityLabel(a.counts)
+  if (a.kind === 'project') return projectActivityLabel(a.counts)
   return 'Working…'
 }
 
@@ -279,4 +295,3 @@ export function openUnifiedContext(item: UnifiedContextItem, navigation: Context
     }
   )
 }
-

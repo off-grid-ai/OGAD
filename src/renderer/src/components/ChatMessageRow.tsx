@@ -16,11 +16,37 @@ import { parseArtifact } from '@renderer/lib/artifact-parser'
 import { VoiceBubble } from './VoiceBubble'
 import { LoadingDots } from './ui/loading-dots'
 import { type ChatMessage } from '@renderer/lib/chat-transcript-types'
-import { ArtifactCard, AskCard, AssistantMessageActions, CopyAction, GenerationMetricsRow, ImageMemoryRetryAction, ResponseCutoffNotice, UserMessageActions } from './ChatMessageActions'
+import {
+  ArtifactCard,
+  AskCard,
+  AssistantMessageActions,
+  CopyAction,
+  GenerationMetricsRow,
+  ImageMemoryRetryAction,
+  ResponseCutoffNotice,
+  UserMessageActions
+} from './ChatMessageActions'
 import { ChatImagePreview, IncomingFileRows, MessageAttachments } from './ChatMessageAttachments'
 import { ContextDisclosure } from './ChatMessageContext'
 import { MessageMarkdown } from './ChatMessageMarkdown'
-import { activityLabel, isPromptEnhancementMessage, isSupportingMessage, messageToSpeakable, noticeText, parseAsk, recordedClipUrl, selectedMessageContent, speechControlState, standardMessageBubbleClass, standardMessageRowClass, type ContextNavigation, type MessageRowActions, type MessageRowProps, type MessageRowState, type OpenImage } from './chat-message-projection'
+import {
+  activityLabel,
+  isPromptEnhancementMessage,
+  isSupportingMessage,
+  messageToSpeakable,
+  noticeText,
+  parseAsk,
+  recordedClipUrl,
+  selectedMessageContent,
+  speechControlState,
+  standardMessageBubbleClass,
+  standardMessageRowClass,
+  type ContextNavigation,
+  type MessageRowActions,
+  type MessageRowProps,
+  type MessageRowState,
+  type OpenImage
+} from './chat-message-projection'
 
 function NoticeMessageRow({ message }: Readonly<{ message: ChatMessage }>): React.JSX.Element {
   return (
@@ -177,25 +203,29 @@ function WebTaskStepFeed(): React.JSX.Element | null {
   )
 }
 
+function StreamingThinkingHeader({
+  message
+}: Readonly<{ message: ChatMessage }>): React.JSX.Element {
+  const activity = activityLabel(message.activity)
+  const showLiveActivity = hasLiveStreamActivity(message)
+  return (
+    <div className="mb-1.5 flex flex-col gap-1.5">
+      {showLiveActivity ? <LoadingDots /> : null}
+      {message.reasoningRequested || message.reasoning?.trim() ? (
+        <ChatThinkingBlock content={message.reasoning ?? ''} live />
+      ) : null}
+      {showLiveActivity && activity ? (
+        <span className="text-[11px] text-neutral-500">{activity}</span>
+      ) : null}
+      {showLiveActivity ? <WebTaskStepFeed /> : null}
+    </div>
+  )
+}
+
 /** The main process rethrows the real reason; Electron wraps it as "Error invoking remote method". */
 function MessageThinkingHeader({ message }: Readonly<{ message: ChatMessage }>): React.JSX.Element {
   if (message.role !== 'assistant') return <></>
-  if (message.streaming) {
-    const activity = activityLabel(message.activity)
-    const showLiveActivity = hasLiveStreamActivity(message)
-    return (
-      <div className="mb-1.5 flex flex-col gap-1.5">
-        {showLiveActivity ? <LoadingDots /> : null}
-        {message.reasoningRequested || message.reasoning?.trim() ? (
-          <ChatThinkingBlock content={message.reasoning ?? ''} live />
-        ) : null}
-        {showLiveActivity && activity ? (
-          <span className="text-[11px] text-neutral-500">{activity}</span>
-        ) : null}
-        {showLiveActivity ? <WebTaskStepFeed /> : null}
-      </div>
-    )
-  }
+  if (message.streaming) return <StreamingThinkingHeader message={message} />
   const reasoning = message.reasoning?.trim()
   if (!reasoning && !message.reasoningRequested) return <></>
   const readableContent =

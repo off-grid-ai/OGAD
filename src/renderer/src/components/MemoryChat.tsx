@@ -35,6 +35,9 @@ import {
 } from '@renderer/lib/sync-hooks'
 import { AudioPane, DocumentPane } from './ChatMessageAttachments'
 import { MessageRow, ToolMessageTimelineRow } from './ChatMessageRow'
+import { prepareChatInput, type ChatSendOptions } from './chat-send-input'
+import { StylePresetPicker } from './StylePresetPicker'
+import { imageStylePrompt } from './image-style-presets'
 import {
   type ContextNavigation,
   type MessageRowActions,
@@ -163,6 +166,8 @@ const GENERATED_IMAGE_NOT_LINKED =
   'The image was saved in Chat, but it could not be linked for device sync.'
 const CHAT_ANSWER_NOT_SAVED =
   'The answer is visible, but Chat could not save it. Copy it before you leave this chat.'
+const CHAT_ARTIFACT_NOT_SAVED =
+  'The answer is visible, but its artifact could not be added to the gallery.'
 
 function completedImageMessage(
   content: string,
@@ -272,146 +277,6 @@ const IMAGE_EXAMPLES = [
   'Cyberpunk city street at night, neon, rain',
   'Studio portrait of a husky, soft lighting'
 ]
-
-// Visual style presets. The prompt modifier and bundled preview share this key.
-const STYLE_PRESETS: { name: string; prompt: string }[] = [
-  {
-    name: 'Photoreal',
-    prompt: 'photorealistic, sharp focus, high detail, 50mm photo'
-  },
-  {
-    name: 'Cinematic',
-    prompt: 'cinematic film still, dramatic lighting, shallow depth of field, color graded'
-  },
-  {
-    name: 'Anime',
-    prompt: 'anime illustration, clean lineart, vibrant colors'
-  },
-  {
-    name: 'Sketch',
-    prompt: 'detailed pencil sketch on paper, monochrome line art'
-  },
-  {
-    name: 'Watercolor',
-    prompt: 'watercolor painting, soft washes, paper texture'
-  },
-  {
-    name: 'Oil painting',
-    prompt: 'oil painting, visible brushstrokes, classical, rich color'
-  },
-  {
-    name: 'Monochrome',
-    prompt: 'black and white, high contrast, monochrome'
-  },
-  {
-    name: 'Neon',
-    prompt: 'neon-lit cyberpunk, glowing lights, night, moody'
-  },
-  {
-    name: '3D render',
-    prompt: '3D render, octane, soft studio lighting, subsurface detail'
-  },
-  {
-    name: 'Steampunk',
-    prompt: 'steampunk, brass and gears, victorian, intricate'
-  },
-  {
-    name: 'Surreal',
-    prompt: 'surreal, dreamlike, imaginative composition'
-  },
-  {
-    name: 'Vintage film',
-    prompt: 'vintage film photograph, faded colors, grain, 1970s'
-  },
-  {
-    name: 'Minimal',
-    prompt: 'minimal flat design, clean, simple shapes, lots of negative space'
-  },
-  {
-    name: 'Risograph',
-    prompt: 'risograph print, halftone texture, limited palette'
-  },
-  {
-    name: 'Fantasy art',
-    prompt: 'epic fantasy concept art, dramatic, highly detailed'
-  },
-  {
-    name: 'Studio portrait',
-    prompt: 'studio portrait, soft key light, bokeh background'
-  }
-]
-
-function styleKey(name: string): string {
-  return name.replace(/[^\w-]+/g, '_')
-}
-
-function StylePresetPicker({
-  activeStyle,
-  compact = false,
-  styleThumbs,
-  onChange
-}: Readonly<{
-  activeStyle: string | null
-  compact?: boolean
-  styleThumbs: Record<string, string>
-  onChange: (style: string | null) => void
-}>): React.JSX.Element {
-  return (
-    <div className={compact ? 'mb-2 w-full' : 'mt-4 w-full'}>
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-[10px] uppercase tracking-wider text-neutral-600">Style</span>
-        {activeStyle ? (
-          <button
-            type="button"
-            onClick={() => onChange(null)}
-            className="text-[10px] text-neutral-600 transition-colors hover:text-neutral-300"
-          >
-            Clear {activeStyle}
-          </button>
-        ) : null}
-      </div>
-      <div
-        className={`grid w-full grid-cols-2 gap-2.5 sm:grid-cols-4 ${compact ? 'lg:grid-cols-8' : ''}`}
-      >
-        {STYLE_PRESETS.map((style) => {
-          const thumb = styleThumbs[styleKey(style.name)]
-          const selected = activeStyle === style.name
-          return (
-            <button
-              key={style.name}
-              type="button"
-              aria-pressed={selected}
-              onClick={() => onChange(selected ? null : style.name)}
-              className={`group relative overflow-hidden rounded-md border transition-all ${compact ? 'h-48' : 'aspect-[16/9]'} ${
-                selected
-                  ? 'border-green-500 ring-1 ring-green-500'
-                  : 'border-neutral-800 hover:border-neutral-600'
-              }`}
-            >
-              {thumb ? (
-                <img
-                  src={captureUrlForPath(thumb)}
-                  alt={style.name}
-                  className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                />
-              ) : (
-                <span className="absolute inset-0 bg-neutral-900" />
-              )}
-              <span className="absolute inset-x-0 bottom-0 bg-black/70 px-2 py-1.5 text-left text-[11px] font-medium text-white">
-                {style.name}
-              </span>
-              {selected ? (
-                <span className="absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-green-500 text-neutral-950">
-                  <Check className="h-3 w-3" weight="bold" />
-                </span>
-              ) : null}
-            </button>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
 
 const NEW_CHAT = '__new__' // bucket key for a fresh, not-yet-saved conversation
 const EMPTY_MSGS: ChatMessage[] = []
@@ -562,7 +427,9 @@ export function MemoryChat({
       void window.api
         .getSettings()
         .then((settings) => setShowGenerationDetails(settings.showGenerationDetails === true))
-        .catch(() => {})
+        .catch((error) => {
+          console.error('[chat] generation-detail setting could not be read', error)
+        })
     }
     window.addEventListener(DISPLAY_SETTINGS_INVALIDATED_EVENT, refresh)
     return () => window.removeEventListener(DISPLAY_SETTINGS_INVALIDATED_EVENT, refresh)
@@ -1313,7 +1180,6 @@ export function MemoryChat({
       setActiveProjectId(projectId)
       setProjectMenuOpen(false)
       setProjCreating(false)
-      setProjNewName('')
       if (activeConversationId) {
         try {
           await window.api.setRagConversationProject(activeConversationId, projectId)
@@ -1686,61 +1552,27 @@ export function MemoryChat({
     }
   }
 
-  const sendMessage = async (
-    override?: string,
-    opts?: {
-      regen?: boolean
-      voiceClip?: { url: string; duration: number }
-      atts?: Attachment[]
-      conversationId?: string
-      imageRequest?: ImageGenerationRequestContract
-      projectIdOverride?: string | null
-      sessionReplay?: {
-        type: 'regenerate' | 'edit'
-        turnId: string
-        anchor: { messageId: string; keepAnchor: boolean }
-      }
-      /** A form submission is user input even though its text is supplied as an argument. */
-      asUserInput?: boolean
-      /**
-       * The answer this turn settled on, for a caller that needs it rather than just the rendered
-       * rows - the voice workflow, which speaks it.
-       *
-       * A sink rather than a return value on purpose: this function settles through several paths
-       * (a plain reply, the tool loop, a stop, an error) and each one already knows its own
-       * authoritative answer at the point it commits it. Threading a return type through all of
-       * them would put the same decision in four places.
-       */
-      onAnswer?: (answer: string) => void
-    }
-  ): Promise<void> => {
-    const isInput = override === undefined || opts?.asUserInput === true
-    // Regenerate/Resend: the user turn already exists in the thread — re-run it
-    // in place instead of echoing another user bubble.
-    const regen = opts?.regen ?? false
-    // Lock the project for THIS send at send-time, like convId — every attribution
-    // below (RAG scope, saved artifacts, generated images) uses it. Reading the live
-    // `activeProjectId` at each await instead let a mid-stream project switch land
-    // this turn's output in the WRONG project (D21).
-    const projectId =
-      opts?.projectIdOverride !== undefined ? opts.projectIdOverride : activeProjectId
-    // Attachments (pasted blocks + processed files) ride along on a normal send
-    // from the composer, or on a drained queue item (opts.atts) — not on
-    // resend/regenerate/example.
-    const atts =
-      opts?.atts ??
-      (isInput ? attachments.filter((a) => a.status === 'ready' && (a.text || a.path)) : [])
-    const typed = (override ?? draftStore.getSnapshot()).trim()
-    // The user sees `trimmed`; the model also gets the attachment text folded in.
-    const trimmed =
-      typed || (atts.length ? `(${atts.length} attachment${atts.length > 1 ? 's' : ''})` : '')
-    const attBlock = atts
-      .filter((a) => a.text)
-      .map((a) => `--- attached ${a.kind}: ${a.name} ---\n${a.text}`)
-      .join('\n\n')
-    // Actual image files go to the multimodal model (not just their captions).
-    const imagePaths = atts.filter((a) => a.kind === 'image' && a.path).map((a) => a.path as string)
-    let modelQuery = (attBlock ? `${attBlock}\n\n${typed}` : typed).trim()
+  const sendMessage = async (override?: string, opts?: ChatSendOptions): Promise<void> => {
+    // Freeze every input used by this turn. Later project, draft, or attachment changes cannot
+    // redirect work that already crossed the send boundary.
+    const prepared = prepareChatInput({
+      override,
+      options: opts,
+      draft: draftStore.getSnapshot(),
+      activeProjectId,
+      attachments
+    })
+    const {
+      isInput,
+      regen,
+      projectId,
+      atts,
+      typed,
+      trimmed,
+      attachmentText: attBlock,
+      imagePaths
+    } = prepared
+    let { modelQuery } = prepared
     if (!typed && atts.length === 0) return
     // Shared ChatSessionService queues this turn by conversation after its durable input is saved.
     const targetConv = opts?.conversationId ?? activeConversationId
@@ -1905,8 +1737,13 @@ export function MemoryChat({
               conversationId: convId,
               projectId: projectId
             })
-            .catch(() => {
-              /* ignore */
+            .catch((error) => {
+              console.error('[chat-artifact] gallery persistence failed', {
+                conversationId: convId,
+                projectId,
+                error
+              })
+              setAttachWarn(CHAT_ARTIFACT_NOT_SAVED)
             })
         } else if (a.text) {
           void window.api
@@ -1917,8 +1754,13 @@ export function MemoryChat({
               conversationId: convId,
               projectId: projectId
             })
-            .catch(() => {
-              /* ignore */
+            .catch((error) => {
+              console.error('[chat-artifact] gallery persistence failed', {
+                conversationId: convId,
+                projectId,
+                error
+              })
+              setAttachWarn(CHAT_ARTIFACT_NOT_SAVED)
             })
         }
       }
@@ -1939,11 +1781,11 @@ export function MemoryChat({
       setImgProgress(null)
       setImageGenConv(convId)
       const seedNum = imgSeed.trim() === '' ? -1 : parseInt(imgSeed, 10)
-      const styleObj = STYLE_PRESETS.find((s) => s.name === activeStyle)
+      const stylePrompt = imageStylePrompt(activeStyle)
       // In explicit image mode keep the exact prompt (+ any chosen style); on
       // auto-route strip the "draw/generate an image of" phrasing to the subject.
       const basePrompt = mode === 'image' ? trimmed : cleanImagePrompt(trimmed)
-      const fullPrompt = styleObj ? `${basePrompt}, ${styleObj.prompt}` : basePrompt
+      const fullPrompt = stylePrompt ? `${basePrompt}, ${stylePrompt}` : basePrompt
       const imageRequest: ImageGenerationRequestContract = opts?.imageRequest ?? {
         prompt: fullPrompt,
         negativePrompt: imgNegative.trim() || undefined,
@@ -2514,8 +2356,13 @@ export function MemoryChat({
       })
       try {
         await window.api.addRagMessage(convId, 'assistant', errorContent)
-      } catch {
-        /* ignore */
+      } catch (persistenceError) {
+        console.error('[chat] generation failure message could not be persisted', {
+          conversationId: convId,
+          generationError: e,
+          persistenceError
+        })
+        setAttachWarn(CHAT_ANSWER_NOT_SAVED)
       }
     } finally {
       cancelledRef.current.delete(convId)
