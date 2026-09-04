@@ -11,6 +11,7 @@ import {
   type ImageSettingKey,
   type ImageSettingsProjection
 } from '@renderer/lib/image-settings-store'
+import { SettingsNumberField } from './SettingsNumberField'
 import { SettingsSelect } from './SettingsSelect'
 import { SettingsTextField, type SettingsWriteOutcome } from './SettingsTextField'
 import { desktopModelControl } from '@renderer/composition/model-control'
@@ -89,12 +90,27 @@ export function ImageSettingsTab(): React.JSX.Element {
       .catch(() => setModel(previous))
   }
 
+  const writeOverride = useCallback(
+    async (key: keyof ImageParamOverride, value: number): Promise<SettingsWriteOutcome> => {
+      if (!model) return ok(undefined)
+      const next = setOverride(params, model, key, value)
+      setParams(next)
+      return save('imageParams', next)
+    },
+    [model, params, save]
+  )
+
   const saveOverride = (key: keyof ImageParamOverride, value: number): void => {
-    if (!model) return
-    const next = setOverride(params, model, key, value)
-    setParams(next)
-    persist('imageParams', next)
+    void writeOverride(key, value).then((outcome) => {
+      setSaveFailure(outcome.ok ? '' : outcome.failure.message)
+    })
   }
+
+  const commitSteps = useCallback((value: number) => writeOverride('steps', value), [writeOverride])
+  const commitGuidance = useCallback(
+    (value: number) => writeOverride('cfgScale', value),
+    [writeOverride]
+  )
 
   if (!model) {
     return (
@@ -139,15 +155,14 @@ export function ImageSettingsTab(): React.JSX.Element {
           <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
             Steps
           </span>
-          <input
-            aria-label="Image steps"
-            type="number"
+          <SettingsNumberField
+            key={`${model}-steps`}
+            id="image-steps"
+            label="Image steps"
             min={4}
             max={50}
             value={effective.steps}
-            onChange={(event) =>
-              saveOverride('steps', Math.max(4, Math.min(50, Number(event.target.value) || 4)))
-            }
+            commit={commitSteps}
             className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
           />
         </label>
@@ -155,16 +170,15 @@ export function ImageSettingsTab(): React.JSX.Element {
           <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
             Guidance
           </span>
-          <input
-            aria-label="Image guidance"
-            type="number"
+          <SettingsNumberField
+            key={`${model}-guidance`}
+            id="image-guidance"
+            label="Image guidance"
             min={0}
             max={20}
             step={0.5}
             value={effective.cfgScale}
-            onChange={(event) =>
-              saveOverride('cfgScale', Math.max(0, Math.min(20, Number(event.target.value) || 0)))
-            }
+            commit={commitGuidance}
             className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
           />
         </label>

@@ -1262,7 +1262,6 @@ export function setupIPC(): void {
   ipcMain.handle('settings:save', (_, key: string, value: unknown) => {
     if (key === COMPUTER_USE_SETTINGS_KEY) setComputerUseSettings(value)
     else saveSetting(key, value)
-    console.log(`[IPC] Setting saved: ${key} =`, value)
     return true
   })
 
