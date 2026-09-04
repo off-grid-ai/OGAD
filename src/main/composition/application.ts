@@ -73,6 +73,7 @@ export function startDesktopApplication(): ReturnType<typeof desktopApplication.
     } catch (error) {
       releaseSyncRuntime()
       releaseSyncRuntime = null
+      starting = null
       throw error
     }
   })()
