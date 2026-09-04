@@ -132,39 +132,12 @@ export function desktopAsyncDownloadedRegistryPorts(dir: string): AsyncDownloade
         throw error
       }
     },
-    writeAtomically: async (models) => {
-      await fs.promises.mkdir(dir, { recursive: true })
-      const temporaryPath = `${filePath}.tmp-${randomUUID()}`
-      const contents = JSON.stringify(models, null, 2)
-      const handle = await fs.promises.open(temporaryPath, 'wx')
-      let open = true
-      try {
-        await handle.writeFile(contents)
-        open = false
-        await handle.close()
-        await fs.promises.rename(temporaryPath, filePath)
-      } catch (cause) {
-        const failures: unknown[] = [cause]
-        if (open) {
-          try {
-            await handle.close()
-          } catch (closeCause) {
-            failures.push(closeCause)
-          }
-        }
-        try {
-          await fs.promises.rm(temporaryPath, { force: true })
-        } catch (cleanupCause) {
-          failures.push(cleanupCause)
-        }
-        if (failures.length > 1) {
-          throw new AggregateError(
-            failures,
-            'Downloaded-model registry write and cleanup both failed.'
-          )
-        }
-        throw cause
-      }
+    updateAtomically: async (update) => {
+      // All Desktop registry writers run in this main process. Do not yield between reading the
+      // current rows and replacing them: transfer registration and reconciliation also use this
+      // synchronous store. Shared supplies the pure mutation; Desktop owns the atomic file swap.
+      const store = desktopDownloadedRegistryPorts(dir)
+      store.write([...update(store.read())])
     },
     fileSize: async (fileName) => {
       try {
