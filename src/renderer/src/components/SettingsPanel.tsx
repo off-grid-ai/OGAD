@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { createElement, useCallback, useEffect, useState } from 'react'
 import { persistToggle } from '@renderer/lib/persist-toggle'
 import {
   DEFAULT_CTX_SIZE,
@@ -163,14 +163,14 @@ export function SettingsPanel({
 
   const refreshConnectors = useCallback((): void => {
     window.api
-      .mcpList?.()
+      .mcpList()
       .then((c: Connector[]) => setConnectors(c))
       .catch(() => setConnectors([]))
   }, [])
 
   useEffect(() => {
     window.api
-      .getLlmSettings?.()
+      .getLlmSettings()
       .then((v: LlmSettings) => setS(v))
       .catch(() => {})
     void desktopModelControl
@@ -180,15 +180,15 @@ export function SettingsPanel({
       )
       .catch(() => setActiveModelName(null))
     window.api
-      .getTranscriptionInfo?.()
+      .getTranscriptionInfo()
       .then((info: TranscriptionInfo) => setTranscriptionInfo(info))
       .catch(() => setTranscriptionInfo(null))
     window.api
-      .getSettings?.()
+      .getSettings()
       .then((settings) => setShowGenerationDetails(settings.showGenerationDetails === true))
       .catch(() => {})
     window.api
-      .listTools?.()
+      .listTools()
       .then((t: { name: string; description: string }[]) => setTools(t))
       .catch(() => {})
     refreshConnectors()
@@ -197,8 +197,8 @@ export function SettingsPanel({
   // Persist one inference setting (optimistic) — backend applies it per-request.
   const set = (patch: LlmSettings): void => {
     setS((prev) => ({ ...prev, ...patch }))
-    void Promise.resolve(window.api.setLlmSettings?.(patch))
-      .then(() => window.api.getLlmSettings?.())
+    void Promise.resolve(window.api.setLlmSettings(patch))
+      .then(() => window.api.getLlmSettings())
       .then((next) => {
         if (next) {
           setS(next)
@@ -207,7 +207,7 @@ export function SettingsPanel({
       })
       .catch(() => {
         void window.api
-          .getLlmSettings?.()
+          .getLlmSettings()
           .then((next) => setS(next))
           .catch(() => {})
       })
@@ -215,10 +215,10 @@ export function SettingsPanel({
 
   const resetDefaults = (): void => {
     setS((prev) => ({ ...prev, ...DEFAULTS }))
-    void Promise.resolve(window.api.setLlmSettings?.(DEFAULTS))
+    void Promise.resolve(window.api.setLlmSettings(DEFAULTS))
       .then(() => {
         invalidateLlmSettings()
-        return window.api.getLlmSettings?.()
+        return window.api.getLlmSettings()
       })
       .then((next) => {
         if (next) setS(next)
@@ -269,7 +269,7 @@ export function SettingsPanel({
 
   const addConnector = async (): Promise<void> => {
     if (!newConn.name.trim() || !newConn.url.trim()) return
-    await window.api.mcpAdd?.({
+    await window.api.mcpAdd({
       name: newConn.name.trim(),
       transport: 'http',
       url: newConn.url.trim()
@@ -334,7 +334,7 @@ export function SettingsPanel({
       </div>
 
       <div className={embedded ? 'p-1 pt-4 text-sm' : 'min-h-0 flex-1 overflow-y-auto p-4 text-sm'}>
-        {tab === 'tasks' && TaskSettings ? <TaskSettings /> : null}
+        {tab === 'tasks' && TaskSettings ? createElement(TaskSettings) : null}
         {tab === 'model' && (
           <>
             <div
@@ -725,7 +725,7 @@ export function SettingsPanel({
                           tools.map((x) => (x.name === t.name ? { ...x, enabled: next } : x)),
                           tools,
                           setTools,
-                          () => window.api.setToolEnabled?.(t.name, next)
+                          () => window.api.setToolEnabled(t.name, next)
                         )
                       }}
                       className={`shrink-0 rounded px-2 py-1 text-[11px] ${t.enabled === false ? 'text-neutral-500' : 'text-green-500'}`}
@@ -784,7 +784,7 @@ export function SettingsPanel({
                     <div className="flex items-center gap-2">
                       <button
                         onClick={async () => {
-                          await window.api.mcpSetEnabled?.(c.id, !c.enabled)
+                          await window.api.mcpSetEnabled(c.id, !c.enabled)
                           refreshConnectors()
                         }}
                         className={`rounded px-2 py-1 text-[11px] ${c.enabled ? 'text-green-500' : 'text-neutral-500'}`}
@@ -793,7 +793,7 @@ export function SettingsPanel({
                       </button>
                       <button
                         onClick={async () => {
-                          await window.api.mcpRemove?.(c.id)
+                          await window.api.mcpRemove(c.id)
                           refreshConnectors()
                         }}
                         className="rounded px-2 py-1 text-[11px] text-red-400 hover:bg-red-500/10"
