@@ -1,8 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterAll, afterEach, beforeEach } from 'vitest'
-import { installCompatibleGenerationModel } from './compatible-generation-model'
+import { afterAll } from 'vitest'
 
 // The data dir is pinned for the whole suite before any main module loads. runtime-env resolves it from
 // this variable first; without it a journey that never set its own dir read and WROTE the developer's
@@ -11,18 +10,6 @@ import { installCompatibleGenerationModel } from './compatible-generation-model'
 if (!process.env.OFFGRID_DATA_DIR) {
   process.env.OFFGRID_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-db-suite-'))
 }
-
-let removeCompatibleGenerationModel: (() => void) | null = null
-
-beforeEach(async () => {
-  if (process.env.OFFGRID_SKIP_COMPATIBLE_GENERATION_MODEL === '1') return
-  removeCompatibleGenerationModel = await installCompatibleGenerationModel()
-})
-
-afterEach(() => {
-  removeCompatibleGenerationModel?.()
-  removeCompatibleGenerationModel = null
-})
 
 /**
  * Leave the model port free for the next file.

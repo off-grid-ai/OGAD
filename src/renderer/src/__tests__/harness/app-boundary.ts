@@ -37,7 +37,7 @@ export function installAppBoundary(overrides: Record<string, unknown> = {}): voi
       error: ''
     }),
     getModelCatalog: async () => ({ kinds: ['text'], models: [] }),
-    getModelControlSnapshot: async () =>
+    getModelControlProjection: async () =>
       modelControlSnapshot({ kinds: ['text'], models: [] }),
     getInstalledModels: async () => [],
     getActiveModelIds: async () => [],

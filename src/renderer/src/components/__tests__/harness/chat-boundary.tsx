@@ -317,8 +317,17 @@ export class ChatBoundary {
     ]),
     prepareTtsVoice: vi.fn(async () => ({ ready: true })),
     onTtsVoiceProgress: vi.fn(() => () => {}),
+    speechCommands: {
+      transcribe: vi.fn(),
+      cancelTranscription: vi.fn(),
+      speak: vi.fn(async () => ({ kind: 'spoken' as const })),
+      feedStream: vi.fn(async () => {}),
+      finishStream: vi.fn(async () => {}),
+      interrupt: vi.fn(async () => {}),
+      onEvent: vi.fn(() => () => {})
+    },
     getSettings: vi.fn(async () => ({})),
-    getModelControlSnapshot: vi.fn(() => this.modelControlSnapshot()),
+    getModelControlProjection: vi.fn(() => this.modelControlSnapshot()),
     saveSetting: vi.fn(async () => {}),
     listProjects: vi.fn(async () => this.projects.map((item) => ({ ...item }))),
     styleThumbs: vi.fn(async () => ({})),
