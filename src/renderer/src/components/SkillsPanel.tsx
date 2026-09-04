@@ -51,8 +51,9 @@ function flattenTrigger(
       action,
       connectors
     }
-  if (t.kind === 'event' && (t.on === 'calendar' || t.on === 'approval'))
+  if (t.kind === 'event') {
     return { triggerKind: 'event', triggerConfig: t.on, action, connectors }
+  }
   return { triggerKind: '', triggerConfig: '', action: '', connectors: true }
 }
 

@@ -214,7 +214,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
       const mediaModels = Object.entries(result.catalog ?? {}).flatMap(([modality, options]) =>
         modality === 'text'
           ? []
-          : (options ?? []).map((model) => ({
+          : options.map((model) => ({
               id: model.id,
               name: model.name,
               modality: modality as RemoteModelModality

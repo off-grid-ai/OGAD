@@ -151,8 +151,9 @@ export function ActionGateDock({
                   onClick={() => {
                     const args = { ...request.args, ...editing }
                     setEdits((current) => {
-                      const { [request.actionId]: _dropped, ...rest } = current
-                      return rest
+                      const remaining = { ...current }
+                      delete remaining[request.actionId]
+                      return remaining
                     })
                     resolve(request.actionId, { kind: 'edit', args })
                   }}

@@ -74,7 +74,7 @@ export function HealthPanel(): React.ReactElement {
       if (document.visibilityState === 'visible') void refresh()
     }
     void refresh()
-    const stopChatHealth = api.onChatHealthChanged?.(() => void refresh())
+    const stopChatHealth = api.onChatHealthChanged(() => void refresh())
     window.addEventListener('focus', refreshWhenVisible)
     document.addEventListener('visibilitychange', refreshWhenVisible)
     return () => {
