@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { ARTIFACT_KIND_LABELS, type ArtifactKind } from '@renderer/lib/artifact-labels'
+import { ARTIFACT_KIND_LABELS } from '@renderer/lib/artifact-labels'
+import type { Artifact } from '@renderer/lib/artifact-parser'
 import { SidePanel } from './SidePanel'
 
 // Renders a model-generated artifact (HTML / SVG / Mermaid / React) in a SANDBOXED
@@ -11,8 +12,6 @@ import { SidePanel } from './SidePanel'
 
 // 'text'/'image' are catalogued inputs (uploaded file / pasted block / image) —
 // shown as plain text or a thumbnail, never executed in the sandbox.
-export type Artifact = { kind: ArtifactKind; code: string; title?: string }
-
 const KIND_LABEL = ARTIFACT_KIND_LABELS
 
 function escapeForHtml(s: string): string {
@@ -20,7 +19,9 @@ function escapeForHtml(s: string): string {
 }
 
 function revokePreview(url: string): void {
-  void window.api.revokeArtifactPreview(url).catch(() => {})
+  void window.api.revokeArtifactPreview(url).catch((cause: unknown) => {
+    console.error('Artifact preview cleanup failed:', cause)
+  })
 }
 
 // npm packages a React artifact imports beyond react/react-dom (loaded from esm.sh).
@@ -48,7 +49,7 @@ export function ArtifactCanvas({
   onClose: () => void
   width?: number | null
   onResize?: (w: number) => void
-}) {
+}): React.JSX.Element {
   const [runtime, setRuntime] = useState<Record<string, string> | null>(null)
   const [view, setView] = useState<'preview' | 'code'>('preview')
   const [resizing, setResizing] = useState(false)
@@ -98,11 +99,12 @@ export function ArtifactCanvas({
   useEffect(() => {
     let alive = true
     window.api
-      .artifactRuntime?.(artifact.kind)
+      .artifactRuntime(artifact.kind)
       .then((r: Record<string, string>) => {
         if (alive) setRuntime(r)
       })
-      .catch(() => {
+      .catch((cause: unknown) => {
+        console.error('Artifact runtime could not be loaded:', cause)
         if (alive) setRuntime({})
       })
     return () => {
@@ -354,45 +356,4 @@ else { __ogShow('No React component found — define a component named App or a 
       </div>
     </SidePanel>
   )
-}
-
-const JSX_SIGNAL =
-  /(<[A-Za-z][^>]*>|<\/[A-Za-z]|=>\s*\(?\s*<|React\.|useState|ReactDOM|export default function|className=)/
-
-/** Extract a renderable artifact from assistant markdown, if any. */
-export function parseArtifact(content: string): Artifact | null {
-  // React first: COMBINE all jsx/tsx/react blocks so multi-file responses
-  // (App.js + Child.js) run together — imports are stripped, so every component
-  // ends up in one shared scope and relative imports resolve.
-  const reactBlocks = [...content.matchAll(/```(?:jsx|tsx|react)\s*\n([\s\S]*?)```/gi)].map((b) =>
-    b[1]!.trim()
-  )
-  if (reactBlocks.length) return { kind: 'react', code: reactBlocks.join('\n\n') }
-
-  // A single html/svg/mermaid artifact.
-  const m = content.match(/```(html|svg|mermaid)\s*\n([\s\S]*?)```/i)
-  if (m) {
-    const lang = m[1]!.toLowerCase()
-    return {
-      kind: lang === 'svg' ? 'svg' : lang === 'mermaid' ? 'mermaid' : 'html',
-      code: m[2]!.trim()
-    }
-  }
-
-  // Plain js/ts blocks that look like React — combine them too.
-  const jsBlocks = [
-    ...content.matchAll(/```(?:javascript|js|typescript|ts)\s*\n([\s\S]*?)```/gi)
-  ].map((b) => b[1]!.trim())
-  if (jsBlocks.length && jsBlocks.some((b) => JSX_SIGNAL.test(b))) {
-    return { kind: 'react', code: jsBlocks.join('\n\n') }
-  }
-
-  // A bare <svg>…</svg> with no fence is still a valid artifact.
-  const svg = content.match(/<svg[\s\S]*<\/svg>/i)
-  if (svg) return { kind: 'svg', code: svg[0] }
-
-  // A fenced markdown/doc block becomes a rendered document artifact.
-  const md = content.match(/```(?:markdown|md)\s*\n([\s\S]*?)```/i)
-  if (md) return { kind: 'text', code: md[1]!.trim() }
-  return null
 }

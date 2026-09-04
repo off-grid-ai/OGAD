@@ -15,7 +15,8 @@ import {
   IconSettings,
   IconLayoutGrid
 } from '@tabler/icons-react'
-import { ArtifactCanvas, type Artifact } from './ArtifactCanvas'
+import { ArtifactCanvas } from './ArtifactCanvas'
+import type { Artifact } from '@renderer/lib/artifact-parser'
 import { artifactKindLabel } from '@renderer/lib/artifact-labels'
 import { timeAgo } from '@renderer/lib/time'
 import { useRendererEntitlement } from '@renderer/bootstrap/useRendererEntitlement'
