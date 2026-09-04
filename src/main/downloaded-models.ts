@@ -4,6 +4,7 @@
 
 import fs from 'fs'
 import path from 'path'
+import { randomUUID } from 'node:crypto'
 import { modelPackageIdentity } from '@offgrid/sync'
 import type {
   AsyncDownloadedModelRegistryPort,
@@ -27,7 +28,25 @@ function requireDownloadedRows(value: unknown): DownloadedModel[] {
   if (!Array.isArray(value)) {
     throw new Error('Downloaded-model registry must contain an array.')
   }
-  return value as DownloadedModel[]
+  return value.map((row: unknown, index) => {
+    if (!isDownloadedRow(row)) {
+      throw new Error(`Downloaded-model registry row ${index + 1} is invalid.`)
+    }
+    return row
+  })
+}
+
+function isDownloadedRow(value: unknown): value is DownloadedModel {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const row = value as Record<string, unknown>
+  const requiredStrings = ['id', 'name', 'kind']
+  const optionalStrings = ['familyId', 'packageIdentity']
+  return (
+    requiredStrings.every((key) => typeof row[key] === 'string') &&
+    optionalStrings.every((key) => row[key] === undefined || typeof row[key] === 'string') &&
+    Array.isArray(row.files) &&
+    row.files.every((file: unknown) => typeof file === 'string')
+  )
 }
 
 function isMissing(error: unknown): boolean {
@@ -41,8 +60,7 @@ export function desktopDownloadedRegistryPorts(dir: string): DownloadedRegistryP
   return {
     read: () => {
       try {
-        const rows: unknown = JSON.parse(fs.readFileSync(registryPath(dir), 'utf-8'))
-        return Array.isArray(rows) ? (rows as DownloadedModel[]) : []
+        return requireDownloadedRows(JSON.parse(fs.readFileSync(registryPath(dir), 'utf-8')))
       } catch (error) {
         if (isMissing(error)) return []
         throw error
@@ -52,7 +70,39 @@ export function desktopDownloadedRegistryPorts(dir: string): DownloadedRegistryP
       // A completed non-catalog download must be discoverable after restart. Let persistence
       // failures reach the facade finalizer so it cannot publish a success-shaped completion while
       // the installed model is absent from the durable registry.
-      fs.writeFileSync(registryPath(dir), JSON.stringify(models, null, 2))
+      fs.mkdirSync(dir, { recursive: true })
+      const temporaryPath = `${registryPath(dir)}.tmp-${randomUUID()}`
+      const contents = JSON.stringify(models, null, 2)
+      // Open outside the cleanup scope: a failed exclusive open does not own this path.
+      const descriptor = fs.openSync(temporaryPath, 'wx')
+      let open = true
+      try {
+        fs.writeFileSync(descriptor, contents)
+        open = false
+        fs.closeSync(descriptor)
+        fs.renameSync(temporaryPath, registryPath(dir))
+      } catch (cause) {
+        const failures: unknown[] = [cause]
+        if (open) {
+          try {
+            fs.closeSync(descriptor)
+          } catch (closeCause) {
+            failures.push(closeCause)
+          }
+        }
+        try {
+          fs.rmSync(temporaryPath, { force: true })
+        } catch (cleanupCause) {
+          failures.push(cleanupCause)
+        }
+        if (failures.length > 1) {
+          throw new AggregateError(
+            failures,
+            'Downloaded-model registry write and cleanup both failed.'
+          )
+        }
+        throw cause
+      }
     },
     fileSize: (fileName) => {
       try {
@@ -84,16 +134,32 @@ export function desktopAsyncDownloadedRegistryPorts(dir: string): AsyncDownloade
     },
     writeAtomically: async (models) => {
       await fs.promises.mkdir(dir, { recursive: true })
-      const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}`
+      const temporaryPath = `${filePath}.tmp-${randomUUID()}`
+      const contents = JSON.stringify(models, null, 2)
+      const handle = await fs.promises.open(temporaryPath, 'wx')
+      let open = true
       try {
-        await fs.promises.writeFile(temporaryPath, JSON.stringify(models, null, 2))
+        await handle.writeFile(contents)
+        open = false
+        await handle.close()
         await fs.promises.rename(temporaryPath, filePath)
       } catch (cause) {
+        const failures: unknown[] = [cause]
+        if (open) {
+          try {
+            await handle.close()
+          } catch (closeCause) {
+            failures.push(closeCause)
+          }
+        }
         try {
           await fs.promises.rm(temporaryPath, { force: true })
         } catch (cleanupCause) {
+          failures.push(cleanupCause)
+        }
+        if (failures.length > 1) {
           throw new AggregateError(
-            [cause, cleanupCause],
+            failures,
             'Downloaded-model registry write and cleanup both failed.'
           )
         }

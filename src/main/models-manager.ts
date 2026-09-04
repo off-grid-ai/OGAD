@@ -18,9 +18,11 @@ import {
 import { modelPackageIdentity, type TransferredModelManifest } from '@offgrid/sync'
 import {
   artifactVerificationError,
+  findDownloadedModelVariant as downloadedVariant,
   type LocalModelImportPorts,
   type ModelLibraryRemovalPorts,
   type ModelTransferRegistrationPorts,
+  type TransferableModelFileAccess,
   type ModelMetadataRepairCommandPorts,
   type ModelLibraryRemovalTarget,
   mergeCatalog,
@@ -170,14 +172,6 @@ function downloadedPrimary(model: DownloadedModel): string | undefined {
 
 function downloadedProjector(model: DownloadedModel): string | undefined {
   return model.files.find(isProjectorFileName)
-}
-
-/** Exact id first; a unique family match keeps a stale pre-migration selection working. */
-function downloadedVariant(models: DownloadedModel[], id: string): DownloadedModel | undefined {
-  const exact = models.find((model) => model.id === id)
-  if (exact) return exact
-  const family = models.filter((model) => model.familyId === id)
-  return family.length === 1 ? family[0] : undefined
 }
 
 /** A route id, or any id that names a remote route, is already canonical (the workspace decides). */
@@ -795,21 +789,13 @@ export async function getActiveModelIds(): Promise<string[]> {
 }
 
 /**
- * Make ANY installed model the active one for its type — the single seam the UI
- * calls. Routes by kind internally: text/vision load the chat LLM; image/voice/
- * transcription set that modality's default pick. Callers pass only the id and
- * never branch on kind. Adding a new modality needs zero caller changes.
+ * Resolve local/catalog activation facts. Shared owns remote inventory lookup and
+ * modality dispatch; this host callback must not re-enter the facade that holds it.
  */
 export async function resolveDesktopActivation(
   modelId: string,
   requestedKind?: string
-): Promise<{ kind?: string; remote?: boolean; supportsRequestedKind?: boolean } | null> {
-  const known = desktopModels.lookup(modelId)
-  if (known?.source === 'remote') {
-    // A remote route's modality is an inventory fact; without it a caller that names no kind would
-    // be routed to text and an image pick would silently fail.
-    return { remote: true, kind: known.kind }
-  }
+): Promise<{ kind?: string; supportsRequestedKind?: boolean } | null> {
   let kind: string | undefined
   let supportsRequestedKind = false
   if (isLocalLibraryModelId(modelId)) {
@@ -861,24 +847,6 @@ export function getActiveModalities(): { text: string | null } & Record<Modality
 
 export type LocalModel = LocalModelRegistryEntry
 
-export type TransferableModelSource = 'catalog' | 'downloaded' | 'local'
-
-export interface TransferableModelFile {
-  name: string
-  sizeBytes: number
-  path: string
-}
-
-export interface TransferableModel {
-  id: string
-  familyId: string
-  packageIdentity?: string
-  name: string
-  kind: string
-  source: TransferableModelSource
-  files: TransferableModelFile[]
-}
-
 export function getLocalModels(dir = llm.getModelsDir()): LocalModel[] {
   return new LocalModelRegistry(dir).read()
 }
@@ -889,9 +857,9 @@ function saveLocalModels(list: LocalModel[], dir = llm.getModelsDir()): void {
 async function transferredFilesOnDisk(
   dir: string,
   files: Array<{ name: string; sizeBytes: number }>
-): Promise<{ error?: string; files?: TransferableModelFile[] }> {
+): Promise<{ error?: string; files?: TransferableModelFileAccess[] }> {
   if (files.length === 0) return { error: 'model has no transferable files' }
-  const resolved: TransferableModelFile[] = []
+  const resolved: TransferableModelFileAccess[] = []
   for (const file of files) {
     const filePath = path.join(dir, file.name)
     const verification = await verifyArtifactFile(filePath, fs, 'transfer', false, file.sizeBytes)
@@ -918,6 +886,7 @@ export function desktopModelTransferRegistrationPorts(
   dir: () => string
 ): ModelTransferRegistrationPorts {
   return {
+    libraryId: () => path.resolve(dir()),
     validateFiles: async (manifest) =>
       (
         await transferredFilesOnDisk(
@@ -935,73 +904,6 @@ export function desktopModelTransferRegistrationPorts(
     hasDownloaded: (id) => Boolean(findDownloaded(dir(), id)),
     packageIdentity: (manifest) => modelPackageIdentity(manifest as TransferredModelManifest)
   }
-}
-
-/**
- * Resolve one installed, file-backed model for device transfer. Runtime caches such as mflux are
- * intentionally excluded because they are directory trees, not portable model files.
- */
-export async function getTransferableModel(
-  modelId: string,
-  dir = llm.getModelsDir()
-): Promise<TransferableModel | null> {
-  const local = getLocalModels(dir).find((model) => model.id === modelId)
-  const { CATALOG } = await import('@offgrid/models')
-  const catalog = CATALOG.find((model) => model.id === modelId)
-  const downloaded = downloadedVariant(reconcileDownloadedModelRegistry(dir, CATALOG), modelId)
-
-  const source: TransferableModelSource | null = local
-    ? 'local'
-    : downloaded
-      ? 'downloaded'
-      : catalog && catalog.runtime !== 'mflux' && catalog.artifactDelivery !== 'runtime'
-        ? 'catalog'
-        : null
-  if (!source) return null
-
-  const names = local
-    ? [local.primary, local.mmproj].filter((name): name is string => Boolean(name))
-    : downloaded
-      ? downloaded.files
-      : (catalog?.files.map((file) => file.name) ?? [])
-  const files = (
-    await transferredFilesOnDisk(
-      dir,
-      names.map((name) => ({ name, sizeBytes: fileSizeOf(dir, name) }))
-    )
-  ).files
-  if (!files) return null
-
-  return {
-    id: downloaded?.id ?? modelId,
-    familyId: downloaded?.familyId ?? catalog?.id ?? local?.id ?? modelId,
-    packageIdentity: downloaded?.packageIdentity,
-    name: local?.name ?? downloaded?.name ?? catalog?.name ?? modelId,
-    kind: local?.kind ?? downloaded?.kind ?? catalog?.kind ?? 'text',
-    source,
-    files
-  }
-}
-
-/**
- * Register model files only after the transfer owner has checksum-verified and atomically promoted
- * every file into the models directory. The catalog remains the source of truth for known models;
- * free-form and local models are recorded in their existing registries.
- */
-export async function registerTransferredModel(
-  manifest: TransferredModelManifest,
-  dir = llm.getModelsDir()
-): Promise<{ success: boolean; error?: string; id?: string }> {
-  if (dir !== llm.getModelsDir()) {
-    return {
-      success: false,
-      error: 'Model transfers can register only in the active model library.'
-    }
-  }
-  const outcome = await desktopModels.registerTransfer({ manifest })
-  return outcome.ok
-    ? { success: true, id: outcome.value.modelId }
-    : { success: false, error: modelsFailureMessage(outcome.failure) }
 }
 
 /** Set of every filename referenced by the local registry (primary + mmproj), so

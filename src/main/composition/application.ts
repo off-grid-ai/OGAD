@@ -30,6 +30,7 @@ import { writeDiagnosticLog } from '../diagnostics-log'
 import { setupVoiceTurnIpc } from '../voice-turn-ipc'
 import { desktopModelDownloads } from '../models/desktop-model-download-ports'
 import { createDesktopModelControlPort } from '../models/desktop-model-control-port'
+import { createDesktopModelTransferQueryPorts } from '../models/model-transfer-query-ports'
 
 const speechIo = createDesktopSpeechIoPorts()
 const extensionPorts = consumeDesktopApplicationExtensionPorts()
@@ -45,7 +46,10 @@ export const desktopApplication = createOffGridApplication({
     control: createDesktopModelControlPort(),
     guidedSetup: createDesktopGuidedSetupPorts(),
     activation: { resolve: resolveDesktopActivation },
-    library: desktopModelLibraryPorts,
+    library: {
+      ...desktopModelLibraryPorts,
+      transferable: createDesktopModelTransferQueryPorts()
+    },
     settings: createDesktopModelSettingsPort()
   },
   rag: {

@@ -514,6 +514,115 @@ function report(rule, file, source, node, detail) {
   findings.push({ rule, file, line: lineOf(source, node), detail })
 }
 
+/** Transfer policy belongs to Shared; raw host facts and type-only imports remain legal. */
+function checkTransferOwnership(fileName, source) {
+  const forbidden = new Set(['getTransferableModel', 'registerTransferredModel'])
+  const transferCaller =
+    /^pro\/main\/sync\/(?:model-transfer-service|sync-facade-activation|sync-facade-ipc-transfers)\.ts$/.test(
+      fileName
+    )
+  const legacyMember = (name) => forbidden.has(name) || (transferCaller && name === 'listInstalled')
+  const managerModule = (node) =>
+    node &&
+    ts.isStringLiteralLike(node) &&
+    /(?:^|\/)models-manager(?:\.[cm]?[jt]s)?$/.test(node.text)
+  const flag = (node, name) =>
+    report(
+      'model-transfer-policy-is-shared',
+      fileName,
+      source,
+      node,
+      `legacy transfer policy: ${name}`
+    )
+  const unwrap = (node) => {
+    while (node && (ts.isAwaitExpression(node) || ts.isParenthesizedExpression(node)))
+      node = node.expression
+    return node
+  }
+  const importsManager = (node) => {
+    const value = unwrap(node)
+    return (
+      value &&
+      ts.isCallExpression(value) &&
+      value.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      managerModule(value.arguments[0])
+    )
+  }
+  const namespaces = new Set()
+  const inspectImport = (bindings) => {
+    if (ts.isNamespaceImport(bindings)) namespaces.add(bindings.name.text)
+    if (ts.isNamedImports(bindings)) {
+      for (const element of bindings.elements) {
+        const name = (element.propertyName ?? element.name).text
+        if (!element.isTypeOnly && legacyMember(name)) flag(element, name)
+      }
+    }
+  }
+  const collect = (node) => {
+    if (
+      ts.isImportDeclaration(node) &&
+      managerModule(node.moduleSpecifier) &&
+      node.importClause &&
+      !node.importClause.isTypeOnly &&
+      node.importClause.namedBindings
+    ) {
+      inspectImport(node.importClause.namedBindings)
+    }
+    if (ts.isVariableDeclaration(node) && importsManager(node.initializer)) {
+      if (ts.isIdentifier(node.name)) namespaces.add(node.name.text)
+      if (ts.isObjectBindingPattern(node.name)) {
+        for (const element of node.name.elements) {
+          const name = (element.propertyName ?? element.name).getText(source)
+          if (legacyMember(name)) flag(element, name)
+        }
+      }
+    }
+    ts.forEachChild(node, collect)
+  }
+  collect(source)
+  const inspect = (node) => {
+    if (
+      ts.isExportDeclaration(node) &&
+      !node.isTypeOnly &&
+      node.exportClause &&
+      ts.isNamedExports(node.exportClause)
+    ) {
+      for (const element of node.exportClause.elements) {
+        const original = (element.propertyName ?? element.name).text
+        if (!element.isTypeOnly && (forbidden.has(original) || forbidden.has(element.name.text)))
+          flag(element, original)
+      }
+    }
+    if (
+      (ts.isFunctionDeclaration(node) || ts.isVariableStatement(node)) &&
+      node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
+    ) {
+      const names = ts.isFunctionDeclaration(node)
+        ? [node.name]
+        : node.declarationList.declarations.map((declaration) => declaration.name)
+      for (const name of names) {
+        if (name && ts.isIdentifier(name) && forbidden.has(name.text)) flag(name, name.text)
+      }
+    }
+    if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+      const receiver = unwrap(node.expression)
+      const name = ts.isPropertyAccessExpression(node)
+        ? node.name.text
+        : node.argumentExpression && ts.isStringLiteralLike(node.argumentExpression)
+          ? node.argumentExpression.text
+          : null
+      if (
+        name &&
+        legacyMember(name) &&
+        ((ts.isIdentifier(receiver) && namespaces.has(receiver.text)) || importsManager(receiver))
+      )
+        flag(node, name)
+    }
+    ts.forEachChild(node, inspect)
+  }
+  inspect(source)
+}
+
 for (const file of files) {
   const text = fs.readFileSync(file, 'utf8')
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true)
@@ -974,6 +1083,7 @@ for (const file of files) {
   checkModelOwnerConstruction(fileName, source)
   checkDownloadOwnerImports(fileName, source)
   checkFacadeOwnedServiceConstruction(fileName, source)
+  checkTransferOwnership(fileName, source)
 
   const visit = (node) => {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
