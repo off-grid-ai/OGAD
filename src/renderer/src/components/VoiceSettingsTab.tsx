@@ -27,6 +27,7 @@ import type { SettingsWriteOutcome } from './SettingsTextField'
 import { LoadingDots } from './ui/loading-dots'
 import { failed, formatTransferSpeed, ok } from '@offgrid/application'
 import { projectProgress } from '@offgrid/ui'
+import { useTransferRate } from '@renderer/hooks/useTransferRate'
 import { formatStorageBytes } from './setup/storage-format'
 
 /** Playback speed as the row has always shown it. */
@@ -154,6 +155,7 @@ export function VoiceSettingsTab(): React.JSX.Element {
   const [preferences, setPreferences] = useState(DEFAULT_VOICE_PREFERENCES)
   const testOperationRef = useRef<string | null>(null)
   const requestedVoiceRef = useRef('af_heart')
+  const transferRate = useTransferRate()
 
   const requestVoices = useCallback((): void => {
     void window.api
@@ -175,10 +177,14 @@ export function VoiceSettingsTab(): React.JSX.Element {
 
   useEffect(() => {
     const stopProgress = window.api.onTtsVoiceProgress(
-      ({ voiceId, progress: percentage, ...next }) => {
+      ({ voiceId, progress: percentage, sampledAtMs, ...next }) => {
         if (voiceId && voiceId !== requestedVoiceRef.current) return
         setAssetsState('downloading')
-        setProgress({ percentage, ...next })
+        setProgress({
+          percentage,
+          ...next,
+          bytesPerSecond: transferRate.measure(next.downloadedBytes, sampledAtMs)
+        })
       }
     )
     const stopSpeechEvents = window.api.speechCommands.onEvent((event) => {
@@ -218,6 +224,9 @@ export function VoiceSettingsTab(): React.JSX.Element {
   useEffect(() => {
     if (!settingsLoaded || !voices.some(({ id }) => id === voice)) return
     requestedVoiceRef.current = voice
+    // A new voice is a new download: measuring its first chunk against the previous voice's last
+    // one would report a rate that never happened.
+    transferRate.reset()
     void Promise.resolve()
       .then(() => {
         setAssetsState('checking')

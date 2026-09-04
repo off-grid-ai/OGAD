@@ -760,7 +760,8 @@ const offGridApi = {
       progress: number | null
       downloadedBytes?: number
       totalBytes?: number | null
-      bytesPerSecond?: number
+      /** When these bytes were counted. The surface derives the transfer rate from it. */
+      sampledAtMs?: number
       currentAsset?: string
     }) => void
   ) => {
@@ -771,7 +772,8 @@ const offGridApi = {
         progress: number | null
         downloadedBytes?: number
         totalBytes?: number | null
-        bytesPerSecond?: number
+        /** When these bytes were counted. The surface derives the transfer rate from it. */
+        sampledAtMs?: number
         currentAsset?: string
       }
     ): void => callback(data)

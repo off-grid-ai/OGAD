@@ -1,6 +1,5 @@
 import fs from 'node:fs'
 import sharp from 'sharp'
-import { COLORS_DARK, COLORS_LIGHT } from '@offgrid/design'
 import {
   runComputerUsePolicy,
   serializeComputerUsePolicyResponse,
@@ -17,6 +16,7 @@ import type {
   VisionPolicyResponse
 } from './model-adapters/types'
 import { serializeVisionPolicyMessages } from './model-adapters/model-input'
+import { VISION_ANNOTATION_COLORS } from '../../shared/vision-coordinate-grid'
 
 /** Keep remote transport errors useful without exposing endpoints, headers, or
  * request contents. Node's fetch puts the real network reason on `cause`. */
@@ -105,7 +105,7 @@ function normalizedCoordinateGrid(width: number, height: number): Buffer {
     yLabels.push(`<text x="3" y="${labelY}">${value}</text>`)
   }
   return Buffer.from(
-    `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"><g stroke="${COLORS_LIGHT.primary}" stroke-width="1" stroke-dasharray="4 6" opacity="0.22">${verticalLines.join('')}${horizontalLines.join('')}</g><g fill="${COLORS_LIGHT.primaryDark}" stroke="${COLORS_LIGHT.background}" stroke-width="2" paint-order="stroke" font-family="Menlo,monospace" font-size="11" font-weight="700" opacity="0.8">${xLabels.join('')}${yLabels.join('')}</g></svg>`
+    `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"><g stroke="${VISION_ANNOTATION_COLORS.grid}" stroke-width="1" stroke-dasharray="4 6" opacity="0.22">${verticalLines.join('')}${horizontalLines.join('')}</g><g fill="${VISION_ANNOTATION_COLORS.gridLabel}" stroke="${VISION_ANNOTATION_COLORS.halo}" stroke-width="2" paint-order="stroke" font-family="Menlo,monospace" font-size="11" font-weight="700" opacity="0.8">${xLabels.join('')}${yLabels.join('')}</g></svg>`
   )
 }
 
@@ -201,7 +201,7 @@ export async function modelScreenshot(input: VisionGroundingInput): Promise<{
     const radius = markerSize / 2
     overlays.push({
       input: Buffer.from(
-        `<svg width="${markerSize}" height="${markerSize}" xmlns="http://www.w3.org/2000/svg"><circle cx="${radius}" cy="${radius}" r="${Math.max(2, radius - 2)}" fill="${COLORS_DARK.primary}" stroke="${COLORS_LIGHT.background}" stroke-width="2"/></svg>`
+        `<svg width="${markerSize}" height="${markerSize}" xmlns="http://www.w3.org/2000/svg"><circle cx="${radius}" cy="${radius}" r="${Math.max(2, radius - 2)}" fill="${VISION_ANNOTATION_COLORS.marker}" stroke="${VISION_ANNOTATION_COLORS.halo}" stroke-width="2"/></svg>`
       ),
       left: Math.max(0, Math.min(expected.width - markerSize, Math.round(marker.x - radius))),
       top: Math.max(0, Math.min(expected.height - markerSize, Math.round(marker.y - radius)))
