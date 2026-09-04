@@ -235,5 +235,7 @@ export function initializeTaskHistory(): void {
 
 /** Compatibility seam. The Shared application root owns process lifecycle. */
 export function resetTaskHistoryForTests(): void {
-  void desktopAutomation.stop()
+  void desktopAutomation.stop().catch((cause: unknown) => {
+    console.error('Automation reset failed:', cause)
+  })
 }
