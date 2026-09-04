@@ -22,10 +22,15 @@ import {
 } from '@renderer/lib/voice-preferences'
 import { SettingsRow } from './SettingsRow'
 import { SettingsSelect } from './SettingsSelect'
+import { SettingsSlider } from './SettingsSlider'
+import type { SettingsWriteOutcome } from './SettingsTextField'
 import { LoadingDots } from './ui/loading-dots'
-import { formatTransferSpeed } from '@offgrid/application'
+import { failed, formatTransferSpeed, ok } from '@offgrid/application'
 import { projectProgress } from '@offgrid/ui'
 import { formatStorageBytes } from './setup/storage-format'
+
+/** Playback speed as the row has always shown it. */
+const speedLabel = (speed: number): string => `${speed.toFixed(1)}x`
 
 type AssetsState = 'loading' | 'checking' | 'downloading' | 'ready' | 'error'
 type TestState = 'idle' | 'generating' | 'playing' | 'error'
@@ -254,19 +259,47 @@ export function VoiceSettingsTab(): React.JSX.Element {
     return () => window.removeEventListener(VOICE_PREFERENCES_CHANGED_EVENT, updatePreferences)
   }, [])
 
-  const persistPreference = useCallback(
-    <K extends keyof VoicePreferences>(key: K, value: VoicePreferences[K], settingKey: string) => {
+  /**
+   * Save one voice preference and publish the committed set once. Returns the outcome so a caller
+   * that shows failure - the speed slider - can, while the callers that only flip a choice keep
+   * the revert-on-failure behaviour below.
+   */
+  const commitPreference = useCallback(
+    async <K extends keyof VoicePreferences>(
+      key: K,
+      value: VoicePreferences[K],
+      settingKey: string
+    ): Promise<SettingsWriteOutcome> => {
       const previous = preferences
       const next = { ...preferences, [key]: value }
       setPreferences(next)
-      void Promise.resolve(window.api.saveSetting(settingKey, value))
-        .then(() => publishVoicePreferences(next))
-        .catch((error: unknown) => {
-          console.error(`Could not save voice preference ${settingKey}.`, error)
-          setPreferences(previous)
-        })
+      try {
+        await window.api.saveSetting(settingKey, value)
+        publishVoicePreferences(next)
+        return ok(undefined)
+      } catch (error) {
+        console.error(`Could not save voice preference ${settingKey}.`, error)
+        setPreferences(previous)
+        return failed({ message: 'This preference could not be saved.' })
+      }
     },
     [preferences]
+  )
+
+  const persistPreference = useCallback(
+    <K extends keyof VoicePreferences>(
+      key: K,
+      value: VoicePreferences[K],
+      settingKey: string
+    ): void => {
+      void commitPreference(key, value, settingKey)
+    },
+    [commitPreference]
+  )
+
+  const commitSpeed = useCallback(
+    (speed: number) => commitPreference('speed', speed, 'ttsSpeed'),
+    [commitPreference]
   )
 
   const filteredVoices = useMemo(
@@ -449,22 +482,16 @@ export function VoiceSettingsTab(): React.JSX.Element {
         />
       </SettingsRow>
 
-      <SettingsRow
+      <SettingsSlider
+        id="tts-speed"
         label="Playback speed"
-        value={`${preferences.speed.toFixed(1)}x`}
-        controlId="tts-speed"
-      >
-        <input
-          id="tts-speed"
-          type="range"
-          min={0.5}
-          max={2}
-          step={0.1}
-          value={preferences.speed}
-          onChange={(event) => persistPreference('speed', Number(event.target.value), 'ttsSpeed')}
-          className="w-full accent-green-500"
-        />
-      </SettingsRow>
+        min={0.5}
+        max={2}
+        step={0.1}
+        value={preferences.speed}
+        format={speedLabel}
+        commit={commitSpeed}
+      />
 
       <button
         type="button"
