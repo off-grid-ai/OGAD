@@ -21,6 +21,7 @@ import { setupSpeechTextCleaningIpc } from '../speech-text-cleaning-ipc'
 import { consumeDesktopApplicationExtensionPorts } from './application-extension-ports'
 import { claimDesktopSyncRuntime } from '../sync-runtime-owner'
 import { writeDiagnosticLog } from '../diagnostics-log'
+import { desktopApplicationHealth } from './application-health'
 
 const speechIo = createDesktopSpeechIoPorts()
 const extensionPorts = consumeDesktopApplicationExtensionPorts()
@@ -66,6 +67,7 @@ desktopApplication.use.events((event) => {
 let starting: ReturnType<typeof desktopApplication.start> | null = null
 let releaseSyncRuntime: (() => void) | null = null
 let releaseFailureObserver: (() => void) | null = null
+let releaseHealthObserver: (() => void) | null = null
 
 function describeFailure(failure: unknown): string {
   try {
@@ -95,28 +97,52 @@ function reportDegradedStart(
   result: Awaited<ReturnType<OffGridApplication['start']>>
 ): Awaited<ReturnType<OffGridApplication['start']>> {
   for (const { domain, reason } of result.degraded) {
-    writeDiagnosticLog('application', 'lifecycle.start.degraded', { domain, reason }, 'error')
+    desktopApplicationHealth.reportDegraded({ domain, source: 'application', reason })
   }
   return result
 }
 
+/**
+ * One projection of startup health for every consumer: shared's own status and retained
+ * lifecycle failure, plus what each extension reports about its own activation. Every recorded
+ * degradation is also written to the support log through the injected sink, so the log stays a
+ * consequence of the observable state rather than the only place the truth lives.
+ */
+function observeApplicationHealth(): void {
+  desktopApplicationHealth.setSink(({ domain, source, reason }) => {
+    writeDiagnosticLog(
+      'application',
+      'lifecycle.start.degraded',
+      { domain, source, reason },
+      'error'
+    )
+  })
+  releaseHealthObserver ??= desktopApplication.subscribe(({ status, lifecycleFailure }) => {
+    desktopApplicationHealth.observeLifecycle({ status, lifecycleFailure })
+  })
+}
+
 observeApplicationFailures()
+observeApplicationHealth()
 
 export function startDesktopApplication(): ReturnType<typeof desktopApplication.start> {
   if (starting) return starting
 
   const startPromise = (async () => {
     observeApplicationFailures()
+    observeApplicationHealth()
     releaseSyncRuntime = claimDesktopSyncRuntime('application')
     try {
       return reportDegradedStart(await desktopApplication.start())
     } catch (error) {
-      writeDiagnosticLog(
-        'application',
-        'lifecycle.start.failed',
-        { error: error instanceof Error ? error.message : String(error) },
-        'error'
-      )
+      const message = error instanceof Error ? error.message : String(error)
+      writeDiagnosticLog('application', 'lifecycle.start.failed', { error: message }, 'error')
+      // start() itself threw, so shared never published a lifecycle failure of its own. Publish it
+      // here or the only record of a dead application would be this log line.
+      desktopApplicationHealth.observeLifecycle({
+        status: 'stopped',
+        lifecycleFailure: { phase: 'start', message, causes: [message] }
+      })
       releaseSyncRuntime()
       releaseSyncRuntime = null
       starting = null
@@ -133,6 +159,9 @@ export async function stopDesktopApplication(): Promise<void> {
   } finally {
     releaseFailureObserver?.()
     releaseFailureObserver = null
+    releaseHealthObserver?.()
+    releaseHealthObserver = null
+    desktopApplicationHealth.setSink(null)
     releaseSyncRuntime?.()
     releaseSyncRuntime = null
     starting = null
