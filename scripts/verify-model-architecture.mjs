@@ -38,6 +38,178 @@ if (fs.existsSync(legacyDownloadQueue)) {
   })
 }
 
+/**
+ * ---- residency-admission-has-one-owner -----------------------------------------------------------
+ *
+ * THE INVARIANT: every LOCAL model that can stay resident in memory loads through
+ * `ModelResidencyManager`. It owns admission, co-residency, eviction, leases, budgeting, overrides
+ * and reclaim failures. Platform code performs the native load/unload ONLY as an adapter the manager
+ * invokes, and never decides residency policy. Call direction is fixed: app -> `ModelsFacade` ->
+ * residency manager -> native adapter.
+ *
+ * WHY A GATE AND NOT A COMMENT: mobile's `adapters/native/modelLoaders.ts` states this invariant in
+ * its header. The claim is TRUE at HEAD - its one caller does go through the manager - and nothing
+ * stops the next call site from bypassing it, while the comment keeps reassuring every reader. A
+ * true claim with no enforcement decays into a false one silently, and the comment is what makes the
+ * decay invisible.
+ *
+ * HOW IT MATCHES, and why not by receiver name: an earlier scan of ours anchored on `await
+ * desktopRag.` and was therefore blind to every injected facade - which is every hexagonal file. So
+ * this rule anchors on the ENGINE MODULE, not on a variable: it records the local bindings a file
+ * obtains from an engine module - static import, namespace import, or `const { x } = await
+ * import(...)`, which is how the real adapter reaches them - and only then looks at member calls on
+ * those bindings. Renaming the variable cannot evade it - verified with a probe that renamed both
+ * forms (`renamedEngine.unload()`, and `const { imageRuntime: alias } = await import(...)` then
+ * `alias.evict()`); both were caught.
+ *
+ * WHAT THIS GATE CANNOT SEE. A gate that silently misses a class of bypass is as bad as the comment
+ * it replaces, so the blind spots are written here rather than discovered later:
+ *
+ * 1. AN INJECTED PORT. A file handed a `GenerationAdapter` or `DesktopManagedRuntime` as a parameter
+ *    and calling `.unload()` on it is indistinguishable from any other object - there is no import
+ *    to anchor on. This is the biggest hole and it is unavoidable HERE, because it is also exactly
+ *    how the legitimate path works. What narrows it is the import graph: dependency-cruiser decides
+ *    which modules may obtain such a port at all.
+ * 2. A RE-EXPORT CHAIN. `export { llm } from './llm'` in an intermediate module, imported from
+ *    there, is invisible: this rule anchors on the engine specifier and does not resolve re-exports.
+ * 3. A COMPUTED MEMBER - `engine[name]()` where `name` is a variable.
+ * 4. CROSS-PROCESS. A renderer that invokes an IPC channel which loads in main has no engine import
+ *    of its own. The main-side handler is where it is catchable, and `src/main/ipc.ts` is exactly
+ *    that case, caught there.
+ * 5. ANYTHING OUTSIDE TYPESCRIPT - a spawned binary or shell that loads a model itself.
+ * 6. THE THIRD CARVE-OUT IS WHERE THIS GATE IS WEAKEST, and it must be said plainly. A truly
+ *    short-lived process that retains no model memory needs no admission - but `src/main/tts.ts`'s
+ *    `evict: () => {}` is honest only BECAUSE its ExecuTorch process exits and releases everything,
+ *    and that is asserted by a comment this gate cannot verify. A process INTENDED to be short-lived
+ *    can survive SIGKILL and still hold model memory, so the carve-out must mean PROVEN exited, not
+ *    intended to exit. Proving exit is a runtime fact; this rule sees only the call. Do not widen the
+ *    carve-out on the strength of a comment - that is the failure this rule exists to prevent.
+ */
+const residencyEngineModules = new Map([
+  ['./llm', 'llama text engine'],
+  ['./imagegen', 'diffusion image engine'],
+  ['./tts', 'speech synthesis engine'],
+  ['./transcription/select', 'speech-to-text engine'],
+  ['./embeddings', 'native embedding worker'],
+  ['./sd-server', 'diffusion server process'],
+  ['./transcription/whisper-server', 'whisper server process']
+])
+/** Members that CHANGE residency. Deliberately not `generate`/`chat`: those consume, not admit. */
+const residencyLifecycleMembers = new Set([
+  'init',
+  'initNative',
+  'warm',
+  'restart',
+  'unload',
+  'unloadNative',
+  'evict',
+  'release',
+  'stop'
+])
+/**
+ * The only files that may touch a native lifecycle member, each because the manager invokes it or
+ * composes what the manager invokes. This list is SHORT by design: if it needs to grow, the call
+ * direction is wrong, not the list.
+ */
+const residencyAdapterFiles = new Set([
+  'src/main/model-generation-adapters.ts', // the GenerationAdapter set the manager drives
+  'src/main/composition/model-lifecycle.ts', // composes the residency handlers from those adapters
+  'src/main/model-runtime-port.ts' // the DesktopManagedRuntime contract itself
+])
+const engineModuleFor = (specifier) => {
+  for (const [suffix, label] of residencyEngineModules) {
+    const bare = suffix.replace(/^\.\//, '')
+    if (specifier === suffix || specifier.endsWith(`/${bare}`)) return label
+  }
+  return null
+}
+
+function checkResidencyAdmission(fileName, source) {
+  if (residencyAdapterFiles.has(fileName)) return
+  // An engine module may of course drive its own process.
+  if (
+    [...residencyEngineModules.keys()].some(
+      (suffix) => fileName === `src/main/${suffix.replace(/^\.\//, '')}.ts`
+    )
+  ) {
+    return
+  }
+  const bindings = new Map()
+  const bind = (name, label) => {
+    if (name) bindings.set(name, label)
+  }
+  const collect = (node) => {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+      const label = engineModuleFor(node.moduleSpecifier.text)
+      if (label && node.importClause) {
+        const named = node.importClause.namedBindings
+        if (named && ts.isNamedImports(named)) {
+          for (const element of named.elements) bind(element.name.text, label)
+        }
+        if (named && ts.isNamespaceImport(named)) bind(named.name.text, label)
+        if (node.importClause.name) bind(node.importClause.name.text, label)
+      }
+    }
+    // `const { imageRuntime } = await import('./imagegen')` - how the real adapter reaches engines.
+    if (ts.isVariableDeclaration(node) && node.initializer) {
+      const initializer = ts.isAwaitExpression(node.initializer)
+        ? node.initializer.expression
+        : node.initializer
+      if (
+        ts.isCallExpression(initializer) &&
+        initializer.expression.kind === ts.SyntaxKind.ImportKeyword &&
+        initializer.arguments[0] &&
+        ts.isStringLiteral(initializer.arguments[0])
+      ) {
+        const label = engineModuleFor(initializer.arguments[0].text)
+        if (label) {
+          if (ts.isObjectBindingPattern(node.name)) {
+            for (const element of node.name.elements) {
+              if (ts.isIdentifier(element.name)) bind(element.name.text, label)
+            }
+          } else if (ts.isIdentifier(node.name)) {
+            bind(node.name.text, label)
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, collect)
+  }
+  collect(source)
+  if (bindings.size === 0) return
+
+  const flag = (node, detail) =>
+    report('residency-admission-has-one-owner', fileName, source, node, detail)
+  const inspect = (node) => {
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression
+      if (
+        ts.isPropertyAccessExpression(callee) &&
+        ts.isIdentifier(callee.expression) &&
+        bindings.has(callee.expression.text) &&
+        residencyLifecycleMembers.has(callee.name.text)
+      ) {
+        flag(
+          node,
+          `native lifecycle call outside the residency adapter: ${callee.expression.text}.${callee.name.text}() on the ${bindings.get(callee.expression.text)}`
+        )
+      }
+      if (
+        ts.isIdentifier(callee) &&
+        bindings.has(callee.text) &&
+        residencyLifecycleMembers.has(callee.text)
+      ) {
+        flag(
+          node,
+          `native lifecycle call outside the residency adapter: ${callee.text}() on the ${bindings.get(callee.text)}`
+        )
+      }
+    }
+    ts.forEachChild(node, inspect)
+  }
+  inspect(source)
+}
+
 function report(rule, file, source, node, detail) {
   findings.push({ rule, file, line: lineOf(source, node), detail })
 }
@@ -211,8 +383,10 @@ for (const file of files) {
   }
   if (
     fileName === 'pro/main/crm/agent.ts' &&
-    (!/\bProactiveActionApplicationService\b/.test(text) ||
-      !/\bProactiveToolCatalogService\b/.test(text) ||
+    // Either names the shared service, or calls it through the composition root that constructs it
+    // (pro `7493428` moved the ports there to break a cycle). Local policy is still forbidden below.
+    (!/\b(?:ProactiveActionApplicationService|proactiveActionApplication)\b/.test(text) ||
+      !/\b(?:ProactiveToolCatalogService|proactiveToolCatalog)\b/.test(text) ||
       /\b(?:extractJson|toolScore|isActionTool|jaccard|sameSubject)\b|\bconst\s+(?:prompt|gate)\s*=|Return JSON only/.test(
         text
       ))
@@ -227,8 +401,9 @@ for (const file of files) {
   }
   if (
     fileName === 'pro/main/ingest.ts' &&
-    (!/\bConnectorReadApplicationService\b/.test(text) ||
-      !/\bConnectorDistillApplicationService\b/.test(text) ||
+    // Same as above: the connector services are constructed in the composition root now.
+    (!/\b(?:ConnectorReadApplicationService|connectorReadApplication)\b/.test(text) ||
+      !/\b(?:ConnectorDistillApplicationService|connectorDistillApplication)\b/.test(text) ||
       /\b(?:DISTILL_SCHEMA|extractJson|pickReadTool|buildArgs|structuredItems)\b|\bconst\s+prompt\s*=|\b(?:maxTokens|temperature|disableThinking)\s*:/.test(
         text
       ))
@@ -508,6 +683,8 @@ for (const file of files) {
       'adapter:direct-remote-configuration-mutation'
     )
   }
+
+  checkResidencyAdmission(fileName, source)
 
   const visit = (node) => {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
