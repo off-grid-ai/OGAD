@@ -12,6 +12,7 @@ import type {
   GenerationChunk,
   GenerationRequest,
   OpenAIProjectedMessage,
+  ResidentReclaim,
   RuntimeModel
 } from '@offgrid/models'
 import { llm, type StreamChatOptions } from './llm'
@@ -216,6 +217,23 @@ abstract class DesktopTypedGenerationAdapter implements GenerationAdapter {
   abstract generate(model: RuntimeModel, request: GenerationRequest): AsyncIterable<GenerationChunk>
 }
 
+/**
+ * Turn a wrapper's reclaim answer into something residency can hear.
+ *
+ * `GenerationAdapter.unload` returns `Promise<void>` and deliberately does not change - the reclaim
+ * contract stops at the function residency itself invokes. But on desktop the SAME method is what
+ * residency invokes, because `desktopModelLifecyclePorts` wraps it in shared's `reclaimAttempt`,
+ * which reads "it resolved" as "the memory came back" and "it threw" as "it did not".
+ *
+ * So a known non-release must not return normally: resolving a `Promise<void>` here MEANS released,
+ * and that is exactly the weak assumption the reclaim contract replaced. Throwing is the channel
+ * `reclaimAttempt` exists to translate, and the reason travels with it.
+ */
+async function requireReclaimed(evict: () => Promise<ResidentReclaim>): Promise<void> {
+  const reclaim = await evict()
+  if (!reclaim.reclaimed) throw new Error(reclaim.reason)
+}
+
 export class DesktopImageGenerationAdapter extends DesktopTypedGenerationAdapter {
   readonly id = 'desktop.image'
 
@@ -226,7 +244,7 @@ export class DesktopImageGenerationAdapter extends DesktopTypedGenerationAdapter
 
   async unload(): Promise<void> {
     const { imageRuntime } = await import('./imagegen')
-    await imageRuntime.evict()
+    await requireReclaimed(() => imageRuntime.evict())
   }
 
   async *generate(
@@ -299,7 +317,7 @@ export class DesktopVoiceGenerationAdapter extends DesktopTypedGenerationAdapter
 
   async unload(): Promise<void> {
     const { ttsRuntime } = await import('./tts')
-    await ttsRuntime.evict()
+    await requireReclaimed(() => ttsRuntime.evict())
   }
 
   async *generate(
@@ -336,7 +354,7 @@ export class DesktopTranscriptionGenerationAdapter extends DesktopTypedGeneratio
 
   async unload(): Promise<void> {
     const { sttRuntime } = await import('./transcription/select')
-    await sttRuntime.evict()
+    await requireReclaimed(() => sttRuntime.evict())
   }
 
   async *generate(

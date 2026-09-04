@@ -78,10 +78,19 @@ function runtime(): ExecutorchSpeechRuntime {
 
 let busy = false
 
-/** ExecuTorch releases every model when its short-lived process exits. */
+/**
+ * ExecuTorch releases every model when its short-lived process exits.
+ *
+ * DELIBERATELY EMPTY, and `{ reclaimed: true }` is the TRUE answer here - do not "fix" this in a
+ * sweep that makes every evict able to fail. The runtime is constructed per call and its process is
+ * short-lived, so between calls nothing is resident: there is no memory for an eviction to release
+ * and nothing that could fail to release it. Answering `false` would strand a phantom resident and
+ * refuse every future admission, which would make the one wrapper that was always honest into the
+ * only one that lies.
+ */
 export const ttsRuntime: DesktopManagedRuntime = {
   modality: 'tts',
-  evict: () => {},
+  evict: () => Promise.resolve({ reclaimed: true }),
   warm: () => {},
   release: () => {}
 }

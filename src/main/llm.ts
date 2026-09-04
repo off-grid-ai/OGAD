@@ -1475,22 +1475,32 @@ export class LLMService {
   get runtime(): DesktopManagedRuntime {
     return {
       modality: 'llm',
-      evict: () => {
-        try {
-          this.pause()
-        } catch (error) {
-          // SILENT PARTIAL LOSS, now stated: residency is about to count this engine's memory as
-          // reclaimed. If the teardown failed, that budget is wrong and the next resident may be
-          // admitted into memory that is still held.
-          //
-          // It deliberately does not rethrow: `DesktopManagedRuntime.evict` has no failure
-          // channel, so throwing would surface as an unhandled rejection inside the residency
-          // service rather than as a decision it could make. Making the port's eviction outcome
-          // typed is the real fix and belongs with whoever owns that contract.
-          console.error(
-            '[LLMService] eviction failed; residency may over-count reclaimed memory',
-            error
-          )
+      /**
+       * Release the engine's memory and say whether it happened.
+       *
+       * This called `pause()`, which is NOT a memory release: it sets the no-respawn flag and then
+       * `stop()` sends one SIGTERM, nulls the handle, and returns without waiting. So the previous
+       * code reported a non-release as a reclaim - not because the kill failed, but because it
+       * never waited to find out, and llama-server can hang on shutdown in a Metal/GGML abort
+       * holding its port and its weights.
+       *
+       * `unload()` is what actually answers: it escalates SIGTERM to SIGKILL and WAITS, races an
+       * in-flight init so a fresh spawn cannot survive the teardown, reaps orphans of ours still
+       * holding the port, and returns `{ outcome, portFree }`. It also sets the same `paused` flag
+       * `pause()` did, so `warm`/`release` keep working exactly as before.
+       *
+       * `pause` reads as "stop respawning" and `unload` reads as "release the memory". Residency
+       * asked for the second and was being given the first.
+       */
+      evict: async () => {
+        const { outcome, portFree } = await llm.unload()
+        if (outcome !== 'stuck' && portFree) return { reclaimed: true }
+        return {
+          reclaimed: false,
+          reason:
+            outcome === 'stuck'
+              ? 'The chat engine survived SIGKILL and is still holding its memory.'
+              : 'The chat engine exited but its port is still held, so its memory may not be free.'
         }
       },
       warm: () => {

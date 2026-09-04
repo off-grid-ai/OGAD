@@ -252,7 +252,10 @@ export function residentWhisperAvailable(): boolean {
 
 export const sttRuntime: DesktopManagedRuntime = {
   modality: 'stt',
+  // The resident whisper server's answer, verbatim - it waited for the process to exit.
   evict: () => whisperServer.stop(),
   warm: () => {},
-  release: () => whisperServer.stop()
+  release: () => {
+    void whisperServer.stop()
+  }
 }

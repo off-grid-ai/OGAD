@@ -935,13 +935,14 @@ async function runImageGen(
  *  sd-cli/mflux paths hold nothing between jobs. */
 export const imageRuntime: DesktopManagedRuntime = {
   modality: 'image',
-  evict: () => {
-    sdServer.stop()
-  },
+  // The resident sd-server's answer, verbatim: it waited for the process to exit, so it knows
+  // whether the weights came back. This used to call `stop()` and drop what it returned, which
+  // reported a reclaim whether or not the kill worked.
+  evict: () => sdServer.stop(),
   warm: () => {
     /* lazily re-spawned by ensureUp on the next resident generation */
   },
   release: () => {
-    sdServer.stop()
+    void sdServer.stop()
   }
 }

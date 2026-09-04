@@ -18,6 +18,8 @@
 // SOLID: the process lifecycle + HTTP client live here; the pure request/arg/
 // result shaping is extracted into exported functions (unit-tested, zero-IO).
 import { spawn, type ChildProcess, execSync } from 'child_process'
+import type { ResidentReclaim } from '@offgrid/models'
+import { reclaimFromTeardown, terminateChildProcess } from './process-teardown'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
@@ -244,7 +246,10 @@ class SdServerService {
     })
     if (action === 'reuse') return
     if (action === 'join-start') return this.startPromise!
-    if (action === 'restart') this.stopProcess()
+    // An internal swap: a fresh spawn follows immediately, so the reclaim answer has no consumer -
+    // but it is still awaited, because spawning the replacement before the old process is gone is
+    // how two engines briefly hold the same weights.
+    if (action === 'restart') await this.stopProcess()
     this.startPromise = this.spawn(ctx, key).finally(() => {
       this.startPromise = null
     })
@@ -402,26 +407,36 @@ class SdServerService {
   }
 
   /** Stop the server now (model swap, shutdown, or memory reclaim) and fire the
-   *  eviction hook so the caller can warm the LLM back up. */
-  stop(): void {
+   *  eviction hook so the caller can warm the LLM back up. Reports whether the memory came back. */
+  async stop(): Promise<ResidentReclaim> {
     this.clearIdleTimer()
     const wasUp = this.server !== null
-    this.stopProcess()
+    const reclaim = await this.stopProcess()
     if (wasUp) this.evictionHook?.()
+    return reclaim
   }
 
   /** Kill the process without firing the eviction hook (used on internal swaps
    *  where a new spawn follows immediately). */
-  private stopProcess(): void {
-    if (this.server) {
-      try {
-        this.server.kill('SIGKILL')
-      } catch {
-        /* already gone */
-      }
-      this.server = null
-    }
+  /**
+   * Terminate the process and say whether it actually died.
+   *
+   * This was `try { kill('SIGKILL') } catch { /* already gone *\/ }` followed by nulling the handle
+   * and the active key unconditionally - so a failed kill was indistinguishable from a successful
+   * one, the wrapper then reported "not loaded" regardless, and residency could admit the next
+   * model into memory nobody had released. A signal call not throwing is not evidence the process
+   * is gone; waiting for it to exit is.
+   *
+   * The state is still cleared on every path, including a stuck process: this object is no longer
+   * managing that process either way, and pretending it still owns one it cannot kill would only
+   * add a second wrong answer. What changes is that the caller is TOLD.
+   */
+  private async stopProcess(): Promise<ResidentReclaim> {
+    const proc = this.server
+    this.server = null
     this.activeKey = null
+    if (!proc) return { reclaimed: true }
+    return reclaimFromTeardown(await terminateChildProcess(proc), 'image')
   }
 
   private armIdleTimer(): void {
@@ -436,7 +451,9 @@ class SdServerService {
       if (
         idleEvictionAction({ event: 'timer-fired', processAlive: this.server !== null }) === 'evict'
       )
-        this.stop()
+        // Nobody asked, so nobody is told: an idle eviction has no caller to report to. A stuck
+        // process still leaves `activeKey` cleared, and the next `ensureUp` spawns a replacement.
+        void this.stop()
     }, this.idleMs)
     // Don't let the eviction timer keep the Node event loop (or a test) alive.
     ;(this.idleTimer as unknown as { unref?: () => void }).unref?.()

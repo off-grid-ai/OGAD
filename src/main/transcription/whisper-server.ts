@@ -17,6 +17,8 @@
 // pure request/arg/parse shaping is extracted into exported functions (unit-tested,
 // zero-IO), exactly as whisper-cli.ts extracts model resolution and parseSegments.
 import { spawn, type ChildProcess, execSync } from 'child_process'
+import type { ResidentReclaim } from '@offgrid/models'
+import { reclaimFromTeardown, terminateChildProcess } from '../process-teardown'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
@@ -140,7 +142,10 @@ export class WhisperServerService {
     })
     if (action === 'reuse') return
     if (action === 'join-start') return this.startPromise!
-    if (action === 'restart') this.stopProcess()
+    // An internal swap: a fresh spawn follows immediately, so the reclaim answer has no consumer -
+    // but it is awaited, because spawning the replacement before the old process is gone is how
+    // two engines briefly hold the same weights.
+    if (action === 'restart') await this.stopProcess()
     this.startPromise = this.spawn(ctx, key).finally(() => {
       this.startPromise = null
     })
@@ -243,7 +248,12 @@ export class WhisperServerService {
   async transcribe(ctx: WhisperServerContext, req: WhisperInferenceRequest): Promise<Transcript> {
     return this.inferenceMutex.runExclusive(async () => {
       req.signal?.throwIfAborted()
-      const cancelNativeInference = (): void => this.stopProcess()
+      // Cancelling one request's native inference. It must stay synchronous - it is an abort
+      // listener - and there is no caller to report a reclaim to, so the answer is dropped here
+      // deliberately rather than by omission.
+      const cancelNativeInference = (): void => {
+        void this.stopProcess()
+      }
       req.signal?.addEventListener('abort', cancelNativeInference, { once: true })
       try {
         req.signal?.throwIfAborted()
@@ -284,22 +294,31 @@ export class WhisperServerService {
     }
   }
 
-  /** Stop the server now (model swap, shutdown, or memory reclaim). */
-  stop(): void {
+  /** Stop the server now (model swap, shutdown, or memory reclaim), and say whether it let go. */
+  async stop(): Promise<ResidentReclaim> {
     this.clearIdleTimer()
-    this.stopProcess()
+    return this.stopProcess()
   }
 
-  private stopProcess(): void {
-    if (this.server) {
-      try {
-        this.server.kill('SIGKILL')
-      } catch {
-        /* already gone */
-      }
-      this.server = null
-    }
+  /**
+   * Terminate the process and say whether it actually died.
+   *
+   * This was `try { kill('SIGKILL') } catch { /* already gone *\/ }` followed by nulling the handle
+   * and the active key unconditionally - so a failed kill was indistinguishable from a successful
+   * one, the wrapper then reported "not loaded" regardless, and residency could admit the next
+   * model into memory nobody had released. A signal call not throwing is not evidence the process
+   * is gone; waiting for it to exit is.
+   *
+   * The state is still cleared on every path, including a stuck process: this object is no longer
+   * managing that process either way, and pretending it still owns one it cannot kill would only
+   * add a second wrong answer. What changes is that the caller is TOLD.
+   */
+  private async stopProcess(): Promise<ResidentReclaim> {
+    const proc = this.server
+    this.server = null
     this.activeKey = null
+    if (!proc) return { reclaimed: true }
+    return reclaimFromTeardown(await terminateChildProcess(proc), 'transcription')
   }
 
   private armIdleTimer(): void {
@@ -314,7 +333,8 @@ export class WhisperServerService {
       if (
         idleEvictionAction({ event: 'timer-fired', processAlive: this.server !== null }) === 'evict'
       )
-        this.stop()
+        // An idle eviction has no caller to report to; the next `ensureUp` spawns a replacement.
+        void this.stop()
     }, this.idleMs)
     // Don't let the eviction timer keep the Node event loop (or a test) alive.
     ;(this.idleTimer as unknown as { unref?: () => void }).unref?.()
