@@ -1495,12 +1495,25 @@ export class LLMService {
       evict: async () => {
         const { outcome, portFree } = await llm.unload()
         if (outcome !== 'stuck' && portFree) return { reclaimed: true }
+        /**
+         * The same trap the image and transcription wrappers had: `unload()` nulls its process
+         * handle whatever the outcome, so a SECOND evict finds nothing running, reports
+         * `already-dead`, and would answer `reclaimed: true` while the stuck engine is still up
+         * holding its weights. `liveOwners` cannot catch it either - that counts OTHER apps'
+         * engines, deliberately, so our own orphan is invisible to it.
+         *
+         * So the answer comes from something the handle cannot fake: whether the port is free.
+         * A live llama-server holds it, and it cannot hold it and have released its memory. Until
+         * that is PROVEN free, this keeps refusing - which is the honest terminal state if the
+         * process never dies.
+         */
+        const freed = await isPortFree(this.port)
+        if (freed && outcome !== 'stuck') return { reclaimed: true }
         return {
           reclaimed: false,
-          reason:
-            outcome === 'stuck'
-              ? 'The chat engine survived SIGKILL and is still holding its memory.'
-              : 'The chat engine exited but its port is still held, so its memory may not be free.'
+          reason: freed
+            ? 'The chat engine survived SIGKILL, so its memory may still be held.'
+            : `The chat engine is still holding port ${this.port}, so its memory has not come back.`
         }
       },
       warm: () => {

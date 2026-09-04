@@ -19,7 +19,7 @@
 // result shaping is extracted into exported functions (unit-tested, zero-IO).
 import { spawn, type ChildProcess, execSync } from 'child_process'
 import type { ResidentReclaim } from '@offgrid/models'
-import { reclaimFromTeardown, terminateChildProcess } from './process-teardown'
+import { createProcessTeardown, type ProcessTeardown } from './process-teardown'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
@@ -182,6 +182,11 @@ interface SdGenProgress {
 /** The resident image server. One instance (the exported `sdServer`). */
 class SdServerService {
   private server: ChildProcess | null = null
+  /**
+   * Processes that would not die. Held so a later reclaim can answer honestly, and so the spawn
+   * path can refuse rather than start a second server beside a live orphan.
+   */
+  private readonly teardown: ProcessTeardown = createProcessTeardown('image')
   private port = SD_SERVER_PORT
   private activeKey: string | null = null // contextKey of the loaded model, null when down
   private startPromise: Promise<void> | null = null
@@ -232,6 +237,20 @@ class SdServerService {
   /** Ensure a server is up with EXACTLY this context; restart on a model/flag
    *  swap. Cancels any pending idle-eviction (we're about to be busy). */
   async ensureUp(ctx: SdServerContext): Promise<void> {
+    /**
+     * REFUSE while an earlier process is stranded.
+     *
+     * This is where a wrong reclaim answer stops being a reporting problem and becomes resource
+     * exhaustion: `residentEngineAction` decides from `processAlive: this.server !== null`, so a
+     * stuck teardown that had cleared the handle looked like "nothing running" and this method
+     * would spawn a fresh server beside the live orphan - two processes holding model memory while
+     * residency believed none did. Retry the stranded one first; only its proven exit reopens this
+     * path.
+     */
+    if (this.teardown.hasStranded()) {
+      const reclaim = await this.teardown.recheck()
+      if (!reclaim.reclaimed) throw new Error(reclaim.reason)
+    }
     if (
       idleEvictionAction({ event: 'activity-started', processAlive: this.server !== null }) ===
       'cancel'
@@ -419,24 +438,27 @@ class SdServerService {
   /** Kill the process without firing the eviction hook (used on internal swaps
    *  where a new spawn follows immediately). */
   /**
-   * Terminate the process and say whether it actually died.
+   * Terminate the process and say whether the memory actually came back.
    *
    * This was `try { kill('SIGKILL') } catch { /* already gone *\/ }` followed by nulling the handle
    * and the active key unconditionally - so a failed kill was indistinguishable from a successful
-   * one, the wrapper then reported "not loaded" regardless, and residency could admit the next
-   * model into memory nobody had released. A signal call not throwing is not evidence the process
-   * is gone; waiting for it to exit is.
+   * one, and residency could admit the next model into memory nobody had released. A signal call
+   * not throwing is not evidence the process is gone; waiting for it to exit is.
    *
-   * The state is still cleared on every path, including a stuck process: this object is no longer
-   * managing that process either way, and pretending it still owns one it cannot kill would only
-   * add a second wrong answer. What changes is that the caller is TOLD.
+   * This object does stop managing the process, and that is deliberate - but it does NOT drop the
+   * reference, because "no longer managed" and "reclaimed" are different facts. A process that
+   * survives termination is retained by `teardown`, which is what lets every later call keep
+   * answering `reclaimed: false` until its exit is proven instead of inventing a release the moment
+   * the handle is gone.
    */
   private async stopProcess(): Promise<ResidentReclaim> {
     const proc = this.server
     this.server = null
     this.activeKey = null
-    if (!proc) return { reclaimed: true }
-    return reclaimFromTeardown(await terminateChildProcess(proc), 'image')
+    // No process of our own to stop, but an earlier one may still be stranded: re-ask rather than
+    // assume, because "nothing here now" was exactly the false `true` this replaces.
+    if (!proc) return this.teardown.recheck()
+    return this.teardown.terminate(proc)
   }
 
   private armIdleTimer(): void {

@@ -70,17 +70,91 @@ export function terminateChildProcess(
 }
 
 /**
- * What a teardown means for residency's memory budget.
+ * Processes that would not die, kept so the question can be answered later.
  *
- * Every outcome except `stuck` means the process is gone, so its memory is not held any more -
- * including `already-dead`, where there was nothing loaded. Answering `false` there would strand a
- * phantom resident and refuse every future admission, which is the one case where `false` is the
- * harmful answer rather than the safe one.
+ * THE PRINCIPLE, because it is the defect this exists to prevent: "this object no longer manages
+ * it" does not make memory reclaimed. Ownership and reclamation are different facts, and
+ * discarding the handle changes only the first.
+ *
+ * The first version of this cleared the handle before knowing whether the process stopped. A stuck
+ * process therefore produced a truthful `reclaimed: false` and then, on the very next call, a
+ * confident `reclaimed: true` - because there was no longer a process to ask about. Residency acts
+ * on the second, drops the record, and readmits into memory the orphan is still holding. A
+ * truthful first answer followed by a false second one is worse than a consistently vague one.
+ *
+ * So a process that survives termination is RETAINED here. Every later reclaim re-checks that
+ * exact process and keeps answering `reclaimed: false` until its exit is PROVEN - not until a
+ * timeout, not until a handle is gone. If it never exits, `reclaimed: false` forever is the correct
+ * answer.
  */
-export function reclaimFromTeardown(outcome: TeardownOutcome, engine: string): ResidentReclaim {
-  if (outcome !== 'stuck') return { reclaimed: true }
-  return {
+export interface ProcessTeardown {
+  /** Terminate `proc` and answer. A process that will not die is retained, not forgotten. */
+  terminate(proc: ChildProcess): Promise<ResidentReclaim>
+  /**
+   * Re-ask about anything stranded. Answers `reclaimed: true` only once every retained process has
+   * been observed to exit, which is what makes a later call unable to invent a release.
+   */
+  recheck(): Promise<ResidentReclaim>
+  /**
+   * Is a stranded process still alive? A spawn path MUST refuse while this is true: starting a
+   * replacement beside a live orphan is how two processes come to hold model memory while
+   * residency believes none do.
+   */
+  hasStranded(): boolean
+  /** How many are stranded, for a report. */
+  strandedCount(): number
+}
+
+export function createProcessTeardown(
+  engine: string,
+  graceMs: number = ENGINE_TEARDOWN_GRACE_MS
+): ProcessTeardown {
+  /** Retained references. The only thing that can answer the question after the fact. */
+  const stranded = new Set<ChildProcess>()
+
+  /** Drop the ones that have since exited. Node reaps its own children, so an exit IS observable. */
+  const pruneExited = (): void => {
+    for (const proc of [...stranded]) if (!processAlive(proc)) stranded.delete(proc)
+  }
+
+  const refusal = (): ResidentReclaim => ({
     reclaimed: false,
-    reason: `The ${engine} process survived SIGKILL and is still holding its memory.`
+    reason:
+      stranded.size === 1
+        ? `A ${engine} process survived termination and is still holding its memory.`
+        : `${stranded.size} ${engine} processes survived termination and are still holding their memory.`
+  })
+
+  const settle = (): ResidentReclaim => {
+    pruneExited()
+    return stranded.size === 0 ? { reclaimed: true } : refusal()
+  }
+
+  return {
+    terminate: async (proc) => {
+      const outcome = await terminateChildProcess(proc, graceMs)
+      if (outcome === 'stuck') stranded.add(proc)
+      else stranded.delete(proc)
+      // Even a successful termination answers through `settle`: this process let go, but an EARLIER
+      // one that never did is still holding memory, and residency must not hear otherwise.
+      return settle()
+    },
+    recheck: async () => {
+      pruneExited()
+      // Try again rather than only looking: a process uninterruptible a moment ago - a wedged GPU
+      // call, a driver in a kernel wait - can become killable once that call returns.
+      for (const proc of [...stranded]) {
+        if ((await terminateChildProcess(proc, graceMs)) !== 'stuck') stranded.delete(proc)
+      }
+      return settle()
+    },
+    hasStranded: () => {
+      pruneExited()
+      return stranded.size > 0
+    },
+    strandedCount: () => {
+      pruneExited()
+      return stranded.size
+    }
   }
 }
