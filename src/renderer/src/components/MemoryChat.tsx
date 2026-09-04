@@ -3320,7 +3320,7 @@ export function MemoryChat({
     persistChangedPreference('imageParams', imgParamStore)
   }, [imgParamStore, persistChangedPreference])
 
-  const activeProjectName = projects.find((p) => p.id === activeProjectId)?.name ?? null
+  const activeProjectName = projects.find((p) => p.id === activeProjectId)?.name
 
   const loadProjects = useCallback(async () => {
     try {
