@@ -2762,3 +2762,37 @@ the typed arm at `:382` instead of throwing the flattened failure. A comment des
 that no longer exists is the same class of defect as one describing a guarantee that does not.
 
 Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
+
+## A mutation that loses publication has nothing to reconcile it (OPEN, in this slice)
+
+Introduced by the single publication authority in `ModelsScreen.tsx`, and a direct consequence of it
+rather than an oversight in it. `activateModel` claims publication and issues activate for A; while A
+is in flight a completed download triggers `refreshModelControl`, which claims publication and reads
+PRE-ACTIVATION state; A then commits the active model in the main process and its reply is refused by
+the authority check. The screen keeps showing state from before the activation.
+
+The download path survives this because the download-completed subscription re-refreshes, so its
+refusal is momentary. Activate and remove have NO completion event this screen subscribes to - checked:
+`grep subscribe` in that file finds nothing - so their refusal is permanent until something else
+happens to refresh.
+
+The authority is not the defect; the missing half is that a mutation which SETTLED but lost
+publication must trigger an authoritative refresh afterwards. Constraints for the fix: one publication
+authority, cleanup ownership stays separate, the reconcile claims the authority normally rather than
+bypassing it, and the discarded projection is NOT re-applied - it is stale by definition, which is why
+it lost. If main control does expose an activation- or removal-completed event, subscribing beats a
+post-hoc refresh and should be preferred.
+
+## `refreshModelControl` returns silently on refusal (OPEN, in this slice)
+
+`ModelsScreen.tsx:433` - `if (!outcome.ok) return`. A refused refresh, or an inventory that cannot be
+read, leaves the screen showing whatever it had or nothing at all, indistinguishable from a genuinely
+empty inventory. This is the same defect fixed on the picker surface, where unread and empty became
+different states; the Models screen still conflates them, and it is the surface a user checks first
+when they think something is missing.
+
+The typed failure is available on the outcome and this screen already has a notice channel, so
+reporting it needs no new mechanism. Every other silent `!ok` return in the file should be checked in
+the same pass.
+
+Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
