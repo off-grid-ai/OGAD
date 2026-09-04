@@ -64,15 +64,29 @@ export const desktopApplication = createOffGridApplication({
 })
 
 registerDesktopApplication(desktopApplication)
-desktopApplication.automation.events(forwardDesktopAutomationEvent)
-desktopApplication.use.events((event) => {
-  if (event.type === 'action_outcome') observeActionOutcome(event.outcome)
-})
 
 let starting: ReturnType<typeof desktopApplication.start> | null = null
 let releaseSyncRuntime: (() => void) | null = null
 let releaseFailureObserver: (() => void) | null = null
 let releaseHealthObserver: (() => void) | null = null
+let releaseAutomationForwarder: (() => void) | null = null
+let releaseUseForwarder: (() => void) | null = null
+
+/**
+ * Two domain streams desktop forwards to owners of its own: Automation's events to the task-history
+ * writer, and Use's action outcomes to the action-outcome observer.
+ *
+ * Owned the same way every other subscription here is - registered once, released by
+ * `stopDesktopApplication` - because a subscription whose disposer is discarded cannot be released,
+ * and then `stop()` cannot return the application's listener count to its pre-start value. That is a
+ * lifecycle budget this program measures, so it is worth two variables.
+ */
+function observeDomainForwarding(): void {
+  releaseAutomationForwarder ??= desktopApplication.automation.events(forwardDesktopAutomationEvent)
+  releaseUseForwarder ??= desktopApplication.use.events((event) => {
+    if (event.type === 'action_outcome') observeActionOutcome(event.outcome)
+  })
+}
 
 function describeFailure(failure: unknown): string {
   try {
@@ -129,6 +143,7 @@ function observeApplicationHealth(): void {
 
 observeApplicationFailures()
 observeApplicationHealth()
+observeDomainForwarding()
 
 export function startDesktopApplication(): ReturnType<typeof desktopApplication.start> {
   if (starting) return starting
@@ -136,6 +151,7 @@ export function startDesktopApplication(): ReturnType<typeof desktopApplication.
   const startPromise = (async () => {
     observeApplicationFailures()
     observeApplicationHealth()
+    observeDomainForwarding()
     releaseSyncRuntime = claimDesktopSyncRuntime('application')
     try {
       return await desktopApplication.start()
@@ -160,6 +176,10 @@ export async function stopDesktopApplication(): Promise<void> {
     releaseFailureObserver = null
     releaseHealthObserver?.()
     releaseHealthObserver = null
+    releaseAutomationForwarder?.()
+    releaseAutomationForwarder = null
+    releaseUseForwarder?.()
+    releaseUseForwarder = null
     releaseSyncRuntime?.()
     releaseSyncRuntime = null
     starting = null
