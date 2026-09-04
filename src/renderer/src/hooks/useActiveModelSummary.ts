@@ -23,21 +23,23 @@ export interface ActiveModelSummary {
   thinking: boolean | null
 }
 
+const LOADING_ACTIVE_MODEL_SUMMARY: ActiveModelSummary = {
+  status: 'loading',
+  failure: null,
+  name: null,
+  ctx: null,
+  configuredCtx: null,
+  recommendedCtx: null,
+  thinking: null
+}
+
 /** Read the active text model + its running context window for the composer indicator.
  *  Pass a value that changes when the model may have changed (e.g. the model-picker
  *  open flag) so the chip refreshes after a switch. All formatting lives in the pure
  *  model-summary helpers; this hook only does the IPC reads. */
 export function useActiveModelSummary(refreshWhen: unknown): ActiveModelSummary {
   const [settingsRevision, setSettingsRevision] = useState(0)
-  const [summary, setSummary] = useState<ActiveModelSummary>({
-    status: 'loading',
-    failure: null,
-    name: null,
-    ctx: null,
-    configuredCtx: null,
-    recommendedCtx: null,
-    thinking: null
-  })
+  const [summary, setSummary] = useState<ActiveModelSummary>(LOADING_ACTIVE_MODEL_SUMMARY)
 
   useEffect(() => {
     const invalidate = (): void => setSettingsRevision((revision) => revision + 1)
@@ -47,14 +49,8 @@ export function useActiveModelSummary(refreshWhen: unknown): ActiveModelSummary 
 
   useEffect(() => {
     const request = { active: true }
-    setSummary({
-      status: 'loading',
-      failure: null,
-      name: null,
-      ctx: null,
-      configuredCtx: null,
-      recommendedCtx: null,
-      thinking: null
+    queueMicrotask(() => {
+      if (request.active) setSummary(LOADING_ACTIVE_MODEL_SUMMARY)
     })
     void (async (): Promise<void> => {
       const api = window.api as ActiveModelApi | undefined
