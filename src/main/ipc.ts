@@ -76,6 +76,7 @@ import {
   type NormalizedTextResponse,
   type RetrievalEntity,
   type RetrievalFact,
+  type RetrievalMemory,
   type RetrievalMessage,
   type RetrievalSummary,
   fallbackReasonText,
@@ -264,8 +265,9 @@ async function streamAnswer(
   // observer, so finish metadata and the configured cap cannot diverge by caller.
   if (!streamId || !event?.sender) {
     // Shared generation owns model admission, residency, and fallback for this turn.
-    return generateWithDesktopModels(request())
-      .then((result) => response(result.content, result.finishReason, result.model))
+    return generateWithDesktopModels(request()).then((result) =>
+      response(result.content, result.finishReason, result.model)
+    )
   }
 
   const sender = event.sender
@@ -571,8 +573,7 @@ export async function summarizeSession(sessionId: string): Promise<string | null
   const prompt = getPrompt('sessionSummary', { CONVERSATION_TEXT: conversationText })
 
   try {
-    const summary = (await generateDesktopText(prompt, { profile: 'long-form' }))
-      .content
+    const summary = (await generateDesktopText(prompt, { profile: 'long-form' })).content
     upsertChatSummary(sessionId, summary)
 
     // Extract and update entity memory (non-blocking — don't fail the summary if these error)
@@ -714,8 +715,7 @@ export function setupIPC(): void {
           profile: 'compaction-summary',
           maxTokens: options?.maxTokens
         })
-      )
-        .content
+      ).content
   )
 
   ipcMain.handle('llm:extract', async (_, text: string) => {
@@ -776,9 +776,8 @@ export function setupIPC(): void {
       // generates it (it already detects an ```image block).
       if (intent === 'image') {
         const imgPrompt = buildImagePromptEnhancementRequest(query)
-        const desc = (
-          await generateDesktopText(imgPrompt, { profile: 'prompt-enhancement' })
-        ).content
+        const desc = (await generateDesktopText(imgPrompt, { profile: 'prompt-enhancement' }))
+          .content
         return { answer: formatDeferredImageAnswer(desc, query), context: undefined }
       }
 
@@ -875,11 +874,11 @@ export function setupIPC(): void {
       // which failed the whole retrieval. Preserves the any-term (OR) recall the retrieval expects.
       const ftsQuery = ftsMatchExpression(query)
 
-      let memories: any[] = []
+      let memories: RetrievalMemory[] = []
       try {
         const queryVector = await embeddings.generateEmbedding(query)
         const vecStr = JSON.stringify(queryVector)
-        const params: any[] = [vecStr]
+        const params: unknown[] = [vecStr]
         let memoryQuery = `
             SELECT *, cosine_similarity(embedding, ?) as score
             FROM memories
@@ -891,11 +890,15 @@ export function setupIPC(): void {
           params.push(vecFilter.param)
         }
         memoryQuery += ` ORDER BY score DESC LIMIT 12`
-        memories = db.prepare(memoryQuery).all(...params)
-        memories = memories.filter((m: any) => typeof m.score !== 'number' || m.score >= 0.2)
+        const scoredMemories = db
+          .prepare<unknown[], RetrievalMemory & { score?: number }>(memoryQuery)
+          .all(...params)
+        memories = scoredMemories.filter(
+          (memory) => typeof memory.score !== 'number' || memory.score >= 0.2
+        )
       } catch (e) {
         console.error('[RAG] Vector search failed, falling back to FTS', e)
-        const params: any[] = []
+        const params: unknown[] = []
         let fallbackQuery = `
             SELECT memories.*
             FROM memories
@@ -909,10 +912,10 @@ export function setupIPC(): void {
           params.push(ftsFilter.param)
         }
         fallbackQuery += ` LIMIT 12`
-        memories = db.prepare(fallbackQuery).all(...params)
+        memories = db.prepare<unknown[], RetrievalMemory>(fallbackQuery).all(...params)
       }
 
-      const messageParams: any[] = [ftsQuery]
+      const messageParams: unknown[] = [ftsQuery]
       let messageQuery = `
                 SELECT m.id, m.conversation_id, m.role, m.content, m.created_at, c.title, c.app_name,
                              bm25(message_fts) as score
@@ -927,9 +930,9 @@ export function setupIPC(): void {
         messageParams.push(msgFilter.param)
       }
       messageQuery += ` ORDER BY score ASC LIMIT 12`
-      const messages = db.prepare(messageQuery).all(...messageParams) as RetrievalMessage[]
+      const messages = db.prepare<unknown[], RetrievalMessage>(messageQuery).all(...messageParams)
 
-      const summaryParams: any[] = [ftsQuery]
+      const summaryParams: unknown[] = [ftsQuery]
       let summaryQuery = `
                 SELECT cs.session_id, cs.summary, c.title, c.app_name, c.updated_at,
                              bm25(summary_fts) as score
@@ -944,9 +947,9 @@ export function setupIPC(): void {
         summaryParams.push(sumFilter.param)
       }
       summaryQuery += ` ORDER BY score ASC LIMIT 8`
-      const summaries = db.prepare(summaryQuery).all(...summaryParams) as RetrievalSummary[]
+      const summaries = db.prepare<unknown[], RetrievalSummary>(summaryQuery).all(...summaryParams)
 
-      const entityParams: any[] = [ftsQuery]
+      const entityParams: unknown[] = [ftsQuery]
       let entityQuery = `
                 SELECT e.id, e.name, e.type, e.summary, e.updated_at,
                              bm25(entity_fts) as score
@@ -967,9 +970,9 @@ export function setupIPC(): void {
         entityParams.push(entFilter.param)
       }
       entityQuery += ` ORDER BY score ASC LIMIT 8`
-      const entities = db.prepare(entityQuery).all(...entityParams) as RetrievalEntity[]
+      const entities = db.prepare<unknown[], RetrievalEntity>(entityQuery).all(...entityParams)
 
-      const factParams: any[] = [ftsQuery]
+      const factParams: unknown[] = [ftsQuery]
       let factQuery = `
                 SELECT f.fact, f.created_at, f.source_session_id, e.name, e.type,
                              bm25(entity_fact_fts) as score
@@ -984,7 +987,7 @@ export function setupIPC(): void {
         factParams.push(factFilter.param)
       }
       factQuery += ` ORDER BY score ASC LIMIT 8`
-      const entityFacts = db.prepare(factQuery).all(...factParams) as RetrievalFact[]
+      const entityFacts = db.prepare<unknown[], RetrievalFact>(factQuery).all(...factParams)
 
       // Unified search: fuse in the best-ranked hits across screens, meetings,
       // memories, entities and facts (hybrid FTS + vectors with RRF) — the same
