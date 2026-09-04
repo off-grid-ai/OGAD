@@ -2321,3 +2321,47 @@ which Shared also emits for `warming_up`, so the app reports "configured" before
 answered its health check.
 
 Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
+
+## Interruption converges with plain failure at the ModelsFailure hop (OPEN, deliberate deferral)
+
+The download slice made shutdown interruption a distinct `DownloadAttemptOutcome` kind and a distinct
+event status (`status: 'interrupted'`, no `failed: true` marker). It is NOT distinct at the
+`ModelsFailure` boundary: there is no `interrupted` kind, so it converges with genuine failure as
+`{kind: 'runtime', message}`. A caller above that hop still cannot tell "the app shut down mid
+download" from "the download broke" without reading text.
+
+The fix is one arm — `| { readonly kind: "interrupted"; readonly reason: string }` in
+`shared/packages/application/src/contracts/models-failure.ts`. It is deferred, not forgotten:
+`modelsFailureMessage` switches exhaustively, so nothing compiles until every Desktop and Pro
+narrowing is updated, and that blast radius crosses repos held by other writers. It needs its own
+slice with all consumers in one reviewed change. `cancelled` is not an acceptable substitute (it
+would claim the person stopped it) and `runtime` is the flattening being removed everywhere else.
+
+## An outcome still decided by a string in the models application service (OPEN)
+
+`shared/packages/models/src/model-control-application-service.ts:285` and `:303` decide an outcome
+from `downloaded.error === "cancelled"`. Currently dead in Shared — no consumer — but exported, so it
+is reachable and it is the exact pattern the download chain just removed everywhere else. Either
+delete it or route it through the typed attempt outcome; do not leave an exported string comparison
+as the last place cancellation is inferred from wording.
+
+## Pre-existing SharedFileDescriptor drift in the Pro sync facade (OPEN, unrelated to transfers)
+
+`desktop/pro/main/sync/sync-facade-activation.ts:243` passes `{name, fileSize}` where
+`SharedFileDescriptor` requires `syncId`, `kind`, `mimeType` and `createdAt`. Present in the earliest
+baseline measured this round, before the transfer work began, and unrelated to the transfer journey -
+it is shared-file descriptor drift. Left untouched deliberately so it is not smuggled into a transfer
+commit; it needs an owner.
+
+## The setup panel's model-control test asserts a shape the journey no longer returns (OPEN)
+
+`desktop/src/renderer/src/components/setup/__tests__/SetupPanel.model-control.integration.test.tsx:35`
+mocks `autoConfigure: async () => ({ success: true })`. That was the flat shape; `autoConfigure` now
+returns the discriminated `GuidedSetupResult<ModelsFailure>`. It still TYPECHECKS, because the mock is
+not typed against the API - which is precisely why it is dangerous: the panel now sits with no
+terminal outcome under it, so the test no longer exercises the journey it claims to, and it covers the
+model-control cancel path that just changed. Needs `{ status: 'ready', success: true, modelId,
+modelName }` and a progress event carrying `modelId` so a cancel target exists. Not fixed here because
+test work is not authorized at this gate.
+
+Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
