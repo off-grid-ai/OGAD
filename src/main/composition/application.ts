@@ -34,6 +34,7 @@ import { setupSpeechTextCleaningIpc } from '../speech-text-cleaning-ipc'
 import { consumeDesktopApplicationExtensionPorts } from './application-extension-ports'
 import { claimDesktopSyncRuntime } from '../sync-runtime-owner'
 import { writeDiagnosticLog, type DiagnosticValue } from '../diagnostics-log'
+import { setupVoiceTurnIpc } from '../voice-turn-ipc'
 
 const speechIo = createDesktopSpeechIoPorts()
 const extensionPorts = consumeDesktopApplicationExtensionPorts()
@@ -68,6 +69,12 @@ export const desktopApplication = createOffGridApplication({
     ...extensionPorts.pro,
     sync: { ...extensionPorts.pro?.sync, state: desktopSyncStatePort }
   },
+  // The one cross-domain port: a voice question that belongs to a CONVERSATION. Main owns the
+  // decision, the renderer owns the turn - it holds the persisted rows, the retrieval context, the
+  // tool loop and the variants - so this broker asks the window to run its own turn and waits for
+  // the answer, the same inversion the speech playback broker uses. Without it `askByVoice` can only
+  // answer a conversation-less question.
+  voiceTurn: setupVoiceTurnIpc(),
   newId: randomUUID
 })
 
