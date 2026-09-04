@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
+import { getRendererIsPro } from './bootstrap/entitlementRegistry'
 
 export interface MeetingRecorder {
   recording: boolean
@@ -54,7 +55,7 @@ function reportCommandFailure(command: string, error: unknown): void {
  * decisions and owns no timers that drive recording — so there are no stale closures
  * to leave a recording running (the old useEffect/captured-closure bug class is gone).
  */
-export function useMeetingRecorder(): MeetingRecorder {
+export function useMeetingRecorder(enabled: boolean): MeetingRecorder {
   const [st, setSt] = useState<MeetingState>(EMPTY)
   const [elapsed, setElapsed] = useState(0)
   const [warningSecondsLeft, setWarningSecondsLeft] = useState(0)
@@ -62,27 +63,42 @@ export function useMeetingRecorder(): MeetingRecorder {
   // Subscribe to the controller's broadcast + seed from current state on mount.
   useEffect(() => {
     let alive = true
+    if (!enabled) {
+      void Promise.resolve().then(() => {
+        if (alive) setSt(EMPTY)
+      })
+      return () => {
+        alive = false
+      }
+    }
+    let receivedLiveState = false
+    const off = window.api.onMeetingState((state: unknown) => {
+      if (!alive || !getRendererIsPro()) return
+      if (isMeetingState(state)) {
+        receivedLiveState = true
+        setSt(state)
+      } else console.error('Meeting state update was invalid:', state)
+    })
     window.api
       .meetingGetState()
       .then((state: unknown) => {
-        if (alive && isMeetingState(state)) setSt(state)
+        if (!alive || !getRendererIsPro()) return
+        if (!isMeetingState(state)) {
+          reportCommandFailure('state read', new Error('The meeting state response was invalid'))
+        } else if (!receivedLiveState) setSt(state)
       })
       .catch((error: unknown) => reportCommandFailure('state read', error))
-    const off = window.api.onMeetingState((state: unknown) => {
-      if (isMeetingState(state)) setSt(state)
-      else console.error('Meeting state update was invalid:', state)
-    })
     return () => {
       alive = false
       off()
     }
-  }, [])
+  }, [enabled])
 
   // Display-only ticker derived from startedAt + warnUntil — drives nothing. The
   // controller polls every 10s, so the warning countdown is derived here so it actually
   // ticks down each second instead of showing a frozen "20s".
   useEffect(() => {
-    if (!st.recording || !st.startedAt) {
+    if (!enabled || !st.recording || !st.startedAt) {
       return
     }
     const tick = (): void => {
@@ -98,32 +114,58 @@ export function useMeetingRecorder(): MeetingRecorder {
       window.cancelAnimationFrame(frameId)
       clearInterval(id)
     }
-  }, [st.recording, st.startedAt, st.warnUntil])
+  }, [enabled, st.recording, st.startedAt, st.warnUntil])
 
-  const start = useCallback((platform?: string): void => {
-    void window.api
-      .meetingStart(platform)
-      .catch((error: unknown) => reportCommandFailure('start', error))
-  }, [])
+  const start = useCallback(
+    (platform?: string): void => {
+      if (!enabled || !getRendererIsPro()) {
+        reportCommandFailure(
+          'start',
+          new Error('Meeting recording is unavailable without active Pro features')
+        )
+        return
+      }
+      void window.api
+        .meetingStart(platform)
+        .catch((error: unknown) => reportCommandFailure('start', error))
+    },
+    [enabled]
+  )
   const stop = useCallback((): void => {
+    if (!enabled || !getRendererIsPro()) {
+      reportCommandFailure(
+        'stop',
+        new Error('Meeting recording is unavailable without active Pro features')
+      )
+      return
+    }
     void window.api.meetingStop().catch((error: unknown) => reportCommandFailure('stop', error))
-  }, [])
+  }, [enabled])
   const keepAlive = useCallback((): void => {
+    if (!enabled || !getRendererIsPro()) {
+      reportCommandFailure(
+        'keep-alive',
+        new Error('Meeting recording is unavailable without active Pro features')
+      )
+      return
+    }
     void window.api
       .meetingKeepAlive()
       .catch((error: unknown) => reportCommandFailure('keep-alive', error))
-  }, [])
+  }, [enabled])
 
-  const visibleElapsed = st.recording && st.startedAt ? elapsed : 0
-  const visibleWarningSecondsLeft = st.recording && st.startedAt ? warningSecondsLeft : 0
+  const visibleState = enabled ? st : EMPTY
+  const visibleElapsed = visibleState.recording && visibleState.startedAt ? elapsed : 0
+  const visibleWarningSecondsLeft =
+    visibleState.recording && visibleState.startedAt ? warningSecondsLeft : 0
 
   return {
-    recording: st.recording,
-    busy: st.busy,
+    recording: visibleState.recording,
+    busy: visibleState.busy,
     elapsed: visibleElapsed,
     warningSecondsLeft: visibleWarningSecondsLeft,
-    platform: st.platform,
-    error: st.error,
+    platform: visibleState.platform,
+    error: visibleState.error,
     start,
     stop,
     keepAlive

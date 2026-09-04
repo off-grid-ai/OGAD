@@ -398,7 +398,7 @@ function AppContent(): React.ReactElement {
       return !pinned
     })
   }
-  const rec = useMeetingRecorder()
+  const rec = useMeetingRecorder(isPro && proReady && proActivation === 'full')
 
   const setTaskDetailSidebarMode = useCallback(
     (detailOpen: boolean): void => {
@@ -414,9 +414,11 @@ function AppContent(): React.ReactElement {
   // Tell the capture layer which screen is showing, so self-capture can skip the
   // memory-mirror views (Day/Replay/Entities/…) and avoid looping the graph.
   useEffect(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(window.api as any)?.reportSelfView?.(viewMode)
-  }, [viewMode])
+    if (!isPro || !proReady || proActivation !== 'full') return
+    void window.api.reportSelfView(viewMode).catch((error: unknown) => {
+      console.error('[capture] Self-view report failed', error)
+    })
+  }, [viewMode, isPro, proReady, proActivation])
 
   // Navigation history stacks (back and forward)
   const navigationHistory = useRef<NavigationState[]>([])
