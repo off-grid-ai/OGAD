@@ -2451,3 +2451,95 @@ leaves no orphan files, which is most of the reason the pre-promotion check is a
 correctness fix.
 
 Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
+
+## RESOLUTIONS — original hexagonal migration, transfer and download journeys (2026-09-04)
+
+Recorded against the commits that closed them. Every line below is code-reviewed and source-gated.
+NOTHING here is live-verified, tested, built, pushed, or CI-green; those remain later gates.
+
+**Pro model transfer imported the concrete parent manager — RESOLVED.**
+shared `d9e035b` (transferable query + `expectedLibraryId` guard), desktop `ebd3dee4` (host
+query-ports adapter, `registerTransferredModel` wrapper deleted, gate extended), desktop/pro
+`6086497` + the per-sink getter slice. All four call sites plus the picker candidate source moved to
+the Shared boundary; `getTransferableModel` and `registerTransferredModel` have zero occurrences in
+Pro, and the parent wrapper is gone. Evidence: `node scripts/verify-model-architecture.mjs` exit 0
+with ZERO violations and zero temporary entries - the gate was failing deliberately through the
+migration, so 0 is what proves the legacy path is gone rather than merely unused. Pro production
+typecheck diagnostics: 0.
+
+Two interactions found while implementing, both worth keeping because neither was predictable from
+the plan:
+- `path.resolve`-at-capture would have been UNSAFE while the legacy wrapper still did raw string
+  equality against a possibly-relative `dataDir` (`src/main/runtime-env.ts:67-73`). The getter change
+  and the caller migration therefore had to land in ONE pass; scheduled apart, they would have
+  refused every registration under a relative `OFFGRID_DATA_DIR` - a common test and E2E setup.
+- Migrating registration tightened a real hole for free: the old wrapper returned an optional `id`,
+  so the registered-notification was conditional. `Outcome<{modelId}, ...>` makes it required, so a
+  successful registration can no longer silently skip notifying.
+
+**The sink captured the model library once at startup — RESOLVED.** The option is now a getter, and
+each sink captures its normalized root ONCE at construction. Deliberately not read live per
+filesystem operation: promotion, verification, rollback and the `expectedLibraryId` it sends must
+agree on one directory for that sink's life, or the split-brain returns from the opposite direction.
+A new sink picks up a library switch. A runtime library change has NOT been exercised - the per-sink
+semantics are argued from the construction site, not observed.
+
+**Activation resolve re-read Shared's own record through the facade holding the port — RESOLVED**
+in shared `d9e035b`. Shared resolves the registered-route case from its own workspace before
+consulting the injected port, and the port is narrowed to the inventory facts Shared genuinely lacks.
+The single kind-to-modality policy is untouched.
+
+**Pre-existing `SharedFileDescriptor` drift in the Pro sync facade — RESOLVED.** The ambient receipt
+callback was narrowed to the existing watcher's `name`/`fileSize` input contract rather than
+fabricating the unused descriptor fields. That was the right direction: the contract was oversized,
+not the caller underspecified.
+
+**A cancelled download reported itself as a failure — RESOLVED across the whole chain**, and it took
+four separate hops, each of which had guessed independently:
+shared `4bf6022`, `82251f8`, `ec65937` and desktop `a26de8f4`, plus desktop `7d291693` for the
+renderer. The producer stopped inferring cancellation from a message; the event channel stopped
+emitting `failed: true` for a stop; the per-id cancel marker that leaked on four exit paths was
+replaced with per-attempt state that cannot leak because there is nothing to clear; and the lane
+stopped reading `signal.aborted`, which now appears NOWHERE in outcome classification.
+
+The last of these is the one worth remembering. An adapter does more than move bytes - it verifies
+integrity and promotes the file - so "a stop was requested" and "the transfer stopped for it" are
+different facts, and using the former meant a corrupt artifact our own verifier caught, or a failed
+rename, was reported to the person as their own cancellation. `DownloadAbortedError` puts the report
+where the knowledge is. The root cause of the whole class: the adapter's catch flattened its
+rejection into a new `Error`, destroying the `name` that identified an abort AND the `code` that
+classifies ENOSPC and network faults - so the bad inference upstream was the only signal left. Both
+are preserved now.
+
+Also fixed on the way: the abortable step users actually cancel is the BODY READ, not the header
+fetch, and the pump was inside no `try` at all - so fixing only the documented site would have left
+cancellation broken for every download that had started moving bytes.
+
+**An interrupted download rendered as if nothing had happened — RESOLVED** in desktop `7d291693`.
+Two bugs at once: `error.startsWith('interrupted')` was dead code because an interrupted download
+never entered the `failed` branch, AND the row fell through to a plain "Download" button. The same
+cancelled-reads-as-failed bug also lived in that screen's refusal path, which set `status: 'failed'`
+for every refusal including `{kind: 'cancelled'}`.
+
+## Still open after this round — nothing below is closed
+
+- **Race tests are owed and unwritten.** Every ordering in the cancellation work is reasoned from
+  source and constrained by types; none has been executed. Specifically: cancel arriving during
+  `verifyDownloadedPart`, during `fs.promises.rename`, and during the verify read in
+  `artifact-execution.ts`; both cancel orderings; failure-then-cancel; rollback failure under abort;
+  cancel-then-shutdown; and same-id retry after a failed cancel. A typed path is not a verified one.
+- **The two Pro transfer test files** still call the deleted `modelIds` parameter and now also
+  construct the service with a string where a getter is required. The count GREW because the second
+  change was compile-forcing by design. This is direct fallout of two changes that were ordered and
+  approved, not drift, and test work is not authorized at this gate.
+- **A library refusal still reaches callers as `{kind: 'runtime'}`** with a message, so the two cases
+  the register service distinguishes - a host that cannot verify its library, versus a library that
+  changed mid-registration - are not separable by a caller. They want different messaging and
+  different diagnostics. Nothing parses a message to work around it.
+- **The exported string-parsing outcome** at `shared/packages/models/src/model-control-application-service.ts:285`
+  and `:303` (`downloaded.error === "cancelled"`). Being picked up as its own cleanup if the
+  production consumer trace permits.
+- Live journeys, E2E, integration/native tests, packaged builds, push and CI all remain later gates.
+  No release claim is made anywhere above.
+
+Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
