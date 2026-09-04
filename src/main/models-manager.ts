@@ -21,7 +21,7 @@ import {
   type LocalModelImportService,
   type ModelLibraryRemovalService,
   type ModelTransferRegistrationService,
-  type ModelMetadataRepairCommandService,
+  type ModelMetadataRepairCommandPorts,
   type ModelLibraryRemovalTarget,
   type LocalModelImportProgress,
   mergeCatalog,
@@ -51,17 +51,19 @@ import type { RemoteVisionInventoryModel } from '../shared/remote-vision-server'
 import { registerDesktopModelManagerPorts } from './model-manager-ports'
 import { desktopModelSelectionPersistence } from './model-selection-persistence'
 import {
-  activeProjectorRepairService,
   localModelImportService,
   modelLibraryRemovalService,
   modelTransferRegistration,
-  registerDesktopModelLibraryPorts,
-  type DesktopProjectorRepair
+  registerDesktopModelLibraryPorts
 } from './composition/model-library'
 import { platformFetch } from '@offgrid/models/fetch'
 import { desktopImageRuntimeIdentity } from './models/image-runtime-identity'
 import { modelSearchKind } from './models/model-search-kind'
-import { registerDesktopDownloadMetadataRepairPorts } from './models/desktop-model-download-ports'
+import {
+  desktopDownloadMetadataRepair,
+  registerDesktopDownloadMetadataRepairPorts,
+  type DesktopProjectorRepair
+} from './models/desktop-model-download-ports'
 import { LocalModelRegistry, type LocalModelRegistryEntry } from './models/local-model-registry'
 import { MODEL_FILE_EXTENSION, isGgufFile } from '@offgrid/models'
 import {
@@ -796,9 +798,7 @@ async function resolveActiveModelProjectorRepair(): Promise<{
   }
 }
 
-export function desktopActiveProjectorRepairPorts(): ConstructorParameters<
-  typeof ModelMetadataRepairCommandService<DesktopProjectorRepair>
->[0] {
+export function desktopActiveProjectorRepairPorts(): ModelMetadataRepairCommandPorts<DesktopProjectorRepair> {
   return {
     resolve: resolveActiveModelProjectorRepair,
     persist: (repair) => desktopModelSelectionPersistence.projectLegacyTextConfig(repair),
@@ -807,11 +807,8 @@ export function desktopActiveProjectorRepairPorts(): ConstructorParameters<
   }
 }
 
-const activeProjectorRepair = (): ModelMetadataRepairCommandService<DesktopProjectorRepair> =>
-  activeProjectorRepairService()
-
 export function reconcileActiveModelProjector(): Promise<boolean> {
-  return activeProjectorRepair().execute()
+  return desktopDownloadMetadataRepair().execute()
 }
 
 /**
@@ -1115,7 +1112,6 @@ const activeProjectorRepairPorts = desktopActiveProjectorRepairPorts()
 
 registerDesktopModelLibraryPorts({
   removal: desktopModelLibraryRemovalPorts,
-  repair: () => activeProjectorRepairPorts,
   localImport: desktopLocalModelImportPorts,
   transfer: desktopModelTransferRegistrationPorts
 })

@@ -2,6 +2,7 @@ import path from 'node:path'
 import {
   CATALOG,
   downloadModelType,
+  once,
   resolveHuggingFaceModel,
   type ModelEntry,
   type ModelMetadataRepairCommandPorts,
@@ -27,17 +28,18 @@ interface ResolvedDownloadSource {
   catalogEntry: boolean
 }
 
-interface ActiveProjectorRepair {
+/** The metadata a Desktop projector repair rewrites: the active text model's file pair. */
+export interface DesktopProjectorRepair {
   id: string
   primary: string
   mmproj: string
 }
 
-let metadataRepairPorts: ModelMetadataRepairCommandPorts<ActiveProjectorRepair> | null = null
+let metadataRepairPorts: ModelMetadataRepairCommandPorts<DesktopProjectorRepair> | null = null
 
 /** Register Desktop I/O once. Shared still owns the portable resolve/persist/reload sequence. */
 export function registerDesktopDownloadMetadataRepairPorts(
-  ports: ModelMetadataRepairCommandPorts<ActiveProjectorRepair>
+  ports: ModelMetadataRepairCommandPorts<DesktopProjectorRepair>
 ): void {
   if (metadataRepairPorts) {
     throw new Error('Desktop download metadata-repair ports are already registered.')
@@ -45,23 +47,29 @@ export function registerDesktopDownloadMetadataRepairPorts(
   metadataRepairPorts = ports
 }
 
-function requireMetadataRepairPorts(): ModelMetadataRepairCommandPorts<ActiveProjectorRepair> {
+function requireMetadataRepairPorts(): ModelMetadataRepairCommandPorts<DesktopProjectorRepair> {
   if (!metadataRepairPorts) {
     throw new Error('Desktop download metadata-repair ports are not registered.')
   }
   return metadataRepairPorts
 }
 
-function desktopDownloadMetadataRepair(): DownloadMetadataRepairCommand {
-  return createDownloadMetadataRepairCommand<ActiveProjectorRepair>({
-    resolve: () => requireMetadataRepairPorts().resolve(),
-    persist: (repair) => requireMetadataRepairPorts().persist(repair),
-    reload: () => requireMetadataRepairPorts().reload(),
-    refresh: async () => {
-      await requireMetadataRepairPorts().refresh?.()
-    }
-  })
-}
+/**
+ * The ONE projector-repair command on this device, built by Shared from the registered Desktop I/O.
+ * Both the download owner's post-install repair and the on-demand reconcile run through this single
+ * instance, so the app holds no `@offgrid/models` repair service and no second repair owner.
+ */
+export const desktopDownloadMetadataRepair = once(
+  (): DownloadMetadataRepairCommand =>
+    createDownloadMetadataRepairCommand<DesktopProjectorRepair>({
+      resolve: () => requireMetadataRepairPorts().resolve(),
+      persist: (repair) => requireMetadataRepairPorts().persist(repair),
+      reload: () => requireMetadataRepairPorts().reload(),
+      refresh: async () => {
+        await requireMetadataRepairPorts().refresh?.()
+      }
+    })
+)
 
 function primaryFile(entry: ModelEntry): ModelEntry['files'][number] {
   const primary =

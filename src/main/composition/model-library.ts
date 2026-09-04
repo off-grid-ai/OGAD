@@ -3,22 +3,12 @@
 import {
   LocalModelImportService,
   ModelLibraryRemovalService,
-  ModelMetadataRepairCommandService,
   ModelTransferRegistrationService
 } from '@offgrid/models'
 import { once } from '@offgrid/models'
 
-export interface DesktopProjectorRepair {
-  id: string
-  primary: string
-  mmproj: string
-}
-
 interface DesktopModelLibraryPortFactories {
   removal: () => ConstructorParameters<typeof ModelLibraryRemovalService>[0]
-  repair: () => ConstructorParameters<
-    typeof ModelMetadataRepairCommandService<DesktopProjectorRepair>
-  >[0]
   localImport: () => ConstructorParameters<typeof LocalModelImportService>[0]
   transfer: (
     dir: () => string,
@@ -40,9 +30,6 @@ function ports(): DesktopModelLibraryPortFactories {
 
 export const modelLibraryRemovalService = once(
   () => new ModelLibraryRemovalService(ports().removal())
-)
-export const activeProjectorRepairService = once(
-  () => new ModelMetadataRepairCommandService<DesktopProjectorRepair>(ports().repair())
 )
 export const localModelImportService = once(
   () => new LocalModelImportService(ports().localImport())
