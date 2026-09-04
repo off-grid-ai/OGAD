@@ -3,8 +3,8 @@ import {
   type GenerationAdapter,
   type ModelLifecycleApplicationPorts,
   type ModelModality,
+  reclaimAttempt,
   type ModelWorkspace,
-  type ResidentReclaim,
   type RuntimeModel
 } from '@offgrid/models'
 
@@ -18,23 +18,6 @@ function localModel(
     throw new Error(`No local ${modality} model matches ${identifier}.`)
   }
   return model
-}
-
-/**
- * Turn a native unload into an ANSWER, because residency needs the fact, not an exception.
- *
- * The adapters resolve or throw; what residency has to know is whether the memory came back. A throw
- * is reported as still-held, which keeps residency counting it - the safe direction, because the next
- * admission is then refused by arithmetic instead of overcommitting into memory the engine never
- * released. `reason` is for the report only; the boolean is the gating fact.
- */
-async function reclaimed(release: () => Promise<void>): Promise<ResidentReclaim> {
-  try {
-    await release()
-    return { reclaimed: true }
-  } catch (cause) {
-    return { reclaimed: false, reason: cause instanceof Error ? cause.message : String(cause) }
-  }
 }
 
 function lifecycleAdapter(
@@ -99,20 +82,27 @@ export function desktopModelLifecyclePorts(
         },
         handlers: {
           load: () => adapter.load(model),
-          unload: () => reclaimed(() => adapter.unload(model))
+          unload: () => reclaimAttempt(() => adapter.unload(model))
         }
       }
     },
     resolveUnload(modality) {
       const active = workspace.active(modality).model
       if (!active || active.source !== 'local') {
-        return { key: `${modality}:inactive`, hadRuntime: false, unload: async () => undefined }
+        // No runtime, so nothing held memory: a true reclaim, not an unknown one. `hadRuntime`
+        // still says a runtime never existed, which is a different fact from whether memory came
+        // back.
+        return {
+          key: `${modality}:inactive`,
+          hadRuntime: false,
+          unload: async () => ({ reclaimed: true }) as const
+        }
       }
       const adapter = lifecycleAdapter(adapters, active)
       return {
         key: `${modality}:${routeId(active)}`,
         hadRuntime: active.loaded,
-        unload: () => adapter.unload(active)
+        unload: () => reclaimAttempt(() => adapter.unload(active))
       }
     },
     selectRoute: (modality, selectedRoute) => workspace.select(modality, selectedRoute),
