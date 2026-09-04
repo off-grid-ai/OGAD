@@ -28,7 +28,10 @@ interface ModelControlSnapshot<Model> {
   models: readonly Model[]
   installed: readonly string[]
   activeIds: readonly string[]
-  active: Record<keyof ActiveModels, { modelId: string | null; routeId: string | null; ready: boolean }>
+  active: Record<
+    keyof ActiveModels,
+    { modelId: string | null; routeId: string | null; ready: boolean }
+  >
   downloads: readonly unknown[]
   downloadDurability: { status: 'healthy' }
   /**
@@ -92,8 +95,11 @@ export interface ModelControlBoundary<Model> {
   /** The read the composer indicator and the drawer still use. */
   getModelControlProjection: () => Promise<ModelControlSnapshot<Model>>
   /** The one write door every model surface goes through. */
-  controlModel: (intent: ControlIntent) => Promise<
-    { ok: true; value: ControlSuccess<Model> } | { ok: false; failure: { kind: string; message: string } }
+  controlModel: (
+    intent: ControlIntent
+  ) => Promise<
+    | { ok: true; value: ControlSuccess<Model> }
+    | { ok: false; failure: { kind: string; message: string } }
   >
   /** What the boundary currently holds, for a test that needs to read it back. */
   projection: () => ModelControlSnapshot<Model>
@@ -176,11 +182,17 @@ export function modelControlBoundary<Model extends { id: string }>(
         }
         break
       case 'cancel-download':
-        return { ok: true, value: { status: 'cancelled', operationId: nextOperationId(), projection: state } }
+        return {
+          ok: true,
+          value: { status: 'cancelled', operationId: nextOperationId(), projection: state }
+        }
       default:
         break
     }
-    return { ok: true, value: { status: 'completed', operationId: nextOperationId(), projection: state } }
+    return {
+      ok: true,
+      value: { status: 'completed', operationId: nextOperationId(), projection: state }
+    }
   }
 
   return {

@@ -126,9 +126,7 @@ describe('<ModelPicker/> dismissal', () => {
     fireEvent.click(button as HTMLButtonElement)
     // The saved remote model really holds the Text & Vision route now. `activateModel` was the
     // pre-cutover door for this; the picker issues one `activate` intent through model control.
-    await waitFor(() =>
-      expect(modelControl.projection().active.text.modelId).toBe(REMOTE_MODEL_ID)
-    )
+    await waitFor(() => expect(modelControl.projection().active.text.modelId).toBe(REMOTE_MODEL_ID))
     expect(modelControl.intents).toContainEqual({
       type: 'activate',
       modelId: REMOTE_MODEL_ID,

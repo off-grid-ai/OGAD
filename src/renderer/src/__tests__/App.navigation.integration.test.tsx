@@ -57,7 +57,8 @@ describe('<App/> desktop navigation integration', () => {
     // module initialization. Install that real boundary once, then keep module
     // loading outside the interaction assertion's timeout budget.
     installAppBoundary({
-      getModelControlProjection: async () => modelControlSnapshot({ kinds: MODEL_KINDS, models: [] })
+      getModelControlProjection: async () =>
+        modelControlSnapshot({ kinds: MODEL_KINDS, models: [] })
     })
     installAppBrowserBoundary()
     ;({ default: App } = await import('../App'))
@@ -530,7 +531,8 @@ describe('<App/> desktop navigation integration', () => {
       registerProView(proView)
       installAppBoundary({
         isPro: true,
-        getModelControlProjection: async () => modelControlSnapshot({ kinds: MODEL_KINDS, models: [] }),
+        getModelControlProjection: async () =>
+          modelControlSnapshot({ kinds: MODEL_KINDS, models: [] }),
         crmListEntities: async () => [],
         proInvoke: async (channel: string) => {
           if (channel === 'pro:sync:status') return undefined
@@ -587,7 +589,8 @@ describe('<App/> desktop navigation integration', () => {
       registerProView(proView)
       installAppBoundary({
         isPro: true,
-        getModelControlProjection: async () => modelControlSnapshot({ kinds: MODEL_KINDS, models: [] }),
+        getModelControlProjection: async () =>
+          modelControlSnapshot({ kinds: MODEL_KINDS, models: [] }),
         crmListEntities: async () => [],
         proInvoke: async (channel: string) => {
           if (channel === 'pro:sync:status') return undefined

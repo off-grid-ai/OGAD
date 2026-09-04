@@ -31,10 +31,7 @@ import {
   imageMemoryGuardErrorMessage,
   type ImageGenerationJobContract
 } from '../../../../shared/image-generation-contract'
-import {
-  modelControlBoundary,
-  type ModelControlBoundary
-} from './harness/model-control-snapshot'
+import { modelControlBoundary, type ModelControlBoundary } from './harness/model-control-snapshot'
 import { invalidateLlmSettings } from '../../lib/settings-invalidation'
 
 // The real app mounts MemoryChat inside a global TooltipProvider (App shell). Mirror
@@ -750,9 +747,7 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
 
     // Divergence fix: the dropdown MUST write through the same owner as the
     // Active-models panel, or the two silently disagree on which model runs.
-    await waitFor(() =>
-      expect(modelControl.projection().active.image.modelId).toBe(FEW_STEP)
-    )
+    await waitFor(() => expect(modelControl.projection().active.image.modelId).toBe(FEW_STEP))
 
     await sendPrompt(user, 'a mountain lake')
     await waitFor(() => expect(generateImage).toHaveBeenCalledTimes(1))
