@@ -842,8 +842,7 @@ const offGridApi = {
     cancel: (operationId: string): Promise<void> =>
       ipcRenderer.invoke(ASK_BY_VOICE_CANCEL_CHANNEL, operationId),
     onEvent: (callback: (message: AskByVoiceEventMessage) => void) => {
-      const listener = (_event: unknown, message: AskByVoiceEventMessage): void =>
-        callback(message)
+      const listener = (_event: unknown, message: AskByVoiceEventMessage): void => callback(message)
       ipcRenderer.on(ASK_BY_VOICE_EVENT_CHANNEL, listener)
       return unsubscribe(ASK_BY_VOICE_EVENT_CHANNEL, listener)
     }

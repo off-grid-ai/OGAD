@@ -27,26 +27,63 @@ function assertMainRenderer(event: IpcMainInvokeEvent): void {
   }
 }
 
+/**
+ * The wire contract, one named check per field.
+ *
+ * Written as a single function first, which reached a complexity of 19 - and a parser that a
+ * reader cannot follow is a poor place to keep the rule about what audio this process will accept.
+ * Each check now says what it admits and returns `undefined` for "not present", which is a
+ * different answer from "present and wrong": an absent `conversationId` is a dictation question, a
+ * malformed one is a refused command.
+ */
+type Field<T> = { readonly ok: true; readonly value: T } | { readonly ok: false }
+
+const admitted = <T>(value: T): Field<T> => ({ ok: true, value })
+const refused: Field<never> = { ok: false }
+
+/** Audio this process will accept: present, non-empty, and bounded. */
+function audioBytes(value: unknown): Field<Uint8Array> {
+  if (!(value instanceof Uint8Array)) return refused
+  if (value.byteLength === 0 || value.byteLength > MAX_AUDIO_BYTES) return refused
+  return admitted(value)
+}
+
+function requiredText(value: unknown): Field<string> {
+  return typeof value === 'string' && value ? admitted(value) : refused
+}
+
+/** Absent is a valid answer, and it MEANS something: a question with no conversation to persist. */
+function optionalId(value: unknown): Field<string | undefined> {
+  if (value === undefined) return admitted(undefined)
+  return typeof value === 'string' && value ? admitted(value) : refused
+}
+
+/** A project can be explicitly null - "not in a project" - which is not the same as omitted. */
+function optionalScope(value: unknown): Field<string | null | undefined> {
+  if (value === undefined || value === null) return admitted(value)
+  return typeof value === 'string' ? admitted(value) : refused
+}
+
+function optionalFlag(value: unknown): Field<boolean | undefined> {
+  if (value === undefined) return admitted(undefined)
+  return typeof value === 'boolean' ? admitted(value) : refused
+}
+
 function parseStart(value: unknown): AskByVoiceStartCommand | null {
   if (!value || typeof value !== 'object') return null
   const command = value as Record<string, unknown>
-  const bytes = command.bytes
-  if (!(bytes instanceof Uint8Array) || bytes.byteLength === 0) return null
-  if (bytes.byteLength > MAX_AUDIO_BYTES) return null
-  if (typeof command.mimeType !== 'string' || !command.mimeType) return null
-  const conversationId = command.conversationId
-  if (conversationId !== undefined && (typeof conversationId !== 'string' || !conversationId)) {
-    return null
-  }
-  const projectId = command.projectId
-  if (projectId !== undefined && projectId !== null && typeof projectId !== 'string') return null
-  if (command.speak !== undefined && typeof command.speak !== 'boolean') return null
+  const bytes = audioBytes(command.bytes)
+  const mimeType = requiredText(command.mimeType)
+  const conversationId = optionalId(command.conversationId)
+  const projectId = optionalScope(command.projectId)
+  const speak = optionalFlag(command.speak)
+  if (!bytes.ok || !mimeType.ok || !conversationId.ok || !projectId.ok || !speak.ok) return null
   return {
-    bytes,
-    mimeType: command.mimeType,
-    ...(typeof conversationId === 'string' ? { conversationId } : {}),
-    ...(projectId === undefined ? {} : { projectId: projectId as string | null }),
-    ...(typeof command.speak === 'boolean' ? { speak: command.speak } : {})
+    bytes: bytes.value,
+    mimeType: mimeType.value,
+    ...(conversationId.value === undefined ? {} : { conversationId: conversationId.value }),
+    ...(projectId.value === undefined ? {} : { projectId: projectId.value }),
+    ...(speak.value === undefined ? {} : { speak: speak.value })
   }
 }
 
