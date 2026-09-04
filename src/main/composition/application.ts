@@ -19,6 +19,7 @@ import { setupSpeechMicrophoneIpc } from '../speech-microphone-ipc'
 import { setupSpeechPlaybackIpc } from '../speech-playback-ipc'
 import { setupSpeechTextCleaningIpc } from '../speech-text-cleaning-ipc'
 import { consumeDesktopApplicationExtensionPorts } from './application-extension-ports'
+import { claimDesktopSyncRuntime } from '../sync-runtime-owner'
 
 const speechIo = createDesktopSpeechIoPorts()
 const extensionPorts = consumeDesktopApplicationExtensionPorts()
@@ -62,15 +63,30 @@ desktopApplication.use.events((event) => {
 })
 
 let starting: ReturnType<typeof desktopApplication.start> | null = null
+let releaseSyncRuntime: (() => void) | null = null
 
 export function startDesktopApplication(): ReturnType<typeof desktopApplication.start> {
-  starting ??= desktopApplication.start()
+  starting ??= (async () => {
+    releaseSyncRuntime = claimDesktopSyncRuntime('application')
+    try {
+      await desktopApplication.start()
+    } catch (error) {
+      releaseSyncRuntime()
+      releaseSyncRuntime = null
+      throw error
+    }
+  })()
   return starting
 }
 
 export async function stopDesktopApplication(): Promise<void> {
-  await desktopApplication.stop()
-  starting = null
+  try {
+    await desktopApplication.stop()
+  } finally {
+    releaseSyncRuntime?.()
+    releaseSyncRuntime = null
+    starting = null
+  }
 }
 
 applicationShutdown.register({ name: 'core:application', shutdown: stopDesktopApplication })

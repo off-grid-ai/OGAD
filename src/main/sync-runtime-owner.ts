@@ -1,0 +1,24 @@
+export type DesktopSyncRuntimeOwner = 'application' | 'legacy'
+
+let activeOwner: DesktopSyncRuntimeOwner | null = null
+
+/**
+ * One process may bind one Sync runtime. The lease is independent of boot order, so entitlement
+ * recovery, normal Pro activation, and shutdown cannot race two listeners onto the same port.
+ */
+export function claimDesktopSyncRuntime(owner: DesktopSyncRuntimeOwner): () => void {
+  if (activeOwner) {
+    throw new Error(`Desktop Sync is already owned by the ${activeOwner} runtime.`)
+  }
+  activeOwner = owner
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    if (activeOwner === owner) activeOwner = null
+  }
+}
+
+export function desktopSyncRuntimeOwner(): DesktopSyncRuntimeOwner | null {
+  return activeOwner
+}
