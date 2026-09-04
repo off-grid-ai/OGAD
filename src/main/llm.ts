@@ -54,11 +54,7 @@ import { pickFreePort, isPortFree } from './free-port'
 import { engineSpawnEnv } from './llm/spawn-env'
 import { streamCompletion, type StreamResult } from './llm/stream'
 import { streamRemoteChatCompletion, type RemoteTextModelConnection } from './llm/remote-chat'
-import {
-  terminateEngine,
-  ENGINE_TEARDOWN_GRACE_MS,
-  type TeardownOutcome
-} from './llm/engine-teardown'
+import type { TeardownOutcome } from './llm/engine-teardown'
 import { emitChangedLlmSettings } from './sync-mutation'
 import { loadGatedVisionModelAdapter } from './vision/model-adapters/registry'
 import type { VisionModelArtifacts } from './vision/model-adapters/types'
@@ -1383,52 +1379,12 @@ export class LLMService {
     }
   }
 
-  /** Resolve true if `proc` exits within `timeoutMs`, false on timeout — the wait primitive the
-   *  teardown escalation polls between SIGTERM and SIGKILL. */
-  private waitForProcExit(proc: ChildProcess, timeoutMs: number): Promise<boolean> {
-    if (proc.exitCode !== null || proc.signalCode !== null) {
-      return Promise.resolve(true)
-    }
-    return new Promise((resolve) => {
-      const onExit = (): void => {
-        clearTimeout(timer)
-        resolve(true)
-      }
-      const timer = setTimeout(() => {
-        proc.off('close', onExit)
-        resolve(false)
-      }, timeoutMs)
-      proc.once('close', onExit)
-    })
-  }
-
   /**
    * Cleanly unload the engine: stop generating, terminate llama-server (SIGTERM → SIGKILL if it
    * hangs on a Metal/GGML shutdown abort), WAIT for it to actually die, then reap anything still
    * bound to the port. Awaitable so the UI (and app-quit) can confirm the port is free — this is
    * the fix for "the engine can't be unloaded without a force-quit / reboot" that blocked LM Studio.
    */
-  /** SIGTERM→SIGKILL a specific process and wait for it to actually exit. Rechecks liveness inside
-   *  terminateEngine so a race with natural exit doesn't mislabel the outcome. */
-  private terminateProc(proc: ChildProcess): Promise<TeardownOutcome> {
-    return terminateEngine(
-      {
-        isAlive: () => proc.exitCode === null && proc.signalCode === null,
-        sendSignal: (sig) => {
-          try {
-            proc.kill(sig)
-          } catch {
-            // EXPECTED ABSENCE: the process may exit between the liveness check and the signal.
-            // `terminateEngine` rechecks liveness itself, so a race with a natural exit is
-            // reported as the exit it was, not as a failed teardown.
-          }
-        },
-        waitForExit: (ms) => this.waitForProcExit(proc, ms)
-      },
-      ENGINE_TEARDOWN_GRACE_MS
-    )
-  }
-
   async unload(): Promise<{ outcome: TeardownOutcome; portFree: boolean }> {
     this.paused = true // stop the on-demand respawn path from warming a new server mid-teardown
     let outcome: TeardownOutcome = 'already-dead'
