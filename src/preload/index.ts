@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { ModelsEvent } from '@offgrid/application'
+import type { ModelsEvent, ModelsFailure } from '@offgrid/application'
+import type { GuidedSetupResult } from '@offgrid/models'
 
 type PublicDownloadEvent = Extract<ModelsEvent, { type: 'download' }>['event']
 import {
@@ -547,7 +548,11 @@ const offGridApi = {
   setupPlan: (mode?: string) => ipcRenderer.invoke('setup:plan', mode),
   chatVisionAvailable: () => ipcRenderer.invoke('model:chat-vision'),
   writeClipboardText: (text: string) => ipcRenderer.invoke('clipboard:write-text', text),
-  autoConfigure: () => ipcRenderer.invoke('setup:auto-configure'),
+  // The guided-setup result crosses whole and stays typed: `ready` vs `warming_up` vs
+  // `cancelled` vs `failed` (with the domain's own failure attached). `invoke` is `any`, so
+  // the annotation is what keeps the renderer honest about which outcome it is handling.
+  autoConfigure: (): Promise<GuidedSetupResult<ModelsFailure>> =>
+    ipcRenderer.invoke('setup:auto-configure'),
   restartComponent: (id: string) => ipcRenderer.invoke('system:restart', id),
 
   // Storage + download manager

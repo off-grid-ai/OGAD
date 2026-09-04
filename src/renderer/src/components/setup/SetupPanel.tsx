@@ -15,6 +15,8 @@ import { cn } from '@renderer/lib/utils'
 import { deviceNoun } from '@renderer/lib/device'
 import { HealthPanel } from './HealthPanel'
 import { formatTransferSpeed, modelsFailureMessage } from '@offgrid/application'
+import type { ModelsFailure } from '@offgrid/application'
+import type { GuidedSetupResult } from '@offgrid/models'
 import { projectProgress } from '@offgrid/ui'
 import { formatStorageBytes } from './storage-format'
 import { modelControlClient } from '@renderer/lib/model-control-client'
@@ -47,7 +49,7 @@ const KIND_ICON: Record<
 }
 
 interface SetupProgress {
-  phase: 'select' | 'download' | 'activate' | 'start' | 'verify' | 'done' | 'error'
+  phase: 'select' | 'download' | 'activate' | 'start' | 'verify' | 'done' | 'error' | 'cancelled'
   message: string
   modelId?: string
   modelName?: string
@@ -75,12 +77,68 @@ interface SetupPlan {
 }
 
 interface SetupPanelProps {
-  onConfigured?: () => void // called once auto-configure succeeds (e.g. to dismiss a gate)
+  // Called once auto-configure actually reaches `ready` - the engine answered its health
+  // check. NOT on the `done` progress phase, which the domain also emits for `warming_up`.
+  onConfigured?: () => void
   hideHealth?: boolean // hide the embedded health panel (first-run gate)
 }
 
 function reportSetupFailure(operation: string, error: unknown): void {
   console.error(`[setup] ${operation} failed`, error)
+}
+
+/** The terminal record the run itself returned. The progress stream cannot stand in for it:
+ *  the domain emits the `done` phase for a server that is still warming up as well as for one
+ *  that answered, and a person cancelling is terminal but is not a failure. */
+type SetupOutcome = GuidedSetupResult<ModelsFailure>
+
+/** Four terminal states, not two. `ready` is the only one that means chat can answer;
+ *  `cancelled` is terminal but is NOT a failure, so it must not render as one. */
+type TerminalKind = 'ready' | 'warming_up' | 'cancelled' | 'failed' | null
+
+interface SetupPresentation {
+  readonly kind: TerminalKind
+  readonly message: string | undefined
+  readonly textClass: string
+}
+
+/** Total: every terminal kind states itself from the result's own fields. Nothing here can
+ *  fall through to progress text, so a settled run can never display a line that arrived from
+ *  some other run's progress stream. */
+function outcomeMessage(outcome: SetupOutcome): string {
+  if (outcome.status === 'ready') {
+    return `${outcome.modelName} is ready. Chat can answer on this ${deviceNoun()} now.`
+  }
+  if (outcome.status === 'warming_up') {
+    return `${outcome.modelName} is installed and loading. Chat will answer once it finishes starting.`
+  }
+  if (outcome.status === 'cancelled') return 'Setup stopped. Nothing further was downloaded.'
+  return outcome.message
+}
+
+function terminalTextClass(kind: TerminalKind): string {
+  if (kind === 'ready') return 'text-green-500'
+  if (kind === 'failed' || kind === 'warming_up') return 'text-neutral-300'
+  return 'text-neutral-400'
+}
+
+/** Pure, and single-owner. Terminal state is derived from the awaited result ALONE - `configure`
+ *  always has one, because it awaits the run and its `catch` synthesises a `failed` outcome for a
+ *  throw. Progress is ADVISORY: while no result exists it supplies the in-flight line, and it can
+ *  never name a terminal state. It used to, and because the progress stream is broadcast to every
+ *  window, that let a run this panel did not start render a terminal state here. */
+function presentSetup(
+  outcome: SetupOutcome | null,
+  progress: SetupProgress | null
+): SetupPresentation {
+  if (outcome) {
+    return {
+      kind: outcome.status,
+      message: outcomeMessage(outcome),
+      textClass: terminalTextClass(outcome.status)
+    }
+  }
+  return { kind: null, message: progress?.message, textClass: terminalTextClass(null) }
 }
 
 /** The reusable setup surface: pick a resource mode, see exactly which model it'll
@@ -89,10 +147,15 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
   const api = window.api
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState<SetupProgress | null>(null)
+  const [outcome, setOutcome] = useState<SetupOutcome | null>(null)
   const [mode, setMode] = useState<Mode>('balanced')
   const [plan, setPlan] = useState<SetupPlan | null>(null)
-  const firedConfigured = useRef(false)
   const downloadProgress = progress?.phase === 'download' ? projectProgress(progress) : null
+  const downloading = downloadProgress !== null
+  // The run THIS panel started, for exactly as long as it is in flight. It owns the one thing
+  // progress must never choose: which model `cancel-download` targets. Display still reads
+  // `progress` freely - it is advisory - but Cancel reads only the run's own recorded model.
+  const activeRun = useRef<{ target: string | null } | null>(null)
 
   const loadPlan = useCallback(
     async (m: Mode) => {
@@ -127,15 +190,18 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
     const off = (
       api as unknown as { onSetupProgress?: (cb: (p: SetupProgress) => void) => () => void }
     ).onSetupProgress?.((p) => {
+      // Advisory for DISPLAY only: a spinner, a line of text and a byte counter. It decides
+      // neither pending nor terminal state - `configure`'s await owns the outcome and its
+      // `finally` owns pending.
       setProgress(p)
-      if (p.phase === 'done' || p.phase === 'error') setRunning(false)
-      if (p.phase === 'done' && !firedConfigured.current) {
-        firedConfigured.current = true
-        onConfigured?.()
-      }
+      // The single exception is recorded, not read: while this panel has a run in flight, that
+      // run remembers the model it is working on so Cancel has a target it owns. Progress
+      // arriving when this panel started nothing updates the display and nothing else.
+      const run = activeRun.current
+      if (run && p.modelId) run.target = p.modelId
     })
     return () => off?.()
-  }, [api, onConfigured])
+  }, [api])
 
   const pickMode = (m: Mode): void => {
     setMode(m)
@@ -143,8 +209,8 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
     // success that stored nothing.
     void api
       .setLlmSettings({ performanceMode: m })
-      .then((outcome) => {
-        if (!outcome.ok) reportSetupFailure('resource-mode persistence', outcome.failure)
+      .then((saved) => {
+        if (!saved.ok) reportSetupFailure('resource-mode persistence', saved.failure)
       })
       .catch((error: unknown) => reportSetupFailure('resource-mode persistence', error))
     loadPlan(m).catch((error: unknown) => reportSetupFailure('resource-plan loading', error))
@@ -152,36 +218,50 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
 
   const configure = async (): Promise<void> => {
     if (running) return
-    firedConfigured.current = false
+    const run: { target: string | null } = { target: null }
+    activeRun.current = run
+    setOutcome(null)
     setRunning(true)
     setProgress({ phase: 'select', message: `Picking a model that fits your ${deviceNoun()}...` })
     try {
-      await api.autoConfigure()
+      const result = await api.autoConfigure()
+      setOutcome(result)
+      // Only `ready` means the engine answered. `warming_up` must not dismiss the gate.
+      if (result.status === 'ready') onConfigured?.()
     } catch (e) {
-      setProgress({ phase: 'error', message: e instanceof Error ? e.message : 'Setup failed.' })
+      setOutcome({
+        status: 'failed',
+        success: false,
+        origin: 'host',
+        message: e instanceof Error ? e.message : 'Setup failed.'
+      })
+    } finally {
+      // The run is over, so it stops owning a cancellation target. Later progress - a straggler
+      // from this run, or another panel's on this same surface - can no longer aim Cancel.
+      if (activeRun.current === run) activeRun.current = null
       setRunning(false)
     }
   }
 
   const cancel = (): void => {
-    const id = progress?.modelId
+    // Only the in-flight run's own model, never whatever model progress last mentioned.
+    const id = activeRun.current?.target
     if (id) {
       modelControlClient
         .control({ type: 'cancel-download', modelId: id })
-        .then((outcome) => {
-          if (!outcome.ok) {
-            reportSetupFailure('model-download cancellation', modelsFailureMessage(outcome.failure))
+        .then((stopped) => {
+          if (!stopped.ok) {
+            reportSetupFailure('model-download cancellation', modelsFailureMessage(stopped.failure))
           }
         })
         .catch((error: unknown) => reportSetupFailure('model-download cancellation', error))
     }
   }
 
-  const done = progress?.phase === 'done'
-  const errored = progress?.phase === 'error'
-  let progressTextClass = 'text-neutral-400'
-  if (done) progressTextClass = 'text-green-500'
-  else if (errored) progressTextClass = 'text-neutral-300'
+  const { kind, message, textClass } = presentSetup(outcome, progress)
+  const ready = kind === 'ready'
+  const warming = kind === 'warming_up'
+  const errored = kind === 'failed'
 
   return (
     <div className="space-y-4 font-mono">
@@ -205,7 +285,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
               'bg-green-600 text-white hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-60'
             )}
           >
-            {running ? 'Setting up...' : done ? 'Run again' : 'Configure'}
+            {running ? 'Setting up...' : kind ? 'Run again' : 'Configure'}
           </button>
         </div>
 
@@ -320,20 +400,22 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
         )}
 
         {/* Progress / result */}
-        {progress && (
+        {message && (
           <div className="mt-4">
             <div className="flex items-center gap-2 text-xs">
-              {done && <CheckCircle weight="fill" className="h-4 w-4 text-green-500" />}
-              {errored && <WarningCircle weight="fill" className="h-4 w-4 text-neutral-300" />}
-              <span className={progressTextClass}>{progress.message}</span>
+              {ready && <CheckCircle weight="fill" className="h-4 w-4 text-green-500" />}
+              {(errored || warming) && (
+                <WarningCircle weight="fill" className="h-4 w-4 text-neutral-300" />
+              )}
+              <span className={textClass}>{message}</span>
             </div>
-            {running && progress.phase === 'download' && (
+            {running && downloading && (
               <div className="mt-2">
                 <div className="flex items-center gap-2">
                   <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-neutral-800">
                     <div
                       className="h-full rounded-full bg-green-500 transition-all"
-                      style={{ width: `${downloadProgress?.percentage ?? 0}%` }}
+                      style={{ width: `${downloadProgress.percentage ?? 0}%` }}
                     />
                   </div>
                   <button
@@ -344,19 +426,19 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
                   </button>
                 </div>
                 <div className="mt-1 text-[10px] text-neutral-600">
-                  {downloadProgress?.determinate
+                  {downloadProgress.determinate
                     ? `${Math.round(downloadProgress.percentage ?? 0)}%`
                     : 'Downloading'}
-                  {downloadProgress?.totalBytes !== undefined
+                  {downloadProgress.totalBytes !== undefined
                     ? ` · ${formatStorageBytes(downloadProgress.currentBytes)} / ${formatStorageBytes(downloadProgress.totalBytes)}`
                     : ''}
-                  {downloadProgress?.bytesPerSecond !== undefined
+                  {downloadProgress.bytesPerSecond !== undefined
                     ? ` · ${formatTransferSpeed(downloadProgress.bytesPerSecond)}`
                     : ''}
                 </div>
               </div>
             )}
-            {running && progress.phase !== 'download' && (
+            {running && !downloading && (
               <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-neutral-800">
                 <div className="h-full w-1/3 animate-pulse rounded-full bg-green-500/60" />
               </div>

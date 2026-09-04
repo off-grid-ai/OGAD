@@ -10,7 +10,7 @@ import { llm } from './llm'
 import { desktopModels } from './composition/application-access'
 import { desktopApplication } from './composition/application'
 import { desktopRamGb, pingLocalJson } from './composition/guided-setup'
-import { decideChatStatus } from '@offgrid/application'
+import { decideChatStatus, type ModelsFailure } from '@offgrid/application'
 import { getActiveModel } from './models-manager'
 import { getGatewayPort } from './model-server'
 import type {
@@ -26,7 +26,8 @@ import {
   type GuidedSetupItemKind,
   type GuidedSetupPlan,
   type GuidedSetupProgress,
-  type GuidedSetupRecommendation
+  type GuidedSetupRecommendation,
+  type GuidedSetupResult
 } from '@offgrid/models'
 import { platformFetch } from '@offgrid/models/fetch'
 
@@ -203,10 +204,18 @@ export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
   return compatiblePlan(plan)
 }
 
-/** "Configure for me": pick → download (if needed) → activate → start → verify. */
+/** "Configure for me": pick → download (if needed) → activate → start → verify.
+ *
+ *  The facade's result crosses this boundary WHOLE. It used to be flattened to
+ *  `{ success, error }`, which erased every distinction the domain draws: a person
+ *  cancelling looked identical to a failure, and a server that had not yet answered its
+ *  health check ("warming_up") looked identical to one that had ("ready") - so the setup
+ *  screen declared itself configured before chat could answer. The result is already plain
+ *  cloneable data (the typed failure deliberately is not an Error, whose subclass fields do
+ *  not survive structured cloning), so the IPC hop needs no projection. */
 export async function autoConfigure(
   onProgress?: SetupProgressCb
-): Promise<{ success: boolean; error?: string; modelId?: string; modelName?: string }> {
+): Promise<GuidedSetupResult<ModelsFailure>> {
   return desktopApplication.models.guidedSetup.run(onProgress)
 }
 

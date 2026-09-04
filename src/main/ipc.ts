@@ -1552,13 +1552,22 @@ export function setupIPC(): void {
       return false
     }
   })
-  // "Configure for me": pick a RAM-appropriate model, download, activate, start,
-  // verify. Streams progress back to all windows via 'setup:progress'.
-  ipcMain.handle('setup:auto-configure', async () => {
+  // "Configure for me": pick a RAM-appropriate model, download, activate, start, verify.
+  //
+  // Progress goes to the INITIATING surface only. It used to be broadcast to every window,
+  // which made it more than advisory: the setup panel picks its `cancel-download` target from
+  // the model id progress reports, so two windows running setup replaced each other's
+  // cancellation target and Cancel in one could cancel the other's download.
+  ipcMain.handle('setup:auto-configure', async (event) => {
     const { autoConfigure } = await import('./setup')
-    return autoConfigure((p) =>
-      BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('setup:progress', p))
-    )
+    const surface = event.sender
+    return autoConfigure((p) => {
+      // A closed window is UI teardown, not a setup failure. `send` on destroyed webContents
+      // throws, and letting that escape would fail the model work because the surface went
+      // away - the mirror image of the cancelled-reads-as-failed bug fixed upstream.
+      if (surface.isDestroyed()) return
+      surface.send('setup:progress', p)
+    })
   })
   // Restart a component. We only ever stop OUR OWN processes — never SIGKILL an
   // arbitrary PID holding the port (that could kill an unrelated user app, and the
