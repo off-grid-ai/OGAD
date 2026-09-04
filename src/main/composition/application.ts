@@ -164,7 +164,7 @@ type Fields = Record<string, DiagnosticValue>
  * (one type multiplexing started/failed/finished), and speech `speech_finished`, where a failure is
  * an OUTCOME. Shared making failures uniformly detectable is WIRING_B #8, which desktop shares.
  */
-type FailureEvent<E> = Extract<E, { readonly failure: unknown }>
+type FailureEvent<E> = Extract<E, { readonly failure: unknown } | { readonly failed: true }>
 
 /**
  * A repeating failure is recorded in full three times, then counted.
@@ -200,6 +200,33 @@ function recordFailure(logEvent: string, summaryKey: string, fields: Fields): vo
   writeDiagnosticLog('application', logEvent, { ...fields, ...tail }, 'error')
 }
 
+/**
+ * Two of Models' events multiplex success and failure under one `type`, so the contract marks the
+ * failing member with `failed: true` instead of a `failure` field. Their bodies live here so the
+ * classifier below stays a table of names rather than a table with conditions in it.
+ */
+function recordLaunchRestartFailure(
+  event: Extract<ModelsEvent, { type: 'settings_launch_restart' }>
+): void {
+  if (event.status !== 'failed') return
+  recordFailure(
+    'models.settings_launch_restart_failed',
+    `models:launch_restart:${event.message ?? ''}`,
+    { operationId: event.operationId, failure: event.message ?? null }
+  )
+}
+
+function recordDownloadFailure(event: Extract<ModelsEvent, { type: 'download' }>): void {
+  if (!('failed' in event)) return
+  const download = event.event
+  recordFailure('models.download_failed', `models:download:${download.reason ?? ''}`, {
+    downloadId: download.downloadId,
+    modelId: download.modelId,
+    fileName: download.fileName,
+    failure: download.reason ?? null
+  })
+}
+
 /** Models has no `operation_failed`; it names each failure after the operation that produced it. */
 function recordModelsFailure(event: ModelsEvent): void {
   switch (event.type) {
@@ -228,27 +255,28 @@ function recordModelsFailure(event: ModelsEvent): void {
         }
       )
       return
-    // Multiplexed: one type covers started/completed/failed/superseded, so the failure is a status.
     case 'settings_launch_restart':
-      if (event.status !== 'failed') return
+      recordLaunchRestartFailure(event)
+      return
+    /**
+     * A reclaim that did not release its memory, so residency is still counting it. Emitted once per
+     * resident per STANDING failure, so every occurrence is a new overcommit risk and none of them is
+     * traffic - it is recorded whole, and `path` is the identity because a sweep has no caller.
+     */
+    case 'residency_reclaim_failed':
       recordFailure(
-        'models.settings_launch_restart_failed',
-        `models:launch_restart:${event.message ?? ''}`,
-        { operationId: event.operationId, failure: event.message ?? null }
+        'models.residency_reclaim_failed',
+        `models:residency_reclaim_failed:${event.failure.key}:${event.failure.reason}`,
+        {
+          resident: event.failure.key,
+          path: event.failure.path,
+          failure: event.failure.reason
+        }
       )
       return
-    // Multiplexed: the download stream carries progress, completion and error under one type.
-    case 'download': {
-      const download = event.event
-      if (download.status !== 'failed') return
-      recordFailure('models.download_failed', `models:download:${download.reason ?? ''}`, {
-        downloadId: download.downloadId,
-        modelId: download.modelId,
-        fileName: download.fileName,
-        failure: download.reason ?? null
-      })
+    case 'download':
+      recordDownloadFailure(event)
       return
-    }
     default: {
       const routine: Exclude<ModelsEvent, FailureEvent<ModelsEvent>> = event
       void routine
