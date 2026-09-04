@@ -54,6 +54,7 @@ export function useVoiceQuestion(options: VoiceQuestionOptions): VoiceQuestion {
   const [error, setError] = useState<string | null>(null)
   const runRef = useRef<string | null>(null)
   const clipRef = useRef<ChatVoiceClip | null>(null)
+  const hostTurnConversationsRef = useRef(new Map<string, string>())
   // Held by reference so the two subscriptions below register ONCE: they are rebuilt every render,
   // and a listener that re-registers per render is a listener that can miss the event it exists
   // for.
@@ -137,9 +138,11 @@ export function useVoiceQuestion(options: VoiceQuestionOptions): VoiceQuestion {
   useEffect(() => {
     return window.api.voiceTurn.onRequest((message) => {
       if (message.type === 'cancel') {
-        optionsRef.current.stopTurn(message.conversationId)
+        const conversationId = hostTurnConversationsRef.current.get(message.requestId)
+        if (conversationId) optionsRef.current.stopTurn(conversationId)
         return
       }
+      hostTurnConversationsRef.current.set(message.requestId, message.conversationId)
       let answer = ''
       const clip = clipRef.current
       clipRef.current = null
@@ -156,6 +159,7 @@ export function useVoiceQuestion(options: VoiceQuestionOptions): VoiceQuestion {
           }
         )
         .then(() => {
+          hostTurnConversationsRef.current.delete(message.requestId)
           window.api.voiceTurn.respond({
             requestId: message.requestId,
             status: 'completed',
@@ -163,6 +167,7 @@ export function useVoiceQuestion(options: VoiceQuestionOptions): VoiceQuestion {
           })
         })
         .catch((cause: unknown) => {
+          hostTurnConversationsRef.current.delete(message.requestId)
           window.api.voiceTurn.respond({
             requestId: message.requestId,
             status: 'failed',
