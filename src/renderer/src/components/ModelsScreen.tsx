@@ -233,6 +233,11 @@ interface DownloadCardProgress {
    *  by comparing the rendered message against a known string. */
   failureKind?: ModelsFailure['kind']
   error?: string
+  /** A COMMAND about this download was refused (a cancel that did not take), as opposed to the
+   *  transfer itself failing. Kept separate from `status`/`error` on purpose: the transfer is very
+   *  likely still running, and marking a live download `failed` to report a failed cancel just
+   *  swaps one false projection for another. */
+  commandError?: string
   downloadedMB?: string
   totalMB?: string
   downloadedBytes?: number
@@ -427,10 +432,34 @@ export function ModelsScreen({
   const ownsDownload = (id: string, operationId: string): boolean =>
     downloadOwners.current.get(id) === operationId
 
+  // Declared ahead of every callback that writes them. A dependency array is evaluated DURING
+  // render, so a hook or state referenced above its `const` is a mount-time ReferenceError, not a
+  // lint nit - that has already shipped from this file once.
+  const [switching, setSwitching] = useState<string | null>(null)
+  const [switchError, setSwitchError] = useState<string | null>(null)
+  /** The refresh notice is its OWN state with its OWN lane. Sharing `switchError` let a stale
+   *  refresh overwrite the message about the thing the user just did, and let a "couldn't read
+   *  your models" survive a later refresh that read them perfectly well. */
+  const [refreshError, setRefreshError] = useState<string | null>(null)
+
   const refreshModelControl = useCallback(async (): Promise<void> => {
     const operationId = claimOperation(refreshOwner)
     const outcome = await modelControlClient.control({ type: 'refresh', operationId })
-    if (!outcome.ok) return
+    if (!outcome.ok) {
+      // UNREAD IS NOT EMPTY. Returning silently left the grid showing whatever it had - or nothing
+      // at all - which reads exactly like "you have no models" when the truth is that the inventory
+      // could not be read. The reader is told which, in the engine's own words.
+      if (refreshOwner.current === operationId) {
+        setRefreshError(
+          `Couldn't read your installed models: ${modelsFailureMessage(outcome.failure)}`
+        )
+      }
+      return
+    }
+    // The read SUCCEEDED, so a standing "couldn't read your models" is no longer true. Cleared on
+    // this lane's own ownership and independently of publication: whether a newer intent wins the
+    // projection has no bearing on whether this inventory read worked.
+    if (refreshOwner.current === operationId) setRefreshError(null)
     // The ECHOED id, not the one we issued: it proves this reply answers THIS request rather than
     // an older one arriving late, and that no newer intent of ANY kind has claimed publication.
     if (!ownsProjection(outcome.value.operationId)) return
@@ -439,8 +468,6 @@ export function ModelsScreen({
     // leave this surface showing state the backend had already moved past.
     applyModelControlProjection(outcome.value.projection)
   }, [applyModelControlProjection, claimOperation, ownsProjection])
-  const [switching, setSwitching] = useState<string | null>(null)
-  const [switchError, setSwitchError] = useState<string | null>(null)
   const [ramGb, setRamGb] = useState<number | null>(null)
   const [importing, setImporting] = useState(false)
   const [useCase, setUseCase] = useState('all')
@@ -527,12 +554,34 @@ export function ModelsScreen({
   })
 
   const cancelDownload = (id: string): void => {
-    setProgress((p) => withoutProgressEntry(p, id))
+    // NOT erased optimistically. The row is the only honest picture of a transfer that is still
+    // running until the cancel is actually accepted, and clearing it first meant a refused cancel
+    // left the user believing they had stopped something they had not.
     const operationId = claimDownload(id)
     void modelControlClient
       .control({ type: 'cancel-download', modelId: id, operationId })
       .then((outcome) => {
-        if (!outcome.ok) return
+        if (!outcome.ok) {
+          // The COMMAND failed; the DOWNLOAD did not. Its percent, status and byte counts keep
+          // coming from the progress stream and are left exactly as they are - marking a live
+          // transfer `failed` to report a failed cancel would trade one false projection for
+          // another. The refusal goes in its own field instead.
+          if (ownsDownload(id, operationId)) {
+            setProgress((current) => ({
+              ...current,
+              [id]: {
+                ...current[id],
+                percent: current[id]?.percent ?? 0,
+                commandError: `Couldn't cancel: ${modelsFailureMessage(outcome.failure)}`
+              }
+            }))
+          }
+          return
+        }
+        // Accepted: now the row may go, and any stale command message with it.
+        if (ownsDownload(id, outcome.value.operationId)) {
+          setProgress((p) => withoutProgressEntry(p, id))
+        }
         if (!ownsProjection(outcome.value.operationId)) return
         applyModelControlProjection(outcome.value.projection)
       })
@@ -603,10 +652,25 @@ export function ModelsScreen({
         operationId
       })
       if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
-      if (!ownsProjection(outcome.value.operationId)) return
+      if (!ownsProjection(outcome.value.operationId)) {
+        // SETTLED BUT UNPUBLISHED. The files are gone in the main process, and unlike a download
+        // there is no completion event to put that on screen - `onModelProgress` is downloads only,
+        // and the owner's `model_control_*` events never cross to the renderer (checked). Left
+        // alone the screen would list a deleted model forever. Re-applying the projection we just
+        // refused is not the answer - it lost because it is stale - so take a fresh authoritative
+        // read, which claims publication normally rather than bypassing it.
+        void refreshModelControl()
+        return
+      }
       // Unconditional across STATUSES, for the same reason as everywhere else: only `completed`
       // was applied, so any other carried outcome left removed files still shown on disk.
       applyModelControlProjection(outcome.value.projection)
+    } catch (e) {
+      // Previously this threw out of an async function nobody catches - both call sites fire it
+      // and drop the promise - so a failed delete was an unhandled rejection and the user saw
+      // NOTHING. It reports like every other refusal on this screen.
+      if (removeOwner.current !== operationId) return
+      setSwitchError(e instanceof Error ? e.message : "Couldn't remove model")
     } finally {
       // Cleanup is per operation, NOT the publication authority: a newer refresh or download taking
       // publication is no reason to leave this delete's spinner running forever.
@@ -645,7 +709,16 @@ export function ModelsScreen({
         if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
         result = outcome.value
       }
-      if (ownsProjection(result.operationId)) applyModelControlProjection(result.projection)
+      if (ownsProjection(result.operationId)) {
+        applyModelControlProjection(result.projection)
+      } else {
+        // SETTLED BUT UNPUBLISHED - see removeModel. The activation committed in the main process;
+        // a newer intent (a download's follow-up refresh, typically) took publication while it was
+        // in flight, and that refresh READ PRE-ACTIVATION STATE. With no activation event to
+        // subscribe to, the screen would sit on the old active model permanently. Converge with a
+        // fresh authoritative read instead of re-applying a projection already judged stale.
+        void refreshModelControl()
+      }
       // `Outcome.ok` means the command was CARRIED, not that the model is now active. These two
       // statuses ARE that gap: the file is installed but the model did not become active, or the
       // projector is installed and not ready. Each carries its own `failure`, so the reason is the
@@ -982,6 +1055,17 @@ export function ModelsScreen({
                   <span className="whitespace-nowrap">· {timeRemaining}</span>
                 ) : null}
                 <span className="min-w-0 truncate">{downloadPartLabel(prog)}</span>
+                {prog.commandError ? (
+                  // The transfer's own numbers keep their place; this sits beside them as a note
+                  // about the COMMAND, so a refused cancel never masquerades as a failed download.
+                  <span
+                    className="min-w-0 truncate text-red-400/90"
+                    title={prog.commandError}
+                    role="status"
+                  >
+                    · {prog.commandError}
+                  </span>
+                ) : null}
               </div>
               <button
                 onClick={() => cancelDownload(m.id)}
@@ -1278,6 +1362,12 @@ export function ModelsScreen({
           {switchError && (
             <div className="shrink-0 border-b border-red-500/20 bg-red-500/10 px-6 py-1.5 text-[10px] text-red-300">
               {switchError}
+            </div>
+          )}
+
+          {refreshError && (
+            <div className="shrink-0 border-b border-red-500/20 bg-red-500/10 px-6 py-1.5 text-[10px] text-red-300">
+              {refreshError}
             </div>
           )}
 
