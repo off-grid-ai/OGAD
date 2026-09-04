@@ -99,6 +99,7 @@ import { notifyRagConversationChanged } from './rag-conversation-events'
 import { readImages } from './llm/read-images'
 import { generateDesktopMessages, generateDesktopText } from './desktop-generation'
 import { ModelServerError } from './llm/http-post'
+import { modelsFailureMessage } from '@offgrid/application'
 import { mimeForExt } from './mime'
 import {
   desktopModels,
@@ -1622,12 +1623,20 @@ export function setupIPC(): void {
   })
   // Restart a component. We only ever stop OUR OWN processes — never SIGKILL an
   // arbitrary PID holding the port (that could kill an unrelated user app, and the
-  // handler is renderer-reachable). llm.restart() tears down our llama-server with
-  // a command-name guard; the gateway just stops + restarts our own server.
+  // handler is renderer-reachable). The chat engine goes through residency; the gateway holds no
+  // model memory, so it just stops + restarts our own server.
   ipcMain.handle('system:restart', async (_e, id: string) => {
     if (id === 'chat') {
-      const { llm } = await import('./llm')
-      await llm.restart() // safely stops our llama-server (guarded) and respawns
+      // NOT `llm.restart()`. That stopped the process and spawned another without residency ever
+      // learning either fact, so a teardown that failed to free the weights left the budget
+      // counting memory nothing held - and this handler is renderer-reachable, which made it the
+      // most exposed way to reach that state. `models.restart` releases through residency first and
+      // REFUSES if the engine kept its memory, because respawning then would put two engines on one
+      // port while residency counted one.
+      const restarted = await desktopModels.restart({ modality: 'text' })
+      if (!restarted.ok) {
+        return { success: false, error: modelsFailureMessage(restarted.failure) }
+      }
       return { success: true }
     }
     if (id === 'gateway') {
