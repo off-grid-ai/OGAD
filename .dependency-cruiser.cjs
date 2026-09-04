@@ -144,6 +144,48 @@ module.exports = {
       to: { path: '^\\.\\./shared/packages/sync/' }
     },
     {
+      name: 'main-not-to-renderer',
+      comment:
+        'The other half of renderer-not-to-main: main must not import renderer modules either. Main ' +
+        'has no window, no DOM and no React runtime, so such an import either drags presentation into ' +
+        'the main bundle or is a decision that belongs in shared. Both directions of the process ' +
+        'boundary are now gated; only the preload IPC bridge crosses it.',
+      severity: 'error',
+      from: { path: '^(src|pro)/main/', pathNot: '\\.(test|spec)\\.[tj]sx?$|/__tests__/' },
+      to: { path: '^(src|pro)/renderer/' }
+    },
+    {
+      name: 'no-shared-package-source-bypass',
+      comment:
+        'A shared package is consumed through its declared entry points, never by reaching into its ' +
+        'source. A relative path or tsconfig alias into `shared/packages/<pkg>/src` bypasses the ' +
+        "package's public API, its build, and every boundary rule expressed in terms of it.",
+      severity: 'error',
+      from: { path: '^(src|pro)/' },
+      to: { path: '^\\.\\./shared/packages/[^/]+/src/' }
+    },
+    {
+      name: 'main-not-to-presentation-logic',
+      comment:
+        'Zone rule: main is not presentation. @offgrid/ui is a headless settings/control-plane store ' +
+        'for React and RN views, and @offgrid/design is the token set those views render with; a main ' +
+        'process that reads either is either doing UI work or borrowing a helper that belongs in a ' +
+        'domain package. Two exemptions, both to delete rather than grow:\n' +
+        '  - src/main/tts-ipc.ts imports sampleProgressRate from @offgrid/ui. DELETE THIS EXEMPTION ' +
+        'when that progress-rate helper moves to a domain package (it is pure arithmetic over ' +
+        'progress samples and has nothing to do with presentation).\n' +
+        '  - src/main/vision/vision-policy-runner.ts imports COLORS_DARK/COLORS_LIGHT from ' +
+        '@offgrid/design. DELETE THIS EXEMPTION when the colour choice moves to the renderer or the ' +
+        'values reach main as data instead of an import.',
+      severity: 'error',
+      from: {
+        path: '^src/main/',
+        pathNot:
+          '\\.(test|spec)\\.[tj]sx?$|/__tests__/|^src/main/tts-ipc\\.ts$|^src/main/vision/vision-policy-runner\\.ts$'
+      },
+      to: { path: '^\\.\\./shared/packages/(ui|design)/' }
+    },
+    {
       name: 'not-to-test',
       comment:
         'Production code must not import test files (they would ship, dragging fixtures in).',
