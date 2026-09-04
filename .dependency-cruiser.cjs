@@ -170,19 +170,13 @@ module.exports = {
         'Zone rule: main is not presentation. @offgrid/ui is a headless settings/control-plane store ' +
         'for React and RN views, and @offgrid/design is the token set those views render with; a main ' +
         'process that reads either is either doing UI work or borrowing a helper that belongs in a ' +
-        'domain package. Two exemptions, both to delete rather than grow:\n' +
-        '  - src/main/tts-ipc.ts imports sampleProgressRate from @offgrid/ui. DELETE THIS EXEMPTION ' +
-        'when that progress-rate helper moves to a domain package (it is pure arithmetic over ' +
-        'progress samples and has nothing to do with presentation).\n' +
-        '  - src/main/vision/vision-policy-runner.ts imports COLORS_DARK/COLORS_LIGHT from ' +
-        '@offgrid/design. DELETE THIS EXEMPTION when the colour choice moves to the renderer or the ' +
-        'values reach main as data instead of an import.',
+        'domain package. NO EXEMPTIONS: the two this rule shipped with are closed (desktop 52073686), ' +
+        'and both closures were better than a relocation - the transfer rate is now derived by the ' +
+        'surface that renders it, and the vision overlay colours are named for what they do, because ' +
+        'that screenshot goes to a model rather than to a person and nobody in that flow has a theme ' +
+        'opinion. Do not add an entry here; fix the caller.',
       severity: 'error',
-      from: {
-        path: '^src/main/',
-        pathNot:
-          '\\.(test|spec)\\.[tj]sx?$|/__tests__/|^src/main/tts-ipc\\.ts$|^src/main/vision/vision-policy-runner\\.ts$'
-      },
+      from: { path: '^src/main/', pathNot: '\\.(test|spec)\\.[tj]sx?$|/__tests__/' },
       to: { path: '^\\.\\./shared/packages/(ui|design)/' }
     },
     {
