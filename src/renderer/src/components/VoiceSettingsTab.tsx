@@ -70,6 +70,74 @@ function PreferenceButtons<T extends string | number>({
   )
 }
 
+function VoiceAssetStatus({
+  state,
+  voice,
+  language,
+  progress,
+  onRetry
+}: {
+  state: AssetsState
+  voice: string
+  language: string
+  progress: ReturnType<typeof projectProgress>
+  onRetry: () => void
+}): React.JSX.Element {
+  if (state === 'loading' || state === 'checking') {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        className="mb-4 flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-3.5 py-2.5 text-xs text-neutral-400"
+      >
+        <LoadingDots />
+        {state === 'loading' ? 'Loading voices...' : 'Checking voice files...'}
+      </div>
+    )
+  }
+  if (state === 'downloading') {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        className="mb-4 flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-3.5 py-2.5 text-xs text-neutral-400"
+      >
+        <LoadingDots />
+        Downloading {runtimeVoiceLanguage({ id: voice })?.label ?? language} audio
+        {progress.determinate ? ` - ${Math.round(progress.percentage ?? 0)}%` : '...'}
+        {progress.totalBytes !== undefined
+          ? ` · ${formatStorageBytes(progress.currentBytes)} / ${formatStorageBytes(progress.totalBytes)}`
+          : ''}
+        {progress.bytesPerSecond !== undefined
+          ? ` · ${formatTransferSpeed(progress.bytesPerSecond)}`
+          : ''}
+      </div>
+    )
+  }
+  if (state === 'error') {
+    return (
+      <div
+        role="alert"
+        className="mb-4 flex items-center justify-between gap-3 text-xs text-red-400"
+      >
+        <span>Could not load voices. Check your connection and retry.</span>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="rounded-md border border-red-500/50 px-2.5 py-1 text-red-300"
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
+  return (
+    <p role="status" className="mb-4 text-xs text-neutral-500">
+      {runtimeVoiceLanguage({ id: voice })?.label ?? language} voice ready.
+    </p>
+  )
+}
+
 export function VoiceSettingsTab(): React.JSX.Element {
   const [voices, setVoices] = useState<RuntimeSpeechVoice[]>([])
   const [voice, setVoice] = useState('af_heart')
@@ -82,17 +150,23 @@ export function VoiceSettingsTab(): React.JSX.Element {
   const testOperationRef = useRef<string | null>(null)
   const requestedVoiceRef = useRef('af_heart')
 
-  const loadVoices = useCallback((): void => {
-    setAssetsState('loading')
-    setProgress({ percentage: 0 })
+  const requestVoices = useCallback((): void => {
     void window.api
       .ttsVoices()
       .then((runtimeVoices: RuntimeSpeechVoice[]) => {
         if (!runtimeVoices.length) throw new Error('No voices available')
         setVoices(runtimeVoices)
       })
-      .catch(() => setAssetsState('error'))
+      .catch((error: unknown) => {
+        console.error('Could not load text-to-speech voices.', error)
+        setAssetsState('error')
+      })
   }, [])
+  const loadVoices = useCallback((): void => {
+    setAssetsState('loading')
+    setProgress({ percentage: 0 })
+    requestVoices()
+  }, [requestVoices])
 
   useEffect(() => {
     const stopProgress = window.api.onTtsVoiceProgress(
@@ -109,7 +183,7 @@ export function VoiceSettingsTab(): React.JSX.Element {
         event.outcome.kind === 'spoken' || event.outcome.kind === 'interrupted' ? 'idle' : 'error'
       )
     })
-    loadVoices()
+    requestVoices()
     void window.api
       .getSettings()
       .then((settings) => {
@@ -120,7 +194,9 @@ export function VoiceSettingsTab(): React.JSX.Element {
         }
         setPreferences(readVoicePreferences(settings))
       })
-      .catch(() => {})
+      .catch((error: unknown) => {
+        console.error('Could not load voice settings.', error)
+      })
       .finally(() => setSettingsLoaded(true))
     return () => {
       stopProgress()
@@ -132,22 +208,25 @@ export function VoiceSettingsTab(): React.JSX.Element {
         })
       }
     }
-  }, [loadVoices])
+  }, [requestVoices])
 
   useEffect(() => {
     if (!settingsLoaded || !voices.some(({ id }) => id === voice)) return
     requestedVoiceRef.current = voice
-    setAssetsState('checking')
-    setProgress({ percentage: 0 })
-    void window.api
-      .prepareTtsVoice(voice)
+    void Promise.resolve()
+      .then(() => {
+        setAssetsState('checking')
+        setProgress({ percentage: 0 })
+        return window.api.prepareTtsVoice(voice)
+      })
       .then(() => {
         if (requestedVoiceRef.current === voice) {
           setProgress({ percentage: 100 })
           setAssetsState('ready')
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        console.error(`Could not prepare text-to-speech voice ${voice}.`, error)
         if (requestedVoiceRef.current === voice) setAssetsState('error')
       })
   }, [settingsLoaded, voice, voices])
@@ -156,9 +235,15 @@ export function VoiceSettingsTab(): React.JSX.Element {
     if (assetsState !== 'ready' || !voices.length || voices.some(({ id }) => id === voice)) return
     const fallback = firstRuntimeVoiceForLanguage(voices, language) ?? voices[0]
     if (!fallback) return
-    setVoice(fallback.id)
-    setLanguage(runtimeVoiceLanguage(fallback)?.code ?? 'en-US')
-    void Promise.resolve(window.api.saveSetting('ttsVoice', fallback.id)).catch(() => {})
+    void Promise.resolve().then(() => {
+      setVoice(fallback.id)
+      setLanguage(runtimeVoiceLanguage(fallback)?.code ?? 'en-US')
+      void Promise.resolve(window.api.saveSetting('ttsVoice', fallback.id)).catch(
+        (error: unknown) => {
+          console.error(`Could not save fallback text-to-speech voice ${fallback.id}.`, error)
+        }
+      )
+    })
   }, [assetsState, language, voice, voices])
 
   useEffect(() => {
@@ -176,7 +261,10 @@ export function VoiceSettingsTab(): React.JSX.Element {
       setPreferences(next)
       void Promise.resolve(window.api.saveSetting(settingKey, value))
         .then(() => publishVoicePreferences(next))
-        .catch(() => setPreferences(previous))
+        .catch((error: unknown) => {
+          console.error(`Could not save voice preference ${settingKey}.`, error)
+          setPreferences(previous)
+        })
     },
     [preferences]
   )
@@ -189,7 +277,9 @@ export function VoiceSettingsTab(): React.JSX.Element {
   useEffect(() => {
     const selected = voices.find(({ id }) => id === voice)
     const selectedLanguage = selected ? runtimeVoiceLanguage(selected)?.code : undefined
-    if (selectedLanguage && selectedLanguage !== language) setLanguage(selectedLanguage)
+    if (selectedLanguage && selectedLanguage !== language) {
+      void Promise.resolve().then(() => setLanguage(selectedLanguage))
+    }
   }, [language, voice, voices])
 
   const pickVoice = (nextVoice: string): void => {
@@ -197,7 +287,8 @@ export function VoiceSettingsTab(): React.JSX.Element {
     const runtimeVoice = voices.find(({ id }) => id === nextVoice) ?? { id: nextVoice }
     setVoice(nextVoice)
     setLanguage(runtimeVoiceLanguage(runtimeVoice)?.code ?? language)
-    void Promise.resolve(window.api.saveSetting('ttsVoice', nextVoice)).catch(() => {
+    void Promise.resolve(window.api.saveSetting('ttsVoice', nextVoice)).catch((error: unknown) => {
+      console.error(`Could not save text-to-speech voice ${nextVoice}.`, error)
       setVoice(previous.voice)
       setLanguage(previous.language)
     })
@@ -229,7 +320,8 @@ export function VoiceSettingsTab(): React.JSX.Element {
         return
       }
       setTestState('playing')
-    } catch {
+    } catch (error: unknown) {
+      console.error('Could not play the text-to-speech voice sample.', error)
       if (testOperationRef.current === operationId) testOperationRef.current = null
       setTestState('error')
     }
@@ -331,50 +423,13 @@ export function VoiceSettingsTab(): React.JSX.Element {
         />
       </SettingsRow>
 
-      {assetsState === 'loading' || assetsState === 'checking' ? (
-        <div
-          role="status"
-          aria-live="polite"
-          className="mb-4 flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-3.5 py-2.5 text-xs text-neutral-400"
-        >
-          <LoadingDots />
-          {assetsState === 'loading' ? 'Loading voices...' : 'Checking voice files...'}
-        </div>
-      ) : assetsState === 'downloading' ? (
-        <div
-          role="status"
-          aria-live="polite"
-          className="mb-4 flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-3.5 py-2.5 text-xs text-neutral-400"
-        >
-          <LoadingDots />
-          Downloading {runtimeVoiceLanguage({ id: voice })?.label ?? language} audio
-          {assetProgress.determinate ? ` - ${Math.round(assetProgress.percentage ?? 0)}%` : '...'}
-          {assetProgress.totalBytes !== undefined
-            ? ` · ${formatStorageBytes(assetProgress.currentBytes)} / ${formatStorageBytes(assetProgress.totalBytes)}`
-            : ''}
-          {assetProgress.bytesPerSecond !== undefined
-            ? ` · ${formatTransferSpeed(assetProgress.bytesPerSecond)}`
-            : ''}
-        </div>
-      ) : assetsState === 'error' ? (
-        <div
-          role="alert"
-          className="mb-4 flex items-center justify-between gap-3 text-xs text-red-400"
-        >
-          <span>Could not load voices. Check your connection and retry.</span>
-          <button
-            type="button"
-            onClick={loadVoices}
-            className="rounded-md border border-red-500/50 px-2.5 py-1 text-red-300"
-          >
-            Retry
-          </button>
-        </div>
-      ) : (
-        <p role="status" className="mb-4 text-xs text-neutral-500">
-          {runtimeVoiceLanguage({ id: voice })?.label ?? language} voice ready.
-        </p>
-      )}
+      <VoiceAssetStatus
+        state={assetsState}
+        voice={voice}
+        language={language}
+        progress={assetProgress}
+        onRetry={loadVoices}
+      />
 
       <SettingsRow
         label="Voice"
