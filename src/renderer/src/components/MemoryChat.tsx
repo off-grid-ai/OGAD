@@ -756,29 +756,35 @@ function MessageAttachments({
   )
 }
 
+/**
+ * The editor for one sent message.
+ *
+ * The text being edited used to live in the chat screen, so every character re-rendered every
+ * message in the transcript. It lives here instead: the screen is told the message and gets the
+ * text back once, when the user saves.
+ */
 function MessageEditor({
   messageId,
-  text,
-  onChange,
+  initialText,
   onCancel,
   onSave
 }: Readonly<{
   messageId: string
-  text: string
-  onChange: (text: string) => void
+  initialText: string
   onCancel: () => void
-  onSave: (messageId: string) => void
+  onSave: (messageId: string, text: string) => void
 }>): React.JSX.Element {
+  const [text, setText] = useState(initialText)
   return (
     <div className="flex flex-col gap-2">
       <textarea
         autoFocus
         value={text}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => setText(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault()
-            onSave(messageId)
+            onSave(messageId, text)
           }
           if (event.key === 'Escape') onCancel()
         }}
@@ -788,7 +794,7 @@ function MessageEditor({
       <div className="flex gap-2">
         <button
           type="button"
-          onClick={() => onSave(messageId)}
+          onClick={() => onSave(messageId, text)}
           className="rounded-md bg-green-600 px-3 py-1 text-xs text-white transition-colors hover:bg-green-500"
         >
           Save & submit
@@ -1680,7 +1686,6 @@ type MessageRowState = Readonly<{
   autoPlayId: string | null
   copiedKey: string | null
   editingId: string | null
-  editText: string
   loading: boolean
   speakingId: string | null
   speakLoadingId: string | null
@@ -1707,9 +1712,8 @@ type MessageRowActions = Readonly<{
   openImage: (image: OpenImage) => void
   openAttachment: (attachment: StoredMessageAttachment) => void
   startEdit: (message: ChatMessage) => void
-  changeEditText: (text: string) => void
   cancelEdit: () => void
-  saveEdit: (messageId: string) => void
+  saveEdit: (messageId: string, text: string) => void
   retryImageMemory: (retry: NonNullable<ChatMessage['imageMemoryRetry']>) => void
   openArtifact: (artifact: Artifact) => void
   selectAskOption: (selection: AskOptionSelection) => void
@@ -1777,8 +1781,7 @@ function MessageBubble({
       {editing ? (
         <MessageEditor
           messageId={message.id}
-          text={state.editText}
-          onChange={actions.changeEditText}
+          initialText={message.content}
           onCancel={actions.cancelEdit}
           onSave={actions.saveEdit}
         />
@@ -2662,7 +2665,6 @@ export function MemoryChat({
     renderer?: 'image' | 'document' | 'audio' | 'video' | 'text'
   } | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editText, setEditText] = useState('')
   const [lightbox, setLightbox] = useState<{ url: string; path?: string } | null>(null)
   // Pro registers this slot after the core renderer starts. Resolve it on each render so an
   // execution-chat approval cannot stay hidden behind a value cached before Pro activation.
@@ -4712,8 +4714,8 @@ export function MemoryChat({
   )
 
   // Edit a sent message: replace its text, drop everything after it, re-run.
-  const saveEdit = (id: string): void => {
-    const text = editText.trim()
+  const saveEdit = (id: string, editedText: string): void => {
+    const text = editedText.trim()
     setEditingId(null)
     if (!text) return
     const idx = messages.findIndex((m) => m.id === id)
@@ -4946,9 +4948,7 @@ export function MemoryChat({
     startEdit: (message) => {
       void stopLiveWebUseForConversation(activeConversationId)
       setEditingId(message.id)
-      setEditText(message.content)
     },
-    changeEditText: setEditText,
     cancelEdit: () => setEditingId(null),
     saveEdit,
     retryImageMemory: (retry) => {
@@ -5384,7 +5384,6 @@ export function MemoryChat({
                               autoPlayId,
                               copiedKey,
                               editingId,
-                              editText,
                               loading,
                               speakingId,
                               speakLoadingId,
