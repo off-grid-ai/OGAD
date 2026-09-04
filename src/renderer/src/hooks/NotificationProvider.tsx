@@ -12,16 +12,16 @@ export function NotificationProvider({ children }: { children: ReactNode }): Rea
   const [notifications, setNotifications] = useState<Notification[]>(() => {
     try {
       const stored = localStorage.getItem(NOTIFICATION_STORAGE_KEY)
-      if (stored) return restoreNotifications(JSON.parse(stored))
+      if (stored) {
+        return restoreNotifications(JSON.parse(stored)).filter(
+          (notification) => notification.type !== 'todo'
+        )
+      }
     } catch (error) {
       console.error('Failed to load notifications from storage:', error)
     }
     return []
   })
-
-  useEffect(() => {
-    setNotifications((current) => current.filter((notification) => notification.type !== 'todo'))
-  }, [])
 
   useEffect(() => {
     try {
