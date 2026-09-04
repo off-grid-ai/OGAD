@@ -13,7 +13,8 @@
   "scripts": {
     "prepare": "git config core.hooksPath scripts/hooks || true",
     "format": "prettier --write .",
-    "lint": "eslint --cache .",
+    "lint": "node scripts/verify-lint-ratchet.mjs",
+    "lint:fix": "eslint src pro --fix && node scripts/verify-lint-ratchet.mjs",
     "test": "node scripts/vitest-electron-node.mjs run --project product-integration",
     "test:flow:web-use-boundary": "node scripts/vitest-electron-node.mjs run --project product-integration src/main/browser/__tests__/browser-playwright-boundary.integration.test.ts",
     "test:watch": "node scripts/vitest-electron-node.mjs",

@@ -347,13 +347,15 @@ const goldStandardRatchet = {
     curly: ['warn', 'all'],
     'no-else-return': 'warn',
     'no-empty': 'warn',
+    eqeqeq: ['warn', 'always', { null: 'ignore' }],
     'prefer-template': 'warn',
     'no-console': ['warn', { allow: ['error', 'warn'] }],
     'max-params': ['warn', 3],
     complexity: ['warn', 15],
     'max-lines-per-function': ['warn', 250],
     'max-lines': ['warn', 350],
-    '@typescript-eslint/no-shadow': 'warn'
+    '@typescript-eslint/no-shadow': 'warn',
+    '@typescript-eslint/no-explicit-any': 'warn'
   }
 }
 
@@ -425,9 +427,11 @@ export default defineConfig(
       'e2e/fixtures/computer-use-hybrid-llama-server.mjs',
       'scripts/bench-capture.mjs',
       'scripts/bench-chat.mjs',
+      'scripts/initialize-lint-baseline.mjs',
       'scripts/lib/app-support.mjs',
       'scripts/seed-e2e-license.mjs',
       'scripts/stage-native.mjs',
+      'scripts/verify-lint-ratchet.mjs',
       'scripts/verify-model-architecture.mjs'
     ],
     rules: {
