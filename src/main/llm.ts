@@ -449,7 +449,7 @@ export class LLMService {
     })
   }
 
-  getSettings(): LlmSettings {
+  private settingsSnapshot(): LlmSettings & Record<string, unknown> {
     return {
       temperature: this.temperature,
       ctxSize: this.ctxSize,
@@ -467,7 +467,13 @@ export class LLMService {
       gpuLayers: this.gpuLayers,
       threads: this.threads,
       batchSize: this.batchSize,
-      performanceMode: this.performanceMode,
+      performanceMode: this.performanceMode
+    }
+  }
+
+  getSettings(): LlmSettings {
+    return {
+      ...this.settingsSnapshot(),
       // Report the EFFECTIVE (clamped) context so the UI can show what's really used, plus the
       // model's trained maximum so the UI can offer the slider up to it (not a hardcoded cap),
       // plus the accelerator the running engine chose so the UI never has to guess one.
@@ -527,11 +533,26 @@ export class LLMService {
     // about it is expected absence: a full disk, a read-only profile or a permissions problem used
     // to mean the user changed a setting, was told it was saved, and found it gone after a
     // restart. It throws now, so the settings command's write fails and the panel says so.
-    fs.mkdirSync(path.dirname(this.settingsFile), { recursive: true })
-    fs.writeFileSync(
-      this.settingsFile,
-      JSON.stringify({ ...this.getSettings(), userExplicit: [...this.userExplicit] })
-    )
+    const destination = this.settingsFile
+    fs.mkdirSync(path.dirname(destination), { recursive: true })
+    const temporaryDirectory = fs.mkdtempSync(path.join(path.dirname(destination), '.llm-settings-'))
+    const temporary = path.join(temporaryDirectory, 'settings.json')
+    try {
+      fs.writeFileSync(
+        temporary,
+        JSON.stringify({ ...this.getSettings(), userExplicit: [...this.userExplicit] }),
+        { flag: 'wx', mode: 0o600 }
+      )
+      fs.renameSync(temporary, destination)
+    } finally {
+      // Cleanup cannot turn an already committed rename into a refused settings save.
+      try {
+        fs.rmSync(temporary, { force: true })
+        fs.rmdirSync(temporaryDirectory)
+      } catch (error) {
+        console.warn('[LLMService] Could not remove settings temporary file', error)
+      }
+    }
   }
 
   /** Read each image off disk and decode to base64 + mime (the one impure step of
@@ -552,7 +573,29 @@ export class LLMService {
     s: LlmSettings,
     options: LlmSettingsUpdateOptions = {}
   ): Promise<LlmSettingsUpdateResult> {
+    const previous = this.settingsSnapshot()
+    const previousPins = [...this.userExplicit]
     const before = options.emitSync === false ? undefined : this.getSettings()
+    let launchChanged: boolean
+    try {
+      launchChanged = this.applySettingsPatch(s)
+      this.persist()
+    } catch (error) {
+      Object.assign(this, previous)
+      this.userExplicit.clear()
+      for (const field of previousPins) this.userExplicit.add(field)
+      throw error
+    }
+    if (before) {
+      emitChangedLlmSettings(
+        before as Record<string, unknown>,
+        this.getSettings() as Record<string, unknown>
+      )
+    }
+    return { launchChanged: launchChanged && !this.paused }
+  }
+
+  private applySettingsPatch(s: LlmSettings): boolean {
     // Granular launch-time fields the user sets in THIS patch become pinned: a mode
     // preset (now or on a future restart / mode re-pick) must NOT clobber them. Pin
     // BEFORE applying the preset so an explicit q8_0 in the same patch survives.
@@ -609,14 +652,7 @@ export class LLMService {
     if (typeof s.batchSize === 'number') this.batchSize = s.batchSize
     // Quantized KV cache requires FlashAttention — auto-enable it so the pair is valid.
     if (this.kvCacheType !== 'f16' && !this.flashAttn) this.flashAttn = true
-    this.persist()
-    if (before) {
-      emitChangedLlmSettings(
-        before as Record<string, unknown>,
-        this.getSettings() as Record<string, unknown>
-      )
-    }
-    return { launchChanged: launchChanged && !this.paused }
+    return launchChanged
   }
 
   /**
