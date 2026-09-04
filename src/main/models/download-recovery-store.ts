@@ -15,14 +15,20 @@ export interface DownloadRecoveryHealth {
 }
 
 export interface DownloadRecoveryFilePort {
-  readFileSync(file: string, encoding: BufferEncoding): string
-  mkdirSync(dir: string, options: { recursive: true }): unknown
-  writeFileSync(file: string, data: string, options: { encoding: 'utf8'; mode: number }): void
-  renameSync(from: string, to: string): void
-  rmSync(file: string, options: { force: true }): void
+  readFile(file: string, encoding: BufferEncoding): Promise<string>
+  mkdir(dir: string, options: { recursive: true }): Promise<unknown>
+  writeFile(file: string, data: string, options: { encoding: 'utf8'; mode: number }): Promise<void>
+  rename(from: string, to: string): Promise<void>
+  rm(file: string, options: { force: true }): Promise<void>
 }
 
-const nodeFiles: DownloadRecoveryFilePort = fs
+const nodeFiles: DownloadRecoveryFilePort = {
+  readFile: (file, encoding) => fs.promises.readFile(file, encoding),
+  mkdir: (dir, options) => fs.promises.mkdir(dir, options),
+  writeFile: (file, data, options) => fs.promises.writeFile(file, data, options),
+  rename: (from, to) => fs.promises.rename(from, to),
+  rm: (file, options) => fs.promises.rm(file, options)
+}
 
 function isMissing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT'
@@ -166,17 +172,17 @@ export class DownloadRecoveryStore {
     private readonly files: DownloadRecoveryFilePort = nodeFiles
   ) {}
 
-  read(): PersistedModelDownload[] {
+  async read(): Promise<PersistedModelDownload[]> {
     let source: string
     try {
-      source = this.files.readFileSync(this.file, 'utf8')
+      source = await this.files.readFile(this.file, 'utf8')
     } catch (error) {
       if (isMissing(error)) {
         this.readFailed = false
         this.health = { status: 'healthy' }
         return []
       }
-      return this.failRead('Download recovery data could not be read.', error)
+      throw this.failRead('Download recovery data could not be read.', error)
     }
 
     try {
@@ -186,34 +192,45 @@ export class DownloadRecoveryStore {
       this.readFailed = false
       return records
     } catch (error) {
-      return this.failRead(
+      throw this.failRead(
         `Download recovery data could not be migrated. The original file was kept at ${this.file}. Move it aside to start with empty recovery data.`,
         error
       )
     }
   }
 
-  write(records: readonly PersistedModelDownload[]): void {
-    if (this.readFailed) return
+  async write(records: readonly PersistedModelDownload[]): Promise<void> {
+    if (this.readFailed) {
+      throw new Error(
+        'Download recovery data could not be saved because its original data could not be read.'
+      )
+    }
     const temporary = `${this.file}.tmp-${process.pid}-${++this.writeSequence}`
     try {
-      this.files.mkdirSync(path.dirname(this.file), { recursive: true })
-      this.files.writeFileSync(temporary, JSON.stringify(records), {
+      await this.files.mkdir(path.dirname(this.file), { recursive: true })
+      await this.files.writeFile(temporary, JSON.stringify(records), {
         encoding: 'utf8',
         mode: 0o600
       })
-      this.files.renameSync(temporary, this.file)
+      await this.files.rename(temporary, this.file)
       this.health = { status: 'healthy' }
     } catch (error) {
+      let cleanupFailure: unknown
       try {
-        this.files.rmSync(temporary, { force: true })
-      } catch {
-        // The existing recovery file remains authoritative.
+        await this.files.rm(temporary, { force: true })
+      } catch (cleanupError) {
+        cleanupFailure = cleanupError
       }
       const message = 'Download recovery data could not be saved.'
       this.health = { status: 'degraded', error: message }
-      this.report('write.failed', error instanceof Error ? error.message : String(error))
-      // A live download remains valid. The health projection reports restart risk.
+      const cause = cleanupFailure
+        ? new AggregateError(
+            [error, cleanupFailure],
+            'Recovery write and temporary-file cleanup failed'
+          )
+        : error
+      this.report('write.failed', cause instanceof Error ? cause.message : String(cause))
+      throw new Error(message, { cause })
     }
   }
 
@@ -221,10 +238,10 @@ export class DownloadRecoveryStore {
     return { ...this.health }
   }
 
-  private failRead(message: string, cause: unknown): [] {
+  private failRead(message: string, cause: unknown): Error {
     this.readFailed = true
     this.health = { status: 'degraded', error: message }
     this.report('read.failed', cause instanceof Error ? cause.message : String(cause))
-    return []
+    return new Error(message, { cause })
   }
 }

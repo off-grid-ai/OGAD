@@ -14,10 +14,10 @@ import {
 import { cn } from '@renderer/lib/utils'
 import { deviceNoun } from '@renderer/lib/device'
 import { HealthPanel } from './HealthPanel'
-import { formatTransferSpeed } from '@offgrid/application'
+import { formatTransferSpeed, modelsFailureMessage } from '@offgrid/application'
 import { projectProgress } from '@offgrid/ui'
 import { formatStorageBytes } from './storage-format'
-import { desktopModelControl } from '@renderer/composition/model-control'
+import { modelControlClient } from '@renderer/lib/model-control-client'
 
 type Mode = 'conservative' | 'balanced' | 'extreme'
 
@@ -166,8 +166,13 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
   const cancel = (): void => {
     const id = progress?.modelId
     if (id) {
-      desktopModelControl
-        .execute({ type: 'cancel-download', modelId: id })
+      modelControlClient
+        .control({ type: 'cancel-download', modelId: id })
+        .then((outcome) => {
+          if (!outcome.ok) {
+            reportSetupFailure('model-download cancellation', modelsFailureMessage(outcome.failure))
+          }
+        })
         .catch((error: unknown) => reportSetupFailure('model-download cancellation', error))
     }
   }

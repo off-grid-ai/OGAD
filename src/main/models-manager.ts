@@ -7,12 +7,6 @@ import path from 'path'
 import { llm } from './llm'
 import { verifyArtifactFile } from './models/gguf'
 import {
-  DesktopModelDownloadService,
-  DOWNLOAD_INTERRUPTED_ERROR,
-  type DownloadProgress,
-  type ProgressCb
-} from './models/desktop-model-download-service'
-import {
   recordDownloaded,
   removeDownloaded,
   findDownloaded,
@@ -29,6 +23,7 @@ import {
   type ModelTransferRegistrationService,
   type ModelMetadataRepairCommandService,
   type ModelLibraryRemovalTarget,
+  type LocalModelImportProgress,
   mergeCatalog,
   workspaceRouteId,
   catalogEntryForIdentifier,
@@ -46,12 +41,12 @@ import {
   transferredProjectorRepair,
   type CatalogEntry,
   type ModelCapabilities,
-  type ModelControlCatalogModel,
   type ModelModality,
   type Modality,
   type VisionStatus,
   isLocalLibraryModelId
 } from '@offgrid/models'
+import type { ModelControlCatalogModel } from '@offgrid/application'
 import type { RemoteVisionInventoryModel } from '../shared/remote-vision-server'
 import { registerDesktopModelManagerPorts } from './model-manager-ports'
 import { desktopModelSelectionPersistence } from './model-selection-persistence'
@@ -65,20 +60,26 @@ import {
 } from './composition/model-library'
 import { platformFetch } from '@offgrid/models/fetch'
 import { desktopImageRuntimeIdentity } from './models/image-runtime-identity'
+import { modelSearchKind } from './models/model-search-kind'
+import { registerDesktopDownloadMetadataRepairPorts } from './models/desktop-model-download-ports'
 import { LocalModelRegistry, type LocalModelRegistryEntry } from './models/local-model-registry'
 import { MODEL_FILE_EXTENSION, isGgufFile } from '@offgrid/models'
 import {
   desktopActiveModalities,
   desktopModels,
   modelsFailureMessage,
+  refreshDesktopModels,
   selectDesktopModel
 } from './composition/application-access'
 
-export { DOWNLOAD_INTERRUPTED_ERROR }
-export type { DownloadProgress, ProgressCb }
-
-export type DesktopModelControlCatalogModel = Omit<ModelControlCatalogModel, 'files'> & {
-  files?: Array<{ name: string; role?: string }>
+export type DesktopModelControlCatalogModel = Omit<ModelControlCatalogModel, 'artifacts'> & {
+  files?: Array<{
+    name: string
+    role?: 'primary' | 'mmproj' | 'tokenizer' | 'aux'
+    sizeBytes?: number
+    url?: string
+    sha256?: string
+  }>
   remoteModelId?: string
   capabilities?: ModelCapabilities
 }
@@ -91,7 +92,8 @@ function isModelControlCatalogModel(value: unknown): value is DesktopModelContro
     !('name' in value) ||
     typeof value.name !== 'string' ||
     !('kind' in value) ||
-    typeof value.kind !== 'string'
+    typeof value.kind !== 'string' ||
+    !['text', 'vision', 'image', 'voice', 'transcription', 'computer_use'].includes(value.kind)
   ) {
     return false
   }
@@ -104,7 +106,15 @@ function isModelControlCatalogModel(value: unknown): value is DesktopModelContro
           Boolean(file) &&
           typeof file === 'object' &&
           'name' in file &&
-          typeof file.name === 'string'
+          typeof file.name === 'string' &&
+          (!('url' in file) || typeof file.url === 'string') &&
+          (!('sizeBytes' in file) || typeof file.sizeBytes === 'number') &&
+          (!('sha256' in file) || typeof file.sha256 === 'string') &&
+          (!('role' in file) ||
+            file.role === 'primary' ||
+            file.role === 'mmproj' ||
+            file.role === 'tokenizer' ||
+            file.role === 'aux')
       ))
   )
 }
@@ -326,7 +336,7 @@ export async function getModelControlCatalogFacts(): Promise<{
   catalog: Awaited<ReturnType<typeof getCatalog>>
   installed: string[]
 }> {
-  await desktopModels.refresh()
+  await refreshDesktopModels()
   const [catalog, installed] = await Promise.all([getCatalog(), listInstalled()])
   return { catalog, installed }
 }
@@ -432,23 +442,6 @@ export async function listInstalled(): Promise<string[]> {
   ]
 }
 
-function modelSearchKind(value: unknown): ModelModality | undefined {
-  switch (value) {
-    case 'text':
-    case 'vision':
-    case 'computer_use':
-    case 'image':
-    case 'voice':
-    case 'transcription':
-    case 'embedding':
-    case 'classifier':
-    case 'tool_selection':
-      return value
-    default:
-      return undefined
-  }
-}
-
 export async function searchModels(query: string, kind?: string): Promise<unknown[]> {
   try {
     const { searchHuggingFace } = await import('@offgrid/models')
@@ -482,24 +475,6 @@ async function finalizeInstalledModelArtifacts(): Promise<void> {
     throw new ActiveModelProjectorFinalizationError(cause)
   }
 }
-
-const modelDownloads = new DesktopModelDownloadService({
-  modelsDir: () => llm.getModelsDir(),
-  onArtifactsFinalized: finalizeInstalledModelArtifacts
-})
-
-export const downloadStatus = (modelId: string): DownloadProgress | null =>
-  modelDownloads.status(modelId)
-
-export const cancelDownload = (modelId: string): boolean => modelDownloads.cancel(modelId)
-
-export const shutdownModelDownloads = (): Promise<void> => modelDownloads.shutdown()
-
-/** Download a catalog entry or any Hugging Face repo through Shared admission and recovery. */
-export const downloadModel = (
-  modelId: string,
-  onProgress?: ProgressCb
-): Promise<{ success: boolean; error?: string }> => modelDownloads.download(modelId, onProgress)
 
 interface DeleteModelResult {
   success: boolean
@@ -752,9 +727,7 @@ export function getActiveModel(): string | null {
  * late. So the guard refuses to BEGIN the pair when its caller has already given up on it, and
  * never interrupts it once begun.
  */
-export async function reconcileActiveModelClassification(
-  signal?: AbortSignal
-): Promise<boolean> {
+export async function reconcileActiveModelClassification(signal?: AbortSignal): Promise<boolean> {
   const activeId = getActiveModel()
   if (!activeId) return false
 
@@ -830,7 +803,7 @@ export function desktopActiveProjectorRepairPorts(): ConstructorParameters<
     resolve: resolveActiveModelProjectorRepair,
     persist: (repair) => desktopModelSelectionPersistence.projectLegacyTextConfig(repair),
     reload: () => llm.reloadModel(),
-    refresh: () => desktopModels.refresh()
+    refresh: refreshDesktopModels
   }
 }
 
@@ -1138,19 +1111,22 @@ export function desktopLocalModelImportPorts(): ConstructorParameters<
   }
 }
 
+const activeProjectorRepairPorts = desktopActiveProjectorRepairPorts()
+
 registerDesktopModelLibraryPorts({
   removal: desktopModelLibraryRemovalPorts,
-  repair: desktopActiveProjectorRepairPorts,
+  repair: () => activeProjectorRepairPorts,
   localImport: desktopLocalModelImportPorts,
   transfer: desktopModelTransferRegistrationPorts
 })
+registerDesktopDownloadMetadataRepairPorts(activeProjectorRepairPorts)
 
 const localModelImports = (): LocalModelImportService => localModelImportService()
 
 /** Import and register one local GGUF through the Shared model-library transaction. */
 export function importLocalModel(
   source: string,
-  onProgress?: ProgressCb
+  onProgress?: (progress: LocalModelImportProgress) => void
 ): Promise<{ success: boolean; error?: string; id?: string }> {
   return localModelImports().import(source, onProgress)
 }
@@ -1290,48 +1266,6 @@ export async function deleteOrphans(): Promise<{
     retainedBytes: failures.reduce((total, failure) => total + failure.bytes, 0),
     failures
   }
-}
-
-// ---------------------------------------------------------------------------
-// Download registry: surface active/failed/completed downloads + retry, and
-// survive an app restart (an interrupted download becomes resumable).
-// ---------------------------------------------------------------------------
-
-/** All known downloads (active, failed, interrupted) for a download-manager view. */
-export function listDownloads(): DownloadProgress[] {
-  return modelDownloads.list()
-}
-
-/** Non-blocking durability health for interrupted-download restart recovery. */
-export function getDownloadRecoveryHealth(): ReturnType<
-  DesktopModelDownloadService['recoveryHealth']
-> {
-  return modelDownloads.recoveryHealth()
-}
-
-/** Retry (resumes from the partial .part) a failed/interrupted download. */
-export async function retryDownload(
-  modelId: string,
-  onProgress?: ProgressCb
-): Promise<{ success: boolean; error?: string }> {
-  return modelDownloads.retry(modelId, onProgress)
-}
-
-/** Dismiss a download-manager entry: abort it if still running, delete its partial
- *  .part files, and drop it from the registry so it leaves the Downloads list. */
-export async function clearDownload(
-  modelId: string
-): Promise<{ success: boolean; freedBytes: number }> {
-  return modelDownloads.clear(modelId)
-}
-
-/** Clear every failed/cancelled/interrupted download (entry + .part). */
-export async function clearInactiveDownloads(): Promise<{
-  success: boolean
-  count: number
-  freedBytes: number
-}> {
-  return modelDownloads.clearInactive()
 }
 
 registerDesktopModelManagerPorts({

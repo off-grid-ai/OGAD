@@ -1,4 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { ModelsEvent } from '@offgrid/application'
+
+type PublicDownloadEvent = Extract<ModelsEvent, { type: 'download' }>['event']
 import {
   CACHE_CLEANUP_CHANNEL,
   type ArtifactKindContract,
@@ -428,8 +431,6 @@ const offGridApi = {
   residencyGet: () => ipcRenderer.invoke('runtime:residency:get'),
   residencySet: (modality: string, mode: string) =>
     ipcRenderer.invoke('runtime:residency:set', modality, mode),
-  // Unload a modality's model from memory now (free RAM); reloads on next use.
-  unloadRuntime: (modality: string) => ipcRenderer.invoke('runtime:unload', modality),
   // Pipeline queue config (serialize heavy jobs; let speech coexist) + live state.
   queueConfigGet: () => ipcRenderer.invoke('queue:config:get'),
   queueConfigSet: (patch: { enabled?: boolean; tier1Coexists?: boolean }) =>
@@ -504,82 +505,15 @@ const offGridApi = {
 
   // Model Download APIs
   checkModelStatus: () => ipcRenderer.invoke('model:check-status'),
-  onModelDownloadProgress: (
-    callback: (data: {
-      modelName: string
-      percent: number
-      downloadedMB: string
-      totalMB: string
-      downloadedBytes?: number
-      totalBytes?: number
-      bytesPerSecond?: number
-    }) => void
-  ) => {
-    const subscription = (
-      _event: unknown,
-      data: {
-        modelName: string
-        percent: number
-        downloadedMB: string
-        totalMB: string
-        downloadedBytes?: number
-        totalBytes?: number
-        bytesPerSecond?: number
-      }
-    ): void => callback(data)
-    ipcRenderer.on('model:download-progress', subscription)
-    return unsubscribe('model:download-progress', subscription)
-  },
-
   // Off Grid AI model catalog (text, vision, image, voice, transcription)
-  getModelCatalog: () => ipcRenderer.invoke('models:catalog'),
-  getModelControlSnapshot: () => ipcRenderer.invoke('models:control-snapshot'),
-  getInstalledModels: () => ipcRenderer.invoke('models:installed'),
+  getModelControlProjection: () => ipcRenderer.invoke('models:control-projection'),
+  controlModel: (intent: import('@offgrid/application').ModelControlIntent) =>
+    ipcRenderer.invoke('models:control', intent),
   getModelVisionStatus: () => ipcRenderer.invoke('models:vision-status'),
   searchModels: (query: string, kind?: string) => ipcRenderer.invoke('models:search', query, kind),
-  downloadModel: (modelId: string) => ipcRenderer.invoke('models:download', modelId),
-  cancelModelDownload: (modelId: string) => ipcRenderer.invoke('models:cancel-download', modelId),
-  deleteModel: (modelId: string) => ipcRenderer.invoke('models:delete', modelId),
-  setActiveModel: (modelId: string) => ipcRenderer.invoke('models:set-active', modelId),
-  // Activate any model for its type. A dual-capability model can name the rail
-  // that the user selected; main validates that rail against the catalog.
-  activateModel: (modelId: string, requestedKind?: string) =>
-    ipcRenderer.invoke('models:activate', modelId, requestedKind),
-  getActiveModel: () => ipcRenderer.invoke('models:get-active'),
-  getActiveModelIds: () => ipcRenderer.invoke('models:active-ids'),
-  setActiveModalModel: (kind: string, modelId: string | null) =>
-    ipcRenderer.invoke('models:set-active-modal', kind, modelId),
-  getActiveModalities: () => ipcRenderer.invoke('models:active-modalities'),
   getComputerUseActiveModels: () => ipcRenderer.invoke('models:computer-use-active'),
-  onModelProgress: (
-    callback: (data: {
-      modelId: string
-      percent?: number
-      status?: 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled'
-      currentFile?: string
-      downloadedMB?: string
-      totalMB?: string
-      downloadedBytes?: number
-      totalBytes?: number
-      bytesPerSecond?: number
-      error?: string
-    }) => void
-  ) => {
-    const subscription = (
-      _event: unknown,
-      data: {
-        modelId: string
-        percent?: number
-        status?: 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled'
-        currentFile?: string
-        downloadedMB?: string
-        totalMB?: string
-        downloadedBytes?: number
-        totalBytes?: number
-        bytesPerSecond?: number
-        error?: string
-      }
-    ): void => callback(data)
+  onModelProgress: (callback: (data: PublicDownloadEvent) => void) => {
+    const subscription = (_event: unknown, data: PublicDownloadEvent): void => callback(data)
     ipcRenderer.on('model:download-progress', subscription)
     return unsubscribe('model:download-progress', subscription)
   },
@@ -615,16 +549,10 @@ const offGridApi = {
   writeClipboardText: (text: string) => ipcRenderer.invoke('clipboard:write-text', text),
   autoConfigure: () => ipcRenderer.invoke('setup:auto-configure'),
   restartComponent: (id: string) => ipcRenderer.invoke('system:restart', id),
-  estimateModelFit: (modelId: string) => ipcRenderer.invoke('system:estimate-fit', modelId),
 
   // Storage + download manager
   getStorageInfo: () => ipcRenderer.invoke('models:storage'),
   deleteOrphans: () => ipcRenderer.invoke('models:delete-orphans'),
-  listDownloads: () => ipcRenderer.invoke('models:downloads'),
-  getDownloadRecoveryHealth: () => ipcRenderer.invoke('models:download-recovery-health'),
-  retryDownload: (modelId: string) => ipcRenderer.invoke('models:retry-download', modelId),
-  clearDownload: (modelId: string) => ipcRenderer.invoke('models:clear-download', modelId),
-  clearDownloads: () => ipcRenderer.invoke('models:clear-downloads'),
   clearAppCache: () =>
     ipcRenderer.invoke(CACHE_CLEANUP_CHANNEL) as Promise<CacheCleanupResultContract>,
   importLocalModel: () => ipcRenderer.invoke('models:import'),

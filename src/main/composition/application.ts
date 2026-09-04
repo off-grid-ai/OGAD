@@ -7,7 +7,7 @@ import {
   type OffGridApplicationSnapshot
 } from '@offgrid/application'
 import { DEFAULT_RAG_EMBEDDING_DIMENSION } from '@offgrid/rag'
-import { desktopModelWorkspace } from '../model-services'
+import { desktopModelWorkspacePorts } from '../model-services'
 import { resolveDesktopActivation } from '../models-manager'
 import { createDesktopModelSettingsPort } from '../models/model-settings-port'
 import { embeddings } from '../embeddings'
@@ -28,13 +28,21 @@ import { consumeDesktopApplicationExtensionPorts } from './application-extension
 import { claimDesktopSyncRuntime } from '../sync-runtime-owner'
 import { writeDiagnosticLog } from '../diagnostics-log'
 import { setupVoiceTurnIpc } from '../voice-turn-ipc'
+import { desktopModelDownloads } from '../models/desktop-model-download-ports'
+import { createDesktopModelControlPort } from '../models/desktop-model-control-port'
 
 const speechIo = createDesktopSpeechIoPorts()
 const extensionPorts = consumeDesktopApplicationExtensionPorts()
 
 export const desktopApplication = createOffGridApplication({
   models: {
-    workspace: desktopModelWorkspace,
+    // The workspace's own I/O and this device's adapters, not a workspace: shared's root composes
+    // the single one from these and registers the adapters into it. Desktop holds no instance, so
+    // there is exactly one routing owner and one residency owner on the device. The platform
+    // contract accepts ports only, so Desktop cannot hand a second workspace into the root.
+    ...desktopModelWorkspacePorts,
+    downloads: desktopModelDownloads.ports,
+    control: createDesktopModelControlPort(),
     guidedSetup: createDesktopGuidedSetupPorts(),
     activation: { resolve: resolveDesktopActivation },
     settings: createDesktopModelSettingsPort()
@@ -90,7 +98,11 @@ let releaseUseForwarder: (() => void) | null = null
  * lifecycle budget this program measures, so it is worth two variables.
  */
 function observeDomainForwarding(): void {
-  releaseAutomationForwarder ??= desktopApplication.automation.events(forwardDesktopAutomationEvent)
+  releaseAutomationForwarder ??= desktopApplication.automation.events((event) => {
+    // Operational failures are already consumed by the shared failure observer. Task history owns
+    // only durable and live task mutations, so it must not receive the facade's failure envelope.
+    if (event.type !== 'operation_failed') forwardDesktopAutomationEvent(event)
+  })
   releaseUseForwarder ??= desktopApplication.use.events((event) => {
     if (event.type === 'action_outcome') observeActionOutcome(event.outcome)
   })

@@ -14,8 +14,8 @@ import {
 import { SettingsNumberField } from './SettingsNumberField'
 import { SettingsSelect } from './SettingsSelect'
 import { SettingsTextField, type SettingsWriteOutcome } from './SettingsTextField'
-import { desktopModelControl } from '@renderer/composition/model-control'
-import { failed, modelFileDisplayName, ok } from '@offgrid/application'
+import { failed, modelFileDisplayName, modelsFailureMessage, ok } from '@offgrid/application'
+import { modelControlClient } from '@renderer/lib/model-control-client'
 
 type ImageSettings = ImageSettingsProjection
 
@@ -81,10 +81,11 @@ export function ImageSettingsTab(): React.JSX.Element {
   const chooseModel = (nextModel: string): void => {
     const previous = model
     setModel(nextModel)
-    void desktopModelControl
-      .execute({ type: 'select', surface: 'image', modelId: nextModel })
-      .then((result) => {
-        if (result.status === 'completed') publishActiveImageModelChanged()
+    void modelControlClient
+      .control({ type: 'select', surface: 'image', modelId: nextModel })
+      .then((outcome) => {
+        if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
+        if (outcome.value.status === 'completed') publishActiveImageModelChanged()
         else setModel(previous)
       })
       .catch(() => setModel(previous))

@@ -17,7 +17,7 @@ protocol.registerSchemesAsPrivileged([
 ])
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
-import { setupIPC } from './ipc' // IMPORT FROM IPC ONLY
+import { setupIPC, startModelDownloadIpcProjection } from './ipc' // IMPORT FROM IPC ONLY
 import { setupMcpIpc } from './mcp-ipc'
 import { registerToolExtension } from './tools'
 import { registerNativeActionTools } from './tools/nativeActionToolExtension'
@@ -73,7 +73,6 @@ import {
   installApplicationShutdown,
   registerCoreShutdownOwners
 } from './shutdown'
-import { shutdownModelDownloads } from './models-manager'
 
 // Before anything logs: a broken stdout/stderr pipe (parent/e2e-harness exited, closed pipe)
 // must never crash main via an uncaught EPIPE. See stream-guards.ts.
@@ -145,8 +144,7 @@ installApplicationShutdown(app, applicationShutdown, ({ owner, error }) =>
 )
 registerCoreShutdownOwners(applicationShutdown, {
   stopGateway: stopModelServer,
-  stopMediaServer,
-  stopModelDownloads: shutdownModelDownloads
+  stopMediaServer
 })
 
 function createWindow(): void {
@@ -524,7 +522,11 @@ app.whenReady().then(async () => {
      * from it, and nothing can: every consumer below is behind `applicationRoot.ok`.
      */
     lateEffectIsRecoverable: true,
-    run: () => import('./composition/application')
+    run: async () => {
+      const composition = await import('./composition/application')
+      startModelDownloadIpcProjection(composition.desktopApplication.models)
+      return composition
+    }
   })
   if (applicationRoot.ok) {
     applicationShutdown.register({
@@ -727,7 +729,17 @@ app.whenReady().then(async () => {
       // runtime owner. So a late completion cannot activate a second runtime; it is reported
       // `late` and its activation stands, because half-activated Pro would be worse than late Pro.
       lateEffectIsRecoverable: true,
-      run: () => loadProFeaturesMain()
+      run: async () => {
+        if (!applicationRoot.ok) {
+          throw new Error('The application root could not be constructed.')
+        }
+        // Pro Sync is an extension of the shared Sync facade, not a parallel runtime. Its launch
+        // reconciliation can request discovery, so the shared application must finish its
+        // memoised start first. The shell is already open; this only orders the two background
+        // stages and cannot construct or start a second application.
+        await applicationRoot.value.startDesktopApplication()
+        await loadProFeaturesMain()
+      }
     },
     {
       // Update IPC is always registered (the renderer queries staged-version on startup in every

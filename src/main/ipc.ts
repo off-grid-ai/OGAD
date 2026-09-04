@@ -71,7 +71,6 @@ import {
   formatRetrievalHistory,
   normalizeTextResponse as toResponseGenerationResult,
   parseChatIntentResponse,
-  selectableModelControlModality,
   type ChatIntent,
   type NormalizedTextResponse,
   type RetrievalEntity,
@@ -99,17 +98,23 @@ import { notifyRagConversationChanged } from './rag-conversation-events'
 import { readImages } from './llm/read-images'
 import { generateDesktopMessages, generateDesktopText } from './desktop-generation'
 import { ModelServerError } from './llm/http-post'
-import { modelsFailureMessage } from '@offgrid/application'
+import {
+  modelsFailureMessage,
+  parseModelControlIntent,
+  type ModelsFacade
+} from '@offgrid/application'
 import { mimeForExt } from './mime'
 import {
   desktopModels,
   desktopRag,
   generateWithDesktopModels,
-  selectDesktopModel,
+  refreshDesktopModels,
   unloadDesktopModel
 } from './composition/application-access'
 import { desktopGenerationObservations } from './model-generation-adapters'
 import { requireApplicationOutcome } from './composition/application-outcome'
+import { applicationShutdown } from './shutdown'
+import { ModelDownloadIpcProjectionLifecycle } from './model-download-ipc-projection'
 // import { llm } from './llm'; // Moved to dynamic import to support ESM
 
 type ResponseGenerationResult = NormalizedTextResponse<GenerationMetrics>
@@ -177,6 +182,18 @@ import {
 
 const streamControllers = new Map<string, AbortController>()
 
+const modelDownloadIpcProjection = new ModelDownloadIpcProjectionLifecycle({
+  targets: () => BrowserWindow.getAllWindows().map((window) => window.webContents),
+  report: (error) => console.error('[models] could not publish download progress', error),
+  registerShutdown: (owner) => {
+    applicationShutdown.register(owner)
+  }
+})
+
+export function startModelDownloadIpcProjection(models: Pick<ModelsFacade, 'events'>): void {
+  modelDownloadIpcProjection.install(models)
+}
+
 function generationMessages(
   input: string | readonly GenerationMessage[],
   images: string[],
@@ -234,7 +251,7 @@ async function streamAnswer(
   images: string[] = []
 ): Promise<ResponseGenerationResult> {
   const { llm } = await import('./llm')
-  await desktopModels.refresh()
+  await refreshDesktopModels()
   const turnId = streamId ?? `desktop-chat:${randomUUID()}`
   const request = (signal?: AbortSignal): GenerationRequest => ({
     messages: generationMessages(prompt, images, llm.getSettings().systemPrompt ?? ''),
@@ -1276,25 +1293,9 @@ export function setupIPC(): void {
   ipcMain.handle('runtime:residency:get', () => getResidency())
   ipcMain.handle('runtime:residency:set', async (_e, modality: Modality, mode: ResidencyMode) => {
     const residency = setResidencyMode(modality, mode)
-    await desktopModels.refresh()
+    await refreshDesktopModels()
     return residency
   })
-  // Unload one modality's model from memory now (the "free RAM" button). Goes through
-  // the same evict() seam as residency/shutdown; the engine reloads on next use.
-  ipcMain.handle('runtime:unload', async (_e, modality: Modality) => {
-    const sharedModality =
-      modality === 'llm'
-        ? 'text'
-        : modality === 'stt'
-          ? 'transcription'
-          : modality === 'tts'
-            ? 'voice'
-            : modality
-    const freed = await unloadDesktopModel(sharedModality)
-    console.log(`[runtime] unload ${modality}: ${freed ? 'freed' : 'nothing registered'}`)
-    return freed
-  })
-
   // Pipeline queue config — the user-facing controls for the shared scheduler.
   // Reads/writes go through the Node composition for the shared scheduler and
   // apply to the live queue immediately, so a toggle takes effect without a restart.
@@ -1485,60 +1486,18 @@ export function setupIPC(): void {
 
   // === Off Grid AI MODEL CATALOG (text, vision, image, voice, transcription) ===
 
-  // Model management lives in ./models-manager (one source of truth, shared with
-  // the headless gateway HTTP admin endpoints). These IPC handlers are thin
-  // wrappers; the download one adds a renderer progress broadcast.
-  ipcMain.handle('models:catalog', () => import('./models-manager').then((m) => m.getCatalog()))
-  ipcMain.handle('models:control-snapshot', () =>
-    import('./composition/model-control-snapshot').then((m) => m.getModelControlSnapshot())
-  )
+  ipcMain.handle('models:control-projection', () => desktopModels.snapshot().control)
+  ipcMain.handle('models:control', (_event, input: unknown) => {
+    const parsed = parseModelControlIntent(input)
+    return parsed.ok ? desktopModels.control(parsed.value) : parsed
+  })
   ipcMain.handle('models:vision-status', () =>
     import('./models-manager').then((m) => m.getVisionStatuses())
-  )
-  ipcMain.handle('models:installed', () =>
-    import('./models-manager').then((m) => m.listInstalled())
   )
   ipcMain.handle('models:search', (_, query: string, kind?: string) =>
     import('./models-manager').then((m) => m.searchModels(query, kind))
   )
 
-  ipcMain.handle('models:download', async (_, modelId: string) => {
-    const { downloadModel } = await import('./models-manager')
-    return downloadModel(modelId, (p) =>
-      BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('model:download-progress', p))
-    )
-  })
-  ipcMain.handle('models:cancel-download', (_evt, modelId: string) =>
-    import('./models-manager').then((m) => m.cancelDownload(modelId))
-  )
-  ipcMain.handle('models:delete', (_, modelId: string) =>
-    import('./models-manager').then((m) => m.deleteModel(modelId))
-  )
-
-  ipcMain.handle('models:set-active', async (_, modelId: string) => {
-    return selectDesktopModel('text', modelId)
-  })
-  // Single activation seam: route any model to the right backend by its kind.
-  ipcMain.handle('models:activate', (_, modelId: string, requestedKind?: string) =>
-    import('./models-manager').then((m) => m.activateModel(modelId, requestedKind))
-  )
-  ipcMain.handle('models:get-active', () =>
-    import('./models-manager').then((m) => m.getActiveModel())
-  )
-  // Active model ids across ALL modalities — the UI's single "what's active" source.
-  ipcMain.handle('models:active-ids', () =>
-    import('./models-manager').then((m) => m.getActiveModelIds())
-  )
-  ipcMain.handle('models:set-active-modal', async (_, kind: string, modelId: string | null) => {
-    const modality = selectableModelControlModality(kind)
-    if (!modality) {
-      return { success: false, error: 'use models:set-active for the chat LLM (text/vision)' }
-    }
-    return selectDesktopModel(modality, modelId)
-  })
-  ipcMain.handle('models:active-modalities', () =>
-    import('./models-manager').then((m) => m.getActiveModalities())
-  )
   ipcMain.handle('models:computer-use-active', () =>
     import('./vision/vision-task-model-strategy').then((m) =>
       m.getComputerUseActiveModelProjection()
@@ -1549,24 +1508,6 @@ export function setupIPC(): void {
   ipcMain.handle('models:storage', () => import('./models-manager').then((m) => m.getStorageInfo()))
   ipcMain.handle('models:delete-orphans', () =>
     import('./models-manager').then((m) => m.deleteOrphans())
-  )
-  ipcMain.handle('models:downloads', () =>
-    import('./models-manager').then((m) => m.listDownloads())
-  )
-  ipcMain.handle('models:download-recovery-health', () =>
-    import('./models-manager').then((m) => m.getDownloadRecoveryHealth())
-  )
-  ipcMain.handle('models:retry-download', async (_, modelId: string) => {
-    const { retryDownload } = await import('./models-manager')
-    return retryDownload(modelId, (p) =>
-      BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('model:download-progress', p))
-    )
-  })
-  ipcMain.handle('models:clear-download', (_, modelId: string) =>
-    import('./models-manager').then((m) => m.clearDownload(modelId))
-  )
-  ipcMain.handle('models:clear-downloads', () =>
-    import('./models-manager').then((m) => m.clearInactiveDownloads())
   )
   ipcMain.handle(CACHE_CLEANUP_CHANNEL, () =>
     import('./cache-cleanup').then((m) => m.clearEphemeralCache())
@@ -1581,9 +1522,7 @@ export function setupIPC(): void {
     })
     if (r.canceled || !r.filePaths[0]) return { canceled: true }
     const { importLocalModel } = await import('./models-manager')
-    return importLocalModel(r.filePaths[0], (p) =>
-      BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('model:download-progress', p))
-    )
+    return importLocalModel(r.filePaths[0])
   })
 
   // --- Setup + system health -----------------------------------------------
@@ -1653,11 +1592,6 @@ export function setupIPC(): void {
     }
     return { success: false, error: `cannot restart "${id}"` }
   })
-  // Pre-activate RAM fit estimate (for a warning before loading a big model).
-  ipcMain.handle('system:estimate-fit', (_e, modelId: string) =>
-    import('./setup').then((m) => m.estimateModelFit(modelId))
-  )
-
   // Open an https link in the user's default browser (e.g. a model's HF page).
   ipcMain.handle('app:open-external', async (_e, url: string) => {
     if (!/^https:\/\//.test(url)) return { success: false }

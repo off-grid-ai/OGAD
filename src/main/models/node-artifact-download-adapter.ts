@@ -16,6 +16,10 @@ export interface DesktopModelDownloadPorts {
   transfers: DownloadTransferPort
 }
 
+function isMissing(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT'
+}
+
 async function sha256(filePath: string): Promise<string> {
   return await new Promise((resolve, reject) => {
     const hash = createHash('sha256')
@@ -36,16 +40,18 @@ export function createNodeModelDownloadPorts(
       pathFor: (localName) => path.join(modelsDir, localName),
       exists: async (filePath) => {
         try {
-          return fs.statSync(filePath).isFile()
-        } catch {
-          return false
+          return (await fs.promises.stat(filePath)).isFile()
+        } catch (error) {
+          if (isMissing(error)) return false
+          throw error
         }
       },
       size: async (filePath) => {
         try {
-          return fs.statSync(filePath).size
-        } catch {
-          return 0
+          return (await fs.promises.stat(filePath)).size
+        } catch (error) {
+          if (isMissing(error)) return 0
+          throw error
         }
       },
       readPrefix: async (filePath, bytes) => {
@@ -69,11 +75,12 @@ export function createNodeModelDownloadPorts(
     transfers: {
       async start(input) {
         const partPath = `${input.destination}.part`
+        await fs.promises.mkdir(path.dirname(partPath), { recursive: true })
         let partialBytes = 0
         try {
-          partialBytes = fs.statSync(partPath).size
-        } catch {
-          /* new transfer */
+          partialBytes = (await fs.promises.stat(partPath)).size
+        } catch (error) {
+          if (!isMissing(error)) throw error
         }
         const resumeFrom = input.resume ? partialBytes : 0
         let response: Response

@@ -66,7 +66,7 @@ import { SkillsPanel } from './SkillsPanel'
 import { ModelPicker } from './ModelPicker'
 import { SettingsPanel } from './SettingsPanel'
 import { OPEN_ACTIVE_MODELS_PANEL_EVENT } from '@renderer/lib/model-settings-panel'
-import { desktopModelControl } from '@renderer/composition/model-control'
+import { modelControlClient } from '@renderer/lib/model-control-client'
 import { LoadingDots } from './ui/loading-dots'
 import { SidePanel } from './SidePanel'
 import { ConversationSearchList } from './ConversationSearchList'
@@ -1117,12 +1117,12 @@ export function MemoryChat({
       // Write through to the owning source; log on failure rather than swallow — a
       // silent reject would let the composer and Active-models panel diverge again
       // (the exact drift this binding prevents), with no signal.
-      void desktopModelControl
-        .execute({ type: 'select', surface: 'image', modelId: value })
-        .then((result) => {
-          if (result.status !== 'completed') {
+      void modelControlClient
+        .control({ type: 'select', surface: 'image', modelId: value })
+        .then((outcome) => {
+          if (!outcome.ok || outcome.value.status !== 'completed') {
             setImgModel(previous)
-            console.error('[image] failed to persist active model', result)
+            console.error('[image] failed to persist active model', outcome)
           }
         })
         .catch((error) => {

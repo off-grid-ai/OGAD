@@ -4,16 +4,57 @@ import {
   type ModelLifecycleApplicationPorts,
   type ModelModality,
   reclaimAttempt,
-  type ModelWorkspace,
   type RuntimeModel
 } from '@offgrid/models'
+import {
+  DesktopModelsOperationError,
+  desktopModels,
+  refreshDesktopModels
+} from './application-access'
+
+/**
+ * The only model routing these ports need. It used to be the desktop `ModelWorkspace` INSTANCE,
+ * which made this module's caller (`model-services.ts`) an app-level workspace owner. Shared's root
+ * now composes the single workspace from platform ports, and the platform contract cannot accept a
+ * workspace instance. A held app instance would therefore be a second routing and residency owner.
+ *
+ * None of the four capabilities is residency: they are all routing, and each has a facade
+ * equivalent. This narrow shape also keeps the module unit-testable without a workspace or the
+ * application root.
+ */
+export interface DesktopModelLifecycleRouting {
+  /** The inventory model any identifier names, or null. */
+  lookup(identifier: string): RuntimeModel | null
+  /** The model currently answering a modality, or null when nothing is selected or resolvable. */
+  activeModel(modality: ModelModality): RuntimeModel | null
+  select(modality: ModelModality, selectedRoute: string | null): Promise<void>
+  refresh(): Promise<void>
+}
+
+/**
+ * Facade-backed routing, the pattern `speech-selection.ts` established for the same reason.
+ * `snapshot().active[modality]` is the very `ActiveModelSnapshot` the workspace's `active()`
+ * returned - shared republishes that branch synchronously from the routing owner's own
+ * subscription, so a read straight after a selection sees the selection.
+ */
+const facadeRouting: DesktopModelLifecycleRouting = {
+  lookup: (identifier) => desktopModels.lookup(identifier),
+  activeModel: (modality) => desktopModels.snapshot().active[modality]?.model ?? null,
+  async select(modality, selectedRoute) {
+    const outcome = await desktopModels.select({ modality, modelId: selectedRoute })
+    // Shared's lifecycle transaction compensates on a throw, so a typed failure must not become a
+    // silent no-op selection while the load it belongs to reports success.
+    if (!outcome.ok) throw new DesktopModelsOperationError(outcome.failure)
+  },
+  refresh: refreshDesktopModels
+}
 
 function localModel(
-  workspace: ModelWorkspace,
+  routing: DesktopModelLifecycleRouting,
   modality: ModelModality,
   identifier: string
 ): RuntimeModel {
-  const model = workspace.lookup(identifier)
+  const model = routing.lookup(identifier)
   if (!model || model.modality !== modality || model.source !== 'local') {
     throw new Error(`No local ${modality} model matches ${identifier}.`)
   }
@@ -58,12 +99,12 @@ function computerUseLifecycle(
 
 /** Desktop supplies native lifecycle I/O. Shared owns admission, selection, and transactions. */
 export function desktopModelLifecyclePorts(
-  workspace: ModelWorkspace,
-  adapters: ReadonlyMap<string, GenerationAdapter>
+  adapters: ReadonlyMap<string, GenerationAdapter>,
+  routing: DesktopModelLifecycleRouting = facadeRouting
 ): ModelLifecycleApplicationPorts {
   return {
     resolveLoad(modality, identifier) {
-      const model = localModel(workspace, modality, identifier)
+      const model = localModel(routing, modality, identifier)
       const adapter =
         modality === 'computer_use'
           ? computerUseLifecycle(model.id)
@@ -87,7 +128,7 @@ export function desktopModelLifecyclePorts(
       }
     },
     resolveUnload(modality) {
-      const active = workspace.active(modality).model
+      const active = routing.activeModel(modality)
       if (!active || active.source !== 'local') {
         // No runtime, so nothing held memory: a true reclaim, not an unknown one. `hadRuntime`
         // still says a runtime never existed, which is a different fact from whether memory came
@@ -105,7 +146,7 @@ export function desktopModelLifecyclePorts(
         unload: () => reclaimAttempt(() => adapter.unload(active))
       }
     },
-    selectRoute: (modality, selectedRoute) => workspace.select(modality, selectedRoute),
-    refreshInventory: () => workspace.refresh().then(() => undefined)
+    selectRoute: (modality, selectedRoute) => routing.select(modality, selectedRoute),
+    refreshInventory: () => routing.refresh()
   }
 }

@@ -6,6 +6,7 @@ import fs from 'fs'
 import path from 'path'
 import { modelPackageIdentity } from '@offgrid/sync'
 import type {
+  AsyncDownloadedModelRegistryPort,
   DownloadedModelRegistryService,
   DownloadedModelRecord,
   DownloadedRegistryCatalogEntry
@@ -22,6 +23,17 @@ function registryPath(dir: string): string {
   return path.join(dir, 'downloaded-models.json')
 }
 
+function requireDownloadedRows(value: unknown): DownloadedModel[] {
+  if (!Array.isArray(value)) {
+    throw new Error('Downloaded-model registry must contain an array.')
+  }
+  return value as DownloadedModel[]
+}
+
+function isMissing(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT'
+}
+
 type DownloadedRegistryPorts = ConstructorParameters<typeof DownloadedModelRegistryService>[0]
 
 /** JSON persistence, file sizes, and package identity for one models directory. I/O only. */
@@ -31,22 +43,69 @@ export function desktopDownloadedRegistryPorts(dir: string): DownloadedRegistryP
       try {
         const rows: unknown = JSON.parse(fs.readFileSync(registryPath(dir), 'utf-8'))
         return Array.isArray(rows) ? (rows as DownloadedModel[]) : []
-      } catch {
-        return []
+      } catch (error) {
+        if (isMissing(error)) return []
+        throw error
       }
     },
     write: (models) => {
-      try {
-        fs.writeFileSync(registryPath(dir), JSON.stringify(models, null, 2))
-      } catch {
-        /* The registry is best-effort metadata. Model artifacts remain recoverable from disk. */
-      }
+      // A completed non-catalog download must be discoverable after restart. Let persistence
+      // failures reach the facade finalizer so it cannot publish a success-shaped completion while
+      // the installed model is absent from the durable registry.
+      fs.writeFileSync(registryPath(dir), JSON.stringify(models, null, 2))
     },
     fileSize: (fileName) => {
       try {
         return fs.statSync(path.join(dir, fileName)).size
-      } catch {
-        return 0
+      } catch (error) {
+        if (isMissing(error)) return 0
+        throw error
+      }
+    },
+    packageIdentity: (input) =>
+      modelPackageIdentity({
+        ...input,
+        files: input.files as [(typeof input.files)[number], ...Array<(typeof input.files)[number]>]
+      })
+  }
+}
+
+/** Async durable I/O for the application-owned download completion workflow. */
+export function desktopAsyncDownloadedRegistryPorts(dir: string): AsyncDownloadedModelRegistryPort {
+  const filePath = registryPath(dir)
+  return {
+    read: async () => {
+      try {
+        return requireDownloadedRows(JSON.parse(await fs.promises.readFile(filePath, 'utf-8')))
+      } catch (error) {
+        if (isMissing(error)) return []
+        throw error
+      }
+    },
+    writeAtomically: async (models) => {
+      await fs.promises.mkdir(dir, { recursive: true })
+      const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}`
+      try {
+        await fs.promises.writeFile(temporaryPath, JSON.stringify(models, null, 2))
+        await fs.promises.rename(temporaryPath, filePath)
+      } catch (cause) {
+        try {
+          await fs.promises.rm(temporaryPath, { force: true })
+        } catch (cleanupCause) {
+          throw new AggregateError(
+            [cause, cleanupCause],
+            'Downloaded-model registry write and cleanup both failed.'
+          )
+        }
+        throw cause
+      }
+    },
+    fileSize: async (fileName) => {
+      try {
+        return (await fs.promises.stat(path.join(dir, fileName))).size
+      } catch (error) {
+        if (isMissing(error)) return 0
+        throw error
       }
     },
     packageIdentity: (input) =>

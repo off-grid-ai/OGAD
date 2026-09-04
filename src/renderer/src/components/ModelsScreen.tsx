@@ -40,7 +40,10 @@ import {
   catalogTagTone,
   visibleCatalogTags,
   type CatalogTagTone,
-  isLocalLibraryModelId
+  isLocalLibraryModelId,
+  modelsFailureMessage,
+  type ModelControlCatalogModel,
+  type ModelControlProjection
 } from '@offgrid/application'
 import {
   filterAndSort,
@@ -57,11 +60,7 @@ import {
   type Credibility,
   type ModelKind
 } from '@offgrid/application'
-import {
-  type DesktopModelControlModel,
-  type DesktopModelControlProjection
-} from '@renderer/lib/model-control-application'
-import { desktopModelControl } from '@renderer/composition/model-control'
+import { modelControlClient } from '@renderer/lib/model-control-client'
 import {
   useModelDownloadProgress,
   type ModelDownloadProgressEvent
@@ -142,7 +141,20 @@ function Sel({
   )
 }
 
-type ModelEntry = DesktopModelControlModel
+type ModelEntry = Omit<ModelControlCatalogModel, 'artifacts' | 'imageModes' | 'tags'> & {
+  artifacts: Array<ModelControlCatalogModel['artifacts'][number]>
+  imageModes?: string[]
+  tags?: string[]
+}
+
+function mutableCatalogModel(model: ModelControlCatalogModel): ModelEntry {
+  return {
+    ...model,
+    artifacts: [...model.artifacts],
+    imageModes: model.imageModes ? [...model.imageModes] : undefined,
+    tags: model.tags ? [...model.tags] : undefined
+  }
+}
 
 interface UseCase {
   id: string
@@ -330,10 +342,10 @@ export function ModelsScreen({
   const [activeIds, setActiveIds] = useState<Set<string>>(new Set())
   const isActive = (id: string): boolean => activeIds.has(id)
   const applyModelControlProjection = useCallback(
-    (projection: DesktopModelControlProjection): void => {
-      setKinds(projection.kinds)
-      setModels(projection.models)
-      setInstalled(projection.installed)
+    (projection: ModelControlProjection): void => {
+      setKinds([...projection.kinds])
+      setModels(projection.models.map(mutableCatalogModel))
+      setInstalled([...projection.installed])
       setActiveIds(new Set(projection.activeIds))
       setActiveKind((current) =>
         current === 'storage' || projection.kinds.includes(current)
@@ -344,8 +356,10 @@ export function ModelsScreen({
     []
   )
   const refreshModelControl = useCallback(async (): Promise<void> => {
-    const result = await desktopModelControl.execute({ type: 'refresh' })
-    if (result.status === 'completed') applyModelControlProjection(result.projection)
+    const outcome = await modelControlClient.control({ type: 'refresh' })
+    if (outcome.ok && outcome.value.status === 'completed') {
+      applyModelControlProjection(outcome.value.projection)
+    }
   }, [applyModelControlProjection])
   const [switching, setSwitching] = useState<string | null>(null)
   const [switchError, setSwitchError] = useState<string | null>(null)
@@ -436,8 +450,10 @@ export function ModelsScreen({
 
   const cancelDownload = (id: string): void => {
     setProgress((p) => withoutProgressEntry(p, id))
-    void desktopModelControl.execute({ type: 'cancel-download', modelId: id }).then((result) => {
-      if (result.status === 'cancelled') applyModelControlProjection(result.projection)
+    void modelControlClient.control({ type: 'cancel-download', modelId: id }).then((outcome) => {
+      if (outcome.ok && outcome.value.status === 'cancelled') {
+        applyModelControlProjection(outcome.value.projection)
+      }
     })
   }
   const download = (id: string): void => {
@@ -445,7 +461,20 @@ export function ModelsScreen({
     // left a refused request showing a spinner at 0% forever. The main process moves it to
     // 'downloading' when bytes actually start, and to 'failed' if it never gets that far.
     setProgress((p) => ({ ...p, [id]: { percent: 0, status: 'queued' } }))
-    void desktopModelControl.execute({ type: 'download', modelId: id }).then((result) => {
+    void modelControlClient.control({ type: 'download', modelId: id }).then((outcome) => {
+      if (!outcome.ok) {
+        setProgress((current) => ({
+          ...current,
+          [id]: {
+            ...current[id],
+            percent: 0,
+            status: 'failed',
+            error: modelsFailureMessage(outcome.failure)
+          }
+        }))
+        return
+      }
+      const result = outcome.value
       if (result.status === 'completed') {
         applyModelControlProjection(result.projection)
         return
@@ -454,17 +483,6 @@ export function ModelsScreen({
         setProgress((p) => withoutProgressEntry(p, id))
         applyModelControlProjection(result.projection)
         return
-      }
-      if (result.status === 'failed') {
-        // You cancelled it, so there is nothing to report: the download resolves unsuccessfully by
-        // design, and the progress channel has already cleared the card. Treating that as a failure
-        // put a red "cancelled" box under a model you had just chosen to stop.
-        // A refusal also arrives on the progress channel; recording it here too means the card
-        // still tells the truth if this window was not listening when the event went out.
-        setProgress((p) => ({
-          ...p,
-          [id]: { ...p[id], percent: 0, status: 'failed', error: result.error }
-        }))
       }
     })
   }
@@ -476,8 +494,11 @@ export function ModelsScreen({
     if (!window.confirm(`Delete "${label}"? This removes its files from disk.`)) return
     setDeleting(id)
     try {
-      const result = await desktopModelControl.execute({ type: 'remove', modelId: id })
-      if (result.status === 'completed') applyModelControlProjection(result.projection)
+      const outcome = await modelControlClient.control({ type: 'remove', modelId: id })
+      if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
+      if (outcome.value.status === 'completed') {
+        applyModelControlProjection(outcome.value.projection)
+      }
     } finally {
       setDeleting(null)
     }
@@ -489,17 +510,18 @@ export function ModelsScreen({
     try {
       const surface = modelControlSurfaceForKind(activeKind)
       if (!surface) throw new Error(`Unsupported model control kind: ${activeKind}`)
-      let result = await desktopModelControl.execute({ type: 'activate', modelId: id, surface })
+      let outcome = await modelControlClient.control({ type: 'activate', modelId: id, surface })
+      if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
+      let result = outcome.value
       if (result.status === 'confirmation_required') {
-        if (!window.confirm(`${result.message}\n\nLoad it anyway?`)) return
-        result = await desktopModelControl.execute({
-          type: 'activate',
-          modelId: id,
-          surface,
-          overrideMemory: true
+        if (!window.confirm(`${result.confirmation.message}\n\nLoad it anyway?`)) return
+        outcome = await modelControlClient.control({
+          type: 'confirm-activation',
+          confirmationId: result.confirmation.confirmationId
         })
+        if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
+        result = outcome.value
       }
-      if (result.status === 'failed') setSwitchError(`Couldn't switch: ${result.error}`)
       if (result.status === 'completed') applyModelControlProjection(result.projection)
     } catch (e) {
       setSwitchError(e instanceof Error ? e.message : "Couldn't switch model")
@@ -516,8 +538,8 @@ export function ModelsScreen({
   // filtered grid - follows on the deferred value, so a keystroke never waits on the list.
   const deferredQuery = useDeferredValue(query)
   const searchingMode = searchEnabled && deferredQuery.trim().length >= 2
-  const totalBytes = (m: { files?: { sizeBytes?: number }[] }): number =>
-    (m.files || []).reduce((s, f) => s + (f.sizeBytes || 0), 0)
+  const totalBytes = (m: { artifacts: readonly { sizeBytes?: number }[] }): number =>
+    m.artifacts.reduce((s, f) => s + (f.sizeBytes || 0), 0)
 
   useEffect(() => {
     const q = deferredQuery.trim()
@@ -579,17 +601,20 @@ export function ModelsScreen({
   // Tags offered as filter chips — every tag present in this tab's models.
   const availableTags = useMemo(() => collectTags(list), [list])
 
-  const displayedCatalog = useMemo(
-    () =>
-      filterAndSort(
-        list.map((m) => ({
+  const displayedCatalog = useMemo(() => {
+    const byId = new Map(list.map((model) => [model.id, model]))
+    return filterAndSort(
+      list.map((m) => ({
           ...m,
           org: m.org ?? '',
           params: m.params ?? parseParamCount(m.name) ?? undefined,
+          files: m.artifacts,
           credibility: determineCredibility((m.id || '').split('/')[0]!)
         })),
-        filterState
-      )
+      filterState
+    )
+      .map((model) => byId.get(model.id))
+      .filter((model): model is ModelEntry => model !== undefined)
         .filter((m) => sizeBucket == null || totalBytes(m) <= sizeBucket * 1e9)
         .filter(
           (m) =>
@@ -604,7 +629,8 @@ export function ModelsScreen({
             rank(a) - rank(b) ||
             catalogEntryRank(a, recommendedImageId) - catalogEntryRank(b, recommendedImageId)
           )
-        }),
+        })
+  },
     [
       list,
       filterState,
@@ -615,8 +641,7 @@ export function ModelsScreen({
       activeIds,
       installed,
       recommendedImageId
-    ]
-  )
+    ])
 
   const tabs = internalTabRoutes('models').filter(
     ({ id }) => id === 'storage' || kinds.includes(id)
@@ -633,7 +658,7 @@ export function ModelsScreen({
   // Four-way browse chip: only a model past the AGGRESSIVE ceiling reads "won't
   // fit"; 55-82%-of-RAM models read "tight" and stay loadable (Load anyway) — the
   // never-block posture, more accurate than the old 3-way "may not fit".
-  const ramTier = (m: { files?: { sizeBytes?: number }[] }): FitTier => {
+  const ramTier = (m: ModelEntry): FitTier => {
     if (!ramGb) return 'easy'
     const gb = totalBytes(m) / 1e9
     if (!gb) return 'easy'
@@ -641,7 +666,7 @@ export function ModelsScreen({
   }
 
   const renderCard = (
-    m: ModelEntry & { credibility?: string; params?: number; org?: string },
+    m: ModelEntry,
     isHf = false
   ): React.JSX.Element => {
     const isInstalled = installed.includes(m.id)
@@ -1135,9 +1160,8 @@ export function ModelsScreen({
                         name: r.name,
                         kind: activeKind as ModelKind,
                         org: r.org,
-                        files: [],
-                        params: r.params ?? undefined,
-                        credibility: r.credibility
+                        artifacts: [],
+                        params: r.params ?? undefined
                       },
                       true
                     )

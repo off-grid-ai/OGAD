@@ -6,12 +6,13 @@ import type { ComputerUseActiveModelProjection } from '../../../shared/computer-
 import { openModelSettingsPanel } from '@renderer/lib/model-settings-panel'
 import { SettingsSelect } from './SettingsSelect'
 import {
-  type DesktopModelControlModel,
-  type DesktopModelControlProjection
-} from '@renderer/lib/model-control-application'
-import { desktopModelControl } from '@renderer/composition/model-control'
+  modelsFailureMessage,
+  type ModelControlCatalogModel,
+  type ModelControlProjection
+} from '@offgrid/application'
+import { modelControlClient } from '@renderer/lib/model-control-client'
 
-type ModelEntry = DesktopModelControlModel
+type ModelEntry = ModelControlCatalogModel
 
 const MODALITIES: {
   label: string
@@ -42,16 +43,24 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
   const [unload, setUnload] = useState<Record<string, UnloadStatus>>({})
   const [computerUse, setComputerUse] = useState<ComputerUseActiveModelProjection | null>(null)
 
-  const applyProjection = useCallback((projection: DesktopModelControlProjection): void => {
-    setModels(projection.models)
-    setInstalled(projection.installed)
-    setActive(projection.active)
-    setComputerUse(projection.computerUse)
+  const applyProjection = useCallback((projection: ModelControlProjection): void => {
+    setModels([...projection.models])
+    setInstalled([...projection.installed])
+    setActive(
+      Object.fromEntries(
+        Object.entries(projection.active).map(([surface, value]) => [surface, value.modelId])
+      )
+    )
   }, [])
 
   const load = useCallback(async () => {
-    const result = await desktopModelControl.execute({ type: 'refresh' })
-    if (result.status === 'completed') applyProjection(result.projection)
+    const [outcome, computerUseProjection] = await Promise.all([
+      modelControlClient.control({ type: 'refresh' }),
+      window.api.getComputerUseActiveModels()
+    ])
+    if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
+    if (outcome.value.status === 'completed') applyProjection(outcome.value.projection)
+    setComputerUse(computerUseProjection)
   }, [applyProjection])
   useEffect(() => {
     void load()
@@ -73,12 +82,13 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     setBusy(m.id)
     clearUnloadStatus(mode) // re-selecting reloads this modality on next use
     try {
-      const result = await desktopModelControl.execute({
+      const outcome = await modelControlClient.control({
         type: 'activate',
         modelId: m.id,
         surface: mode
       })
-      if (result.status === 'completed') applyProjection(result.projection)
+      if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
+      if (outcome.value.status === 'completed') applyProjection(outcome.value.projection)
     } finally {
       setBusy(null)
     }
@@ -88,12 +98,13 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     if (!modelId) return
     setBusy(modelId)
     try {
-      const result = await desktopModelControl.execute({
+      const outcome = await modelControlClient.control({
         type: 'activate',
         modelId,
         surface: 'computer_use'
       })
-      if (result.status === 'completed') applyProjection(result.projection)
+      if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
+      if (outcome.value.status === 'completed') applyProjection(outcome.value.projection)
     } finally {
       setBusy(null)
     }
@@ -104,8 +115,9 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
   const unloadModel = async (mode: PickerMode): Promise<void> => {
     setUnloadStatus(mode, 'unloading')
     try {
-      const result = await desktopModelControl.execute({ type: 'unload', surface: mode })
-      if (result.status === 'completed') applyProjection(result.projection)
+      const outcome = await modelControlClient.control({ type: 'unload', surface: mode })
+      if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
+      if (outcome.value.status === 'completed') applyProjection(outcome.value.projection)
       setUnloadStatus(mode, 'unloaded')
     } catch (e) {
       console.error('[models] unload failed', e)

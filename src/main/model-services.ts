@@ -1,16 +1,14 @@
 import { randomUUID } from 'crypto'
 import os from 'node:os'
 import {
-  localCatalogRuntimeModels,
-  createModelWorkspace,
   decodeModelRouteId,
+  localCatalogRuntimeModels,
   runtimeModelRouteId,
   type ModelInventoryAdapter,
   type GenerationAdapter,
   type ModelModality,
   type ModelSelectionStore,
-  type ModelReasoningMetadata,
-  type ModelWorkspace,
+  type ModelWorkspacePorts,
   type RuntimeModel
 } from '@offgrid/models'
 import {
@@ -37,68 +35,15 @@ import { getResidencyMode } from './runtime-residency'
 import './models-manager'
 import { desktopModelManagerPorts } from './model-manager-ports'
 import { desktopModelLifecyclePorts } from './composition/model-lifecycle'
+import { refreshDesktopModels } from './composition/application-access'
+import {
+  desktopAdapterId,
+  type DesktopInventoryModel,
+  type DesktopModelWorkspacePorts
+} from './model-selection-adapter'
 
-interface DesktopInventoryModel {
-  id: string
-  familyId?: string
-  name?: string
-  kind?: string
-  files?: Array<{ name?: string; sizeBytes?: number; role?: string }>
-  availability?: 'ready' | 'coming_soon'
-  runtime?: string
-  engine?: string
-  remoteServerId?: string
-  remoteModelId?: string
-  remoteCapabilities?: {
-    supportsVision?: boolean
-    supportsToolCalling?: boolean
-    supportsThinking?: boolean
-  }
-  grounder?: boolean
-  artifactDelivery?: 'catalog' | 'runtime'
-}
+export { desktopAdapterId }
 
-interface DesktopModelWorkspacePorts {
-  listCatalog(): Promise<DesktopInventoryModel[]>
-  listInstalled(): Promise<string[]>
-  localTextRuntimeState(): Promise<{
-    ready: boolean
-    loaded: boolean
-    reasoning?: ModelReasoningMetadata
-    /** The window llama-server runs with; Shared bounds tool results to the room left in it. */
-    contextLength?: number
-  }>
-  localVoiceRuntimeState?(): Promise<{ installed: boolean; ready: boolean; error?: string }>
-  localTextLifecycle?: {
-    load(): Promise<void>
-    unload(): Promise<void>
-  }
-  projectTextSelection?(modelId: string): Promise<{ success: boolean; error?: string }>
-  residencySetting?(modality: 'image' | 'stt'): 'resident' | 'on-demand'
-}
-
-export function desktopAdapterId(source: 'local' | 'remote', modality: ModelModality): string {
-  const prefix = source === 'remote' ? 'desktop.remote-chat' : 'desktop.llama'
-  // Vision is a capability of the text runtime, not a second residency or
-  // selection authority. Keep legacy callers on the canonical text adapter.
-  if (modality === 'text' || modality === 'vision') return prefix
-  if (modality === 'computer_use') return `${prefix}.computer-use`
-  if (modality === 'image') return source === 'remote' ? 'desktop.remote-image' : 'desktop.image'
-  if (modality === 'voice') return source === 'remote' ? 'desktop.remote-voice' : 'desktop.tts'
-  if (modality === 'transcription') {
-    return source === 'remote' ? 'desktop.remote-transcription' : 'desktop.transcription'
-  }
-  if (modality === 'embedding') {
-    return source === 'remote' ? 'desktop.remote-embedding' : 'desktop.embedding'
-  }
-  return `${prefix}.${modality.replace('_', '-')}`
-}
-
-/**
- * Older Desktop selections can contain a primary filename. This read codec keeps
- * that compatibility at the adapter boundary. New writes use canonical inventory
- * ids; runtime adapters resolve those ids to their platform files.
- */
 export class LegacyDesktopModelIdCodec {
   private readonly canonicalByStored = new Map<string, string>()
 
@@ -116,8 +61,7 @@ export class LegacyDesktopModelIdCodec {
         this.canonicalByStored.set(model.familyId, model.id)
       }
       const primary = model.files?.find((file) => file.role !== 'mmproj')?.name
-      if (!primary) continue
-      this.canonicalByStored.set(primary, model.id)
+      if (primary) this.canonicalByStored.set(primary, model.id)
     }
   }
 
@@ -153,23 +97,18 @@ export class DesktopModelSelectionStore implements ModelSelectionStore {
   indexRoutes(models: readonly RuntimeModel[]): void {
     this.routeBySelection.clear()
     for (const model of models) {
-      const routeId = model.routeId ?? runtimeModelRouteId(model)
-      this.routeBySelection.set(`${model.modality}:${model.id}`, routeId)
+      this.routeBySelection.set(
+        `${model.modality}:${model.id}`,
+        model.routeId ?? runtimeModelRouteId(model)
+      )
     }
   }
 
-  /**
-   * Two file writes and nothing else: the canonical route, and the native runtime's legacy
-   * projection of it (active-model.json for the chat engine; active-modalities.json for the rest).
-   * Which route is valid was decided by the workspace before this is called.
-   */
   async write(modality: ModelModality, modelId: string | null): Promise<void> {
     const route = modelId ? decodeModelRouteId(modelId) : null
     const nativeModelId = route?.modelId ?? modelId
     if (modality === 'text') {
       if (!nativeModelId) this.routes.clearLegacyTextConfig()
-      // A remote route leaves the legacy file alone: it remembers the last local model, which is
-      // the route "Use remote server: off" returns to.
       else if (!route?.serverId && this.projectTextSelection) {
         const result = await this.projectTextSelection(nativeModelId)
         if (!result.success) throw new Error(result.error ?? 'The model could not be selected.')
@@ -204,8 +143,7 @@ class DesktopInventorySource {
       this.ports.listCatalog(),
       this.ports.listInstalled(),
       this.ports.localTextRuntimeState(),
-      this.ports.localVoiceRuntimeState?.() ??
-        Promise.resolve({ installed: false, ready: false })
+      this.ports.localVoiceRuntimeState?.() ?? Promise.resolve({ installed: false, ready: false })
     ])
     this.ids.index(catalog)
     // Shared owns the local inventory projection (installed, ready, loaded, memory, residency,
@@ -253,10 +191,20 @@ class DesktopModelInventoryAdapter implements ModelInventoryAdapter {
   }
 }
 
-export function createDesktopModelWorkspace(
+/**
+ * The workspace's own I/O plus the adapters this device can run. Nothing here is an owner: shared's
+ * composition root composes the ONE `ModelWorkspace` from these ports and registers these adapters
+ * into it, which is why desktop no longer builds or holds an instance of its own.
+ */
+export type DesktopModelPlatformPorts = ModelWorkspacePorts & {
+  readonly inventoryAdapters: readonly ModelInventoryAdapter[]
+  readonly generationAdapters: readonly GenerationAdapter[]
+}
+
+export function createDesktopModelWorkspacePorts(
   ports: DesktopModelWorkspacePorts,
   selectionPersistence: DesktopModelSelectionPersistence = desktopModelSelectionPersistence
-): ModelWorkspace {
+): DesktopModelPlatformPorts {
   const ids = new LegacyDesktopModelIdCodec()
   const selections = new DesktopModelSelectionStore(
     ids,
@@ -264,8 +212,7 @@ export function createDesktopModelWorkspace(
     ports.projectTextSelection
   )
   const lifecycleAdapters = new Map<string, GenerationAdapter>()
-  let lifecycleWorkspace: ReturnType<typeof createModelWorkspace> | null = null
-  const workspace = createModelWorkspace({
+  const workspacePorts: ModelWorkspacePorts = {
     selection: selections,
     memory: {
       current: () => ({
@@ -280,13 +227,13 @@ export function createDesktopModelWorkspace(
     remoteServerId: randomUUID,
     localFallback: (modality) => {
       if (modality !== 'text') return undefined
-      const id = desktopModelSelectionPersistence.readLegacyTextConfig().id
+      const id = selectionPersistence.readLegacyTextConfig().id
       return typeof id === 'string' ? id : undefined
     },
-    lifecycle: () => {
-      if (!lifecycleWorkspace) throw new Error('Desktop model workspace is not initialized.')
-      return desktopModelLifecyclePorts(lifecycleWorkspace, lifecycleAdapters)
-    },
+    // Shared composes these on demand. The lifecycle ports reach routing through the Models facade,
+    // so building them needs no workspace - and the residency reads shared offers this factory are
+    // not needed here, because every capability these ports use is routing.
+    lifecycle: () => desktopModelLifecyclePorts(lifecycleAdapters),
     remoteInventory: {
       adapterId: (modality) => desktopAdapterId('remote', modality),
       // Inventory never waits on the network: answer from the cache, probe in the background, and
@@ -297,16 +244,20 @@ export function createDesktopModelWorkspace(
         const known = peekRemoteReasoningMetadata(connection)
         if (!known) {
           void remoteReasoningMetadata(connection)
-            .then(() => lifecycleWorkspace?.refresh())
-            .catch(() => undefined)
+            .then(refreshDesktopModels)
+            .catch((cause) => {
+              console.error('[models] Failed to refresh remote reasoning metadata:', cause)
+            })
         }
         return known
       }
     }
-  })
-  lifecycleWorkspace = workspace
-  // Adapters register THROUGH the workspace, not through its raw routing and generation owners:
-  // reaching inside was the last thing keeping the workspace itself in the platform ports.
+  }
+  // Adapters are DECLARED here and registered by shared's root into the workspace it composes.
+  // Registering them ourselves would mean holding a workspace to register them through, which is
+  // the exact instance this app must not hold.
+  const inventoryAdapters: ModelInventoryAdapter[] = []
+  const generationAdapters: GenerationAdapter[] = []
   const source = new DesktopInventorySource(ports, ids, selections)
   for (const adapterId of [
     'desktop.llama',
@@ -326,7 +277,7 @@ export function createDesktopModelWorkspace(
     'desktop.embedding',
     'desktop.remote-embedding'
   ]) {
-    workspace.registerInventoryAdapter(new DesktopModelInventoryAdapter(adapterId, source))
+    inventoryAdapters.push(new DesktopModelInventoryAdapter(adapterId, source))
   }
   const generationObservations = desktopGenerationObservations
   for (const adapterId of [
@@ -341,7 +292,7 @@ export function createDesktopModelWorkspace(
       ports.localTextLifecycle
     )
     lifecycleAdapters.set(adapterId, adapter)
-    workspace.registerGenerationAdapter(adapter)
+    generationAdapters.push(adapter)
   }
   const imageAdapter = new DesktopImageGenerationAdapter()
   const voiceAdapter = new DesktopVoiceGenerationAdapter()
@@ -349,27 +300,25 @@ export function createDesktopModelWorkspace(
   const embeddingAdapter = new DesktopEmbeddingGenerationAdapter()
   for (const adapter of [imageAdapter, voiceAdapter, transcriptionAdapter, embeddingAdapter]) {
     lifecycleAdapters.set(adapter.id, adapter)
-    workspace.registerGenerationAdapter(adapter)
+    generationAdapters.push(adapter)
   }
-  workspace.registerGenerationAdapter(new DesktopRemoteImageGenerationAdapter())
-  workspace.registerGenerationAdapter(new DesktopRemoteVoiceGenerationAdapter())
-  workspace.registerGenerationAdapter(new DesktopRemoteTranscriptionGenerationAdapter())
-  workspace.registerGenerationAdapter(new DesktopRemoteEmbeddingGenerationAdapter())
+  generationAdapters.push(new DesktopRemoteImageGenerationAdapter())
+  generationAdapters.push(new DesktopRemoteVoiceGenerationAdapter())
+  generationAdapters.push(new DesktopRemoteTranscriptionGenerationAdapter())
+  generationAdapters.push(new DesktopRemoteEmbeddingGenerationAdapter())
   for (const adapterId of [
     'desktop.remote-chat',
     'desktop.remote-chat.classifier',
     'desktop.remote-chat.tool-selection',
     'desktop.remote-chat.computer-use'
   ]) {
-    workspace.registerGenerationAdapter(
-      new DesktopRemoteGenerationAdapter(generationObservations, adapterId)
-    )
+    generationAdapters.push(new DesktopRemoteGenerationAdapter(generationObservations, adapterId))
   }
 
-  return workspace
+  return { ...workspacePorts, inventoryAdapters, generationAdapters }
 }
 
-export const desktopModelWorkspace = createDesktopModelWorkspace({
+export const desktopModelWorkspacePorts = createDesktopModelWorkspacePorts({
   listCatalog: async () => {
     const catalog = await desktopModelManagerPorts.getCatalog()
     return catalog.models as DesktopInventoryModel[]

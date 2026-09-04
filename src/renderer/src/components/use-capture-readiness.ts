@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import type {
-  CaptureReadinessApplicationService,
-  CaptureReadinessProjection
-} from '@offgrid/application'
-import { captureReadinessApplication } from '@renderer/composition/capture-readiness'
+import type { CaptureReadinessProjection } from '@offgrid/application'
+import { captureReadinessClient } from '@renderer/lib/capture-readiness-client'
 import type { ProgressLike } from '@offgrid/ui'
 import { useModelDownloadProgress } from '@renderer/hooks/useModelDownloadProgress'
 
@@ -17,19 +14,17 @@ export interface CaptureReadinessController {
 export function useCaptureReadiness(isPro: boolean): CaptureReadinessController {
   const [projection, setProjection] = useState<CaptureReadinessProjection | null>(null)
   const [progress, setProgress] = useState<ProgressLike | null>(null)
-  const service: CaptureReadinessApplicationService = captureReadinessApplication()
-
   const refresh = useCallback(async (): Promise<void> => {
     if (!isPro || !window.api.proInvoke) {
       setProjection(null)
       return
     }
     try {
-      setProjection(await service.read())
+      setProjection(await captureReadinessClient.projection())
     } catch (error) {
       console.error('Failed to check capture vision readiness:', error)
     }
-  }, [isPro, service])
+  }, [isPro])
 
   useEffect(() => {
     void refresh()
@@ -58,11 +53,7 @@ export function useCaptureReadiness(isPro: boolean): CaptureReadinessController 
   const repair = useCallback(async (): Promise<void> => {
     if (projection?.kind === 'missing-projector') setProgress({ percent: 0 })
     try {
-      const result = await service.repair()
-      if (result.status === 'failed') {
-        setProgress(null)
-        console.error('Failed to repair capture vision readiness:', result.error)
-      }
+      if (projection) await captureReadinessClient.repair(projection)
     } catch (error) {
       setProgress(null)
       console.error('Failed to repair capture vision readiness:', error)
@@ -70,7 +61,7 @@ export function useCaptureReadiness(isPro: boolean): CaptureReadinessController 
       if (projection?.kind === 'missing-projector') setProgress(null)
       void refresh()
     }
-  }, [projection?.kind, refresh, service])
+  }, [projection, refresh])
 
   return { projection, progress, repair }
 }

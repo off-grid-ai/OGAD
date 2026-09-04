@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { HardDrives, Trash, ArrowsClockwise, X, Broom } from '@phosphor-icons/react'
+import { HardDrives, Trash, ArrowsClockwise, Broom } from '@phosphor-icons/react'
 import { cn } from '@renderer/lib/utils'
 import { modelKindLabel } from '@renderer/lib/model-kind-labels'
-import { companionDownloadLabel } from '@renderer/lib/download-label'
 import {
   modelSettingsTabForKind,
   openModelSettingsPanel,
@@ -10,16 +9,21 @@ import {
 } from '@renderer/lib/model-settings-panel'
 import { CacheCleanupControl } from './CacheCleanupControl'
 import { formatStorageBytes } from './storage-format'
-import { formatTransferSpeed } from '@offgrid/application'
-import { projectProgress } from '@offgrid/ui'
-import { downloadTimeRemaining } from '@renderer/lib/download-progress'
-import { type DesktopModelControlProjection } from '@renderer/lib/model-control-application'
-import { desktopModelControl } from '@renderer/composition/model-control'
+import {
+  isActiveDownloadStatus,
+  isFailedDownloadStatus,
+  modelsFailureMessage,
+  type DownloadDurabilityHealth,
+  type ModelControlProjection,
+  type PublicDownloadInfo
+} from '@offgrid/application'
+import { modelControlClient } from '@renderer/lib/model-control-client'
 import { modelControlSurfaceForKind } from '@offgrid/application'
 import {
   useModelDownloadProgress,
   type ModelDownloadProgressEvent
 } from '@renderer/hooks/useModelDownloadProgress'
+import { ModelDownloadRows, type DownloadEntry } from './ModelDownloadRows'
 
 interface ModelDiskEntry {
   id: string
@@ -36,22 +40,6 @@ interface StorageInfo {
   models: ModelDiskEntry[]
   orphans: { name: string; bytes: number }[]
 }
-interface DownloadEntry {
-  modelId: string
-  percent?: number
-  status?: 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled'
-  currentFile?: string
-  downloadedMB?: string
-  totalMB?: string
-  downloadedBytes?: number
-  totalBytes?: number
-  bytesPerSecond?: number
-  error?: string
-}
-interface DownloadRecoveryHealth {
-  status: 'healthy' | 'degraded'
-  error?: string
-}
 interface OrphanCleanupResult {
   success: boolean
   count: number
@@ -62,8 +50,7 @@ interface OrphanCleanupResult {
 interface ModelActionNotice {
   type: 'confirmation' | 'error'
   message: string
-  modelId?: string
-  kind?: string
+  confirmationId?: string
 }
 
 // Group order for the by-type storage layout. Display labels come from the shared
@@ -78,7 +65,7 @@ export function StoragePanel(): React.ReactElement {
   const [downloads, setDownloads] = useState<DownloadEntry[]>([])
   const [activeIds, setActiveIds] = useState<Set<string>>(new Set())
   const [storageError, setStorageError] = useState<string | null>(null)
-  const [recoveryHealth, setRecoveryHealth] = useState<DownloadRecoveryHealth>({
+  const [recoveryHealth, setRecoveryHealth] = useState<DownloadDurabilityHealth>({
     status: 'healthy'
   })
   const [cleanupFailure, setCleanupFailure] = useState<OrphanCleanupResult | null>(null)
@@ -87,7 +74,7 @@ export function StoragePanel(): React.ReactElement {
   const liveProgress = useRef(new Map<string, DownloadEntry>())
 
   const applyModelControlProjection = useCallback(
-    (projection: DesktopModelControlProjection): void =>
+    (projection: ModelControlProjection): void =>
       setActiveIds(new Set(projection.activeIds)),
     []
   )
@@ -102,19 +89,39 @@ export function StoragePanel(): React.ReactElement {
         error instanceof Error ? error.message : 'Your model library could not be read.'
       )
     }
+    let control: ModelControlProjection | null = null
     try {
-      applyModelControlProjection(await desktopModelControl.project())
+      control = await modelControlClient.projection()
+      applyModelControlProjection(control)
     } catch {
       // Never keep a stale active identity when the canonical projection is unavailable.
       setActiveIds(new Set())
     }
     try {
-      const [d, health] = await Promise.all([api.listDownloads(), api.getDownloadRecoveryHealth()])
+      const d = control?.downloads ?? []
       if (Array.isArray(d)) {
-        const registry = (d as DownloadEntry[]).map((entry) => ({
-          ...entry,
-          ...liveProgress.current.get(entry.modelId)
-        }))
+        const registry = (d as readonly PublicDownloadInfo[]).map(
+          (entry): DownloadEntry => ({
+            downloadId: entry.downloadId,
+            modelId: entry.modelId,
+            status: entry.status,
+            currentFile: entry.fileName,
+            downloadedBytes: entry.bytesDownloaded,
+            totalBytes: entry.totalBytes,
+            downloadedMB: (entry.bytesDownloaded / 1024 / 1024).toFixed(1),
+            totalMB: (entry.totalBytes / 1024 / 1024).toFixed(1),
+            ...(entry.totalBytes > 0
+              ? {
+                  percent: Math.min(
+                    100,
+                    Math.round((entry.bytesDownloaded / entry.totalBytes) * 100)
+                  )
+                }
+              : {}),
+            error: entry.reason,
+            ...liveProgress.current.get(entry.modelId)
+          })
+        )
         const known = new Set(registry.map((entry) => entry.modelId))
         setDownloads([
           ...registry,
@@ -122,14 +129,15 @@ export function StoragePanel(): React.ReactElement {
         ])
       }
       setRecoveryHealth(
-        health && (health.status === 'healthy' || health.status === 'degraded')
-          ? (health as DownloadRecoveryHealth)
-          : { status: 'degraded', error: 'Download recovery status is unavailable.' }
+        control?.downloadDurability ?? {
+          status: 'degraded',
+          reason: 'Download recovery status is unavailable.'
+        }
       )
     } catch (error) {
       setRecoveryHealth({
         status: 'degraded',
-        error: error instanceof Error ? error.message : 'Download recovery status is unavailable.'
+        reason: error instanceof Error ? error.message : 'Download recovery status is unavailable.'
       })
     }
   }, [api, applyModelControlProjection])
@@ -163,7 +171,8 @@ export function StoragePanel(): React.ReactElement {
     if (!window.confirm(`Delete "${name}"? This removes its files from disk.`)) return
     setBusy(id)
     try {
-      await api.deleteModel(id)
+      const outcome = await modelControlClient.control({ type: 'remove', modelId: id })
+      if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
       await refresh()
     } finally {
       setBusy(null)
@@ -171,27 +180,29 @@ export function StoragePanel(): React.ReactElement {
   }
   // Activate a downloaded model straight from Storage. One call — the main process
   // routes by kind (chat LLM vs image/voice/STT default). The UI never branches.
-  const use = async (id: string, kind?: string, overrideMemory = false): Promise<void> => {
+  const use = async (id: string, kind?: string, confirmationId?: string): Promise<void> => {
     setBusy(id)
     try {
       const surface = modelControlSurfaceForKind(kind ?? '')
-      const result = await desktopModelControl.execute({
-        type: 'activate',
-        modelId: id,
-        ...(surface ? { surface } : {}),
-        ...(overrideMemory ? { overrideMemory: true } : {})
-      })
+      if (!confirmationId && !surface) {
+        throw new Error(`Unsupported model control kind: ${kind ?? 'unknown'}`)
+      }
+      const outcome = await modelControlClient.control(
+        confirmationId
+          ? { type: 'confirm-activation', confirmationId }
+          : { type: 'activate', modelId: id, surface: surface! }
+      )
+      if (!outcome.ok) {
+        setModelActionNotice({ type: 'error', message: modelsFailureMessage(outcome.failure) })
+        return
+      }
+      const result = outcome.value
       if (result.status === 'confirmation_required') {
         setModelActionNotice({
           type: 'confirmation',
-          message: result.message,
-          modelId: id,
-          kind
+          message: result.confirmation.message,
+          confirmationId: result.confirmation.confirmationId
         })
-        return
-      }
-      if (result.status === 'failed') {
-        setModelActionNotice({ type: 'error', message: result.error })
         return
       }
       applyModelControlProjection(result.projection)
@@ -233,8 +244,18 @@ export function StoragePanel(): React.ReactElement {
   const retry = async (id: string): Promise<void> => {
     setBusy(id)
     try {
-      await api.retryDownload(id)
+      const outcome = await modelControlClient.control({ type: 'retry-download', modelId: id })
+      if (!outcome.ok) {
+        setModelActionNotice({ type: 'error', message: modelsFailureMessage(outcome.failure) })
+        return
+      }
+      setModelActionNotice(null)
       await refresh()
+    } catch (error) {
+      setModelActionNotice({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'The download could not be retried.'
+      })
     } finally {
       setBusy(null)
     }
@@ -242,9 +263,9 @@ export function StoragePanel(): React.ReactElement {
   const cancel = async (id: string): Promise<void> => {
     setBusy(id)
     try {
-      const result = await desktopModelControl.execute({ type: 'cancel-download', modelId: id })
-      if (result.status === 'failed') {
-        setModelActionNotice({ type: 'error', message: result.error })
+      const outcome = await modelControlClient.control({ type: 'cancel-download', modelId: id })
+      if (!outcome.ok) {
+        setModelActionNotice({ type: 'error', message: modelsFailureMessage(outcome.failure) })
         return
       }
       setModelActionNotice(null)
@@ -261,8 +282,18 @@ export function StoragePanel(): React.ReactElement {
   const clearOne = async (id: string): Promise<void> => {
     setBusy(id)
     try {
-      await api.clearDownload(id)
+      const outcome = await modelControlClient.control({ type: 'clear-download', modelId: id })
+      if (!outcome.ok) {
+        setModelActionNotice({ type: 'error', message: modelsFailureMessage(outcome.failure) })
+        return
+      }
+      setModelActionNotice(null)
       await refresh()
+    } catch (error) {
+      setModelActionNotice({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'The download could not be cleared.'
+      })
     } finally {
       setBusy(null)
     }
@@ -270,8 +301,18 @@ export function StoragePanel(): React.ReactElement {
   const clearAllIncomplete = async (): Promise<void> => {
     setBusy('clear-dl')
     try {
-      await api.clearDownloads()
+      const outcome = await modelControlClient.control({ type: 'clear-inactive-downloads' })
+      if (!outcome.ok) {
+        setModelActionNotice({ type: 'error', message: modelsFailureMessage(outcome.failure) })
+        return
+      }
+      setModelActionNotice(null)
       await refresh()
+    } catch (error) {
+      setModelActionNotice({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'The downloads could not be cleared.'
+      })
     } finally {
       setBusy(null)
     }
@@ -279,10 +320,10 @@ export function StoragePanel(): React.ReactElement {
   const openModelSettings = (kind?: string): void => {
     openModelSettingsPanel(modelSettingsTabForKind(kind))
   }
-  const active = downloads.filter((d) => d.status === 'downloading' || d.status === 'queued')
-  const runningCount = active.filter((d) => d.status === 'downloading').length
-  const queuedCount = active.filter((d) => d.status === 'queued').length
-  const incomplete = downloads.filter((d) => d.status === 'failed' || d.status === 'cancelled')
+  const active = downloads.filter((d) => isActiveDownloadStatus(d.status))
+  const incomplete = downloads.filter(
+    (download) => isFailedDownloadStatus(download.status) || download.status === 'cancelled'
+  )
   const orphanBytes = (info?.orphans ?? []).reduce((s, o) => s + o.bytes, 0)
   const usedFrac =
     info && info.totalBytes + info.freeBytes > 0
@@ -319,7 +360,7 @@ export function StoragePanel(): React.ReactElement {
           className="border-b border-red-900/60 px-4 py-2 text-[11px] text-red-400"
         >
           Current downloads can continue, but interrupted downloads cannot resume after restart.
-          <div className="mt-0.5 text-[10px] text-neutral-500">{recoveryHealth.error}</div>
+          <div className="mt-0.5 text-[10px] text-neutral-500">{recoveryHealth.reason}</div>
         </div>
       )}
 
@@ -335,11 +376,11 @@ export function StoragePanel(): React.ReactElement {
       {modelActionNotice && (
         <div role="alert" className="border-b border-red-900/60 px-4 py-2 text-[11px] text-red-400">
           <div>{modelActionNotice.message}</div>
-          {modelActionNotice.type === 'confirmation' && modelActionNotice.modelId && (
+          {modelActionNotice.type === 'confirmation' && modelActionNotice.confirmationId && (
             <div className="mt-1 flex gap-3">
               <button
                 type="button"
-                onClick={() => use(modelActionNotice.modelId!, modelActionNotice.kind, true)}
+                onClick={() => use('', undefined, modelActionNotice.confirmationId)}
                 className="underline hover:text-red-300"
               >
                 Load anyway
@@ -375,109 +416,15 @@ export function StoragePanel(): React.ReactElement {
         </div>
       </div>
 
-      {/* Active + interrupted downloads */}
-      {(active.length > 0 || incomplete.length > 0) && (
-        <div className="border-t border-neutral-800/40 px-4 py-2">
-          <div className="mb-1 flex items-center justify-between">
-            <span className="text-[10px] uppercase tracking-widest text-neutral-600">
-              Downloads
-            </span>
-            {active.length > 0 && (
-              <span className="text-[10px] text-neutral-600">
-                {runningCount} running · {queuedCount} queued
-              </span>
-            )}
-            {incomplete.length > 0 && (
-              <button
-                onClick={clearAllIncomplete}
-                disabled={busy === 'clear-dl'}
-                className="text-[10px] text-neutral-500 transition-colors hover:text-white disabled:opacity-50"
-              >
-                {busy === 'clear-dl' ? 'Clearing…' : `Clear ${incomplete.length} interrupted`}
-              </button>
-            )}
-          </div>
-          {active.map((d) => {
-            const progress = projectProgress(d)
-            const timeRemaining = downloadTimeRemaining(progress)
-            return (
-              <div key={d.modelId} className="flex items-center gap-3 py-1.5">
-                <div className="min-w-0 flex-1">
-                  <div className="truncate font-mono text-[11px] text-neutral-300">
-                    {d.modelId}
-                    {companionDownloadLabel(d.currentFile) && (
-                      // A companion-only fetch (e.g. adding a vision projector to a model
-                      // already on disk) — say so, or it reads as a full re-download.
-                      <span className="ml-1.5 rounded-sm border border-emerald-300/40 px-1 py-px text-[9px] uppercase tracking-wide text-emerald-300">
-                        {companionDownloadLabel(d.currentFile)} only
-                      </span>
-                    )}
-                  </div>
-                  {d.status === 'queued' ? (
-                    <div className="mt-0.5 text-[10px] text-neutral-500">Queued</div>
-                  ) : (
-                    <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-neutral-800">
-                      <div
-                        className="h-full w-full origin-left rounded-full bg-green-500 transition-transform duration-300 ease-out motion-reduce:transition-none"
-                        style={{ transform: `scaleX(${(progress.percentage ?? 0) / 100})` }}
-                      />
-                    </div>
-                  )}
-                  {d.status === 'downloading' ? (
-                    <div className="mt-1 text-[10px] tabular-nums text-neutral-500">
-                      {progress.totalBytes !== undefined
-                        ? `${formatStorageBytes(progress.currentBytes)} of ${formatStorageBytes(progress.totalBytes)}`
-                        : 'Total size unavailable'}
-                      {progress.bytesPerSecond !== undefined
-                        ? ` · ${formatTransferSpeed(progress.bytesPerSecond)}`
-                        : ''}
-                      {timeRemaining ? ` · ${timeRemaining}` : ''}
-                    </div>
-                  ) : null}
-                </div>
-                {d.status === 'downloading' && (
-                  <span className="font-mono text-[10px] text-neutral-500">
-                    {progress.determinate
-                      ? `${Math.round(progress.percentage ?? 0)}%`
-                      : 'Downloading'}
-                  </span>
-                )}
-                <button
-                  onClick={() => cancel(d.modelId)}
-                  className="rounded-md p-1 text-neutral-500 hover:text-white"
-                  aria-label={`Cancel ${d.modelId}`}
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            )
-          })}
-          {incomplete.map((d) => (
-            <div key={d.modelId} className="flex items-center gap-3 py-1.5">
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-mono text-[11px] text-neutral-300">{d.modelId}</div>
-                <div className="truncate text-[10px] text-neutral-500">{d.error ?? d.status}</div>
-              </div>
-              <button
-                onClick={() => retry(d.modelId)}
-                disabled={busy === d.modelId}
-                className="rounded-md border border-neutral-700 px-2 py-1 text-[10px] text-neutral-300 hover:border-green-500/60 hover:text-white disabled:opacity-50"
-              >
-                {busy === d.modelId ? '…' : 'Retry'}
-              </button>
-              <button
-                onClick={() => clearOne(d.modelId)}
-                disabled={busy === d.modelId}
-                aria-label="Dismiss"
-                title="Dismiss and delete the partial file"
-                className="rounded-md p-1 text-neutral-500 transition-colors hover:text-red-400 disabled:opacity-50"
-              >
-                <Trash className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      <ModelDownloadRows
+        active={active}
+        incomplete={incomplete}
+        busy={busy}
+        onCancel={cancel}
+        onRetry={retry}
+        onClear={clearOne}
+        onClearAll={clearAllIncomplete}
+      />
 
       {/* Installed models — grouped by type, each group a width-filling grid so
           the type and the active model per type are easy to spot. */}

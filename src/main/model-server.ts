@@ -58,7 +58,7 @@ import { docsText, docsHtml, openApiSpec } from './api-docs'
 import { handleMcpRequest } from './mcp-server'
 import { logActionTokenForDev } from './mcp-auth'
 import { llm, type LlmSettings } from './llm'
-import { modelsFailureMessage } from '@offgrid/application'
+import { modelControlSurfaceForKind, modelsFailureMessage } from '@offgrid/application'
 import { GATEWAY_HOST, GATEWAY_BIND_HOST, GATEWAY_PORT } from '../shared/ports'
 import { pickFreePort } from './free-port'
 import { guardProxyStreams } from './stream-guards'
@@ -70,7 +70,8 @@ import { gatewayAsyncRequests } from './composition/gateway'
 import {
   desktopModels,
   DesktopModelsOperationError,
-  generateWithDesktopModels
+  generateWithDesktopModels,
+  refreshDesktopModels
 } from './composition/application-access'
 
 const UPSTREAM_HOST = '127.0.0.1'
@@ -85,9 +86,15 @@ let server: http.Server | null = null
 
 async function liveGatewayModalities(imageAvailable: boolean): Promise<GatewayModalities> {
   try {
-    await desktopModels.refresh()
-  } catch {
-    /* unavailable model registry means optional modalities are not ready */
+    await refreshDesktopModels()
+  } catch (cause) {
+    // Gateway discovery can still answer for the always-available routes, but the degraded
+    // inventory must remain visible in the private diagnostic stream.
+    console.warn(
+      `[model-server] model inventory unavailable while projecting gateway modalities: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`
+    )
   }
   const models = desktopModels.snapshot()
   const transcription = models.active.transcription?.model
@@ -507,7 +514,7 @@ async function handleEmbeddings(
 // that and fold in the active image, speech (TTS), and transcription (STT) models.
 // Each entry carries a non-standard `kind` (chat/vision/image/speech/transcription).
 async function handleModelsList(res: http.ServerResponse): Promise<void> {
-  await desktopModels.refresh()
+  await refreshDesktopModels()
   // Voices are the one fact the workspace cannot know: they belong to the speech engine.
   let voices: string[] = []
   try {
@@ -1047,7 +1054,6 @@ export async function startModelServer(
         // Through the settings command, so a gateway client earns the same one atomic commit, one
         // publish and one superseding restart as the settings panel does. It used to call
         // `llm.setSettings` directly, which made this a second place deciding when to respawn.
-        const { desktopModels } = await import('./composition/application-access')
         const committed = await desktopModels.settings.save({
           patch: patch as Record<string, unknown>
         })
@@ -1088,26 +1094,27 @@ export async function startModelServer(
     if (url.startsWith('/v1/models/') || (url === '/v1/models' && method !== 'GET')) {
       void (async () => {
         try {
-          const mm = await import('./models-manager')
+          const control = desktopModels.snapshot().control
           if (url === '/v1/models/catalog' && method === 'GET')
-            return json(res, 200, await mm.getCatalog())
+            return json(res, 200, { kinds: control.kinds, models: control.models })
           if (url === '/v1/models/installed' && method === 'GET')
-            return json(res, 200, { installed: await mm.listInstalled() })
-          if (url === '/v1/models/active' && method === 'GET')
-            return json(res, 200, mm.getActiveModalities())
+            return json(res, 200, { installed: control.installed })
+          if (url === '/v1/models/active' && method === 'GET') return json(res, 200, control.active)
           if (url === '/v1/models/pull/status' && method === 'GET') {
             const id = (req.url || '').split('?')[1]?.match(/(?:^|&)id=([^&]+)/)?.[1]
             return json(
               res,
               200,
-              mm.downloadStatus(decodeURIComponent(id || '')) ?? { status: 'idle' }
+              control.downloads.find(
+                (download) => download.modelId === decodeURIComponent(id || '')
+              ) ?? { status: 'idle' }
             )
           }
           if (url === '/v1/models/pull' && method === 'POST') {
             const { id } = await readJson(req)
             if (!id) return json(res, 400, { error: 'id required' })
-            // Kick off async; clients poll /v1/models/pull/status?id=.
-            void mm.downloadModel(String(id))
+            const started = await desktopModels.control({ type: 'download', modelId: String(id) })
+            if (!started.ok) return json(res, 400, { error: modelsFailureMessage(started.failure) })
             return json(res, 202, {
               status: 'started',
               id,
@@ -1116,26 +1123,53 @@ export async function startModelServer(
           }
           if (url === '/v1/models/cancel' && method === 'POST') {
             const { id } = await readJson(req)
-            return json(res, 200, { cancelled: mm.cancelDownload(String(id)) })
+            const cancelled = await desktopModels.control({
+              type: 'cancel-download',
+              modelId: String(id)
+            })
+            if (!cancelled.ok)
+              return json(res, 400, { error: modelsFailureMessage(cancelled.failure) })
+            return json(res, 200, { cancelled: cancelled.value.status === 'cancelled' })
           }
           if (url === '/v1/models/activate' && method === 'POST') {
             const { id, kind } = await readJson(req)
             if (!id) return json(res, 400, { error: 'id required' })
-            const r = await mm.activateModel(
-              String(id),
-              typeof kind === 'string' ? kind : undefined
-            )
-            return json(res, r.success ? 200 : 400, r)
+            const model = control.models.find((row) => row.id === String(id))
+            // Resolved explicitly, because the two failures are different facts. An unknown id and
+            // a known model of an unsupported kind both used to answer "unsupported model kind",
+            // which sent a caller looking at the kind of a model that was never there. The union
+            // also could not be passed to `modelControlSurfaceForKind`, which takes a string - a
+            // type error that only surfaced once shared's declarations were rebuilt.
+            const requestedKind = typeof kind === 'string' ? kind : model?.kind
+            if (requestedKind === undefined)
+              return json(res, 404, { error: `unknown model: ${String(id)}` })
+            const surface = modelControlSurfaceForKind(requestedKind)
+            if (!surface)
+              return json(res, 400, { error: `unsupported model kind: ${requestedKind}` })
+            const activated = await desktopModels.control({
+              type: 'activate',
+              modelId: String(id),
+              surface
+            })
+            return activated.ok
+              ? json(res, 200, activated.value)
+              : json(res, 400, { error: modelsFailureMessage(activated.failure) })
           }
           // DELETE /v1/models/{id}  (or POST /v1/models/delete {id})
           if (method === 'DELETE' && url.startsWith('/v1/models/') && url !== '/v1/models/') {
             const id = decodeURIComponent(url.slice('/v1/models/'.length))
-            return json(res, 200, await mm.deleteModel(id))
+            const removed = await desktopModels.control({ type: 'remove', modelId: id })
+            return removed.ok
+              ? json(res, 200, removed.value)
+              : json(res, 400, { error: modelsFailureMessage(removed.failure) })
           }
           if (url === '/v1/models/delete' && method === 'POST') {
             const { id } = await readJson(req)
             if (!id) return json(res, 400, { error: 'id required' })
-            return json(res, 200, await mm.deleteModel(String(id)))
+            const removed = await desktopModels.control({ type: 'remove', modelId: String(id) })
+            return removed.ok
+              ? json(res, 200, removed.value)
+              : json(res, 400, { error: modelsFailureMessage(removed.failure) })
           }
           return json(res, 404, { error: 'unknown model endpoint' })
         } catch (e) {

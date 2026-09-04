@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { formatContextWindow, resolveActiveTextModel } from '../lib/model-summary'
 import { recommendedContextWindow } from '../lib/ctx-options'
 import { LLM_SETTINGS_INVALIDATED_EVENT } from '../lib/settings-invalidation'
-import { desktopModelControl } from '../composition/model-control'
+import { modelControlClient } from '../lib/model-control-client'
 
 type ActiveModelApi = Partial<Pick<typeof window.api, 'getLlmSettings'>>
 
@@ -55,12 +55,15 @@ export function useActiveModelSummary(refreshWhen: unknown): ActiveModelSummary 
     void (async (): Promise<void> => {
       const api = window.api as ActiveModelApi | undefined
       try {
-        const projection = await desktopModelControl.project()
+        const projection = await modelControlClient.projection()
         const settings = await api?.getLlmSettings?.()
         if (!request.active) {
           return
         }
-        const activeModel = resolveActiveTextModel(projection.models, projection.active.text)
+        const activeModel = resolveActiveTextModel(
+          projection.models,
+          projection.active.text.modelId
+        )
         setSummary({
           status: 'ready',
           failure: null,

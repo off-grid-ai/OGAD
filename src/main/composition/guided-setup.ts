@@ -3,13 +3,11 @@ import os from 'node:os'
 import { CATALOG, normalizeGuidedSetupMode, type GuidedSetupPorts } from '@offgrid/models'
 import { deviceNoun } from '../../shared/device'
 import { llm } from '../llm'
-import { DesktopModelsOperationError, desktopModels } from './application-access'
 import {
-  downloadModel,
-  listInstalled,
-  setActiveModalChoice,
-  setActiveModel
-} from '../models-manager'
+  DesktopModelsOperationError,
+  desktopModels,
+  modelsFailureMessage
+} from './application-access'
 
 export function desktopRamGb(): number {
   return Math.round(os.totalmem() / 1e9)
@@ -58,12 +56,23 @@ export function createDesktopGuidedSetupPorts(): GuidedSetupPorts {
         return 'balanced'
       }
     },
-    listInstalled,
-    downloadModel,
-    activateChat: setActiveModel,
+    listInstalled: async () => [...desktopModels.snapshot().control.installed],
+    downloadModel: async (modelId) => {
+      const outcome = await desktopModels.control({ type: 'download', modelId })
+      return outcome.ok
+        ? { success: outcome.value.status === 'completed' }
+        : { success: false, error: modelsFailureMessage(outcome.failure) }
+    },
+    activateChat: async (modelId) => {
+      const outcome = await desktopModels.control({ type: 'select', surface: 'text', modelId })
+      return outcome.ok
+        ? { success: true }
+        : { success: false, error: modelsFailureMessage(outcome.failure) }
+    },
     activateModality: async (kind, modelId) => {
-      const selected = await setActiveModalChoice(kind, modelId)
-      if (!selected.success) throw new Error(selected.error ?? `Could not activate ${kind}`)
+      const surface = kind === 'voice' ? 'speech' : kind
+      const selected = await desktopModels.control({ type: 'select', surface, modelId })
+      if (!selected.ok) throw new DesktopModelsOperationError(selected.failure)
     },
     /**
      * "Starting the local model server" is a LOAD, not a restart.
