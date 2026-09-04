@@ -141,9 +141,15 @@ export function UpgradeScreen({
           <div className="flex items-start gap-4">
             <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-neutral-800 bg-neutral-900/60">
               {f ? (
-                <f.icon weight="duotone" className="h-7 w-7 text-emerald-600 dark:text-emerald-400" />
+                <f.icon
+                  weight="duotone"
+                  className="h-7 w-7 text-emerald-600 dark:text-emerald-400"
+                />
               ) : (
-                <Sparkle weight="duotone" className="h-7 w-7 text-emerald-600 dark:text-emerald-400" />
+                <Sparkle
+                  weight="duotone"
+                  className="h-7 w-7 text-emerald-600 dark:text-emerald-400"
+                />
               )}
             </div>
             <div className="min-w-0">
@@ -164,7 +170,11 @@ export function UpgradeScreen({
             <ul className="grid gap-2 sm:grid-cols-2">
               {f.highlights.map((h) => (
                 <li key={h} className="flex items-start gap-2 text-sm text-neutral-300">
-                  <Check weight="bold" className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" /> {h}
+                  <Check
+                    weight="bold"
+                    className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400"
+                  />{' '}
+                  {h}
                 </li>
               ))}
             </ul>
@@ -199,9 +209,9 @@ export function UpgradeScreen({
                 You have Pro
               </div>
               <p className="text-sm leading-relaxed text-neutral-300">
-                Your license covers desktop and mobile - up to 5 devices.
-                Windows is live and Pro features are arriving one at a time; this one is not on your{' '}
-                {deviceNoun()} yet, and the ones that are work here today.
+                Your license covers desktop and mobile devices. Windows is live and Pro features are
+                arriving one at a time; this one is not on your {deviceNoun()} yet, and the ones
+                that are work here today.
               </p>
               <p className="text-[11px] leading-relaxed text-neutral-600">
                 Everything else in Off Grid AI works on your {deviceNoun()} today.
@@ -242,7 +252,7 @@ export function UpgradeScreen({
                       Coming soon to your {deviceNoun()}.
                     </span>{' '}
                     Windows is live and Pro features are arriving one at a time - this one runs on
-                    Mac today. Your license covers desktop and mobile - up to 5 devices.
+                    Mac today. Your license covers desktop and mobile devices.
                   </span>
                 </div>
               )}
@@ -287,7 +297,7 @@ export function UpgradeScreen({
                 Get Off Grid AI Mobile
               </span>
               <span className="mt-0.5 block text-[11px] leading-tight text-neutral-500">
-                Your license covers your phone too - up to 5 devices, synced over your own network.
+                Your license covers your phone too, synced over your own network.
               </span>
             </span>
             <ArrowSquareOut weight="bold" className="h-4 w-4 shrink-0 text-neutral-500" />

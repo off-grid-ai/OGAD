@@ -350,7 +350,7 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                 transition={{ delay: 1 }}
                 className="mt-8 text-center text-xs text-neutral-600"
               >
-                Pro is live now. $49/year or $69 once - one license across up to 5 devices.
+                Pro is live now. $49/year or $69 once - one license across your licensed devices.
               </motion.p>
             </div>
           </motion.div>
@@ -370,7 +370,7 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
               <div>
                 <div className="mb-4 flex items-center gap-2 text-[11px] uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
                   <Devices className="h-4 w-4" weight="regular" />
-                  Five-device mesh
+                  Your private mesh
                 </div>
                 <TextGenerate
                   words="Your devices work as one."
@@ -383,10 +383,10 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                   transition={{ delay: 0.5 }}
                   className="mt-5 max-w-2xl text-sm leading-6 text-neutral-400"
                 >
-                  Sync your workspace directly between up to five total devices, including this one.
-                  Off Grid AI uses LAN first and Nearby when needed. Traffic is encrypted between
-                  paired devices. No Off Grid AI server receives it. In Off Grid AI Mobile, choose a
-                  paired Desktop by name. You can use its tools and change its active models.
+                  Sync your workspace directly between your licensed devices. Off Grid AI uses LAN
+                  first and Nearby when needed. Traffic is encrypted between paired devices. No Off
+                  Grid AI server receives it. In Off Grid AI Mobile, choose a paired Desktop by
+                  name. You can use its tools and change its active models.
                 </motion.p>
                 <motion.p
                   initial={{ opacity: 0 }}
