@@ -4,7 +4,7 @@ import {
   taskRetryAvailability,
   type TaskRetryCheckpoint,
   type TaskRetryRunner
-} from '../task-retry'
+} from '@offgrid/automation'
 import type { TaskRunSnapshot, TaskRunUpdate } from '../task-history-store'
 import { registerTaskRetryIpc } from '../task-retry-ipc'
 import {

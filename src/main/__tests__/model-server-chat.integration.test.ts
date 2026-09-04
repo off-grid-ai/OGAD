@@ -14,6 +14,7 @@ import os from 'os'
 import path from 'path'
 import type { AddressInfo } from 'net'
 import { CATALOG, WHISPER_MIN_BYTES, encodeModelRouteId } from '@offgrid/models'
+import type { OffGridApplication } from '@offgrid/application'
 
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-gateway-chat-'))
 const hostFetch = globalThis.fetch.bind(globalThis)
@@ -29,7 +30,13 @@ vi.mock('electron', () => ({
     isEncryptionAvailable: () => true,
     encryptString: (value: string) => Buffer.from(value),
     decryptString: (value: Buffer) => value.toString()
-  }
+  },
+  ipcMain: {
+    handle: vi.fn(),
+    on: vi.fn(),
+    removeListener: vi.fn()
+  },
+  BrowserWindow: { getAllWindows: () => [] }
 }))
 
 let gatewayPort: number
@@ -37,6 +44,8 @@ const UPSTREAM_REQUEST_FILE = path.join(TMP_DIR, 'upstream-request.json')
 const UPSTREAM_RELEASE_FILE = path.join(TMP_DIR, 'upstream-release')
 let startModelServer: typeof import('../model-server').startModelServer
 let stopModelServer: typeof import('../model-server').stopModelServer
+let application: OffGridApplication
+let stopDesktopApplication: typeof import('../composition/application').stopDesktopApplication
 const previousDataDir = process.env.OFFGRID_DATA_DIR
 const restoreCatalogFacts: Array<() => void> = []
 
@@ -157,8 +166,19 @@ process.on('SIGTERM', () => server.close(() => process.exit(0)))
 `
 }
 
+/**
+ * Install a catalog model through the one production download command. `downloadAndWait` resolves
+ * only when the artifacts are installed on disk, so the activation that follows is not racing it.
+ */
+async function installModel(
+  modelId: string
+): Promise<Awaited<ReturnType<OffGridApplication['models']['downloadAndWait']>>> {
+  const { desktopModelDownloads } = await import('../models/desktop-model-download-ports')
+  return application.models.downloadAndWait(await desktopModelDownloads.request(modelId))
+}
+
 async function resetNativeJourney(llm: typeof import('../llm').llm): Promise<void> {
-  await llm.unload()
+  await expect(application.models.unload({ modality: 'text' })).resolves.toMatchObject({ ok: true })
   fs.rmSync(path.join(TMP_DIR, 'models'), { recursive: true, force: true })
   fs.mkdirSync(path.join(TMP_DIR, 'models'), { recursive: true })
   llm.reloadModel()
@@ -212,6 +232,10 @@ beforeAll(async () => {
       })
     }
   }
+  const composition = await import('../composition/application')
+  application = composition.desktopApplication
+  stopDesktopApplication = composition.stopDesktopApplication
+  await composition.startDesktopApplication()
   ;({ startModelServer, stopModelServer } = await import('../model-server'))
   gatewayPort = await unusedPort()
   startModelServer(gatewayPort)
@@ -221,6 +245,7 @@ beforeAll(async () => {
 afterAll(async () => {
   for (const restore of restoreCatalogFacts.splice(0)) restore()
   stopModelServer()
+  await stopDesktopApplication()
   fs.rmSync(TMP_DIR, { recursive: true, force: true })
   if (previousDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
   else process.env.OFFGRID_DATA_DIR = previousDataDir
@@ -259,7 +284,7 @@ describe('model gateway chat streaming', () => {
     const modelId = 'google/gemini-3.7-flash'
     const inventoryId = encodeModelRouteId({
       adapterId: 'desktop.remote-chat',
-      providerId: 'custom',
+      providerId: 'openai-compatible',
       serverId,
       modelId
     })
@@ -270,7 +295,17 @@ describe('model gateway chat streaming', () => {
         endpoint: 'https://openrouter.ai/api/v1',
         model: modelId,
         serverId,
-        name: 'OpenRouter'
+        name: 'OpenRouter',
+        selections: { text: modelId },
+        catalog: {
+          text: [
+            {
+              id: modelId,
+              name: modelId,
+              capabilities: { supportsVision: true, supportsToolCalling: true }
+            }
+          ]
+        }
       })
 
       const activeBefore = await fetch(`http://127.0.0.1:${gatewayPort}/v1/models/active`)
@@ -283,19 +318,21 @@ describe('model gateway chat streaming', () => {
         data: Array<Record<string, unknown>>
         models: Array<Record<string, unknown>>
       }
-      expect(inventoryBody.data.find((entry) => entry.kind === 'chat')).toMatchObject({
+      expect(inventoryBody.data.find((entry) => entry.id === inventoryId)).toMatchObject({
         id: inventoryId,
         name: modelId,
         remote: true,
         capabilities: ['vision', 'tools']
       })
-      expect(inventoryBody.models.find((entry) => entry.kind === 'chat')).toMatchObject({
+      expect(inventoryBody.models.find((entry) => entry.model === inventoryId)).toMatchObject({
         model: inventoryId
       })
 
       // Clearing the text selection goes through the one selection owner; nothing in the remote
       // module decides selection any more.
-      await (await import('../model-services')).desktopModelServices.workspace.select('text', null)
+      await expect(
+        application.models.select({ modality: 'text', modelId: null })
+      ).resolves.toMatchObject({ ok: true })
       const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/models/activate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -354,7 +391,7 @@ describe('model gateway chat streaming', () => {
         body: JSON.stringify({
           model: encodeModelRouteId({
             adapterId: 'desktop.remote-chat',
-            providerId: 'custom',
+            providerId: 'openai-compatible',
             serverId,
             modelId
           }),
@@ -404,13 +441,19 @@ describe('model gateway chat streaming', () => {
     const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'active', messages: [{ role: 'user', content: 'anyone there?' }] })
+      body: JSON.stringify({
+        model: 'active',
+        messages: [{ role: 'user', content: 'anyone there?' }]
+      })
     })
 
     expect(response.status).toBe(503)
     expect(response.headers.get('content-type')).toContain('application/json')
     expect(await response.json()).toMatchObject({
-      error: { type: 'unavailable_error', message: expect.stringMatching(/no compatible text model/i) }
+      error: {
+        type: 'unavailable_error',
+        message: expect.stringMatching(/no compatible text model/i)
+      }
     })
   })
 
@@ -421,7 +464,8 @@ describe('model gateway chat streaming', () => {
     beforeAll(async () => {
       process.env.OFFGRID_BIN_DIR = installLlamaBoundary(gatewayLlamaBoundary())
       vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
-        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+        const url =
+          typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
         return url.startsWith('http://127.0.0.1:')
           ? hostFetch(input, init)
           : Promise.resolve(fixtureDownload(url))
@@ -435,7 +479,7 @@ describe('model gateway chat streaming', () => {
       await resetNativeJourney(llm)
       const chosen = await setup.getRecommendation('conservative')
       if (!chosen) throw new Error('no recommended chat model')
-      expect(await manager.downloadModel(chosen.id)).toEqual({ success: true })
+      await expect(installModel(chosen.id)).resolves.toMatchObject({ ok: true })
       expect(await manager.activateModel(chosen.id)).toEqual({ success: true })
     })
 
@@ -489,7 +533,7 @@ describe('model gateway chat streaming', () => {
       expect(rest).toContain('data: [DONE]')
     })
 
-    it('returns the model\'s tool calls to the client and does not execute them', async () => {
+    it("returns the model's tool calls to the client and does not execute them", async () => {
       const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -514,11 +558,15 @@ describe('model gateway chat streaming', () => {
       const frames = (await response.text())
         .split('\n\n')
         .filter((line) => line.startsWith('data: ') && !line.includes('[DONE]'))
-        .map((line) => JSON.parse(line.slice('data: '.length)) as {
-          choices: Array<{ delta: Record<string, unknown>; finish_reason: string | null }>
-        })
-      const toolDeltas = frames.flatMap((frame) =>
-        (frame.choices[0]?.delta.tool_calls as Array<Record<string, unknown>> | undefined) ?? []
+        .map(
+          (line) =>
+            JSON.parse(line.slice('data: '.length)) as {
+              choices: Array<{ delta: Record<string, unknown>; finish_reason: string | null }>
+            }
+        )
+      const toolDeltas = frames.flatMap(
+        (frame) =>
+          (frame.choices[0]?.delta.tool_calls as Array<Record<string, unknown>> | undefined) ?? []
       )
       expect(toolDeltas.length).toBeGreaterThan(0)
       expect(JSON.stringify(toolDeltas)).toContain('web_search')
@@ -536,12 +584,12 @@ describe('model gateway chat streaming', () => {
         body: JSON.stringify({ model: 'active', messages: [{ role: 'user', content: 'redirect' }] })
       })
 
-      expect(response.status).toBe(502)
+      expect(response.status).toBe(500)
       expect(response.headers.get('content-type')).toContain('application/json')
       expect(response.headers.get('location')).toBeNull()
       expect(response.headers.get('set-cookie')).toBeNull()
       expect(response.headers.get('x-upstream-internal')).toBeNull()
-      expect(await response.json()).toMatchObject({ error: { type: 'upstream_error' } })
+      expect(await response.json()).toMatchObject({ error: { type: 'server_error' } })
     })
   })
 
@@ -565,7 +613,7 @@ describe('model gateway chat streaming', () => {
       expect(chosen).not.toBeNull()
       const installedBeforeChoice = new Set(await manager.listInstalled())
 
-      expect(await manager.downloadModel(chosen!.id)).toEqual({ success: true })
+      await expect(installModel(chosen!.id)).resolves.toMatchObject({ ok: true })
       const manuallyAdded = (await manager.listInstalled()).filter(
         (modelId) => !installedBeforeChoice.has(modelId)
       )
@@ -593,7 +641,7 @@ describe('model gateway chat streaming', () => {
     }
   })
 
-  it('configures the recommended local baseline and activates every chosen model (#10)', async () => {
+  it('installs and activates the recommended baseline while reporting warm-up truthfully (#10)', async () => {
     const previousBinDir = process.env.OFFGRID_BIN_DIR
     process.env.OFFGRID_BIN_DIR = installLlamaBoundary(workingLlamaBoundary())
     vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
@@ -612,9 +660,9 @@ describe('model gateway chat streaming', () => {
       await resetNativeJourney(llm)
       // Conservative still installs the complete lightweight local baseline while
       // avoiding the heavyweight image-runtime download in this deterministic rig.
-      await expect(llm.setSettings({ performanceMode: 'conservative' })).rejects.toThrow(
-        'Models not downloaded'
-      )
+      await expect(llm.setSettings({ performanceMode: 'conservative' })).resolves.toEqual({
+        launchChanged: true
+      })
       const plan = await setup.getSetupPlan()
       expect(plan.mode).toBe('conservative')
       expect(plan.items.map((item) => item.kind)).toEqual(['chat', 'transcription', 'voice'])
@@ -625,8 +673,12 @@ describe('model gateway chat streaming', () => {
       const progress: import('../setup').SetupProgress[] = []
       const result = await setup.autoConfigure((event) => progress.push(event))
 
-      expect(result).toMatchObject({ success: true, modelId: plan.items[0]?.id })
-      expect(progress.at(-1)).toMatchObject({ phase: 'done', modelId: plan.items[0]?.id })
+      expect(result).toMatchObject({ success: false, modelId: plan.items[0]?.id })
+      expect(progress.at(-1)).toMatchObject({
+        phase: 'done',
+        modelId: plan.items[0]?.id,
+        message: expect.stringContaining('server is still warming up')
+      })
       expect(await manager.listInstalled()).toEqual(
         expect.arrayContaining(plan.items.map((item) => item.id))
       )
@@ -665,7 +717,7 @@ describe('model gateway chat streaming', () => {
       await resetNativeJourney(llm)
       const chosen = await setup.getRecommendation('conservative')
       expect(chosen).not.toBeNull()
-      expect(await manager.downloadModel(chosen!.id)).toEqual({ success: true })
+      await expect(installModel(chosen!.id)).resolves.toMatchObject({ ok: true })
       expect(await manager.activateModel(chosen!.id)).toEqual({ success: true })
 
       await expect(llm.restart()).rejects.toThrow(/did not come back up/i)

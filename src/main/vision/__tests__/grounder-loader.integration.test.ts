@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import {
-  LLMService,
-  ModelResidencyManager,
-  runtimeModelRouteId,
-  type ModelModality,
-  type RuntimeModel
-} from '@offgrid/models'
+import { createOffGridApplication } from '@offgrid/application'
+import { runtimeModelRouteId, type ModelModality, type RuntimeModel } from '@offgrid/models'
 import {
   createGrounderLifecycle,
   createGrounderRunner,
@@ -61,12 +56,6 @@ function lifecycle(): {
 describe('Computer Use specialist lifecycle', () => {
   it('uses shared selection and residency for the native specialist swap and restore', async () => {
     const selections = new Map<ModelModality, string | null>()
-    const models = new LLMService({
-      read: (modality) => selections.get(modality) ?? null,
-      write: (modality, routeId) => {
-        selections.set(modality, routeId)
-      }
-    })
     const runtimeModels: RuntimeModel[] = [
       {
         id: CHAT_MODEL,
@@ -77,10 +66,11 @@ describe('Computer Use specialist lifecycle', () => {
         adapterId: 'desktop.llama',
         capabilities: { textGeneration: true },
         installed: true,
-        ready: true,
-        loaded: true,
+        ready: false,
+        loaded: false,
         residentSizeMB: 200,
-        peakSizeMB: 240
+        peakSizeMB: 240,
+        residencyKey: 'desktop.llama'
       },
       {
         id: SPECIALIST,
@@ -94,99 +84,149 @@ describe('Computer Use specialist lifecycle', () => {
         ready: true,
         loaded: false,
         residentSizeMB: 300,
-        peakSizeMB: 360
+        peakSizeMB: 360,
+        residencyKey: 'desktop.llama'
       }
     ]
-    models.registerAdapter({ id: 'desktop-test-inventory', listModels: async () => runtimeModels })
-    await models.refresh()
-    const chatRoute = runtimeModelRouteId(runtimeModels[0]!)
-    await models.select('text', chatRoute)
     const events: string[] = []
-    const residency = new ModelResidencyManager({
-      current: () => ({ totalMB: 16_384, availableMB: 16_384, platform: 'desktop' })
-    })
-    const chatLease = await residency.acquire(
-      { key: `text:${chatRoute}`, modelId: chatRoute, type: 'text', sizeMB: 240 },
-      {
-        load: async () => {
-          events.push('load-chat')
-        },
-        unload: async () => {
-          events.push('unload-chat')
-        }
-      }
-    )
-    await chatLease.release()
-    const services = {
-      llm: models,
-      residency,
-      refresh: () => models.refresh(),
-      routeIdFor: (modality: ModelModality, nativeModelId?: string) =>
-        models.list(modality).find((model) => !nativeModelId || model.id === nativeModelId)
-          ?.routeId,
-      select: async (modality: ModelModality, routeId: string | null) => {
-        try {
-          await models.select(modality, routeId)
-          return { success: true }
-        } catch (error) {
-          return { success: false, error: error instanceof Error ? error.message : String(error) }
-        }
-      },
-      unload: async (modality: ModelModality) => {
-        let unloaded = false
-        for (const resident of residency.getResidents().filter((item) => item.type === modality)) {
-          unloaded = (await residency.evictByKey(resident.key)) || unloaded
-        }
-        return unloaded
-      },
-      warmText: async () => {
-        const model = models.active('text').model
-        if (!model) return false
-        const routeId = model.routeId ?? runtimeModelRouteId(model)
-        const lease = await residency.acquire(
-          { key: `text:${routeId}`, modelId: routeId, type: 'text', sizeMB: 240 },
-          {
-            load: async () => {
-              events.push('load-chat')
-            },
-            unload: async () => {
-              events.push('unload-chat')
-            }
-          }
-        )
-        await lease.release()
-        return lease.loaded
-      }
+    const loaded = new Set<string>()
+    const inventory = {
+      id: 'desktop-test-inventory',
+      listModels: async () =>
+        runtimeModels.map((model) => {
+          const routeId = runtimeModelRouteId(model)
+          return { ...model, ready: loaded.has(routeId), loaded: loaded.has(routeId) }
+        })
     }
-    const lifecycle = createGrounderLifecycle(services, {
-      project: async (modelId) => {
-        events.push(`project:${modelId}`)
-        return { success: true }
-      },
-      restart: async () => {
-        events.push('restart-grounder')
-      },
-      unload: async () => {
-        events.push('unload-grounder')
+    const modelFor = (identifier: string): RuntimeModel => {
+      const model = runtimeModels.find(
+        (candidate) => candidate.id === identifier || runtimeModelRouteId(candidate) === identifier
+      )
+      if (!model) throw new Error(`Unknown lifecycle model: ${identifier}`)
+      return model
+    }
+    const unloadModel = async (model: RuntimeModel): Promise<{ reclaimed: true }> => {
+      const routeId = runtimeModelRouteId(model)
+      loaded.delete(routeId)
+      events.push(model.modality === 'computer_use' ? 'unload-grounder' : 'unload-chat')
+      return { reclaimed: true }
+    }
+    const application = createOffGridApplication({
+      models: {
+        selection: {
+          read: (modality) => selections.get(modality) ?? null,
+          write: (modality, routeId) => {
+            selections.set(modality, routeId)
+          }
+        },
+        memory: {
+          current: () => ({ totalMB: 16_384, availableMB: 16_384, platform: 'desktop' })
+        },
+        remote: {
+          configuration: {
+            read: () => ({ version: 1, activeServerId: null, servers: [] }),
+            write: async () => undefined
+          },
+          credentials: {
+            read: async () => null,
+            write: async () => undefined,
+            remove: async () => undefined
+          },
+          providers: {
+            register: async () => undefined,
+            unregister: async () => undefined
+          }
+        },
+        inventoryAdapters: [inventory],
+        lifecycle: () => ({
+          resolveLoad(modality, identifier) {
+            const model = modelFor(identifier)
+            const routeId = runtimeModelRouteId(model)
+            return {
+              routeId,
+              spec: {
+                key: `${modality}:${routeId}`,
+                modelId: routeId,
+                type: modality,
+                sizeMB: model.peakSizeMB ?? 0,
+                residencyKey: model.residencyKey
+              },
+              handlers: {
+                load: async () => {
+                  loaded.add(routeId)
+                  if (modality === 'computer_use') {
+                    events.push(`project:${model.id}`)
+                    events.push('restart-grounder')
+                  } else {
+                    events.push('load-chat')
+                  }
+                },
+                unload: () => unloadModel(model)
+              }
+            }
+          },
+          resolveUnload(modality) {
+            const model = application.models.snapshot().active[modality]?.model
+            if (!model) {
+              return {
+                key: `${modality}:inactive`,
+                hadRuntime: false,
+                unload: async () => ({ reclaimed: true }) as const
+              }
+            }
+            return {
+              key: `${modality}:${runtimeModelRouteId(model)}`,
+              hadRuntime: true,
+              unload: () => unloadModel(model)
+            }
+          },
+          async selectRoute(modality, routeId) {
+            const selected = await application.models.select({ modality, modelId: routeId })
+            if (!selected.ok) throw new Error(selected.failure.kind)
+          },
+          async refreshInventory() {
+            const refreshed = await application.models.refresh()
+            if (!refreshed.ok) throw new Error(refreshed.failure.kind)
+          }
+        })
       }
     })
 
-    await lifecycle.load(SPECIALIST)
+    try {
+      await application.start()
+      await application.models.refresh()
+      const chatRoute = runtimeModelRouteId(runtimeModels[0]!)
+      expect(
+        await application.models.select({ modality: 'text', modelId: chatRoute })
+      ).toMatchObject({ ok: true })
+      expect(await application.models.load({ modality: 'text', modelId: chatRoute })).toMatchObject(
+        { ok: true }
+      )
+      const lifecycle = createGrounderLifecycle(application.models)
 
-    expect(models.active('computer_use').model?.id).toBe(SPECIALIST)
-    expect(residency.getResidents().map((resident) => resident.type)).toEqual(['computer_use'])
-    expect(events).toEqual([
-      'load-chat',
-      'unload-chat',
-      `project:${SPECIALIST}`,
-      'restart-grounder'
-    ])
+      await lifecycle.load(SPECIALIST)
 
-    await lifecycle.restoreLocal(CHAT_MODEL)
+      expect(application.models.snapshot().active.computer_use?.model?.id).toBe(SPECIALIST)
+      expect(application.models.snapshot().residents.map((resident) => resident.type)).toEqual([
+        'computer_use'
+      ])
+      expect(events).toEqual([
+        'load-chat',
+        'unload-chat',
+        `project:${SPECIALIST}`,
+        'restart-grounder'
+      ])
 
-    expect(models.active('text').model?.id).toBe(CHAT_MODEL)
-    expect(residency.getResidents().map((resident) => resident.type)).toEqual(['text'])
-    expect(events.slice(-2)).toEqual(['unload-grounder', 'load-chat'])
+      await lifecycle.restoreLocal(CHAT_MODEL)
+
+      expect(application.models.snapshot().active.text?.model?.id).toBe(CHAT_MODEL)
+      expect(application.models.snapshot().residents.map((resident) => resident.type)).toEqual([
+        'text'
+      ])
+      expect(events.slice(-2)).toEqual(['unload-grounder', 'load-chat'])
+    } finally {
+      await application.stop()
+    }
   })
 
   it('keeps the specialist resident between actions when the text reasoner is remote', async () => {

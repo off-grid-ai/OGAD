@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { BrowserHistoryStore, MANUAL_BROWSER_HISTORY_LIMIT } from '../browser-history-store'
 import type { TaskHistoryDatabase } from '../../tasks/task-history-store'
 
-function store(now = () => 1_000) {
+function store(now = () => 1_000): BrowserHistoryStore {
   const db = new DatabaseSync(':memory:') as unknown as TaskHistoryDatabase
   const history = new BrowserHistoryStore(db, now)
   history.migrate()
@@ -19,7 +19,12 @@ describe('manual browser history (real SQLite)', () => {
     history.upsert({ historyId: 'b', title: 'B', url: 'https://b.test' })
     history.upsert({ historyId: 'a', title: 'A again', url: 'https://a.test/2' })
     expect(history.get('a')).toEqual({
-      historyId: 'a', kind: 'manual', status: 'closed', title: 'A again', url: 'https://a.test/2', updatedAt: 12
+      historyId: 'a',
+      kind: 'manual',
+      status: 'closed',
+      title: 'A again',
+      url: 'https://a.test/2',
+      updatedAt: 12
     })
     expect(history.get('missing')).toBeUndefined()
     expect(history.list().map((e) => e.historyId)).toEqual(['a', 'b'])

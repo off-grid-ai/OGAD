@@ -3,13 +3,15 @@ import os from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
 import { describe, expect, it } from 'vitest'
+import { createOffGridApplication, type OffGridApplication } from '@offgrid/application'
 import {
   serializeComputerUsePolicyResponse,
   type GenerationRequest,
   type RuntimeModel
 } from '@offgrid/models'
 import type { TaskExecutionPlan } from '../../../shared/task-execution-plan'
-import { desktopModelServices } from '../../model-services'
+import { createDesktopModelWorkspacePorts } from '../../model-services'
+import { registerDesktopApplication } from '../../composition/application-access'
 import {
   generalVisionOperatorAdapter,
   generalVisionPolicyFailure
@@ -34,12 +36,25 @@ interface ScriptedVisionResponse extends VisionPolicyResponse {
 
 let runtimeNumber = 0
 
+function createVisionApplication(): OffGridApplication {
+  const application = createOffGridApplication({
+    models: createDesktopModelWorkspacePorts({
+      listCatalog: async () => [],
+      listInstalled: async () => [],
+      localTextRuntimeState: async () => ({ ready: false, loaded: false })
+    })
+  })
+  registerDesktopApplication(application)
+  return application
+}
+
 async function scriptedVisionRuntime(responses: ScriptedVisionResponse[]): Promise<{
   routeId: string
   requests: GenerationRequest[]
   calls(): number
-  dispose(): void
+  dispose(): Promise<void>
 }> {
+  const application = createVisionApplication()
   runtimeNumber += 1
   const adapterId = `vision-test-runtime-${runtimeNumber}`
   const model: RuntimeModel = {
@@ -62,13 +77,13 @@ async function scriptedVisionRuntime(responses: ScriptedVisionResponse[]): Promi
     ready: true,
     loaded: true
   }
-  const unregisterInventory = desktopModelServices.llm.registerAdapter({
+  const unregisterInventory = application.models.adapters.registerInventory({
     id: adapterId,
     listModels: async () => [model]
   })
   const requests: GenerationRequest[] = []
   let callCount = 0
-  const unregisterGeneration = desktopModelServices.generation.registerAdapter({
+  const unregisterGeneration = application.models.adapters.registerGeneration({
     id: adapterId,
     async *generate(_model, request) {
       const response = responses[Math.min(callCount, responses.length - 1)]!
@@ -91,18 +106,21 @@ async function scriptedVisionRuntime(responses: ScriptedVisionResponse[]): Promi
       }
     }
   })
-  await desktopModelServices.refresh()
-  const routeId = desktopModelServices.llm
-    .list('computer_use')
+  await application.start()
+  await application.models.refresh()
+  const routeId = application.models
+    .snapshot()
+    .inventory.filter((candidate) => candidate.modality === 'computer_use')
     .find((candidate) => candidate.adapterId === adapterId)?.routeId
   if (!routeId) throw new Error('The scripted vision route was not registered.')
   return {
     routeId,
     requests,
     calls: () => callCount,
-    dispose() {
+    async dispose() {
       unregisterGeneration()
       unregisterInventory()
+      await application.stop()
     }
   }
 }
@@ -312,7 +330,7 @@ describe('general vision native tool policy', () => {
       expect(actuated).toEqual([{ type: 'click', point: { x: 287, y: 227 } }])
       expect(reasoning).toContain('The control is visible.')
     } finally {
-      runtime.dispose()
+      await runtime.dispose()
       fs.rmSync(imagePath, { force: true })
     }
   })
@@ -361,7 +379,7 @@ describe('general vision native tool policy', () => {
         'the model returned 0 tool calls; exactly one is required; re-observing'
       )
     } finally {
-      runtime.dispose()
+      await runtime.dispose()
       fs.rmSync(imagePath, { force: true })
     }
   })
@@ -383,7 +401,7 @@ describe('general vision native tool policy', () => {
       await expect(runVisionPolicyRequest(request)).resolves.toEqual(invalid)
       expect(runtime.calls()).toBe(2)
     } finally {
-      runtime.dispose()
+      await runtime.dispose()
     }
   })
 
@@ -550,7 +568,7 @@ describe('general vision native tool policy', () => {
       expect(modelImageUrl).toBe(persistedDataUrl)
       expect(grounding.screenshotDataUrl).toBe(persistedDataUrl)
     } finally {
-      runtime.dispose()
+      await runtime.dispose()
       fs.rmSync(file, { force: true })
     }
   })

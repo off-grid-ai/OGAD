@@ -2,10 +2,26 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { OffGridApplication } from '@offgrid/application'
 
 const previousDataDir = process.env.OFFGRID_DATA_DIR
 let profile: string
 let modelsDir: string
+let application: OffGridApplication | undefined
+
+async function createModelsApplication(): Promise<OffGridApplication> {
+  const [{ createOffGridApplication }, { desktopModelWorkspacePorts }, applicationAccess] =
+    await Promise.all([
+      import('@offgrid/application'),
+      import('../model-services'),
+      import('../composition/application-access')
+    ])
+  const created = createOffGridApplication({ models: desktopModelWorkspacePorts })
+  applicationAccess.registerDesktopApplication(created)
+  await created.start()
+  application = created
+  return created
+}
 
 beforeEach(() => {
   vi.resetModules()
@@ -15,7 +31,9 @@ beforeEach(() => {
   process.env.OFFGRID_DATA_DIR = profile
 })
 
-afterEach(() => {
+afterEach(async () => {
+  await application?.stop()
+  application = undefined
   if (previousDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
   else process.env.OFFGRID_DATA_DIR = previousDataDir
   fs.rmSync(profile, { recursive: true, force: true })
@@ -42,8 +60,8 @@ describe.sequential('legacy selected local artifact inventory migration', () => 
       ])
     )
 
-    // The catalog's remote rows are the workspace's; the composition root must be loaded first.
-    await import('../model-services')
+    // The catalog's remote rows are the application's; boot its real model facade first.
+    await createModelsApplication()
     const { getCatalog, listInstalled } = await import('../models-manager')
     const catalog = (await getCatalog()).models as Array<{ id: string }>
     const installed = await listInstalled()
@@ -59,14 +77,20 @@ describe.sequential('legacy selected local artifact inventory migration', () => 
     fs.writeFileSync(path.join(modelsDir, legacy.primary), Buffer.from('GGUF legacy text'))
     fs.writeFileSync(path.join(modelsDir, 'active-model.json'), JSON.stringify(legacy))
 
-    const { desktopModelServices } = await import('../model-services')
-    const first = await desktopModelServices.refresh()
-    const second = await desktopModelServices.refresh()
+    const app = await createModelsApplication()
+    await app.models.refresh()
+    const first = app.models.snapshot().inventory
+    await app.models.refresh()
+    const second = app.models.snapshot().inventory
 
-    expect(first.filter((model) => model.id === legacy.id && model.modality === 'text')).toHaveLength(1)
-    expect(second.filter((model) => model.id === legacy.id && model.modality === 'text')).toHaveLength(1)
-    expect(desktopModelServices.llm.active('text')).toMatchObject({
-      selectedId: expect.stringMatching(/^model-route:v1:/),
+    expect(
+      first.filter((model) => model.id === legacy.id && model.modality === 'text')
+    ).toHaveLength(1)
+    expect(
+      second.filter((model) => model.id === legacy.id && model.modality === 'text')
+    ).toHaveLength(1)
+    expect(app.models.snapshot().active.text).toMatchObject({
+      selectedRouteId: expect.stringMatching(/^model-route:v1:/),
       model: { id: legacy.id, adapterId: 'desktop.llama', installed: true, ready: true }
     })
     expect(JSON.parse(fs.readFileSync(path.join(modelsDir, 'active-model.json'), 'utf8'))).toEqual(
@@ -82,16 +106,20 @@ describe.sequential('legacy selected local artifact inventory migration', () => 
       JSON.stringify({ image: imageId })
     )
 
-    const { desktopModelServices } = await import('../model-services')
-    const first = await desktopModelServices.refresh()
-    const second = await desktopModelServices.refresh()
+    const app = await createModelsApplication()
+    await app.models.refresh()
+    const first = app.models.snapshot().inventory
+    await app.models.refresh()
+    const second = app.models.snapshot().inventory
 
-    expect(first.filter((model) => model.id === imageId && model.modality === 'image')).toHaveLength(1)
-    expect(second.filter((model) => model.id === imageId && model.modality === 'image')).toHaveLength(
-      1
-    )
-    expect(desktopModelServices.llm.active('image')).toMatchObject({
-      selectedId: expect.stringMatching(/^model-route:v1:/),
+    expect(
+      first.filter((model) => model.id === imageId && model.modality === 'image')
+    ).toHaveLength(1)
+    expect(
+      second.filter((model) => model.id === imageId && model.modality === 'image')
+    ).toHaveLength(1)
+    expect(app.models.snapshot().active.image).toMatchObject({
+      selectedRouteId: expect.stringMatching(/^model-route:v1:/),
       model: { id: imageId, adapterId: 'desktop.image', installed: true, ready: true }
     })
     expect(

@@ -4,7 +4,7 @@ import { BrowserJourneyRunOwners } from '../browser-run-owners'
 
 describe('browser journey run ownership', () => {
   it('replaces and halts the old run while admitting only the new generation', () => {
-    const owners = new BrowserJourneyRunOwners()
+    const owners = new BrowserJourneyRunOwners<VisionGuard>()
     const oldGuard = new VisionGuard({ taskId: 'task-old', kind: 'web_use' })
     const old = owners.replace('chat-1', 'task-old', oldGuard).owner
     const newGuard = new VisionGuard({ taskId: 'task-new', kind: 'web_use' })
@@ -20,7 +20,7 @@ describe('browser journey run ownership', () => {
   })
 
   it('releases only the current generation', () => {
-    const owners = new BrowserJourneyRunOwners()
+    const owners = new BrowserJourneyRunOwners<VisionGuard>()
     const old = owners.replace(
       'chat-1',
       'task-old',
@@ -41,7 +41,7 @@ describe('browser journey run ownership', () => {
   })
 
   it('keeps independent journeys independent', () => {
-    const owners = new BrowserJourneyRunOwners()
+    const owners = new BrowserJourneyRunOwners<VisionGuard>()
     const first = owners.replace(
       'chat-1',
       'task-1',

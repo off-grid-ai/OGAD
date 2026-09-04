@@ -1,113 +1,259 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { registerHook, HOOKS } from '../bootstrap/hookRegistry'
 import {
-  emitKnowledgeDocumentMutation,
-  type KnowledgeDocumentMutation
-} from '../sync-knowledge-document'
+  CORE_SYNC_ENTITIES,
+  createOffGridApplication,
+  type ModelsPlatformPorts,
+  type OffGridApplication,
+  type RagDocument,
+  type RagPlatformPorts,
+  type SyncMutation,
+  type WorkflowEvent
+} from '@offgrid/application'
+import type { RemoteServerConfiguration } from '@offgrid/models'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-/**
- * How core tells Pro that a knowledge document changed - and why core does not care whether Pro is there.
- *
- * This is the open-core seam. The free build has no sync coordinator, so the hook is simply unregistered,
- * and indexing a document must work exactly the same. In a paid build the coordinator is on the other end,
- * and if IT throws - a peer mid-handshake, a disk error while queueing - the user's document is already
- * indexed locally and must stay that way. So the one behaviour worth protecting is that nothing this hook
- * does can fail the RAG write that preceded it.
- */
-
-const snapshot = {
-  syncId: 'doc-sync-1',
+const DOCUMENT = {
+  syncId: '11111111-1111-4111-8111-111111111111',
   projectId: 'project-alpha',
-  name: 'Contract.pdf',
-  filePath: '/restored/Contract.pdf',
-  fileSize: 42,
-  createdAt: '2026-01-01T09:00:00.000Z',
-  enabled: true
+  name: 'Contract.txt',
+  path: '/restored/Contract.txt',
+  size: 42,
+  createdAt: '2026-01-01T09:00:00.000Z'
+} as const
+
+function modelBoundary(): ModelsPlatformPorts {
+  const selections = new Map<string, string | null>()
+  let remoteConfiguration: RemoteServerConfiguration = {
+    version: 1,
+    activeServerId: null,
+    servers: []
+  }
+  return {
+    selection: {
+      read: (modality) => selections.get(modality) ?? null,
+      write: (modality, routeId) => {
+        selections.set(modality, routeId)
+      }
+    },
+    memory: {
+      current: () => ({ totalMB: 16_000, availableMB: 8_000, platform: 'desktop' })
+    },
+    remote: {
+      configuration: {
+        read: () => remoteConfiguration,
+        write: (value) => {
+          remoteConfiguration = value
+        }
+      },
+      credentials: {
+        read: async () => null,
+        write: async () => undefined,
+        remove: async () => undefined
+      },
+      providers: {
+        register: async () => undefined,
+        unregister: async () => undefined
+      },
+      activateManaged: async () => ({})
+    }
+  }
 }
 
-describe('announcing a knowledge document change to the optional sync coordinator', () => {
-  beforeEach(() => {
-    // Back to the free-build shape between tests: no coordinator listening.
-    registerHook(HOOKS.syncKnowledgeDocumentMutation, undefined as never)
-    vi.restoreAllMocks()
-  })
+/** In-memory substitutes for the database and file reader, which are external RAG boundaries. */
+function ragBoundary(): RagPlatformPorts {
+  const documents = new Map<number, RagDocument>()
+  let nextId = 1
+  return {
+    embeddings: { dimension: 1, embed: async () => [1] },
+    extraction: { readText: async () => 'Contract terms contain enough text to index.' },
+    store: {
+      addDocument: async (input) => {
+        const id = nextId++
+        documents.set(id, {
+          id,
+          syncId: input.syncId ?? `00000000-0000-4000-8000-${String(id).padStart(12, '0')}`,
+          projectId: input.projectId,
+          name: input.name,
+          path: input.path,
+          size: input.size,
+          kind: input.kind,
+          enabled: input.enabled ?? true,
+          createdAt: input.createdAt ?? '2026-01-01T09:00:00.000Z'
+        })
+        return id
+      },
+      addChunks: async () => undefined,
+      getChunkCandidates: async () => [],
+      listDocuments: async (projectId) =>
+        [...documents.values()].filter((document) => document.projectId === projectId),
+      listDocumentPage: async (afterId, limit) => {
+        const page = [...documents.values()]
+          .filter(({ id }) => id > (afterId ?? 0))
+          .sort((left, right) => left.id - right.id)
+          .slice(0, limit)
+        return { documents: page, nextAfterId: null }
+      },
+      getDocument: async (docId) => documents.get(docId),
+      getDocumentBySyncId: async (syncId) =>
+        [...documents.values()].find((document) => document.syncId === syncId),
+      setDocumentEnabled: async (docId, enabled) => {
+        const document = documents.get(docId)
+        if (document) documents.set(docId, { ...document, enabled })
+      },
+      deleteDocument: async (docId) => {
+        documents.delete(docId)
+      }
+    }
+  }
+}
 
-  it('hands the coordinator exactly what it was given', () => {
-    const seen: KnowledgeDocumentMutation[] = []
-    registerHook(HOOKS.syncKnowledgeDocumentMutation, (mutation) => {
-      seen.push(mutation as KnowledgeDocumentMutation)
+function createApplication(
+  record?: (mutation: SyncMutation) => void | Promise<void>
+): OffGridApplication {
+  return createOffGridApplication({
+    models: modelBoundary(),
+    rag: ragBoundary(),
+    ...(record
+      ? {
+          pro: {
+            sync: {
+              state: {
+                record,
+                sendKnowledgeDocument: async () => undefined
+              }
+            }
+          }
+        }
+      : {})
+  })
+}
+
+function addDocument(
+  application: OffGridApplication
+): ReturnType<OffGridApplication['rag']['addDocument']> {
+  return application.rag.addDocument({
+    projectId: DOCUMENT.projectId,
+    path: DOCUMENT.path,
+    fileName: DOCUMENT.name,
+    size: DOCUMENT.size,
+    syncId: DOCUMENT.syncId,
+    createdAt: DOCUMENT.createdAt
+  })
+}
+
+let application: OffGridApplication
+
+beforeEach(() => {
+  vi.restoreAllMocks()
+})
+
+afterEach(async () => {
+  await application?.stop()
+})
+
+describe('knowledge-document replication through the application facade', () => {
+  it('records canonical knowledge-document state after a local index succeeds', async () => {
+    const recorded: SyncMutation[] = []
+    application = createApplication((mutation) => {
+      recorded.push(mutation)
     })
 
-    emitKnowledgeDocumentMutation({ kind: 'indexed', document: snapshot })
+    await expect(addDocument(application)).resolves.toMatchObject({ ok: true })
 
-    // Passed through unchanged: the coordinator needs the file path and size to offer the document to a
-    // peer, and the syncId to recognise it later. Anything summarised away here cannot be recovered.
-    expect(seen).toEqual([{ kind: 'indexed', document: snapshot }])
+    expect(recorded).toEqual([
+      {
+        entity: CORE_SYNC_ENTITIES.knowledgeDocument,
+        entityId: DOCUMENT.syncId,
+        kind: 'put',
+        fields: {
+          project_id: DOCUMENT.projectId,
+          name: DOCUMENT.name,
+          created_at: DOCUMENT.createdAt,
+          enabled: 1
+        }
+      }
+    ])
   })
 
-  it('carries each kind of change the coordinator has to distinguish', () => {
-    const seen: KnowledgeDocumentMutation[] = []
-    registerHook(HOOKS.syncKnowledgeDocumentMutation, (mutation) => {
-      seen.push(mutation as KnowledgeDocumentMutation)
+  it('records distinct index, enabled, and delete changes', async () => {
+    const recorded: SyncMutation[] = []
+    application = createApplication((mutation) => {
+      recorded.push(mutation)
     })
+    const indexed = await addDocument(application)
+    expect(indexed.ok).toBe(true)
+    if (!indexed.ok) return
 
-    emitKnowledgeDocumentMutation({ kind: 'indexed', document: snapshot })
-    emitKnowledgeDocumentMutation({ kind: 'enabled', syncId: 'doc-sync-1', enabled: false })
-    emitKnowledgeDocumentMutation({ kind: 'deleted', syncId: 'doc-sync-1' })
+    await application.rag.setDocumentEnabled(indexed.value.docId, false)
+    await application.rag.removeDocument(indexed.value.docId)
 
-    // Three different things happen to a document, and they mean three different things to a peer: send
-    // it, stop using it, forget it. A single "changed" event would force the far side to guess.
-    expect(seen.map((mutation) => mutation.kind)).toEqual(['indexed', 'enabled', 'deleted'])
-    expect(seen[1]).toEqual({ kind: 'enabled', syncId: 'doc-sync-1', enabled: false })
-    expect(seen[2]).toEqual({ kind: 'deleted', syncId: 'doc-sync-1' })
+    expect(recorded.map(({ kind }) => kind)).toEqual(['put', 'put', 'delete'])
+    expect(recorded[1]).toMatchObject({ entityId: DOCUMENT.syncId, fields: { enabled: 0 } })
+    expect(recorded[2]).toEqual({
+      entity: CORE_SYNC_ENTITIES.knowledgeDocument,
+      entityId: DOCUMENT.syncId,
+      kind: 'delete'
+    })
   })
 
-  it('does nothing at all in a build with no coordinator', () => {
-    // An unlicensed install. Not an error and not a warning: there is nobody to tell, and indexing a document is a
-    // core feature that must not notice pro's absence.
-    expect(() =>
-      emitKnowledgeDocumentMutation({ kind: 'indexed', document: snapshot })
-    ).not.toThrow()
+  it('keeps the local index when no Pro sync state owner is present', async () => {
+    application = createApplication()
+
+    const indexed = await addDocument(application)
+    expect(indexed.ok).toBe(true)
+    if (!indexed.ok) return
+
+    await expect(application.rag.document(indexed.value.docId)).resolves.toMatchObject({
+      ok: true,
+      value: { syncId: DOCUMENT.syncId }
+    })
   })
 
-  it('swallows a coordinator failure so the local index is not undone by it', () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
-    registerHook(HOOKS.syncKnowledgeDocumentMutation, () => {
+  it('keeps the local index and reports a bridge failure when sync persistence fails', async () => {
+    const events: WorkflowEvent[] = []
+    application = createApplication(() => {
       throw new Error('peer handshake in progress')
     })
+    application.workflows.events((event) => events.push(event))
 
-    // The document is already indexed by the time this runs. Letting the throw escape would fail the
-    // caller's write path and lose a document the user successfully added, because a PEER was busy.
-    expect(() =>
-      emitKnowledgeDocumentMutation({ kind: 'indexed', document: snapshot })
-    ).not.toThrow()
-
-    // Swallowed, not hidden: the failure is logged with the mutation, so a document that never reached a
-    // peer can be traced rather than silently missing.
-    expect(logged).toHaveBeenCalledWith(
-      '[sync] Failed to record knowledge document mutation',
-      { kind: 'indexed', document: snapshot },
-      expect.any(Error)
-    )
+    const indexed = await addDocument(application)
+    expect(indexed.ok).toBe(true)
+    if (!indexed.ok) return
+    await vi.waitFor(() => {
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'bridge_failed',
+          bridge: 'knowledge_document_replication'
+        })
+      )
+    })
+    await expect(application.rag.document(indexed.value.docId)).resolves.toMatchObject({
+      ok: true,
+      value: { syncId: DOCUMENT.syncId }
+    })
   })
 
-  it('keeps announcing later changes after one of them failed', () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {})
-    const seen: KnowledgeDocumentMutation[] = []
+  it('records later changes after one sync persistence failure', async () => {
+    const recorded: SyncMutation[] = []
     let failNext = true
-    registerHook(HOOKS.syncKnowledgeDocumentMutation, (mutation) => {
+    application = createApplication((mutation) => {
       if (failNext) {
         failNext = false
         throw new Error('transient')
       }
-      seen.push(mutation as KnowledgeDocumentMutation)
+      recorded.push(mutation)
     })
 
-    emitKnowledgeDocumentMutation({ kind: 'indexed', document: snapshot })
-    emitKnowledgeDocumentMutation({ kind: 'deleted', syncId: 'doc-sync-1' })
+    const indexed = await addDocument(application)
+    expect(indexed.ok).toBe(true)
+    if (!indexed.ok) return
+    await application.rag.removeDocument(indexed.value.docId)
 
-    // One bad announcement must not latch the seam off - the next change still goes out, so a transient
-    // failure costs one event rather than every event after it.
-    expect(seen).toEqual([{ kind: 'deleted', syncId: 'doc-sync-1' }])
+    expect(recorded).toEqual([
+      {
+        entity: CORE_SYNC_ENTITIES.knowledgeDocument,
+        entityId: DOCUMENT.syncId,
+        kind: 'delete'
+      }
+    ])
   })
 })

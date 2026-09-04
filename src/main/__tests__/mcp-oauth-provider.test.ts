@@ -20,16 +20,16 @@ const loopback = vi.hoisted(() => ({
 vi.mock('../mcp-oauth-loopback', () => ({
   OAuthLoopbackServer: class {
     redirectUrl = 'http://127.0.0.1:7979/callback'
-    async start() {
+    async start(): Promise<void> {
       loopback.started++
     }
-    awaitCode(state: string) {
+    awaitCode(state: string): Promise<string> {
       loopback.awaited.push(state)
       return new Promise<string>((resolve) => {
         loopback.resolve = resolve
       })
     }
-    cancel(state: string) {
+    cancel(state: string): void {
       loopback.cancelled.push(state)
     }
   }
@@ -49,7 +49,10 @@ describe('connector OAuth provider', () => {
   it('registers dynamically without a static client and persists client and tokens per connector', () => {
     const provider = makeOAuthProvider(7)
     expect(provider.redirectUrl).toBe('http://127.0.0.1:7979/callback')
-    expect(provider.clientMetadata).toMatchObject({ token_endpoint_auth_method: 'none', client_name: 'Off Grid AI Desktop' })
+    expect(provider.clientMetadata).toMatchObject({
+      token_endpoint_auth_method: 'none',
+      client_name: 'Off Grid AI Desktop'
+    })
     expect(provider.clientInformation()).toBeUndefined()
     provider.saveClientInformation!({ client_id: 'dyn' })
     expect(provider.clientInformation()).toEqual({ client_id: 'dyn' })
@@ -67,7 +70,10 @@ describe('connector OAuth provider', () => {
 
   it('pins a static Google client: no registration, secret on token exchange, least-privilege scope', () => {
     const provider = makeOAuthProvider(3, { client_id: 'g', client_secret: 's', scope: 'read' })
-    expect(provider.clientMetadata).toMatchObject({ token_endpoint_auth_method: 'client_secret_post', scope: 'read' })
+    expect(provider.clientMetadata).toMatchObject({
+      token_endpoint_auth_method: 'client_secret_post',
+      scope: 'read'
+    })
     expect(provider.clientInformation()).toEqual({ client_id: 'g', client_secret: 's' })
     provider.saveClientInformation!({ client_id: 'ignored' })
     expect(provider.clientInformation()).toEqual({ client_id: 'g', client_secret: 's' })
@@ -80,7 +86,9 @@ describe('connector OAuth provider', () => {
     expect(() => silent.getCodePromise()).toThrow('no pending authorization')
 
     const interactive = makeOAuthProvider(2, { client_id: 'g', client_secret: 's', scope: 'read' })
-    await expect(interactive.redirectToAuthorization(new URL('https://auth.test/'))).rejects.toThrow('missing state')
+    await expect(
+      interactive.redirectToAuthorization(new URL('https://auth.test/'))
+    ).rejects.toThrow('missing state')
     await interactive.redirectToAuthorization(new URL('https://auth.test/?state=xyz'))
     expect(loopback.awaited).toEqual(['xyz'])
     expect(opened[0]).toContain('access_type=offline')

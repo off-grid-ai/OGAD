@@ -205,12 +205,13 @@ describe('the shutdown registry', () => {
     expect(() => unregister()).not.toThrow()
   })
 
-  it('swallows a failure from an owner that registered during teardown', async () => {
-    const registry = new ShutdownRegistry()
+  it('reports failures from owners that register after teardown', async () => {
+    const failures: ShutdownFailure[] = []
+    const registry = new ShutdownRegistry((failure) => failures.push(failure))
     await registry.shutdown()
 
-    // Nobody is left to collect this failure - shutdown() has already resolved - so it must not surface as an
-    // unhandled rejection while the process is on its way out.
+    // shutdown() has already resolved, so this failure cannot join its returned collection. The
+    // explicit late-failure boundary keeps it observable without raising an unhandled rejection.
     expect(() =>
       registry.register({
         name: 'late-and-broken',
@@ -218,25 +219,41 @@ describe('the shutdown registry', () => {
       })
     ).not.toThrow()
     await Promise.resolve()
+    expect(failures).toEqual([{ owner: 'late-and-broken', error: expect.any(Error) }])
+  })
+
+  it('reports a synchronous failure from an owner that registers after teardown', async () => {
+    const failures: ShutdownFailure[] = []
+    const registry = new ShutdownRegistry((failure) => failures.push(failure))
+    await registry.shutdown()
+
+    expect(() =>
+      registry.register({
+        name: 'late-sync-failure',
+        shutdown: () => {
+          throw new Error('nope')
+        }
+      })
+    ).not.toThrow()
+    await Promise.resolve()
+    expect(failures).toEqual([{ owner: 'late-sync-failure', error: expect.any(Error) }])
   })
 })
 
 describe('registering the core resources', () => {
-  it('registers all four in construction order, so teardown reverses it', async () => {
+  it('registers independent Core resources in construction order, so teardown reverses it', async () => {
     const registry = new ShutdownRegistry()
     const stopped: string[] = []
 
     registerCoreShutdownOwners(registry, {
       stopGateway: () => void stopped.push('gateway'),
-      stopMediaServer: () => void stopped.push('media'),
-      stopModelRuntimes: () => void stopped.push('runtimes'),
-      stopModelDownloads: () => void stopped.push('downloads')
+      stopMediaServer: () => void stopped.push('media')
     })
     await registry.shutdown()
 
-    // Model workers before the sockets that host them, downloads before the runtimes they feed. This order is
-    // the reason the registry reverses rather than the caller listing things backwards.
-    expect(stopped).toEqual(['downloads', 'runtimes', 'media', 'gateway'])
+    // Independent resources still stop in reverse construction order. Model downloads stop through
+    // the application root, which prevents a second shutdown owner for the same workers.
+    expect(stopped).toEqual(['media', 'gateway'])
   })
 })
 

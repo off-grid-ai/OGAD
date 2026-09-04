@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { nextZoomLevel, zoomIntentForInput } from '../window-zoom'
 
-const key = (key: string, extra: Partial<Parameters<typeof zoomIntentForInput>[0]> = {}) => ({
+const key = (
+  key: string,
+  extra: Partial<Parameters<typeof zoomIntentForInput>[0]> = {}
+): Parameters<typeof zoomIntentForInput>[0] => ({
   type: 'keyDown' as const,
   key,
   meta: true,

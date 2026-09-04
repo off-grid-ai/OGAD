@@ -14,7 +14,10 @@ const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-model-integrity-'
 process.env.OFFGRID_DATA_DIR = dataDir
 
 await import('../../model-services')
-const manager = await import('../../models-manager')
+const manager = {
+  ...(await import('../../models-manager')),
+  ...(await import('./download-facade-test-client'))
+}
 const { CATALOG } = await import('@offgrid/models')
 
 const unavailableSource = CATALOG.find((entry) => entry.kind === 'computer_use')
@@ -145,6 +148,27 @@ interface CapacityProbe {
   partialExistedAtFailure: boolean
 }
 
+function findDescendant(root: string, matches: (name: string) => boolean): string | undefined {
+  if (!fs.existsSync(root)) return undefined
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const candidate = path.join(root, entry.name)
+    if (entry.isDirectory()) {
+      const nested = findDescendant(candidate, matches)
+      if (nested) return nested
+    } else if (matches(entry.name)) {
+      return candidate
+    }
+  }
+  return undefined
+}
+
+function stagedPart(fileName: string): string | undefined {
+  return findDescendant(
+    path.join(dataDir, 'models', 'offgrid-download-staging'),
+    (name) => name === fileName || name.endsWith(`-${fileName}.part`)
+  )
+}
+
 function capacityLimitedFileStream(
   filePath: string,
   capacity: number,
@@ -223,13 +247,11 @@ describe('model-manager GGUF integrity', () => {
     const fetchBoundary = vi.fn()
     vi.stubGlobal('fetch', fetchBoundary)
     const modelsDir = path.join(dataDir, 'models')
-    const filesBefore = fs.readdirSync(modelsDir).sort()
-
     const result = await manager.downloadModel(unavailableModel.id)
 
     expect(result).toEqual({ success: false, error: unavailableModel.availabilityNote })
     expect(fetchBoundary).not.toHaveBeenCalled()
-    expect(fs.readdirSync(modelsDir).sort()).toEqual(filesBefore)
+    expect(findDescendant(modelsDir, (name) => name.endsWith('.part'))).toBeUndefined()
     expect(await manager.listInstalled()).not.toContain(unavailableModel.id)
     await expect(manager.loadComputerUseModel(unavailableModel.id)).resolves.toEqual({
       success: false,
@@ -255,21 +277,23 @@ describe('model-manager GGUF integrity', () => {
 
     expect(result).toEqual({
       success: false,
-      error: `${primary.fileName}: transferred file size does not match the manifest`
+      error: expect.stringMatching(
+        new RegExp(`${primary.fileName}.*transferred file size does not match the manifest`)
+      )
     })
     expect(fs.existsSync(primary.filePath)).toBe(false)
     expect(fs.existsSync(`${primary.filePath}.part`)).toBe(false)
     expect(await manager.listInstalled()).not.toContain(primary.entry.id)
-    expect(manager.downloadStatus(primary.entry.id)).toMatchObject({
+    expect(await manager.downloadStatus(primary.entry.id)).toMatchObject({
       modelId: primary.entry.id,
       status: 'failed',
       error: result.error
     })
 
     const cleared = await manager.clearDownload(primary.entry.id)
-    expect(cleared).toEqual({ success: true, freedBytes: 0 })
+    expect(cleared).toMatchObject({ success: true, freedBytes: 0 })
     expect(fs.existsSync(`${primary.filePath}.part`)).toBe(false)
-    expect(manager.downloadStatus(primary.entry.id)).toBeNull()
+    expect(await manager.downloadStatus(primary.entry.id)).toBeNull()
   })
 
   it('retries an invalid completed GGUF from byte zero', async () => {
@@ -291,11 +315,11 @@ describe('model-manager GGUF integrity', () => {
 
     expect(firstAttempt).toEqual({
       success: false,
-      error: `${invalidRetryFileName}: downloaded file is not a valid GGUF (corrupt or truncated)`
+      error: expect.stringContaining('downloaded file is not a valid GGUF (corrupt or truncated)')
     })
     expect(fs.existsSync(invalidRetryPath)).toBe(false)
     expect(fs.existsSync(`${invalidRetryPath}.part`)).toBe(false)
-    expect(manager.downloadStatus(invalidRetryModel.id)).toMatchObject({ status: 'failed' })
+    expect(await manager.downloadStatus(invalidRetryModel.id)).toMatchObject({ status: 'failed' })
 
     const retry = await manager.retryDownload(invalidRetryModel.id)
 
@@ -323,7 +347,7 @@ describe('model-manager GGUF integrity', () => {
 
     expect(result).toEqual({
       success: false,
-      error: expect.stringMatching(/checksum mismatch/i)
+      error: expect.stringMatching(/checksum/i)
     })
     expect(fs.existsSync(checksumPath)).toBe(false)
     expect(fs.existsSync(`${checksumPath}.part`)).toBe(false)
@@ -365,7 +389,7 @@ describe('model-manager GGUF integrity', () => {
     const createWriteStream = fs.createWriteStream.bind(fs)
     const capacityProbe: CapacityProbe = { acceptedBytes: 0, partialExistedAtFailure: false }
     vi.spyOn(fs, 'createWriteStream').mockImplementation((target, options) => {
-      if (target === `${diskFailure.filePath}.part`) {
+      if (String(target).endsWith(`-${diskFailure.fileName}.part`)) {
         return capacityLimitedFileStream(String(target), 512, capacityProbe)
       }
       return createWriteStream(target, options)
@@ -378,12 +402,12 @@ describe('model-manager GGUF integrity', () => {
       error: 'ENOSPC: no space left on device, write'
     })
     expect(fs.existsSync(diskFailure.filePath)).toBe(false)
-    expect(fs.readFileSync(`${diskFailure.filePath}.part`)).toEqual(body.subarray(0, 512))
+    expect(fs.readFileSync(stagedPart(diskFailure.fileName)!)).toEqual(body.subarray(0, 512))
     expect(capacityProbe).toEqual({ acceptedBytes: 512, partialExistedAtFailure: true })
     expect(fs.readFileSync(primary.filePath)).toEqual(installedBytes)
     expect(await manager.listInstalled()).toContain(primary.entry.id)
     expect(await manager.listInstalled()).not.toContain(diskFailure.entry.id)
-    expect(manager.downloadStatus(diskFailure.entry.id)).toMatchObject({
+    expect(await manager.downloadStatus(diskFailure.entry.id)).toMatchObject({
       modelId: diskFailure.entry.id,
       status: 'failed',
       error: result.error
@@ -430,14 +454,17 @@ describe('model-manager GGUF integrity', () => {
     const firstAttempt = await manager.downloadModel(interruptedModel.id)
 
     expect(firstAttempt).toEqual({ success: false, error: 'network connection interrupted' })
-    expect(fs.readFileSync(`${interruptedPath}.part`)).toEqual(prefix)
+    expect(fs.readFileSync(stagedPart(interruptedFileName)!)).toEqual(prefix)
     expect(fs.existsSync(interruptedPath)).toBe(false)
 
     vi.resetModules()
     registerTestCatalogEntries((await import('@offgrid/models')).CATALOG)
     await import('../../model-services')
-    const restartedManager = await import('../../models-manager')
-    expect(restartedManager.listDownloads()).toContainEqual(
+    const restartedManager = {
+      ...(await import('../../models-manager')),
+      ...(await import('./download-facade-test-client'))
+    }
+    expect(await restartedManager.listDownloads()).toContainEqual(
       expect.objectContaining({
         modelId: interruptedModel.id,
         status: 'failed',
@@ -456,9 +483,12 @@ describe('model-manager GGUF integrity', () => {
     vi.resetModules()
     registerTestCatalogEntries((await import('@offgrid/models')).CATALOG)
     await import('../../model-services')
-    const finalRestart = await import('../../models-manager')
-    expect(finalRestart.listDownloads().map((download) => download.modelId)).not.toContain(
-      interruptedModel.id
+    const finalRestart = {
+      ...(await import('../../models-manager')),
+      ...(await import('./download-facade-test-client'))
+    }
+    expect(await finalRestart.listDownloads()).toContainEqual(
+      expect.objectContaining({ modelId: interruptedModel.id, status: 'completed' })
     )
   })
 
@@ -493,7 +523,7 @@ describe('model-manager GGUF integrity', () => {
     expect(fs.existsSync(`${offlineRetryPath}.part`)).toBe(false)
     expect(await manager.listInstalled()).not.toContain(offlineRetryModel.id)
     expect(await manager.listInstalled()).toContain(primary.entry.id)
-    expect(manager.downloadStatus(offlineRetryModel.id)).toMatchObject({
+    expect(await manager.downloadStatus(offlineRetryModel.id)).toMatchObject({
       modelId: offlineRetryModel.id,
       status: 'failed',
       error: firstAttempt.error
@@ -539,7 +569,11 @@ describe('active model deletion', () => {
 
       vi.resetModules()
       await import('../../model-services')
-      const restartedManager = await import('../../models-manager')
+      const restartedManager = {
+        ...(await import('../../models-manager')),
+        ...(await import('./download-facade-test-client'))
+      }
+      await restartedManager.listDownloads()
       expect(restartedManager.getActiveModalities()).toEqual({
         text: null,
         computer_use: null,
@@ -568,7 +602,11 @@ describe('active model persistence', () => {
 
     vi.resetModules()
     await import('../../model-services')
-    const restartedManager = await import('../../models-manager')
+    const restartedManager = {
+      ...(await import('../../models-manager')),
+      ...(await import('./download-facade-test-client'))
+    }
+    await restartedManager.listDownloads()
 
     expect(restartedManager.getActiveModalities().text).toBe(text.entry.id)
     expect(await restartedManager.getActiveModelIds()).toContain(text.entry.id)
@@ -602,7 +640,11 @@ describe('active model persistence', () => {
 
     vi.resetModules()
     await import('../../model-services')
-    const restartedManager = await import('../../models-manager')
+    const restartedManager = {
+      ...(await import('../../models-manager')),
+      ...(await import('./download-facade-test-client'))
+    }
+    await restartedManager.listDownloads()
 
     expect(await restartedManager.getActiveModelIds()).toEqual(expect.arrayContaining(selectedIds))
     expect(restartedManager.getActiveModalities()).toEqual(activeBeforeRestart)

@@ -1,126 +1,194 @@
 /**
- * The park-aware drain loop, against scripted engine and park-signal fakes.
- * The property under test: an action waiting on a human never blocks the
- * queue - the loop moves on, and the parked tick's outcome still reaches
- * its waiter when the gate finally resolves.
+ * Shared Use application scheduling against a real queue database. The database,
+ * device, gate, clock scheduler, and park notifications are platform boundaries;
+ * the drain loop, waiters, event feed, and lifecycle remain real Off Grid code.
  */
-import { describe, expect, it } from 'vitest'
-import type { TickOutcome } from '@offgrid/use'
-import { createActionWorker, type EngineLike, type ParkSignal } from '../use-worker'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import Database from 'better-sqlite3-multiple-ciphers'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  createUseApplication,
+  type GateCallback,
+  type UseApplication,
+  type UseParkPort
+} from '@offgrid/use'
+import { makeUseDriver } from '../use-driver'
 
-const done = (id: string): TickOutcome =>
-  ({ id, outcome: 'done', record: { id } as never }) as TickOutcome
+const applications: UseApplication[] = []
+const databases: Database.Database[] = []
+const tempDirs: string[] = []
 
-function makePark() {
+interface ParkBoundary {
+  park: UseParkPort
+  fire(actionId: string): void
+}
+
+afterEach(async () => {
+  await Promise.all(applications.splice(0).map((application) => application.stop()))
+  for (const database of databases.splice(0)) database.close()
+  for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+})
+
+function makeParkBoundary(): ParkBoundary {
   const listeners = new Set<() => void>()
-  const signal: ParkSignal = {
+  const actionListeners = new Map<string, Set<() => void>>()
+  const park: UseParkPort = {
     onParked(listener) {
       listeners.add(listener)
       return () => listeners.delete(listener)
+    },
+    onActionParked(actionId, listener) {
+      const current = actionListeners.get(actionId) ?? new Set()
+      current.add(listener)
+      actionListeners.set(actionId, current)
+      return () => current.delete(listener)
     }
   }
-  return { signal, fire: () => listeners.forEach((l) => l()) }
+  return {
+    park,
+    fire(actionId: string) {
+      for (const listener of actionListeners.get(actionId) ?? []) listener()
+      for (const listener of listeners) listener()
+    }
+  }
 }
 
-const flush = () => new Promise((resolve) => setTimeout(resolve, 10))
-
-describe('createActionWorker', () => {
-  it('drains outcomes to their waiters and stops when nothing is due', async () => {
-    const script: Array<TickOutcome | undefined> = [done('a1'), done('a2'), undefined]
-    const engine: EngineLike = { tick: async () => script.shift() }
-    const { signal } = makePark()
-    const worker = createActionWorker(engine, signal)
-
-    const w1 = worker.waitForOutcome('a1', 1000)
-    const w2 = worker.waitForOutcome('a2', 1000)
-    worker.kick()
-
-    expect((await w1)?.id).toBe('a1')
-    expect((await w2)?.id).toBe('a2')
-    await flush()
-    expect(worker.draining()).toBe(false)
-  })
-
-  it('a parked tick does not block the loop, and its outcome still lands later', async () => {
-    const { signal, fire } = makePark()
-    let resolveParkedTick: ((o: TickOutcome) => void) | undefined
-    let call = 0
-    const engine: EngineLike = {
-      tick: async () => {
-        call += 1
-        if (call === 1) {
-          // This action reaches the gate and waits on a human.
-          return new Promise<TickOutcome>((resolve) => {
-            resolveParkedTick = resolve
-            queueMicrotask(fire) // the gate host announces the park
-          })
-        }
-        if (call === 2) {
-          return done('quick')
-        }
-        return undefined
+function makeApplication(
+  options: {
+    gate?: GateCallback
+    park?: UseParkPort
+    execute?: () => Promise<{ ok: boolean; detail?: string }>
+  } = {}
+): UseApplication {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ogad-use-application-'))
+  const database = new Database(path.join(dir, 'app.db'))
+  tempDirs.push(dir)
+  databases.push(database)
+  let nextId = 0
+  const application = createUseApplication({
+    driver: makeUseDriver(database),
+    handlers: [
+      {
+        type: 'message',
+        rail: 'semantic',
+        defaultRisk: 'mutate',
+        verification: 'none_fuzzy'
       }
-    }
-    const worker = createActionWorker(engine, signal)
-    const parked = worker.waitForOutcome('parked', 1000)
-    const quick = worker.waitForOutcome('quick', 1000)
-    worker.kick()
+    ],
+    gate: options.gate ?? (async () => ({ kind: 'approve' })),
+    device: {
+      execute: options.execute ?? (async () => ({ ok: true }))
+    },
+    park: options.park,
+    scheduler: {
+      every: (intervalMs, listener) => {
+        const timer = setInterval(listener, intervalMs)
+        timer.unref()
+        return () => clearInterval(timer)
+      },
+      after: (delayMs, listener) => {
+        const timer = setTimeout(listener, delayMs)
+        timer.unref()
+        return () => clearTimeout(timer)
+      }
+    },
+    newId: () => `action-${++nextId}`,
+    attemptTimeoutMs: 1_000
+  })
+  applications.push(application)
+  return application
+}
 
-    expect((await quick)?.id).toBe('quick')
-    // The human decides much later; the parked outcome still arrives.
-    resolveParkedTick?.(done('parked'))
-    expect((await parked)?.id).toBe('parked')
+async function propose(application: UseApplication, intent: string): Promise<string> {
+  const outcome = await application.run({
+    proposal: { type: 'message', intent, args: {}, risk: 'mutate' },
+    source: 'chat'
+  })
+  expect(outcome.accepted).toBe(true)
+  if (!outcome.accepted) throw new Error(outcome.reason)
+  return outcome.id
+}
+
+describe('the shared Use application drain loop', () => {
+  it('drains outcomes to their waiters and stops when nothing is due', async () => {
+    const application = makeApplication()
+    const first = await propose(application, 'first action')
+    const second = await propose(application, 'second action')
+
+    expect((await application.waitForOutcome(first, 1_000))?.id).toBe(first)
+    expect((await application.waitForOutcome(second, 1_000))?.id).toBe(second)
+    await vi.waitFor(() => expect(application.snapshot().running).toBe(false))
   })
 
-  it('waitForOutcome times out to undefined and drops its waiter', async () => {
-    const engine: EngineLike = { tick: async () => undefined }
-    const worker = createActionWorker(engine, makePark().signal)
-    const result = await worker.waitForOutcome('ghost', 20)
-    expect(result).toBeUndefined()
+  it('a parked action does not block the queue, and its outcome still lands later', async () => {
+    const boundary = makeParkBoundary()
+    let resolveParked: (() => void) | undefined
+    const application = makeApplication({
+      park: boundary.park,
+      gate: async ({ action }) => {
+        if (action.intent !== 'parked action') return { kind: 'approve' }
+        await new Promise<void>((resolve) => {
+          resolveParked = resolve
+          queueMicrotask(() => boundary.fire(action.id))
+        })
+        return { kind: 'approve' }
+      }
+    })
+    const parked = await propose(application, 'parked action')
+    const quick = await propose(application, 'quick action')
+
+    expect((await application.waitForOutcome(quick, 1_000))?.id).toBe(quick)
+    resolveParked?.()
+    expect((await application.waitForOutcome(parked, 1_000))?.id).toBe(parked)
+  })
+
+  it('waitForOutcome returns undefined when its timeout expires', async () => {
+    const application = makeApplication()
+    await expect(application.waitForOutcome('ghost', 20)).resolves.toBeUndefined()
   })
 
   it('kick while draining does not start a second drain', async () => {
-    let ticks = 0
+    let executions = 0
     let release: (() => void) | undefined
-    const engine: EngineLike = {
-      tick: async () => {
-        ticks += 1
-        if (ticks === 1) {
-          await new Promise<void>((resolve) => {
-            release = resolve
-          })
-          return done('slow')
-        }
-        return undefined
+    const application = makeApplication({
+      execute: async () => {
+        executions += 1
+        await new Promise<void>((resolve) => {
+          release = resolve
+        })
+        return { ok: true }
       }
-    }
-    const worker = createActionWorker(engine, makePark().signal)
-    worker.kick()
-    worker.kick()
-    worker.kick()
-    await flush()
-    expect(ticks).toBe(1)
+    })
+    const actionId = await propose(application, 'slow action')
+    application.kick()
+    application.kick()
+    application.kick()
+
+    await vi.waitFor(() => expect(executions).toBe(1))
     release?.()
-    await flush()
-    expect(worker.draining()).toBe(false)
+    expect((await application.waitForOutcome(actionId, 1_000))?.id).toBe(actionId)
+    await vi.waitFor(() => expect(application.snapshot().running).toBe(false))
   })
 })
 
-describe('onOutcome (the UI feed)', () => {
+describe('Use action outcomes (the UI feed)', () => {
   it('every outcome reaches subscribers, and unsubscribe stops the feed', async () => {
-    const script: Array<TickOutcome | undefined> = [done('a1'), done('a2'), undefined]
-    const engine: EngineLike = { tick: async () => script.shift() }
-    const worker = createActionWorker(engine, makePark().signal)
+    const application = makeApplication()
     const seen: string[] = []
-    const unsubscribe = worker.onOutcome((outcome) => seen.push(outcome.id))
-    worker.kick()
-    await flush()
-    expect(seen).toEqual(['a1', 'a2'])
+    const unsubscribe = application.events((event) => {
+      if (event.type === 'action_outcome') seen.push(event.outcome.id)
+    })
+    const first = await propose(application, 'first visible action')
+    const second = await propose(application, 'second visible action')
+    await application.waitForOutcome(first, 1_000)
+    await application.waitForOutcome(second, 1_000)
+    expect(seen).toEqual([first, second])
+
     unsubscribe()
-    const more: Array<TickOutcome | undefined> = [done('a3'), undefined]
-    const worker2 = createActionWorker({ tick: async () => more.shift() }, makePark().signal)
-    worker2.kick()
-    await flush()
-    expect(seen).toEqual(['a1', 'a2'])
+    const third = await propose(application, 'hidden after unsubscribe')
+    await application.waitForOutcome(third, 1_000)
+    expect(seen).toEqual([first, second])
   })
 })
