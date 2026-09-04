@@ -42,7 +42,11 @@ import {
   type ResidentReclaim
 } from '@offgrid/models'
 import type { DesktopManagedRuntime } from './model-runtime-port'
-import { createProcessTeardown, type ProcessTeardown } from './process-teardown'
+import {
+  createProcessTeardown,
+  requireNoStrandedProcess,
+  type ProcessTeardown
+} from './process-teardown'
 import { acceleratorForEngine, type EngineAccelerator } from '../shared/engine-accelerator'
 import { verifyArtifactFile } from './models/gguf'
 import { readGgufContextLength } from './models/gguf-metadata'
@@ -809,19 +813,9 @@ export class LLMService {
   private async _doInit(): Promise<void> {
     if (this.initialized) return
 
-    /**
-     * REFUSE while an earlier engine is stranded.
-     *
-     * The same rule the image and transcription servers now carry, and the point where a wrong
-     * reclaim answer stops being a reporting problem: a stuck engine that had been forgotten looks
-     * like "nothing running", so this would spawn a fresh llama-server beside a live orphan - two
-     * processes holding model weights on one port while residency believed none did. Retry the
-     * stranded one first; only its proven exit reopens this path.
-     */
-    if (this.teardown.hasStranded()) {
-      const reclaim = await this.teardown.recheck()
-      if (!reclaim.reclaimed) throw new Error(reclaim.reason)
-    }
+    // No fresh engine beside a live orphan: two processes holding weights on one port while
+    // residency believes none do. Only the stranded one's proven exit reopens this path.
+    await requireNoStrandedProcess(this.teardown)
 
     this.resolveModel()
 

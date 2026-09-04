@@ -19,7 +19,11 @@
 // result shaping is extracted into exported functions (unit-tested, zero-IO).
 import { spawn, type ChildProcess, execSync } from 'child_process'
 import type { ResidentReclaim } from '@offgrid/models'
-import { createProcessTeardown, type ProcessTeardown } from './process-teardown'
+import {
+  createProcessTeardown,
+  requireNoStrandedProcess,
+  type ProcessTeardown
+} from './process-teardown'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
@@ -171,7 +175,7 @@ export function describeSdFetchFailure(
   const reason = serverAlive ? 'became unreachable' : 'crashed'
   const tail = stderrTail.slice(-6).join(' | ').trim()
   const rawMsg = raw instanceof Error ? raw.message : String(raw)
-  return `sd-server ${reason} during image generation` + (tail ? `: ${tail}` : ` (${rawMsg})`)
+  return `sd-server ${reason} during image generation${tail ? `: ${tail}` : ` (${rawMsg})`}`
 }
 
 interface SdGenProgress {
@@ -237,20 +241,9 @@ class SdServerService {
   /** Ensure a server is up with EXACTLY this context; restart on a model/flag
    *  swap. Cancels any pending idle-eviction (we're about to be busy). */
   async ensureUp(ctx: SdServerContext): Promise<void> {
-    /**
-     * REFUSE while an earlier process is stranded.
-     *
-     * This is where a wrong reclaim answer stops being a reporting problem and becomes resource
-     * exhaustion: `residentEngineAction` decides from `processAlive: this.server !== null`, so a
-     * stuck teardown that had cleared the handle looked like "nothing running" and this method
-     * would spawn a fresh server beside the live orphan - two processes holding model memory while
-     * residency believed none did. Retry the stranded one first; only its proven exit reopens this
-     * path.
-     */
-    if (this.teardown.hasStranded()) {
-      const reclaim = await this.teardown.recheck()
-      if (!reclaim.reclaimed) throw new Error(reclaim.reason)
-    }
+    // `residentEngineAction` decides from `processAlive: this.server !== null`, so a stranded
+    // process would read as "nothing running" here and this would spawn a second server beside it.
+    await requireNoStrandedProcess(this.teardown)
     if (
       idleEvictionAction({ event: 'activity-started', processAlive: this.server !== null }) ===
       'cancel'

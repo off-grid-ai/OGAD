@@ -114,6 +114,21 @@ export interface ProcessTeardown {
   strandedCount(): number
 }
 
+/**
+ * May a replacement process be started right now?
+ *
+ * The admission rule for a spawn, in one place because three engines need it and each one had it
+ * inline: a stranded process is retried first, and starting a replacement while it is still alive
+ * would put two processes on one port both holding model weights while residency believes none do.
+ * Throws the tracker's own reason, so the caller reports what is actually wrong rather than
+ * inventing a message for it.
+ */
+export async function requireNoStrandedProcess(teardown: ProcessTeardown): Promise<void> {
+  if (!teardown.hasStranded()) return
+  const reclaim = await teardown.recheck()
+  if (!reclaim.reclaimed) throw new Error(reclaim.reason)
+}
+
 export function createProcessTeardown(
   engine: string,
   graceMs: number = ENGINE_TEARDOWN_GRACE_MS
