@@ -40,8 +40,12 @@ export interface StartupStageContext {
   /** Aborted when the deadline passes. Pass it to anything that accepts one. */
   readonly signal: AbortSignal
   /**
-   * This run's identity, for an operation that cannot be cancelled but CAN be told apart from a
-   * later one (`models.prepare`'s `operationId` is the case today).
+   * This run's identity, for CORRELATING a stage with the events its work emits.
+   *
+   * It is not a supersession token. `models.prepare` accepts an `operationId` and emits it on
+   * started / succeeded / failed, and nothing in shared compares it - so passing it makes a late
+   * completion attributable, not impossible. Anything that must not happen late needs `commit`,
+   * or an owner that refuses it.
    */
   readonly operationId: string
   /** False once the deadline has passed: this stage no longer owns its outcome. */
@@ -117,12 +121,21 @@ export async function runStartupStage<T>(stage: StartupStage<T>): Promise<Startu
     timer.unref()
   })
 
+  // Counted, because the late report must say what the code KNOWS. A stage that never called
+  // `commit` has told this machinery nothing about whether it changed state, and reporting that
+  // its late effect was "refused" would claim a guard that was never asked to run.
+  let commitsApplied = 0
+  let commitsRefused = 0
   const context: StartupStageContext = {
     signal: controller.signal,
     operationId,
     isOwner: () => owned,
     commit: <R>(label: string, apply: () => R): R | undefined => {
-      if (owned) return apply()
+      if (owned) {
+        commitsApplied += 1
+        return apply()
+      }
+      commitsRefused += 1
       writeDiagnosticLog(
         'startup',
         'stage.late-commit-refused',
@@ -133,12 +146,22 @@ export async function runStartupStage<T>(stage: StartupStage<T>): Promise<Startu
     }
   }
 
-  const work = stage.run(context)
+  // Deferred through a resolved promise so a SYNCHRONOUS throw from `run` becomes a rejection
+  // this function handles, rather than escaping before the try: it used to leave the timer
+  // running, the stage reading as pending forever, and `runIndependentStartupStages` rejecting
+  // early instead of collecting a typed failure.
+  const work = Promise.resolve().then(() => stage.run(context))
   try {
     const outcome = await Promise.race([work.then((value) => ({ value }) as const), deadline])
     const durationMs = Date.now() - startedAt
     if (outcome === 'timeout') {
-      observeLateSettlement(stage, work, operationId, startedAt)
+      observeLateSettlement({
+        stage,
+        work,
+        operationId,
+        startedAt,
+        commits: () => ({ applied: commitsApplied, refused: commitsRefused })
+      })
       return settleFailure(
         stage,
         { reason: 'timeout', error: `exceeded ${stage.deadlineMs}ms` },
@@ -169,6 +192,23 @@ export async function runStartupStage<T>(stage: StartupStage<T>): Promise<Startu
 }
 
 /**
+ * What is actually known about a late effect.
+ *
+ * `refused` is claimed ONLY when this machinery refused something: at least one `commit` was
+ * turned away after the deadline and none was applied. A stage that never called `commit` has told
+ * us nothing, so it reports `unguarded` - which is the truth, and is meant to read as a gap rather
+ * than as safety.
+ */
+function lateEffectOf<T>(
+  stage: StartupStage<T>,
+  commits: { readonly applied: number; readonly refused: number }
+): 'kept' | 'refused' | 'unguarded' {
+  if (stage.lateEffectIsRecoverable === true) return 'kept'
+  if (commits.refused > 0 && commits.applied === 0) return 'refused'
+  return 'unguarded'
+}
+
+/**
  * Keep watching work the deadline abandoned.
  *
  * A timed-out stage's promise is still running, and dropping it would mean its eventual outcome is
@@ -176,15 +216,18 @@ export async function runStartupStage<T>(stage: StartupStage<T>): Promise<Startu
  * change the world with nothing recording that it did. So it is reported as `late` - the app is not
  * permanently broken because something arrived slowly, and it is not clean either.
  */
-function observeLateSettlement<T>(
-  stage: StartupStage<T>,
-  work: Promise<T>,
-  operationId: string,
-  startedAt: number
-): void {
+function observeLateSettlement<T>(input: {
+  readonly stage: StartupStage<T>
+  readonly work: Promise<T>
+  readonly operationId: string
+  readonly startedAt: number
+  readonly commits: () => { readonly applied: number; readonly refused: number }
+}): void {
+  const { stage, work, operationId, startedAt } = input
   void work.then(
     () => {
       const durationMs = Date.now() - startedAt
+      const commits = input.commits()
       writeDiagnosticLog(
         'startup',
         'stage.late-completion',
@@ -192,7 +235,9 @@ function observeLateSettlement<T>(
           stage: stage.name,
           operationId,
           durationMs,
-          effect: stage.lateEffectIsRecoverable === true ? 'kept' : 'refused'
+          effect: lateEffectOf(stage, commits),
+          commitsApplied: commits.applied,
+          commitsRefused: commits.refused
         },
         'warn'
       )

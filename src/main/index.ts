@@ -308,8 +308,10 @@ app.whenReady().then(async () => {
       name: 'models.text.prepare',
       deadlineMs: 180_000,
       domain: 'models',
-      // Cannot be cancelled, but it can be told apart from a later prepare: the stage's operation
-      // id is its identity at the facade.
+      // `operationId` correlates this prepare with the events it emits; it does not supersede a
+      // stale one (see the windowed stage below). Late is KEPT: a model that finished loading is
+      // loaded, and headless has no shell whose state could contradict it.
+      lateEffectIsRecoverable: true,
       run: async ({ operationId }) => {
         const { desktopApplication } = await import('./composition/application')
         const outcome = await desktopApplication.models.prepare('text', { operationId })
@@ -513,10 +515,13 @@ app.whenReady().then(async () => {
     name: 'application.construct',
     deadlineMs: 10_000,
     required: true,
-    // A module import cannot be cancelled, and its only module-scope effect is filling the single
-    // slot the facade proxies read - so a late import produces a late-resolving application, never
-    // a second one. What must not happen late is anything STARTING from it, and nothing can: every
-    // consumer below is behind `applicationRoot.ok`.
+    /**
+     * A module import cannot be cancelled, so its late effect is KEPT - and what makes that safe
+     * is the module cache, not a guard of mine: evaluation happens at most once, so a late import
+     * cannot register the handlers it sets up at module scope (the speech IPC among them) twice,
+     * and cannot construct a second application. What must not happen late is anything STARTING
+     * from it, and nothing can: every consumer below is behind `applicationRoot.ok`.
+     */
     lateEffectIsRecoverable: true,
     run: () => import('./composition/application')
   })
@@ -623,10 +628,10 @@ app.whenReady().then(async () => {
       domain: 'models',
       run: async ({ signal }) => {
         const modelManager = await import('./models-manager')
-        await modelManager.reconcileActiveModelClassification()
-        // Two independent repairs. If the deadline passed during the first, the second is never
-        // started: each one persists its own repair rather than replacing shared state, so the
-        // guard that matters here is not BEGINNING more work after the stage was given up on.
+        // The signal goes INTO the repair, not just between the two: the classification repair
+        // makes two persisted selection changes, so checking only after it returned let both of
+        // them land after this stage had been given up on. It now refuses to begin them.
+        await modelManager.reconcileActiveModelClassification(signal)
         if (signal.aborted) return
         await modelManager.reconcileActiveModelProjector()
       }
@@ -660,8 +665,18 @@ app.whenReady().then(async () => {
       name: 'models.text.prepare',
       deadlineMs: 180_000,
       domain: 'models',
-      // Loading a model cannot be cancelled, but the facade accepts an operation id, so a
-      // superseded prepare is distinguishable from the current one at its owner.
+      /**
+       * Loading a model cannot be cancelled, and `operationId` does NOT supersede a stale prepare:
+       * shared emits it on started / succeeded / failed and nothing compares it, so it makes a
+       * late completion attributable, not impossible. (Requested of Seat C in WIRING_D item 4.)
+       *
+       * So this stage's late effect is declared KEPT, which is what actually happens: a model that
+       * finished loading after the deadline IS loaded and resident, and the app should use it.
+       * There is no local guard that could honestly refuse it - the residency and active-model
+       * change happen inside shared, and undoing them by unloading a model the user may already be
+       * chatting with would be the worse outcome. What this seat owns is saying so.
+       */
+      lateEffectIsRecoverable: true,
       run: async ({ operationId }) => {
         const { desktopModels, modelsFailureMessage } =
           await import('./composition/application-access')

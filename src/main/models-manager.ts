@@ -743,7 +743,18 @@ export function getActiveModel(): string | null {
  * specialist. Preserve the user's choice in the proper modality, then remove the invalid
  * chat selection before llama-server starts.
  */
-export async function reconcileActiveModelClassification(): Promise<boolean> {
+/**
+ * `signal` is checked at the ONE safe point: after the reads, before the first persisted change.
+ *
+ * The two writes below are an atomic pair - migrating the model to its real modality and clearing
+ * it out of the text slot. Abandoning the repair between them would leave a specialist both
+ * migrated AND still selected as the chat model, which is worse than a repair that ran slightly
+ * late. So the guard refuses to BEGIN the pair when its caller has already given up on it, and
+ * never interrupts it once begun.
+ */
+export async function reconcileActiveModelClassification(
+  signal?: AbortSignal
+): Promise<boolean> {
   const activeId = getActiveModel()
   if (!activeId) return false
 
@@ -753,6 +764,7 @@ export async function reconcileActiveModelClassification(): Promise<boolean> {
 
   const modality = specialistReclassificationModality(entry.kind)
   if (!modality) return false
+  if (signal?.aborted === true) return false
   // selectedModelRoutes owns the modality-to-slot mapping; a modality this desktop has no
   // slot for reads as unselected and the migration proceeds through the same selection port.
   const activeForModality = selectedModelRoutes()[modality]
