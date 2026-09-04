@@ -2719,3 +2719,46 @@ Also still hardcoded and NOT in this fix: `src/renderer/src/components/Onboardin
 identical "Hold Option+Space" string. It sits in another owner's reserved domain this round.
 
 Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
+
+## CI verifies a BRANCH, not the commit that was verified locally (OPEN — release gate)
+
+`desktop/.github/workflows/ci.yml` resolves its Pro and Shared sources by branch name with a
+fallback, not by exact commit. So CI can build against a different Shared or Pro tree than the one
+reviewed here, and a green run would not mean the verified heads are green.
+
+This is not hypothetical right now: the apps are on `release/107-feedback` while Shared is on
+`fix/shared-rag-closeout-fixtures`, so a branch lookup selects the WRONG Shared source for every run.
+Pro's own `ci.yml` carries a comment claiming it pins the exact Pro commit while the workflow does a
+branch lookup, and its manual shared build lists only `sync`, `models`, `speech`, `ui` — so packages
+this migration changed are not built there at all. Shared has no workflow of its own.
+
+Observed remote state, read-only: OGAD's latest CI run `33787390040` FAILED core typecheck on
+`4f54da6`; OGAM `33653191613` failed Jest on `ea263c0`; Pro's greens are on `a2b5f5f` / `ad7b086`,
+which are NOT the current heads `b1f7422` / `69296e32`. So no green run exists against anything we
+reviewed.
+
+TASK for the release gate, before any push is treated as evidence: make each workflow verify an EXACT
+head — the reviewed Shared commit, the reviewed Pro commit — rather than a branch or a fallback;
+correct Pro's comment to match what its workflow does; and extend the manual shared build to the
+packages this migration actually changed. Until then a green CI badge proves something, but not that
+these commits are green.
+
+Deliberately NOT started during production closeout: CI/release YAML is out of scope at this gate,
+and editing it now would produce evidence about a pipeline nobody has run against these heads.
+
+## Pro transfer sink comment goes stale the moment the typed library arm lands (OPEN, sequenced)
+
+`desktop/pro/main/sync/model-transfer-service.ts:378-381` states that a library refusal arrives as
+`runtime` and that the registration service's two cases — the library cannot be verified, versus it
+changed during registration — are not separable by a caller.
+
+That is still TRUE as of this entry, so the comment stays. `ModelTransferLibraryFailure` is being
+added as a `ModelsFailure` arm in another owner's reserved files and is uncommitted; until that is
+integrated, removing the comment would claim a capability the tree does not have — the exact
+inversion of the stale-comment defects removed elsewhere this round.
+
+When that slice is accepted: delete or rewrite this comment IN THE SAME integration, and branch on
+the typed arm at `:382` instead of throwing the flattened failure. A comment describing a limitation
+that no longer exists is the same class of defect as one describing a guarantee that does not.
+
+Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
