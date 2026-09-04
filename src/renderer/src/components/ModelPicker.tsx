@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { IconLoader2, IconCheck, IconCpu, IconPower } from '@tabler/icons-react'
 import { X } from '@phosphor-icons/react'
 import { SidePanel } from './SidePanel'
@@ -35,6 +35,13 @@ function transportFailureMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
 }
 
+// A section is in exactly one of three states. PENDING is not EMPTY and neither is UNAVAILABLE:
+// conflating any two of them is the defect class this whole migration has been removing.
+type SectionRead =
+  | { readonly state: 'pending' }
+  | { readonly state: 'read' }
+  | { readonly state: 'unavailable'; readonly message: string }
+
 function openSettings(onClose: () => void): void {
   onClose()
   openModelSettingsPanel('model')
@@ -47,14 +54,30 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
   const [busy, setBusy] = useState<string | null>(null)
   const [unload, setUnload] = useState<Record<string, UnloadStatus>>({})
   const [computerUse, setComputerUse] = useState<ComputerUseActiveModelProjection | null>(null)
-  // An inventory we never managed to read is NOT an empty inventory. `inventoryRead` stays
-  // false until a projection has actually been applied, so a failed read can never be
-  // rendered as "nothing is downloaded". `failure` carries the typed refusal's own message.
-  const [inventoryRead, setInventoryRead] = useState(false)
+  // An inventory still in flight is NOT an empty one and NOT a failed one. Only a projection
+  // that actually arrived makes "nothing is downloaded" true; only a real refusal makes
+  // "could not be read" true. `failure` carries the typed refusal's own message.
+  const [inventoryRead, setInventoryRead] = useState<SectionRead>({ state: 'pending' })
   const [failure, setFailure] = useState<string | null>(null)
-  // The optional Computer Use read owns its own failure. An unread section is its own state:
-  // it is never collapsed into "no model selected", and never filled with a guessed empty list.
-  const [computerUseFailure, setComputerUseFailure] = useState<string | null>(null)
+  // The optional Computer Use read owns its own state: it is never collapsed into "no model
+  // selected", never filled with a guessed empty list, and never called failed while pending.
+  const [computerUseRead, setComputerUseRead] = useState<SectionRead>({ state: 'pending' })
+
+  // One store, one writer: the most recently ISSUED control request owns it. An answer to a
+  // request nobody is waiting for any more — a mount refresh resolving after an activate — must
+  // NOT publish, or the panel silently reverts to the pre-command state. `operationId` is the
+  // control API's own request identity (it is accepted on the intent and echoed on the
+  // success), so ownership is carried by that field rather than by a second copy of the store.
+  const controlOwner = useRef<string | null>(null)
+  const claimControl = useCallback((): string => {
+    const operationId = crypto.randomUUID()
+    controlOwner.current = operationId
+    return operationId
+  }, [])
+  const ownsControl = useCallback(
+    (operationId: string): boolean => controlOwner.current === operationId,
+    []
+  )
 
   const applyProjection = useCallback((projection: ModelControlProjection): void => {
     setModels([...projection.models])
@@ -64,25 +87,34 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
         Object.entries(projection.active).map(([surface, value]) => [surface, value.modelId])
       )
     )
-    setInventoryRead(true)
+    setInventoryRead({ state: 'read' })
   }, [])
 
   // The canonical model inventory. Owns only its own failure.
   const readInventory = useCallback(async (): Promise<void> => {
+    const operationId = claimControl()
     try {
-      const outcome = await modelControlClient.control({ type: 'refresh' })
+      const outcome = await modelControlClient.control({ type: 'refresh', operationId })
       if (!outcome.ok) {
-        setFailure(modelsFailureMessage(outcome.failure))
+        if (!ownsControl(operationId)) return
+        const message = modelsFailureMessage(outcome.failure)
+        setFailure(message)
+        setInventoryRead({ state: 'unavailable', message })
         return
       }
+      // The success echoes the id we sent; an answer to any other request is not ours to apply.
+      if (!ownsControl(outcome.value.operationId)) return
       setFailure(null)
       // Every success status carries the fresh projection, not only `completed`. Dropping the
       // others left the panel showing a stale (or absent) active model after a refusal.
       applyProjection(outcome.value.projection)
     } catch (cause) {
-      setFailure(transportFailureMessage(cause))
+      if (!ownsControl(operationId)) return
+      const message = transportFailureMessage(cause)
+      setFailure(message)
+      setInventoryRead({ state: 'unavailable', message })
     }
-  }, [applyProjection])
+  }, [applyProjection, claimControl, ownsControl])
 
   // Computer Use is an OPTIONAL section read over a separate channel. It is deliberately not
   // combined with the inventory read: a rejection here must never suppress a model-control
@@ -90,9 +122,9 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
   const readComputerUse = useCallback(async (): Promise<void> => {
     try {
       setComputerUse(await window.api.getComputerUseActiveModels())
-      setComputerUseFailure(null)
+      setComputerUseRead({ state: 'read' })
     } catch (cause) {
-      setComputerUseFailure(transportFailureMessage(cause))
+      setComputerUseRead({ state: 'unavailable', message: transportFailureMessage(cause) })
     }
   }, [])
 
@@ -115,48 +147,62 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     })
 
   const choose = async (mode: PickerMode, m: ModelEntry): Promise<void> => {
-    setBusy(m.id)
+    const busyId = m.id
+    setBusy(busyId)
     clearUnloadStatus(mode) // re-selecting reloads this modality on next use
+    const operationId = claimControl()
     try {
       const outcome = await modelControlClient.control({
         type: 'activate',
         modelId: m.id,
-        surface: mode
+        surface: mode,
+        operationId
       })
       if (!outcome.ok) {
+        if (!ownsControl(operationId)) return
         setFailure(modelsFailureMessage(outcome.failure))
         return
       }
+      if (!ownsControl(outcome.value.operationId)) return
       setFailure(null)
       applyProjection(outcome.value.projection)
     } catch (cause) {
+      if (!ownsControl(operationId)) return
       // A rejected IPC (bridge missing, main process gone, serialization failure) would
       // otherwise escape this void-called handler: the spinner stops and nothing is said.
       setFailure(transportFailureMessage(cause))
     } finally {
-      setBusy(null)
+      // Clear only THIS request's spinner; a stale answer must not clear a newer one's.
+      setBusy((current) => (current === busyId ? null : current))
     }
   }
 
   const chooseComputerUse = async (modelId: string): Promise<void> => {
     if (!modelId) return
-    setBusy(modelId)
+    const busyId = modelId
+    setBusy(busyId)
+    const operationId = claimControl()
     try {
       const outcome = await modelControlClient.control({
         type: 'activate',
         modelId,
-        surface: 'computer_use'
+        surface: 'computer_use',
+        operationId
       })
       if (!outcome.ok) {
+        if (!ownsControl(operationId)) return
         setFailure(modelsFailureMessage(outcome.failure))
         return
       }
+      if (!ownsControl(outcome.value.operationId)) return
       setFailure(null)
       applyProjection(outcome.value.projection)
     } catch (cause) {
+      if (!ownsControl(operationId)) return
       setFailure(transportFailureMessage(cause))
     } finally {
-      setBusy(null)
+      // Clear only THIS request's spinner; a stale answer must not clear a newer one's.
+      setBusy((current) => (current === busyId ? null : current))
     }
   }
 
@@ -164,10 +210,17 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
   // Independent per modality — writes only this mode's status.
   const unloadModel = async (mode: PickerMode): Promise<void> => {
     setUnloadStatus(mode, 'unloading')
+    const operationId = claimControl()
     try {
-      const outcome = await modelControlClient.control({ type: 'unload', surface: mode })
+      const outcome = await modelControlClient.control({
+        type: 'unload',
+        surface: mode,
+        operationId
+      })
       if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
-      applyProjection(outcome.value.projection)
+      // Ownership gates the SHARED inventory only. This modality's unload status is per-mode
+      // state that no other modality's command supersedes, so it always records its own answer.
+      if (ownsControl(outcome.value.operationId)) applyProjection(outcome.value.projection)
       // `ok` means the command was carried and answered — NOT that the model left memory.
       // Only `completed` means unloaded; every other status means it is still resident, and
       // reporting "Unloaded" for those would present a refusal as a finished action.
@@ -215,9 +268,13 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
               <span className="text-[10px] text-neutral-500">{computerUse.strategyLabel}</span>
             ) : null}
           </div>
-          {computerUseFailure !== null ? (
+          {computerUseRead.state === 'unavailable' ? (
             <p role="alert" className="px-2 py-1.5 text-xs text-amber-400">
-              {`Your Computer Use models could not be read — this section is unavailable, not empty. ${computerUseFailure}`}
+              {`Your Computer Use models could not be read — this section is unavailable, not empty. ${computerUseRead.message}`}
+            </p>
+          ) : computerUseRead.state === 'pending' ? (
+            <p className="px-2 py-1.5 text-xs text-neutral-600">
+              <IconLoader2 className="h-3.5 w-3.5 animate-spin text-neutral-500" />
             </p>
           ) : computerUse?.models.length ? (
             <div className="space-y-1">
@@ -311,9 +368,13 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
               </div>
               {list.length === 0 ? (
                 <p className="px-2 py-1.5 text-xs text-neutral-600">
-                  {inventoryRead
-                    ? `No ${label.toLowerCase()} model downloaded — get one in Models.`
-                    : `Your ${label.toLowerCase()} models could not be read — this list is unavailable, not empty.`}
+                  {inventoryRead.state === 'pending' ? (
+                    <IconLoader2 className="h-3.5 w-3.5 animate-spin text-neutral-500" />
+                  ) : inventoryRead.state === 'read' ? (
+                    `No ${label.toLowerCase()} model downloaded — get one in Models.`
+                  ) : (
+                    `Your ${label.toLowerCase()} models could not be read — this list is unavailable, not empty.`
+                  )}
                 </p>
               ) : (
                 <div className="space-y-1">
