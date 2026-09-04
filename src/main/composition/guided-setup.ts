@@ -1,13 +1,8 @@
 import * as http from 'node:http'
 import os from 'node:os'
-import { CATALOG, normalizeGuidedSetupMode, type GuidedSetupPorts } from '@offgrid/models'
+import { CATALOG, normalizeGuidedSetupMode, type GuidedSetupHostPorts } from '@offgrid/models'
 import { deviceNoun } from '../../shared/device'
 import { llm } from '../llm'
-import {
-  DesktopModelsOperationError,
-  desktopModels,
-  modelsFailureMessage
-} from './application-access'
 
 export function desktopRamGb(): number {
   return Math.round(os.totalmem() / 1e9)
@@ -43,7 +38,18 @@ export function pingLocalJson(
   })
 }
 
-export function createDesktopGuidedSetupPorts(): GuidedSetupPorts {
+/**
+ * The device FACTS guided setup needs, and nothing else.
+ *
+ * This object is handed INTO the models facade, so anything it did with the facade was the facade's
+ * own port calling back into the facade holding it - a second control plane over download,
+ * activation and residency that only setup could reach. Install, select and make-resident now come
+ * from the owners the facade already composes, so setup runs the SAME commands as every other
+ * caller and inherits their admission and typed failures. What remains here is what only this host
+ * can answer: its memory, the mode the user committed, what to call the device, and whether the
+ * local server is answering.
+ */
+export function createDesktopGuidedSetupPorts(): GuidedSetupHostPorts {
   return {
     catalog: CATALOG,
     totalRamGb: desktopRamGb,
@@ -55,44 +61,6 @@ export function createDesktopGuidedSetupPorts(): GuidedSetupPorts {
       } catch {
         return 'balanced'
       }
-    },
-    listInstalled: async () => [...desktopModels.snapshot().control.installed],
-    downloadModel: async (modelId) => {
-      const outcome = await desktopModels.control({ type: 'download', modelId })
-      return outcome.ok
-        ? { success: outcome.value.status === 'completed' }
-        : { success: false, error: modelsFailureMessage(outcome.failure) }
-    },
-    activateChat: async (modelId) => {
-      const outcome = await desktopModels.control({ type: 'select', surface: 'text', modelId })
-      return outcome.ok
-        ? { success: true }
-        : { success: false, error: modelsFailureMessage(outcome.failure) }
-    },
-    activateModality: async (kind, modelId) => {
-      const surface = kind === 'voice' ? 'speech' : kind
-      const selected = await desktopModels.control({ type: 'select', surface, modelId })
-      if (!selected.ok) throw new DesktopModelsOperationError(selected.failure)
-    },
-    /**
-     * "Starting the local model server" is a LOAD, not a restart.
-     *
-     * This runs immediately after `activateChat` has selected the model the user just downloaded, so
-     * what the step means is "make the chat model resident". It used to call `llm.restart()`, which
-     * respawns llama-server and reloads the model with no admission - residency was left holding a
-     * stale view of what occupies memory, which is the state that lets the NEXT model be admitted
-     * into memory nobody accounted for. `prepare` is the same intent expressed as a request: the
-     * facade asks the residency manager, the manager admits it against the budget and then invokes
-     * the native adapter. Idempotent by contract, which matters because setup can be re-run.
-     *
-     * A restart of an ALREADY-RESIDENT model is a genuinely different operation - same model, same
-     * memory, fresh process - and re-entering admission for memory it already holds could refuse
-     * itself. That case is the `system:restart` command, not this step, and it needs the manager to
-     * understand a restart as distinct rather than as a fresh admission.
-     */
-    startChat: async () => {
-      const prepared = await desktopModels.prepare('text')
-      if (!prepared.ok) throw new DesktopModelsOperationError(prepared.failure)
     },
     verifyChat: async () => Boolean(await pingLocalJson(llm.getPort(), '/health', 3000)),
     deviceLabel: () => deviceNoun(process.platform)
