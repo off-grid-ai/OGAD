@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   resolveImageParams,
   setOverride,
@@ -7,8 +7,9 @@ import {
 } from '@renderer/lib/image-params'
 import { announceImageSettingsChanged } from '@renderer/lib/image-settings-events'
 import { SettingsSelect } from './SettingsSelect'
+import { SettingsTextField, type SettingsWriteOutcome } from './SettingsTextField'
 import { desktopModelControl } from '@renderer/composition/model-control'
-import { modelFileDisplayName } from '@offgrid/application'
+import { failed, modelFileDisplayName, ok } from '@offgrid/application'
 
 type ImageSettings = {
   imageParams?: ImageParamStore
@@ -26,6 +27,7 @@ export function ImageSettingsTab(): React.JSX.Element {
   const [seed, setSeed] = useState('')
   const [negativePrompt, setNegativePrompt] = useState('')
   const [enhance, setEnhance] = useState(true)
+  const [saveFailure, setSaveFailure] = useState('')
 
   useEffect(() => {
     void Promise.all([window.api.imageGenStatus(), window.api.getSettings()])
@@ -45,11 +47,26 @@ export function ImageSettingsTab(): React.JSX.Element {
 
   const effective = resolveImageParams(model, params)
 
+  // One write path for this tab: save, then tell the rest of the app what changed. A failed
+  // write is returned as a typed failure so the field or the tab can show it, never dropped.
+  const save = useCallback(async (key: string, value: unknown): Promise<SettingsWriteOutcome> => {
+    try {
+      await window.api.saveSetting(key, value)
+      announceImageSettingsChanged()
+      return ok(undefined)
+    } catch {
+      return failed({ message: 'This setting could not be saved.' })
+    }
+  }, [])
+
   const persist = (key: string, value: unknown): void => {
-    void Promise.resolve(window.api.saveSetting(key, value))
-      .then(announceImageSettingsChanged)
-      .catch(() => {})
+    void save(key, value).then((outcome) => {
+      setSaveFailure(outcome.ok ? '' : outcome.failure.message)
+    })
   }
+
+  const commitSeed = useCallback((value: string) => save('imgSeed', value), [save])
+  const commitNegativePrompt = useCallback((value: string) => save('imgNegative', value), [save])
 
   const chooseModel = (nextModel: string): void => {
     const previous = model
@@ -146,14 +163,12 @@ export function ImageSettingsTab(): React.JSX.Element {
           <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
             Seed
           </span>
-          <input
-            aria-label="Image seed"
-            value={seed}
-            onChange={(event) => {
-              const next = event.target.value.replace(/[^0-9]/g, '')
-              setSeed(next)
-              persist('imgSeed', next)
-            }}
+          <SettingsTextField
+            id="image-seed"
+            label="Image seed"
+            initialValue={seed}
+            sanitize={(value) => value.replace(/[^0-9]/g, '')}
+            commit={commitSeed}
             placeholder="random"
             className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 placeholder-neutral-700 outline-none focus:border-green-500"
           />
@@ -164,13 +179,11 @@ export function ImageSettingsTab(): React.JSX.Element {
         <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
           Negative prompt
         </span>
-        <textarea
-          aria-label="Negative prompt"
-          value={negativePrompt}
-          onChange={(event) => {
-            setNegativePrompt(event.target.value)
-            persist('imgNegative', event.target.value)
-          }}
+        <SettingsTextField
+          id="image-negative-prompt"
+          label="Negative prompt"
+          initialValue={negativePrompt}
+          commit={commitNegativePrompt}
           rows={3}
           className="w-full resize-none rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
         />
@@ -193,6 +206,12 @@ export function ImageSettingsTab(): React.JSX.Element {
           </span>
         </span>
       </label>
+
+      {saveFailure ? (
+        <p role="alert" className="text-[10px] text-red-400">
+          {saveFailure}
+        </p>
+      ) : null}
     </div>
   )
 }
