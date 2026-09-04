@@ -628,6 +628,12 @@ const offGridApi = {
 
   // --- LLM inference settings ---
   getLlmSettings: () => ipcRenderer.invoke('llm:get-settings'),
+  /**
+   * Commit model settings. Resolves with ONE committed projection - the whole committed record,
+   * the keys that moved, how the engine restart ended, and any sync-publish failure that left the
+   * local value committed - or with a typed failure. A refused value commits nothing, so the form
+   * keeps its draft. Nothing needs a read-back afterwards.
+   */
   setLlmSettings: (s: {
     temperature?: number
     ctxSize?: number

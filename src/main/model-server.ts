@@ -58,6 +58,7 @@ import { docsText, docsHtml, openApiSpec } from './api-docs'
 import { handleMcpRequest } from './mcp-server'
 import { logActionTokenForDev } from './mcp-auth'
 import { llm, type LlmSettings } from './llm'
+import { modelsFailureMessage } from '@offgrid/application'
 import { GATEWAY_HOST, GATEWAY_BIND_HOST, GATEWAY_PORT } from '../shared/ports'
 import { pickFreePort } from './free-port'
 import { guardProxyStreams } from './stream-guards'
@@ -1043,8 +1044,18 @@ export async function startModelServer(
       }
       return void (async () => {
         const patch = (await readJson(req)) as LlmSettings
-        await llm.setSettings(patch)
-        json(res, 200, { success: true, settings: llm.getSettings() })
+        // Through the settings command, so a gateway client earns the same one atomic commit, one
+        // publish and one superseding restart as the settings panel does. It used to call
+        // `llm.setSettings` directly, which made this a second place deciding when to respawn.
+        const { desktopModels } = await import('./composition/application-access')
+        const committed = await desktopModels.settings.save({
+          patch: patch as Record<string, unknown>
+        })
+        if (!committed.ok) {
+          json(res, 400, { error: { message: modelsFailureMessage(committed.failure) } })
+          return
+        }
+        json(res, 200, { success: true, settings: committed.value.settings })
       })().catch((e) =>
         json(res, 500, { error: { message: String(e instanceof Error ? e.message : e) } })
       )

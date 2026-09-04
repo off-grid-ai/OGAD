@@ -1906,10 +1906,20 @@ export function setupIPC(): void {
     const { llm } = await import('./llm')
     return llm.getSettings()
   })
-  ipcMain.handle('llm:set-settings', async (_e, s: import('./llm').LlmSettings) => {
-    const { llm } = await import('./llm')
-    await llm.setSettings(s)
-    return llm.getSettings()
+  /**
+   * Commit model settings: ONE atomic save, one committed projection back.
+   *
+   * This used to be `llm.setSettings(patch)` followed by `llm.getSettings()` - the renderer wrote,
+   * then read the whole record back to find out what happened, and the engine decided by itself
+   * whether to restart. Now shared validates and normalizes the group together, persists once,
+   * publishes at most one mutation per portable key, asks for at most one restart under the save's
+   * operation id, and returns all of it: the committed record to render, what changed, how the
+   * restart ended, and whether publishing to the other devices failed while the local value stayed
+   * committed. A refused value commits NOTHING and comes back as `invalid_settings` naming the keys.
+   */
+  ipcMain.handle('llm:set-settings', async (_e, patch: import('./llm').LlmSettings) => {
+    const { desktopModels } = await import('./composition/application-access')
+    return desktopModels.settings.save({ patch: patch as Record<string, unknown> })
   })
   ipcMain.handle('vision:remote-server:get', async () => {
     const { getRemoteVisionServerSettings } = await import('./vision/remote-vision-server')

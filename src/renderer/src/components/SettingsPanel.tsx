@@ -14,6 +14,7 @@ import {
   optionsWithinCeiling,
   reconcileBudgets,
   failed,
+  modelsFailureMessage,
   ok
 } from '@offgrid/application'
 import { gpuLayersHint, type EngineAccelerator } from '@offgrid/core/shared/engine-accelerator'
@@ -203,46 +204,59 @@ export function SettingsPanel({
     refreshConnectors()
   }, [refreshConnectors])
 
-  // Persist one inference setting (optimistic) — backend applies it per-request.
-  const set = (patch: LlmSettings): void => {
-    setS((prev) => ({ ...prev, ...patch }))
-    void Promise.resolve(window.api.setLlmSettings(patch))
-      .then(() => window.api.getLlmSettings())
-      .then((next) => {
-        if (next) {
-          setS(next)
-          invalidateLlmSettings()
-        }
-      })
-      .catch(() => {
-        void window.api
-          .getLlmSettings()
-          .then((next) => setS(next))
-          .catch(() => {})
-      })
-  }
-
   /**
-   * Write one launch-time engine setting and report the outcome.
+   * Commit one group of model settings and say, in the user's terms, what happened.
    *
-   * Sliders commit through this rather than `set`, because a launch argument change costs a model
-   * restart: the caller needs to know whether the value it is showing is the value the engine took,
-   * and a failure has to be visible instead of dropped.
+   * One command per save. Shared validates and normalizes the group together, writes it once,
+   * publishes at most one mutation per portable key, and asks for at most one engine restart - and
+   * returns the committed record, so this panel renders what IS committed instead of writing and
+   * then reading the whole record back to guess.
+   *
+   * The three outcomes a user can actually be in:
+   * - refused: nothing was committed, and the message names the settings at fault, so the draft is
+   *   still theirs to fix;
+   * - committed but not shared: the value is live on this device and only the mesh missed it, so it
+   *   stays and says so - rolling a stored value back over someone else's network is worse;
+   * - committed, restart failed: the value is stored, the engine did not come back with it, and the
+   *   message says which of the two happened rather than a generic failure.
    */
-  const commitLaunchSetting = useCallback(
+  const commitModelSettings = useCallback(
     async (patch: LlmSettings): Promise<SettingsWriteOutcome> => {
-      try {
-        await Promise.resolve(window.api.setLlmSettings(patch))
-        invalidateLlmSettings()
-        const next = await window.api.getLlmSettings()
-        if (next) setS(next)
-        return ok(undefined)
-      } catch {
-        return failed({ message: 'This setting could not be applied to the engine.' })
+      const outcome = await window.api.setLlmSettings(patch)
+      if (!outcome.ok) return failed({ message: modelsFailureMessage(outcome.failure) })
+      const committed = outcome.value
+      setS(committed.settings as LlmSettings)
+      if (committed.changed.length > 0) invalidateLlmSettings()
+      if (committed.launch?.status === 'failed') {
+        return failed({
+          message: `Saved, but the model could not restart with it: ${committed.launch.message}`
+        })
       }
+      if (committed.syncFailure) {
+        return failed({
+          message: 'Saved on this device, but it could not be shared with your other devices.'
+        })
+      }
+      return ok(undefined)
     },
     []
   )
+
+  // Persist one inference setting. Applied per request by the engine, so nothing here waits.
+  const set = (patch: LlmSettings): void => {
+    setS((prev) => ({ ...prev, ...patch }))
+    void commitModelSettings(patch)
+  }
+
+  /**
+   * Launch-time settings commit through the same command; the sliders just need the outcome.
+   *
+   * A launch argument change costs a model restart, so the caller has to know whether the value it
+   * is showing is the value the engine took. Which restart wins is no longer decided here or in the
+   * engine: the command asks its coordinator once per save, and a drag that is overtaken is
+   * superseded rather than spawning.
+   */
+  const commitLaunchSetting = commitModelSettings
 
   const commitGpuLayers = useCallback(
     (gpuLayers: number) => commitLaunchSetting({ gpuLayers }),
@@ -259,15 +273,7 @@ export function SettingsPanel({
 
   const resetDefaults = (): void => {
     setS((prev) => ({ ...prev, ...DEFAULTS }))
-    void Promise.resolve(window.api.setLlmSettings(DEFAULTS))
-      .then(() => {
-        invalidateLlmSettings()
-        return window.api.getLlmSettings()
-      })
-      .then((next) => {
-        if (next) setS(next)
-      })
-      .catch(() => {})
+    void commitModelSettings(DEFAULTS)
   }
 
   /**

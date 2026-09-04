@@ -139,8 +139,13 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
 
   const pickMode = (m: Mode): void => {
     setMode(m)
-    api
+    // One committed save. A refusal is a value, so it is reported rather than resolving as a
+    // success that stored nothing.
+    void api
       .setLlmSettings({ performanceMode: m })
+      .then((outcome) => {
+        if (!outcome.ok) reportSetupFailure('resource-mode persistence', outcome.failure)
+      })
       .catch((error: unknown) => reportSetupFailure('resource-mode persistence', error))
     loadPlan(m).catch((error: unknown) => reportSetupFailure('resource-plan loading', error))
   }

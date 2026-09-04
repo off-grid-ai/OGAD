@@ -86,6 +86,14 @@ export interface LlmSettingsUpdateOptions {
   emitSync?: boolean
 }
 
+export interface LlmSettingsUpdateResult {
+  /**
+   * A launch argument moved, so the engine is running arguments that are now stale. Requesting the
+   * restart belongs to the settings command; this only reports that one is owed.
+   */
+  launchChanged: boolean
+}
+
 export interface StreamChatOptions {
   temperature?: number
   topP?: number
@@ -190,8 +198,6 @@ export class LLMService {
   // user had already moved past. Each request takes the next id; a request whose id is no
   // longer the latest is superseded and never spawns, and at most one spawn is ever in
   // flight.
-  private launchRestartRequest = 0
-  private launchRestartQueue: Promise<void> = Promise.resolve()
   // Last ~50 stderr lines from llama-server, so we can explain WHY it died on
   // load (unknown arch / OOM / OS-too-old) instead of a blank "Down".
   private stderrTail: string[] = []
@@ -427,9 +433,20 @@ export class LLMService {
    *  payload building). A file that can't be read is logged and skipped so a broken
    *  path never fails the whole request. */
 
-  /** Update inference settings; respawns the server if any launch-time arg changed
-   *  (context, KV-cache type, flash-attn, GPU layers, threads, batch). */
-  async setSettings(s: LlmSettings, options: LlmSettingsUpdateOptions = {}): Promise<void> {
+  /**
+   * Apply committed inference settings and say whether a launch argument moved.
+   *
+   * It does NOT restart. A launch argument (context, KV-cache type, flash-attn, GPU layers,
+   * threads, batch) only takes effect on a fresh spawn, and who gets to ask for that spawn - once,
+   * with the newest arguments - is the settings command's decision, not this class's. Callers that
+   * reach this method directly are telling the engine what to hold; a caller that wants the change
+   * to take effect goes through `models.settings.save`, which persists through this method and
+   * then asks the restart coordinator exactly once.
+   */
+  async setSettings(
+    s: LlmSettings,
+    options: LlmSettingsUpdateOptions = {}
+  ): Promise<LlmSettingsUpdateResult> {
     const before = options.emitSync === false ? undefined : this.getSettings()
     // Granular launch-time fields the user sets in THIS patch become pinned: a mode
     // preset (now or on a future restart / mode re-pick) must NOT clobber them. Pin
@@ -494,23 +511,20 @@ export class LLMService {
         this.getSettings() as Record<string, unknown>
       )
     }
-    if (launchChanged && !this.paused) await this.restartForLaunchChange()
+    return { launchChanged: launchChanged && !this.paused }
   }
 
-  /** The engine owns restart policy: one spawn at a time, and the newest settings win. */
-  private async restartForLaunchChange(): Promise<void> {
-    const request = ++this.launchRestartRequest
-    const run = this.launchRestartQueue.then(async () => {
-      // A newer launch change is already queued and will spawn with the newest arguments,
-      // so this one has nothing left to do.
-      if (request !== this.launchRestartRequest) return
-      this.stop()
-      await this.init()
-    })
-    // The queue itself must never carry a rejection: a failed respawn is reported to the
-    // caller that asked for it, and the next request still gets its turn.
-    this.launchRestartQueue = run.catch(() => {})
-    await run
+  /**
+   * Restart so the committed launch arguments take effect. The plain effect, nothing more.
+   *
+   * This class used to own restart POLICY too - a request counter and a single-file queue, so a
+   * slider drag could not leave an earlier spawn's arguments running. That rule is shared's now
+   * (`createLaunchRestartCoordinator`, reached through `models.settings`), and keeping a second
+   * copy of it here would mean two owners deciding which restart wins.
+   */
+  async restartForLaunchSettings(): Promise<void> {
+    this.stop()
+    await this.init()
   }
 
   // Resolve the active model's files. The Models screen writes active-model.json
