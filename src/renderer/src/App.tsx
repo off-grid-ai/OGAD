@@ -33,7 +33,7 @@ import { NotificationProvider } from './hooks/NotificationProvider'
 import { useNotifications } from './hooks/useNotifications'
 import { ToastProvider } from './hooks/ToastProvider'
 import { ReprocessingProvider, useReprocessing } from './hooks/useReprocessing'
-import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react'
+import { createElement, useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react'
 import { GridBackdrop } from './components/ui/grid-backdrop'
 import { StarfieldBackdrop } from './components/ui/starfield-backdrop'
 import { Sidebar, SidebarBody } from './components/ui/sidebar'
@@ -129,7 +129,7 @@ interface NavigationState {
   selectedProjectId: string | null
 }
 
-function ReprocessingBanner() {
+function ReprocessingBanner(): React.ReactElement | null {
   const { reprocessing, progress } = useReprocessing()
   if (!reprocessing) return null
 
@@ -276,7 +276,19 @@ function ModelStatusDot({
   )
 }
 
-function AppContent() {
+function ProViewRoute({
+  viewMode,
+  context
+}: {
+  viewMode: ViewMode
+  context: ProViewContext
+}): React.ReactElement {
+  return (
+    <>{renderProView(viewMode, context) ?? <UpgradeScreen feature={getProFeature(viewMode)} />}</>
+  )
+}
+
+function AppContent(): React.ReactElement {
   const { addNotification, unreadCount } = useNotifications()
 
   // Main owns entitlement truth. The preload value seeds this renderer, then
@@ -305,7 +317,7 @@ function AppContent() {
 
   useEffect(() => {
     if (!proReady || !isPro) {
-      setExternalUnreadCount(0)
+      void Promise.resolve().then(() => setExternalUnreadCount(0))
       return
     }
     return callHook<ReturnType<NotificationExternalUnreadSubscriber>>(
@@ -386,9 +398,12 @@ function AppContent() {
   }
   const rec = useMeetingRecorder()
 
-  const setTaskDetailSidebarMode = useCallback((detailOpen: boolean): void => {
-    if (detailOpen) setSidebarOpen(false)
-  }, [])
+  const setTaskDetailSidebarMode = useCallback(
+    (detailOpen: boolean): void => {
+      if (detailOpen) setSidebarOpen(false)
+    },
+    [setSidebarOpen]
+  )
 
   // The meeting recording lifecycle (detect → record → warn → stop → finalize) is
   // owned by the main-process MeetingController. This view just reflects rec.* and
@@ -461,7 +476,9 @@ function AppContent() {
     void license
       .status()
       .then(applyStatus)
-      .catch(() => {})
+      .catch((error: unknown) => {
+        console.error('[license] Failed to read current status', error)
+      })
     return () => {
       active = false
       off()
@@ -470,50 +487,52 @@ function AppContent() {
 
   // Handle browser URL changes
   useEffect(() => {
-    const path = window.location.pathname
-    const viewMap: Record<string, ViewMode> = {
-      '/': 'day',
-      '/explore': 'explore',
-      '/day': 'day',
-      '/replay': 'replay',
-      '/reflect': 'reflect',
-      '/actions': 'actions',
-      '/connectors': 'connectors',
-      '/meetings': 'meetings',
-      '/chat': CHAT_VIEW,
-      '/chats': 'chats',
-      '/memories': 'memories',
-      '/entities': 'entities',
-      '/models': 'models',
-      '/gateway': 'gateway',
-      '/projects': 'projects',
-      '/notifications': 'notifications',
-      '/search': 'search',
-      '/settings': 'settings',
-      '/voice': 'voice',
-      '/devices': 'devices'
-    }
-
-    const internalTab = internalTabLocation(path)
-    if (internalTab) {
-      setNavigationSubroute(internalTab.subroute)
-      setSettingsSection(null)
-      commitViewMode(internalTab.view)
-    } else if (path.startsWith('/settings/')) {
-      let section: string | null = null
-      try {
-        section = decodeURIComponent(path.slice('/settings/'.length)) || null
-      } catch {
-        section = null
+    void Promise.resolve().then(() => {
+      const path = window.location.pathname
+      const viewMap: Record<string, ViewMode> = {
+        '/': 'day',
+        '/explore': 'explore',
+        '/day': 'day',
+        '/replay': 'replay',
+        '/reflect': 'reflect',
+        '/actions': 'actions',
+        '/connectors': 'connectors',
+        '/meetings': 'meetings',
+        '/chat': CHAT_VIEW,
+        '/chats': 'chats',
+        '/memories': 'memories',
+        '/entities': 'entities',
+        '/models': 'models',
+        '/gateway': 'gateway',
+        '/projects': 'projects',
+        '/notifications': 'notifications',
+        '/search': 'search',
+        '/settings': 'settings',
+        '/voice': 'voice',
+        '/devices': 'devices'
       }
-      setSettingsSection(section)
-      setNavigationSubroute(null)
-      commitViewMode('settings')
-    } else if (viewMap[path]) {
-      setNavigationSubroute(null)
-      setSettingsSection(null)
-      commitViewMode(viewMap[path])
-    }
+
+      const internalTab = internalTabLocation(path)
+      if (internalTab) {
+        setNavigationSubroute(internalTab.subroute)
+        setSettingsSection(null)
+        commitViewMode(internalTab.view)
+      } else if (path.startsWith('/settings/')) {
+        let section: string | null = null
+        try {
+          section = decodeURIComponent(path.slice('/settings/'.length)) || null
+        } catch {
+          section = null
+        }
+        setSettingsSection(section)
+        setNavigationSubroute(null)
+        commitViewMode('settings')
+      } else if (viewMap[path]) {
+        setNavigationSubroute(null)
+        setSettingsSection(null)
+        commitViewMode(viewMap[path])
+      }
+    })
   }, [])
 
   // Programmatic navigation from outside the shell (e.g. the first-run gate's
@@ -549,7 +568,7 @@ function AppContent() {
     }
     window.addEventListener('og:navigate', onNav)
     // Main-driven navigation (tray → a screen).
-    const offNav = window.api.onNavigate?.((v: string) => {
+    const offNav = window.api.onNavigate((v: string) => {
       navigateTo(v as ViewMode, () => {
         setNavigationSubroute(null)
         setSettingsSection(null)
@@ -557,7 +576,7 @@ function AppContent() {
     })
     return () => {
       window.removeEventListener('og:navigate', onNav)
-      offNav?.()
+      offNav()
     }
   }, [navigateTo])
 
@@ -681,7 +700,9 @@ function AppContent() {
       .then((v) => {
         if (v) setUpdateReady(v)
       })
-      .catch(() => {})
+      .catch((error: unknown) => {
+        console.error('[updates] Failed to read the staged update version', error)
+      })
     unsubscribers.push(
       window.api.onUpdateDownloaded((data) => {
         setUpdateReady(data.version)
@@ -843,15 +864,17 @@ function AppContent() {
     const prev = prevViewRef.current
     prevViewRef.current = viewMode
     if (prev === viewMode) return
-    if (prev === 'replay' && viewMode !== 'replay') setReplayTarget(null)
-    if (prev === 'meetings' && viewMode !== 'meetings') setMeetingTarget(null)
-    if (prev === 'day' && viewMode !== 'day') setCalendarEventTarget(null)
-    if (prev === 'actions' && viewMode !== 'actions') {
-      setActionTarget(null)
-      setApprovalTarget(null)
-      setActionsMode(null)
-      setActionsEntity(null)
-    }
+    void Promise.resolve().then(() => {
+      if (prev === 'replay' && viewMode !== 'replay') setReplayTarget(null)
+      if (prev === 'meetings' && viewMode !== 'meetings') setMeetingTarget(null)
+      if (prev === 'day' && viewMode !== 'day') setCalendarEventTarget(null)
+      if (prev === 'actions' && viewMode !== 'actions') {
+        setActionTarget(null)
+        setApprovalTarget(null)
+        setActionsMode(null)
+        setActionsEntity(null)
+      }
+    })
   }, [viewMode])
 
   // Open a project chat in the main Chat screen (existing convo or new-in-project).
@@ -887,7 +910,7 @@ function AppContent() {
 
   // Global keyboard shortcuts for back/forward navigation (Cmd+[ and Cmd+])
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: KeyboardEvent): void => {
       if ((e.metaKey || e.ctrlKey) && e.key === '[') {
         e.preventDefault()
         if (modelSettingsOpen) setModelSettingsOpen(false)
@@ -1343,7 +1366,10 @@ function AppContent() {
                       />
                     ) : viewMode === 'tasks' ? (
                       TaskWorkspace ? (
-                        <TaskWorkspace standalone onDetailModeChange={setTaskDetailSidebarMode} />
+                        createElement(TaskWorkspace, {
+                          standalone: true,
+                          onDetailModeChange: setTaskDetailSidebarMode
+                        })
                       ) : (
                         <UpgradeScreen feature={getProFeature(viewMode)} />
                       )
@@ -1377,36 +1403,39 @@ function AppContent() {
                     ) : (
                       // Pro tabs: render through the pro view-router when active,
                       // otherwise show the upgrade writeup for that feature.
-                      (renderProView(viewMode, {
-                        setView: (v) => navigateTo(v as ViewMode),
-                        onNavigate: handleProNavigate,
-                        navigationSubroute,
-                        setNavigationSubroute,
-                        navigateBack,
-                        replayTarget,
-                        meetingTarget,
-                        actionTarget,
-                        approvalTarget,
-                        calendarEventTarget,
-                        actionsMode,
-                        actionsEntity,
-                        searchQuery,
-                        onSearchQueryChange: setSearchQuery,
-                        searchSources,
-                        onSearchSourcesChange: setSearchSources,
-                        searchSort,
-                        onSearchSortChange: setSearchSort,
-                        selectedMemoryId,
-                        setSelectedMemoryId,
-                        selectedEntityId,
-                        rec,
-                        onSelectEntity: handleSelectEntity,
-                        onSelectMemory: handleSelectMemory,
-                        onOpenHit: handleOpenHit,
-                        openChatOwner: handleOpenChatOwner
-                      } satisfies ProViewContext) ?? (
-                        <UpgradeScreen feature={getProFeature(viewMode)} />
-                      ))
+                      <ProViewRoute
+                        viewMode={viewMode}
+                        context={
+                          {
+                            setView: (v) => navigateTo(v as ViewMode),
+                            onNavigate: handleProNavigate,
+                            navigationSubroute,
+                            setNavigationSubroute,
+                            navigateBack,
+                            replayTarget,
+                            meetingTarget,
+                            actionTarget,
+                            approvalTarget,
+                            calendarEventTarget,
+                            actionsMode,
+                            actionsEntity,
+                            searchQuery,
+                            onSearchQueryChange: setSearchQuery,
+                            searchSources,
+                            onSearchSourcesChange: setSearchSources,
+                            searchSort,
+                            onSearchSortChange: setSearchSort,
+                            selectedMemoryId,
+                            setSelectedMemoryId,
+                            selectedEntityId,
+                            rec,
+                            onSelectEntity: handleSelectEntity,
+                            onSelectMemory: handleSelectMemory,
+                            onOpenHit: handleOpenHit,
+                            openChatOwner: handleOpenChatOwner
+                          } satisfies ProViewContext
+                        }
+                      />
                     )}
                   </motion.div>
                 )}
@@ -1424,7 +1453,7 @@ function AppContent() {
           />
         )}
       </AnimatePresence>
-      {TaskFloatingView ? <TaskFloatingView /> : null}
+      {TaskFloatingView ? createElement(TaskFloatingView) : null}
     </div>
   )
 }
@@ -1445,15 +1474,13 @@ function writeSidebarPinned(pinned: boolean): void {
   }
 }
 
-function App() {
+function App(): React.ReactElement {
   // Onboarding runs FIRST — before the model/permission gate — so a new user sees
   // the intro, then goes straight to model selection (handled by PermissionGate).
-  const [onboarded, setOnboarded] = useState<boolean | null>(null)
-  useEffect(() => {
-    setOnboarded(localStorage.getItem('onboarding_completed') === 'true')
-  }, [])
+  const [onboarded, setOnboarded] = useState(
+    () => localStorage.getItem('onboarding_completed') === 'true'
+  )
 
-  if (onboarded === null) return null
   if (!onboarded) return <Onboarding onComplete={() => setOnboarded(true)} />
 
   return (
