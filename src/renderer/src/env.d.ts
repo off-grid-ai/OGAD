@@ -305,7 +305,10 @@ interface RendererAPIOverrides {
 
   // RAG Conversations
   createRagConversation: (id: string, title?: string, projectId?: string | null) => Promise<string>
-  getRagConversations: (projectId?: string | null) => Promise<RagConversation[]>
+  getRagConversations: (
+    projectId?: string | null,
+    page?: { limit?: number; updatedBefore?: string }
+  ) => Promise<RagConversation[]>
   onRagConversationsChanged?: (
     callback: (data: { conversationId: string; projectId: string | null }) => void
   ) => () => void

@@ -55,8 +55,10 @@ function ConversationSearchListInner({
       try {
         const ids = await window.api.searchRagConversationIds(trimmedQuery)
         if (live) setContentMatches({ query: trimmedQuery, ids: new Set(ids ?? []) })
-      } catch {
-        /* keep title-only matches */
+      } catch (error) {
+        // Title matches still stand, so the list keeps working - but a search that failed is not
+        // the same as a search that found nothing, and the difference has to be recorded somewhere.
+        console.error('[chat] conversation content search failed', error)
       }
     }, CONTENT_SEARCH_DELAY_MS)
     return () => {

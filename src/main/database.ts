@@ -15,6 +15,20 @@ import type {
   UserProfileContract
 } from '../shared/ipc-contracts'
 
+/**
+ * The full-text schema this build expects. Bump it when an FTS table, its columns or its triggers
+ * change: that is what makes every existing profile rebuild its indexes exactly once, on the next
+ * launch, instead of on every launch.
+ */
+const FTS_SCHEMA_VERSION = 1
+
+/** Conversation-list page size when a caller does not ask for one, and the ceiling it may ask for. */
+const DEFAULT_CONVERSATION_PAGE = 500
+const MAX_CONVERSATION_PAGE = 2_000
+/** Content-search result cap. Bounded because the caller renders a list, not a report. */
+const DEFAULT_SEARCH_LIMIT = 200
+const MAX_SEARCH_LIMIT = 1_000
+
 let db: Database.Database | null = null
 
 // --- Encryption at rest (new DBs only) -------------------------------------
@@ -191,6 +205,17 @@ export function getDB(): Database.Database {
       content_rowid='id'
     );
 
+    -- Chat message content, searchable. The chat-list content search used to be a
+    -- lower(content) LIKE match per term over rag_messages, which no index can serve: every
+    -- keystroke's search read every message ever stored. External-content FTS5, same shape as
+    -- message_fts above, so the index holds terms and the rows stay in rag_messages.
+    CREATE VIRTUAL TABLE IF NOT EXISTS rag_message_fts USING fts5(
+      content,
+      conversation_id UNINDEXED,
+      content='rag_messages',
+      content_rowid='id'
+    );
+
     CREATE VIRTUAL TABLE IF NOT EXISTS summary_fts USING fts5(
       summary,
       session_id UNINDEXED,
@@ -339,6 +364,17 @@ export function getDB(): Database.Database {
       INSERT INTO message_fts(rowid, content, conversation_id) VALUES (new.id, new.content, new.conversation_id);
     END;`,
 
+    `CREATE TRIGGER IF NOT EXISTS rag_messages_ai AFTER INSERT ON rag_messages BEGIN
+      INSERT INTO rag_message_fts(rowid, content, conversation_id) VALUES (new.id, new.content, new.conversation_id);
+    END;`,
+    `CREATE TRIGGER IF NOT EXISTS rag_messages_ad AFTER DELETE ON rag_messages BEGIN
+      INSERT INTO rag_message_fts(rag_message_fts, rowid, content, conversation_id) VALUES('delete', old.id, old.content, old.conversation_id);
+    END;`,
+    `CREATE TRIGGER IF NOT EXISTS rag_messages_au AFTER UPDATE ON rag_messages BEGIN
+      INSERT INTO rag_message_fts(rag_message_fts, rowid, content, conversation_id) VALUES('delete', old.id, old.content, old.conversation_id);
+      INSERT INTO rag_message_fts(rowid, content, conversation_id) VALUES (new.id, new.content, new.conversation_id);
+    END;`,
+
     `CREATE TRIGGER IF NOT EXISTS summaries_ai AFTER INSERT ON chat_summaries BEGIN
       INSERT INTO summary_fts(rowid, summary, session_id) VALUES (new.rowid, new.summary, new.session_id);
     END;`,
@@ -377,13 +413,39 @@ export function getDB(): Database.Database {
     db.exec(trigger)
   }
 
-  try {
-    db.exec("INSERT INTO message_fts(message_fts) VALUES('rebuild')")
-    db.exec("INSERT INTO summary_fts(summary_fts) VALUES('rebuild')")
-    db.exec("INSERT INTO entity_fts(entity_fts) VALUES('rebuild')")
-    db.exec("INSERT INTO entity_fact_fts(entity_fact_fts) VALUES('rebuild')")
-  } catch {
-    // Ignore rebuild errors
+  // The search index that makes the conversation list's content search an index lookup instead of
+  // a table scan, and the one that serves the list's "last message in this conversation" reads.
+  // rag_messages had NO index at all: every preview and every count was a full scan.
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_rag_messages_conversation ON rag_messages(conversation_id, created_at DESC, id DESC)'
+  )
+
+  /**
+   * FTS backfill, versioned so it happens once per profile instead of once per launch.
+   *
+   * Rebuilding five full-text indexes reads every message, summary, entity and fact in the
+   * database, synchronously, on Electron's main thread. It ran on EVERY startup - so the bigger a
+   * user's history got, the longer their app took to become usable, for work that had already been
+   * done. `PRAGMA user_version` is the gate: bumping FTS_SCHEMA_VERSION is how a future change to
+   * an FTS table or trigger repairs every existing profile exactly once.
+   *
+   * Nothing is trimmed or dropped here. This only rebuilds a derived index from rows that stay
+   * exactly as they are.
+   */
+  const installedFtsVersion = Number(db.pragma('user_version', { simple: true }) ?? 0)
+  if (installedFtsVersion < FTS_SCHEMA_VERSION) {
+    try {
+      db.exec("INSERT INTO message_fts(message_fts) VALUES('rebuild')")
+      db.exec("INSERT INTO rag_message_fts(rag_message_fts) VALUES('rebuild')")
+      db.exec("INSERT INTO summary_fts(summary_fts) VALUES('rebuild')")
+      db.exec("INSERT INTO entity_fts(entity_fts) VALUES('rebuild')")
+      db.exec("INSERT INTO entity_fact_fts(entity_fact_fts) VALUES('rebuild')")
+      db.pragma(`user_version = ${FTS_SCHEMA_VERSION}`)
+    } catch (error) {
+      // The version is deliberately NOT advanced: a failed rebuild must be retried on the next
+      // launch, not remembered as done. Search degrades to whatever the triggers have indexed.
+      console.error('[database] full-text index rebuild failed; will retry next launch', error)
+    }
   }
 
   // Migration: Add timestamp column to messages if it doesn't exist
@@ -1130,35 +1192,95 @@ export function createRagConversation(
   return id
 }
 
-export function getRagConversations(projectId?: string | null): RagConversation[] {
+/** One bounded page of the conversation list. `updatedBefore` continues from the last row seen. */
+export interface RagConversationPage {
+  readonly limit?: number
+  /** `updated_at` of the last row the caller already has. Omit for the newest page. */
+  readonly updatedBefore?: string
+}
+
+function conversationPageLimit(page?: RagConversationPage): number {
+  const requested = page?.limit ?? DEFAULT_CONVERSATION_PAGE
+  if (!Number.isFinite(requested) || requested <= 0) return DEFAULT_CONVERSATION_PAGE
+  return Math.min(Math.floor(requested), MAX_CONVERSATION_PAGE)
+}
+
+/**
+ * The conversation list, newest first, one bounded page at a time.
+ *
+ * It used to return EVERY conversation with three correlated subqueries per row - a count and two
+ * ordered LIMIT 1 reads for the preview - against a `rag_messages` table with no index at all. So
+ * the cost was conversations x messages, on Electron's main thread, every time the list refreshed.
+ *
+ * Now: the preview and the count come from two index-driven passes over
+ * `idx_rag_messages_conversation` instead of 3N subqueries, and the page has an explicit limit
+ * with a cursor. The limit bounds what this RETURNS - nothing is trimmed or deleted, and a caller
+ * that wants older conversations asks for them with `updatedBefore`.
+ */
+export function getRagConversations(
+  projectId?: string | null,
+  page?: RagConversationPage
+): RagConversation[] {
   const db = getDB()
-  const where =
-    projectId === undefined
-      ? ''
-      : projectId === null
-        ? 'WHERE rc.project_id IS NULL'
-        : 'WHERE rc.project_id = ?'
+  const conditions: string[] = []
+  const parameters: unknown[] = []
+  if (projectId === null) conditions.push('rc.project_id IS NULL')
+  else if (projectId !== undefined) {
+    conditions.push('rc.project_id = ?')
+    parameters.push(projectId)
+  }
+  if (page?.updatedBefore) {
+    conditions.push('rc.updated_at < ?')
+    parameters.push(page.updatedBefore)
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+  parameters.push(conversationPageLimit(page))
+  // The page is chosen FIRST, then the message reads are restricted to it. Aggregating every
+  // message in the database to describe 500 conversations would have replaced one bad shape with
+  // another; both joins below are index lookups over the page's conversations only.
   const stmt = db.prepare(`
+        WITH page AS (
+            SELECT rc.id, rc.title, rc.project_id, rc.origin_device_id, rc.origin_device_name,
+                   rc.created_at, rc.updated_at
+            FROM rag_conversations rc
+            ${where}
+            ORDER BY rc.updated_at DESC
+            LIMIT ?
+        )
         SELECT
-            rc.id,
-            rc.title,
-            rc.project_id,
-            rc.origin_device_id,
-            rc.origin_device_name,
-            rc.created_at,
-            rc.updated_at,
-            (SELECT COUNT(*) FROM rag_messages rm WHERE rm.conversation_id = rc.id) as message_count,
+            page.id,
+            page.title,
+            page.project_id,
+            page.origin_device_id,
+            page.origin_device_name,
+            page.created_at,
+            page.updated_at,
+            COALESCE(counts.message_count, 0) as message_count,
             -- The last turn, for the list's one-line preview. A conversation synced from a phone
-            -- otherwise listed as a title with nothing under it.
-            (SELECT rm.role FROM rag_messages rm WHERE rm.conversation_id = rc.id
-               ORDER BY rm.created_at DESC, rm.id DESC LIMIT 1) as last_role,
-            (SELECT rm.content FROM rag_messages rm WHERE rm.conversation_id = rc.id
-               ORDER BY rm.created_at DESC, rm.id DESC LIMIT 1) as last_content
-        FROM rag_conversations rc
-        ${where}
-        ORDER BY rc.updated_at DESC
+            -- otherwise listed as a title with nothing under it. One ordered pass over
+            -- idx_rag_messages_conversation picks it, instead of two ordered subqueries per row.
+            last.role as last_role,
+            last.content as last_content
+        FROM page
+        LEFT JOIN (
+            SELECT conversation_id, COUNT(*) as message_count
+            FROM rag_messages
+            WHERE conversation_id IN (SELECT id FROM page)
+            GROUP BY conversation_id
+        ) counts ON counts.conversation_id = page.id
+        LEFT JOIN (
+            SELECT conversation_id, role, content FROM (
+                SELECT conversation_id, role, content,
+                       ROW_NUMBER() OVER (
+                         PARTITION BY conversation_id ORDER BY created_at DESC, id DESC
+                       ) as recency
+                FROM rag_messages
+                WHERE conversation_id IN (SELECT id FROM page)
+            ) WHERE recency = 1
+        ) last ON last.conversation_id = page.id
+        ORDER BY page.updated_at DESC
     `)
-  return (projectId ? stmt.all(projectId) : stmt.all()) as RagConversation[]
+  return stmt.all(...parameters) as RagConversation[]
 }
 
 export function getRagConversation(id: string): RagConversation | null {
@@ -1186,16 +1308,46 @@ export function setRagConversationProject(id: string, projectId: string | null):
   }
 }
 
-/** Conversation ids whose MESSAGE CONTENT matches a query (all terms, AND) — so the
- *  chat-list search can match what was said, not just the title. */
-export function searchRagConversationIds(query: string): string[] {
-  const terms = (query.toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).slice(0, 6)
-  if (!terms.length) return []
-  const where = terms.map(() => 'lower(content) LIKE ?').join(' AND ')
+/**
+ * The FTS5 MATCH expression for a user's search box, or null when there is nothing to match.
+ *
+ * Pure and separately testable, because this is where a user's typing becomes query syntax. Terms
+ * are extracted as letters and digits only and each is quoted, so a stray quote, a hyphen or an
+ * FTS operator like NEAR or OR is data rather than syntax. The trailing `*` keeps the
+ * search-as-you-type behaviour the old LIKE had for the last, partial word.
+ */
+export function ragMessageMatchExpression(query: string): string | null {
+  const terms = (query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).slice(0, 6)
+  if (!terms.length) return null
+  return terms.map((term) => `"${term.replace(/"/g, '""')}"*`).join(' AND ')
+}
+
+/**
+ * Conversation ids whose MESSAGE CONTENT matches a query (all terms, AND) — so the chat-list
+ * search can match what was said, not just the title.
+ *
+ * This was `lower(content) LIKE '%term%'` per term, with no LIMIT, over a `rag_messages` table
+ * with no index: a leading wildcard cannot use one, so every keystroke's search read every message
+ * ever stored, synchronously, on the main thread. It is an FTS5 MATCH against
+ * `rag_message_fts` now, and it returns a bounded page - the caller renders a list, not a report.
+ */
+export function searchRagConversationIds(query: string, limit?: number): string[] {
+  const match = ragMessageMatchExpression(query)
+  if (!match) return []
+  const requested = limit ?? DEFAULT_SEARCH_LIMIT
+  const bounded = Math.min(
+    Number.isFinite(requested) && requested > 0 ? Math.floor(requested) : DEFAULT_SEARCH_LIMIT,
+    MAX_SEARCH_LIMIT
+  )
   const rows = getDB()
-    .prepare(`SELECT DISTINCT conversation_id FROM rag_messages WHERE ${where}`)
-    .all(...terms.map((t) => `%${t}%`)) as { conversation_id: string }[]
-  return rows.map((r) => r.conversation_id)
+    .prepare(
+      `SELECT DISTINCT conversation_id
+         FROM rag_message_fts
+        WHERE rag_message_fts MATCH ?
+        LIMIT ?`
+    )
+    .all(match, bounded) as { conversation_id: string }[]
+  return rows.map((row) => row.conversation_id)
 }
 
 /**

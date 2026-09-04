@@ -1188,12 +1188,17 @@ export function setupIPC(): void {
     }
   )
 
-  ipcMain.handle('rag:get-conversations', (_, projectId?: string | null) => {
-    return getRagConversations(projectId)
-  })
+  // Both reads are bounded at their owner. `page` and `limit` are optional: a caller that wants
+  // older conversations or more matches asks for them, and one that asks for nothing still gets a
+  // page rather than the whole table.
+  ipcMain.handle(
+    'rag:get-conversations',
+    (_, projectId?: string | null, page?: import('./database').RagConversationPage) =>
+      getRagConversations(projectId, page)
+  )
 
-  ipcMain.handle('rag:search-conversation-ids', (_, query: string) =>
-    searchRagConversationIds(query)
+  ipcMain.handle('rag:search-conversation-ids', (_, query: string, limit?: number) =>
+    searchRagConversationIds(query, limit)
   )
 
   ipcMain.handle(

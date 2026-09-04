@@ -311,8 +311,14 @@ const offGridApi = {
   // RAG Conversation History
   createRagConversation: (id: string, title?: string, projectId?: string | null) =>
     ipcRenderer.invoke('rag:create-conversation', id, title, projectId),
-  getRagConversations: (projectId?: string | null) =>
-    ipcRenderer.invoke('rag:get-conversations', projectId),
+  /**
+   * One bounded page of the conversation list, newest first. Omit `page` for the newest page;
+   * pass `updatedBefore` (the `updated_at` of the last row you hold) to continue.
+   */
+  getRagConversations: (
+    projectId?: string | null,
+    page?: { limit?: number; updatedBefore?: string }
+  ) => ipcRenderer.invoke('rag:get-conversations', projectId, page),
   onRagConversationsChanged: (
     callback: (data: { conversationId: string; projectId: string | null }) => void
   ) => {
@@ -323,8 +329,9 @@ const offGridApi = {
     ipcRenderer.on('rag:conversations-changed', subscription)
     return unsubscribe('rag:conversations-changed', subscription)
   },
-  searchRagConversationIds: (query: string) =>
-    ipcRenderer.invoke('rag:search-conversation-ids', query),
+  /** Conversation ids whose message content matches, bounded. */
+  searchRagConversationIds: (query: string, limit?: number) =>
+    ipcRenderer.invoke('rag:search-conversation-ids', query, limit),
   setRagConversationProject: (id: string, projectId: string | null) =>
     ipcRenderer.invoke('rag:set-conversation-project', id, projectId),
   getRagConversation: (id: string) => ipcRenderer.invoke('rag:get-conversation', id),
