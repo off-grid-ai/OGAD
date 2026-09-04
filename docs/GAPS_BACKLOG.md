@@ -2613,3 +2613,63 @@ Not observed: no concurrent interleave has been exercised. The guarantee is argu
 synchronous commit path, which is a strong argument and still not a test.
 
 Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
+
+## Migration code gate — closed and still-open, measured (2026-09-04)
+
+Combined production diagnostics, run after the development declaration refresh:
+
+| Gate | Result |
+|---|---|
+| shared `npm run typecheck:source` | exit 0 |
+| shared `npm run depcruise` | exit 0 |
+| desktop `typecheck:node` production diagnostics | **0** |
+| desktop `typecheck:web` production diagnostics | **0** |
+| desktop `verify-model-architecture.mjs` | exit 0, **zero** temporary entries |
+| desktop/pro production diagnostics | **0** (119 total, all test paths) |
+| desktop/pro dirty production files | 0 |
+
+### RESOLVED this round
+
+- **Outgoing transfer reads followed whatever was at the path** — pro `419ee7b`. One descriptor helper
+  owns the checksum, the chunked read AND both outgoing blob fast paths, which had reopened `filePath`
+  with `createReadStream` and skipped validation the slow path performed. No-follow non-blocking opens
+  refuse symlinks and non-files; expected size is checked from the descriptor before any bytes are
+  read, stability after; close failures stay visible. The fast path is preserved, not disabled.
+  NOT prevented, and not claimed: same-size content mutation, parent-directory substitution, or any
+  immutable content snapshot.
+- **Four production faults the migration's typecheck surfaced** — pro `df4dca2`. A reversed
+  `after(delayMs, callback)` made a chat schedule fire IMMEDIATELY rather than late (a function as a
+  `setTimeout` delay coerces to 0); a missing `listConnectors` import crashed a CRM path; capture
+  divided by an unchecked load sample and emitted NaN, which compares false against every threshold
+  so a scheduler decision looked considered and was arbitrary; and an oversized ambient callback
+  contract was narrowed to the watcher's real `name`/`fileSize` input rather than fabricating four
+  descriptor fields other code trusts.
+- Typed interruption end to end (shared `303d601`), obsolete control-owner removal (shared `774a444`),
+  the atomic registry updater (shared `846a5d8` + desktop `967ec7d3`), and the earlier transfer and
+  cancellation groups, all recorded above with their own boundaries.
+
+### STILL OPEN — verified against source, not assumed from a report
+
+- **A library-mismatch refusal is still message-only.** `transfer-registration-service.ts:96-99`
+  returns `{ success, error?, id? }` and `libraryError` returns strings (`:100`, `:105`, `:110`,
+  `:140`), so the refusal reaches callers as `{kind: 'runtime'}` with a message. The two cases the
+  service genuinely distinguishes — a host that CANNOT VERIFY its library, versus a library that
+  CHANGED mid-registration — are not separable by a caller, and they want different messaging and
+  different diagnostics. Nothing parses a message to work around it. This was NOT in the completed
+  list and remains real.
+- **Race tests are owed and unwritten.** Nothing in the cancellation, interruption, registry or
+  transfer-safety work has been observed running. Every guarantee is typed, which makes the wrong
+  outcome uncompilable and demonstrates nothing about timing — and timing is the substance of these
+  defects. Owed: cancel during `verifyDownloadedPart`, during the rename, during the verify read;
+  shutdown-during-active-download across all five hops; both adapter orderings; failure-then-cancel;
+  rollback-failure-under-abort; same-id retry after a failed cancel; a concurrent registry interleave;
+  and a symlink/non-file substitution attempt.
+- **Test migration debt**, deliberately untouched at this gate: the two Pro transfer test files (119
+  diagnostics, all test paths — the count GREW because two ordered changes were compile-forcing), and
+  the six tests targeting the removed `ModelControlApplicationService`, which must be reproved through
+  the canonical Application boundary and must NOT be fixed by restoring the deleted owner.
+- Live journeys, E2E, integration and native tests, packaged builds, push and CI remain later gates.
+  The remaining requested Desktop production journeys are still outstanding. **No full-goal completion
+  is claimed.**
+
+Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
