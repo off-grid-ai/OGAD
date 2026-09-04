@@ -312,7 +312,7 @@ async function announceImageMessagePersisted(
   conversationId: string,
   messageId: string
 ): Promise<void> {
-  await window.api.imageGenConversationPersisted?.(conversationId, messageId)
+  await window.api.imageGenConversationPersisted(conversationId, messageId)
 }
 
 /**
@@ -890,14 +890,14 @@ function VoiceMessageRow({
 function WebTaskStepFeed(): React.JSX.Element | null {
   const [steps, setSteps] = useState<string[]>([])
   useEffect(() => {
-    const offStep = window.api.browser?.onStep?.((e) => {
-      const note = (e as { note?: string })?.note
+    const offStep = window.api.browser?.onStep((e) => {
+      const note = (e as { note?: string }).note
       if (typeof note === 'string') {
         setSteps((prev) => [...prev, note])
       }
     })
-    const offState = window.api.browser?.onTaskState?.((e) => {
-      if ((e as { status?: string })?.status === 'running') {
+    const offState = window.api.browser?.onTaskState((e) => {
+      if ((e as { status?: string }).status === 'running') {
         setSteps([])
       }
     })
@@ -2496,7 +2496,7 @@ export function MemoryChat({
   onTargetConsumed,
   onActiveConversationChange,
   onTaskDetailModeChange
-}: MemoryChatProps) {
+}: MemoryChatProps): React.JSX.Element {
   const desktopChatSessionRef = useRef<DesktopChatSession | null>(null)
   if (!desktopChatSessionRef.current) {
     desktopChatSessionRef.current = createDesktopChatSession()
@@ -2648,7 +2648,7 @@ export function MemoryChat({
     let live = true
     const t = setTimeout(async () => {
       try {
-        const ids = (await window.api.searchRagConversationIds?.(q)) as string[] | undefined
+        const ids = await window.api.searchRagConversationIds(q)
         if (live) setContentMatchIds(new Set(ids ?? []))
       } catch {
         /* keep title-only matches */
@@ -3065,7 +3065,10 @@ export function MemoryChat({
       desktopChatSession.subscribe((event) => {
         if (event.type === 'queue_changed') setChatQueue(event.queue)
         // A quiet marker above the live reply, kept in the transcript: what happened mid-turn.
-        const insertTurnNotice = (turn: { id: string; conversationId: string }, text: string) => {
+        const insertTurnNotice = (
+          turn: { id: string; conversationId: string },
+          text: string
+        ): void => {
           const content = `_${text}_`
           const notice: ChatMessage = {
             id: `notice-${event.type}-${turn.id}-${Date.now()}`,
