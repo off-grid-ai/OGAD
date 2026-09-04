@@ -58,6 +58,7 @@ import { resourceDirs } from './runtime-env'
 import { beginProductIdentityBootstrap } from './product-identity-lifecycle'
 import { repairMissingDefaultKeychainAtBootstrap } from './secure-storage-bootstrap'
 import {
+  flushDiagnosticLog,
   installDiagnosticConsoleCapture,
   installIpcDiagnostics,
   writeDiagnosticLog
@@ -532,6 +533,9 @@ app.on('before-quit', (event) => {
       console.error('[shutdown] application stop failed', readLifecycleFailure?.() ?? error)
     } finally {
       engineUnloaded = true
+      // Buffered diagnostics are written now rather than lost with the process. Bounded, so a
+      // stalled disk delays quit by at most the flush timeout.
+      await flushDiagnosticLog()
       try {
         commitApplicationRelaunch(app)
       } finally {

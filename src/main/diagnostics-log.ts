@@ -1,6 +1,6 @@
-import fs from 'node:fs'
 import path from 'node:path'
 import { dataDir } from './runtime-env'
+import { createDiagnosticWriter, type DiagnosticWriterStats } from './diagnostics-writer'
 
 export type DiagnosticLevel = 'info' | 'warn' | 'error'
 export type DiagnosticValue = string | number | boolean | null | undefined
@@ -11,6 +11,10 @@ export interface IpcHandlerRegistrar {
 }
 
 const MAX_LOG_BYTES = 5 * 1024 * 1024
+// Diagnostics are worth less than the application they observe: past these bounds the OLDEST
+// records go and the log says how many.
+const MAX_BUFFERED_RECORDS = 5_000
+const MAX_BUFFERED_BYTES = 4 * 1024 * 1024
 const MAX_VALUE_CHARS = 1_500
 const SECRET_VALUE =
   /((?:authorization|password|passwd|token|secret|api[-_ ]?key|cookie)["']?\s*[:=]\s*["']?)([^\s,"'}]+)/gi
@@ -55,23 +59,34 @@ export function diagnosticLogPath(): string {
   )
 }
 
-function rotateIfNeeded(logPath: string): void {
-  try {
-    if (fs.statSync(logPath).size < MAX_LOG_BYTES) return
-    const previous = `${logPath}.previous`
-    fs.rmSync(previous, { force: true })
-    fs.renameSync(logPath, previous)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+/**
+ * The single buffering and flushing owner for this log.
+ *
+ * A write failure is reported on the process stream directly. Routing it back through
+ * `writeDiagnosticLog` would ask the failing writer to record its own failure.
+ */
+const writer = createDiagnosticWriter({
+  resolvePath: diagnosticLogPath,
+  maxLogBytes: MAX_LOG_BYTES,
+  maxBufferedRecords: MAX_BUFFERED_RECORDS,
+  maxBufferedBytes: MAX_BUFFERED_BYTES,
+  reportFailure: (message) => {
+    process.stderr.write(
+      `${formatDiagnosticLog(new Date().toISOString(), 'error', 'diagnostics', 'write.failed', {
+        error: message
+      })}\n`
+    )
   }
+})
+
+/** What this log has buffered, dropped and failed to write. Observable, not hidden. */
+export function diagnosticWriterStats(): DiagnosticWriterStats {
+  return writer.stats()
 }
 
-function persistLine(line: string): void {
-  const logPath = diagnosticLogPath()
-  fs.mkdirSync(path.dirname(logPath), { recursive: true })
-  rotateIfNeeded(logPath)
-  fs.appendFileSync(logPath, `${line}\n`, { encoding: 'utf8', mode: 0o600 })
-  fs.chmodSync(logPath, 0o600)
+/** Drain buffered diagnostics on a controlled shutdown. Bounded: quit is never held hostage. */
+export function flushDiagnosticLog(timeoutMs?: number): Promise<void> {
+  return writer.flush(timeoutMs)
 }
 
 function consoleValue(value: unknown): string {
@@ -107,15 +122,7 @@ export function writeDiagnosticLog(
   level: DiagnosticLevel = 'info'
 ): void {
   const line = formatDiagnosticLog(new Date().toISOString(), level, component, event, fields)
-  try {
-    persistLine(line)
-  } catch (error) {
-    process.stderr.write(
-      `${formatDiagnosticLog(new Date().toISOString(), 'error', 'diagnostics', 'write.failed', {
-        error: error instanceof Error ? error.message : String(error)
-      })}\n`
-    )
-  }
+  writer.append(line)
   const stream = level === 'error' ? process.stderr : process.stdout
   stream.write(`${line}\n`)
 }
@@ -203,15 +210,11 @@ export function installDiagnosticConsoleCapture(): void {
     const original = console[name].bind(console)
     console[name] = (...values: unknown[]): void => {
       original(...values)
-      try {
-        persistLine(
-          formatDiagnosticLog(new Date().toISOString(), level, 'app', 'console', {
-            message: formatConsoleMessage(values)
-          })
-        )
-      } catch {
-        // Diagnostics must never take down the application it is observing.
-      }
+      writer.append(
+        formatDiagnosticLog(new Date().toISOString(), level, 'app', 'console', {
+          message: formatConsoleMessage(values)
+        })
+      )
     }
   }
   writeDiagnosticLog('diagnostics', 'capture.installed', { logPath: diagnosticLogPath() })
