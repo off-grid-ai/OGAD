@@ -40,7 +40,8 @@ const contract = [
       'parseModelControlIntent',
       'modelsFailureMessage',
       'projectCaptureReadiness',
-      'observeApplicationFailures'
+      'observeApplicationFailures',
+      'OFFGRID_SYNC_PORT'
     ],
     declarations: [
       'ModelControlIntent',
@@ -57,7 +58,12 @@ const contract = [
   },
   {
     package: 'models',
-    runtime: ['runtimeModelRouteId', 'decodeModelRouteId', 'mergeCatalog'],
+    runtime: [
+      'runtimeModelRouteId',
+      'decodeModelRouteId',
+      'mergeCatalog',
+      'captureInteractionReportIntervalMs'
+    ],
     declarations: [
       'ModelWorkspacePorts',
       'ModelInventoryAdapter',
@@ -140,27 +146,41 @@ for (const entry of contract) {
   }
   const runtimeEntry = path.resolve(packageRoot, esmEntry)
   const declarationEntry = path.resolve(packageRoot, typesEntry)
+  const commonJsEntry = manifest.exports?.['.']?.require ?? manifest.main
+  const builtEntries = [runtimeEntry, declarationEntry]
+  if (typeof commonJsEntry === 'string') {
+    builtEntries.push(path.resolve(packageRoot, commonJsEntry))
+  }
 
   try {
-    await Promise.all([
-      access(runtimeEntry, constants.R_OK),
-      access(declarationEntry, constants.R_OK)
-    ])
+    await Promise.all(builtEntries.map((builtEntry) => access(builtEntry, constants.R_OK)))
   } catch {
     failures.push(`@offgrid/${entry.package}: dist is missing - run \`npm run build\` in shared/`)
     continue
   }
 
-  const [{ mtimeMs: builtAt }, sourceAt] = await Promise.all([
-    stat(declarationEntry),
-    newestSourceMtime(path.join(packageRoot, 'src')).catch(() => 0)
-  ])
+  let sourceAt
+  let builtAt
+  try {
+    const [builtStats, newestSource, manifestStat] = await Promise.all([
+      Promise.all(builtEntries.map((builtEntry) => stat(builtEntry))),
+      newestSourceMtime(path.join(packageRoot, 'src')),
+      stat(path.join(packageRoot, 'package.json'))
+    ])
+    builtAt = Math.min(...builtStats.map(({ mtimeMs }) => mtimeMs))
+    sourceAt = Math.max(newestSource, manifestStat.mtimeMs)
+  } catch (error) {
+    failures.push(
+      `@offgrid/${entry.package}: artifact freshness could not be checked - ${error instanceof Error ? error.message : String(error)}`
+    )
+    continue
+  }
   if (sourceAt > builtAt) {
     // Reported, then the symbol checks still run: one run should say BOTH that the build is
     // stale and whether the stale build even satisfies the contract, because those are
     // different problems and stopping here would hide the second one.
     failures.push(
-      `@offgrid/${entry.package}: dist is STALE - its sources are newer than its declarations`
+      `@offgrid/${entry.package}: dist is STALE - its sources or manifest are newer than a runtime or declaration entry`
     )
   }
 
