@@ -128,23 +128,28 @@ export function ProjectsScreen({
   onOpenChat,
   selectedProjectId,
   onSelectProject
-}: ProjectsScreenProps) {
+}: ProjectsScreenProps): React.ReactElement {
   const [projects, setProjects] = useState<Project[]>([])
   const [localActiveId, setLocalActiveId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
   const [view, setView] = useState<'chat' | 'artifacts' | 'config'>('chat')
 
-  const refreshProjects = useCallback(async () => {
-    const list = (await api.listProjects?.()) ?? []
+  const applyProjects = useCallback((list: Project[]): Project[] => {
     setProjects(list)
     setLocalActiveId((cur) => cur ?? list[0]?.id ?? null)
-    return list as Project[]
+    return list
   }, [])
+  const loadProjects = useCallback(async (): Promise<Project[]> => {
+    return ((await api.listProjects?.()) ?? []) as Project[]
+  }, [])
+  const refreshProjects = useCallback(async (): Promise<Project[]> => {
+    return applyProjects(await loadProjects())
+  }, [applyProjects, loadProjects])
 
   useEffect(() => {
-    refreshProjects()
-  }, [refreshProjects])
+    void loadProjects().then(applyProjects)
+  }, [applyProjects, loadProjects])
 
   const activeId = selectedProjectId ?? localActiveId
   const selectProject = (projectId: string | null): void => {
@@ -311,7 +316,7 @@ function ProjectChats({
 }: {
   project: Project
   onOpenChat: (target: { conversationId?: string; projectId?: string }) => void
-}) {
+}): React.ReactElement {
   const [chats, setChats] = useState<RagConvo[]>([])
 
   useEffect(() => {
@@ -388,7 +393,7 @@ function ProjectConfig({
   project: Project
   onSaved: () => void
   onDelete: () => void
-}) {
+}): React.ReactElement {
   const [name, setName] = useState(project.name)
   const [description, setDescription] = useState(project.description)
   const [systemPrompt, setSystemPrompt] = useState(project.systemPrompt)
@@ -502,7 +507,15 @@ function ProjectConfig({
   )
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+function Field({
+  label,
+  hint,
+  children
+}: {
+  label: string
+  hint?: string
+  children: ReactNode
+}): React.ReactElement {
   return (
     <div>
       <div className="mb-1.5 text-[11px] uppercase tracking-wide text-neutral-500">{label}</div>
@@ -514,12 +527,12 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 
 // --- Knowledge base manager -------------------------------------------------
 
-function KnowledgeBase({ projectId }: { projectId: string }) {
+function KnowledgeBase({ projectId }: { projectId: string }): React.ReactElement {
   const [docs, setDocs] = useState<RagDoc[]>([])
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<void> => {
     setDocs((await api.listProjectDocuments?.(projectId)) ?? [])
   }, [projectId])
 
