@@ -42,6 +42,11 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
   const [busy, setBusy] = useState<string | null>(null)
   const [unload, setUnload] = useState<Record<string, UnloadStatus>>({})
   const [computerUse, setComputerUse] = useState<ComputerUseActiveModelProjection | null>(null)
+  // An inventory we never managed to read is NOT an empty inventory. `inventoryRead` stays
+  // false until a projection has actually been applied, so a failed read can never be
+  // rendered as "nothing is downloaded". `failure` carries the typed refusal's own message.
+  const [inventoryRead, setInventoryRead] = useState(false)
+  const [failure, setFailure] = useState<string | null>(null)
 
   const applyProjection = useCallback((projection: ModelControlProjection): void => {
     setModels([...projection.models])
@@ -51,16 +56,27 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
         Object.entries(projection.active).map(([surface, value]) => [surface, value.modelId])
       )
     )
+    setInventoryRead(true)
   }, [])
 
   const load = useCallback(async () => {
-    const [outcome, computerUseProjection] = await Promise.all([
-      modelControlClient.control({ type: 'refresh' }),
-      window.api.getComputerUseActiveModels()
-    ])
-    if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
-    if (outcome.value.status === 'completed') applyProjection(outcome.value.projection)
-    setComputerUse(computerUseProjection)
+    try {
+      const [outcome, computerUseProjection] = await Promise.all([
+        modelControlClient.control({ type: 'refresh' }),
+        window.api.getComputerUseActiveModels()
+      ])
+      setComputerUse(computerUseProjection)
+      if (!outcome.ok) {
+        setFailure(modelsFailureMessage(outcome.failure))
+        return
+      }
+      setFailure(null)
+      // Every success status carries the fresh projection, not only `completed`. Dropping the
+      // others left the panel showing a stale (or absent) active model after a refusal.
+      applyProjection(outcome.value.projection)
+    } catch (e) {
+      setFailure(e instanceof Error ? e.message : String(e))
+    }
   }, [applyProjection])
   useEffect(() => {
     void load()
@@ -87,8 +103,12 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
         modelId: m.id,
         surface: mode
       })
-      if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
-      if (outcome.value.status === 'completed') applyProjection(outcome.value.projection)
+      if (!outcome.ok) {
+        setFailure(modelsFailureMessage(outcome.failure))
+        return
+      }
+      setFailure(null)
+      applyProjection(outcome.value.projection)
     } finally {
       setBusy(null)
     }
@@ -103,8 +123,12 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
         modelId,
         surface: 'computer_use'
       })
-      if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
-      if (outcome.value.status === 'completed') applyProjection(outcome.value.projection)
+      if (!outcome.ok) {
+        setFailure(modelsFailureMessage(outcome.failure))
+        return
+      }
+      setFailure(null)
+      applyProjection(outcome.value.projection)
     } finally {
       setBusy(null)
     }
@@ -117,7 +141,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     try {
       const outcome = await modelControlClient.control({ type: 'unload', surface: mode })
       if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
-      if (outcome.value.status === 'completed') applyProjection(outcome.value.projection)
+      applyProjection(outcome.value.projection)
       setUnloadStatus(mode, 'unloaded')
     } catch (e) {
       console.error('[models] unload failed', e)
@@ -148,6 +172,11 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
         </div>
       </div>
       <div className="flex-1 space-y-5 overflow-y-auto p-4">
+        {failure ? (
+          <p role="alert" className="px-2 py-1.5 text-xs text-amber-400">
+            {failure}
+          </p>
+        ) : null}
         <section aria-label="Computer Use">
           <div className="mb-1.5 flex items-center justify-between gap-3">
             <span className="text-[10px] uppercase tracking-wide text-neutral-600">
@@ -249,7 +278,9 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
               </div>
               {list.length === 0 ? (
                 <p className="px-2 py-1.5 text-xs text-neutral-600">
-                  No {label.toLowerCase()} model downloaded — get one in Models.
+                  {inventoryRead
+                    ? `No ${label.toLowerCase()} model downloaded — get one in Models.`
+                    : `Your ${label.toLowerCase()} models could not be read — this list is unavailable, not empty.`}
                 </p>
               ) : (
                 <div className="space-y-1">
