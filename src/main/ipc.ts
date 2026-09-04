@@ -86,7 +86,6 @@ import type { GenerationMetrics } from '../shared/generation-metrics'
 import { getAllPromptDefs } from './prompts'
 import { getPrompt, getPromptTemplate, resetPrompt } from './prompt-store'
 import { setupTtsIpc } from './tts-ipc'
-import { setupVoiceTranscriptionIpc } from './voice-transcription-ipc'
 import {
   safeParseJson,
   ftsMatchExpression,
@@ -598,7 +597,6 @@ export async function summarizeSession(sessionId: string): Promise<string | null
 }
 
 export function setupIPC() {
-  setupVoiceTranscriptionIpc()
   setupSpeechPlaybackIpc()
   setupSpeechMicrophoneIpc()
   setupSpeechTextCleaningIpc()
