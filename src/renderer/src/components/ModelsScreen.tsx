@@ -58,7 +58,8 @@ import {
   recommendedImageModelId,
   type FilterState,
   type Credibility,
-  type ModelKind
+  type ModelKind,
+  type ModelsFailure
 } from '@offgrid/application'
 import { modelControlClient } from '@renderer/lib/model-control-client'
 import {
@@ -223,8 +224,13 @@ const MODE_LABELS: Record<string, string> = { txt2img: 'Text→Image', img2img: 
  *  behind it, which file is in flight and how many the job has, and why it failed if it did. */
 interface DownloadCardProgress {
   percent: number
-  status?: string
+  /** The download's own lifecycle phase, straight from the event. A typed union, so `cancelled`
+   *  and `interrupted` stay distinguishable from a genuine `failed` without reading any text. */
+  status?: ModelDownloadProgressEvent['status']
   currentFile?: string
+  /** The typed refusal kind when the REQUEST was refused, so what happened is never re-derived
+   *  by comparing the rendered message against a known string. */
+  failureKind?: ModelsFailure['kind']
   error?: string
   downloadedMB?: string
   totalMB?: string
@@ -281,14 +287,22 @@ function downloadPartLabel(prog: DownloadCardProgress): string {
   return ''
 }
 
-/** Plain words for a download that failed. You need two things from this line: what happened, and
- *  whether trying again is worth it. The raw engine string stays in the title attribute, where it
- *  helps a bug report without shouting at everyone else. */
-function downloadFailureText(error?: string): string {
-  if (!error) return 'The download did not start.'
-  if (error.startsWith('interrupted')) return 'The download stopped before it finished.'
-  if (error === 'unknown model') return 'This model is not available to download.'
-  return error
+/** Plain words for a download that did not finish. You need two things from this line: what
+ *  happened, and whether trying again is worth it. The raw engine string stays in the title
+ *  attribute, where it helps a bug report without shouting at everyone else.
+ *
+ *  It decides from the download's own typed status and typed refusal kind. It used to decide by
+ *  parsing the message - `error.startsWith('interrupted')` and `error === 'unknown model'` - which
+ *  read a rendered sentence as if it were data. The `interrupted` comparison was also already
+ *  dead: an interrupted download carries `status: 'interrupted'`, and only `status: 'failed'`
+ *  reached this text, so an interrupted row rendered no explanation at all. */
+function downloadFailureText(prog: DownloadCardProgress): string {
+  if (prog.status === 'interrupted') {
+    return 'The download stopped before it finished. Try again to pick up where it left off.'
+  }
+  if (prog.failureKind === 'unknown_model') return 'This model is not available to download.'
+  if (!prog.error) return 'The download did not start.'
+  return prog.error
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -463,12 +477,21 @@ export function ModelsScreen({
     setProgress((p) => ({ ...p, [id]: { percent: 0, status: 'queued' } }))
     void modelControlClient.control({ type: 'download', modelId: id }).then((outcome) => {
       if (!outcome.ok) {
+        // A refusal that IS a cancellation is not a failure, and must not be dressed as one -
+        // the same distinction the setup panel draws. It clears the row exactly like the
+        // `cancelled` result below, rather than leaving red text and a "Try again".
+        if (outcome.failure.kind === 'cancelled') {
+          setProgress((p) => withoutProgressEntry(p, id))
+          return
+        }
         setProgress((current) => ({
           ...current,
           [id]: {
             ...current[id],
             percent: 0,
             status: 'failed',
+            // The kind travels with the message so the card never has to re-read the message.
+            failureKind: outcome.failure.kind,
             error: modelsFailureMessage(outcome.failure)
           }
         }))
@@ -862,18 +885,23 @@ export function ModelsScreen({
                 Cancel
               </button>
             </>
-          ) : prog?.status === 'failed' ? (
+          ) : prog?.status === 'failed' || prog?.status === 'interrupted' ? (
             // A failure is a STATE of the action row, not a banner under it. As its own block it
             // stacked a second button beneath "Download" and asked you to choose between two ways
             // of doing the same thing. Reason left, one button right, on the row that was already
             // there.
+            //
+            // `interrupted` shares this row because it wants the same thing - a word and a retry -
+            // but not the failure tone: it stopped, it did not break.
             <>
               <span
-                className="min-w-0 truncate text-[10px] text-red-400/90"
+                className={`min-w-0 truncate text-[10px] ${
+                  prog.status === 'interrupted' ? 'text-neutral-400' : 'text-red-400/90'
+                }`}
                 title={prog.error}
                 role="status"
               >
-                {downloadFailureText(prog.error)}
+                {downloadFailureText(prog)}
               </span>
               <button
                 onClick={() => retryDownload(m.id)}
