@@ -8,6 +8,7 @@ import {
 import { DEFAULT_RAG_EMBEDDING_DIMENSION } from '@offgrid/rag'
 import { desktopModelWorkspace } from '../model-services'
 import { resolveDesktopActivation } from '../models-manager'
+import { createDesktopModelSettingsPort } from '../models/model-settings-port'
 import { embeddings } from '../embeddings'
 import { desktopExtraction } from '../rag/extractors'
 import { desktopVectorStore, projectExists } from '../rag/store'
@@ -33,7 +34,8 @@ export const desktopApplication = createOffGridApplication({
   models: {
     workspace: desktopModelWorkspace,
     guidedSetup: createDesktopGuidedSetupPorts(),
-    activation: { resolve: resolveDesktopActivation }
+    activation: { resolve: resolveDesktopActivation },
+    settings: createDesktopModelSettingsPort()
   },
   rag: {
     store: desktopVectorStore,
