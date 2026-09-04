@@ -107,6 +107,67 @@ export interface StreamChatOptions {
   responseFormat?: unknown
 }
 
+/**
+ * Reading a JSON config file, with ABSENCE and CORRUPTION told apart.
+ *
+ * Both used to arrive as the same swallowed exception behind a comment saying "defaults" or "no
+ * active selection yet". They are not the same event: a missing file on a first launch is the
+ * normal state and deserves silence, while a file that exists and does not parse is data loss - the
+ * user's settings or their chosen model - and the app was quietly reverting to defaults and then
+ * OVERWRITING the unreadable original on the next save, so the loss became permanent and
+ * invisible.
+ */
+type ConfigRead =
+  /** No file. The normal state before the first write. */
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'ok'; readonly value: Record<string, unknown> }
+  /** The file exists and could not be read or parsed: corruption, or a device/IO failure. */
+  | { readonly kind: 'unreadable'; readonly reason: string }
+
+function readJsonConfig(file: string): ConfigRead {
+  let raw: string
+  try {
+    raw = fs.readFileSync(file, 'utf-8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'absent' }
+    return { kind: 'unreadable', reason: (error as Error).message }
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') {
+      return { kind: 'unreadable', reason: 'the file does not contain a JSON object' }
+    }
+    return { kind: 'ok', value: parsed as Record<string, unknown> }
+  } catch (error) {
+    return { kind: 'unreadable', reason: (error as Error).message }
+  }
+}
+
+/**
+ * Move an unreadable config aside so the next save cannot destroy it.
+ *
+ * This is the self-perpetuating half: without it, a corrupt settings file is read as "defaults",
+ * and the first setting the user touches writes defaults OVER the original. Whatever was
+ * recoverable is then gone, every launch looks like a fresh install, and nothing ever said so.
+ */
+function quarantineUnreadableConfig(file: string, reason: string): void {
+  const quarantined = `${file}.unreadable`
+  try {
+    fs.rmSync(quarantined, { force: true })
+    fs.renameSync(file, quarantined)
+    console.error(
+      `[LLMService] ${path.basename(file)} could not be read (${reason}); kept as ${path.basename(quarantined)} and continuing with defaults`
+    )
+  } catch (error) {
+    // Reported, not retried: the file stays where it is and the next save may overwrite it, which
+    // is worth saying out loud rather than leaving as a silent possibility.
+    console.error(
+      `[LLMService] ${path.basename(file)} could not be read (${reason}) AND could not be moved aside`,
+      error
+    )
+  }
+}
+
 export class LLMService {
   private readonly healthInvalidationListeners = new Set<() => void>()
   private server: ChildProcess | null = null
@@ -209,8 +270,15 @@ export class LLMService {
 
   constructor() {
     this.resolveModel()
-    try {
-      const s = JSON.parse(fs.readFileSync(this.settingsFile, 'utf-8'))
+    const stored = readJsonConfig(this.settingsFile)
+    // CORRUPTION, not absence: an unreadable settings file is the user's context size, GPU layers,
+    // KV choice and pins. It is moved aside before anything can overwrite it, and it is said out
+    // loud; only then do we continue on defaults.
+    if (stored.kind === 'unreadable') {
+      quarantineUnreadableConfig(this.settingsFile, stored.reason)
+    }
+    if (stored.kind === 'ok') {
+      const s = stored.value
       if (typeof s.temperature === 'number') this.temperature = s.temperature
       if (typeof s.ctxSize === 'number') this.ctxSize = s.ctxSize
       if (typeof s.topP === 'number') this.topP = s.topP
@@ -223,8 +291,14 @@ export class LLMService {
       if (typeof s.reasoningBudget === 'number') this.reasoningBudget = s.reasoningBudget
       if (isReasoningEffort(s.reasoningEffort)) this.reasoningEffort = s.reasoningEffort
       if (typeof s.systemPrompt === 'string') this.systemPrompt = s.systemPrompt
-      if (s.kvCacheType === 'f16' || s.kvCacheType === 'q8_0' || s.kvCacheType === 'q4_0')
-        this.kvCacheType = s.kvCacheType
+      const storedKvCacheType = s.kvCacheType
+      if (
+        storedKvCacheType === 'f16' ||
+        storedKvCacheType === 'q8_0' ||
+        storedKvCacheType === 'q4_0'
+      ) {
+        this.kvCacheType = storedKvCacheType
+      }
       if (typeof s.flashAttn === 'boolean') this.flashAttn = s.flashAttn
       if (typeof s.gpuLayers === 'number') this.gpuLayers = s.gpuLayers
       if (typeof s.threads === 'number') this.threads = s.threads
@@ -236,9 +310,9 @@ export class LLMService {
         for (const f of s.userExplicit)
           if (f === 'ctxSize' || f === 'kvCacheType' || f === 'flashAttn') this.userExplicit.add(f)
       }
-    } catch {
-      /* defaults */
     }
+    // `absent` needs no branch: a first launch has no settings file, and the field defaults above
+    // are already the answer. That is the one case here that is genuinely expected absence.
   }
 
   /** Subscribe to process-lifecycle invalidations. This does not define health
@@ -290,6 +364,33 @@ export class LLMService {
     return this.port
   }
 
+  /**
+   * One weight file's size in GB for the context budget, or 0 when it cannot be measured.
+   *
+   * EXPECTED ABSENCE for ENOENT: the budget is computed before a model is necessarily on disk (a
+   * fresh profile, a selection whose download has not finished), and a missing file contributing
+   * nothing is correct.
+   *
+   * Anything else is a DEVICE/IO FAILURE and is reported, because the consequence is not neutral:
+   * an unmeasurable weight file makes the budget look SMALLER than it is, so the context this
+   * picks can be too large for the memory actually left, and the load fails later somewhere that
+   * cannot explain why. Returning 0 is still the right fallback - a heuristic must not fail a load
+   * - but it stops being a silent one.
+   */
+  private weightsSizeGb(file: string): number {
+    try {
+      return fs.statSync(file).size / 1e9
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        console.error(
+          `[LLMService] could not measure ${path.basename(file)} for the context budget; treating it as 0 GB`,
+          error
+        )
+      }
+      return 0
+    }
+  }
+
   private safeCtxSize(requestedRaw: number): number {
     const trained = this.trainedContext()
     let totalGb: number | undefined
@@ -297,16 +398,8 @@ export class LLMService {
     try {
       totalGb = os.totalmem() / 1e9
       weightsGb = 0
-      try {
-        weightsGb += fs.statSync(this.modelPath).size / 1e9
-      } catch {
-        /* unknown */
-      }
-      try {
-        if (this.mmProjPath) weightsGb += fs.statSync(this.mmProjPath).size / 1e9
-      } catch {
-        /* unknown */
-      }
+      weightsGb += this.weightsSizeGb(this.modelPath)
+      if (this.mmProjPath) weightsGb += this.weightsSizeGb(this.mmProjPath)
     } catch {
       totalGb = undefined
       weightsGb = undefined
@@ -418,15 +511,15 @@ export class LLMService {
    *  `userExplicit` pin-set (which fields the user set granularly), so a plain restart
    *  restores the pins and a mode preset can't reclobber an explicit KV/ctx choice. */
   private persist(): void {
-    try {
-      fs.mkdirSync(path.dirname(this.settingsFile), { recursive: true })
-      fs.writeFileSync(
-        this.settingsFile,
-        JSON.stringify({ ...this.getSettings(), userExplicit: [...this.userExplicit] })
-      )
-    } catch {
-      /* ignore */
-    }
+    // DEVICE/IO FAILURE, and it no longer disappears. This write CREATES the file, so nothing
+    // about it is expected absence: a full disk, a read-only profile or a permissions problem used
+    // to mean the user changed a setting, was told it was saved, and found it gone after a
+    // restart. It throws now, so the settings command's write fails and the panel says so.
+    fs.mkdirSync(path.dirname(this.settingsFile), { recursive: true })
+    fs.writeFileSync(
+      this.settingsFile,
+      JSON.stringify({ ...this.getSettings(), userExplicit: [...this.userExplicit] })
+    )
   }
 
   /** Read each image off disk and decode to base64 + mime (the one impure step of
@@ -530,17 +623,32 @@ export class LLMService {
   // Resolve the active model's files. The Models screen writes active-model.json
   // ({ id, primary, mmproj }) after resolving a catalog entry; default to the
   // bundled Qwen3-VL vision model when nothing is selected yet.
+  /**
+   * The active model selection, read once and classified.
+   *
+   * Three sites used to parse this file with three different swallowed catches and three different
+   * fallbacks. Absence is genuine here - nothing is selected before the first activation, and the
+   * bundled default is the documented answer. An unreadable file is NOT: it is the user's chosen
+   * model, and silently loading a different one is a product change nobody was told about. So it
+   * is moved aside and stated, exactly once, rather than re-derived per call site.
+   */
+  private readActiveModelSelection(): Record<string, unknown> | null {
+    const read = readJsonConfig(this.activeModelFile)
+    if (read.kind === 'ok') return read.value
+    if (read.kind === 'unreadable') {
+      quarantineUnreadableConfig(this.activeModelFile, read.reason)
+    }
+    return null
+  }
+
   private resolveModel(): void {
     const modelsDir = getModelsDir()
-    try {
-      const cfg = JSON.parse(fs.readFileSync(this.activeModelFile, 'utf-8'))
-      if (cfg?.primary) {
-        this.modelPath = path.join(modelsDir, cfg.primary)
-        this.mmProjPath = cfg.mmproj ? path.join(modelsDir, cfg.mmproj) : ''
-        return
-      }
-    } catch {
-      // no active selection yet
+    const cfg = this.readActiveModelSelection()
+    if (typeof cfg?.primary === 'string' && cfg.primary) {
+      this.modelPath = path.join(modelsDir, cfg.primary)
+      this.mmProjPath =
+        typeof cfg.mmproj === 'string' && cfg.mmproj ? path.join(modelsDir, cfg.mmproj) : ''
+      return
     }
     // No active selection yet. Point at a real catalog vision model so that IF
     // its files happen to be present we still load; otherwise modelsExist() is
@@ -617,12 +725,11 @@ export class LLMService {
     this.resolveModel()
     if (!fs.existsSync(this.modelPath)) return null
     let id = path.basename(this.modelPath)
-    try {
-      const cfg = JSON.parse(fs.readFileSync(this.activeModelFile, 'utf-8'))
-      if (cfg?.id) id = cfg.id
-    } catch {
-      /* fall back to the filename */
-    }
+    // EXPECTED ABSENCE: before the first activation there is no selection file, and the weight
+    // filename is the right id to show. An unreadable file is handled (and reported) by the
+    // reader, so this call site has one case left, not two.
+    const cfg = this.readActiveModelSelection()
+    if (typeof cfg?.id === 'string' && cfg.id) id = cfg.id
     return { id, vision: !!this.mmProjPath && fs.existsSync(this.mmProjPath) }
   }
 
@@ -631,12 +738,11 @@ export class LLMService {
     this.resolveModel()
     if (!fs.existsSync(this.modelPath)) return null
     let id = path.basename(this.modelPath)
-    try {
-      const cfg = JSON.parse(fs.readFileSync(this.activeModelFile, 'utf-8'))
-      if (cfg?.id) id = cfg.id
-    } catch {
-      /* fall back to the filename */
-    }
+    // EXPECTED ABSENCE: before the first activation there is no selection file, and the weight
+    // filename is the right id to show. An unreadable file is handled (and reported) by the
+    // reader, so this call site has one case left, not two.
+    const cfg = this.readActiveModelSelection()
+    if (typeof cfg?.id === 'string' && cfg.id) id = cfg.id
     const primaryFile = path.basename(this.modelPath)
     const projectorFile = this.mmProjPath ? path.basename(this.mmProjPath) : null
     return {
@@ -670,8 +776,12 @@ export class LLMService {
       // and leaves chat without a server (the bug this replaces).
       try {
         this.resumeFromPauseHook?.()
-      } catch {
-        /* ignore */
+      } catch (error) {
+        // SILENT PARTIAL LOSS, now stated: the image server may not have released its memory, so
+        // the spawn below may fail to allocate. Clearing the pause ourselves is still right - init
+        // must never silently no-op and leave chat with no server - but the reason the next
+        // failure happens has to be readable.
+        console.error('[LLMService] on-demand image-server eviction failed before init', error)
       }
       this.paused = false
     }
@@ -778,7 +888,9 @@ export class LLMService {
       try {
         this.server.kill('SIGKILL')
       } catch {
-        /* ignore */
+        // EXPECTED ABSENCE: the process this handle refers to may already have exited, and
+        // signalling a dead pid throws ESRCH. There is nothing to report and nothing to do - the
+        // goal was "not running", and it is not running.
       }
       this.server = null
     }
@@ -947,7 +1059,8 @@ export class LLMService {
       try {
         proc.kill('SIGKILL')
       } catch {
-        /* already gone */
+        // EXPECTED ABSENCE: the engine that just failed to start has very likely exited on its
+        // own, and ESRCH from signalling it means exactly the state we wanted.
       }
       if (this.server === proc) {
         this.server = null
@@ -1037,7 +1150,17 @@ export class LLMService {
         `[LLMService] reducing context ${this.ctxSize} -> ${plan.nextContext} after repeated crashes`
       )
       this.ctxSize = plan.nextContext
-      this.persist()
+      try {
+        this.persist()
+      } catch (error) {
+        // Crash recovery, not a user command: the reduced context applies to THIS session either
+        // way, so a failed write must not stop the restart. Recorded because the reduction will
+        // silently not survive a relaunch.
+        console.error(
+          '[LLMService] could not persist the reduced context for the next launch',
+          error
+        )
+      }
     }
     await new Promise((r) => setTimeout(r, plan.delayMs))
     if (this.paused || this.intentionalStop) return
@@ -1103,7 +1226,10 @@ export class LLMService {
           }
         }
       } catch {
-        /* not up yet */
+        // EXPECTED ABSENCE, and the normal case: this is a poll loop against a server that is
+        // still binding its port, so ECONNREFUSED is what "starting" looks like. A server that
+        // never comes up is NOT swallowed here - the loop ends at its deadline and reports through
+        // `lastErrorMsg` with the engine's own stderr tail.
       }
       const action = engineReadinessAction({
         processAlive: this.server !== null,
@@ -1272,7 +1398,9 @@ export class LLMService {
           try {
             proc.kill(sig)
           } catch {
-            /* already gone */
+            // EXPECTED ABSENCE: the process may exit between the liveness check and the signal.
+            // `terminateEngine` rechecks liveness itself, so a race with a natural exit is
+            // reported as the exit it was, not as a failed teardown.
           }
         },
         waitForExit: (ms) => this.waitForProcExit(proc, ms)
@@ -1350,8 +1478,19 @@ export class LLMService {
       evict: () => {
         try {
           this.pause()
-        } catch {
-          /* ignore */
+        } catch (error) {
+          // SILENT PARTIAL LOSS, now stated: residency is about to count this engine's memory as
+          // reclaimed. If the teardown failed, that budget is wrong and the next resident may be
+          // admitted into memory that is still held.
+          //
+          // It deliberately does not rethrow: `DesktopManagedRuntime.evict` has no failure
+          // channel, so throwing would surface as an unhandled rejection inside the residency
+          // service rather than as a decision it could make. Making the port's eviction outcome
+          // typed is the real fix and belongs with whoever owns that contract.
+          console.error(
+            '[LLMService] eviction failed; residency may over-count reclaimed memory',
+            error
+          )
         }
       },
       warm: () => {
