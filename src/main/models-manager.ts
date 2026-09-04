@@ -18,12 +18,11 @@ import {
 import { modelPackageIdentity, type TransferredModelManifest } from '@offgrid/sync'
 import {
   artifactVerificationError,
-  type LocalModelImportService,
-  type ModelLibraryRemovalService,
-  type ModelTransferRegistrationService,
+  type LocalModelImportPorts,
+  type ModelLibraryRemovalPorts,
+  type ModelTransferRegistrationPorts,
   type ModelMetadataRepairCommandPorts,
   type ModelLibraryRemovalTarget,
-  type LocalModelImportProgress,
   mergeCatalog,
   workspaceRouteId,
   catalogEntryForIdentifier,
@@ -50,12 +49,6 @@ import type { ModelControlCatalogModel } from '@offgrid/application'
 import type { RemoteVisionInventoryModel } from '../shared/remote-vision-server'
 import { registerDesktopModelManagerPorts } from './model-manager-ports'
 import { desktopModelSelectionPersistence } from './model-selection-persistence'
-import {
-  localModelImportService,
-  modelLibraryRemovalService,
-  modelTransferRegistration,
-  registerDesktopModelLibraryPorts
-} from './composition/model-library'
 import { platformFetch } from '@offgrid/models/fetch'
 import { desktopImageRuntimeIdentity } from './models/image-runtime-identity'
 import { modelSearchKind } from './models/model-search-kind'
@@ -458,26 +451,6 @@ export async function searchModels(query: string, kind?: string): Promise<unknow
   }
 }
 
-export class ActiveModelProjectorFinalizationError extends Error {
-  readonly code = 'ACTIVE_MODEL_PROJECTOR_FINALIZATION_FAILED'
-
-  constructor(cause: unknown) {
-    super(
-      'Model files are ready, but the active vision model could not be updated. Retry to finish setup.',
-      { cause }
-    )
-    this.name = 'ActiveModelProjectorFinalizationError'
-  }
-}
-
-async function finalizeInstalledModelArtifacts(): Promise<void> {
-  try {
-    await reconcileActiveModelProjector()
-  } catch (cause) {
-    throw new ActiveModelProjectorFinalizationError(cause)
-  }
-}
-
 interface DeleteModelResult {
   success: boolean
   error?: string
@@ -572,12 +545,12 @@ async function resolveDesktopRemoval(modelId: string): Promise<DesktopRemovalTar
 }
 
 /** Desktop file, runtime, and registry I/O for model removal. Shared owns the transaction. */
-export function desktopModelLibraryRemovalPorts(): ConstructorParameters<
-  typeof ModelLibraryRemovalService
->[0] {
+export function desktopModelLibraryRemovalPorts(): Omit<
+  ModelLibraryRemovalPorts,
+  'selected' | 'clearSelection'
+> {
   return {
     resolve: resolveDesktopRemoval,
-    selected: selectedModelRoutes,
     async removeFile(fileName) {
       const filePath = path.join(llm.getModelsDir(), fileName)
       const existed = fs.existsSync(filePath)
@@ -604,16 +577,16 @@ export function desktopModelLibraryRemovalPorts(): ConstructorParameters<
       ) {
         removeDownloaded(llm.getModelsDir(), target.modelId)
       }
-    },
-    clearSelection: (modality) => selectDesktopModel(modality, null)
+    }
   }
 }
 
-const modelLibraryRemoval = (): ModelLibraryRemovalService => modelLibraryRemovalService()
-
 /** Delete a model package through the Shared removal and selection-cleanup transaction. */
-export function deleteModel(modelId: string): Promise<DeleteModelResult> {
-  return modelLibraryRemoval().remove(modelId)
+export async function deleteModel(modelId: string): Promise<DeleteModelResult> {
+  const outcome = await desktopModels.remove(modelId)
+  return outcome.ok
+    ? { success: true, freedFiles: outcome.value.freedFiles }
+    : { success: false, error: modelsFailureMessage(outcome.failure), freedFiles: 0 }
 }
 
 async function setActiveLlamaModel(
@@ -942,9 +915,8 @@ async function transferredFilesOnDisk(
 
 /** Registry and filesystem I/O for a transferred model, scoped to one models directory. */
 export function desktopModelTransferRegistrationPorts(
-  dir: () => string,
-  afterRegistered?: () => Promise<void>
-): ConstructorParameters<typeof ModelTransferRegistrationService>[0] {
+  dir: () => string
+): ModelTransferRegistrationPorts {
   return {
     validateFiles: async (manifest) =>
       (
@@ -961,13 +933,9 @@ export function desktopModelTransferRegistrationPorts(
     writeLocalModels: (models) => saveLocalModels([...models], dir()),
     recordDownloaded: (model) => recordDownloaded(dir(), model),
     hasDownloaded: (id) => Boolean(findDownloaded(dir(), id)),
-    packageIdentity: (manifest) => modelPackageIdentity(manifest as TransferredModelManifest),
-    ...(afterRegistered ? { afterRegistered } : {})
+    packageIdentity: (manifest) => modelPackageIdentity(manifest as TransferredModelManifest)
   }
 }
-
-const transferredModelRegistration = (): ModelTransferRegistrationService =>
-  modelTransferRegistration(() => llm.getModelsDir(), finalizeInstalledModelArtifacts)
 
 /**
  * Resolve one installed, file-backed model for device transfer. Runtime caches such as mflux are
@@ -1024,21 +992,16 @@ export async function registerTransferredModel(
   manifest: TransferredModelManifest,
   dir = llm.getModelsDir()
 ): Promise<{ success: boolean; error?: string; id?: string }> {
-  if (dir === llm.getModelsDir()) {
-    try {
-      return await transferredModelRegistration().register(manifest)
-    } catch (error) {
-      return {
-        success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : 'Model files are ready, but active model setup could not be completed.'
-      }
+  if (dir !== llm.getModelsDir()) {
+    return {
+      success: false,
+      error: 'Model transfers can register only in the active model library.'
     }
   }
-  const scoped = modelTransferRegistration(() => dir)
-  return scoped.register(manifest)
+  const outcome = await desktopModels.registerTransfer({ manifest })
+  return outcome.ok
+    ? { success: true, id: outcome.value.modelId }
+    : { success: false, error: modelsFailureMessage(outcome.failure) }
 }
 
 /** Set of every filename referenced by the local registry (primary + mmproj), so
@@ -1052,9 +1015,7 @@ function localProtectedNames(): Set<string> {
   return s
 }
 
-export function desktopLocalModelImportPorts(): ConstructorParameters<
-  typeof LocalModelImportService
->[0] {
+export function desktopLocalModelImportPorts(): LocalModelImportPorts {
   return {
     async inspect(source) {
       if (!source || !isGgufFile(source)) {
@@ -1109,22 +1070,35 @@ export function desktopLocalModelImportPorts(): ConstructorParameters<
 }
 
 const activeProjectorRepairPorts = desktopActiveProjectorRepairPorts()
-
-registerDesktopModelLibraryPorts({
-  removal: desktopModelLibraryRemovalPorts,
-  localImport: desktopLocalModelImportPorts,
-  transfer: desktopModelTransferRegistrationPorts
-})
 registerDesktopDownloadMetadataRepairPorts(activeProjectorRepairPorts)
 
-const localModelImports = (): LocalModelImportService => localModelImportService()
-
 /** Import and register one local GGUF through the Shared model-library transaction. */
-export function importLocalModel(
-  source: string,
-  onProgress?: (progress: LocalModelImportProgress) => void
+export async function importLocalModel(
+  source: string
 ): Promise<{ success: boolean; error?: string; id?: string }> {
-  return localModelImports().import(source, onProgress)
+  const outcome = await desktopModels.import({ path: source, modality: 'text' })
+  return outcome.ok
+    ? { success: true, id: outcome.value.id }
+    : { success: false, error: modelsFailureMessage(outcome.failure) }
+}
+
+/** Raw model-library I/O for the Shared application composition root. */
+export const desktopModelLibraryPorts = {
+  removal: desktopModelLibraryRemovalPorts(),
+  localImport: desktopLocalModelImportPorts(),
+  transfer: {
+    ...desktopModelTransferRegistrationPorts(() => llm.getModelsDir()),
+    afterRegistered: async () => {
+      try {
+        await reconcileActiveModelProjector()
+      } catch (cause) {
+        throw new Error(
+          'Model files are ready, but the active vision model could not be updated. Retry to finish setup.',
+          { cause }
+        )
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

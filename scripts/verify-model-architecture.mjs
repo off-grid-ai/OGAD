@@ -54,6 +54,16 @@ for (const legacyOwner of [
   }
 }
 
+const legacyModelLibraryOwner = path.join(repoRoot, 'src/main/composition/model-library.ts')
+if (fs.existsSync(legacyModelLibraryOwner)) {
+  findings.push({
+    rule: 'models-facade-owns-shared-model-services',
+    file: relative(legacyModelLibraryOwner),
+    line: 1,
+    detail: 'app-owned model-library service composition remains'
+  })
+}
+
 /**
  * ---- residency-admission-has-one-owner -----------------------------------------------------------
  *
