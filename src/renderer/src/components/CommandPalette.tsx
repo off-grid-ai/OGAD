@@ -22,9 +22,6 @@ import {
 import type { SearchHit } from '@/types'
 import { paletteScreenMatches, type PaletteScreen } from '../lib/paletteScreens'
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const api = (window as any).api
-
 const KIND_ICON = {
   screen: IconPhoto,
   meeting: IconVideo,
@@ -69,16 +66,23 @@ export function CommandPalette({
   // Debounced fast search (keyword only for instant feel).
   useEffect(() => {
     if (!query.trim()) {
-      setHits([])
-      return undefined
+      const id = ++seq.current
+      const clearTimer = window.setTimeout(() => {
+        if (id === seq.current) setHits([])
+      }, 0)
+      return () => window.clearTimeout(clearTimer)
     }
     const id = ++seq.current
-    const t = setTimeout(async () => {
-      const result = await api.universalSearch(query, { limit: 8, semantic: false })
-      const nextHits = Array.isArray(result) ? (result as SearchHit[]) : []
-      if (id === seq.current) setHits(nextHits)
+    const searchTimer = window.setTimeout(() => {
+      void window.api
+        .universalSearch(query, { limit: 8, semantic: false })
+        .then((result) => {
+          const nextHits = Array.isArray(result) ? result : []
+          if (id === seq.current) setHits(nextHits)
+        })
+        .catch((error: unknown) => console.error('Command palette search failed:', error))
     }, 140)
-    return () => clearTimeout(t)
+    return () => window.clearTimeout(searchTimer)
   }, [query])
 
   const open_ = (hit: SearchHit): void => {
