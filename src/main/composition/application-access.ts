@@ -1,5 +1,6 @@
 import {
   modelsFailureMessage,
+  type ApplicationDegradation,
   type ModelsFailure,
   type AutomationFacade,
   type GenerationEvents,
@@ -9,9 +10,12 @@ import {
   type ModelModality,
   type ModelsFacade,
   type OffGridApplication,
+  type OffGridApplicationSnapshot,
+  type OffGridDomain,
   type PartialGenerationState,
   type RagFacade,
   type SyncFacade,
+  type Unsubscribe,
   type UseFacade
 } from '@offgrid/application'
 
@@ -61,6 +65,58 @@ export const desktopUse: UseFacade = new Proxy({} as UseFacade, {
     return typeof value === 'function' ? value.bind(facade) : value
   }
 })
+
+/**
+ * The one call an owner that activates BESIDE the application root makes about its own health:
+ * Pro's Sync activation is the case today. Shared retains the report on its snapshot, so a
+ * surface that subscribes long after boot still sees it. `reason: null` clears this owner's
+ * entry and no other owner's.
+ */
+export function reportDesktopApplicationDegraded(entry: {
+  readonly domain: OffGridDomain
+  readonly source: string
+  readonly reason: string | null
+}): void {
+  current().reportDegraded(entry)
+}
+
+/** What one owner currently reports about one domain, read from the shared snapshot. */
+export function desktopApplicationDegradation(
+  domain: OffGridDomain,
+  source: string
+): ApplicationDegradation | null {
+  return findDegradation(current().snapshot(), domain, source)
+}
+
+/** The same query over a snapshot a consumer already holds. Pure. */
+export function findDegradation(
+  snapshot: Pick<OffGridApplicationSnapshot, 'degraded'>,
+  domain: OffGridDomain,
+  source: string
+): ApplicationDegradation | null {
+  return (
+    snapshot.degraded.find((entry) => entry.domain === domain && entry.source === source) ?? null
+  )
+}
+
+/**
+ * Watch ONE owner's report about ONE domain. The application snapshot moves for every domain
+ * event; this notifies only when the reason for this pair actually changes, so a consumer that
+ * repaints on degradation does not repaint on unrelated domain traffic.
+ */
+export function observeDesktopApplicationDegradation(
+  domain: OffGridDomain,
+  source: string,
+  listener: (degradation: ApplicationDegradation | null) => void
+): Unsubscribe {
+  let last = desktopApplicationDegradation(domain, source)
+  return current().subscribe((snapshot) => {
+    const next = findDegradation(snapshot, domain, source)
+    if (next === last) return
+    last = next
+    listener(next)
+  })
+}
 
 /** Stable access to the Shared Sync facade without constructing the application root. */
 export const desktopSync: SyncFacade = new Proxy({} as SyncFacade, {

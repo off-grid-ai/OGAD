@@ -1,6 +1,10 @@
 /** Desktop composition root. Shared owns application behavior; Desktop supplies device I/O. */
 import { randomUUID } from 'node:crypto'
-import { createOffGridApplication, type OffGridApplication } from '@offgrid/application'
+import {
+  createOffGridApplication,
+  type ApplicationDegradation,
+  type OffGridApplicationSnapshot
+} from '@offgrid/application'
 import { DEFAULT_RAG_EMBEDDING_DIMENSION } from '@offgrid/rag'
 import { desktopModelWorkspace } from '../model-services'
 import { resolveDesktopActivation } from '../models-manager'
@@ -21,7 +25,6 @@ import { setupSpeechTextCleaningIpc } from '../speech-text-cleaning-ipc'
 import { consumeDesktopApplicationExtensionPorts } from './application-extension-ports'
 import { claimDesktopSyncRuntime } from '../sync-runtime-owner'
 import { writeDiagnosticLog } from '../diagnostics-log'
-import { desktopApplicationHealth } from './application-health'
 
 const speechIo = createDesktopSpeechIoPorts()
 const extensionPorts = consumeDesktopApplicationExtensionPorts()
@@ -93,33 +96,33 @@ function observeApplicationFailures(): void {
   })
 }
 
-function reportDegradedStart(
-  result: Awaited<ReturnType<OffGridApplication['start']>>
-): Awaited<ReturnType<OffGridApplication['start']>> {
-  for (const { domain, reason } of result.degraded) {
-    desktopApplicationHealth.reportDegraded({ domain, source: 'application', reason })
-  }
-  return result
-}
+const degradationKey = ({ domain, source, reason }: ApplicationDegradation): string =>
+  `${source}:${domain}:${reason}`
 
 /**
- * One projection of startup health for every consumer: shared's own status and retained
- * lifecycle failure, plus what each extension reports about its own activation. Every recorded
- * degradation is also written to the support log through the injected sink, so the log stays a
- * consequence of the observable state rather than the only place the truth lives.
+ * Startup health is shared's state, not a desktop store: `application.snapshot().degraded` retains
+ * every owner's report - shared's own failed start steps and anything an extension reports beside
+ * the root through `reportDegraded` - so a consumer that subscribes long after boot still sees it.
+ *
+ * The only desktop job left is the support log, and it stays a CONSEQUENCE of that state: write a
+ * line the first time an owner reports a reason, never again for the same reason, and never for
+ * unrelated domain traffic on the same snapshot.
  */
+const loggedDegradations = new Set<string>()
+
+function writeDegradations(snapshot: Pick<OffGridApplicationSnapshot, 'degraded'>): void {
+  for (const entry of snapshot.degraded) {
+    const key = degradationKey(entry)
+    if (loggedDegradations.has(key)) continue
+    loggedDegradations.add(key)
+    writeDiagnosticLog('application', 'lifecycle.start.degraded', { ...entry }, 'error')
+  }
+}
+
 function observeApplicationHealth(): void {
-  desktopApplicationHealth.setSink(({ domain, source, reason }) => {
-    writeDiagnosticLog(
-      'application',
-      'lifecycle.start.degraded',
-      { domain, source, reason },
-      'error'
-    )
-  })
-  releaseHealthObserver ??= desktopApplication.subscribe(({ status, lifecycleFailure }) => {
-    desktopApplicationHealth.observeLifecycle({ status, lifecycleFailure })
-  })
+  if (releaseHealthObserver) return
+  writeDegradations(desktopApplication.snapshot())
+  releaseHealthObserver = desktopApplication.subscribe(writeDegradations)
 }
 
 observeApplicationFailures()
@@ -133,16 +136,10 @@ export function startDesktopApplication(): ReturnType<typeof desktopApplication.
     observeApplicationHealth()
     releaseSyncRuntime = claimDesktopSyncRuntime('application')
     try {
-      return reportDegradedStart(await desktopApplication.start())
+      return await desktopApplication.start()
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       writeDiagnosticLog('application', 'lifecycle.start.failed', { error: message }, 'error')
-      // start() itself threw, so shared never published a lifecycle failure of its own. Publish it
-      // here or the only record of a dead application would be this log line.
-      desktopApplicationHealth.observeLifecycle({
-        status: 'stopped',
-        lifecycleFailure: { phase: 'start', message, causes: [message] }
-      })
       releaseSyncRuntime()
       releaseSyncRuntime = null
       starting = null
@@ -161,7 +158,6 @@ export async function stopDesktopApplication(): Promise<void> {
     releaseFailureObserver = null
     releaseHealthObserver?.()
     releaseHealthObserver = null
-    desktopApplicationHealth.setSink(null)
     releaseSyncRuntime?.()
     releaseSyncRuntime = null
     starting = null
