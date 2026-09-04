@@ -30,6 +30,11 @@ type PickerMode = (typeof MODALITIES)[number]['mode']
 // modality is independent — unloading one must NOT reset another's state.
 type UnloadStatus = 'unloading' | 'unloaded' | 'error'
 
+/** A rejected IPC carries no typed failure. Report what it said, never a guessed value. */
+function transportFailureMessage(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause)
+}
+
 function openSettings(onClose: () => void): void {
   onClose()
   openModelSettingsPanel('model')
@@ -47,6 +52,9 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
   // rendered as "nothing is downloaded". `failure` carries the typed refusal's own message.
   const [inventoryRead, setInventoryRead] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
+  // The optional Computer Use read owns its own failure. An unread section is its own state:
+  // it is never collapsed into "no model selected", and never filled with a guessed empty list.
+  const [computerUseFailure, setComputerUseFailure] = useState<string | null>(null)
 
   const applyProjection = useCallback((projection: ModelControlProjection): void => {
     setModels([...projection.models])
@@ -59,13 +67,10 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     setInventoryRead(true)
   }, [])
 
-  const load = useCallback(async () => {
+  // The canonical model inventory. Owns only its own failure.
+  const readInventory = useCallback(async (): Promise<void> => {
     try {
-      const [outcome, computerUseProjection] = await Promise.all([
-        modelControlClient.control({ type: 'refresh' }),
-        window.api.getComputerUseActiveModels()
-      ])
-      setComputerUse(computerUseProjection)
+      const outcome = await modelControlClient.control({ type: 'refresh' })
       if (!outcome.ok) {
         setFailure(modelsFailureMessage(outcome.failure))
         return
@@ -74,13 +79,28 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
       // Every success status carries the fresh projection, not only `completed`. Dropping the
       // others left the panel showing a stale (or absent) active model after a refusal.
       applyProjection(outcome.value.projection)
-    } catch (e) {
-      setFailure(e instanceof Error ? e.message : String(e))
+    } catch (cause) {
+      setFailure(transportFailureMessage(cause))
     }
   }, [applyProjection])
+
+  // Computer Use is an OPTIONAL section read over a separate channel. It is deliberately not
+  // combined with the inventory read: a rejection here must never suppress a model-control
+  // projection that arrived intact. It reports its own error and guesses nothing.
+  const readComputerUse = useCallback(async (): Promise<void> => {
+    try {
+      setComputerUse(await window.api.getComputerUseActiveModels())
+      setComputerUseFailure(null)
+    } catch (cause) {
+      setComputerUseFailure(transportFailureMessage(cause))
+    }
+  }, [])
+
   useEffect(() => {
-    void load()
-  }, [load])
+    // Both start now and settle independently; neither can reject out or block the other.
+    void readInventory()
+    void readComputerUse()
+  }, [readInventory, readComputerUse])
 
   const setUnloadStatus = (mode: string, status: UnloadStatus): void =>
     setUnload((s) => ({ ...s, [mode]: status }))
@@ -109,6 +129,10 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
       }
       setFailure(null)
       applyProjection(outcome.value.projection)
+    } catch (cause) {
+      // A rejected IPC (bridge missing, main process gone, serialization failure) would
+      // otherwise escape this void-called handler: the spinner stops and nothing is said.
+      setFailure(transportFailureMessage(cause))
     } finally {
       setBusy(null)
     }
@@ -129,6 +153,8 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
       }
       setFailure(null)
       applyProjection(outcome.value.projection)
+    } catch (cause) {
+      setFailure(transportFailureMessage(cause))
     } finally {
       setBusy(null)
     }
@@ -142,7 +168,10 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
       const outcome = await modelControlClient.control({ type: 'unload', surface: mode })
       if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
       applyProjection(outcome.value.projection)
-      setUnloadStatus(mode, 'unloaded')
+      // `ok` means the command was carried and answered — NOT that the model left memory.
+      // Only `completed` means unloaded; every other status means it is still resident, and
+      // reporting "Unloaded" for those would present a refusal as a finished action.
+      setUnloadStatus(mode, outcome.value.status === 'completed' ? 'unloaded' : 'error')
     } catch (e) {
       console.error('[models] unload failed', e)
       setUnloadStatus(mode, 'error')
@@ -186,7 +215,11 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
               <span className="text-[10px] text-neutral-500">{computerUse.strategyLabel}</span>
             ) : null}
           </div>
-          {computerUse?.models.length ? (
+          {computerUseFailure !== null ? (
+            <p role="alert" className="px-2 py-1.5 text-xs text-amber-400">
+              {`Your Computer Use models could not be read — this section is unavailable, not empty. ${computerUseFailure}`}
+            </p>
+          ) : computerUse?.models.length ? (
             <div className="space-y-1">
               {computerUse.models.map((model) => (
                 <div
