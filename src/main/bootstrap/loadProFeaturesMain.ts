@@ -34,6 +34,16 @@ interface ActiveProRuntime {
   shutdown(): Promise<void>
 }
 
+export class ProMainActivationError extends Error {
+  readonly cause: unknown
+
+  constructor(cause: unknown) {
+    super('Off Grid AI Pro could not start.')
+    this.name = 'ProMainActivationError'
+    this.cause = cause
+  }
+}
+
 interface RuntimeSessionOptions {
   entitlementRequired: boolean
   requestRelaunch(): void
@@ -179,7 +189,11 @@ async function loadProFeaturesMainNow(): Promise<void> {
   let pro: unknown
   try {
     pro = await import('@offgrid/pro/main')
-  } catch {
+  } catch (cause) {
+    if (proEnabled()) {
+      console.error('[pro] paid runtime import failed', cause)
+      throw new ProMainActivationError(cause)
+    }
     return // free / contributor build: package not present
   }
   const forced = getForcedProActivation(__OFFGRID_PRO__, process.env.OFFGRID_PRO, app.isPackaged)
@@ -218,7 +232,11 @@ async function loadProFeaturesMainNow(): Promise<void> {
   }
   const activateMain = (pro as { activateMain?: (api: ProMainApi) => void | Promise<void> })
     .activateMain
-  if (typeof activateMain !== 'function') return // stub resolved to null
+  if (typeof activateMain !== 'function') {
+    const cause = new Error('The paid runtime does not export activateMain.')
+    console.error('[pro] paid runtime activation entry is missing', cause)
+    throw new ProMainActivationError(cause)
+  }
   if (activeProRuntime) return
   const bootstrap = activeEntitlementBootstrap
   activeEntitlementBootstrap = null
@@ -231,6 +249,7 @@ async function loadProFeaturesMainNow(): Promise<void> {
   } catch (e) {
     await session.runtime.shutdown()
     console.error('[pro] activateMain failed', e)
+    throw new ProMainActivationError(e)
   }
 }
 

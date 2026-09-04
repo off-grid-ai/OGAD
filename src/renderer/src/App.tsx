@@ -470,9 +470,30 @@ function AppContent(): React.ReactElement {
     const license = window.api.license
     if (!license || typeof license.onChanged !== 'function') return
     let active = true
+    let version = 0
     const applyStatus = (info: ProLicenseInfo): void => {
-      if (!active || !shouldRemovePaidRendererAccess(info)) return
-      removePaidRendererAccess()
+      const requestVersion = ++version
+      if (!active) return
+      if (shouldRemovePaidRendererAccess(info)) {
+        removePaidRendererAccess()
+        return
+      }
+      if (!info.isPro) return
+      setIsPro(true)
+      setProReady(false)
+      void loadProFeaturesRenderer()
+        .then((activation) => {
+          if (!active || requestVersion !== version) return
+          setProActivation(activation)
+          setProReady(true)
+        })
+        .catch((error: unknown) => {
+          if (!active || requestVersion !== version) return
+          clearProFeaturesRenderer()
+          setProActivation('none')
+          setProReady(true)
+          console.error('[pro] renderer entitlement restoration failed', error)
+        })
     }
     const off = license.onChanged(applyStatus)
     void license
@@ -485,7 +506,7 @@ function AppContent(): React.ReactElement {
       active = false
       off()
     }
-  }, [removePaidRendererAccess])
+  }, [removePaidRendererAccess, setIsPro])
 
   // Handle browser URL changes
   useEffect(() => {
