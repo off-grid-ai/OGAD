@@ -43,7 +43,7 @@ function collect(node: Nodes, out: string[]): void {
     }
     return // toString already walked this block's inline children
   }
-  for (const child of (node as Parent).children ?? []) {
+  for (const child of (node as Parent).children) {
     collect(child, out)
   }
 }
