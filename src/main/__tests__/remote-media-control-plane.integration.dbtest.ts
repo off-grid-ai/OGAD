@@ -3,6 +3,7 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import type { AddressInfo } from 'node:net'
+import type { OffGridApplication } from '@offgrid/application'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-remote-control-plane-'))
@@ -21,9 +22,19 @@ const requests: string[] = []
 let server: http.Server
 let endpoint = ''
 let serverId = ''
+let application: OffGridApplication
 const audioPath = path.join(profile, 'sample.wav')
 
 beforeAll(async () => {
+  const [{ createOffGridApplication }, { desktopModelWorkspacePorts }, applicationAccess] =
+    await Promise.all([
+      import('@offgrid/application'),
+      import('../model-services'),
+      import('../composition/application-access')
+    ])
+  application = createOffGridApplication({ models: desktopModelWorkspacePorts })
+  applicationAccess.registerDesktopApplication(application)
+  await application.start()
   fs.writeFileSync(audioPath, Buffer.from('RIFF-test'))
   server = http.createServer((request, response) => {
     requests.push(request.url ?? '')
@@ -80,6 +91,7 @@ beforeAll(async () => {
 afterAll(async () => {
   const { removeRemoteVisionServer } = await import('../vision/remote-vision-server')
   if (serverId) await removeRemoteVisionServer(serverId)
+  await application.stop()
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()))
   })
@@ -126,8 +138,8 @@ describe('Desktop remote media control plane', () => {
       'Remote Image'
     )
 
-    const { desktopModelServices } = await import('../model-services')
-    const inventory = await desktopModelServices.refresh()
+    await application.models.refresh()
+    const inventory = application.models.snapshot().inventory
     expect(
       inventory
         .filter((model) => model.serverId === serverId)
@@ -141,8 +153,8 @@ describe('Desktop remote media control plane', () => {
         ['Remote Embedding', 'embedding', 'desktop.remote-embedding']
       ])
     )
-    expect(desktopModelServices.llm.active('image').model?.name).toBe('Remote Image')
-    expect(desktopModelServices.llm.active('voice').model?.name).toBe('Remote Voice')
+    expect(application.models.snapshot().active.image?.model?.name).toBe('Remote Image')
+    expect(application.models.snapshot().active.voice?.model?.name).toBe('Remote Voice')
 
     const { generateDesktopOperation } = await import('../desktop-generation')
     await expect(

@@ -41,6 +41,12 @@ vi.mock('electron', () => ({
     isEncryptionAvailable: () => false,
     encryptString: (value: string) => Buffer.from(value),
     decryptString: (value: Buffer) => value.toString()
+  },
+  ipcMain: {
+    on: () => undefined,
+    removeListener: () => undefined,
+    handle: () => undefined,
+    removeHandler: () => undefined
   }
 }))
 
@@ -283,13 +289,17 @@ describe('fresh setup to first use', () => {
   it('resumes the full baseline, uses every selected runtime, and stays usable after relaunch', async () => {
     expect(fs.existsSync(dataDir)).toBe(false)
     installRuntimeBoundaries()
+    // Electron owns the userData directory before main-process composition begins.
+    fs.mkdirSync(dataDir, { recursive: true })
 
-    const [{ llm }, setup, manager, { CATALOG, MODEL_KINDS }] = await Promise.all([
+    const [{ llm }, setup, managerBase, { CATALOG, MODEL_KINDS }, downloads] = await Promise.all([
       import('../llm'),
       import('../setup'),
       import('../models-manager'),
-      import('@offgrid/models')
+      import('@offgrid/models'),
+      import('../models/__tests__/download-facade-test-client')
     ])
+    const manager = { ...managerBase, ...downloads }
 
     // This is the real settings owner. Fresh setup cannot start the model yet, but
     // the selected mode is persisted before that expected missing-model failure.
@@ -385,12 +395,18 @@ describe('fresh setup to first use', () => {
     // then the same download owner resumes the remaining catalog modalities.
     vi.resetModules()
     interruptDownloads = false
-    const [{ llm: resumedLlm }, resumedSetup, resumedManager] = await Promise.all([
-      import('../llm'),
-      import('../setup'),
-      import('../models-manager')
-    ])
-    expect(resumedManager.listDownloads()).toEqual(
+    // Electron creates this profile directory before it loads the main graph. The module-reset
+    // relaunch must reproduce that native boundary instead of asking SQLite to create its parent.
+    fs.mkdirSync(dataDir, { recursive: true })
+    const [{ llm: resumedLlm }, resumedSetup, resumedManagerBase, resumedDownloads] =
+      await Promise.all([
+        import('../llm'),
+        import('../setup'),
+        import('../models-manager'),
+        import('../models/__tests__/download-facade-test-client')
+      ])
+    const resumedManager = { ...resumedManagerBase, ...resumedDownloads }
+    expect(await resumedManager.listDownloads()).toEqual(
       expect.arrayContaining(
         downloadableModels.map((model) =>
           expect.objectContaining({

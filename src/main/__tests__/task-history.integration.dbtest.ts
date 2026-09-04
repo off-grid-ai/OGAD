@@ -16,6 +16,7 @@ import { MAX_TASK_STEP_DETAILS } from '../tasks/task-step-details'
 import { MAX_COMPUTER_USE_REASONING_CHARS } from '../../shared/computer-use-limits'
 import { encodeTaskExecutionPlan, encodeTaskPhase } from '../../shared/task-execution-plan'
 import {
+  AutomationApplication,
   automationTaskKindLabel,
   automationTaskReadStatus,
   createAutomationTask,
@@ -24,13 +25,27 @@ import {
 
 const temporaryDirectories: string[] = []
 
-function openStore(now = 1_000): { db: Database.Database; store: TaskHistoryStore } {
+function createApplication(
+  db: Database.Database,
+  now: number,
+  device = { id: 'studio-mac', name: 'Studio Mac' }
+): AutomationApplication {
+  const history = new TaskHistoryStore(db)
+  history.migrate()
+  const application = new AutomationApplication({ history, device, now: () => now })
+  application.start()
+  return application
+}
+
+function openApplication(now = 1_000): {
+  db: Database.Database
+  application: AutomationApplication
+} {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-task-history-'))
   temporaryDirectories.push(directory)
   const db = new Database(path.join(directory, 'history.db'))
-  const store = new TaskHistoryStore(db, () => now)
-  store.migrate()
-  return { db, store }
+  const application = createApplication(db, now)
+  return { db, application }
 }
 
 afterEach(() => {
@@ -41,7 +56,7 @@ afterEach(() => {
 
 describe('task history persistence', () => {
   it('persists the real shared automation projection and rejects unknown vocabularies', () => {
-    const { db, store } = openStore(4_000)
+    const { db, application } = openApplication(4_000)
     let task = createAutomationTask({
       taskId: 'shared-contract-task',
       kind: 'web_use',
@@ -52,7 +67,7 @@ describe('task history persistence', () => {
     if (!started.accepted) throw new Error(started.reason)
     task = started.snapshot
 
-    store.upsert({
+    application.record({
       taskId: task.taskId,
       journeyId: 'chat-shared-contract',
       kind: task.kind,
@@ -74,19 +89,19 @@ describe('task history persistence', () => {
       3_000
     )
 
-    expect(store.get(task.taskId)).toMatchObject({
+    expect(application.get(task.taskId)).toMatchObject({
       kind: 'web_use',
       status: 'running',
       title: 'Web Use'
     })
-    expect(store.get('invalid-task-vocabulary')).toBeUndefined()
-    expect(store.list().map((item) => item.taskId)).toEqual(['shared-contract-task'])
+    expect(application.get('invalid-task-vocabulary')).toBeUndefined()
+    expect(application.list().map((item) => item.taskId)).toEqual(['shared-contract-task'])
     db.close()
   })
 
   it('materializes and removes a synced visual step without changing task ownership timestamps', () => {
-    const { db, store } = openStore(4_000)
-    store.upsert({
+    const { db, application } = openApplication(4_000)
+    application.record({
       taskId: 'remote-visual-task',
       journeyId: 'chat-remote',
       kind: 'computer_use',
@@ -95,7 +110,7 @@ describe('task history persistence', () => {
       at: 3_000
     })
 
-    const materialized = store.materializeVisualStep('remote-visual-task', {
+    const materialized = application.materializeSyncedVisualStep('remote-visual-task', {
       stepId: 'sync:4',
       at: 2_000,
       decisionSummary: 'Opened the saved app',
@@ -115,12 +130,14 @@ describe('task history persistence', () => {
       decisionSummary: 'Opened the saved app',
       screenshot: { path: '/tmp/remote-visual-step.jpg' }
     })
-    expect(store.removeVisualStep('remote-visual-task', 'sync:4')?.stepDetails).toEqual([])
+    expect(application.removeSyncedVisualStep('remote-visual-task', 'sync:4')?.stepDetails).toEqual(
+      []
+    )
     db.close()
   })
 
   it('keeps the execution plan when a Computer Use checkpoint updates the run', () => {
-    const { db, store } = openStore(4_000)
+    const { db, application } = openApplication(4_000)
     const plan = encodeTaskExecutionPlan({
       version: 1,
       phases: [
@@ -128,7 +145,7 @@ describe('task history persistence', () => {
         { id: 'phase-2', title: 'Complete the form' }
       ]
     })
-    store.upsert({
+    application.record({
       taskId: 'computer-plan-checkpoint',
       kind: 'computer_use',
       title: 'Complete the form',
@@ -138,13 +155,13 @@ describe('task history persistence', () => {
 
     // Checkpoints update liveness only. Their action-local step array must not
     // replace the canonical trace with a plan-free list.
-    store.upsert({
+    application.record({
       taskId: 'computer-plan-checkpoint',
       kind: 'computer_use',
       title: 'Complete the form'
     })
 
-    expect(store.get('computer-plan-checkpoint')?.steps).toEqual([
+    expect(application.get('computer-plan-checkpoint')?.steps).toEqual([
       plan,
       encodeTaskPhase('phase-1'),
       'opened the app'
@@ -157,9 +174,8 @@ describe('task history persistence', () => {
     temporaryDirectories.push(directory)
     const file = path.join(directory, 'history.db')
     const firstDb = new Database(file)
-    const first = new TaskHistoryStore(firstDb, () => 1_000)
-    first.migrate()
-    first.upsert({
+    const first = createApplication(firstDb, 1_000)
+    first.record({
       taskId: 'legacy-web-run',
       kind: 'web_use',
       title: 'Gather proposal facts',
@@ -172,8 +188,7 @@ describe('task history persistence', () => {
     firstDb.close()
 
     const reopenedDb = new Database(file)
-    const reopened = new TaskHistoryStore(reopenedDb, () => 2_000)
-    reopened.migrate()
+    const reopened = createApplication(reopenedDb, 2_000)
     expect(reopened.list()).toEqual([
       expect.objectContaining({
         taskId: 'legacy-web-run',
@@ -217,15 +232,14 @@ describe('task history persistence', () => {
       )
       .run('model-owned-run', 'web_use', 'Find a flight', 'running', 1_000, 1_000)
 
-    const migrated = new TaskHistoryStore(firstDb, () => 2_000)
-    migrated.migrate()
-    migrated.upsert({
+    const migrated = createApplication(firstDb, 2_000)
+    migrated.record({
       taskId: 'model-owned-run',
       kind: 'web_use',
       modelId: 'qwen-vision',
       modelName: 'Qwen Vision 9B'
     })
-    migrated.upsert({
+    migrated.record({
       taskId: 'model-owned-run',
       kind: 'web_use',
       modelId: 'gemma-vision',
@@ -235,8 +249,7 @@ describe('task history persistence', () => {
     firstDb.close()
 
     const reopenedDb = new Database(file)
-    const reopened = new TaskHistoryStore(reopenedDb, () => 4_000)
-    reopened.migrate()
+    const reopened = createApplication(reopenedDb, 4_000)
     expect(reopened.get('model-owned-run')).toMatchObject({
       modelId: 'qwen-vision',
       modelName: 'Qwen Vision 9B',
@@ -271,11 +284,10 @@ describe('task history persistence', () => {
       )
     `)
 
-    const migrated = new TaskHistoryStore(firstDb, () => 2_000)
-    migrated.migrate()
+    const migrated = createApplication(firstDb, 2_000)
     const secret = 'private-form-value-839201'
     const streamed = `${'context '.repeat(2_000)}The field is ready. type "${secret}". api_key=private-api-key-839201`
-    migrated.upsert({
+    migrated.record({
       taskId: 'web-reasoning-run',
       journeyId: 'conversation-a',
       kind: 'web_use',
@@ -286,14 +298,14 @@ describe('task history persistence', () => {
       reasoningLive: true
     })
     expect(migrated.get('web-reasoning-run')?.reasoningLive).toBe(true)
-    migrated.upsert({
+    migrated.record({
       taskId: 'web-reasoning-run',
       kind: 'web_use',
       currentReasoning: streamed,
       reasoningLive: false,
       at: 3_000
     })
-    migrated.upsert({
+    migrated.record({
       taskId: 'native-reasoning-run',
       kind: 'computer_use',
       title: 'Edit the deck',
@@ -304,8 +316,7 @@ describe('task history persistence', () => {
     firstDb.close()
 
     const reopenedDb = new Database(file)
-    const reopened = new TaskHistoryStore(reopenedDb, () => 4_000)
-    reopened.migrate()
+    const reopened = createApplication(reopenedDb, 4_000)
     const web = reopened.get('web-reasoning-run')
     expect(web).toMatchObject({
       journeyId: 'conversation-a',
@@ -333,8 +344,8 @@ describe('task history persistence', () => {
   })
 
   it('closes interrupted live runs on restart without losing their state', () => {
-    const { db, store } = openStore(4_000)
-    store.upsert({
+    const { db, application } = openApplication(4_000)
+    application.record({
       taskId: 'computer-live',
       kind: 'computer_use',
       title: 'Make the deck',
@@ -344,8 +355,9 @@ describe('task history persistence', () => {
       steps: ['opened Keynote'],
       screenshotPath: '/tmp/last-screen.png'
     })
-    expect(store.recoverInterrupted('studio-mac', 5_000)).toBe(1)
-    expect(store.get('computer-live')).toMatchObject({
+    application.stop()
+    const recovered = createApplication(db, 5_000)
+    expect(recovered.get('computer-live')).toMatchObject({
       status: 'stopped',
       finishedAt: 5_000,
       steps: ['opened Keynote'],
@@ -355,8 +367,8 @@ describe('task history persistence', () => {
   })
 
   it('persists authenticated launch identity through later task updates and restart', () => {
-    const { db, store } = openStore(4_000)
-    store.upsert({
+    const { db, application } = openApplication(4_000)
+    application.record({
       taskId: 'remote-web-launch',
       journeyId: 'mobile-chat-107',
       launchId: 'launch-web-107',
@@ -366,14 +378,14 @@ describe('task history persistence', () => {
       status: 'running',
       executionDeviceId: 'studio-mac'
     })
-    store.upsert({
+    application.record({
       taskId: 'remote-web-launch',
       kind: 'web_use',
       status: 'done',
       summary: 'Dashboard opened'
     })
 
-    expect(store.get('remote-web-launch')).toMatchObject({
+    expect(application.get('remote-web-launch')).toMatchObject({
       launchId: 'launch-web-107',
       requestingDeviceId: 'mobile-1',
       journeyId: 'mobile-chat-107',
@@ -383,8 +395,8 @@ describe('task history persistence', () => {
   })
 
   it('stops one orphaned local Web Use run without changing remote or native runs', () => {
-    const { db, store } = openStore(4_000)
-    store.upsert({
+    const { db, application } = openApplication(5_000)
+    application.record({
       taskId: 'local-web',
       journeyId: 'chat-local',
       kind: 'web_use',
@@ -395,14 +407,14 @@ describe('task history persistence', () => {
       currentReasoning: 'The search page is visible.',
       reasoningLive: true
     })
-    store.upsert({
+    application.record({
       taskId: 'remote-web',
       kind: 'web_use',
       title: 'Check another site',
       status: 'running',
       executionDeviceId: 'travel-mac'
     })
-    store.upsert({
+    application.record({
       taskId: 'local-computer',
       kind: 'computer_use',
       title: 'Update the app',
@@ -410,7 +422,8 @@ describe('task history persistence', () => {
       executionDeviceId: 'studio-mac'
     })
 
-    expect(store.stopOrphanedLocalWebTask('local-web', 'studio-mac', 5_000)).toMatchObject({
+    expect(application.stopOrphanedLocalWebTask('local-web')).toBe(true)
+    expect(application.get('local-web')).toMatchObject({
       taskId: 'local-web',
       journeyId: 'chat-local',
       status: 'stopped',
@@ -421,17 +434,17 @@ describe('task history persistence', () => {
       currentReasoning: 'The search page is visible.',
       reasoningLive: false
     })
-    expect(store.stopOrphanedLocalWebTask('remote-web', 'studio-mac', 5_000)).toBeUndefined()
-    expect(store.stopOrphanedLocalWebTask('local-computer', 'studio-mac', 5_000)).toBeUndefined()
-    expect(store.get('remote-web')?.status).toBe('running')
-    expect(store.get('local-computer')?.status).toBe('running')
+    expect(application.stopOrphanedLocalWebTask('remote-web')).toBe(false)
+    expect(application.stopOrphanedLocalWebTask('local-computer')).toBe(false)
+    expect(application.get('remote-web')?.status).toBe('running')
+    expect(application.get('local-computer')?.status).toBe('running')
     db.close()
   })
 
   it('removes legacy private guidance before history or sync can read it', () => {
-    const { db, store } = openStore(4_000)
+    const { db, application } = openApplication(4_000)
     const privateGuidance = 'USER GUIDANCE · password=hunter2 and token=private-839201'
-    store.upsert({
+    application.record({
       taskId: 'legacy-guidance',
       kind: 'web_use',
       title: 'Private task',
@@ -439,7 +452,7 @@ describe('task history persistence', () => {
       steps: [privateGuidance, 'clicked Continue']
     })
 
-    expect(store.get('legacy-guidance')?.steps).toEqual([
+    expect(application.get('legacy-guidance')?.steps).toEqual([
       'GUIDANCE ACCEPTED · Applying to the next decision.',
       'clicked Continue'
     ])
@@ -456,9 +469,8 @@ describe('task history persistence', () => {
     temporaryDirectories.push(directory)
     const file = path.join(directory, 'history.db')
     const firstDb = new Database(file)
-    const first = new TaskHistoryStore(firstDb, () => 1_000)
-    first.migrate()
-    first.upsert({
+    const first = createApplication(firstDb, 1_000)
+    first.record({
       taskId: 'old-build-task',
       kind: 'web_use',
       title: 'Old build task',
@@ -471,8 +483,7 @@ describe('task history persistence', () => {
     firstDb.close()
 
     const reopenedDb = new Database(file)
-    const reopened = new TaskHistoryStore(reopenedDb, () => 2_000)
-    reopened.migrate()
+    const reopened = createApplication(reopenedDb, 2_000)
     expect(reopened.get('old-build-task')?.steps).toEqual([
       'GUIDANCE ACCEPTED · Applying to the next decision.'
     ])
@@ -484,8 +495,8 @@ describe('task history persistence', () => {
   })
 
   it('recovers only runs owned by this device and leaves remote runs live', () => {
-    const { db, store } = openStore(4_000)
-    store.upsert({
+    const { db, application } = openApplication(4_000)
+    application.record({
       taskId: 'local-run',
       journeyId: 'chat-local',
       kind: 'computer_use',
@@ -494,7 +505,7 @@ describe('task history persistence', () => {
       executionDeviceId: 'studio-mac',
       executionDeviceName: 'Studio Mac'
     })
-    store.upsert({
+    application.record({
       taskId: 'remote-run',
       journeyId: 'chat-remote',
       kind: 'computer_use',
@@ -503,17 +514,21 @@ describe('task history persistence', () => {
       executionDeviceId: 'travel-mac',
       executionDeviceName: 'Travel Mac'
     })
-    store.upsert({
+    application.record({
       taskId: 'legacy-local-run',
       kind: 'computer_use',
       title: 'Legacy local task',
       status: 'paused'
     })
 
-    expect(store.recoverInterrupted('studio-mac', 5_000)).toBe(2)
-    expect(store.get('local-run')).toMatchObject({ status: 'stopped', finishedAt: 5_000 })
-    expect(store.get('legacy-local-run')).toMatchObject({ status: 'stopped', finishedAt: 5_000 })
-    expect(store.get('remote-run')).toMatchObject({
+    application.stop()
+    const recovered = createApplication(db, 5_000)
+    expect(recovered.get('local-run')).toMatchObject({ status: 'stopped', finishedAt: 5_000 })
+    expect(recovered.get('legacy-local-run')).toMatchObject({
+      status: 'stopped',
+      finishedAt: 5_000
+    })
+    expect(recovered.get('remote-run')).toMatchObject({
       status: 'running',
       journeyId: 'chat-remote',
       executionDeviceId: 'travel-mac',
@@ -523,9 +538,9 @@ describe('task history persistence', () => {
   })
 
   it('bounds retained task history for canonical task kinds', () => {
-    const { db, store } = openStore()
+    const { db, application } = openApplication()
     for (let index = 0; index < TASK_HISTORY_LIMIT + 3; index += 1) {
-      store.upsert({
+      application.record({
         taskId: `task-${index}`,
         kind: index % 2 ? 'web_use' : 'computer_use',
         title: `Task ${index}`,
@@ -533,8 +548,8 @@ describe('task history persistence', () => {
         at: index + 1
       })
     }
-    expect(store.list()).toHaveLength(TASK_HISTORY_LIMIT)
-    expect(store.get('task-0')).toBeUndefined()
+    expect(application.list()).toHaveLength(TASK_HISTORY_LIMIT)
+    expect(application.get('task-0')).toBeUndefined()
     db.close()
   })
 
@@ -543,8 +558,7 @@ describe('task history persistence', () => {
     temporaryDirectories.push(directory)
     const file = path.join(directory, 'history.db')
     const firstDb = new Database(file)
-    const first = new TaskHistoryStore(firstDb, () => 10_000)
-    first.migrate()
+    const first = createApplication(firstDb, 10_000)
 
     const details = Array.from({ length: MAX_TASK_STEP_DETAILS + 2 }, (_, index) => ({
       stepId: `step-${index}`,
@@ -572,7 +586,7 @@ describe('task history persistence', () => {
       }
     }))
 
-    first.upsert({
+    first.record({
       taskId: 'computer-details',
       journeyId: 'conversation-42',
       kind: 'computer_use',
@@ -588,8 +602,7 @@ describe('task history persistence', () => {
     firstDb.close()
 
     const reopenedDb = new Database(file)
-    const reopened = new TaskHistoryStore(reopenedDb, () => 20_000)
-    reopened.migrate()
+    const reopened = createApplication(reopenedDb, 20_000)
     const restored = reopened.get('computer-details')
 
     expect(restored?.stepDetails).toHaveLength(MAX_TASK_STEP_DETAILS)
@@ -630,11 +643,10 @@ describe('task history persistence', () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-task-typed-secret-'))
     temporaryDirectories.push(directory)
     const database = new Database(path.join(directory, 'history.db'))
-    const history = new TaskHistoryStore(database, () => 10_000)
-    history.migrate()
+    const application = createApplication(database, 10_000)
 
     const secret = '839201-private-value'
-    history.upsert({
+    application.record({
       taskId: 'typed-secret',
       kind: 'computer_use',
       title: 'Complete the form',

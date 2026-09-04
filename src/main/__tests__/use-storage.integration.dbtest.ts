@@ -50,7 +50,10 @@ function makeEngine(
   db: Database.Database,
   clock: { t: number },
   options: { gate?: (record: ActionRecord) => GateDecision; ids?: string } = {}
-) {
+): {
+  engine: UseEngine
+  device: { calls: number; execute(action: ActionRecord): Promise<{ ok: boolean }> }
+} {
   const registry = new HandlerRegistry()
   registry.register({
     type: 'reminder',
@@ -86,7 +89,7 @@ function makeEngine(
   return { engine, device }
 }
 
-const proposal = (title: string, triggerAt?: number) => ({
+const proposal = (title: string, triggerAt?: number): Parameters<UseEngine['propose']>[0] => ({
   type: 'reminder',
   intent: `remind me: ${title}`,
   args: { title },

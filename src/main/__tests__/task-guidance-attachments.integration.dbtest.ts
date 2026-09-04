@@ -6,7 +6,13 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  createOffGridApplication,
+  type ModelsPlatformPorts,
+  type OffGridApplication
+} from '@offgrid/application'
+import type { RemoteServerConfiguration } from '@offgrid/models'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-task-guide-attachments-'))
 
@@ -28,16 +34,12 @@ vi.mock('electron', () => ({
 import { getDB } from '../database'
 import {
   appendTaskStep,
+  createDesktopAutomationPorts,
   getTaskRun,
-  recordTaskRun,
-  resetTaskHistoryForTests
+  recordTaskRun
 } from '../tasks/task-history'
-import {
-  guideTask,
-  persistedTaskGuidanceTrace,
-  registerTaskGuideHandler,
-  resetTaskGuideHandlersForTests
-} from '../tasks/task-guide'
+import { registerDesktopApplication } from '../composition/application-access'
+import { guideTask, registerTaskGuideHandler, TASK_GUIDANCE_TRACE } from '../tasks/task-guide'
 import {
   TASK_GUIDE_MAX_ATTACHMENTS,
   TASK_GUIDE_MAX_ATTACHMENT_BYTES,
@@ -45,12 +47,62 @@ import {
   type TaskGuideInput
 } from '../../shared/task-guidance'
 
-afterEach(() => {
-  resetTaskGuideHandlersForTests()
+const releases: Array<() => void> = []
+let application: OffGridApplication | undefined
+
+function testModelPorts(): ModelsPlatformPorts {
+  const selections = new Map<string, string | null>()
+  let remoteConfiguration: RemoteServerConfiguration = {
+    version: 1,
+    activeServerId: null,
+    servers: []
+  }
+  return {
+    selection: {
+      read: (modality) => selections.get(modality) ?? null,
+      write: (modality, routeId) => {
+        selections.set(modality, routeId)
+      }
+    },
+    memory: {
+      current: () => ({ totalMB: 16_000, availableMB: 8_000, platform: 'desktop' })
+    },
+    remote: {
+      configuration: {
+        read: () => remoteConfiguration,
+        write: (value) => {
+          remoteConfiguration = value
+        }
+      },
+      credentials: {
+        read: async () => null,
+        write: async () => undefined,
+        remove: async () => undefined
+      },
+      providers: {
+        register: async () => undefined,
+        unregister: async () => undefined
+      },
+      activateManaged: async () => ({})
+    }
+  }
+}
+
+beforeAll(async () => {
+  application = createOffGridApplication({
+    models: testModelPorts(),
+    automation: createDesktopAutomationPorts()
+  })
+  registerDesktopApplication(application)
+  await application.start()
 })
 
-afterAll(() => {
-  resetTaskHistoryForTests()
+afterEach(() => {
+  for (const release of releases.splice(0)) release()
+})
+
+afterAll(async () => {
+  await application?.stop()
   getDB().close()
   fs.rmSync(profile, { recursive: true, force: true })
 })
@@ -73,12 +125,19 @@ function waitingTask(taskId: string): void {
   })
 }
 
+function registerGuidance(
+  taskId: string,
+  handler: Parameters<typeof registerTaskGuideHandler>[1]
+): void {
+  releases.push(registerTaskGuideHandler(taskId, handler))
+}
+
 describe('live task guidance attachments', () => {
   it('accepts guidance while a live task waits for user input', async () => {
     const taskId = 'web-guidance-waiting'
     waitingTask(taskId)
     let received = ''
-    registerTaskGuideHandler(taskId, (guidance) => {
+    registerGuidance(taskId, (guidance) => {
       received = guidance
       return true
     })
@@ -95,24 +154,22 @@ describe('live task guidance attachments', () => {
   it('keeps one accepted trace when the live operator records it first', async () => {
     const taskId = 'web-guidance-single-owner'
     waitingTask(taskId)
-    registerTaskGuideHandler(taskId, () => {
-      appendTaskStep(taskId, 'web_use', 'Wait for route details', persistedTaskGuidanceTrace())
+    registerGuidance(taskId, () => {
+      appendTaskStep(taskId, 'web_use', 'Wait for route details', TASK_GUIDANCE_TRACE)
       return true
     })
 
     await expect(guideTask(taskId, { text: 'Use a one-way flight' })).resolves.toMatchObject({
       accepted: true
     })
-    expect(
-      getTaskRun(taskId)?.steps.filter((step) => step === persistedTaskGuidanceTrace())
-    ).toHaveLength(1)
+    expect(getTaskRun(taskId)?.steps.filter((step) => step === TASK_GUIDANCE_TRACE)).toHaveLength(1)
   })
 
   it('extracts a selected file for the next decision without persisting its contents or path', async () => {
     const taskId = 'web-guidance-attachment'
     runningTask(taskId)
     let received = ''
-    registerTaskGuideHandler(taskId, (guidance) => {
+    registerGuidance(taskId, (guidance) => {
       received = guidance
       return true
     })
@@ -150,7 +207,7 @@ describe('live task guidance attachments', () => {
     const taskId = 'web-guidance-rejected-attachment'
     runningTask(taskId)
     let deliveries = 0
-    registerTaskGuideHandler(taskId, () => {
+    registerGuidance(taskId, () => {
       deliveries += 1
       return true
     })

@@ -2,8 +2,8 @@
  * MCP tool extension integration over the real connector database. Only the remote
  * MCP transport and private pro approval hook are faked boundaries.
  */
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { HandlerRegistry, UseEngine } from '@offgrid/use'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createUseApplication, parseActionProposal, type UseApplication } from '@offgrid/use'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -27,7 +27,6 @@ import {
 } from '../tools/mcpConnectorToolExtension'
 import type { ConnectorToolDefinition } from '../tools/mcpConnectorToolExtension-logic'
 import { makeUseDriver } from '../actions/use-driver'
-import { createActionWorker } from '../actions/use-worker'
 import { makeConnectorRailExecutor } from '../actions/connector-rail'
 import type { ChatConnectorActionsPort } from '../actions/chat-connector-action'
 import { gateHost, onActionParked } from '../actions/gate-host'
@@ -70,44 +69,62 @@ class FakeMcpBoundary implements McpConnectorToolBoundary {
 }
 
 function realActionsPort(boundary: FakeMcpBoundary): ChatConnectorActionsPort {
-  const registry = new HandlerRegistry()
-  registry.register({
-    type: 'connector',
-    rail: 'connector',
-    defaultRisk: 'mutate',
-    verification: 'none_fuzzy'
-  })
   const execute = makeConnectorRailExecutor((connectorId, tool, args) =>
     boundary.callTool(connectorId, tool, args)
   )
-  const engine = new UseEngine({
+  const application = createUseApplication({
     driver: makeUseDriver(getDB()),
-    registry,
+    handlers: [
+      {
+        type: 'connector',
+        rail: 'connector',
+        defaultRisk: 'mutate',
+        verification: 'none_fuzzy'
+      }
+    ],
     gate: gateHost,
     device: { execute },
+    park: { onParked: () => () => {}, onActionParked: () => () => {} },
+    scheduler: {
+      every: (intervalMs, listener) => {
+        const timer = setInterval(listener, intervalMs)
+        timer.unref()
+        return () => clearInterval(timer)
+      },
+      after: (delayMs, listener) => {
+        const timer = setTimeout(listener, delayMs)
+        timer.unref()
+        return () => clearTimeout(timer)
+      }
+    },
     attemptTimeoutMs: 1_000
   })
-  const worker = createActionWorker(engine, { onParked: () => () => {} })
-  const ready = engine.init()
+  applications.push(application)
   return {
     async propose(input, meta) {
-      await ready
-      return engine.propose(input, meta)
+      const parsed = parseActionProposal(input)
+      if (!parsed.ok) return { accepted: false, reason: parsed.error }
+      return application.run({ proposal: parsed.value, ...meta })
     },
-    waitForOutcome: (id, timeoutMs) => worker.waitForOutcome(id, timeoutMs),
+    waitForOutcome: (id, timeoutMs) => application.waitForOutcome(id, timeoutMs),
     onParked: onActionParked,
-    kick: () => worker.kick()
+    kick: () => application.kick()
   }
 }
 
 let boundary: FakeMcpBoundary
 let extension: McpConnectorToolExtension
+const applications: UseApplication[] = []
 
 beforeEach(() => {
   listConnectors()
   getDB().exec('DELETE FROM connectors')
   boundary = new FakeMcpBoundary()
   extension = new McpConnectorToolExtension(boundary)
+})
+
+afterEach(async () => {
+  await Promise.all(applications.splice(0).map((application) => application.stop()))
 })
 
 afterAll(() => {

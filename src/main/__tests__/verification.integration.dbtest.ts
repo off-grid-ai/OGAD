@@ -1,7 +1,7 @@
 /**
  * Box 14's done-when: a failed read-back drives the retry policy correctly,
- * proven on the real engine + real DB + the REAL registry the app ships
- * (buildRegistry), with only the helper boundary scripted. The same
+ * proven on the real Use application + real DB + the real handlers the app ships,
+ * with only the helper boundary scripted. The same
  * scripted helper serves both the rail (create) and the verifiers (list),
  * exactly as production shares runNativeAction.
  */
@@ -10,16 +10,30 @@ import os from 'os'
 import path from 'path'
 import Database from 'better-sqlite3-multiple-ciphers'
 import { afterEach, describe, expect, it } from 'vitest'
-import { UseEngine, type ActionRecord, type Rail } from '@offgrid/use'
+import {
+  createUseApplication,
+  type ActionProposal,
+  type ActionRecord,
+  type Rail,
+  type UseApplication
+} from '@offgrid/use'
 import { makeUseDriver } from '../actions/use-driver'
 import { makeSemanticRailExecutor } from '../actions/semantic-rail'
-import { buildRegistry } from '../actions/use-runtime'
+import { buildHandlers } from '../actions/use-runtime'
 import type { NativeActionCommand, NativeActionResponse } from '../actions/native-helper-logic'
 
 const tempDirs: string[] = []
 const openDbs: Database.Database[] = []
+const applications: UseApplication[] = []
 
-afterEach(() => {
+interface VerificationWorld {
+  application: UseApplication
+  landed: string[]
+  creates(): number
+}
+
+afterEach(async () => {
+  await Promise.all(applications.splice(0).map((application) => application.stop()))
   for (const db of openDbs.splice(0)) {
     try {
       db.close()
@@ -36,7 +50,7 @@ afterEach(() => {
  * A scripted Reminders world: creates succeed or silently drop (the classic
  * false-ok), lists report what actually landed.
  */
-function makeWorld({ dropFirstCreates = 0 } = {}) {
+function makeWorld({ dropFirstCreates = 0 } = {}): VerificationWorld {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ogad-verify-'))
   tempDirs.push(dir)
   const db = new Database(path.join(dir, 'app.db'))
@@ -64,9 +78,9 @@ function makeWorld({ dropFirstCreates = 0 } = {}) {
   const semanticExecute = makeSemanticRailExecutor(run)
   const clock = { t: 1_000_000 }
   let n = 0
-  const engine = new UseEngine({
+  const application = createUseApplication({
     driver: makeUseDriver(db),
-    registry: buildRegistry(run),
+    handlers: buildHandlers(run),
     device: {
       async execute(action: ActionRecord, rail: Rail) {
         if (rail !== 'semantic') {
@@ -76,37 +90,52 @@ function makeWorld({ dropFirstCreates = 0 } = {}) {
       }
     },
     gate: async () => ({ kind: 'approve' as const }),
+    scheduler: {
+      every: (intervalMs, listener) => {
+        const timer = setInterval(listener, intervalMs)
+        timer.unref()
+        return () => clearInterval(timer)
+      },
+      after: (delayMs, listener) => {
+        const timer = setTimeout(listener, delayMs)
+        timer.unref()
+        return () => clearTimeout(timer)
+      }
+    },
     now: () => clock.t,
     newId: () => `act_${++n}`,
     attemptTimeoutMs: 500,
     visibilityMs: 60_000
   })
-  return { engine, landed, creates: () => creates }
+  applications.push(application)
+  return { application, landed, creates: () => creates }
 }
 
-const proposal = {
+const proposal: ActionProposal = {
   type: 'reminder',
   intent: 'remind me to send the deck',
   args: { title: 'Send the deck' },
   risk: 'mutate'
 }
 
-describe('read-back verification driving the retry policy (real registry, real DB)', () => {
+describe('read-back verification driving the retry policy (real Use application, real DB)', () => {
   it('a clean create verifies by read-back and is done in one attempt', async () => {
-    const { engine, landed, creates } = makeWorld()
-    await engine.init()
-    await engine.propose(proposal, { source: 'chat' })
-    const result = await engine.tick()
+    const { application, landed, creates } = makeWorld()
+    const proposed = await application.run({ proposal, source: 'chat' })
+    expect(proposed.accepted).toBe(true)
+    if (!proposed.accepted) return
+    const result = await application.waitForOutcome(proposed.id, 1_000)
     expect(result?.outcome).toBe('done')
     expect(landed).toEqual(['Send the deck'])
     expect(creates()).toBe(1)
   })
 
   it('a false-ok create is caught by read-back and retried exactly once to success', async () => {
-    const { engine, landed, creates } = makeWorld({ dropFirstCreates: 1 })
-    await engine.init()
-    await engine.propose(proposal, { source: 'chat' })
-    const result = await engine.tick()
+    const { application, landed, creates } = makeWorld({ dropFirstCreates: 1 })
+    const proposed = await application.run({ proposal, source: 'chat' })
+    expect(proposed.accepted).toBe(true)
+    if (!proposed.accepted) return
+    const result = await application.waitForOutcome(proposed.id, 1_000)
     expect(result?.outcome).toBe('done')
     expect(creates()).toBe(2)
     expect(landed).toEqual(['Send the deck'])
@@ -117,10 +146,11 @@ describe('read-back verification driving the retry policy (real registry, real D
   })
 
   it('a write that never lands exhausts retry-once and asks instead of looping', async () => {
-    const { engine, landed, creates } = makeWorld({ dropFirstCreates: 99 })
-    await engine.init()
-    await engine.propose(proposal, { source: 'chat' })
-    const result = await engine.tick()
+    const { application, landed, creates } = makeWorld({ dropFirstCreates: 99 })
+    const proposed = await application.run({ proposal, source: 'chat' })
+    expect(proposed.accepted).toBe(true)
+    if (!proposed.accepted) return
+    const result = await application.waitForOutcome(proposed.id, 1_000)
     expect(result?.outcome).toBe('needs_help')
     expect(creates()).toBe(2)
     expect(landed).toEqual([])

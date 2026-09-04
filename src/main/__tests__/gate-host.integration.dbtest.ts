@@ -31,7 +31,11 @@ afterEach(() => {
   }
 })
 
-function makeWorld() {
+function makeWorld(): {
+  engine: UseEngine
+  executed: Record<string, unknown>[]
+  db: Database.Database
+} {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ogad-gate-host-'))
   tempDirs.push(dir)
   const db = new Database(path.join(dir, 'app.db'))
@@ -56,9 +60,7 @@ function makeWorld() {
   const device = {
     async execute(action: ActionRecord) {
       executed.push({ ...action.args })
-      db.prepare(`INSERT INTO test_computer_uses (title) VALUES (?)`).run(
-        String(action.args.title)
-      )
+      db.prepare(`INSERT INTO test_computer_uses (title) VALUES (?)`).run(String(action.args.title))
       return { ok: true }
     }
   }
@@ -87,7 +89,10 @@ async function until(condition: () => boolean): Promise<void> {
 }
 
 /** Narrow a tick outcome to the record-carrying variants, or fail the test. */
-function recordOutcome(result: Awaited<ReturnType<UseEngine['tick']>>) {
+type TickResult = NonNullable<Awaited<ReturnType<UseEngine['tick']>>>
+type RecordTickResult = Exclude<TickResult, { outcome: 'poisoned' }>
+
+function recordOutcome(result: Awaited<ReturnType<UseEngine['tick']>>): RecordTickResult {
   if (!result || result.outcome === 'poisoned') {
     throw new Error(`unexpected tick outcome: ${JSON.stringify(result)}`)
   }

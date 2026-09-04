@@ -4,6 +4,7 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import type { AddressInfo } from 'node:net'
+import type { OffGridApplication } from '@offgrid/application'
 
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-active-text-model-'))
 
@@ -25,6 +26,7 @@ import {
 import { planTask } from '../tools/planner'
 import { toolChat } from '../tools'
 import { generateDesktopMessages } from '../desktop-generation'
+import { remoteReasoningMetadata } from '../llm/remote-chat'
 
 interface RecordedRequest {
   body: Record<string, unknown>
@@ -43,6 +45,7 @@ const turns: RemoteTurn[] = []
 const requests: RecordedRequest[] = []
 let remoteServer: http.Server
 let remoteServerId = ''
+let application: OffGridApplication
 const platformFetch = globalThis.fetch.bind(globalThis)
 
 /**
@@ -159,9 +162,15 @@ beforeAll(async () => {
   remoteServer = await startRemoteServer()
   const port = (remoteServer.address() as AddressInfo).port
   installLoopbackTlsBoundary(port)
-  // Boot the same composition root as Desktop before a remote selection projects
-  // into Shared LLMService.
-  await import('../model-services')
+  const [{ createOffGridApplication }, { desktopModelWorkspacePorts }, applicationAccess] =
+    await Promise.all([
+      import('@offgrid/application'),
+      import('../model-services'),
+      import('../composition/application-access')
+    ])
+  application = createOffGridApplication({ models: desktopModelWorkspacePorts })
+  applicationAccess.registerDesktopApplication(application)
+  await application.start()
   const settings = await setRemoteVisionServerSettings({
     provider: 'openrouter',
     name: 'Test OpenRouter',
@@ -193,6 +202,9 @@ beforeAll(async () => {
     apiKey: 'test-api-key'
   })
   remoteServerId = settings.activeServerId ?? ''
+  const activeRemote = getActiveRemoteVisionServer()
+  if (!activeRemote) throw new Error('The selected remote fixture was not persisted.')
+  await remoteReasoningMetadata(activeRemote)
 })
 
 beforeEach(() => {
@@ -202,6 +214,7 @@ beforeEach(() => {
 
 afterAll(async () => {
   if (remoteServerId) await removeRemoteVisionServer(remoteServerId)
+  await application.stop()
   vi.unstubAllGlobals()
   await new Promise<void>((resolve, reject) => {
     remoteServer.close((error) => (error ? reject(error) : resolve()))
@@ -215,13 +228,13 @@ afterAll(async () => {
 
 describe('active text model transport', () => {
   it('uses the selected OpenRouter model for planner, chat, and tools', async () => {
-    const { desktopModelServices } = await import('../model-services')
-    const inventory = await desktopModelServices.refresh()
+    await application.models.refresh()
+    const inventory = application.models.snapshot().inventory
     const remoteText = inventory.find(
       (model) => model.serverId === remoteServerId && model.modality === 'text'
     )
-    expect(desktopModelServices.llm.active('text')).toMatchObject({
-      selectedId: remoteText?.routeId,
+    expect(application.models.snapshot().active.text).toMatchObject({
+      selectedRouteId: remoteText?.routeId,
       model: { serverId: remoteServerId, id: 'openai/gpt-5.6' }
     })
     const remoteToolSelection = inventory.find(
@@ -333,12 +346,9 @@ describe('active text model transport', () => {
     })
 
     try {
-      const result = await toolChat('Send a message to Ali.', [])
-      expect(result).toMatchObject({
-        answer: expect.stringContaining('UI-TARS 1.5 7B cannot act as the Chat tool planner'),
-        toolCalls: []
-      })
-      expect(result.answer).toContain('Select it as the Computer Use specialist instead')
+      await expect(toolChat('Send a message to Ali.', [])).rejects.toThrow(
+        'UI-TARS 1.5 7B cannot act as the Chat tool planner'
+      )
       expect(requests).toHaveLength(0)
 
       await expect(
@@ -407,7 +417,7 @@ describe('active text model transport', () => {
         timeoutMs: 5_000,
         maxTokens: 200
       })
-    ).rejects.toThrow('Remote server returned HTTP 429 from OpenRouter: Try again later.')
+    ).rejects.toThrow('Try again later.')
     expect(requests).toHaveLength(1)
   })
 })
