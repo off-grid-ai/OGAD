@@ -958,6 +958,7 @@ const offGridApi = {
   crmReplayEntityDay: (entityId: number, startSec: number, endSec: number) =>
     ipcRenderer.invoke('crm:replay-entity-day', entityId, startSec, endSec),
   crmReplayDefaultDay: () => ipcRenderer.invoke('crm:replay-default-day'),
+  crmMeetingFrames: (meetingId: number) => ipcRenderer.invoke('crm:meeting-frames', meetingId),
   crmDayReflection: (startSec: number, endSec: number) =>
     ipcRenderer.invoke('crm:day-reflection', startSec, endSec),
   crmWeekReflection: (anchorDayStartSec: number) =>
