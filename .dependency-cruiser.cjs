@@ -113,7 +113,10 @@ module.exports = {
       comment:
         'Presentation reads Speech through @offgrid/application. Renderer composition adapters may depend on the raw platform contract.',
       severity: 'error',
-      from: { path: '^(src/renderer/src/(components|lib|screens)/|pro/renderer/)' },
+      from: {
+        path: '^(src/renderer/src/|pro/renderer/)',
+        pathNot: '(__tests__/|\\.(test|spec)\\.[tj]sx?$)|^src/renderer/src/composition/'
+      },
       to: { path: '^\\.\\./shared/packages/speech/' }
     },
     {
@@ -122,9 +125,9 @@ module.exports = {
         'Presentation reads Models through @offgrid/application. Renderer composition and platform adapters may depend on the raw domain contract.',
       severity: 'error',
       from: {
-        path: '^(src/renderer/src/(components|lib|screens)/|pro/renderer/)',
+        path: '^(src/renderer/src/|pro/renderer/)',
         pathNot:
-          '(__tests__/|\\.(test|spec)\\.[tj]sx?$)|^src/renderer/src/lib/(capture-readiness-ports|desktop-chat-generation-adapter|desktop-chat-session-repository)\\.ts$'
+          '(__tests__/|\\.(test|spec)\\.[tj]sx?$)|^src/renderer/src/composition/|^src/renderer/src/lib/(capture-readiness-ports|desktop-chat-generation-adapter|desktop-chat-session-repository)\\.ts$'
       },
       to: { path: '^\\.\\./shared/packages/models/' }
     },
@@ -134,9 +137,9 @@ module.exports = {
         'Presentation reads Sync through @offgrid/application. The renderer Sync state adapter is the only raw domain seam.',
       severity: 'error',
       from: {
-        path: '^(src/renderer/src/(components|lib|screens)/|pro/renderer/)',
+        path: '^(src/renderer/src/|pro/renderer/)',
         pathNot:
-          '(__tests__/|\\.(test|spec)\\.[tj]sx?$)|^pro/renderer/sync-state\\.ts$'
+          '(__tests__/|\\.(test|spec)\\.[tj]sx?$)|^src/renderer/src/composition/|^pro/renderer/sync-state\\.ts$'
       },
       to: { path: '^\\.\\./shared/packages/sync/' }
     },
@@ -154,7 +157,9 @@ module.exports = {
     // traverse the private graph and apply open-core rules inside Pro itself.
     doNotFollow: { path: 'node_modules|^pro/' },
     tsConfig: { fileName: 'tsconfig.web.json' },
-    exclude: { path: 'node_modules|e2e/' },
+    exclude: {
+      path: 'node_modules|e2e/|(^|/)(__tests__|__mocks__)/|\\.(test|spec|dbtest)\\.[jt]sx?$'
+    },
     tsPreCompilationDeps: true,
     // Follow package "exports" subpaths (e.g. @modelcontextprotocol/sdk/client/*.js)
     // so real imports resolve and not-to-unresolvable doesn't false-positive on them.
