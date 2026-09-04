@@ -40,12 +40,20 @@ export interface StartupStageContext {
   /** Aborted when the deadline passes. Pass it to anything that accepts one. */
   readonly signal: AbortSignal
   /**
-   * This run's identity, for CORRELATING a stage with the events its work emits.
+   * This run's identity, for correlating a stage with the events its work emits - and, where the
+   * owner supports it, for SUPERSESSION.
    *
-   * It is not a supersession token. `models.prepare` accepts an `operationId` and emits it on
-   * started / succeeded / failed, and nothing in shared compares it - so passing it makes a late
-   * completion attributable, not impossible. Anything that must not happen late needs `commit`,
-   * or an owner that refuses it.
+   * `models.prepare` now compares it: a prepare whose operation is no longer the newest for its
+   * modality emits `model_prepare_superseded` and returns the typed `superseded` failure instead of
+   * reporting success, and its work is told through `context.superseded()` so it can decline before
+   * it applies. So passing the same id to a prepare makes a late completion REFUSED, not merely
+   * attributable.
+   *
+   * Two limits, because a guarantee is worth only what its limits are. Other owners still do not
+   * compare it - only prepare does today - so for anything else this stays a correlation id.
+   * And even for prepare, a native load already in flight when a newer prepare arrives will finish
+   * and leave that model resident; what is refused is the ANSWER, not that last effect. Anything
+   * that must not LAND late still needs `commit`, or an owner that refuses it.
    */
   readonly operationId: string
   /** False once the deadline has passed: this stage no longer owns its outcome. */
