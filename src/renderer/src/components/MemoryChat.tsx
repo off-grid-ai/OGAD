@@ -54,7 +54,7 @@ import { VoiceBubble } from './VoiceBubble'
 import { stopAllVoicePlayback } from '@renderer/lib/voice-playback-bus'
 import { ChatVoiceComposer, VoiceModeControl } from './ChatVoiceComposer'
 import { ChatDraftInput, ChatDraftSendButton, type ChatDraftInputHandle } from './ChatDraftInput'
-import { createChatDraftStore } from './chat-draft-store'
+import { createTextDraftStore } from '@renderer/lib/text-draft-store'
 import { ExploreSection } from './explore/ExploreSection'
 import { PresetSetup } from './explore/PresetSetup'
 import { ApprovalIntakeFailure, ApprovalSetup } from './actions/ApprovalSetup'
@@ -2258,7 +2258,7 @@ export function MemoryChat({
     },
     [loadLatestConversationMessages, replaceDurableMessages]
   )
-  const [draftStore] = useState(createChatDraftStore)
+  const [draftStore] = useState(createTextDraftStore)
   // A curated run collects its complete brief inside Chat before any model request starts.
   const [presetSetup, setPresetSetup] = useState<DemoPreset | null>(null)
   const [approvalIntake, setApprovalIntake] = useState<ApprovalIntakeState>({ status: 'idle' })

@@ -9,7 +9,7 @@ import {
 } from 'react'
 import { Button } from '@renderer/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
-import type { ChatDraftStore } from './chat-draft-store'
+import type { TextDraftStore } from '@renderer/lib/text-draft-store'
 
 interface SkillOption {
   name: string
@@ -21,7 +21,7 @@ export interface ChatDraftInputHandle {
 }
 
 interface ChatDraftInputProps {
-  store: ChatDraftStore
+  store: TextDraftStore
   skills: readonly SkillOption[]
   mode: 'ask' | 'image'
   activeProjectName?: string
@@ -30,7 +30,7 @@ interface ChatDraftInputProps {
   onSubmit: () => void
 }
 
-function useDraft(store: ChatDraftStore): string {
+function useDraft(store: TextDraftStore): string {
   return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
 }
 
@@ -127,7 +127,7 @@ export const ChatDraftInput = forwardRef<ChatDraftInputHandle, ChatDraftInputPro
 )
 
 interface ChatDraftSendButtonProps {
-  store: ChatDraftStore
+  store: TextDraftStore
   hasAttachments: boolean
   attachmentPending: boolean
   onSubmit: () => void
