@@ -75,6 +75,7 @@ import { desktopModelControl } from '@renderer/composition/model-control'
 import { LoadingDots } from './ui/loading-dots'
 import { SidePanel } from './SidePanel'
 import { ConversationSearchList } from './ConversationSearchList'
+import { NewProjectNameField } from './NewProjectNameField'
 import { ImageLightbox } from './media/ImageLightbox'
 import { resolveImageParams, setOverride, type ImageParamStore } from '@renderer/lib/image-params'
 import {
@@ -2451,16 +2452,6 @@ export function MemoryChat({
   const [noMemory, setNoMemory] = useState(!isPro)
   const [, setProjectMenuOpen] = useState(false)
   const [projCreating, setProjCreating] = useState(false)
-  const [projNewName, setProjNewName] = useState('')
-  const projInputRef = useRef<HTMLInputElement>(null)
-  // Focus the new-project input AFTER the dropdown returns focus to its trigger,
-  // otherwise Radix's focus-return blurs the input immediately and onBlur tears it
-  // down before the user can type. A short delay lands focus after that hand-off.
-  useEffect(() => {
-    if (!projCreating) return
-    const t = setTimeout(() => projInputRef.current?.focus(), 80)
-    return () => clearTimeout(t)
-  }, [projCreating])
   const [toolsOn, setToolsOn] = useState(false)
   const [connectorsOn, setConnectorsOn] = useState(false)
   const [thinkingEnabled, setThinkingEnabled] = useState(false)
@@ -3069,20 +3060,23 @@ export function MemoryChat({
   )
 
   // Create a project inline and assign the current chat to it.
-  const createAndAssignProject = useCallback(async () => {
-    const name = projNewName.trim()
-    if (!name) {
-      setProjCreating(false)
-      return
-    }
-    try {
-      const id = await window.api.createProject({ name })
-      await loadProjects()
-      if (id) await assignProject(id)
-    } catch (e) {
-      console.error('Failed to create project', e)
-    }
-  }, [projNewName, loadProjects, assignProject])
+  const createAndAssignProject = useCallback(
+    async (typedName: string) => {
+      const name = typedName.trim()
+      if (!name) {
+        setProjCreating(false)
+        return
+      }
+      try {
+        const id = await window.api.createProject({ name })
+        await loadProjects()
+        if (id) await assignProject(id)
+      } catch (e) {
+        console.error('Failed to create project', e)
+      }
+    },
+    [loadProjects, assignProject]
+  )
 
   useEffect(() => {
     // Follow the stream to the bottom ONLY while the user hasn't scrolled up. followBottomRef is
@@ -5691,23 +5685,10 @@ export function MemoryChat({
                     </AnimatePresence>
 
                     {projCreating && (
-                      <div className="mb-2">
-                        <input
-                          ref={projInputRef}
-                          value={projNewName}
-                          onChange={(e) => setProjNewName(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') createAndAssignProject()
-                            if (e.key === 'Escape') {
-                              setProjCreating(false)
-                              setProjNewName('')
-                            }
-                          }}
-                          onBlur={createAndAssignProject}
-                          placeholder="New project name…  (Enter to create, Esc to cancel)"
-                          className="w-full rounded-md border border-green-500 bg-neutral-900 px-3 py-2 text-xs text-white placeholder-neutral-600 outline-none"
-                        />
-                      </div>
+                      <NewProjectNameField
+                        onCreate={createAndAssignProject}
+                        onCancel={() => setProjCreating(false)}
+                      />
                     )}
 
                     {activeQueuedTurns.length > 0 && (
