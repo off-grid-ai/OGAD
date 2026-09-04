@@ -2585,3 +2585,31 @@ Both `downloaded.error === "cancelled"` string-decided outcomes went with it, wh
 separately recorded gap about that exported string comparison - the fix was deletion, not rewiring.
 
 Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
+
+## RESOLVED — the downloaded registry no longer loses independent row updates (2026-09-04)
+
+shared `846a5d8` + desktop the adapter commit that follows it. This supersedes the OPEN entry above,
+which correctly said replacement atomicity proved nothing about lost updates. It now does, within a
+stated boundary.
+
+`writeAtomically(models)` was unfixable as an API: staleness was baked in before the call, because a
+caller read the rows, awaited, then handed back a whole array computed from a snapshot that might no
+longer hold. `updateAtomically(update)` inverts who reads - the caller supplies a pure mutation and
+the store applies it to the rows present at commit - so the domain register and the rollback/recover
+paths now say "add this row" and "remove that row" instead of asserting the file's entire contents.
+
+The adapter is what makes it true rather than merely better shaped: it reuses the SYNCHRONOUS raw
+writer, so read, mutate, write and rename are one block with no `await` between them, and on a single
+thread that cannot interleave. An async commit would have reproduced the same hole one level down -
+two callers each reading before either renamed.
+
+BOUNDARY, stated so this is not read as more than it is: it serializes writers IN THIS PROCESS. Both
+real writers - sync transfer registration and reconcile, and the async finalizer - are in the main
+process, so it is sufficient for them. It is NOT file-level locking, would not protect a second OS
+process writing the same registry, and makes no power-loss durability claim. The same-family
+replacement policy is unchanged.
+
+Not observed: no concurrent interleave has been exercised. The guarantee is argued from the
+synchronous commit path, which is a strong argument and still not a test.
+
+Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
