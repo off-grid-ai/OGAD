@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence } from 'motion/react'
 import {
   IconDownload,
@@ -512,75 +512,111 @@ export function ModelsScreen({
   }
 
   const searchEnabled = activeKind !== 'voice' && activeKind !== 'transcription'
-  const searchingMode = searchEnabled && query.trim().length >= 2
+  // The typed query paints immediately; everything derived from it - the remote search, the
+  // filtered grid - follows on the deferred value, so a keystroke never waits on the list.
+  const deferredQuery = useDeferredValue(query)
+  const searchingMode = searchEnabled && deferredQuery.trim().length >= 2
   const totalBytes = (m: { files?: { sizeBytes?: number }[] }): number =>
     (m.files || []).reduce((s, f) => s + (f.sizeBytes || 0), 0)
 
   useEffect(() => {
-    const q = query.trim()
+    const q = deferredQuery.trim()
     if (!searchEnabled || q.length < 2) {
       setHfResults([])
       return
     }
     setSearching(true)
+    // A slow answer for an earlier query must never replace the results the user is looking at:
+    // the request is abandoned the moment a newer query supersedes it.
+    let live = true
     const t = setTimeout(async () => {
       const res = await api.searchModels?.(q, activeKind)
+      if (!live) return
       setHfResults(res ?? [])
       setSearching(false)
     }, 400)
-    return () => clearTimeout(t)
-  }, [query, activeKind, searchEnabled])
+    return () => {
+      live = false
+      clearTimeout(t)
+    }
+  }, [deferredQuery, activeKind, searchEnabled])
 
-  const list = models.filter(
-    (model) =>
-      modelSupportsKind(model, activeKind as Parameters<typeof modelSupportsKind>[1]) ||
-      (activeKind === 'text' && modelSupportsKind(model, 'vision'))
+  const list = useMemo(
+    () =>
+      models.filter(
+        (model) =>
+          modelSupportsKind(model, activeKind as Parameters<typeof modelSupportsKind>[1]) ||
+          (activeKind === 'text' && modelSupportsKind(model, 'vision'))
+      ),
+    [models, activeKind]
   )
 
   // The image model recommended for this machine's RAM (Light Q4 on <=16GB, full
   // Q8 above) — one pure rule, reused for both the badge and the top-of-list sort.
-  const recommendedImageId = recommendedImageModelId(models, ramGb)
+  const recommendedImageId = useMemo(
+    () => recommendedImageModelId(models, ramGb),
+    [models, ramGb]
+  )
 
-  const displayed = filterAndSort(
-    hfResults.map((r) => ({
-      id: r.id,
-      name: r.name,
-      org: r.org,
-      downloads: r.downloads,
-      likes: r.likes,
-      lastModified: r.lastModified,
-      credibility: r.credibility as Credibility | undefined,
-      params: parseParamCount(r.name) ?? parseParamCount(r.id)
-    })),
-    filterState
+  const displayed = useMemo(
+    () =>
+      filterAndSort(
+        hfResults.map((r) => ({
+          id: r.id,
+          name: r.name,
+          org: r.org,
+          downloads: r.downloads,
+          likes: r.likes,
+          lastModified: r.lastModified,
+          credibility: r.credibility as Credibility | undefined,
+          params: parseParamCount(r.name) ?? parseParamCount(r.id)
+        })),
+        filterState
+      ),
+    [hfResults, filterState]
   )
 
   // Tags offered as filter chips — every tag present in this tab's models.
-  const availableTags = collectTags(list)
+  const availableTags = useMemo(() => collectTags(list), [list])
 
-  const displayedCatalog = filterAndSort(
-    list.map((m) => ({
-      ...m,
-      org: m.org ?? '',
-      params: m.params ?? parseParamCount(m.name) ?? undefined,
-      credibility: determineCredibility((m.id || '').split('/')[0]!)
-    })),
-    filterState
-  )
-    .filter((m) => sizeBucket == null || totalBytes(m) <= sizeBucket * 1e9)
-    .filter(
-      (m) => activeKind !== 'text' || (USE_CASES.find((u) => u.id === useCase)?.match(m) ?? true)
-    )
-    .filter((m) => matchesAllTags(m.tags, selectedTags))
-    .sort((a, b) => {
-      // Active first, then other installed, then available — within each tier keep feature rank.
-      const rank = (x: { id: string }): number =>
-        isActive(x.id) ? 0 : installed.includes(x.id) ? 1 : 2
-      return (
-        rank(a) - rank(b) ||
-        catalogEntryRank(a, recommendedImageId) - catalogEntryRank(b, recommendedImageId)
+  const displayedCatalog = useMemo(
+    () =>
+      filterAndSort(
+        list.map((m) => ({
+          ...m,
+          org: m.org ?? '',
+          params: m.params ?? parseParamCount(m.name) ?? undefined,
+          credibility: determineCredibility((m.id || '').split('/')[0]!)
+        })),
+        filterState
       )
-    })
+        .filter((m) => sizeBucket == null || totalBytes(m) <= sizeBucket * 1e9)
+        .filter(
+          (m) =>
+            activeKind !== 'text' || (USE_CASES.find((u) => u.id === useCase)?.match(m) ?? true)
+        )
+        .filter((m) => matchesAllTags(m.tags, selectedTags))
+        .sort((a, b) => {
+          // Active first, then other installed, then available — within each tier keep feature rank.
+          const rank = (x: { id: string }): number =>
+            activeIds.has(x.id) ? 0 : installed.includes(x.id) ? 1 : 2
+          return (
+            rank(a) - rank(b) ||
+            catalogEntryRank(a, recommendedImageId) - catalogEntryRank(b, recommendedImageId)
+          )
+        }),
+    [
+      list,
+      filterState,
+      sizeBucket,
+      activeKind,
+      useCase,
+      selectedTags,
+      activeIds,
+      installed,
+      recommendedImageId
+    ]
+  )
 
   const tabs = internalTabRoutes('models').filter(
     ({ id }) => id === 'storage' || kinds.includes(id)
