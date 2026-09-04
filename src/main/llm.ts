@@ -38,9 +38,11 @@ import {
   type GenerationReasoning,
   type ModelReasoningMetadata,
   type ReasoningEffort,
-  type ReasoningWireFragment
+  type ReasoningWireFragment,
+  type ResidentReclaim
 } from '@offgrid/models'
 import type { DesktopManagedRuntime } from './model-runtime-port'
+import { createProcessTeardown, type ProcessTeardown } from './process-teardown'
 import { acceleratorForEngine, type EngineAccelerator } from '../shared/engine-accelerator'
 import { verifyArtifactFile } from './models/gguf'
 import { readGgufContextLength } from './models/gguf-metadata'
@@ -261,6 +263,16 @@ export class LLMService {
   // flight.
   // Last ~50 stderr lines from llama-server, so we can explain WHY it died on
   // load (unknown arch / OOM / OS-too-old) instead of a blank "Down".
+  /**
+   * Processes that would not die. THE SAME owner the image and transcription servers use.
+   *
+   * This trap has now been found at three layers of this one path - the port's answer channel,
+   * those two servers, and here - and each time the code above it read as if the question had been
+   * asked. That is why a DERIVED answer is dangerous even while it is correct: it survives the
+   * change that makes it wrong. The only thing that can answer "did the memory come back" later is
+   * a retained reference to the process that was holding it.
+   */
+  private readonly teardown: ProcessTeardown = createProcessTeardown('chat engine')
   private stderrTail: string[] = []
   // Human, actionable reason the server failed to come up (null when healthy).
   private lastErrorMsg: string | null = null
@@ -796,6 +808,20 @@ export class LLMService {
 
   private async _doInit(): Promise<void> {
     if (this.initialized) return
+
+    /**
+     * REFUSE while an earlier engine is stranded.
+     *
+     * The same rule the image and transcription servers now carry, and the point where a wrong
+     * reclaim answer stops being a reporting problem: a stuck engine that had been forgotten looks
+     * like "nothing running", so this would spawn a fresh llama-server beside a live orphan - two
+     * processes holding model weights on one port while residency believed none did. Retry the
+     * stranded one first; only its proven exit reopens this path.
+     */
+    if (this.teardown.hasStranded()) {
+      const reclaim = await this.teardown.recheck()
+      if (!reclaim.reclaimed) throw new Error(reclaim.reason)
+    }
 
     this.resolveModel()
 
@@ -1421,8 +1447,12 @@ export class LLMService {
       this.intentionalStop = true
       const proc = this.server
       if (proc) {
-        outcome = await this.terminateProc(proc)
-        if (this.server === proc) {
+        // Through the tracker, so a process that survives SIGKILL is RETAINED. The handle used to
+        // be cleared unconditionally - `outcome` was not consulted - so a stuck engine was
+        // forgotten here and the next call started at `already-dead` with nothing left to ask.
+        const terminated = await this.teardown.terminate(proc)
+        outcome = terminated.outcome
+        if (this.server === proc && outcome !== 'stuck') {
           this.server = null
         }
       }
@@ -1435,12 +1465,36 @@ export class LLMService {
     this.initialized = false
     // Safety net: reap any llama-server WE own still holding the port (a forked/stuck child).
     // liveOwners are OTHER apps' engines — we never touch those, so the port isn't "ours to free".
-    const reap = this.reapOrphansOnPort(this.port)
+    //
+    // NOTHING is concluded from what it returns. Its `killed` count means "we sent SIGKILL", not
+    // "it died": there is no wait for exit and no recheck, and SIGKILL does not return memory from
+    // a process in an uninterruptible wait, which is exactly the case that matters here. The old
+    // `outcome !== 'stuck' && liveOwners.length === 0` read like a port-free check and touched no
+    // port; `liveOwners` structurally cannot see our own orphan, by design.
+    this.reapOrphansOnPort(this.port)
     // Leave the engine down but allow a future explicit start; releasePause clears the block
     // without warming a server (on-demand — the next chat/tool turn respawns).
     this.paused = false
     this.invalidateHealth()
-    return { outcome, portFree: outcome !== 'stuck' && reap.liveOwners.length === 0 }
+    // PROBED, not derived, and it answers a different question from the reclaim: "can another app
+    // bind :8439 now" is what this unload is FOR (freeing the port for LM Studio), and it is what
+    // the renderer shows. Whether the memory came back is `reclaimResidentMemory`, which proves an
+    // exit. Two facts, each measured; never one standing in for the other.
+    return { outcome, portFree: await isPortFree(this.port) }
+  }
+
+  /**
+   * Release this engine's resident memory and say whether it happened.
+   *
+   * The authoritative answer, and the only one residency acts on: it comes from the tracker, which
+   * proves the exit of every process this engine has failed to kill. A process that never exits
+   * keeps this at `reclaimed: false` permanently, which is the honest terminal state - better than
+   * a timeout that guesses, and better than the port probe, which answers a related but different
+   * question.
+   */
+  async reclaimResidentMemory(): Promise<ResidentReclaim> {
+    await this.unload()
+    return this.teardown.recheck()
   }
 
   /** Set by the image runtime (imagegen.ts): how to evict a resident image server
@@ -1492,30 +1546,13 @@ export class LLMService {
        * `pause` reads as "stop respawning" and `unload` reads as "release the memory". Residency
        * asked for the second and was being given the first.
        */
-      evict: async () => {
-        const { outcome, portFree } = await llm.unload()
-        if (outcome !== 'stuck' && portFree) return { reclaimed: true }
-        /**
-         * The same trap the image and transcription wrappers had: `unload()` nulls its process
-         * handle whatever the outcome, so a SECOND evict finds nothing running, reports
-         * `already-dead`, and would answer `reclaimed: true` while the stuck engine is still up
-         * holding its weights. `liveOwners` cannot catch it either - that counts OTHER apps'
-         * engines, deliberately, so our own orphan is invisible to it.
-         *
-         * So the answer comes from something the handle cannot fake: whether the port is free.
-         * A live llama-server holds it, and it cannot hold it and have released its memory. Until
-         * that is PROVEN free, this keeps refusing - which is the honest terminal state if the
-         * process never dies.
-         */
-        const freed = await isPortFree(this.port)
-        if (freed && outcome !== 'stuck') return { reclaimed: true }
-        return {
-          reclaimed: false,
-          reason: freed
-            ? 'The chat engine survived SIGKILL, so its memory may still be held.'
-            : `The chat engine is still holding port ${this.port}, so its memory has not come back.`
-        }
-      },
+      /**
+       * `pause()` is NOT a memory release - it sets the no-respawn flag and sends one un-awaited
+       * SIGTERM - so this used to report a non-release as a reclaim. It asks the engine to release
+       * and prove it instead, and the proof is a retained process observed to exit, not a handle
+       * we just cleared.
+       */
+      evict: () => llm.reclaimResidentMemory(),
       warm: () => {
         this.resume()
       },

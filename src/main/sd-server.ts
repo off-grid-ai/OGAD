@@ -458,7 +458,7 @@ class SdServerService {
     // No process of our own to stop, but an earlier one may still be stranded: re-ask rather than
     // assume, because "nothing here now" was exactly the false `true` this replaces.
     if (!proc) return this.teardown.recheck()
-    return this.teardown.terminate(proc)
+    return (await this.teardown.terminate(proc)).reclaim
   }
 
   private armIdleTimer(): void {

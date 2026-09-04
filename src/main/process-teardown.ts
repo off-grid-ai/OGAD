@@ -88,8 +88,17 @@ export function terminateChildProcess(
  * answer.
  */
 export interface ProcessTeardown {
-  /** Terminate `proc` and answer. A process that will not die is retained, not forgotten. */
-  terminate(proc: ChildProcess): Promise<ResidentReclaim>
+  /**
+   * Terminate `proc` and answer. A process that will not die is retained, not forgotten.
+   *
+   * `outcome` rides along for a caller that REPORTS what it took (the chat engine's unload surfaces
+   * it to the renderer). It is not a second answer to "is the memory back" - `reclaim` is the only
+   * answer to that, and it is the one every caller must act on.
+   */
+  terminate(proc: ChildProcess): Promise<{
+    readonly outcome: TeardownOutcome
+    readonly reclaim: ResidentReclaim
+  }>
   /**
    * Re-ask about anything stranded. Answers `reclaimed: true` only once every retained process has
    * been observed to exit, which is what makes a later call unable to invent a release.
@@ -137,7 +146,7 @@ export function createProcessTeardown(
       else stranded.delete(proc)
       // Even a successful termination answers through `settle`: this process let go, but an EARLIER
       // one that never did is still holding memory, and residency must not hear otherwise.
-      return settle()
+      return { outcome, reclaim: settle() }
     },
     recheck: async () => {
       pruneExited()
