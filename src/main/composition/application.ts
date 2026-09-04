@@ -66,10 +66,12 @@ let starting: ReturnType<typeof desktopApplication.start> | null = null
 let releaseSyncRuntime: (() => void) | null = null
 
 export function startDesktopApplication(): ReturnType<typeof desktopApplication.start> {
-  starting ??= (async () => {
+  if (starting) return starting
+
+  const startPromise = (async () => {
     releaseSyncRuntime = claimDesktopSyncRuntime('application')
     try {
-      await desktopApplication.start()
+      return await desktopApplication.start()
     } catch (error) {
       releaseSyncRuntime()
       releaseSyncRuntime = null
@@ -77,7 +79,8 @@ export function startDesktopApplication(): ReturnType<typeof desktopApplication.
       throw error
     }
   })()
-  return starting
+  starting = startPromise
+  return startPromise
 }
 
 export async function stopDesktopApplication(): Promise<void> {
