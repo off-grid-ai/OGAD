@@ -9,6 +9,7 @@ import { desktopRag } from './composition/application-access'
 import { desktopApplication } from './composition/application'
 import { requireApplicationOutcome } from './composition/application-outcome'
 import { attachmentPickerExtensions } from '@offgrid/sync'
+import { workflowFailureMessage } from '@offgrid/application'
 
 // Built from the shared attachment classifier (@offgrid/sync) so the picker allowlist
 // and the processor can never drift: it used to hardcode a subset that omitted
@@ -33,7 +34,12 @@ export function setupRagIPC(): void {
   })
 
   ipcMain.handle('projects:delete', async (_e, id: string) => {
-    await desktopApplication.workflows.deleteProject(id)
+    // The workflow owns the cross-domain cleanup (RAG index, then sync). Its failure is the
+    // reason it exists: deleting the local row after a partial cleanup destroys the only
+    // record of what still has to be cleaned up, so the typed failure stops the delete and
+    // reaches the caller instead of being dropped.
+    const cleanup = await desktopApplication.workflows.deleteProject(id)
+    if (!cleanup.ok) throw new Error(workflowFailureMessage(cleanup.failure))
     deleteProject(id)
   })
 
