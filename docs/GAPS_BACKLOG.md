@@ -2543,3 +2543,45 @@ for every refusal including `{kind: 'cancelled'}`.
   No release claim is made anywhere above.
 
 Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
+
+## Atomic replacement does NOT make the downloaded registry concurrency-safe (OPEN)
+
+Recorded because the atomic-write change is easy to mistake for a fix to a different problem, and it
+is not one. The write itself is now sound: an exclusive UUID temp file, the handle closed before the
+rename, the rename as the final step, so there is no fallible operation after success and no
+collision-prone timestamped path. That is replacement atomicity - a reader never sees a torn file.
+
+It does not prevent a LOST UPDATE. `desktopAsyncDownloadedRegistryPorts` exposes `read` and
+`writeAtomically` as separate operations (`desktop/src/main/downloaded-models.ts:126-145`), so every
+caller performs read → await → write-the-whole-array. Two writers touching this same file - the
+downloaded-model registration path and sync transferred registration - can interleave: both read the
+same array, both write their own version, and the second rename silently discards the first writer's
+row. Atomicity guarantees the file is never half-written; it says nothing about whether both updates
+survive.
+
+So the honest scope of what landed: no torn reads, no leftover temp files, no post-rename hazard, and
+strict decoding preserved. NOT established: multi-writer serialization, power-loss durability, or any
+lost-update guarantee. A read-modify-write seam over a whole-file rewrite needs either a lock, a
+compare-and-swap on the prior contents, or per-row files - and choosing between those is its own
+slice. No production-complete claim may rest on replacement atomicity alone.
+
+Worth noting the two writers reach this file through different paths, so the interleave is not
+hypothetical: a model transfer completing while a download registers is an ordinary sequence.
+
+## Six tests target a class that no longer exists (OPEN, canonical-test migration debt)
+
+`shared/packages/models/test/model-control-application-service.test.mjs` has six top-level tests plus
+nested boundary cases against `ModelControlApplicationService`, which was removed after a production
+scan across all five repos found no consumer or constructor - the test suite was its only caller.
+That suite will not import against a fresh build.
+
+DO NOT restore the obsolete class to make these compile. The behaviour they cover must be proved
+through the live canonical Application control boundary instead, which is where it actually runs. This
+is migration debt on the tests, not evidence that the removal was wrong: keeping a 332-line alternate
+command owner alive solely so its own tests keep passing is how a second control plane survives a
+migration.
+
+Both `downloaded.error === "cancelled"` string-decided outcomes went with it, which closes the
+separately recorded gap about that exported string comparison - the fix was deletion, not rewiring.
+
+Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
