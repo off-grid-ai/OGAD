@@ -18,12 +18,7 @@ export type StartupPhaseContract = 'pending' | 'ready' | 'degraded' | 'failed'
  * the caller already acted on the timeout, so whether the late effect was kept or refused is
  * recorded, and the surface says something arrived slowly rather than that the app is broken.
  */
-export type StartupStageStatusContract =
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'timeout'
-  | 'late'
+export type StartupStageStatusContract = 'running' | 'completed' | 'failed' | 'timeout' | 'late'
 
 export interface StartupStageContract {
   readonly name: string
