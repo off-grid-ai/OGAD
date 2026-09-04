@@ -29,7 +29,11 @@ import {
   currentRemoteScreenTaskSession,
   runWithRemoteScreenTaskSession
 } from '../actions/remote-screen-session'
-import { desktopModels, modelsFailureMessage } from '../composition/application-access'
+import {
+  desktopModels,
+  modelsFailureMessage,
+  refreshDesktopModels
+} from '../composition/application-access'
 
 const DEFAULT_GROUNDER_MODEL_ID = 'mradermacher/UI-TARS-1.5-7B-GGUF'
 
@@ -39,7 +43,7 @@ export function selectedGrounderModelId(): string {
 }
 
 async function grounderInstalled(modelId: string): Promise<boolean> {
-  await desktopModels.refresh()
+  await refreshDesktopModels()
   return desktopModels.lookup(modelId)?.ready ?? false
 }
 
@@ -56,7 +60,8 @@ export function createGrounderLifecycle(
 ): Pick<GrounderRunnerDependencies, 'load' | 'restoreLocal'> {
   return {
     async load(modelId) {
-      await models.refresh()
+      const refreshed = await models.refresh()
+      if (!refreshed.ok) throw new Error(modelsFailureMessage(refreshed.failure))
       const selected = await models.select({ modality: 'computer_use', modelId })
       if (!selected.ok) {
         throw new Error(modelsFailureMessage(selected.failure))

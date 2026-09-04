@@ -21,7 +21,11 @@ import {
   type RemoteModalitySelections,
   type PersistedRemoteServer
 } from '@offgrid/models'
-import { desktopModels, modelsFailureMessage } from '../composition/application-access'
+import {
+  desktopModels,
+  modelsFailureMessage,
+  refreshDesktopModels
+} from '../composition/application-access'
 import { deleteSecret, getSecret, setSecret } from '../secrets'
 import {
   REMOTE_VISION_PROVIDERS,
@@ -214,7 +218,7 @@ export const desktopRemoteServerPorts: Omit<RemoteServerApplicationPorts, 'selec
       read: () => sharedConfiguration(readStored()),
       async write(value) {
         writeStored({ version: CONFIG_VERSION, servers: value.servers.map(storedFromShared) })
-        await desktopModels.refresh()
+        await refreshDesktopModels()
       }
     },
     credentials: {
