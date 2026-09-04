@@ -1,5 +1,4 @@
 import { useEffect, useState, useCallback, type ReactNode } from 'react'
-import { AnimatePresence } from 'motion/react'
 import {
   IconPlus,
   IconFolder,
@@ -15,69 +14,12 @@ import {
   IconSettings,
   IconLayoutGrid
 } from '@tabler/icons-react'
-import { ArtifactCanvas } from './ArtifactCanvas'
-import type { Artifact } from '@renderer/lib/artifact-parser'
-import { artifactKindLabel } from '@renderer/lib/artifact-labels'
 import { timeAgo } from '@renderer/lib/time'
 import { useRendererEntitlement } from '@renderer/bootstrap/useRendererEntitlement'
+import { ProjectArtifacts } from './ProjectArtifacts'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const api = (window as any).api
-
-// Artifacts saved within a project — listed (and openable) from the project view.
-function ProjectArtifacts({ projectId }: { projectId: string }): React.ReactElement {
-  const [items, setItems] = useState<(Artifact & { id: string; title: string; created: number })[]>(
-    []
-  )
-  const [open, setOpen] = useState<Artifact | null>(null)
-  useEffect(() => {
-    ;(async () => {
-      try {
-        setItems((await api.listArtifacts?.({ projectId })) || [])
-      } catch {
-        /* ignore */
-      }
-    })()
-  }, [projectId])
-  return (
-    <div className="w-full px-8 py-6">
-      <div className="mb-5 text-[11px] uppercase tracking-widest text-neutral-600">
-        {items.length} {items.length === 1 ? 'artifact' : 'artifacts'}
-      </div>
-      {items.length === 0 ? (
-        <p className="py-10 text-center text-sm text-neutral-600">
-          No artifacts yet — generate HTML, React, SVG, Mermaid, or docs in a chat scoped to this
-          project and they’ll appear here.
-        </p>
-      ) : (
-        <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-          {items.map((a) => (
-            <button
-              key={a.id}
-              onClick={() => setOpen(a)}
-              className="group flex flex-col gap-2 rounded-lg border border-neutral-800/80 bg-neutral-900/30 p-4 text-left transition-colors hover:border-green-500/50 hover:bg-neutral-900/60"
-            >
-              <div className="flex items-center justify-between">
-                <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-400">
-                  {artifactKindLabel(a.kind)}
-                </span>
-                <span className="text-[10px] text-neutral-600">
-                  {a.created ? timeAgo(new Date(a.created).toISOString()) : ''}
-                </span>
-              </div>
-              <span className="min-w-0 truncate text-sm text-neutral-200 group-hover:text-white">
-                {a.title}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-      <AnimatePresence>
-        {open && <ArtifactCanvas artifact={open} onClose={() => setOpen(null)} />}
-      </AnimatePresence>
-    </div>
-  )
-}
 
 interface Project {
   id: string
