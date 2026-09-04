@@ -32,16 +32,22 @@ const LOGO_OVERRIDE: Record<string, string> = { slack: slackLogo }
 // client is configured so the card can gate its Connect button.
 function ConnectorSetup({
   entry,
+  connectorId,
+  compact,
   onReadyChange
 }: {
   entry: CatalogEntry
-  onReadyChange: (ready: boolean) => void
+  connectorId?: number
+  compact?: boolean
+  onReadyChange?: (ready: boolean) => void
 }): ReactElement | null {
   const Slot = getSlot(SLOTS.connectorSetup)
   if (entry.oauthClient !== 'byo' || !Slot) return null
   // The Pro slot is registered at runtime after the core bundle loads, so it must be resolved here.
-  // eslint-disable-next-line react-hooks/static-components
-  return <Slot entry={entry} onReadyChange={onReadyChange} />
+  return (
+    // eslint-disable-next-line react-hooks/static-components
+    <Slot entry={entry} connectorId={connectorId} compact={compact} onReadyChange={onReadyChange} />
+  )
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -275,7 +281,9 @@ export function ConnectorsScreen(): ReactElement {
   // installed list changes, so it is not rebuilt on every keystroke or sync tick.
   const gallery = useMemo(() => {
     const installed = new Set(items.map((i) => i.name.toLowerCase()))
-    return CONNECTOR_CATALOG.filter((e) => !installed.has(e.name.toLowerCase()))
+    return CONNECTOR_CATALOG.filter(
+      (e) => e.oauthClient === 'byo' || !installed.has(e.name.toLowerCase())
+    )
   }, [items])
 
   const doConnect = async (
@@ -460,6 +468,7 @@ export function ConnectorsScreen(): ReactElement {
               : []
             return (
               <div className="mx-auto max-w-[1500px] space-y-5">
+                {dcat && <ConnectorSetup entry={dcat} connectorId={detail.id} />}
                 <button
                   onClick={() => {
                     setDetailId(null)
@@ -804,6 +813,7 @@ export function ConnectorsScreen(): ReactElement {
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2">
                                 <span className="text-sm text-neutral-100">{c.name}</span>
+                                {cat && <ConnectorSetup entry={cat} connectorId={c.id} compact />}
                                 {notReady ? (
                                   <span className="rounded-sm bg-neutral-800 px-1 py-0.5 text-[9px] uppercase tracking-wide text-neutral-500">
                                     disabled · preview

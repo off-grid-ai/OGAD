@@ -128,7 +128,7 @@ export function makeOAuthProvider(
         // only ever request the least-privilege read scope (not every scope the
         // MCP server advertises, which would exceed the consent screen).
         url.searchParams.set('access_type', 'offline')
-        url.searchParams.set('prompt', 'consent')
+        url.searchParams.set('prompt', 'consent select_account')
         url.searchParams.set('scope', google.scope)
       }
       // Register for the redirect (keyed by state) BEFORE opening the browser, so
