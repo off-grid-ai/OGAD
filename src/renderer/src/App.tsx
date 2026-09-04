@@ -70,6 +70,7 @@ import { navigateSearchHit } from './lib/search-navigation'
 import { internalTabPaletteScreens } from './lib/paletteScreens'
 import { getSlot, SLOTS } from './bootstrap/slotRegistry'
 import { SidebarNavigationMenu } from './components/navigation/SidebarNavigationMenu'
+import { StartupNotice } from './components/StartupNotice'
 import { CHAT_VIEW, setCurrentView } from './lib/current-view'
 import {
   OPEN_MODEL_SETTINGS_PANEL_EVENT,
@@ -1086,6 +1087,8 @@ function AppContent(): React.ReactElement {
 
   return (
     <div className="h-screen w-full overflow-hidden bg-neutral-950 relative">
+      {/* The shell opens before startup finishes, so it says so instead of not opening. */}
+      <StartupNotice />
       <CommandPalette
         onOpenHit={handleOpenHit}
         onSeeAll={openSearch}

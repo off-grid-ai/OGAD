@@ -13,6 +13,7 @@
  */
 import { writeDiagnosticLog } from './diagnostics-log'
 import { reportDesktopApplicationDegraded } from './composition/application-access'
+import { startupProjection } from './startup-projection'
 import type { OffGridDomain } from '@offgrid/application'
 
 /** Who reported it, so a domain's own report and a startup report never overwrite each other. */
@@ -37,6 +38,12 @@ export interface StartupStage<T> {
    * degraded projection under that domain so a surface can say why it is degraded.
    */
   readonly domain?: OffGridDomain
+  /**
+   * The product did not start if this stage did not. Default false: an optional domain failing is
+   * degradation, and treating it as a failed launch is how one unavailable feature comes to look
+   * like a broken app.
+   */
+  readonly required?: boolean
   readonly run: (signal: AbortSignal) => Promise<T>
 }
 
@@ -52,6 +59,10 @@ function describe(error: unknown): string {
  */
 export async function runStartupStage<T>(stage: StartupStage<T>): Promise<StartupStageResult<T>> {
   const startedAt = Date.now()
+  const required = stage.required === true
+  // Recorded before it runs, so "pending" names the stage the user is actually waiting on rather
+  // than being a bare spinner.
+  startupProjection.stageStarted({ name: stage.name, required })
   const controller = new AbortController()
   let timer: NodeJS.Timeout | undefined
   const deadline = new Promise<'timeout'>((resolve) => {
@@ -78,6 +89,12 @@ export async function runStartupStage<T>(stage: StartupStage<T>): Promise<Startu
     // Deliberately no clear-on-success: the degraded projection is keyed by (domain, source), so
     // one stage succeeding would erase a SIBLING stage's failure on the same domain.
     writeDiagnosticLog('startup', 'stage.completed', { stage: stage.name, durationMs })
+    startupProjection.stageSettled({
+      name: stage.name,
+      status: 'completed',
+      durationMs,
+      required
+    })
     return { ok: true, value: outcome.value, durationMs }
   } catch (error) {
     return settleFailure(
@@ -109,6 +126,13 @@ function settleFailure<T>(
       reason: `${stage.name}: ${error}`
     })
   }
+  startupProjection.stageSettled({
+    name: stage.name,
+    status: reason === 'timeout' ? 'timeout' : 'failed',
+    durationMs,
+    error,
+    required: stage.required === true
+  })
   return { ok: false, reason, error, durationMs }
 }
 

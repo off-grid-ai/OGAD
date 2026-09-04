@@ -27,6 +27,7 @@ import type {
 } from '../shared/browser-session'
 import type { TaskGuideInput } from '../shared/task-guidance'
 import type { RemoteVisionServerUpdate } from '../shared/remote-vision-server'
+import type { StartupSnapshotContract } from '../shared/startup-contract'
 import type { TaskRunSnapshot } from '../main/tasks/task-history-store'
 import {
   SPEECH_PLAYBACK_REQUEST_CHANNEL,
@@ -560,6 +561,21 @@ const offGridApi = {
     ): void => callback(data)
     ipcRenderer.on('model:download-progress', subscription)
     return unsubscribe('model:download-progress', subscription)
+  },
+
+  /**
+   * Where startup is: pending, ready, degraded or failed, with the stages still running and the
+   * domains that came up degraded.
+   *
+   * The window opens before startup finishes, so this is how a surface says "not ready yet" -
+   * previously it was said by not opening the window at all.
+   */
+  startupStatus: (): Promise<StartupSnapshotContract> => ipcRenderer.invoke('app:startup-status'),
+  onStartupStatusChanged: (callback: (snapshot: StartupSnapshotContract) => void) => {
+    const subscription = (_event: unknown, snapshot: StartupSnapshotContract): void =>
+      callback(snapshot)
+    ipcRenderer.on('app:startup-status-changed', subscription)
+    return unsubscribe('app:startup-status-changed', subscription)
   },
 
   // Setup + system health

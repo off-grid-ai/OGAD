@@ -58,6 +58,8 @@ import { resourceDirs } from './runtime-env'
 import { beginProductIdentityBootstrap } from './product-identity-lifecycle'
 import { repairMissingDefaultKeychainAtBootstrap } from './secure-storage-bootstrap'
 import { runIndependentStartupStages, runStartupStage } from './startup-stages'
+import { startupProjection } from './startup-projection'
+import { registerStartupStatusIpc } from './startup-ipc'
 import {
   flushDiagnosticLog,
   installDiagnosticConsoleCapture,
@@ -275,16 +277,37 @@ app.whenReady().then(async () => {
         /* ignore */
       }
     }
-    // startModelServer is async (it scans for a free port); a try/catch can't catch its rejection,
-    // so handle it on the promise itself.
-    startModelServer().catch((e) => console.error('[gateway] start failed', e))
-    void import('./composition/application')
-      .then(async ({ desktopApplication, startDesktopApplication }) => {
-        await startDesktopApplication()
+    // Headless: no window exists to open early, so there is nothing to order around. It runs
+    // through the SAME stage machinery as the windowed sequence, so its deadlines, its typed
+    // results and its degraded reports are the ones every other startup step gets - a second mode
+    // is not a second startup contract.
+    void runIndependentStartupStages([
+      {
+        name: 'models.gateway.start',
+        deadlineMs: 30_000,
+        domain: 'models',
+        run: () => startModelServer()
+      },
+      {
+        name: 'application.start',
+        deadlineMs: 20_000,
+        required: true,
+        run: () =>
+          import('./composition/application').then(({ startDesktopApplication }) =>
+            startDesktopApplication()
+          )
+      }
+    ])
+    void runStartupStage({
+      name: 'models.text.prepare',
+      deadlineMs: 180_000,
+      domain: 'models',
+      run: async () => {
+        const { desktopApplication } = await import('./composition/application')
         const outcome = await desktopApplication.models.prepare('text')
         if (!outcome.ok) throw new Error(outcome.failure.kind)
-      })
-      .catch((err) => console.error('[gateway] LLM init failed', err))
+      }
+    })
     return // skip window, tray, IPC, capture, connectors — gateway only
   }
 
@@ -413,13 +436,22 @@ app.whenReady().then(async () => {
   // Now: the required local steps run in order, the independent ones run together, each has a
   // deadline and a typed result, and nothing network-bound is waited on before the shell opens.
   installIpcDiagnostics(ipcMain)
+  // Startup state is readable from the moment the window loads, because the window no longer waits
+  // for startup to finish. Registered first so the renderer's very first question has an answer.
+  applicationShutdown.register({
+    name: 'startup:status-ipc',
+    shutdown: registerStartupStatusIpc()
+  })
   // Licensing first, from the CACHED entitlement: this is the local authorization decision, and
   // the SYNC `pro:is-enabled` handler must exist before createWindow() so the preload's sendSync
-  // resolves and window.api.isPro reflects the real licence rather than a default.
+  // resolves and window.api.isPro reflects the real licence rather than a default. It is in the
+  // minimum because of what it decides, not because it is cheap: private content must not reach a
+  // window before the local decision about it exists.
   await runStartupStage({
     name: 'pro.entitlement.load-cached',
     deadlineMs: 5_000,
     domain: 'sync',
+    required: true,
     run: () => loadProEntitlementProvider()
   })
   initLicensing()
@@ -434,16 +466,27 @@ app.whenReady().then(async () => {
     shutdown: () => clearInterval(entitlementRefresh)
   })
   setupIPC()
-  // The application root owns the six domains every other registration below reads through, so
-  // this one stays ordered. It publishes its own degradation, hence no `domain` here.
-  await runStartupStage({
-    name: 'application.start',
-    deadlineMs: 20_000,
-    run: () =>
-      import('./composition/application').then(({ startDesktopApplication }) =>
-        startDesktopApplication()
-      )
+  /**
+   * CONSTRUCT the application, do not start it.
+   *
+   * Importing the composition root is what registers the application object, and that is what makes
+   * every facade a handler reaches resolve instead of throwing "Desktop application is not
+   * initialized". So the object is part of the minimum for a safe shell. STARTING its six domains
+   * is not: that used to be a 20-second deadline in front of the window, and it now runs beside it,
+   * with `startupProjection` carrying pending / degraded / failed to the renderer instead.
+   */
+  const applicationRoot = await runStartupStage({
+    name: 'application.construct',
+    deadlineMs: 10_000,
+    required: true,
+    run: () => import('./composition/application')
   })
+  if (applicationRoot.ok) {
+    applicationShutdown.register({
+      name: 'startup:application-lifecycle',
+      shutdown: startupProjection.observe(applicationRoot.value.desktopApplication)
+    })
+  }
   setupMcpIpc() // basic MCP connectors (management + chat tool extension)
   registerNativeActionTools(registerToolExtension) // the assistant's tools (macOS full set; Windows Outlook subset)
   setupDesktopBackupIPC()
@@ -486,10 +529,35 @@ app.whenReady().then(async () => {
       deadlineMs: 10_000,
       domain: 'automation',
       run: () => import('./tasks/task-history-ipc').then((m) => m.registerTaskHistoryIpc())
+    }
+  ])
+
+  // The shell. Everything above it is either the local authorization decision or the handler
+  // registration that makes the window's own calls answerable - nothing network-bound, no domain
+  // started, no data reconciled.
+  createWindow()
+
+  // Everything below runs BESIDE the open window. None of it may hold the shell closed: the
+  // licence revalidation is network-bound, and the rest is optional or recoverable. Each one is
+  // still bounded and each one's failure is observable - a background step is not a silent step.
+  void runIndependentStartupStages([
+    {
+      // The six domains. Ordered ahead of nothing here - the stages in this list are independent -
+      // but it is the one whose progress the renderer watches, through `startupProjection`. It
+      // publishes its own degradation, hence no `domain`.
+      name: 'application.start',
+      deadlineMs: 20_000,
+      required: true,
+      run: () =>
+        applicationRoot.ok
+          ? applicationRoot.value.startDesktopApplication()
+          : Promise.reject(new Error('The application root could not be constructed.'))
     },
     {
       // Repair legacy catalog classifications before any runtime reads the active chat model.
       // A specialist such as Holo must never start as the normal text model after an upgrade.
+      // Reconciliation of stored data, so it belongs beside the shell, not in front of it: chat
+      // reads the active model through the models facade, which is pending until this settles.
       name: 'models.classification.reconcile',
       deadlineMs: 15_000,
       domain: 'models',
@@ -498,15 +566,7 @@ app.whenReady().then(async () => {
         await modelManager.reconcileActiveModelClassification()
         await modelManager.reconcileActiveModelProjector()
       }
-    }
-  ])
-
-  createWindow()
-
-  // Everything below runs BESIDE the open window. None of it may hold the shell closed: the
-  // licence revalidation is network-bound, and the rest is optional or recoverable. Each one is
-  // still bounded and each one's failure is observable - a background step is not a silent step.
-  void runIndependentStartupStages([
+    },
     {
       // The online licence check. The cached entitlement above already decided what this launch
       // is allowed to do; this confirms it, and expiry or revocation reaches every window through
