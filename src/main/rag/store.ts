@@ -98,6 +98,10 @@ export function projectIncludesMemory(projectId: string): boolean {
 }
 
 export const desktopVectorStore: VectorStore = {
+  async ensureReady() {
+    ensureRagStoreSchema()
+  },
+
   async addDocument(doc) {
     ensureRagStoreSchema()
     const info = getDB()
@@ -176,7 +180,8 @@ export const desktopVectorStore: VectorStore = {
         .all(MEMORY_CANDIDATE_LIMIT) as { id: number; content: string; embedding: string }[]
       for (const m of mems) {
         const embedding = parseStoredEmbedding(m.embedding)
-        if (embedding.length) out.push(memoryChunkCandidate({ id: m.id, content: m.content, embedding }))
+        if (embedding.length)
+          out.push(memoryChunkCandidate({ id: m.id, content: m.content, embedding }))
       }
     }
 
@@ -228,6 +233,14 @@ export const desktopVectorStore: VectorStore = {
     }
   },
 
+  async getDocument(docId) {
+    return getRagDocument(docId)
+  },
+
+  async getDocumentBySyncId(syncId) {
+    return getRagDocumentBySyncId(syncId)
+  },
+
   async setDocumentEnabled(docId, enabled) {
     ensureRagStoreSchema()
     getDB()
@@ -243,6 +256,12 @@ export const desktopVectorStore: VectorStore = {
       db.prepare('DELETE FROM rag_documents WHERE id = ?').run(docId)
     })
     tx()
+  },
+
+  async deleteDocumentsByProject(projectId) {
+    ensureRagStoreSchema()
+    const db = getDB()
+    db.transaction(() => deleteRagDocumentRowsByProject(db, projectId))()
   }
 }
 
@@ -274,6 +293,14 @@ function mapDocument(row: RagDocumentRow): RagDocument {
 
 const DOCUMENT_SELECT =
   'SELECT id, sync_id, project_id, name, path, size, kind, enabled, created_at FROM rag_documents'
+
+function deleteRagDocumentRowsByProject(db: ReturnType<typeof getDB>, projectId: string): void {
+  db.prepare(
+    `DELETE FROM rag_chunks
+     WHERE doc_id IN (SELECT id FROM rag_documents WHERE project_id = ?)`
+  ).run(projectId)
+  db.prepare('DELETE FROM rag_documents WHERE project_id = ?').run(projectId)
+}
 
 export function getRagDocument(docId: number): RagDocument | undefined {
   ensureRagStoreSchema()
@@ -384,19 +411,13 @@ export function updateProject(
 export function deleteProject(id: string): void {
   ensureRagStoreSchema()
   const db = getDB()
-  const projectExists =
+  const projectWasPresent =
     db.prepare('SELECT 1 AS present FROM projects WHERE id = ?').get(id) !== undefined
   const conversations = db
     .prepare('SELECT id FROM rag_conversations WHERE project_id = ?')
     .all(id) as Array<{ id: string }>
   const tx = db.transaction(() => {
-    const docs = db.prepare('SELECT id FROM rag_documents WHERE project_id = ?').all(id) as {
-      id: number
-    }[]
-    for (const d of docs) {
-      db.prepare('DELETE FROM rag_chunks WHERE doc_id = ?').run(d.id)
-    }
-    db.prepare('DELETE FROM rag_documents WHERE project_id = ?').run(id)
+    deleteRagDocumentRowsByProject(db, id)
     // A project is a folder and knowledge scope, not the owner of chat history. Removing it moves
     // its conversations back to unfiled Chat while preserving every message.
     db.prepare(
@@ -410,7 +431,7 @@ export function deleteProject(id: string): void {
   // Artifacts (generated images/docs) are files, not DB rows — clean them outside
   // the transaction so a deleted project's artifacts don't linger in the library.
   deleteArtifactsForProject(id)
-  if (!projectExists) return
+  if (!projectWasPresent) return
   for (const conversation of conversations) {
     emitSyncMutation({
       entity: CORE_SYNC_ENTITIES.conversation,
