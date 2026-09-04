@@ -40,7 +40,7 @@ import {
 import { hideSupervisorWindow } from '../vision/supervisor-window'
 import { getComputerUseSettings } from '../computer-use-settings'
 import { resolveComputerUseContextTokens } from '@offgrid/automation'
-import { recentVisualFacts } from '../vision/visual-context'
+import { desktopAutomation } from '../composition/application-access'
 import { recordTaskRun } from '../tasks/task-history'
 import { persistAxFrame, persistAxObservation, type AxObservationFrame } from './ax-observation'
 import { captureAxObservationFrame } from './ax-frame'
@@ -248,7 +248,9 @@ class AxRailHost {
       settings.context,
       llm.effectiveContextSize()
     )
-    const retrievedFacts = settings.retrieveOlderVisuals ? recentVisualFacts(taskId) : []
+    const retrievedFacts = settings.retrieveOlderVisuals
+      ? [...desktopAutomation.recentVisualFacts(taskId)]
+      : []
     const releaseSession = registerVisionSession(taskId, guard, request)
     // The AX rail is model-agnostic and needs no grounding-model notice.
     emitVisionState({

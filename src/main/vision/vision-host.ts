@@ -52,7 +52,7 @@ import {
   planAspectPreservingResize,
   type ScreenshotGeometry
 } from './screenshot-geometry'
-import { recentVisualFacts } from './visual-context'
+import { desktopAutomation } from '../composition/application-access'
 import { retryPlanningGoal, type TaskRetryCheckpoint } from '../tasks/task-retry'
 import { dispatchVisionAction } from './vision-actuation'
 import { encodeTaskPhase } from '../../shared/task-execution-plan'
@@ -250,7 +250,9 @@ class VisionHost {
                   ...(checkpoint.summary ? [`Earlier attempt ended: ${checkpoint.summary}`] : [])
                 ]
               : []),
-            ...(settings.retrieveOlderVisuals ? recentVisualFacts(taskId) : [])
+            ...(settings.retrieveOlderVisuals
+              ? desktopAutomation.recentVisualFacts(taskId)
+              : [])
           ].slice(0, 5)
           return this.runActiveTask({
             goal,

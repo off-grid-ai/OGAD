@@ -5,7 +5,6 @@ import { appendTaskStepDetail, getTaskExecutionDevice } from '../tasks/task-hist
 import type { ComputerUseStepDetail } from '@offgrid/automation'
 import type { TaskExecutionPlan } from '@offgrid/automation'
 import { resolveComputerUseContextTokens } from '@offgrid/automation'
-import { recentVisualFacts } from '../vision/visual-context'
 import {
   type VisionStepObservation,
   type VisionTaskProgress,
@@ -15,7 +14,7 @@ import { resolveVisionModelAdapterForStrategy } from '../vision/model-adapters'
 import { generalVisionOperatorAdapter } from '../vision/model-adapters/general-vision-operator'
 import type { VisionModelAdapter } from '../vision/model-adapters/types'
 import { workspaceRouteId } from '@offgrid/models'
-import { desktopModels } from '../composition/application-access'
+import { desktopAutomation, desktopModels } from '../composition/application-access'
 import { createVisionGrounder } from '../vision/vision-policy-runner'
 import { runVisionTaskGraph } from '../vision/vision-task-graph'
 import type { VisionGuard } from '../vision/vision-guard'
@@ -150,7 +149,9 @@ export function runBrowserVisualTask(input: BrowserVisualTaskInput): Promise<Vis
     contextTokens: resolveComputerUseContextTokens(settings.context, llm.effectiveContextSize()),
     checkpointInterval: settings.checkpointInterval,
     visualHistoryFrames: settings.visualHistoryFrames,
-    retrievedFacts: settings.retrieveOlderVisuals ? recentVisualFacts(input.taskId) : [],
+    retrievedFacts: settings.retrieveOlderVisuals
+      ? [...desktopAutomation.recentVisualFacts(input.taskId)]
+      : [],
     signal: input.signal,
     onObservation: (observation) => {
       const detail = browserVisionStepDetail(observation, executionDevice)
