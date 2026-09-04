@@ -68,7 +68,15 @@ export function startupPhase(input: {
   if (input.stages.some((report) => report.required && settledBadly(report))) return 'failed'
   if (input.stages.some((report) => report.status === 'running')) return 'pending'
   if (input.applicationStatus !== 'started') return 'pending'
-  if (input.degraded.length > 0 || input.stages.some(settledBadly)) return 'degraded'
+  // `late` is deliberately degradation and not failure: something the product needs did arrive,
+  // just after its deadline, and a required stage that eventually settles must not leave the app
+  // reading as permanently failed while it is demonstrably running.
+  if (
+    input.degraded.length > 0 ||
+    input.stages.some((report) => settledBadly(report) || report.status === 'late')
+  ) {
+    return 'degraded'
+  }
   return 'ready'
 }
 

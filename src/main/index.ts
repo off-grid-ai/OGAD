@@ -286,12 +286,18 @@ app.whenReady().then(async () => {
         name: 'models.gateway.start',
         deadlineMs: 30_000,
         domain: 'models',
+        // A late listener is still owned by the shutdown registry (`stopGateway`), so it cannot
+        // outlive the process untracked.
+        lateEffectIsRecoverable: true,
         run: () => startModelServer()
       },
       {
+        // One start, whatever the deadline does: the composition root memoises the start promise,
+        // so a late completion resolves THAT one instead of starting a second runtime.
         name: 'application.start',
         deadlineMs: 20_000,
         required: true,
+        lateEffectIsRecoverable: true,
         run: () =>
           import('./composition/application').then(({ startDesktopApplication }) =>
             startDesktopApplication()
@@ -302,9 +308,11 @@ app.whenReady().then(async () => {
       name: 'models.text.prepare',
       deadlineMs: 180_000,
       domain: 'models',
-      run: async () => {
+      // Cannot be cancelled, but it can be told apart from a later prepare: the stage's operation
+      // id is its identity at the facade.
+      run: async ({ operationId }) => {
         const { desktopApplication } = await import('./composition/application')
-        const outcome = await desktopApplication.models.prepare('text')
+        const outcome = await desktopApplication.models.prepare('text', { operationId })
         if (!outcome.ok) throw new Error(outcome.failure.kind)
       }
     })
@@ -452,6 +460,11 @@ app.whenReady().then(async () => {
     deadlineMs: 5_000,
     domain: 'sync',
     required: true,
+    // The clearest case for KEEPING a late effect. Refusing a licence decision that arrives slowly
+    // would hold a paying user on the free build for the whole session, registering the provider
+    // fills a single slot so it cannot create a second, and the licence-change notifier already
+    // tells every window when entitlement moves.
+    lateEffectIsRecoverable: true,
     run: () => loadProEntitlementProvider()
   })
   initLicensing()
@@ -479,6 +492,11 @@ app.whenReady().then(async () => {
     name: 'application.construct',
     deadlineMs: 10_000,
     required: true,
+    // A module import cannot be cancelled, and its only module-scope effect is filling the single
+    // slot the facade proxies read - so a late import produces a late-resolving application, never
+    // a second one. What must not happen late is anything STARTING from it, and nothing can: every
+    // consumer below is behind `applicationRoot.ok`.
+    lateEffectIsRecoverable: true,
     run: () => import('./composition/application')
   })
   if (applicationRoot.ok) {
@@ -498,37 +516,53 @@ app.whenReady().then(async () => {
       name: 'rag.ipc',
       deadlineMs: 10_000,
       domain: 'rag',
-      run: () => import('./rag-ipc').then(({ setupRagIPC }) => setupRagIPC())
+      run: ({ commit }) =>
+        import('./rag-ipc').then(({ setupRagIPC }) => commit('rag.ipc.handlers', setupRagIPC))
     },
     {
       name: 'actions.ipc', // Approval UX v2: inline gate cards + outcome/undo feed
       deadlineMs: 10_000,
       domain: 'automation',
-      run: () => import('./actions/actions-ipc').then((m) => m.registerActionsIpc())
+      run: ({ commit }) =>
+        import('./actions/actions-ipc').then((m) =>
+          commit('actions.ipc.handlers', m.registerActionsIpc)
+        )
     },
     {
       name: 'browser.view.ipc', // dock the live browser view to the pane's region
       deadlineMs: 10_000,
       domain: 'use',
-      run: () => import('./browser/browser-host').then((m) => m.registerBrowserViewIpc())
+      run: ({ commit }) =>
+        import('./browser/browser-host').then((m) =>
+          commit('browser.view.ipc.handlers', m.registerBrowserViewIpc)
+        )
     },
     {
       name: 'vision.ipc', // the vision rail's supervisor Stop/Pause/Resume
       deadlineMs: 10_000,
       domain: 'use',
-      run: () => import('./vision/vision-controller').then((m) => m.registerVisionIpc())
+      run: ({ commit }) =>
+        import('./vision/vision-controller').then((m) =>
+          commit('vision.ipc.handlers', m.registerVisionIpc)
+        )
     },
     {
       name: 'vision.supervisor-window',
       deadlineMs: 10_000,
       domain: 'use',
-      run: () => import('./vision/supervisor-window').then((m) => m.registerSupervisorWindowIpc())
+      run: ({ commit }) =>
+        import('./vision/supervisor-window').then((m) =>
+          commit('vision.supervisor-window.handlers', m.registerSupervisorWindowIpc)
+        )
     },
     {
       name: 'tasks.history.ipc', // one durable Web Use + Computer Use history
       deadlineMs: 10_000,
       domain: 'automation',
-      run: () => import('./tasks/task-history-ipc').then((m) => m.registerTaskHistoryIpc())
+      run: ({ commit }) =>
+        import('./tasks/task-history-ipc').then((m) =>
+          commit('tasks.history.ipc.handlers', m.registerTaskHistoryIpc)
+        )
     }
   ])
 
@@ -548,6 +582,11 @@ app.whenReady().then(async () => {
       name: 'application.start',
       deadlineMs: 20_000,
       required: true,
+      // A late completion cannot start a second runtime - the composition root memoises the start
+      // promise, so every call after the first resolves THAT one - and it cannot publish a false
+      // ready either: the phase is read from the application's own status, and a stage settling
+      // after its deadline is reported `late`, which is degradation, not readiness.
+      lateEffectIsRecoverable: true,
       run: () =>
         applicationRoot.ok
           ? applicationRoot.value.startDesktopApplication()
@@ -561,9 +600,13 @@ app.whenReady().then(async () => {
       name: 'models.classification.reconcile',
       deadlineMs: 15_000,
       domain: 'models',
-      run: async () => {
+      run: async ({ signal }) => {
         const modelManager = await import('./models-manager')
         await modelManager.reconcileActiveModelClassification()
+        // Two independent repairs. If the deadline passed during the first, the second is never
+        // started: each one persists its own repair rather than replacing shared state, so the
+        // guard that matters here is not BEGINNING more work after the stage was given up on.
+        if (signal.aborted) return
         await modelManager.reconcileActiveModelProjector()
       }
     },
@@ -575,6 +618,9 @@ app.whenReady().then(async () => {
       name: 'pro.entitlement.revalidate',
       deadlineMs: 30_000,
       domain: 'sync',
+      // Same reasoning as the cached read: an entitlement answer that arrives late is kept, and
+      // reaches every window through the licence-change notifier rather than through this stage.
+      lateEffectIsRecoverable: true,
       run: () => revalidateProEntitlement('launch')
     },
     {
@@ -582,6 +628,9 @@ app.whenReady().then(async () => {
       name: 'models.gateway.start',
       deadlineMs: 30_000,
       domain: 'models',
+      // Same as the media server: a late listener is still owned by the shutdown registry
+      // (`stopGateway`), so it cannot outlive the process untracked.
+      lateEffectIsRecoverable: true,
       run: () => startModelServer()
     },
     {
@@ -590,16 +639,21 @@ app.whenReady().then(async () => {
       name: 'models.text.prepare',
       deadlineMs: 180_000,
       domain: 'models',
-      run: async () => {
+      // Loading a model cannot be cancelled, but the facade accepts an operation id, so a
+      // superseded prepare is distinguishable from the current one at its owner.
+      run: async ({ operationId }) => {
         const { desktopModels, modelsFailureMessage } =
           await import('./composition/application-access')
-        const outcome = await desktopModels.prepare('text')
+        const outcome = await desktopModels.prepare('text', { operationId })
         if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
       }
     },
     {
       name: 'media.server.start', // loopback HTTP for seekable local media (meeting videos)
       deadlineMs: 10_000,
+      // A late start still binds a listener, and that listener IS tracked: the shutdown registry
+      // owns `stopMediaServer` from bootstrap, so quitting stops it whenever it came up.
+      lateEffectIsRecoverable: true,
       run: async () => startMediaServer()
     },
     {
@@ -608,6 +662,11 @@ app.whenReady().then(async () => {
       // build (the pro submodule is absent → stub).
       name: 'pro.features.load',
       deadlineMs: 30_000,
+      // Activation is already single-owner where it matters: `loadProFeaturesMain` runs through
+      // the Pro lifecycle queue, and its registry THROWS on a duplicate IPC channel or a duplicate
+      // runtime owner. So a late completion cannot activate a second runtime; it is reported
+      // `late` and its activation stands, because half-activated Pro would be worse than late Pro.
+      lateEffectIsRecoverable: true,
       run: () => loadProFeaturesMain()
     },
     {
@@ -615,11 +674,15 @@ app.whenReady().then(async () => {
       // build); the auto-download engine runs production-only (dev has no feed).
       name: 'updater.ipc',
       deadlineMs: 15_000,
-      run: () =>
-        import('./updater').then((m) => {
-          m.registerUpdateIpc()
-          if (!is.dev) m.startAutoUpdates()
-        })
+      // Registers IPC handlers AND starts the auto-download engine, so both go behind the guard:
+      // a late completion must not add a second set of handlers or a second update engine.
+      run: ({ commit }) =>
+        import('./updater').then((m) =>
+          commit('updater.ipc.handlers', () => {
+            m.registerUpdateIpc()
+            if (!is.dev) m.startAutoUpdates()
+          })
+        )
     }
   ])
 
@@ -628,7 +691,12 @@ app.whenReady().then(async () => {
     void runStartupStage({
       name: 'dev.seed',
       deadlineMs: 120_000,
-      run: () => import('./dev-seed').then((m) => m.seedDemo(process.env.OFFGRID_SEED === 'force'))
+      // Writes demo rows, so a late completion must not seed a database the app has already
+      // decided is unseeded.
+      run: ({ commit }) =>
+        import('./dev-seed').then((m) =>
+          commit('dev.seed.write', () => m.seedDemo(process.env.OFFGRID_SEED === 'force'))
+        )
     })
   }
 

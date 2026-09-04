@@ -38,8 +38,13 @@ function degradedLabel(snapshot: StartupSnapshotContract): string {
   const failed = snapshot.stages.find(
     (stage) => stage.status === 'failed' || stage.status === 'timeout'
   )
-  const label = failed ? STAGE_LABELS[failed.name] : undefined
-  if (label) return `${label} didn't finish. Everything else works.`
+  const failedLabel = failed ? STAGE_LABELS[failed.name] : undefined
+  if (failedLabel) return `${failedLabel} didn't finish. Everything else works.`
+  // Something arrived after its deadline. Worth saying, because the app took longer than it
+  // should have and the user may have watched it happen - but it is here, so it is not a failure.
+  const late = snapshot.stages.find((stage) => stage.status === 'late')
+  const lateLabel = late ? STAGE_LABELS[late.name] : undefined
+  if (lateLabel) return `${lateLabel} took longer than expected, but it's ready.`
   const domain = snapshot.degraded[0]?.domain
   return domain
     ? `${domain} is unavailable. Everything else works.`
