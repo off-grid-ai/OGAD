@@ -8,8 +8,6 @@ import {
 import { Button } from '@/components/ui/button'
 import type { ApprovalSetupRecord } from '@renderer/lib/approval-intake'
 
-export type { ApprovalSetupRecord } from '@renderer/lib/approval-intake'
-
 const placeholder = (value: string): boolean => /^\s*(?:<[^>]+>|\[[^\]]+\])\s*$/.test(value)
 
 function parsedArgs(record: ApprovalSetupRecord): Record<string, string> {
@@ -22,12 +20,13 @@ function parsedArgs(record: ApprovalSetupRecord): Record<string, string> {
         return [key, placeholder(text) ? '' : text]
       })
     )
-  } catch {
+  } catch (cause: unknown) {
+    console.error('Approval arguments could not be parsed:', cause)
     return {}
   }
 }
 
-export function buildApprovalChatPrompt(
+function buildApprovalChatPrompt(
   record: ApprovalSetupRecord,
   instruction: string,
   context: string,
