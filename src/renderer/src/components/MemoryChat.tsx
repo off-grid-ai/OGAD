@@ -57,6 +57,8 @@ import { parseArtifact, type Artifact } from '@renderer/lib/artifact-parser'
 import { VoiceBubble } from './VoiceBubble'
 import { stopAllVoicePlayback } from '@renderer/lib/voice-playback-bus'
 import { ChatVoiceComposer, VoiceModeControl } from './ChatVoiceComposer'
+import { ChatDraftInput, ChatDraftSendButton, type ChatDraftInputHandle } from './ChatDraftInput'
+import { createChatDraftStore } from './chat-draft-store'
 import { ExploreSection } from './explore/ExploreSection'
 import { PresetSetup } from './explore/PresetSetup'
 import { ApprovalIntakeFailure, ApprovalSetup } from './actions/ApprovalSetup'
@@ -2557,7 +2559,7 @@ export function MemoryChat({
     },
     [loadLatestConversationMessages, replaceDurableMessages]
   )
-  const [input, setInput] = useState('')
+  const [draftStore] = useState(createChatDraftStore)
   // A curated run collects its complete brief inside Chat before any model request starts.
   const [presetSetup, setPresetSetup] = useState<DemoPreset | null>(null)
   const [approvalIntake, setApprovalIntake] = useState<ApprovalIntakeState>({ status: 'idle' })
@@ -3020,7 +3022,7 @@ export function MemoryChat({
   const [artifacts, setArtifacts] = useState<
     (Artifact & { id: string; title: string; created: number })[]
   >([])
-  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const draftInputRef = useRef<ChatDraftInputHandle>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
   const voiceMountedRef = useRef(true)
@@ -3572,7 +3574,7 @@ export function MemoryChat({
             setApprovalIntake({ status: 'loading', approvalId: openTarget.approvalId })
             setApprovalIntake(await loadApprovalIntake(openTarget.approvalId, window.api.proInvoke))
           }
-          if (openTarget.draftPrompt) setInput(openTarget.draftPrompt)
+          if (openTarget.draftPrompt) draftStore.set(openTarget.draftPrompt)
         } else if (openTarget.projectId) {
           setActiveConversationId(null)
           setConvMessages(null, [])
@@ -3586,10 +3588,10 @@ export function MemoryChat({
           setActiveConversationId(null)
           setConvMessages(null, [])
           setActiveProjectId(null)
-          setInput(openTarget.draftPrompt)
+          draftStore.set(openTarget.draftPrompt)
         }
         if (openTarget.openGallery) setShowGallery(true)
-        if (openTarget.draftPrompt) requestAnimationFrame(() => inputRef.current?.focus())
+        if (openTarget.draftPrompt) requestAnimationFrame(() => draftInputRef.current?.focus())
         await loadConversations()
       } catch (e) {
         console.error('Failed to open chat target:', e)
@@ -3732,7 +3734,7 @@ export function MemoryChat({
     const atts =
       opts?.atts ??
       (isInput ? attachments.filter((a) => a.status === 'ready' && (a.text || a.path)) : [])
-    const typed = (override ?? input).trim()
+    const typed = (override ?? draftStore.getSnapshot()).trim()
     // The user sees `trimmed`; the model also gets the attachment text folded in.
     const trimmed =
       typed || (atts.length ? `(${atts.length} attachment${atts.length > 1 ? 's' : ''})` : '')
@@ -3771,7 +3773,7 @@ export function MemoryChat({
             return
           }
           if (isInput) {
-            setInput('')
+            draftStore.set('')
             setAttachments([])
           }
           setAttachWarn(null)
@@ -3866,7 +3868,7 @@ export function MemoryChat({
       }
       setConvMessages(convId, (prev) => [...prev, userMessage])
     }
-    setInput('')
+    draftStore.set('')
     setLoading(true)
 
     // Shared starts and persists a queued user turn only when its conversation lane begins.
@@ -4549,7 +4551,7 @@ export function MemoryChat({
         void sendMessage(text, { voiceClip: clip })
         return
       }
-      setInput((previous) => `${previous}${previous ? ' ' : ''}${text}`)
+      draftStore.update((previous) => `${previous}${previous ? ' ' : ''}${text}`)
     }
   })
   const recording =
@@ -4689,28 +4691,6 @@ export function MemoryChat({
     },
     [activeConversationId, desktopChatSession, messagesByConv, markGenerating, imageGenConv]
   )
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-    // Slash skill autocomplete: while typing "/name" (before any space), Tab —
-    // or Enter on a not-yet-complete name — fills in the top matching skill.
-    const sq = input.startsWith('/') && !/\s/.test(input) ? input.slice(1).toLowerCase() : null
-    if (sq !== null) {
-      const matches = skills.filter((s) => s.name.toLowerCase().includes(sq))
-      const exact = skills.some((s) => s.name.toLowerCase() === sq)
-      if (matches.length > 0 && (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && !exact))) {
-        e.preventDefault()
-        setInput(`/${matches[0]!.name} `) // matches.length > 0
-        inputRef.current?.focus()
-        return
-      }
-    }
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      // Don't send while an attachment is still processing — it would be dropped.
-      if (attachments.some((a) => a.status === 'loading')) return
-      sendMessage()
-    }
-  }
 
   const interruptManualSpeech = useCallback(
     async (id: string, request: number): Promise<boolean> => {
@@ -4901,14 +4881,6 @@ export function MemoryChat({
       console.error(e)
     }
   }, [])
-
-  // Auto-grow the composer with its content, up to a cap (then it scrolls).
-  useEffect(() => {
-    const el = inputRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 208)}px`
-  }, [input])
 
   useEffect(() => {
     window.api
@@ -5247,14 +5219,6 @@ export function MemoryChat({
   let examples = ASK_EXAMPLES
   if (mode === 'image') examples = IMAGE_EXAMPLES
   else if (isPro) examples = ASK_EXAMPLES_PRO
-
-  // Slash-command autocomplete: typing "/" (before any space) lists matching skills.
-  const slashQuery =
-    mode === 'ask' && input.startsWith('/') && !/\s/.test(input)
-      ? input.slice(1).toLowerCase()
-      : null
-  const skillMatches =
-    slashQuery !== null ? skills.filter((s) => s.name.toLowerCase().includes(slashQuery)) : []
 
   const messageNavigation: ContextNavigation = {
     onNavigateToMemory,
@@ -6237,31 +6201,6 @@ export function MemoryChat({
                           Drop files to attach
                         </div>
                       ) : null}
-                      {skillMatches.length > 0 && (
-                        <div className="absolute bottom-full left-0 z-20 mb-2 w-72 overflow-hidden rounded-md border border-border bg-popover py-1 text-sm text-popover-foreground shadow-lg">
-                          <div className="flex items-center justify-between px-3 py-1 text-[10px] uppercase tracking-wide text-neutral-600">
-                            <span>Skills</span>
-                            <span className="normal-case text-neutral-700">Tab to complete</span>
-                          </div>
-                          {skillMatches.slice(0, 6).map((s, i) => (
-                            <button
-                              key={s.name}
-                              onClick={() => {
-                                setInput(`/${s.name} `)
-                                inputRef.current?.focus()
-                              }}
-                              className={`flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left transition-colors hover:bg-neutral-900 ${i === 0 ? 'bg-neutral-900/60' : ''}`}
-                            >
-                              <span className="text-green-500">/{s.name}</span>
-                              {s.description ? (
-                                <span className="line-clamp-1 text-[11px] text-neutral-500">
-                                  {s.description}
-                                </span>
-                              ) : null}
-                            </button>
-                          ))}
-                        </div>
-                      )}
                       <input
                         ref={fileInputRef}
                         type="file"
@@ -6417,21 +6356,17 @@ export function MemoryChat({
                           onToggleRecording={toggleRecording}
                         />
                       ) : (
-                        <textarea
-                          ref={inputRef}
-                          value={input}
-                          onChange={(e) => setInput(e.target.value)}
-                          onKeyDown={handleKeyDown}
+                        <ChatDraftInput
+                          ref={draftInputRef}
+                          store={draftStore}
+                          skills={skills}
+                          mode={mode}
+                          activeProjectName={activeProjectName}
+                          attachmentPending={attachments.some(
+                            (attachment) => attachment.status === 'loading'
+                          )}
                           onPaste={handlePaste}
-                          rows={1}
-                          placeholder={
-                            mode === 'image'
-                              ? 'Describe an image to generate…'
-                              : activeProjectName
-                                ? `Ask about “${activeProjectName}”…`
-                                : 'Ask anything…'
-                          }
-                          className="max-h-52 w-full resize-none overflow-y-auto bg-transparent px-3.5 pt-3 text-sm text-foreground placeholder:text-muted-foreground outline-none"
+                          onSubmit={() => void sendMessage()}
                         />
                       )}
                       <div className="flex flex-wrap items-center justify-between gap-y-2 gap-x-2 px-2.5 pb-2.5 pt-1">
@@ -6867,41 +6802,14 @@ export function MemoryChat({
                               Stop
                             </Button>
                           ) : voiceMode ? null : (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  type="button"
-                                  size="icon"
-                                  onClick={() => sendMessage()}
-                                  disabled={
-                                    (!input.trim() && attachments.length === 0) ||
-                                    attachments.some((a) => a.status === 'loading')
-                                  }
-                                  title={
-                                    attachments.some((a) => a.status === 'loading')
-                                      ? 'Waiting for attachment to finish processing…'
-                                      : 'Send'
-                                  }
-                                  className="size-8 rounded-full"
-                                >
-                                  {/* Always sendable — generating doesn't block; messages queue. */}
-                                  <svg
-                                    className="h-4 w-4"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                  >
-                                    <path
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      strokeWidth={2}
-                                      d="M5 10l7-7m0 0l7 7m-7-7v18"
-                                    />
-                                  </svg>
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>Send</TooltipContent>
-                            </Tooltip>
+                            <ChatDraftSendButton
+                              store={draftStore}
+                              hasAttachments={attachments.length > 0}
+                              attachmentPending={attachments.some(
+                                (attachment) => attachment.status === 'loading'
+                              )}
+                              onSubmit={() => void sendMessage()}
+                            />
                           )}
                         </div>
                       </div>
