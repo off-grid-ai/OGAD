@@ -1,4 +1,8 @@
-export type DesktopSyncRuntimeOwner = 'application' | 'legacy'
+/**
+ * The only runtime that may own desktop Sync. The legacy SyncService startup is gone, so
+ * 'application' is the whole set: a second claim is a composition mistake, not a second product.
+ */
+export type DesktopSyncRuntimeOwner = 'application'
 
 let activeOwner: DesktopSyncRuntimeOwner | null = null
 

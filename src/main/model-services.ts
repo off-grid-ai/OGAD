@@ -305,7 +305,8 @@ export function createDesktopModelWorkspace(
     }
   })
   lifecycleWorkspace = workspace
-  const llm = workspace.llm
+  // Adapters register THROUGH the workspace, not through its raw routing and generation owners:
+  // reaching inside was the last thing keeping the workspace itself in the platform ports.
   const source = new DesktopInventorySource(ports, ids, selections)
   for (const adapterId of [
     'desktop.llama',
@@ -325,9 +326,8 @@ export function createDesktopModelWorkspace(
     'desktop.embedding',
     'desktop.remote-embedding'
   ]) {
-    llm.registerAdapter(new DesktopModelInventoryAdapter(adapterId, source))
+    workspace.registerInventoryAdapter(new DesktopModelInventoryAdapter(adapterId, source))
   }
-  const generation = workspace.generation
   const generationObservations = desktopGenerationObservations
   for (const adapterId of [
     'desktop.llama',
@@ -341,7 +341,7 @@ export function createDesktopModelWorkspace(
       ports.localTextLifecycle
     )
     lifecycleAdapters.set(adapterId, adapter)
-    generation.registerAdapter(adapter)
+    workspace.registerGenerationAdapter(adapter)
   }
   const imageAdapter = new DesktopImageGenerationAdapter()
   const voiceAdapter = new DesktopVoiceGenerationAdapter()
@@ -349,19 +349,19 @@ export function createDesktopModelWorkspace(
   const embeddingAdapter = new DesktopEmbeddingGenerationAdapter()
   for (const adapter of [imageAdapter, voiceAdapter, transcriptionAdapter, embeddingAdapter]) {
     lifecycleAdapters.set(adapter.id, adapter)
-    generation.registerAdapter(adapter)
+    workspace.registerGenerationAdapter(adapter)
   }
-  generation.registerAdapter(new DesktopRemoteImageGenerationAdapter())
-  generation.registerAdapter(new DesktopRemoteVoiceGenerationAdapter())
-  generation.registerAdapter(new DesktopRemoteTranscriptionGenerationAdapter())
-  generation.registerAdapter(new DesktopRemoteEmbeddingGenerationAdapter())
+  workspace.registerGenerationAdapter(new DesktopRemoteImageGenerationAdapter())
+  workspace.registerGenerationAdapter(new DesktopRemoteVoiceGenerationAdapter())
+  workspace.registerGenerationAdapter(new DesktopRemoteTranscriptionGenerationAdapter())
+  workspace.registerGenerationAdapter(new DesktopRemoteEmbeddingGenerationAdapter())
   for (const adapterId of [
     'desktop.remote-chat',
     'desktop.remote-chat.classifier',
     'desktop.remote-chat.tool-selection',
     'desktop.remote-chat.computer-use'
   ]) {
-    generation.registerAdapter(
+    workspace.registerGenerationAdapter(
       new DesktopRemoteGenerationAdapter(generationObservations, adapterId)
     )
   }
