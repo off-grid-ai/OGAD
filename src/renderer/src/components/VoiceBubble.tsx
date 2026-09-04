@@ -103,6 +103,44 @@ function normalize(data: number[]): number[] {
   return data.map((v) => v / max)
 }
 
+/** One empty envelope, so the derived value keeps its identity between renders. */
+const NO_DECODED_WAVE: number[] = []
+
+/**
+ * How long the clip is and how far through it we are.
+ *
+ * The real duration once the audio element reports one, the estimate until then, and a fraction
+ * that cannot exceed 1 - clamped because `currentTime` can pass an ESTIMATED duration, and a
+ * progress bar past its own end is a visible glitch. Pure, and out here so the component does not
+ * carry the branches.
+ */
+function playbackProgress(input: {
+  readonly loadedDuration: number
+  readonly estDuration: number
+  readonly currentTime: number
+}): { totalDuration: number; progress: number } {
+  const totalDuration = input.loadedDuration || input.estDuration
+  const progress = totalDuration ? Math.min(1, input.currentTime / totalDuration) : 0
+  return { totalDuration, progress }
+}
+
+/** A decoded envelope, and the clip it was decoded from. */
+interface DecodedWave {
+  readonly url: string
+  readonly wave: number[]
+}
+
+/**
+ * The envelope that belongs to THIS clip, or none.
+ *
+ * Derived rather than kept in sync, and derived out here so the component's own complexity does not
+ * pay for it: a decoded wave is only this clip's wave if it was decoded from this clip's url.
+ */
+function waveForClip(audioUrl: string | undefined, decoded: DecodedWave | null): number[] {
+  if (!audioUrl || decoded?.url !== audioUrl) return NO_DECODED_WAVE
+  return decoded.wave
+}
+
 /** Decode a real audio file's envelope once (recordings). */
 async function decodeFileWaveform(url: string, points: number): Promise<number[]> {
   try {
@@ -172,6 +210,20 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
   const [currentTime, setCurrentTime] = useState(0)
   const [loadedDuration, setLoadedDuration] = useState(0)
   const [speed, setSpeed] = useState(defaultSpeed)
+  /**
+   * The persisted speed preference changed, so the chip goes back to it.
+   *
+   * React's "adjusting state when a prop changes": compare against the PREVIOUS prop value during
+   * render, rather than copying the prop into state from an effect. It fires on exactly the
+   * transitions the effect did - once per change of `defaultSpeed`, including a change back to a
+   * value the user had once overridden - and it does it before anything renders with the stale
+   * value instead of after a second pass.
+   */
+  const [appliedDefaultSpeed, setAppliedDefaultSpeed] = useState(defaultSpeed)
+  if (appliedDefaultSpeed !== defaultSpeed) {
+    setAppliedDefaultSpeed(defaultSpeed)
+    setSpeed(defaultSpeed)
+  }
   const [showTranscript, setShowTranscript] = useState(showTranscriptInitially)
   const [playbackError, setPlaybackError] = useState<string | null>(null)
   const playbackActive = status === 'loading' || status === 'playing'
@@ -186,8 +238,9 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
     if (showTranscriptInitially && transcript && !isLoading) setShowTranscript(true)
   }, [isLoading, showTranscriptInitially, transcript])
 
+  // Telling the audio element about a new preference IS updating an external system, which is what
+  // an effect is for. Resetting the chip is not - see `chosenSpeed`.
   useEffect(() => {
-    setSpeed(defaultSpeed)
     if (audioRef.current) audioRef.current.playbackRate = defaultSpeed
   }, [defaultSpeed])
 
@@ -198,21 +251,28 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
     }
   }, [onPlaybackStateChange, playbackActive])
 
-  // Stable waveform: real decoded envelope for a recording, else transcript-derived.
-  const [fileWave, setFileWave] = useState<number[]>([])
+  /**
+   * Stable waveform: the real decoded envelope for a recording, else transcript-derived.
+   *
+   * The decoded envelope is stored WITH the clip it came from, so "which wave belongs to this
+   * clip" is derived rather than kept in sync by clearing state in an effect. That also closes a
+   * real gap: the old effect only cleared on no clip at all, so between one clip's url changing
+   * and the new one finishing decoding, the bubble drew the PREVIOUS recording's envelope. It now
+   * falls back to the transcript-derived shape for that window, which is what it already does
+   * before any clip has decoded.
+   */
+  const [decodedWave, setDecodedWave] = useState<DecodedWave | null>(null)
   useEffect(() => {
-    if (!audioUrl) {
-      setFileWave([])
-      return
-    }
+    if (!audioUrl) return
     let cancelled = false
-    void decodeFileWaveform(audioUrl, WAVEFORM_BARS).then((w) => {
-      if (!cancelled) setFileWave(w)
+    void decodeFileWaveform(audioUrl, WAVEFORM_BARS).then((wave) => {
+      if (!cancelled) setDecodedWave({ url: audioUrl, wave })
     })
     return () => {
       cancelled = true
     }
   }, [audioUrl])
+  const fileWave = waveForClip(audioUrl, decodedWave)
 
   const bars = useMemo(() => {
     const raw = fileWave.length ? fileWave : waveformFromText(transcript, WAVEFORM_BARS)
@@ -225,8 +285,7 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
     const words = transcript.trim().split(/\s+/).filter(Boolean).length
     return Math.max(1, words / (2.5 * speed))
   }, [durationSeconds, transcript, speed])
-  const totalDuration = loadedDuration || estDuration
-  const progress = totalDuration ? Math.min(1, currentTime / totalDuration) : 0
+  const { totalDuration, progress } = playbackProgress({ loadedDuration, estDuration, currentTime })
 
   // Pause when another bubble takes over playback.
   useEffect(() => {
