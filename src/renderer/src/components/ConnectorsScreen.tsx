@@ -1,4 +1,6 @@
-import { useEffect, useState, useCallback, useRef, type ReactElement } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef, type ReactElement } from 'react'
+import { ConnectorPullQueryField } from './ConnectorPullQueryField'
+import { ConnectorSecretsForm } from './ConnectorSecretsForm'
 import {
   IconLoader2,
   IconPlug,
@@ -236,7 +238,6 @@ export function ConnectorsScreen(): ReactElement {
   const [testingId, setTestingId] = useState<number | null>(null)
   const [syncingId, setSyncingId] = useState<number | null>(null)
   const [syncMsg, setSyncMsg] = useState<string>('')
-  const [queries, setQueries] = useState<Record<number, string>>({})
   const [detailId, setDetailId] = useState<number | null>(null)
   const [tab, setTab] = useState<'all' | 'connected' | 'disconnected'>('all')
   const [syncedItems, setSyncedItems] = useState<
@@ -247,7 +248,6 @@ export function ConnectorsScreen(): ReactElement {
   const cancelledConnections = useRef(new Set<string>())
   const [errorFor, setErrorFor] = useState<Record<string, string>>({})
   const [tokenFor, setTokenFor] = useState<CatalogEntry | null>(null)
-  const [tokenVals, setTokenVals] = useState<Record<string, string>>({})
   // Whether a BYO-OAuth connector has its client configured yet (reported by the
   // setup slot). Connect stays gated until it's true — no OAuth without a client.
   const [byoReady, setByoReady] = useState<Record<string, boolean>>({})
@@ -271,8 +271,12 @@ export function ConnectorsScreen(): ReactElement {
     void load()
   }, [load])
 
-  const installed = new Set(items.map((i) => i.name.toLowerCase()))
-  const gallery = CONNECTOR_CATALOG.filter((e) => !installed.has(e.name.toLowerCase()))
+  // The gallery is every catalog connector that is not installed. It changes only when the
+  // installed list changes, so it is not rebuilt on every keystroke or sync tick.
+  const gallery = useMemo(() => {
+    const installed = new Set(items.map((i) => i.name.toLowerCase()))
+    return CONNECTOR_CATALOG.filter((e) => !installed.has(e.name.toLowerCase()))
+  }, [items])
 
   const doConnect = async (
     entry: CatalogEntry,
@@ -305,8 +309,8 @@ export function ConnectorsScreen(): ReactElement {
       )
       if (outcome.connected) {
         // Truly connected → it moves into "Connected" and out of the gallery.
+        // The secrets form closes with the card, and the typed secrets go with it.
         setTokenFor(null)
-        setTokenVals({})
       } else if (outcome.error) {
         setErrorFor((p) => ({ ...p, [entry.id]: outcome.error ?? '' }))
       }
@@ -340,7 +344,6 @@ export function ConnectorsScreen(): ReactElement {
   const onConnect = (entry: CatalogEntry): void => {
     if (entry.auth === 'token' && entry.secrets?.length) {
       setTokenFor(entry)
-      setTokenVals({})
     } else {
       void doConnect(entry, {})
     }
@@ -553,23 +556,12 @@ export function ConnectorsScreen(): ReactElement {
                       )}{' '}
                       Sync recent
                     </button>
-                    <input
-                      value={queries[detail.id] ?? ''}
-                      onChange={(e) => setQueries((p) => ({ ...p, [detail.id]: e.target.value }))}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && queries[detail.id]?.trim())
-                          sync(detail.id, queries[detail.id])
-                      }}
-                      placeholder={`Ask ${detail.name} for… (e.g. ABSLI)`}
-                      className="flex-1 rounded-md border border-neutral-800 bg-neutral-950 px-2.5 py-1.5 text-xs text-neutral-200 outline-none focus:border-neutral-600"
+                    <ConnectorPullQueryField
+                      key={detail.id}
+                      connectorName={detail.name}
+                      disabled={syncingId === detail.id}
+                      onPull={(query) => void sync(detail.id, query)}
                     />
-                    <button
-                      onClick={() => sync(detail.id, queries[detail.id])}
-                      disabled={syncingId === detail.id || !queries[detail.id]?.trim()}
-                      className="shrink-0 rounded-md border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:border-green-500 hover:text-green-500 disabled:opacity-40"
-                    >
-                      Pull
-                    </button>
                   </div>
                 )}
                 {syncMsg && (
@@ -753,34 +745,11 @@ export function ConnectorsScreen(): ReactElement {
                                     )}
                                   </p>
                                 )}
-                                {e.secrets?.map((s) => (
-                                  <input
-                                    key={s.key}
-                                    type="password"
-                                    value={tokenVals[s.key] ?? ''}
-                                    onChange={(ev) =>
-                                      setTokenVals((p) => ({ ...p, [s.key]: ev.target.value }))
-                                    }
-                                    placeholder={
-                                      s.label + (s.placeholder ? ` (${s.placeholder})` : '')
-                                    }
-                                    className="w-full rounded-md border border-neutral-800 bg-neutral-950 px-2.5 py-1.5 text-xs text-neutral-200 outline-none focus:border-neutral-600"
-                                  />
-                                ))}
-                                <div className="flex gap-2">
-                                  <button
-                                    onClick={() => doConnect(e, tokenVals)}
-                                    className="rounded-md bg-green-500 px-2.5 py-1 text-xs text-neutral-950 hover:bg-green-400"
-                                  >
-                                    Connect
-                                  </button>
-                                  <button
-                                    onClick={() => setTokenFor(null)}
-                                    className="rounded-md border border-neutral-700 px-2.5 py-1 text-xs text-neutral-400"
-                                  >
-                                    Cancel
-                                  </button>
-                                </div>
+                                <ConnectorSecretsForm
+                                  secrets={e.secrets ?? []}
+                                  onConnect={(secrets) => void doConnect(e, secrets)}
+                                  onCancel={() => setTokenFor(null)}
+                                />
                               </div>
                             ) : (
                               <ConnectorConnectControls
