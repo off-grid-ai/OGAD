@@ -469,9 +469,30 @@ app.whenReady().then(async () => {
   })
   initLicensing()
   setupLicenseIpc()
+  // One revalidation at a time, and its failure is recorded rather than dropped. `void` on a
+  // promise discards a rejection, which for a periodic network call means a silent unhandled
+  // rejection every time the mesh is unreachable; and a revalidation slower than the interval used
+  // to have a second one started on top of it.
+  let revalidating = false
   const entitlementRefresh = setInterval(() => {
     refreshCachedProEntitlement()
-    void revalidateProEntitlement('foreground')
+    if (revalidating) {
+      writeDiagnosticLog('pro', 'entitlement.revalidate.skipped', { reason: 'in-flight' }, 'warn')
+      return
+    }
+    revalidating = true
+    revalidateProEntitlement('foreground')
+      .catch((error: unknown) => {
+        writeDiagnosticLog(
+          'pro',
+          'entitlement.revalidate.failed',
+          { reason: 'foreground', error: error instanceof Error ? error.message : String(error) },
+          'error'
+        )
+      })
+      .finally(() => {
+        revalidating = false
+      })
   }, PERSONAL_MESH_ENTITLEMENT_REVALIDATION_INTERVAL_MS)
   entitlementRefresh.unref()
   applicationShutdown.register({
