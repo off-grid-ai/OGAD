@@ -71,7 +71,8 @@ export function createDiagnosticWriter(options: DiagnosticWriterOptions): Diagno
       pending.length > options.maxBufferedRecords ||
       (pendingBytes > options.maxBufferedBytes && pending.length > 1)
     ) {
-      const [oldest] = pending.splice(0, 1)
+      const oldest = pending.shift()
+      if (oldest === undefined) break
       pendingBytes -= Buffer.byteLength(oldest, 'utf8')
       droppedRecords += 1
       droppedSinceNotice += 1
