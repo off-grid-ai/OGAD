@@ -43,7 +43,8 @@ import {
   isLocalLibraryModelId,
   modelsFailureMessage,
   type ModelControlCatalogModel,
-  type ModelControlProjection
+  type ModelControlProjection,
+  type ModelControlSuccess
 } from '@offgrid/application'
 import {
   filterAndSort,
@@ -308,6 +309,22 @@ function downloadFailureText(prog: DownloadCardProgress): string {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const api = (window as any).api
 
+/**
+ * The two carried-but-not-done outcomes: the command ran, and the model still is not usable.
+ * `Outcome.ok` says only that the command was CARRIED - these are precisely the gap between that
+ * and the thing the user asked for, and each carries its own `failure` to explain itself.
+ */
+function carriedButNotActive(
+  result: ModelControlSuccess
+): result is Extract<
+  ModelControlSuccess,
+  { status: 'installed_not_active' | 'projector_installed_not_ready' }
+> {
+  return (
+    result.status === 'installed_not_active' || result.status === 'projector_installed_not_ready'
+  )
+}
+
 export function ModelsScreen({
   navigationSubroute,
   onNavigateSubroute
@@ -369,12 +386,59 @@ export function ModelsScreen({
     },
     []
   )
+  // -- Request ownership -----------------------------------------------------------------
+  // Six paths write the shared projection, and nothing orders them: `model-control-client` is a
+  // direct IPC call, and `ModelControlProjection` carries NO revision to compare (checked: kinds,
+  // models, installed, activeIds, active, downloads, downloadDurability). So a slow reply from an
+  // earlier command can land after a newer one and overwrite fresher state - the click takes, then
+  // visibly reverts. `operationId` already exists on every `ModelControlIntent` and is echoed on
+  // every `ModelControlSuccess`, so correlation needs no new field, store, cache or diff.
+  //
+  // There are TWO different questions, and conflating them is what makes per-writer ownership
+  // wrong. "May this reply publish shared state?" has ONE answer for the whole screen, because all
+  // six writers publish the SAME projection - a per-writer lane would let an old refresh pass its
+  // own guard and still overwrite a newer switch. "May this reply clean up ITS OWN spinner or
+  // notice?" is per operation, because one modality's stale reply must never strand or unlock
+  // another's in-flight work. So: one publication authority, many cleanup lanes.
+  /** THE single authority for publishing a projection: the newest intent, whatever produced it. */
+  const projectionOwner = useRef<string | null>(null)
+  const ownsProjection = useCallback(
+    (operationId: string): boolean => projectionOwner.current === operationId,
+    []
+  )
+  /** Per-operation cleanup identity. Downloads are concurrent, so theirs is keyed per model. */
+  const switchOwner = useRef<string | null>(null)
+  const removeOwner = useRef<string | null>(null)
+  const refreshOwner = useRef<string | null>(null)
+  const downloadOwners = useRef(new Map<string, string>())
+  /** Mint one id, claim the single publication authority with it, and claim its cleanup lane. */
+  const claimOperation = useCallback((lane: { current: string | null }): string => {
+    const operationId = crypto.randomUUID()
+    projectionOwner.current = operationId
+    lane.current = operationId
+    return operationId
+  }, [])
+  const claimDownload = useCallback((id: string): string => {
+    const operationId = crypto.randomUUID()
+    projectionOwner.current = operationId
+    downloadOwners.current.set(id, operationId)
+    return operationId
+  }, [])
+  const ownsDownload = (id: string, operationId: string): boolean =>
+    downloadOwners.current.get(id) === operationId
+
   const refreshModelControl = useCallback(async (): Promise<void> => {
-    const outcome = await modelControlClient.control({ type: 'refresh' })
-    if (outcome.ok && outcome.value.status === 'completed') {
-      applyModelControlProjection(outcome.value.projection)
-    }
-  }, [applyModelControlProjection])
+    const operationId = claimOperation(refreshOwner)
+    const outcome = await modelControlClient.control({ type: 'refresh', operationId })
+    if (!outcome.ok) return
+    // The ECHOED id, not the one we issued: it proves this reply answers THIS request rather than
+    // an older one arriving late, and that no newer intent of ANY kind has claimed publication.
+    if (!ownsProjection(outcome.value.operationId)) return
+    // EVERY ModelControlSuccess variant carries a fresh projection, so every carried command
+    // reconciles the screen. Narrowing to `completed` first is what let a non-completed answer
+    // leave this surface showing state the backend had already moved past.
+    applyModelControlProjection(outcome.value.projection)
+  }, [applyModelControlProjection, claimOperation, ownsProjection])
   const [switching, setSwitching] = useState<string | null>(null)
   const [switchError, setSwitchError] = useState<string | null>(null)
   const [ramGb, setRamGb] = useState<number | null>(null)
@@ -464,50 +528,65 @@ export function ModelsScreen({
 
   const cancelDownload = (id: string): void => {
     setProgress((p) => withoutProgressEntry(p, id))
-    void modelControlClient.control({ type: 'cancel-download', modelId: id }).then((outcome) => {
-      if (outcome.ok && outcome.value.status === 'cancelled') {
+    const operationId = claimDownload(id)
+    void modelControlClient
+      .control({ type: 'cancel-download', modelId: id, operationId })
+      .then((outcome) => {
+        if (!outcome.ok) return
+        if (!ownsProjection(outcome.value.operationId)) return
         applyModelControlProjection(outcome.value.projection)
-      }
-    })
+      })
   }
   const download = (id: string): void => {
     // 'queued', not 'downloading': nothing has been downloaded yet, and claiming otherwise is what
     // left a refused request showing a spinner at 0% forever. The main process moves it to
     // 'downloading' when bytes actually start, and to 'failed' if it never gets that far.
     setProgress((p) => ({ ...p, [id]: { percent: 0, status: 'queued' } }))
-    void modelControlClient.control({ type: 'download', modelId: id }).then((outcome) => {
-      if (!outcome.ok) {
-        // A refusal that IS a cancellation is not a failure, and must not be dressed as one -
-        // the same distinction the setup panel draws. It clears the row exactly like the
-        // `cancelled` result below, rather than leaving red text and a "Try again".
-        if (outcome.failure.kind === 'cancelled') {
-          setProgress((p) => withoutProgressEntry(p, id))
+    const operationId = claimDownload(id)
+    void modelControlClient
+      .control({ type: 'download', modelId: id, operationId })
+      .then((outcome) => {
+        if (!outcome.ok) {
+          // Row cleanup is PER MODEL, not the single publication authority: a stale refusal must
+          // not paint red over the row a newer request for this same model is already filling,
+          // but another model's download starting is no reason to drop this one's error.
+          if (!ownsDownload(id, operationId)) return
+          // A refusal that IS a cancellation is not a failure, and must not be dressed as one -
+          // the same distinction the setup panel draws. It clears the row exactly like the
+          // `cancelled` result below, rather than leaving red text and a "Try again".
+          if (outcome.failure.kind === 'cancelled') {
+            setProgress((p) => withoutProgressEntry(p, id))
+            return
+          }
+          setProgress((current) => ({
+            ...current,
+            [id]: {
+              ...current[id],
+              percent: 0,
+              status: 'failed',
+              // The kind travels with the message so the card never has to re-read the message.
+              failureKind: outcome.failure.kind,
+              error: modelsFailureMessage(outcome.failure)
+            }
+          }))
           return
         }
-        setProgress((current) => ({
-          ...current,
-          [id]: {
-            ...current[id],
-            percent: 0,
-            status: 'failed',
-            // The kind travels with the message so the card never has to re-read the message.
-            failureKind: outcome.failure.kind,
-            error: modelsFailureMessage(outcome.failure)
-          }
-        }))
-        return
-      }
-      const result = outcome.value
-      if (result.status === 'completed') {
+        const result = outcome.value
+        // A cancelled download leaves no row behind. Per-model, for the reason above.
+        if (result.status === 'cancelled' && ownsDownload(id, result.operationId)) {
+          setProgress((p) => withoutProgressEntry(p, id))
+        }
+        // Publication is the single authority. A download whose projection is refused here is not
+        // lost work: the download-completed subscription calls refreshModelControl, which claims
+        // the authority itself and republishes.
+        if (!ownsProjection(result.operationId)) return
+        // Unconditional across STATUSES: `installed_not_active` and `projector_installed_not_ready`
+        // are successful DOWNLOADS - the bytes are on disk - and each carries the projection
+        // proving it. Dropping them left a finished download still listed as not installed. They
+        // are not reported as download failures here because this command only asked for the
+        // download; saying a model is installed but not active is the activation surface's job.
         applyModelControlProjection(result.projection)
-        return
-      }
-      if (result.status === 'cancelled') {
-        setProgress((p) => withoutProgressEntry(p, id))
-        applyModelControlProjection(result.projection)
-        return
-      }
-    })
+      })
   }
   const retryDownload = (id: string): void => {
     setProgress((p) => withoutProgressEntry(p, id))
@@ -516,40 +595,71 @@ export function ModelsScreen({
   const removeModel = async (id: string, label: string): Promise<void> => {
     if (!window.confirm(`Delete "${label}"? This removes its files from disk.`)) return
     setDeleting(id)
+    const operationId = claimOperation(removeOwner)
     try {
-      const outcome = await modelControlClient.control({ type: 'remove', modelId: id })
+      const outcome = await modelControlClient.control({
+        type: 'remove',
+        modelId: id,
+        operationId
+      })
       if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
-      if (outcome.value.status === 'completed') {
-        applyModelControlProjection(outcome.value.projection)
-      }
+      if (!ownsProjection(outcome.value.operationId)) return
+      // Unconditional across STATUSES, for the same reason as everywhere else: only `completed`
+      // was applied, so any other carried outcome left removed files still shown on disk.
+      applyModelControlProjection(outcome.value.projection)
     } finally {
-      setDeleting(null)
+      // Cleanup is per operation, NOT the publication authority: a newer refresh or download taking
+      // publication is no reason to leave this delete's spinner running forever.
+      if (removeOwner.current === operationId) setDeleting(null)
     }
   }
   const activateModel = async (id: string): Promise<void> => {
     if (switching) return
     setSwitchError(null)
     setSwitching(id)
+    const operationId = claimOperation(switchOwner)
     try {
       const surface = modelControlSurfaceForKind(activeKind)
       if (!surface) throw new Error(`Unsupported model control kind: ${activeKind}`)
-      let outcome = await modelControlClient.control({ type: 'activate', modelId: id, surface })
+      let outcome = await modelControlClient.control({
+        type: 'activate',
+        modelId: id,
+        surface,
+        operationId
+      })
       if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
       let result = outcome.value
       if (result.status === 'confirmation_required') {
+        // The confirmation answer carries a projection too, and declining returns early - so
+        // reconcile BEFORE asking, or a declined prompt leaves the screen on stale state. This is
+        // a WRITE, so it goes through the same single authority. The prompt itself is untouched.
+        if (ownsProjection(result.operationId)) applyModelControlProjection(result.projection)
         if (!window.confirm(`${result.confirmation.message}\n\nLoad it anyway?`)) return
+        // The SAME operationId: confirming continues one user intent rather than starting a second,
+        // so it keeps the publication authority and the lane it already holds.
         outcome = await modelControlClient.control({
           type: 'confirm-activation',
-          confirmationId: result.confirmation.confirmationId
+          confirmationId: result.confirmation.confirmationId,
+          operationId
         })
         if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
         result = outcome.value
       }
-      if (result.status === 'completed') applyModelControlProjection(result.projection)
+      if (ownsProjection(result.operationId)) applyModelControlProjection(result.projection)
+      // `Outcome.ok` means the command was CARRIED, not that the model is now active. These two
+      // statuses ARE that gap: the file is installed but the model did not become active, or the
+      // projector is installed and not ready. Each carries its own `failure`, so the reason is the
+      // engine's own, not a guess. Silently ignoring them is what made a click look like it did
+      // nothing while the backend had in fact moved - the exact defect this pass closes.
+      if (switchOwner.current === operationId && carriedButNotActive(result)) {
+        setSwitchError(modelsFailureMessage(result.failure))
+      }
     } catch (e) {
+      // Per operation: a stale refusal must not paint over the notice a newer switch owns.
+      if (switchOwner.current !== operationId) return
       setSwitchError(e instanceof Error ? e.message : "Couldn't switch model")
     } finally {
-      setSwitching(null)
+      if (switchOwner.current === operationId) setSwitching(null)
     }
   }
   const openModelSettings = (kind?: string): void => {
