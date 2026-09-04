@@ -2365,3 +2365,40 @@ modelName }` and a progress event carrying `modelId` so a cancel target exists. 
 test work is not authorized at this gate.
 
 Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
+
+## Two Pro transfer tests call a parameter the migration deleted (OPEN, test work not authorized)
+
+Direct fallout of a deletion that was reviewed and approved, not drift. `listOgamCompatibleModels`
+lost its `modelIds` parameter because enumeration moved inside the Shared library query, so these
+call sites no longer compile:
+- `desktop/pro/main/sync/__tests__/model-transfer-service.test.ts:353, :372, :395, :396, :435, :445, :501`
+- `desktop/pro/main/__tests__/model-transfer-service.integration.dbtest.ts:419`
+
+Eight errors, all in these two files, none in production code. They are NOT a mechanical signature
+fix: they pass literal ID arrays (e.g. `listOgamCompatibleModels(['gemma-4-9b'], 'ios')`) on the
+assumption that the caller supplies candidates. Enumeration is now internal, so each test needs a
+fake at the `desktopModels.transferableModels` boundary instead - a substantive rewrite.
+
+They are worth keeping rather than deleting, particularly the windows/macos platform-blocker pair at
+`:435`/`:445`, which covers real cross-platform eligibility. Left untouched because test work is not
+authorized at this gate and nothing may be weakened or removed to make a count look better.
+
+## Transfer registration guard fires after promotion, not before (OPEN, follow-up by decision)
+
+Today's guard refuses when the caller's directory is not the active library, but it runs at
+REGISTRATION - after bytes have been promoted - which is why `rollbackPromotedFiles`
+(`desktop/pro/main/sync/model-transfer-service.ts:334-340`) has to exist. Checking the expected
+library BEFORE promoting would make the mismatch unreachable instead of recoverable.
+
+Deliberately NOT folded into the transfer typing migration: moving the check changes when bytes hit
+disk, so it needs its own live and failure-path evidence rather than riding along in a contract
+change. If taken, the check belongs at `planInstall` (`:180`), before `prepareFile` opens anything.
+Parity with today's late guard is preserved until then.
+
+Note the incoming Shared contract already narrows the risk considerably: the register service
+compares the expected library identity before file validation AND again after the async validation
+and catalog reads, before any registry write, which closes the root-changed-during-validation window
+that today's single check cannot see. This follow-up is about avoiding the rollback entirely, not
+about the comparison being wrong.
+
+Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
