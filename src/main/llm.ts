@@ -184,6 +184,14 @@ export class LLMService {
   // a server that keeps dying (e.g. memory pressure on a too-large model) can NOT
   // thrash-respawn a multi-GB process forever.
   private restartTimes: number[] = []
+  // Launch-setting restarts are serialized and last-wins. A slider drag or a fast
+  // sequence of settings writes used to call stop()+init() once per change, so several
+  // spawns raced and an EARLIER one could win and leave the engine running arguments the
+  // user had already moved past. Each request takes the next id; a request whose id is no
+  // longer the latest is superseded and never spawns, and at most one spawn is ever in
+  // flight.
+  private launchRestartRequest = 0
+  private launchRestartQueue: Promise<void> = Promise.resolve()
   // Last ~50 stderr lines from llama-server, so we can explain WHY it died on
   // load (unknown arch / OOM / OS-too-old) instead of a blank "Down".
   private stderrTail: string[] = []
@@ -486,10 +494,23 @@ export class LLMService {
         this.getSettings() as Record<string, unknown>
       )
     }
-    if (launchChanged && !this.paused) {
+    if (launchChanged && !this.paused) await this.restartForLaunchChange()
+  }
+
+  /** The engine owns restart policy: one spawn at a time, and the newest settings win. */
+  private async restartForLaunchChange(): Promise<void> {
+    const request = ++this.launchRestartRequest
+    const run = this.launchRestartQueue.then(async () => {
+      // A newer launch change is already queued and will spawn with the newest arguments,
+      // so this one has nothing left to do.
+      if (request !== this.launchRestartRequest) return
       this.stop()
       await this.init()
-    }
+    })
+    // The queue itself must never carry a rejection: a failed respawn is reported to the
+    // caller that asked for it, and the next request still gets its turn.
+    this.launchRestartQueue = run.catch(() => {})
+    await run
   }
 
   // Resolve the active model's files. The Models screen writes active-model.json
