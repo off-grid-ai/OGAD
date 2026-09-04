@@ -124,6 +124,7 @@ export function PermissionGate({ children }: PermissionGateProps): React.JSX.Ele
               issue={captureReadiness.projection.kind}
               modelName={captureReadiness.projection.modelName}
               progress={captureReadiness.progress}
+              failure={captureReadiness.failure}
               onOpen={() => void captureReadiness.repair()}
               onDismiss={() => setSetupDismissed(true)}
             />
@@ -254,6 +255,7 @@ function SetupNudge({
   issue,
   modelName,
   progress,
+  failure,
   onOpen,
   onDismiss
 }: {
@@ -262,6 +264,7 @@ function SetupNudge({
   issue?: RepairableCaptureProjection['kind']
   modelName?: string | null
   progress?: ProgressLike | null
+  failure?: string | null
   onOpen: () => void
   onDismiss: () => void
 }): React.JSX.Element | null {
@@ -339,6 +342,13 @@ function SetupNudge({
       <div className="text-xs leading-tight">
         <div className="font-medium text-foreground">{title}</div>
         <div className="text-muted-foreground">{detail}</div>
+        {failure ? (
+          // The reason the last attempt failed, next to the button that will retry it. Without
+          // this the user reads a re-enabled button as "the click did nothing".
+          <div role="status" className="mt-1 text-red-400">
+            {failure}
+          </div>
+        ) : null}
         {presentedProgress ? (
           <div className="mt-1 tabular-nums text-muted-foreground">
             {presentedProgress.totalBytes !== undefined
