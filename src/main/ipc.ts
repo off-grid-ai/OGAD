@@ -458,7 +458,7 @@ export async function evaluateAndStoreMemoryForMessage(params: {
     if (params.sessionId) {
       const existingMemories = getMemoryRecordsForSession(params.sessionId)
       const memLower = memoryText.toLowerCase()
-      const isDuplicate = existingMemories.some((m: any) => {
+      const isDuplicate = existingMemories.some((m) => {
         const existing = (m.content || '').toLowerCase()
         return existing === memLower || existing.includes(memLower) || memLower.includes(existing)
       })
@@ -485,7 +485,7 @@ async function extractEntitiesForSession(sessionId: string): Promise<void> {
   // Get strictness setting
   const strictness = getSetting<'lenient' | 'balanced' | 'strict'>('entityStrictness', 'balanced')
 
-  const memoryText = memories.map((m: any) => `- ${m.content}`).join('\n')
+  const memoryText = memories.map((memory) => `- ${memory.content}`).join('\n')
 
   const prompt = getPrompt(`entityExtraction.${strictness}`, { MEMORY_TEXT: memoryText })
 
@@ -566,7 +566,7 @@ export async function summarizeSession(sessionId: string): Promise<string | null
   if (memories.length === 0) return null
 
   const conversationText = memories
-    .map((m: any) => `[${m.role || 'unknown'}]: ${m.content}`)
+    .map((memory) => `[${memory.role || 'unknown'}]: ${memory.content}`)
     .join('\n')
   const prompt = getPrompt('sessionSummary', { CONVERSATION_TEXT: conversationText })
 
@@ -596,7 +596,7 @@ export async function summarizeSession(sessionId: string): Promise<string | null
   }
 }
 
-export function setupIPC() {
+export function setupIPC(): void {
   setupSpeechPlaybackIpc()
   setupSpeechMicrophoneIpc()
   setupSpeechTextCleaningIpc()
@@ -612,7 +612,7 @@ export function setupIPC() {
 
   ipcMain.handle('db:get-memories', (_, limit: number = 50, appName?: string) => {
     let query = 'SELECT * FROM memories '
-    const params: any[] = []
+    const params: unknown[] = []
 
     const memFilter = appNameLikeClause(appName, 'source_app')
     if (memFilter) {
@@ -1220,7 +1220,7 @@ export function setupIPC() {
   )
   ipcMain.handle(
     'rag:add-message',
-    (_, conversationId: string, role: 'user' | 'assistant', content: string, context?: any) => {
+    (_, conversationId: string, role: 'user' | 'assistant', content: string, context?: unknown) => {
       // A reply that was streamed is already named, and keeps that name: every paired device has been
       // rendering it under this id, so the arriving record retires their live preview instead of
       // standing beside it. Read from the one owner of "what this device is generating", so no caller
@@ -1256,7 +1256,7 @@ export function setupIPC() {
   // App version (for the Settings footer — so users know what build they're on).
   ipcMain.handle('app:version', () => app.getVersion())
 
-  ipcMain.handle('settings:save', (_, key: string, value: any) => {
+  ipcMain.handle('settings:save', (_, key: string, value: unknown) => {
     if (key === COMPUTER_USE_SETTINGS_KEY) setComputerUseSettings(value)
     else saveSetting(key, value)
     console.log(`[IPC] Setting saved: ${key} =`, value)
