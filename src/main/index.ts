@@ -57,6 +57,7 @@ import { localMediaRoots } from './media-roots'
 import { resourceDirs } from './runtime-env'
 import { beginProductIdentityBootstrap } from './product-identity-lifecycle'
 import { repairMissingDefaultKeychainAtBootstrap } from './secure-storage-bootstrap'
+import { runIndependentStartupStages, runStartupStage } from './startup-stages'
 import {
   flushDiagnosticLog,
   installDiagnosticConsoleCapture,
@@ -405,88 +406,171 @@ app.whenReady().then(async () => {
   })
 
   // 2. Setup IPC Handlers (core) + the local model gateway
-  try {
-    installIpcDiagnostics(ipcMain)
-    // Licensing first: load the cached Keygen entitlement into memory and register
-    // the SYNC `pro:is-enabled` handler BEFORE createWindow() (line below) so the
-    // preload's sendSync resolves and window.api.isPro reflects the real license.
-    await loadProEntitlementProvider()
-    initLicensing()
-    await revalidateProEntitlement('launch')
-    setupLicenseIpc()
-    const entitlementRefresh = setInterval(() => {
-      refreshCachedProEntitlement()
-      void revalidateProEntitlement('foreground')
-    }, PERSONAL_MESH_ENTITLEMENT_REVALIDATION_INTERVAL_MS)
-    entitlementRefresh.unref()
-    applicationShutdown.register({
-      name: 'pro:entitlement-refresh',
-      shutdown: () => clearInterval(entitlementRefresh)
-    })
-    setupIPC()
-    await import('./composition/application').then(({ startDesktopApplication }) =>
-      startDesktopApplication()
-    )
-    await import('./rag-ipc').then(({ setupRagIPC }) => setupRagIPC())
-    setupMcpIpc() // basic MCP connectors (management + chat tool extension)
-    registerNativeActionTools(registerToolExtension) // the assistant's tools (macOS full set; Windows Outlook subset)
-    const { registerActionsIpc } = await import('./actions/actions-ipc')
-    registerActionsIpc() // Approval UX v2: inline gate cards + outcome/undo feed
-    const { registerBrowserViewIpc } = await import('./browser/browser-host')
-    registerBrowserViewIpc() // dock the live browser view to the pane's region
-    const { registerVisionIpc } = await import('./vision/vision-controller')
-    registerVisionIpc() // the vision rail's supervisor Stop/Pause/Resume
-    const { registerSupervisorWindowIpc } = await import('./vision/supervisor-window')
-    registerSupervisorWindowIpc()
-    const { registerTaskHistoryIpc } = await import('./tasks/task-history-ipc')
-    registerTaskHistoryIpc() // one durable Web Use + Computer Use history
-    setupDesktopBackupIPC()
-    // Repair legacy catalog classifications before any runtime reads the active chat model.
-    // A specialist such as Holo must never start as the normal text model after an upgrade.
-    const modelManager = await import('./models-manager')
-    await modelManager.reconcileActiveModelClassification().catch(() => false)
-    await modelManager.reconcileActiveModelProjector().catch(() => false)
-    // one OpenAI-compatible local gateway (LLM + STT); auto-picks a free port. Async, so handle a
-    // rejection on the promise (a try/catch around a fire-and-forget async call can't catch it).
-    startModelServer().catch((e) => console.error('[model-server] start failed', e))
-    startMediaServer() // loopback HTTP for seekable local media (meeting videos)
-    ipcMain.handle('media:url', (_e, absPath: string) => mediaUrlFor(absPath))
-    // (clipboard is now a pro feature — setupClipboard runs in pro's activateMain)
-    // Pro features (capture, CRM, meetings, connectors, secretary, proactive,
-    // skills engine, console, tray) register their own IPC + intervals/capture loop
-    // here. No-op in the free build (the pro submodule is absent → stub).
-    void loadProFeaturesMain().catch((e) => console.error('[pro] load failed', e))
-    // Demo seeder for testing: OFFGRID_SEED=1 seeds once; OFFGRID_SEED=force re-seeds.
-    if (process.env.OFFGRID_SEED) {
-      void import('./dev-seed')
-        .then((m) => m.seedDemo(process.env.OFFGRID_SEED === 'force'))
-        .catch((e) => console.error('[seed]', e))
-    }
-  } catch (e) {
-    console.error('FATAL: IPC Setup failed', e)
-  }
-
-  // 3. Initialize LLM (Async)
-  // We don't await this to avoid blocking window creation
-  import('./composition/application-access').then(({ desktopModels, modelsFailureMessage }) => {
-    desktopModels
-      .prepare('text')
-      .then((outcome) => {
-        if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
-      })
-      .catch((err) => console.error('Failed to init LLM:', err))
+  //
+  // Startup is an explicit dependency graph, not a chain of bare awaits. The first window used to
+  // wait for an ONLINE licence revalidation and then for eleven sequential dynamic imports, and a
+  // single throw anywhere in the block skipped every registration after it under one FATAL line.
+  // Now: the required local steps run in order, the independent ones run together, each has a
+  // deadline and a typed result, and nothing network-bound is waited on before the shell opens.
+  installIpcDiagnostics(ipcMain)
+  // Licensing first, from the CACHED entitlement: this is the local authorization decision, and
+  // the SYNC `pro:is-enabled` handler must exist before createWindow() so the preload's sendSync
+  // resolves and window.api.isPro reflects the real licence rather than a default.
+  await runStartupStage({
+    name: 'pro.entitlement.load-cached',
+    deadlineMs: 5_000,
+    domain: 'sync',
+    run: () => loadProEntitlementProvider()
   })
+  initLicensing()
+  setupLicenseIpc()
+  const entitlementRefresh = setInterval(() => {
+    refreshCachedProEntitlement()
+    void revalidateProEntitlement('foreground')
+  }, PERSONAL_MESH_ENTITLEMENT_REVALIDATION_INTERVAL_MS)
+  entitlementRefresh.unref()
+  applicationShutdown.register({
+    name: 'pro:entitlement-refresh',
+    shutdown: () => clearInterval(entitlementRefresh)
+  })
+  setupIPC()
+  // The application root owns the six domains every other registration below reads through, so
+  // this one stays ordered. It publishes its own degradation, hence no `domain` here.
+  await runStartupStage({
+    name: 'application.start',
+    deadlineMs: 20_000,
+    run: () =>
+      import('./composition/application').then(({ startDesktopApplication }) =>
+        startDesktopApplication()
+      )
+  })
+  setupMcpIpc() // basic MCP connectors (management + chat tool extension)
+  registerNativeActionTools(registerToolExtension) // the assistant's tools (macOS full set; Windows Outlook subset)
+  setupDesktopBackupIPC()
+  ipcMain.handle('media:url', (_e, absPath: string) => mediaUrlFor(absPath))
+  // Nothing below depends on anything else below it: these are separate domains registering their
+  // own handlers, so their import and setup latency is paid once, not eleven times over.
+  await runIndependentStartupStages([
+    {
+      name: 'rag.ipc',
+      deadlineMs: 10_000,
+      domain: 'rag',
+      run: () => import('./rag-ipc').then(({ setupRagIPC }) => setupRagIPC())
+    },
+    {
+      name: 'actions.ipc', // Approval UX v2: inline gate cards + outcome/undo feed
+      deadlineMs: 10_000,
+      domain: 'automation',
+      run: () => import('./actions/actions-ipc').then((m) => m.registerActionsIpc())
+    },
+    {
+      name: 'browser.view.ipc', // dock the live browser view to the pane's region
+      deadlineMs: 10_000,
+      domain: 'use',
+      run: () => import('./browser/browser-host').then((m) => m.registerBrowserViewIpc())
+    },
+    {
+      name: 'vision.ipc', // the vision rail's supervisor Stop/Pause/Resume
+      deadlineMs: 10_000,
+      domain: 'use',
+      run: () => import('./vision/vision-controller').then((m) => m.registerVisionIpc())
+    },
+    {
+      name: 'vision.supervisor-window',
+      deadlineMs: 10_000,
+      domain: 'use',
+      run: () => import('./vision/supervisor-window').then((m) => m.registerSupervisorWindowIpc())
+    },
+    {
+      name: 'tasks.history.ipc', // one durable Web Use + Computer Use history
+      deadlineMs: 10_000,
+      domain: 'automation',
+      run: () => import('./tasks/task-history-ipc').then((m) => m.registerTaskHistoryIpc())
+    },
+    {
+      // Repair legacy catalog classifications before any runtime reads the active chat model.
+      // A specialist such as Holo must never start as the normal text model after an upgrade.
+      name: 'models.classification.reconcile',
+      deadlineMs: 15_000,
+      domain: 'models',
+      run: async () => {
+        const modelManager = await import('./models-manager')
+        await modelManager.reconcileActiveModelClassification()
+        await modelManager.reconcileActiveModelProjector()
+      }
+    }
+  ])
 
   createWindow()
 
-  // Update IPC is always registered (the renderer queries staged-version on startup
-  // in every build); the auto-download engine runs production-only (dev has no feed).
-  import('./updater')
-    .then((m) => {
-      m.registerUpdateIpc()
-      if (!is.dev) m.startAutoUpdates()
+  // Everything below runs BESIDE the open window. None of it may hold the shell closed: the
+  // licence revalidation is network-bound, and the rest is optional or recoverable. Each one is
+  // still bounded and each one's failure is observable - a background step is not a silent step.
+  void runIndependentStartupStages([
+    {
+      // The online licence check. The cached entitlement above already decided what this launch
+      // is allowed to do; this confirms it, and expiry or revocation reaches every window through
+      // the licence change notifier, which also shuts Pro features down. Enforcement is
+      // unchanged - it is reactive rather than a precondition for opening a window.
+      name: 'pro.entitlement.revalidate',
+      deadlineMs: 30_000,
+      domain: 'sync',
+      run: () => revalidateProEntitlement('launch')
+    },
+    {
+      // one OpenAI-compatible local gateway (LLM + STT); auto-picks a free port
+      name: 'models.gateway.start',
+      deadlineMs: 30_000,
+      domain: 'models',
+      run: () => startModelServer()
+    },
+    {
+      // Load the text model. Heavy and entirely optional to having a window: chat says so itself
+      // when no model is ready.
+      name: 'models.text.prepare',
+      deadlineMs: 180_000,
+      domain: 'models',
+      run: async () => {
+        const { desktopModels, modelsFailureMessage } =
+          await import('./composition/application-access')
+        const outcome = await desktopModels.prepare('text')
+        if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
+      }
+    },
+    {
+      name: 'media.server.start', // loopback HTTP for seekable local media (meeting videos)
+      deadlineMs: 10_000,
+      run: async () => startMediaServer()
+    },
+    {
+      // Pro features (capture, CRM, meetings, connectors, secretary, proactive, skills engine,
+      // console, tray) register their own IPC + intervals/capture loop here. No-op in the free
+      // build (the pro submodule is absent → stub).
+      name: 'pro.features.load',
+      deadlineMs: 30_000,
+      run: () => loadProFeaturesMain()
+    },
+    {
+      // Update IPC is always registered (the renderer queries staged-version on startup in every
+      // build); the auto-download engine runs production-only (dev has no feed).
+      name: 'updater.ipc',
+      deadlineMs: 15_000,
+      run: () =>
+        import('./updater').then((m) => {
+          m.registerUpdateIpc()
+          if (!is.dev) m.startAutoUpdates()
+        })
+    }
+  ])
+
+  // Demo seeder for testing: OFFGRID_SEED=1 seeds once; OFFGRID_SEED=force re-seeds.
+  if (process.env.OFFGRID_SEED) {
+    void runStartupStage({
+      name: 'dev.seed',
+      deadlineMs: 120_000,
+      run: () => import('./dev-seed').then((m) => m.seedDemo(process.env.OFFGRID_SEED === 'force'))
     })
-    .catch((e) => console.error('[update] init', e))
+  }
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
