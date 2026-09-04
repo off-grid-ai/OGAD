@@ -2026,3 +2026,298 @@ constraint never fired; the live table had 19 duplicated (title, start) groups. 
 schema bootstrap that rewrites keys and merges rows (freshest linked row wins, empty fields filled).
 Tests: `calendar-identity.test.ts`, `calendar-repair.integration.test.ts` (real SQLite). Verify live after
 restart: Today's Meetings lists each event once.
+
+## Desktop composes model-library application services outside `@offgrid/application` (open, 2026-09-04)
+
+`src/main/composition/model-library.ts` directly constructs `ModelLibraryRemovalService`,
+`ModelMetadataRepairCommandService`, `LocalModelImportService`, and
+`ModelTransferRegistrationService` from `@offgrid/models`. The implementations are shared, but the
+Desktop composition root remains a second public application interface beside `ModelsFacade`.
+
+Deletion condition: move portable removal, metadata repair, local import, and transfer-registration
+orchestration behind typed `ModelsFacade` commands and projections; keep only filesystem, registry,
+runtime, and transport ports in Desktop; migrate all production callers; delete this service
+composition; and make the Desktop model architecture gate reject its reconstruction.
+
+## Renderer composes a second model-control and capture-readiness application (open, 2026-09-04)
+
+### Current production control planes
+
+`src/renderer/src/composition/model-control.ts` constructs
+`ModelControlApplicationService` in the renderer. The service then implements portable model policy
+over eight legacy preload commands: `models:control-snapshot`, `system:estimate-fit`,
+`models:activate`, `models:set-active-modal`, `models:download`, `models:cancel-download`,
+`runtime:unload`, and `models:delete`. This is a second application service beside the root
+`ModelsFacade`; it reduces typed `Outcome` failures to booleans and strings and re-reads an app-built
+projection after each command.
+
+The live intents and consumers are:
+
+- `refresh`: Models, Active Models, Storage, Settings active-model summary, Capture Readiness, and
+  Pro transcription screens;
+- `select(surface, modelId | null)`: Image settings, Memory Chat image selection, Settings
+  transcription selection, Meetings transcription selection, and Pro computer-use selection;
+- `activate(modelId, surface)`: Models, Active Models, Storage, Pro transcription, and computer-use;
+- `download(modelId)` and `install-and-activate(modelId, surface)`: Models, Pro transcription, and
+  capture projector repair;
+- `cancel-download(modelId)`: Models, Storage, Setup, and Pro transcription;
+- `unload(surface)`: Active Models;
+- `remove(modelId)`: Models and Storage;
+- direct legacy commands outside the service: Storage also calls retry, clear-one, clear-inactive,
+  and delete through `window.api`.
+
+Four current user-facing behaviors are not safe to preserve as contracts:
+
+1. `overrideMemory` only skips `system:estimate-fit`. The following `models:activate` call selects a
+   route; it does not pass an override into Shared residency admission and does not prove the model
+   loaded. The UI can therefore say that the user chose "Load anyway" while the next real use still
+   refuses the load.
+2. `runtime:unload` calls the facade unload command with its default `keepSelection: false`, but the
+   Active Models UI says "frees RAM; reloads on next use". The command and the customer-visible
+   promise disagree.
+3. `estimateModelFit` catches catalog, resolver, and transport failures and returns `{ level: 'ok' }`.
+   An unavailable assessment is therefore presented as authoritative permission to load.
+4. Capture Readiness repairs a missing projector through the generic raw `downloadModel` IPC call.
+   It can neither express projector-only repair nor inspect a typed Models failure. The service then
+   returns `projector_downloaded` from the command result without re-reading and proving vision ready.
+
+`src/renderer/src/composition/capture-readiness.ts` is a second related control plane. It constructs
+`CaptureReadinessApplicationService` from `@offgrid/models`, joins Capture status, model-control
+state, projector status, a direct `downloadModel` repair command, and renderer navigation. Capture
+state and navigation do not belong in `ModelsFacade`; model facts and projector repair do.
+
+### Exact Shared contract request
+
+Add one root-owned command to `ModelsFacade`:
+
+```ts
+type ModelControlIntent =
+  | { type: 'refresh'; operationId?: string }
+  | { type: 'select'; surface: ModelControlSurface; modelId: string | null; operationId?: string }
+  | { type: 'activate'; surface: ModelControlSurface; modelId: string; operationId?: string }
+  | { type: 'confirm-activation'; confirmationId: string; operationId?: string }
+  | { type: 'download'; modelId: string; operationId?: string }
+  | { type: 'install-and-activate'; surface: ModelControlSurface; modelId: string; operationId?: string }
+  | { type: 'cancel-download'; modelId: string; operationId?: string }
+  | { type: 'retry-download'; modelId: string; operationId?: string }
+  | { type: 'clear-download'; modelId: string; operationId?: string }
+  | { type: 'clear-inactive-downloads'; operationId?: string }
+  | { type: 'unload'; surface: Exclude<ModelControlSurface, 'computer_use'>; keepSelection: true; operationId?: string }
+  | { type: 'remove'; modelId: string; operationId?: string }
+
+type ModelControlSuccess =
+  | { status: 'completed'; projection: ModelControlProjection }
+  | { status: 'cancelled'; projection: ModelControlProjection }
+  | { status: 'confirmation_required'; confirmation: ModelLoadConfirmation }
+  | { status: 'installed_not_active'; projection: ModelControlProjection; failure: ModelsFailure }
+
+control(intent: ModelControlIntent): Promise<Outcome<ModelControlSuccess, ModelsFailure>>
+```
+
+`ModelLoadConfirmation` must be an opaque, single-use confirmation bound to model identity, modality,
+the current residency revision, and the measured advice. Do not expose a caller-controlled
+`overrideMemory: boolean`. A confirmed activation must recheck current memory state, apply the real
+residency override to `load`/`prepare`, and report ready only after the model is ready. If admission or
+preparation fails, do not claim activation. Preserve or restore the previous selection. For
+`install-and-activate`, a successful durable install followed by failed activation must return the
+typed `installed_not_active` state rather than flattening the partly completed journey into a string.
+
+Shared already has the required command primitives: `refresh`, `select`, `activate`, `prepare`,
+`memoryAdvice`, `unload`, `downloadAndWait`, `retryDownload`, `cancelDownload`, `clearDownload`,
+`clearInactiveDownloads`, `repair`/`repairProjector`, and `remove`. The new work is one aggregate owner
+that orders these commands and keeps their typed outcomes. A `download(modelId)` intent also needs to
+resolve the model ID through the already injected download-source port; Desktop must not manufacture
+a `PublicDownloadRequest` above the facade. The existing model-library gap must supply the `remove`
+port before removal can migrate.
+
+Do not add renderer restart or eject intents. No current renderer consumer requests them. Restart is
+a residency-aware recovery command, eject is a shutdown or memory-pressure command, and unload is
+the only current user intent. Keep these three meanings separate.
+
+The canonical control projection must be a stable branch of `ModelsSnapshot`, so normal facade
+subscription supplies updates for inventory, selection, lifecycle, and downloads without a second
+event store or a re-read after every event. It needs the current Desktop catalog facts used by the
+screens: model ID, display name, kind, source ID, engine, description, artifacts (name, role, size,
+URL), remote route IDs, grounder, availability and reason, organization, parameters, minimum RAM,
+newness, image modes, tags, release date, quantization, and capabilities. Add one bounded asynchronous
+platform catalog-facts port at the root; Shared owns projection identity and refresh order. Reuse the
+existing `ModelsEvent` command and download lifecycle events with operation IDs. Do not add a parallel
+model-control event stream.
+
+Computer-use strategy, strategy label, and role assignments are Automation facts. Remove them from
+the generic model-control projection. The computer-use settings surface must join the Models
+inventory/selection projection with the Automation projection at the application/UI boundary instead
+of teaching `ModelsFacade` about an Automation strategy.
+
+Capture readiness needs a separate application-root owner (or an exported `@offgrid/application`
+factory), not more members on the model command. That owner must join the Capture projection with the
+Models projection. Its projector repair must call the typed Models repair command. A missing model
+choice returns a typed `open_model_picker` UI effect; navigation stays in the renderer. It must not
+construct `CaptureReadinessApplicationService` from `@offgrid/models` or call `window.api.downloadModel`
+directly.
+
+### Deletion and enforcement conditions
+
+This gap closes only when all real callers use the root facade client/projection and these files and
+routes are deleted: `src/renderer/src/composition/model-control.ts`,
+`src/renderer/src/lib/model-control-application.ts`,
+`src/renderer/src/composition/capture-readiness.ts`, the legacy model-control IPC projection and fit
+handler, and the corresponding preload methods. `ModelControlApplicationService` must have zero app
+imports or constructions. `CaptureReadinessApplicationService` must have zero renderer constructions.
+Storage must have zero direct retry/clear/delete model IPC calls. Computer-use projection facts must
+have zero references in Models control contracts.
+
+Extend `scripts/verify-model-architecture.mjs` with AST checks that reject:
+
+- app imports or construction of `ModelControlApplicationService`,
+  `CaptureReadinessApplicationService`, or other `@offgrid/models` application services;
+- renderer calls to the legacy preload methods and main/preload registration of their IPC channels;
+- app construction of a model-control projection or `PublicDownloadRequest`;
+- `overrideMemory` booleans and success/error boolean wrappers at this boundary;
+- Automation/computer-use strategy types in the Models control projection.
+
+Real integration proof must cover: stable reactive projection identity; selection for every surface;
+memory confirmation then real admitted load; stale or replayed confirmation refusal; preparation
+failure with previous selection preserved; download, retry, cancel, and clearing; install success plus
+activation failure; unload with selection retained and a later lazy reload; removal with active and
+downloading models; projector repair; Capture stopped/paused/ready/missing-projector/missing-model
+states; observer failure isolation; and no success-shaped result for any failed I/O or typed Outcome.
+
+## Desktop Sync startup reports a missing service port (RESOLVED 2026-09-04)
+
+A real Desktop launch opened the shell in degraded mode with: `sync: ServiceConfig requires 'port'
+property to be set`. Current Shared source and the current `@offgrid/sync` distribution select the
+stored Desktop port (falling back to `37878`), assign it to the local device before transport and
+discovery start, and have a focused application-start test for that order. The observed launch must
+therefore remain open as either a stale-bundle defect or an uncovered second configuration path.
+
+Closed with both forms of proof. After a dependency-ordered Shared build, the focused Sync startup
+suite passed 10/10, including the exact listener/advertisement port invariant and the fresh-device
+placeholder case. A fresh Desktop development build then started Sync without the red degraded banner
+or the missing-port error. The original screenshot came from a Desktop bundle built before the
+corrected Shared Sync distribution.
+
+## Terminal interrupt can double-signal llama-server during development shutdown (RESOLVED 2026-09-04, live verified)
+
+Normal Quit and terminal Ctrl+C were checked as separate journeys against the current development
+build while a text/vision llama-server, dictation hotkey helper, and Pro proximity helper were live.
+
+Normal macOS Quit was sent as the application Quit event, not as a process signal. Electron entered
+its real `before-quit`/`will-quit` path and exited with code 0. The log recorded cancellation of the
+active model operation, reset/cancellation of both utility windows, and
+`facade_activation_stopped`. Electron, electron-vite, llama-server, the dictation helper, and the
+proximity helper were all absent immediately after exit and remained absent after the dictation
+helper's 500 ms respawn window. No shutdown failure, model-server respawn, or dictation respawn was
+reported. This proves that the production Quit path owns shutdown correctly.
+
+Ctrl+C reproduced the development-only cause. electron-vite, Electron, llama-server, and the helper
+shared the terminal foreground process group, so the terminal delivered SIGINT directly to every
+process. llama-server logged `cleaning up before exit`, then the development parent closed and its
+final captured exit was `signal SIGHUP`. The helper received SIGINT and logged `respawning` because
+its intentional ownership-handoff signal is SIGTERM; its 500 ms timer never fired because Electron
+exited. A process check immediately and two seconds later found no Electron, electron-vite,
+llama-server, dictation helper, or proximity helper.
+
+No production change is justified. Changing normal shutdown to compensate for a terminal foreground
+process-group signal would risk the verified in-app Quit path. The Ctrl+C message is noisy but leaves
+no process, port, or hotkey owner behind. If developer shutdown output must become quiet later, that
+belongs in the development launcher, which must translate one terminal interrupt into the normal
+application Quit event before it closes the process group.
+
+## Pro model transfer still imports the concrete parent manager (OPEN, blocked on one Shared query)
+
+`desktop/pro/main/sync/model-transfer-service.ts` imports `getTransferableModel` and
+`registerTransferredModel` from `@offgrid/core/main/models-manager`, so Pro reaches around the
+facade into Desktop's concrete manager. Traced across all four paths, twice, by two independent
+passes that both stopped without editing rather than closing half the boundary:
+
+- compatible-model listing (`:551`), send (`:427`) and receive (`:189`) all funnel through
+  `getTransferableModel`. None can close today.
+- registration (`:327`) CAN close - `models-manager.ts:991 registerTransferredModel` is a thin
+  wrapper that already delegates to `desktopModels.registerTransfer({ manifest })`, and the wrapper
+  flattens `Outcome<…, ModelsFailure>` to `{ success, error: string }` which Pro then re-wraps in a
+  bare `Error`, so migrating it also recovers a typed failure. Its active-model-directory check must
+  be preserved when the wrapper is removed, and the wrapper may only be deleted after its other
+  consumers migrate.
+
+Closing only registration would leave the import and both symbols in the file, which is the
+"one path closed, one open" state that reads as done and is not. So nothing was changed.
+
+MISSING CAPABILITY, the whole blocker: one application query for transferable-model inventory.
+Shared must own inventory precedence and transfer eligibility - the real policy at
+`desktop/src/main/models-manager.ts:944` resolves across three inventories (local registry,
+`reconcileDownloadedModelRegistry`, `CATALOG`), applies eligibility (`runtime !== 'mflux'`,
+`artifactDelivery !== 'runtime'`), decides name/kind/familyId precedence, and verifies files on
+disk. Reimplementing it in Pro is a second owner; wiring the composition root back to the parent
+manager only relocates the import. The manifest projection half is already correctly Shared (Pro
+imports `projectTransferredModelManifest` from `@offgrid/models`), so inventory resolution is the
+only hop still parent-concrete.
+
+Contract requirements gathered before freezing it, all confirmed against source:
+- `TransferableModelProjectionInput` alone is NOT enough. It carries file names and sizes, but the
+  sender reads each file's `path`, and the existing transferable result also carries
+  `packageIdentity`. Multi-file identity and checksum validation must survive.
+- Host file access stays behind the existing platform boundary; local paths must not leak into a
+  renderer or a peer payload.
+- Return a typed `Outcome`, consistent with the facade. A known non-transferable or absent model
+  must be distinguishable from an I/O or registry failure - a failed read must NEVER become an
+  empty compatible-model list.
+- A facade wrapper that merely delegates the whole existing Desktop decision to a host callback
+  does not close ownership.
+
+Next: one Shared owner writes and freezes the query; one Pro owner then consumes it and deletes the
+import and both symbols. Not concurrent, and not before the contract is frozen.
+
+## Activation resolve re-reads Shared's own record through the facade holding it (OPEN, Shared-side)
+
+Route/kind policy is already single-owner and correct: `runtimeModalityForModelKind` exists only in
+`packages/models/src/registry/activation-service.ts`, Desktop never maps kind to modality, and
+`resolveDesktopActivation` returns inventory facts only. Nothing is duplicated and nothing in
+Desktop needs deleting.
+
+The residue is one back-edge of the same class as the closed `model-lifecycle.ts` slice. The port is
+facade-held (`src/main/composition/application.ts:47` injects `activation: { resolve }` and
+`models-facade.ts` constructs `ModelActivationService` with it), and its remote branch does
+`desktopModels.lookup(modelId)` - re-entering the facade to read a `RuntimeModel` that Shared's own
+`workspace.lookup` already holds, complete with id, kind, modality and source. Shared asks Desktop
+for a fact Shared has.
+
+Cannot be closed from Desktop: deleting the branch makes remote activation return `null` and fail as
+`unknown_model`. The fix is Shared-side - resolve the registered-route case from `workspace.lookup`
+inside the facade before consulting the injected port, then narrow `activation.resolve` to the facts
+Shared genuinely lacks (catalog / HuggingFace / local-import kind, and `supportsRequestedKind`) and
+delete Desktop's remote branch in the SAME slice. Failure behaviour to preserve: an unknown
+identifier still resolves to `unknown_model` -> typed `ModelsFailure`, and a selection failure keeps
+`selection_failed` with its modality.
+
+## Guided setup: typed failure now reaches the surface; the consumer path is still being closed
+
+RESOLVED in Shared (shared `8087d32`, `4bf6022`; desktop `789ee131`). Recorded here because the fix
+spanned four separate dishonesty points that each looked closed on their own:
+
+1. The facade held a port that called back into itself. Desktop supplied all five guided-setup
+   effects by calling `desktopModels`, and `application.ts` passed that object into `desktopModels`
+   - a second control plane over download, activation and residency reachable only from setup, with
+   no ordering against other callers and a `startChat` that respawned llama-server with no
+   residency admission. The facade now composes the effects from owners it already holds; Desktop
+   supplies device facts only.
+2. Download progress was dropped. The service passes an `onProgress` that both the old Desktop
+   implementation and the first migration attempt ignored, so the percentage never moved. Now
+   forwarded from the download owner's snapshot and disposed in `finally`, including on a throw.
+3. Cancellation read as failure - see the download-chain commit. Fixed producer-first.
+4. A comment claimed downstream callers could classify a failure without parsing a string while
+   `runRequiredStep` read only `Error.message`. The claim was removed, then the limitation was
+   actually fixed rather than documented.
+
+One trap worth keeping: the first typed-failure design carried the cause as an `Error` subclass with
+a `failure` field. That does not survive the IPC hop to the setup screen - structured cloning keeps
+plain data and silently discards a subclass's own fields - so a narrowing on the renderer side would
+have compiled and never matched. Anything crossing IPC must be plain cloneable data.
+
+STILL OPEN (Desktop consumer path, in progress): `src/main/setup.ts` declares `autoConfigure` as
+`{ success, error?, modelId?, modelName? }`, erasing status and the typed failure; and
+`SetupPanel.tsx` discards the result entirely, firing `onConfigured` on the `done` progress phase -
+which Shared also emits for `warming_up`, so the app reports "configured" before the server has
+answered its health check.
+
+Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
