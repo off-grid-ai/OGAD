@@ -39,19 +39,20 @@ const TRANSFERRED_MODEL = {
 /** The real DOWNLOAD_INTERRUPTED_ERROR string the main process returns for a refused request. */
 const INTERRUPTED = 'interrupted - retry to resume'
 
+/**
+ * What the main process actually publishes: raw coordinator facts. The percent, the human byte
+ * scale, the rate and the ETA are all DERIVED by the production `useModelDownloadProgress` hook, so
+ * this suite feeds the real channel shape and lets that projection run rather than hand-feeding a
+ * pre-computed percent the channel no longer carries.
+ */
 type ProgressEvent = {
+  downloadId: string
   modelId: string
-  percent?: number
-  status?: string
-  currentFile?: string
-  error?: string
-  downloadedMB?: string
-  totalMB?: string
-  downloadedBytes?: number
+  fileName: string
+  status: string
+  bytesDownloaded?: number
   totalBytes?: number
-  bytesPerSecond?: number
-  fileIndex?: number
-  fileCount?: number
+  reason?: string
 }
 
 /** The main process, faked at the IPC boundary and only there. `downloadModel` behaves the way
@@ -59,6 +60,31 @@ type ProgressEvent = {
  *  test scripts what its download does; the screen decides what to render from that. */
 let listeners: ((p: ProgressEvent) => void)[] = []
 const emit = (p: ProgressEvent): void => listeners.forEach((l) => l(p))
+
+/** 1331.2 MiB of 6296.4 MiB — 21% of the whole job, 1.4 GB of 6.6 GB in the units the card uses. */
+const FIRST_SAMPLE_BYTES = Math.round(1331.2 * 1024 * 1024)
+const JOB_TOTAL_BYTES = Math.round(6296.4 * 1024 * 1024)
+/** 2.5 s later, 2.8 MiB/s further on — the two samples the rate is measured from. */
+const SECOND_SAMPLE_BYTES = FIRST_SAMPLE_BYTES + Math.round(2.8 * 1024 * 1024 * 2.5)
+
+const inFlight = (modelId: string): ProgressEvent => ({
+  downloadId: 'download:qwen',
+  modelId,
+  fileName: MODEL.files[0]!.name,
+  status: 'downloading',
+  bytesDownloaded: FIRST_SAMPLE_BYTES,
+  totalBytes: JOB_TOTAL_BYTES
+})
+
+/** A downloading tick at a chosen whole percent of a round total. */
+const tick = (percent: number): ProgressEvent => ({
+  downloadId: 'download:qwen',
+  modelId: MODEL.id,
+  fileName: MODEL.files[0]!.name,
+  status: 'downloading',
+  bytesDownloaded: percent * 10,
+  totalBytes: 1_000
+})
 let onDownload: (id: string) => Promise<{ success: boolean; error?: string }> = async () => ({
   success: true
 })
@@ -68,7 +94,7 @@ let installedModels: string[] = []
 
 ;(globalThis as unknown as { window: { api: unknown } }).window.api = {
   systemHealth: async () => ({ ramGb: 32 }),
-  getModelControlSnapshot: async () =>
+  getModelControlProjection: async () =>
     modelControlSnapshot({
       kinds: ['vision'],
       models: catalogModels,
@@ -85,8 +111,31 @@ let installedModels: string[] = []
       listeners = listeners.filter((l) => l !== cb)
     }
   },
-  downloadModel: (id: string) => onDownload(id),
-  cancelModelDownload: (id: string) => onCancel(id)
+  // The one model-control door. The main process is the other side of it, so the test drives what
+  // that side does: a refusal, a cancellation, or a download that stays in flight. `cancelled` is
+  // returned as an OUTCOME, not a failure — the same distinction the production owner makes.
+  controlModel: async (intent: { type: string; modelId?: string }) => {
+    const projection = modelControlSnapshot({
+      kinds: ['vision'],
+      models: catalogModels,
+      installed: installedModels
+    })
+    if (intent.type === 'cancel-download') {
+      onCancel(intent.modelId!)
+      return { ok: true, value: { status: 'cancelled', operationId: 'test', projection } }
+    }
+    if (intent.type === 'download') {
+      const result = await onDownload(intent.modelId!)
+      if (result.success) {
+        return { ok: true, value: { status: 'completed', operationId: 'test', projection } }
+      }
+      if (result.error === 'cancelled') {
+        return { ok: true, value: { status: 'cancelled', operationId: 'test', projection } }
+      }
+      return { ok: false, failure: { kind: 'runtime', message: result.error ?? 'Download failed' } }
+    }
+    return { ok: true, value: { status: 'completed', operationId: 'test', projection } }
+  }
 }
 
 let ModelsScreen: () => React.JSX.Element
@@ -113,7 +162,12 @@ describe('<ModelsScreen/> — what a download looks like', () => {
 
     catalogModels = [MODEL, TRANSFERRED_MODEL]
     installedModels = [TRANSFERRED_MODEL.id]
-    emit({ modelId: TRANSFERRED_MODEL.id, status: 'completed', percent: 100 })
+    emit({
+      downloadId: 'download:transferred',
+      modelId: TRANSFERRED_MODEL.id,
+      fileName: TRANSFERRED_MODEL.files[0]!.name,
+      status: 'completed'
+    })
 
     const installedList = await screen.findByRole('list', { name: 'Models on this device' })
     expect(installedList.textContent).toContain(TRANSFERRED_MODEL.name)
@@ -122,7 +176,13 @@ describe('<ModelsScreen/> — what a download looks like', () => {
   it('a refused download says why, and offers one way forward — never a silent 0%', async () => {
     // The main process refuses the request: it publishes 'failed' and resolves unsuccessfully.
     onDownload = async (id) => {
-      emit({ modelId: id, status: 'failed', percent: 0, error: INTERRUPTED })
+      emit({
+        downloadId: 'download:qwen',
+        modelId: id,
+        fileName: MODEL.files[0]!.name,
+        status: 'failed',
+        reason: INTERRUPTED
+      })
       return { success: false, error: INTERRUPTED }
     }
     const user = userEvent.setup()
@@ -151,19 +211,7 @@ describe('<ModelsScreen/> — what a download looks like', () => {
     // genuinely renders and "it went back to Download" is a transition, not a no-op.
     let finish: (r: { success: boolean; error?: string }) => void = () => {}
     onDownload = async (id) => {
-      emit({
-        modelId: id,
-        status: 'downloading',
-        percent: 20,
-        currentFile: MODEL.files[0]!.name,
-        downloadedMB: '1331.2',
-        totalMB: '6296.4',
-        downloadedBytes: 1331.2 * 1024 * 1024,
-        totalBytes: 6296.4 * 1024 * 1024,
-        bytesPerSecond: 2.8 * 1024 * 1024,
-        fileIndex: 1,
-        fileCount: 2
-      })
+      emit(inFlight(id))
       return new Promise((resolve) => {
         finish = resolve
       })
@@ -171,7 +219,12 @@ describe('<ModelsScreen/> — what a download looks like', () => {
     // Cancelling is what the main process does: it clears the card on the channel, and the pending
     // call resolves unsuccessfully with 'cancelled' — which is an outcome, not a failure.
     onCancel = (id) => {
-      emit({ modelId: id, status: 'cancelled' })
+      emit({
+        downloadId: 'download:qwen',
+        modelId: id,
+        fileName: MODEL.files[0]!.name,
+        status: 'cancelled'
+      })
       finish({ success: false, error: 'cancelled' })
     }
     const user = userEvent.setup()
@@ -194,19 +247,14 @@ describe('<ModelsScreen/> — what a download looks like', () => {
 
   it('an in-flight download reads as one number, in human units, with the part it is fetching', async () => {
     onDownload = async (id) => {
-      emit({
-        modelId: id,
-        status: 'downloading',
-        percent: 20,
-        currentFile: MODEL.files[0]!.name,
-        downloadedMB: '1331.2',
-        totalMB: '6296.4',
-        downloadedBytes: 1331.2 * 1024 * 1024,
-        totalBytes: 6296.4 * 1024 * 1024,
-        bytesPerSecond: 2.8 * 1024 * 1024,
-        fileIndex: 1,
-        fileCount: 2
-      })
+      // A rate needs TWO samples of the same file: the hook measures bytes over elapsed time
+      // rather than trusting a number the transport claims. The clock is pinned so the measured
+      // rate is exact instead of racing the test runner.
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000)
+      emit(inFlight(id))
+      clock.mockReturnValue(3_500)
+      emit({ ...inFlight(id), bytesDownloaded: SECOND_SAMPLE_BYTES })
+      clock.mockRestore()
       return new Promise(() => {}) // stays in flight
     }
     const user = userEvent.setup()
@@ -224,21 +272,29 @@ describe('<ModelsScreen/> — what a download looks like', () => {
     expect(screen.getByText(/1\.4 GB of 6\.6 GB/)).toBeTruthy()
     expect(screen.getByText(/2\.8 MB\/s/)).toBeTruthy()
     expect(screen.getByText(/~30 min left/)).toBeTruthy()
-    // Which part is moving, without giving it a second percent of its own.
-    expect(screen.getByText(/file 1 of 2/)).toBeTruthy()
+    // Which part is moving — named, without giving it a second percent of its own.
+    //
+    // BLOCKED, left asserting the product guarantee rather than the current behaviour: the card
+    // never names the file. `downloadPartLabel` (ModelsScreen.tsx) only renders "· adding
+    // <companion>" for a companion file or "· file N of M" from `fileIndex` / `fileCount` — and
+    // the progress channel no longer carries either, so both branches are dead and the label is
+    // always empty for the primary file. Whether the card should name the part, or whether this
+    // guarantee is retired, is the open `fileIndex` / `fileCount` decision; it is not settled by
+    // deleting this line.
+    expect(screen.getByText(new RegExp(MODEL.files[0]!.name))).toBeTruthy()
     // The action row holds the action, on the same line as the status.
     expect(screen.getByRole('button', { name: /cancel/i })).toBeTruthy()
   })
 
   it('uses an indeterminate label when byte totals and percentage are invalid', async () => {
     onDownload = async (id) => {
+      // The coordinator has started the transfer but has no byte totals for it yet — the state the
+      // card used to fill with NaN and Infinity.
       emit({
+        downloadId: 'download:qwen',
         modelId: id,
-        status: 'downloading',
-        percent: Number.NaN,
-        downloadedBytes: Number.NaN,
-        totalBytes: Number.NaN,
-        bytesPerSecond: Number.POSITIVE_INFINITY
+        fileName: MODEL.files[0]!.name,
+        status: 'downloading'
       })
       return new Promise(() => {})
     }
@@ -246,6 +302,12 @@ describe('<ModelsScreen/> — what a download looks like', () => {
     render(<ModelsScreen />)
     await user.click(await screen.findByRole('button', { name: /^download$/i }))
 
+    // BLOCKED, left asserting the product guarantee rather than the current behaviour. A download
+    // the coordinator has started but has no byte totals for renders a bare "0%" — no NaN and no
+    // Infinity, but also no indeterminate label. That bare 0% is the exact failure this suite was
+    // written against (the macOS session of 2026-08-09: a refused download sat at 0% for hours,
+    // saying nothing). A percentage that reads as real progress when there is none is the bug, so
+    // the assertion stays as written and the card has to grow the label.
     expect(await screen.findByText('Downloading')).toBeTruthy()
     expect(document.body.textContent).not.toContain('NaN')
     expect(document.body.textContent).not.toContain('Infinity')
@@ -259,12 +321,12 @@ describe('<ModelsScreen/> — what a download looks like', () => {
     vi.useFakeTimers()
     vi.setSystemTime(0)
     try {
-      act(() => emit({ modelId: MODEL.id, status: 'downloading', percent: 10 }))
+      act(() => emit(tick(10)))
       expect(screen.getByText('10%')).toBeTruthy()
 
       act(() => {
-        emit({ modelId: MODEL.id, status: 'downloading', percent: 20 })
-        emit({ modelId: MODEL.id, status: 'downloading', percent: 30 })
+        emit(tick(20))
+        emit(tick(30))
       })
       expect(screen.getByText('10%')).toBeTruthy()
       expect(screen.queryByText('30%')).toBeNull()
@@ -275,8 +337,14 @@ describe('<ModelsScreen/> — what a download looks like', () => {
       expect(screen.getByText('30%')).toBeTruthy()
 
       act(() => {
-        emit({ modelId: MODEL.id, status: 'downloading', percent: 40 })
-        emit({ modelId: MODEL.id, status: 'failed', error: 'network connection lost' })
+        emit(tick(40))
+        emit({
+          downloadId: 'download:qwen',
+          modelId: MODEL.id,
+          fileName: MODEL.files[0]!.name,
+          status: 'failed',
+          reason: 'network connection lost'
+        })
       })
       expect(screen.getByText('network connection lost')).toBeTruthy()
       expect(screen.queryByText('40%')).toBeNull()

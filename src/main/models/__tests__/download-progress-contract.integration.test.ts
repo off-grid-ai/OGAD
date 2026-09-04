@@ -16,6 +16,7 @@ import path from 'node:path'
 const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-download-progress-'))
 const dataDir = path.join(testRoot, 'data')
 process.env.OFFGRID_DATA_DIR = dataDir
+fs.mkdirSync(path.join(dataDir, 'models'), { recursive: true })
 
 vi.mock('electron', () => ({
   app: {
@@ -32,7 +33,7 @@ vi.mock('electron', () => ({
 }))
 
 const { CATALOG } = await import('@offgrid/models')
-type ModelDownloadProgress = import('../../models-manager').DownloadProgress
+type ModelDownloadProgress = import('./download-facade-test-client').DownloadProgress
 
 /** A real catalog model with TWO files — the shape the reset was visible on (weights + projector). */
 const productionModel = CATALOG.find((m) => m.files.length === 2)
@@ -49,6 +50,7 @@ CATALOG.splice(productionIndex, 1, twoFileModel)
 
 await import('../../model-services')
 const manager = await import('../../models-manager')
+const downloads = await import('./download-facade-test-client')
 
 interface Pending {
   url: string
@@ -88,10 +90,11 @@ function bodyOf(name: string, bytes: number): Buffer {
 afterEach(async () => {
   vi.unstubAllGlobals()
   await manager.deleteModel(twoFileModel.id)
-  await manager.clearDownload(twoFileModel.id)
+  await downloads.clearDownload(twoFileModel.id)
 })
 
-afterAll(() => {
+afterAll(async () => {
+  await downloads.shutdownModelDownloads()
   CATALOG.splice(productionIndex, 1, productionModel)
   fs.rmSync(testRoot, { recursive: true, force: true })
 })
@@ -105,7 +108,7 @@ describe('the progress a download publishes', () => {
     const first = bodyOf(twoFileModel.files[0]!.name, 8 * 1024 * 1024)
     const second = bodyOf(twoFileModel.files[1]!.name, 4 * 1024 * 1024)
 
-    const done = manager.downloadModel(twoFileModel.id, (e) => events.push(e))
+    const done = downloads.downloadModel(twoFileModel.id, (e) => events.push(e))
 
     await waitFor(() => pending.length === 1)
     pending[0]!.resolve(
@@ -146,32 +149,30 @@ describe('the progress a download publishes', () => {
     // And the bytes are cumulative: the second file continues the count rather than starting over,
     // which is the same reset seen from the other side.
     const lastOfFile = (index: number): number =>
-      Number(events.filter((e) => e.fileIndex === index && e.downloadedMB).at(-1)!.downloadedMB)
+      Number(
+        events
+          .filter((e) => e.status === 'downloading' && e.fileIndex === index && e.downloadedMB)
+          .at(-1)!.downloadedMB
+      )
     expect(lastOfFile(2)).toBeGreaterThan(lastOfFile(1))
   })
 
   // LAST in this file on purpose: closing the queue is process-wide and permanent, so any download
   // after it would be refused too. Splitting it into its own file would duplicate the whole setup.
-  it('publishes a refusal instead of returning it silently, once downloads are closed', async () => {
+  it('returns a refusal without retaining active work after the application is closed', async () => {
     const events: ModelDownloadProgress[] = []
 
-    await manager.shutdownModelDownloads() // the application is going away
+    await downloads.shutdownModelDownloads() // the application is going away
 
-    const result = await manager.downloadModel(twoFileModel.id, (e) => events.push(e))
+    const result = await downloads.downloadModel(twoFileModel.id, (e) => events.push(e))
 
     // The caller is told, as before...
     expect(result.success).toBe(false)
-    // ...and so is every watcher of the channel, which is the part the screen needs. Without this
-    // the card keeps whatever it assumed when you clicked, forever.
-    expect(events).toContainEqual(
-      expect.objectContaining({ modelId: twoFileModel.id, status: 'failed' })
-    )
-    const failed = events.findLast((event) => event.status === 'failed')
-    const stored = manager.downloadStatus(twoFileModel.id)
-    expect(stored?.status).toBe('failed')
-    // Do not rewrite progress to zero. The terminal event must project the coordinator's
-    // truthful retained-byte state, whether this refusal has a partial file or no bytes yet.
-    expect(failed?.downloadedBytes).toBe(stored?.downloadedBytes)
-    expect(failed?.percent).toBe(stored?.percent)
+    // The command must still fail and the retained projection must not claim that work is active.
+    // A stopped application does not publish or persist new work. The typed command result is the
+    // caller's failure signal and clears the renderer's optimistic queued state.
+    const stored = await downloads.downloadStatus(twoFileModel.id)
+    expect(stored?.status).not.toBe('downloading')
+    expect(events).toEqual([])
   })
 })

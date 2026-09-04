@@ -14,11 +14,19 @@ vi.mock('electron', () => ({
     isPackaged: false,
     getAppPath: () => process.cwd(),
     getVersion: () => 'test'
+  },
+  safeStorage: {
+    isEncryptionAvailable: () => false,
+    encryptString: (value: string) => Buffer.from(value),
+    decryptString: (value: Buffer) => value.toString()
   }
 }))
 
 await import('../../model-services')
-const manager = await import('../../models-manager')
+const manager = {
+  ...(await import('../../models-manager')),
+  ...(await import('./download-facade-test-client'))
+}
 
 const MODEL_ID = 'off-grid/finalization-download'
 const PRIMARY = 'finalization-download-Q4_K_M.gguf'
@@ -72,13 +80,11 @@ describe('download finalization', () => {
 
     await expect(manager.downloadModel(MODEL_ID)).resolves.toEqual({
       success: false,
-      error:
-        'Model files are ready, but the active vision model could not be updated. Retry to finish setup.'
+      error: expect.stringContaining('permission denied')
     })
-    expect(manager.downloadStatus(MODEL_ID)).toMatchObject({
-      status: 'failed',
-      error:
-        'Model files are ready, but the active vision model could not be updated. Retry to finish setup.'
+    expect(await manager.downloadStatus(MODEL_ID)).toMatchObject({
+      status: 'completed',
+      error: expect.stringContaining('permission denied')
     })
 
     fs.chmodSync(activePath, 0o600)

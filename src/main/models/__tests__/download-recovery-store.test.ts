@@ -44,7 +44,7 @@ function fixture(): PersistedModelDownload {
 }
 
 describe('download recovery filesystem adapter', () => {
-  it('reports damaged recovery data without blocking a new session', () => {
+  it('rejects damaged recovery data, preserves it, and blocks false-success writes', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-download-recovery-'))
     roots.push(root)
     const file = path.join(root, 'downloads.json')
@@ -52,13 +52,15 @@ describe('download recovery filesystem adapter', () => {
     const events: string[] = []
     const store = new DownloadRecoveryStore(file, (event) => events.push(event))
 
-    expect(store.read()).toEqual([])
+    await expect(store.read()).rejects.toThrow('Download recovery data could not be migrated.')
     expect(store.snapshot()).toEqual({
       status: 'degraded',
       error: `Download recovery data could not be migrated. The original file was kept at ${file}. Move it aside to start with empty recovery data.`
     })
     expect(events).toEqual(['read.failed'])
-    store.write([])
+    await expect(store.write([])).rejects.toThrow(
+      'Download recovery data could not be saved because its original data could not be read.'
+    )
     expect(store.snapshot()).toEqual({
       status: 'degraded',
       error: `Download recovery data could not be migrated. The original file was kept at ${file}. Move it aside to start with empty recovery data.`
@@ -66,7 +68,7 @@ describe('download recovery filesystem adapter', () => {
     expect(fs.readFileSync(file, 'utf8')).toBe('{broken')
   })
 
-  it('migrates a real legacy progress file through model id and artifact identity', () => {
+  it('migrates a real legacy progress file through model id and artifact identity', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-download-recovery-'))
     roots.push(root)
     const file = path.join(root, 'downloads.json')
@@ -103,7 +105,7 @@ describe('download recovery filesystem adapter', () => {
     fs.writeFileSync(file, source)
     const store = new DownloadRecoveryStore(file, () => undefined)
 
-    const migrated = store.read()
+    const migrated = await store.read()
     expect(migrated).toHaveLength(3)
     expect(migrated.map((record) => record.manifest.modelId)).toEqual([
       'unsloth/gemma-4-12b-it-GGUF',
@@ -118,11 +120,11 @@ describe('download recovery filesystem adapter', () => {
     expect(store.snapshot()).toEqual({ status: 'healthy' })
     expect(fs.readFileSync(file, 'utf8')).toBe(source)
 
-    store.write(migrated)
+    await store.write(migrated)
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))[0]).toHaveProperty('manifest')
   })
 
-  it('keeps an unsupported legacy file and reports an actionable migration failure', () => {
+  it('keeps an unsupported legacy file and reports an actionable migration failure', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-download-recovery-'))
     roots.push(root)
     const file = path.join(root, 'downloads.json')
@@ -132,39 +134,41 @@ describe('download recovery filesystem adapter', () => {
     fs.writeFileSync(file, source)
     const store = new DownloadRecoveryStore(file, () => undefined)
 
-    expect(store.read()).toEqual([])
+    await expect(store.read()).rejects.toThrow('Download recovery data could not be migrated.')
     expect(store.snapshot().error).toContain('The original file was kept at')
-    store.write([])
+    await expect(store.write([])).rejects.toThrow(
+      'Download recovery data could not be saved because its original data could not be read.'
+    )
     expect(fs.readFileSync(file, 'utf8')).toBe(source)
   })
 
-  it('keeps the last valid snapshot when atomic promotion fails', () => {
+  it('keeps the last valid snapshot when atomic promotion fails', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-download-recovery-'))
     roots.push(root)
     const file = path.join(root, 'downloads.json')
     const record = fixture()
     const healthy = new DownloadRecoveryStore(file, () => undefined)
-    healthy.write([record])
+    await healthy.write([record])
 
     const failingFiles: DownloadRecoveryFilePort = {
-      readFileSync: fs.readFileSync.bind(fs) as DownloadRecoveryFilePort['readFileSync'],
-      mkdirSync: fs.mkdirSync.bind(fs) as DownloadRecoveryFilePort['mkdirSync'],
-      writeFileSync: fs.writeFileSync.bind(fs) as DownloadRecoveryFilePort['writeFileSync'],
-      renameSync: () => {
+      readFile: (target, encoding) => fs.promises.readFile(target, encoding),
+      mkdir: (target, options) => fs.promises.mkdir(target, options),
+      writeFile: (target, data, options) => fs.promises.writeFile(target, data, options),
+      rename: async () => {
         throw Object.assign(new Error('disk is read only'), { code: 'EROFS' })
       },
-      rmSync: fs.rmSync.bind(fs) as DownloadRecoveryFilePort['rmSync']
+      rm: (target, options) => fs.promises.rm(target, options)
     }
     const events: string[] = []
     const failing = new DownloadRecoveryStore(file, (event) => events.push(event), failingFiles)
-    failing.write([])
+    await expect(failing.write([])).rejects.toThrow('Download recovery data could not be saved.')
 
     expect(failing.snapshot()).toEqual({
       status: 'degraded',
       error: 'Download recovery data could not be saved.'
     })
     expect(events).toEqual(['write.failed'])
-    expect(healthy.read()).toEqual([record])
+    await expect(healthy.read()).resolves.toEqual([record])
     expect(fs.readdirSync(root)).toEqual(['downloads.json'])
   })
 })
