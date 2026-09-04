@@ -10,19 +10,20 @@
  * against a removed union member silently pins a projection to one branch.
  *
  * This gate answers two questions per package, before any of that can happen:
- *   1. Is `dist/` OLDER than the package's own sources? Then it is stale, full stop.
+ *   1. Does the ordered Shared build's content proof match inputs, dependencies and artifacts?
  *   2. Does `dist/` still export the contract desktop's production code is built on?
  *
  * The symbol lists are deliberately the load-bearing ones - the seams desktop cannot start
  * without - not an exhaustive mirror of shared's API. A symbol earns a place here by having
  * broken desktop when it went missing.
  */
-import { access, readdir, readFile, stat } from 'node:fs/promises'
+import { access, readFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import console from 'node:console'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { verifyWorkspaceProof } from '../../shared/scripts/workspace-build-provenance.mjs'
 
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const sharedPackages = path.resolve(desktopRoot, '../shared/packages')
@@ -104,26 +105,12 @@ const shapeAssertions = [
 
 const failures = []
 
-/** The newest mtime among a package's own sources - the thing `dist` has to be at least as new as. */
-async function newestSourceMtime(dir) {
-  let newest = 0
-  const walk = async (current) => {
-    const entries = await readdir(current, { withFileTypes: true })
-    for (const entry of entries) {
-      const full = path.join(current, entry.name)
-      if (entry.isDirectory()) {
-        // `dist` is the output being judged and `node_modules` is not this package's source.
-        if (entry.name === 'dist' || entry.name === 'node_modules') continue
-        await walk(full)
-        continue
-      }
-      if (!/\.(ts|tsx|mts|cts)$/.test(entry.name)) continue
-      const { mtimeMs } = await stat(full)
-      if (mtimeMs > newest) newest = mtimeMs
-    }
-  }
-  await walk(dir)
-  return newest
+try {
+  verifyWorkspaceProof(path.dirname(sharedPackages), desktopRoot)
+} catch (error) {
+  failures.push(
+    `Shared artifact provenance failed: ${error instanceof Error ? error.message : String(error)}`
+  )
 }
 
 for (const entry of contract) {
@@ -157,31 +144,6 @@ for (const entry of contract) {
   } catch {
     failures.push(`@offgrid/${entry.package}: dist is missing - run \`npm run build\` in shared/`)
     continue
-  }
-
-  let sourceAt
-  let builtAt
-  try {
-    const [builtStats, newestSource, manifestStat] = await Promise.all([
-      Promise.all(builtEntries.map((builtEntry) => stat(builtEntry))),
-      newestSourceMtime(path.join(packageRoot, 'src')),
-      stat(path.join(packageRoot, 'package.json'))
-    ])
-    builtAt = Math.min(...builtStats.map(({ mtimeMs }) => mtimeMs))
-    sourceAt = Math.max(newestSource, manifestStat.mtimeMs)
-  } catch (error) {
-    failures.push(
-      `@offgrid/${entry.package}: artifact freshness could not be checked - ${error instanceof Error ? error.message : String(error)}`
-    )
-    continue
-  }
-  if (sourceAt > builtAt) {
-    // Reported, then the symbol checks still run: one run should say BOTH that the build is
-    // stale and whether the stale build even satisfies the contract, because those are
-    // different problems and stopping here would hide the second one.
-    failures.push(
-      `@offgrid/${entry.package}: dist is STALE - its sources or manifest are newer than a runtime or declaration entry`
-    )
   }
 
   const declarations = await readFile(declarationEntry, 'utf8')
