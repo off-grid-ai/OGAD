@@ -3166,7 +3166,7 @@ export function MemoryChat({
   // into the composer. Falls back to a sensible default only when nothing is active.
   const refreshImageModel = useCallback(async () => {
     try {
-      const s = await window.api.imageGenStatus?.()
+      const s = await window.api.imageGenStatus()
       if (!s) return
       setImageAvailable(!!s.available)
       const rawModels: unknown = s.models
@@ -3235,11 +3235,11 @@ export function MemoryChat({
     })()
     void refreshImageModel()
     window.api
-      .listProjects?.()
+      .listProjects()
       .then((p: ProjectLite[]) => setProjects(p))
       .catch(() => {})
     window.api
-      .styleThumbs?.()
+      .styleThumbs()
       .then((t: Record<string, string>) => setStyleThumbs(t))
       .catch(() => {})
   }, [])
@@ -3321,7 +3321,7 @@ export function MemoryChat({
 
   const loadProjects = useCallback(async () => {
     try {
-      setProjects((await window.api.listProjects?.()) || [])
+      setProjects((await window.api.listProjects()) || [])
     } catch (e) {
       console.error(e)
     }
@@ -3354,7 +3354,7 @@ export function MemoryChat({
       return
     }
     try {
-      const id = await window.api.createProject?.({ name })
+      const id = await window.api.createProject({ name })
       await loadProjects()
       if (id) await assignProject(id)
     } catch (e) {
@@ -3412,20 +3412,20 @@ export function MemoryChat({
       setImgProgress(null)
       markGenerating(job.conversationId, false)
     }
-    const offJob = window.api.onImageGenJobState?.(observe)
-    const offConversation = window.api.onImageGenConversationUpdated?.((conversationId) => {
+    const offJob = window.api.onImageGenJobState(observe)
+    const offConversation = window.api.onImageGenConversationUpdated((conversationId) => {
       void refreshConversationMessages(conversationId).catch((error) =>
         console.error('Failed to refresh generated image message', error)
       )
     })
     void window.api
-      .imageGenJobStatus?.()
+      .imageGenJobStatus()
       .then(observe)
       .catch((error) => console.error('Failed to reattach image generation', error))
     return () => {
       live = false
-      offJob?.()
-      offConversation?.()
+      offJob()
+      offConversation()
     }
   }, [refreshConversationMessages, markGenerating])
 
@@ -3538,7 +3538,7 @@ export function MemoryChat({
   useEffect(() => {
     const onTaskGuidanceMessage = (event: Event): void => {
       const conversationId = (event as CustomEvent<{ conversationId?: string }>).detail
-        ?.conversationId
+        .conversationId
       if (!conversationId) return
       void (async () => {
         if (conversationId === activeConversationId) {
@@ -3606,7 +3606,7 @@ export function MemoryChat({
 
   useEffect(() => {
     const onApprovalIntake = (event: Event): void => {
-      const approvalId = (event as CustomEvent<{ approvalId?: number }>).detail?.approvalId
+      const approvalId = (event as CustomEvent<{ approvalId?: number }>).detail.approvalId
       if (!approvalId) return
       openApprovalIntake(approvalId)
     }
