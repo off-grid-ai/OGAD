@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import {
   createOffGridApplication,
   type ApplicationDegradation,
+  type ApplicationLifecycleEvent,
   type OffGridApplicationSnapshot
 } from '@offgrid/application'
 import { DEFAULT_RAG_EMBEDDING_DIMENSION } from '@offgrid/rag'
@@ -96,8 +97,49 @@ function describeFailure(failure: unknown): string {
   }
 }
 
+/**
+ * The root's own failures, on the same typed stream the domains use.
+ *
+ * `lifecycle_failed` carries the derived failure for the whole phase; `recovered` says which
+ * reporter retracted, and that other reporters of the same domain may still be reporting - a domain
+ * is healthy only once every one of them has. `degraded` is deliberately NOT logged here: the health
+ * observer below already writes one line per reason and dedupes it, and it reads the snapshot on
+ * attach so a late subscriber still records what was reported before it existed, which an event
+ * stream cannot replay. Logging it in both places would make one fact two records.
+ */
+function observeLifecycleFailure(event: ApplicationLifecycleEvent): void {
+  if (event.type === 'degraded') return
+  if (event.type === 'recovered') {
+    writeDiagnosticLog(
+      'application',
+      'lifecycle.recovered',
+      {
+        domain: event.domain,
+        source: event.source,
+        remainingFailure: event.lifecycleFailure?.message ?? null
+      },
+      'info'
+    )
+    return
+  }
+  writeDiagnosticLog(
+    'application',
+    'lifecycle.failed',
+    {
+      phase: event.failure.phase,
+      failure: event.failure.message,
+      causes: event.failure.causes.join(' | ')
+    },
+    'error'
+  )
+}
+
 function observeApplicationFailures(): void {
   releaseFailureObserver ??= desktopApplication.events(({ domain, event }) => {
+    if (domain === 'lifecycle') {
+      observeLifecycleFailure(event)
+      return
+    }
     if ((domain !== 'rag' && domain !== 'sync') || event.type !== 'operation_failed') return
     writeDiagnosticLog(
       'application',
@@ -153,16 +195,10 @@ export function startDesktopApplication(): ReturnType<typeof desktopApplication.
     observeApplicationHealth()
     observeDomainForwarding()
     releaseSyncRuntime = claimDesktopSyncRuntime('application')
-    try {
-      return await desktopApplication.start()
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      writeDiagnosticLog('application', 'lifecycle.start.failed', { error: message }, 'error')
-      releaseSyncRuntime()
-      releaseSyncRuntime = null
-      starting = null
-      throw error
-    }
+    // No catch: `start()` never rejects. Every step's failure, and anything thrown outside the step
+    // loop, is recorded as a keyed report and reaches the observers above as a `'lifecycle'` event -
+    // so a catch here could only write a second, competing record of state shared already owns.
+    return await desktopApplication.start()
   })()
   starting = startPromise
   return startPromise
