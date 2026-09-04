@@ -3238,11 +3238,11 @@ export function MemoryChat({
     window.api
       .listProjects()
       .then((p: ProjectLite[]) => setProjects(p))
-      .catch(() => {})
+      .catch((error: unknown) => console.error('Failed to load projects:', error))
     window.api
       .styleThumbs()
       .then((t: Record<string, string>) => setStyleThumbs(t))
-      .catch(() => {})
+      .catch((error: unknown) => console.error('Failed to load style thumbnails:', error))
   }, [])
 
   // Resolve the size + steps controls for the current model: a per-model user
@@ -3715,7 +3715,7 @@ export function MemoryChat({
       /** A form submission is user input even though its text is supplied as an argument. */
       asUserInput?: boolean
     }
-  ) => {
+  ): Promise<void> => {
     const isInput = override === undefined || opts?.asUserInput === true
     // Regenerate/Resend: the user turn already exists in the thread — re-run it
     // in place instead of echoing another user bubble.
@@ -3749,7 +3749,7 @@ export function MemoryChat({
     // A live operator task owns this journey until it finishes. New Chat input is
     // guidance for that task, not a second memory/model turn running beside it.
     if (!regen && targetConv && !opts?.imageRequest) {
-      const listedTasks = await window.api.tasks?.list?.(50)
+      const listedTasks = await window.api.tasks?.list(50)
       const liveTask = guidanceTaskForJourney(listedTasks ?? taskSessions, targetConv)
       if (liveTask) {
         const guidanceText = [
@@ -4138,7 +4138,7 @@ export function MemoryChat({
           invalidationAnchor: opts?.sessionReplay?.anchor,
           thinking: thinkingRequested
         })
-        const toolCalls = (tr?.toolCalls || []).map(
+        const toolCalls = (tr.toolCalls || []).map(
           (c: {
             name: string
             result: string
@@ -4149,17 +4149,17 @@ export function MemoryChat({
             status: c.status ?? ('completed' as const)
           })
         )
-        const context = tr?.unified?.length ? { unified: tr.unified } : undefined
+        const context = tr.unified?.length ? { unified: tr.unified } : undefined
         // Persist the citation sources + tool calls so they survive a reload.
         const toolCtx =
-          tr?.unified?.length || toolCalls.length
-            ? { unified: tr?.unified ?? [], toolCalls }
+          tr.unified?.length || toolCalls.length
+            ? { unified: tr.unified ?? [], toolCalls }
             : undefined
         if (cancelledRef.current.has(convId)) {
           // The tool calls made before the stop are kept, exactly as a completed tool turn keeps
           // them: rendered from `toolCalls`, stored in `toolCtx` beside the citation sources.
           await finalizeStoppedTurn(convId, toolStreamId, {
-            answer: tr?.answer,
+            answer: tr.answer,
             context,
             persistContext: toolCtx,
             toolCalls,
@@ -4167,7 +4167,7 @@ export function MemoryChat({
           })
           return
         }
-        const answer = tr?.answer || 'No response returned.'
+        const answer = tr.answer || 'No response returned.'
         // Reasoning read from the ref (populated as it streamed) — deterministic,
         // unlike reading it out of the setConvMessages updater. Rides the persisted
         // context blob so the 'Thinking' block survives reload (T1f).
@@ -4176,7 +4176,7 @@ export function MemoryChat({
         delete answerByStream.current[toolStreamId]
         const toolCtxWithReasoning = buildAssistantContext(toolCtx, {
           reasoning: toolReasoning,
-          metrics: tr?.metrics,
+          metrics: tr.metrics,
           session: {
             turnId: sessionTurn.id,
             status: sessionTurn.status,
@@ -4195,7 +4195,7 @@ export function MemoryChat({
                   // A tool-owned image the memory rule refused offers the same "Run anyway" as the
                   // direct path: one affordance shape, one owner (imageMemoryRefusal).
                   imageMemoryRetry: toolImageMemoryRetry,
-                  metrics: tr?.metrics,
+                  metrics: tr.metrics,
                   activity: undefined,
                   streaming: false
                 }
@@ -4204,8 +4204,8 @@ export function MemoryChat({
         )
         // The Shared session already completed every deferred image operation. This component only
         // projects and persists the returned artifacts.
-        let imageRequests = tr?.imageRequests ?? []
-        if (imageRequests.length === 0 && tr?.imageRequest?.prompt) {
+        let imageRequests = tr.imageRequests ?? []
+        if (imageRequests.length === 0 && tr.imageRequest?.prompt) {
           imageRequests = [tr.imageRequest]
         }
         if (toolGeneratedImages.length > 0 && !cancelledRef.current.has(convId)) {
@@ -4690,7 +4690,7 @@ export function MemoryChat({
     [activeConversationId, desktopChatSession, messagesByConv, markGenerating, imageGenConv]
   )
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     // Slash skill autocomplete: while typing "/name" (before any space), Tab —
     // or Enter on a not-yet-complete name — fills in the top matching skill.
     const sq = input.startsWith('/') && !/\s/.test(input) ? input.slice(1).toLowerCase() : null
@@ -4808,7 +4808,7 @@ export function MemoryChat({
           ? { projectId: activeProjectId }
           : undefined
     try {
-      setGallery((await window.api.listGeneratedImages?.(scope)) || [])
+      setGallery((await window.api.listGeneratedImages(scope)) || [])
     } catch (e) {
       console.error(e)
     }
@@ -4878,7 +4878,7 @@ export function MemoryChat({
   const downloadImage = useCallback(async (path?: string, name?: string) => {
     if (!path) return
     try {
-      await window.api.exportGeneratedImage?.(path, name || 'off-grid-image.png')
+      await window.api.exportGeneratedImage(path, name || 'off-grid-image.png')
     } catch (e) {
       console.error(e)
     }
@@ -4887,7 +4887,7 @@ export function MemoryChat({
   const deleteImage = useCallback(async (path?: string) => {
     if (!path) return
     try {
-      await window.api.deleteGeneratedImage?.(path)
+      await window.api.deleteGeneratedImage(path)
       setMessages((prev) =>
         prev.map((m) =>
           m.imagePath === path
@@ -5080,7 +5080,7 @@ export function MemoryChat({
       .slice(idx + 1)
       .map((message) => readPersistedChatSessionTurn(message.context))
       .find((turn) => turn !== undefined)
-    const keptAtts = edited ? attachmentsOf(edited) : []
+    const keptAtts = attachmentsOf(edited)
     const persisted = keptAtts.length
       ? {
           attachments: keptAtts.map(
@@ -6089,7 +6089,7 @@ export function MemoryChat({
                         ) : (
                           <button
                             onClick={async () => {
-                              const p = await window.api.pickImageForGen?.()
+                              const p = await window.api.pickImageForGen()
                               if (p) setImgInit(p)
                             }}
                             className="rounded-md border border-neutral-800 px-2 py-1 text-neutral-400 transition-colors hover:border-green-500 hover:text-green-500"
