@@ -30,8 +30,8 @@ import { getTaskExecutionDevice } from './tasks/task-history'
 import { promptMessages } from './desktop-generation'
 import { DEFAULT_IMAGE_MIME } from '@offgrid/models'
 import {
-  desktopModels,
-  generateWithDesktopModels
+  generateWithDesktopModels,
+  refreshDesktopModels
 } from './composition/application-access'
 
 const EXECUTION_DEVICE_DESCRIPTION =
@@ -82,7 +82,7 @@ async function generateMcpText(
   maxTokens: number,
   operation: { type: 'text' } | { type: 'vision' }
 ): Promise<string> {
-  await desktopModels.refresh()
+  await refreshDesktopModels()
   const turnId = `mcp:${String(requestId)}`
   const result = await generateWithDesktopModels({
     operation,

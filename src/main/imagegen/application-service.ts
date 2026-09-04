@@ -40,7 +40,8 @@ import { getSetting } from '../database'
 import {
   desktopModels,
   DesktopModelsOperationError,
-  generateWithDesktopModels
+  generateWithDesktopModels,
+  refreshDesktopModels
 } from '../composition/application-access'
 import { dataDir } from '../runtime-env'
 import { enhanceImagePrompt } from '@offgrid/models'
@@ -193,7 +194,7 @@ export function desktopImageApplicationPorts(): ImageGenerationApplicationPorts<
   ReturnType<typeof sharedRequest>
 > {
   return {
-    refreshInventory: () => desktopModels.refresh(),
+    refreshInventory: refreshDesktopModels,
     resolveRouteId: (request) =>
       request.routeId ??
       (request.model

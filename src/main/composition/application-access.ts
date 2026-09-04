@@ -139,6 +139,12 @@ export class DesktopModelsOperationError extends Error {
   }
 }
 
+/** Inspect the Models facade's only inventory transition and preserve its typed failure. */
+export async function refreshDesktopModels(): Promise<void> {
+  const outcome = await desktopModels.refresh()
+  if (!outcome.ok) throw new DesktopModelsOperationError(outcome.failure)
+}
+
 export async function selectDesktopModel(
   modality: ModelModality,
   modelId: string | null

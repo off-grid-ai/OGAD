@@ -33,7 +33,7 @@ import {
   type ComputerUseSessionApplicationService
 } from '@offgrid/models/computer-use'
 import { createComputerUseSessionApplication } from '../composition/computer-use-session'
-import { desktopModels } from '../composition/application-access'
+import { desktopModels, refreshDesktopModels } from '../composition/application-access'
 
 export interface VisionTaskModelSession {
   adapter: VisionModelAdapter
@@ -191,7 +191,7 @@ function remoteChatRouteId(remote: { id: string; model: string }): string {
 }
 
 async function computerUseRouteId(modelId: string, requiredThinking = false): Promise<string> {
-  await desktopModels.refresh()
+  await refreshDesktopModels()
   const known = desktopModels.lookup(modelId)
   const matches = desktopModels
     .snapshot()

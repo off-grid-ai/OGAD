@@ -20,7 +20,8 @@ import { desktopToolExecutor, type DesktopToolExecutionSession } from './desktop
 import {
   desktopModels,
   DesktopModelsOperationError,
-  generateWithDesktopModels
+  generateWithDesktopModels,
+  refreshDesktopModels
 } from './composition/application-access'
 
 export interface DesktopGenerationOptions {
@@ -142,7 +143,7 @@ export async function generateDesktopMessages(
   messages: GenerationMessage[],
   options: DesktopGenerationOptions = {}
 ): Promise<GenerationResult> {
-  await desktopModels.refresh()
+  await refreshDesktopModels()
   const settings = llm.getSettings()
   const needsVision = messages.some(
     (message) =>
@@ -212,7 +213,7 @@ export async function generateDesktopOperation(
     routeId?: string
   } = {}
 ): Promise<GenerationResult> {
-  await desktopModels.refresh()
+  await refreshDesktopModels()
   const modality = operation.type === 'classifier' ? 'classifier' : operation.type
   const modelId = 'modelId' in operation ? operation.modelId : undefined
   const routeId =
