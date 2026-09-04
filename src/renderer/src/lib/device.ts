@@ -3,6 +3,7 @@ import {
   isMac as isMacForPlatform,
   primaryModifier as modifierForPlatform,
   shortcutLabel as shortcutLabelForPlatform,
+  shortcutSymbols as shortcutSymbolsForPlatform,
   type DevicePlatform
 } from '@offgrid/core/shared/device'
 
@@ -40,4 +41,12 @@ export function primaryModifier(): string {
  */
 export function shortcutLabel(accelerator: string): string {
   return shortcutLabelForPlatform(accelerator, currentPlatform())
+}
+
+/**
+ * The same accelerator in macOS keycap glyphs ('Alt+Space' shows as '⌥ Space'), for a <kbd> or a
+ * shortcut chip. Falls back to the word form off macOS, where the glyphs name nothing.
+ */
+export function shortcutSymbols(accelerator: string): string {
+  return shortcutSymbolsForPlatform(accelerator, currentPlatform())
 }
