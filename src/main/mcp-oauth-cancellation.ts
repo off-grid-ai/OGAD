@@ -8,7 +8,7 @@ interface PendingAuthorization {
 const pendingByConnector = new Map<number, PendingAuthorization>()
 
 /**
- * Register one pending browser authorization for a connector. A new attempt replaces and cancels
+ * Register one authorization through token commit for a connector. A new attempt replaces and cancels
  * an older attempt for the same connector. The returned function clears only this registration.
  */
 export function beginOAuthAuthorization(

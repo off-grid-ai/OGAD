@@ -49,6 +49,7 @@ export interface StaticOAuthClient {
 
 export interface OffGridOAuthClientProvider extends OAuthClientProvider {
   getCodePromise(): Promise<string>
+  finishAuthorization(): void
   invalidateCredentials(scope: OAuthCredentialScope): void
 }
 
@@ -66,13 +67,34 @@ export function makeOAuthProvider(
   // the caller can await the code routed back to us by `state`.
   let pendingCode: Promise<string> | null = null
   const pkce = new OAuthPkceVerifier()
+  let activeAuthorization: (() => void) | null = null
+  let authorizationError: Error | null = null
+
+  const assertAuthorizationCurrent = (): void => {
+    if (authorizationError) throw authorizationError
+  }
+  const endAuthorization = (error?: Error): void => {
+    if (error) {
+      authorizationError = error
+      pkce.cancel()
+    }
+    const finish = activeAuthorization
+    activeAuthorization = null
+    finish?.()
+  }
 
   const clearLegacyVerifier = (): void => deleteSecret(skey('verifier'))
 
   return {
     getCodePromise(): Promise<string> {
+      assertAuthorizationCurrent()
       if (pendingCode === null) throw new Error('no pending authorization')
       return pendingCode
+    },
+    finishAuthorization(): void {
+      if (activeAuthorization) {
+        endAuthorization(new Error('Authorization did not complete'))
+      }
     },
     get redirectUrl(): string {
       return oauthLoopback.redirectUrl
@@ -97,6 +119,7 @@ export function makeOAuthProvider(
       return loadJson('client')
     },
     saveClientInformation(info: unknown): void {
+      assertAuthorizationCurrent()
       if (google) return // fixed client — nothing to persist
       setSecret(skey('client'), JSON.stringify(info))
     },
@@ -104,12 +127,15 @@ export function makeOAuthProvider(
       return loadJson('tokens')
     },
     saveTokens(t: unknown): void {
+      assertAuthorizationCurrent()
       setSecret(skey('tokens'), JSON.stringify(t))
+      endAuthorization()
       pendingCode = null
       pkce.complete()
       clearLegacyVerifier()
     },
     saveCodeVerifier(v: string): void {
+      assertAuthorizationCurrent()
       // The verifier belongs to this one browser attempt. Keeping it in the provider instance
       // prevents a cancelled or superseded attempt from deleting another attempt's verifier.
       pkce.save(v)
@@ -119,6 +145,7 @@ export function makeOAuthProvider(
       return pkce.read()
     },
     async redirectToAuthorization(url: URL): Promise<void> {
+      assertAuthorizationCurrent()
       // Background (non-interactive) connects must NEVER pop a login — if the
       // saved token is stale, the sync just fails quietly and the user can
       // reconnect from the UI. Only interactive connects open the browser.
@@ -135,23 +162,28 @@ export function makeOAuthProvider(
       // even an instant skip-consent redirect is caught by the persistent server.
       const state = url.searchParams.get('state')
       if (!state) throw new Error('OAuth authorization URL is missing state')
-      await oauthLoopback.start()
-      pendingCode = oauthLoopback.awaitCode(state)
-      const finishAuthorization = beginOAuthAuthorization(connectorId, (error) =>
+      activeAuthorization = beginOAuthAuthorization(connectorId, (error) => {
+        endAuthorization(error)
         oauthLoopback.cancel(state, error)
-      )
-      void pendingCode.then(finishAuthorization, () => {
-        pkce.cancel()
-        finishAuthorization()
       })
       try {
+        await oauthLoopback.start()
+        assertAuthorizationCurrent()
+        pendingCode = oauthLoopback.awaitCode(state)
+        // Keep cancellation registered through the later token exchange, not just the callback.
+        void pendingCode.catch((error: unknown) => {
+          endAuthorization(error instanceof Error ? error : new Error(String(error)))
+        })
         await shell.openExternal(url.toString())
       } catch (error) {
+        endAuthorization(error instanceof Error ? error : new Error(String(error)))
         oauthLoopback.cancel(state, new Error('Unable to open OAuth authorization URL'))
         throw error
       }
     },
     invalidateCredentials(scope: OAuthCredentialScope): void {
+      // A superseded SDK exchange must not delete the replacement account's credentials either.
+      assertAuthorizationCurrent()
       if (scope === 'all' || scope === 'tokens') deleteSecret(skey('tokens'))
       if (scope === 'all' || scope === 'client') deleteSecret(skey('client'))
       // The SDK retries invalid_client and unauthorized_client with the same authorization code.

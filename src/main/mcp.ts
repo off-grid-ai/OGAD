@@ -236,16 +236,20 @@ async function connect(
     // Runs the OAuth handshake after the SDK opened the browser: wait for the code,
     // exchange it (saves tokens), reconnect with a fresh client + transport.
     const finishOAuth = async (): Promise<void> => {
-      const code = await authProvider.getCodePromise()
-      console.log('[oauth] got code, exchanging for tokens…')
-      await transport.finishAuth(code)
-      console.log(
-        '[oauth] token exchange done; tokens saved =',
-        authProvider.tokens() ? 'yes' : 'NO'
-      )
-      client = new Client({ name: 'Off Grid AI Desktop', version: '1.0.0' }, { capabilities: {} })
-      transport = mkTransport()
-      await client.connect(transport)
+      try {
+        const code = await authProvider.getCodePromise()
+        console.log('[oauth] got code, exchanging for tokens…')
+        await transport.finishAuth(code)
+        console.log(
+          '[oauth] token exchange done; tokens saved =',
+          authProvider.tokens() ? 'yes' : 'NO'
+        )
+        client = new Client({ name: 'Off Grid AI Desktop', version: '1.0.0' }, { capabilities: {} })
+        transport = mkTransport()
+        await client.connect(transport)
+      } finally {
+        authProvider.finishAuthorization()
+      }
     }
     try {
       await client.connect(transport)
