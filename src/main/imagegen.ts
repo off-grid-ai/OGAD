@@ -24,7 +24,12 @@ import {
   stripCheckpointExtension as stripCheckpointExt,
   type ImageExecutionPlan,
   type ImageNativeExecutionFacts,
-  imageTaesdFilename
+  imageTaesdFilename,
+  isGeneratedImageFile,
+  Z_IMAGE_TEXT_ENCODER_PATTERN,
+  Z_IMAGE_VAE_PATTERN,
+  isGgufFile,
+  isZImageModel
 } from '@offgrid/models'
 import type { DesktopManagedRuntime } from './model-runtime-port'
 import {
@@ -56,13 +61,6 @@ import {
   registerDesktopImageInspectionBoundary
 } from './imagegen/application-service'
 import { desktopImageRuntimeIdentity } from './models/image-runtime-identity'
-import { isGeneratedImageFile } from '@offgrid/models'
-import {
-  Z_IMAGE_TEXT_ENCODER_PATTERN,
-  Z_IMAGE_VAE_PATTERN,
-  isGgufFile,
-  isZImageModel
-} from '@offgrid/models'
 
 function findSdCli(): string | null {
   for (const r of binRoots()) {
