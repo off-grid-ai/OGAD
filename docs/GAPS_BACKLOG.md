@@ -2402,3 +2402,52 @@ that today's single check cannot see. This follow-up is about avoiding the rollb
 about the comparison being wrong.
 
 Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
+
+## The sync sink captures the model library once, so the new registration guard will fail closed after a library switch (OPEN, affects the guard being implemented)
+
+`desktop/pro/main/sync/sync-facade-activation.ts:256` binds the sink's directory as
+`modelsDir: llm.getModelsDir()` — evaluated ONCE, at activation — and stores it as an instance field
+(`model-transfer-service.ts:58`, `:163`). The parent manager, by contrast, calls `llm.getModelsDir()`
+LIVE at each use (`desktop/src/main/models-manager.ts:304`, `:377`, `:401`, `:489`), and the
+registration ports are bound the same live way.
+
+The incoming guard has Pro send `expectedLibraryId: path.resolve(this.modelsDir)` and has Shared
+compare it against the host's CURRENT active-library fact, twice - before file validation and again
+after the async validation and catalog reads. Neither comparison can catch a stale expectation,
+because both compare against the value Pro supplies and it is Pro's value that is wrong. The double
+check closes the window where the root changes DURING validation; it cannot close the window where
+the root changed BEFORE the transfer started.
+
+Failure mode is fail-closed, which is the right direction - no split-brain, no corruption - but the
+symptom is bad and hard to diagnose from the refusal alone: model transfers silently stop working
+after switching the model library, until the sync facade is re-activated or the app restarts.
+
+The clean resolution is to read the sink's directory live (`() => llm.getModelsDir()`, matching how
+the registration ports are already bound) rather than capturing it. That is a behaviour change:
+`modelsDir: string` is threaded through the ancillary setup and the model-transfer lifecycle
+composition, and promotion targets it too, so it needs its own slice with its own evidence. Whoever
+owns library switching should take it.
+
+Related, and already deliberate: the transfer service's installed-package check now resolves through
+the facade's live active-library port rather than the sink's captured directory. The two coincide
+today because activation binds the active directory, so there is no live regression, and tracking the
+current library is the more correct behaviour - it is recorded here because it is in the same
+directory-identity family and was a behaviour change, not an accident.
+
+## A library-mismatch refusal must THROW, or promoted bytes are orphaned (constraint, not a defect)
+
+Recorded because it constrains how the registration guard may be consumed. `commitPackage` is called
+inside Shared's own try at `shared/packages/sync/src/model-package-transfer.ts:389`, and the catch at
+`:390-398` is what invokes `rollbackPromotedFiles(promoted)` and `cleanupAttempt`. Rollback fires
+ONLY if `commitPackage` throws.
+
+So "consume the Outcome directly" must not become "return early on `!ok`". A typed library-mismatch
+refusal has to surface as a throw from the Pro call site; returning or swallowing it would leave
+promoted bytes in the sink directory with no registry rows and no cleanup. Typed branching may change
+the message and the classification - it must not change the control flow.
+
+The upside: because rollback is already wired to a `commitPackage` throw, today's post-promotion guard
+leaves no orphan files, which is most of the reason the pre-promotion check is a nicety rather than a
+correctness fix.
+
+Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
