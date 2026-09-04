@@ -13,7 +13,7 @@ import {
   Devices as DevicesIcon
 } from '@phosphor-icons/react'
 import type { ComponentType } from 'react'
-import { deviceNoun, primaryModifier } from '@renderer/lib/device'
+import { deviceNoun, primaryModifier, shortcutLabel } from '@renderer/lib/device'
 import { isMac, type DevicePlatform } from '@offgrid/core/shared/device'
 import { PRO_PURCHASE_URL } from '@offgrid/core/shared/product-links'
 
@@ -49,6 +49,18 @@ export interface ProFeature {
    */
   platforms: DevicePlatform[]
 }
+
+/**
+ * The dictation shortcut as the dictation controller REGISTERS it (Electron accelerator format),
+ * which is not how any keyboard labels it: `shortcutLabel` turns this into the per-platform
+ * spelling so a Windows or Linux reader is never told to hold a key their keyboard has no name for.
+ *
+ * This is the DEFAULT chord. The catalogue is a static, import-time module - it advertises Pro in
+ * the OPEN build, where the dictation settings (and any rebound chord) are not readable - so a user
+ * who rebound dictation reads the default here. Making this copy follow a custom chord needs the
+ * catalogue to become settings-aware; it is not, and this constant is deliberately not plumbed.
+ */
+const DEFAULT_DICTATION_ACCELERATOR = 'Alt+Space'
 
 export const PRO_FEATURES: ProFeature[] = [
   {
@@ -169,9 +181,9 @@ export const PRO_FEATURES: ProFeature[] = [
     label: 'Voice',
     icon: Waveform,
     tagline: 'Talk instead of type, fully local.',
-    description: `Hold Option+Space and speak — Off Grid AI Desktop transcribes on-device with whisper.cpp and pastes the text into whatever app you are in. Tap to toggle, hold to push-to-talk. Every recording and transcript is kept in a searchable library, and you can drop in any audio or video file to transcribe it. Runs in your ${deviceNoun()}'s RAM; nothing leaves the device.`,
+    description: `Hold ${shortcutLabel(DEFAULT_DICTATION_ACCELERATOR)} and speak — Off Grid AI Desktop transcribes on-device with whisper.cpp and pastes the text into whatever app you are in. Tap to toggle, hold to push-to-talk. Every recording and transcript is kept in a searchable library, and you can drop in any audio or video file to transcribe it. Runs in your ${deviceNoun()}'s RAM; nothing leaves the device.`,
     highlights: [
-      'Option+Space push-to-talk or toggle, anywhere',
+      `${shortcutLabel(DEFAULT_DICTATION_ACCELERATOR)} push-to-talk or toggle, anywhere`,
       'Paste-at-cursor + a searchable recordings library',
       'Transcribe any audio/video file, all on-device'
     ],
