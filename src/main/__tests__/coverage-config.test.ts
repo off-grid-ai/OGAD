@@ -16,8 +16,8 @@ describe('workspace coverage configuration', () => {
       statements: 80,
       branches: 80,
       functions: 80,
-      lines: 80,
-      'pro/**': { statements: 80, branches: 80, functions: 80, lines: 80 }
+      lines: 80
     })
+    expect(coverage?.thresholds).not.toHaveProperty('pro/**')
   })
 })

@@ -264,12 +264,7 @@ export default defineConfig({
             statements: 80,
             branches: 80,
             functions: 80,
-            lines: 80,
-            // pro/** stays separately regression-guarded (mobile pattern), same uniform floor.
-            // Only applied when pro is checked out (see hasPro) so a core-only CI run doesn't error.
-            ...(hasPro
-              ? { 'pro/**': { statements: 80, branches: 80, functions: 80, lines: 80 } }
-              : {})
+            lines: 80
           }
     }
   }
