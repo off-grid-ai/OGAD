@@ -7,7 +7,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { CATALOG } from '@offgrid/models'
 import type { OffGridApplication } from '@offgrid/application'
 
@@ -305,7 +305,7 @@ describe('Desktop shared model-service composition', () => {
     await startupApplication.models.refresh()
     const startupInventory = startupApplication.models.snapshot().inventory
     expect(startupInventory.map((model) => [model.id, model.modality, model.ready])).toContainEqual(
-      [text.id, 'text', true]
+      [text.id, 'text', false]
     )
     const startupTextRoute = startupInventory.find(
       (model) => model.id === text.id && model.modality === 'text'
@@ -321,6 +321,11 @@ describe('Desktop shared model-service composition', () => {
       startupApplication.models.load({ modality: 'text', modelId: startupTextRoute })
     ).resolves.toMatchObject({ ok: true })
     expect(nativeLoads).toBe(1)
+    expect(
+      startupApplication.models
+        .snapshot()
+        .inventory.find((model) => model.id === text.id && model.modality === 'text')?.ready
+    ).toBe(true)
     expect(startupApplication.models.snapshot().residents).toEqual([
       expect.objectContaining({
         key: expect.stringMatching(/^text:model-route:v1:/),
@@ -333,6 +338,11 @@ describe('Desktop shared model-service composition', () => {
       value: true
     })
     expect(nativeUnloads).toBe(1)
+    expect(
+      startupApplication.models
+        .snapshot()
+        .inventory.find((model) => model.id === text.id && model.modality === 'text')?.ready
+    ).toBe(false)
     expect(startupApplication.models.snapshot().residents).toEqual([])
 
     const startupError = new Error('Native text runtime failed to start.')
@@ -406,6 +416,139 @@ describe('Desktop shared model-service composition', () => {
       })
     } finally {
       stat.mockRestore()
+    }
+  })
+})
+
+describe('Desktop memory advisory facts (Shared owns the rule)', () => {
+  const text = CATALOG.find(
+    (model) =>
+      model.kind === 'text' &&
+      model.availability !== 'coming_soon' &&
+      model.files.length > 0 &&
+      model.files.every((file) => file.name && (file.sizeBytes ?? 0) > 0)
+  )
+  if (!text) throw new Error('The catalog needs a sized text fixture.')
+  const sizedText = text
+  const artifactBytes = sizedText.files.reduce((sum, file) => sum + (file.sizeBytes ?? 0), 0)
+
+  async function createActivatableApplication(options: {
+    totalBytes: number
+    onDisk: boolean
+  }): Promise<OffGridApplication> {
+    const [applicationModule, modelServices, applicationAccess, controlPort] = await Promise.all([
+      import('@offgrid/application'),
+      import('../model-services'),
+      import('../composition/application-access'),
+      import('../models/desktop-model-control-port')
+    ])
+    vi.spyOn(os, 'totalmem').mockReturnValue(options.totalBytes)
+    vi.spyOn(os, 'freemem').mockReturnValue(options.totalBytes)
+    let ready = false
+    const application = applicationModule.createOffGridApplication({
+      models: {
+        ...modelServices.createDesktopModelWorkspacePorts({
+          listCatalog: async () => [sizedText],
+          listInstalled: async () => [sizedText.id],
+          // The same on-disk fact the production root reads; the fixture is 64 bytes when present.
+          installedArtifactBytes: (fileName) => {
+            if (!options.onDisk) return undefined
+            try {
+              return fs.statSync(path.join(modelDirectory, fileName)).size
+            } catch {
+              return undefined
+            }
+          },
+          localTextRuntimeState: async () => ({ ready, loaded: ready }),
+          localTextLifecycle: {
+            async load() {
+              ready = true
+            },
+            async unload() {
+              ready = false
+            }
+          }
+        }),
+        control: controlPort.createDesktopModelControlPort({
+          readCatalog: async () => ({ kinds: ['text'], models: [sizedText] })
+        })
+      }
+    })
+    applicationAccess.registerDesktopApplication(application)
+    applications.push(application)
+    await application.start()
+    await application.models.refresh()
+    return application
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('admits a small installed model on ample memory through the real activation path', async () => {
+    for (const file of sizedText.files) {
+      fs.writeFileSync(path.join(modelDirectory, file.name), Buffer.alloc(64, 1))
+    }
+    const application = await createActivatableApplication({
+      totalBytes: 64 * 1024 ** 3,
+      onDisk: true
+    })
+    const outcome = await application.models.control({
+      type: 'activate',
+      surface: 'text',
+      modelId: sizedText.id,
+      operationId: 'advisory-small'
+    })
+    expect(outcome).toMatchObject({ ok: true, value: { status: 'completed' } })
+    expect(application.models.snapshot().control.activeIds).toContain(sizedText.id)
+  })
+
+  it("surfaces Shared's critical verdict when the installed model exceeds device memory", async () => {
+    // Not on disk: the catalog's advertised bytes are the artifact fact.
+    const application = await createActivatableApplication({
+      totalBytes: 2 * 1024 ** 3,
+      onDisk: false
+    })
+    expect(artifactBytes).toBeGreaterThan(2 * 1024 ** 3 - 1500 * 1024 ** 2)
+    const outcome = await application.models.control({
+      type: 'activate',
+      surface: 'text',
+      modelId: sizedText.id,
+      operationId: 'advisory-large'
+    })
+    expect(outcome).toMatchObject({
+      ok: true,
+      value: {
+        status: 'confirmation_required',
+        confirmation: {
+          modelId: sizedText.id,
+          advice: { severity: 'critical', canLoad: false }
+        }
+      }
+    })
+    if (!outcome.ok || outcome.value.status !== 'confirmation_required')
+      throw new Error('unreachable')
+    expect(outcome.value.confirmation.advice.message).toContain('exceeds your device')
+  })
+
+  it('never fails closed with memory_advice_unavailable or a stale not-found refusal', async () => {
+    for (const file of sizedText.files) {
+      fs.writeFileSync(path.join(modelDirectory, file.name), Buffer.alloc(64, 1))
+    }
+    const application = await createActivatableApplication({
+      totalBytes: 64 * 1024 ** 3,
+      onDisk: true
+    })
+    const outcome = await application.models.control({
+      type: 'activate',
+      surface: 'text',
+      modelId: sizedText.id,
+      operationId: 'advisory-available'
+    })
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) {
+      expect(outcome.failure.kind).not.toBe('memory_advice_unavailable')
+      expect(outcome.failure.kind).not.toBe('memory_refused')
     }
   })
 })
