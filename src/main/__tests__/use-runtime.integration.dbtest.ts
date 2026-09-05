@@ -33,6 +33,9 @@ vi.mock('electron', () => ({
     isPackaged: false,
     getPath: () => tempDir,
     getAppPath: () => tempDir
+  },
+  safeStorage: {
+    isEncryptionAvailable: () => false
   }
 }))
 
@@ -95,7 +98,8 @@ describe('the shared Use application with Desktop ports', () => {
         args: { title: 'Send the deck' },
         risk: 'mutate'
       },
-      source: 'chat'
+      source: 'chat',
+      sourceRef: 'reminder-chat'
     })
     expect(proposed.accepted).toBe(true)
     if (!proposed.accepted) {
