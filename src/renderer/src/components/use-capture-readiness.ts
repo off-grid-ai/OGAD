@@ -26,19 +26,22 @@ export function useCaptureReadiness(isPro: boolean): CaptureReadinessController 
   const [projection, setProjection] = useState<CaptureReadinessProjection | null>(null)
   const [progress, setProgress] = useState<ProgressLike | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
-  const refresh = useCallback(async (): Promise<void> => {
-    if (!isPro || !window.api.proInvoke) {
-      setProjection(null)
-      return
-    }
-    try {
-      setProjection(await captureReadinessClient.projection())
-      setFailure(null)
-    } catch (error) {
-      console.error('Failed to check capture vision readiness:', error)
-      setFailure(failureText(error))
-    }
-  }, [isPro])
+  const refresh = useCallback(
+    async (preserveFailure = false): Promise<void> => {
+      if (!isPro || !window.api.proInvoke) {
+        setProjection(null)
+        return
+      }
+      try {
+        setProjection(await captureReadinessClient.projection())
+        if (!preserveFailure) setFailure(null)
+      } catch (error) {
+        console.error('Failed to check capture vision readiness:', error)
+        setFailure(failureText(error))
+      }
+    },
+    [isPro]
+  )
 
   useEffect(() => {
     void refresh()
@@ -80,7 +83,9 @@ export function useCaptureReadiness(isPro: boolean): CaptureReadinessController 
       setFailure(failureText(error))
     } finally {
       if (projection?.kind === 'missing-projector') setProgress(null)
-      void refresh()
+      // Reconcile the canonical Shared projection without erasing the outcome of this repair.
+      // A later capture event or successful retry performs a normal refresh and clears it.
+      void refresh(true)
     }
   }, [projection, refresh])
 

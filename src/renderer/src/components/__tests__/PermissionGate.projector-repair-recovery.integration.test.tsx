@@ -16,7 +16,6 @@ const MODEL_ID = 'acme/vision-model'
 class CaptureBoundary {
   private attempts = 0
   private ready = false
-  private progressListener: ((event: unknown) => void) | null = null
 
   readonly api = {
     isPro: true,
@@ -44,16 +43,14 @@ class CaptureBoundary {
         ? { running: true, paused: false, visionReady: this.ready }
         : null,
     proOn: () => () => undefined,
-    onModelProgress: (listener: (event: unknown) => void) => {
-      this.progressListener = listener
-      return () => {
-        this.progressListener = null
-      }
-    },
+    onModelProgress: () => () => undefined,
     controlModel: async () => {
       this.attempts += 1
       if (this.attempts === 1) {
-        return new Promise(() => undefined)
+        return {
+          ok: false,
+          failure: { kind: 'runtime', message: 'The projector archive could not be verified.' }
+        }
       }
       this.ready = true
       return {
@@ -65,16 +62,6 @@ class CaptureBoundary {
         }
       }
     }
-  }
-
-  failDownload(): void {
-    this.progressListener?.({
-      downloadId: 'projector-download',
-      modelId: MODEL_ID,
-      fileName: 'projector.gguf',
-      status: 'failed',
-      reason: 'The projector archive could not be verified.'
-    })
   }
 }
 
@@ -93,7 +80,6 @@ describe('<PermissionGate/> projector repair recovery', () => {
 
     expect(await screen.findByText('Capture needs vision support')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Download vision support' }))
-    boundary.failDownload()
 
     expect(await screen.findByText('The projector archive could not be verified.')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Download vision support' }))
