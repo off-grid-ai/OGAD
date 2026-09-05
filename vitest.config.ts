@@ -43,6 +43,16 @@ export default defineConfig({
       '@renderer': resolve(__dirname, 'src/renderer/src'),
       '@offgrid/core': resolve(__dirname, 'src'),
       '@offgrid/pro/renderer': resolve(__dirname, 'src/bootstrap/proStub.ts'),
+      // `loadProFeaturesMain` dynamically imports `@offgrid/pro/main`, which the production build
+      // (electron.vite.config.ts) resolves to the real `pro/main/index.ts` when the submodule is
+      // present and to the stub when it is not. This alias mirrors that exactly. Without it the
+      // import threw ERR_MODULE_NOT_FOUND under test, which `loadProFeaturesMainNow` reports as a
+      // pro activation failure whenever pro is enabled - so every entitlement-gain test logged a
+      // failure that no production build can produce. A real module when we have it, per the
+      // testing doctrine; the stub only where production would also have the stub.
+      '@offgrid/pro/main': hasPro
+        ? resolve(__dirname, 'pro/main/index.ts')
+        : resolve(__dirname, 'src/bootstrap/proStub.ts'),
       '@offgrid/pro': resolve(__dirname, 'src/bootstrap/proStub.ts'),
       '@': resolve(__dirname, 'src/renderer/src')
     }
