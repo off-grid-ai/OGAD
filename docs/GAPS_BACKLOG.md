@@ -2893,3 +2893,33 @@ had to write the literal - a declared DRY exception in the test that is really a
 production: one string, two owners, and a renderer that cannot reach the exported one.
 
 Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
+
+## `useCrmProjection` publishes after unmount, two ways (OPEN — production, found by a test)
+
+`desktop/pro/renderer/lib/crm-projections.ts`. The hook's effect cleanup calls `offChanged()` and
+removes the visibility listener, but the listener closure carries NO cancelled-guard (`:97-100`): a
+late event still reaches `apply(revision)` → `read()` on a surface that has unmounted. This is what
+`MeetingFrameTimeline.integration.test.tsx:177` asserts against - "drops its subscription on unmount,
+and a late event changes nothing" - and the test's fake emitter is CORRECT (its unsubscribe increments
+and nulls, and both of those assertions pass). So the failure is the production hook, and the
+assertion is left failing rather than adjusted.
+
+The worse variant the test does not even reach is `catchUp()` at `:70-85`: `proInvoke(CRM_PROJECTION_REVISIONS).then(...)`
+is never cancelled. Navigate away while that revisions read is in flight and it resolves after unmount
+and calls `read()` on a dead surface. This one needs no misbehaving emitter - it is reachable through
+the REAL transport on every navigation. It is exactly the "an answer to a request nobody is waiting
+for must not publish" property enforced everywhere else this round, missing here.
+`MeetingsScreen.tsx:158-172` does it correctly with an `active` flag, so the pattern is one file away.
+
+Production source, outside the test phase's scope. Needs an owner; the test stays red until it lands.
+
+## `useMeetingRecorder` has TWO entitlement gates, and a stubbed test would miss the second (NOTE)
+
+Recorded so the next test author is not misled. `102dcd84` added a required `enabled` argument to
+`useMeetingRecorder`. But `useMeetingRecorder.ts:76,84` ALSO drops every broadcast unless
+`getRendererIsPro()`. Passing `enabled` alone leaves the screen permanently idle - the Record button
+never moves and no Stop appears - so a test that stubbed component state instead of initialising the
+renderer entitlement would go green while exercising nothing. Whether two gates are intended is a
+design question for the meeting owner; that they exist is the fact tests must respect.
+
+Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
