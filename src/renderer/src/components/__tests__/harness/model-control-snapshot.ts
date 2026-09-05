@@ -1,4 +1,5 @@
 import { EMPTY_MODELS_OPERATIONS, type ModelsOperationsSnapshot } from '@offgrid/application'
+import type { PublicDownloadInfo } from '@offgrid/models'
 
 interface ActiveModels {
   text: string | null
@@ -25,14 +26,6 @@ interface SnapshotInput<Model> {
   computerUse?: unknown
 }
 
-interface DownloadSnapshot {
-  downloadId: string
-  modelId: string | null | undefined
-  fileName: string
-  status: 'queued' | 'completed'
-  bytesDownloaded: number
-}
-
 interface ModelControlSnapshot<Model> {
   kinds: readonly string[]
   models: readonly Model[]
@@ -42,7 +35,7 @@ interface ModelControlSnapshot<Model> {
     keyof ActiveModels,
     { modelId: string | null; routeId: string | null; ready: boolean }
   >
-  downloads: readonly DownloadSnapshot[]
+  downloads: readonly PublicDownloadInfo[]
   downloadDurability: { status: 'healthy' }
   /**
    * The Computer Use strategy the picker renders. Carried through from the input: it used to be
@@ -191,7 +184,7 @@ export function modelControlBoundary<Model extends { id: string }>(
             )
           }
         }
-        if (input.holdDownloads) {
+        if (input.holdDownloads && modelId) {
           state = {
             ...state,
             downloads: [
@@ -201,7 +194,9 @@ export function modelControlBoundary<Model extends { id: string }>(
                 modelId,
                 fileName: '',
                 status: 'queued',
-                bytesDownloaded: 0
+                bytesDownloaded: 0,
+                totalBytes: 0,
+                startedAt: 0
               }
             ]
           }
