@@ -2973,3 +2973,52 @@ code moves - the same failure mode as the filename-keyed architecture check repa
 Desktop core main tests are Codex's scope; recorded here, not touched.
 
 Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
+
+## Mobile download retry cannot clear a partial: `removePartial` is unimplemented and, on Android, unimplementable as specified (OPEN — Shared contract decision needed)
+
+Shared's `prepareDownloadRetry` (`models/src/downloads/coordinator-retry.ts:20`) throws
+`Download partial cleanup is not configured` when `DownloadFilePort.removePartial` is absent, and
+Mobile's `compositeDownloadFilePort` (`mobile/src/services/modelServices/modelDownloadArtifactIO.ts:67`)
+does not implement it. So every Mobile retry that reaches `clearIncompatiblePartial` fails today.
+Read from source, not reproduced on a device.
+
+Implementing it is not a one-liner, because the contract assumes a partial lives somewhere OTHER than
+the final path: `hasFinal = exists(file)` is computed first, an invalid final throws before
+`removePartial` is reached, and `removePartial(file)` receives the FINAL artifact path. iOS satisfies
+that (partials stage in the URLSession temp / staging dir, moved on completion). Android does not:
+`WorkerDownload.kt:61-66` streams straight into `File(download.destination)` and resumes from its
+length. On Android an interrupted download therefore leaves incomplete bytes AT the final path,
+`hasFinal` is true, verification fails, and retry surfaces as "Existing artifact requires installation
+reconciliation before retry" — a reconciliation error in place of a retry.
+
+Two resolutions, both outside Mobile's ownership: (a) Android adopts a distinct `.part` path so
+partial and final are separable (native change with in-flight migration), or (b) Shared widens the
+`removePartial` contract to "remove incomplete bytes at this path, the caller having established any
+final here is valid". Decision routed to the user and the Shared models owner. Mobile implements the
+moment either lands; the "final + partial → only partial removed" regression is only expressible
+under (a).
+
+Also recorded: the coordinator's `cancel(id, removePartial=true)` does not call `files.removePartial`;
+it calls `files.remove(path)` filtered to non-`completed` artifacts (`coordinator.ts:332-338`), so the
+completed-artifact protection on cancel is Shared's filter, not the host's.
+
+Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
+
+## Mobile carries copied technical catalog values that the user's catalog rule forbids (OPEN — sequenced behind Faraday's Shared hydration cleanup)
+
+Inventory only; nothing removed. Highest priority first.
+
+- `WorkerDownload.kt:215-217` — curated `offgrid/*` entries opt OUT of strict size validation by
+  namespace string, justified by "the URL is pinned to a commit hash". A namespace deciding whether
+  integrity is checked is a copied technical rule; it should be the resolver's verified size/hash.
+- `WorkerDownload.kt:311-316` — a seeded `sizeMB * 1024 * 1024` estimate clamps the real
+  `Content-Length`; the comment records it caused false `FILE_CORRUPTED` at the 0.1% delta check.
+- `mobile/src/types/index.ts:36-44` — `size`, `sha256`, and a nested `mmProjFile { name, size,
+  downloadUrl, sha256 }` on the Mobile model type. `mmProjFile` is also a second source of truth for
+  the mmproj role, which Shared's `currentFileRole` now owns.
+- `mobile/src/types/index.ts:337-341` — `lfs { size, sha256, pointerSize }` mirrored on the type.
+
+Removal lands only after Shared's canonical catalog hydration exposes these as cached verified facts,
+so Mobile consumes the resolver and never a copied value.
+
+Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
