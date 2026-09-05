@@ -72,7 +72,7 @@ describe.sequential('legacy selected local artifact inventory migration', () => 
     expect(installed).not.toContain('legacy-alias')
   })
 
-  it('projects an existing selected text artifact into canonical inventory once', async () => {
+  it('projects an existing selected but unloaded text artifact into canonical inventory once', async () => {
     const legacy = { id: 'legacy-local-text', primary: 'legacy-local-text.gguf', mmproj: null }
     fs.writeFileSync(path.join(modelsDir, legacy.primary), Buffer.from('GGUF legacy text'))
     fs.writeFileSync(path.join(modelsDir, 'active-model.json'), JSON.stringify(legacy))
@@ -91,7 +91,13 @@ describe.sequential('legacy selected local artifact inventory migration', () => 
     ).toHaveLength(1)
     expect(app.models.snapshot().active.text).toMatchObject({
       selectedRouteId: expect.stringMatching(/^model-route:v1:/),
-      model: { id: legacy.id, adapterId: 'desktop.llama', installed: true, ready: true }
+      model: {
+        id: legacy.id,
+        adapterId: 'desktop.llama',
+        installed: true,
+        loaded: false,
+        ready: false
+      }
     })
     expect(JSON.parse(fs.readFileSync(path.join(modelsDir, 'active-model.json'), 'utf8'))).toEqual(
       legacy
