@@ -65,6 +65,22 @@ const { gateHost } = await import('../gate-host')
 const { getActionsRuntime } = await import('../use-runtime')
 const { computePayloadHash } = await import('@offgrid/use')
 type ActionRecord = import('@offgrid/use').ActionRecord
+type UseSnapshot = import('@offgrid/application').UseSnapshot
+
+// The projection lanes the renderer binds to, pinned to Shared's `UseSnapshot`
+// (the SSOT; `terminal` arrived in shared 5abf1e7). `satisfies` refuses a key
+// Shared does not emit, and `MissingProjectionLane` refuses to compile the
+// moment Shared adds a lane this list does not carry - the list cannot drift.
+const PROJECTION_LANES = [
+  'actions',
+  'active',
+  'recoverable',
+  'running',
+  'terminal'
+] as const satisfies readonly (keyof UseSnapshot)[]
+type MissingProjectionLane = Exclude<keyof UseSnapshot, (typeof PROJECTION_LANES)[number]>
+const _everyLaneListed: MissingProjectionLane extends never ? true : never = true
+void _everyLaneListed
 
 const record = (): ActionRecord => {
   const payload = { type: 'message', intent: 'text Ali', args: { text: 'hi' } }
@@ -139,23 +155,11 @@ describe('registerActionsIpc', () => {
 
   it('transports the canonical Shared projection, recoverable work included', async () => {
     const getProjection = handlers.get('actions:get-projection')
-    const projection = (await getProjection?.({})) as {
-      actions: unknown[]
-      active: unknown[]
-      recoverable: unknown[]
-      terminal: unknown[]
-      running: boolean
-    }
+    const projection = (await getProjection?.({})) as UseSnapshot
     // The shape the renderer binds to is the shape Shared really emits - the
     // recoverable lane included, which a hand-written fixture used to drop.
     expect(projection).toEqual(getActionsRuntime().snapshot())
-    expect(Object.keys(projection).sort()).toEqual([
-      'actions',
-      'active',
-      'recoverable',
-      'running',
-      'terminal'
-    ])
+    expect(Object.keys(projection).sort()).toEqual([...PROJECTION_LANES].sort())
     expect(Array.isArray(projection.recoverable)).toBe(true)
     expect(Array.isArray(projection.terminal)).toBe(true)
   })
