@@ -26,7 +26,13 @@ interface GateRequest {
   sourceRef?: string
 }
 
-const EMPTY_PROJECTION: UseSnapshot = { actions: [], active: [], recoverable: [], running: false }
+const EMPTY_PROJECTION: UseSnapshot = {
+  actions: [],
+  active: [],
+  terminal: [],
+  recoverable: [],
+  running: false
+}
 
 const gateRequestFrom = (record: ActionRecord): GateRequest => ({
   actionId: record.id,

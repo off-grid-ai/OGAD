@@ -1,5 +1,24 @@
 import { vi } from 'vitest'
+import type { UseSnapshot } from '@offgrid/application'
 import { modelControlBoundary } from '../../components/__tests__/harness/model-control-snapshot'
+
+const EMPTY_ACTION_PROJECTION: UseSnapshot = {
+  actions: [],
+  active: [],
+  terminal: [],
+  recoverable: [],
+  running: false
+}
+
+export function appActionsBoundary(): NonNullable<Window['api']['actions']> {
+  return {
+    getProjection: async () => EMPTY_ACTION_PROJECTION,
+    onProjection: () => () => undefined,
+    retry: async () => ({ ok: true, value: true }),
+    resolveGate: async () => true,
+    undo: async () => ({ ok: true })
+  }
+}
 
 export const APP_PROJECTS = Array.from({ length: 12 }, (_, index) => {
   const suffix = index === 0 ? 'Alpha' : index === 1 ? 'Beta' : String(index + 1).padStart(2, '0')
@@ -43,6 +62,7 @@ export function installAppBoundary(overrides: Record<string, unknown> = {}): voi
     }),
     getModelCatalog: async () => ({ kinds: ['text'], models: [] }),
     getModelControlProjection: modelControl.getModelControlProjection,
+    onModelControlProjection: eventSubscription,
     controlModel: modelControl.controlModel,
     getInstalledModels: async () => [],
     getActiveModelIds: async () => [],
@@ -75,12 +95,7 @@ export function installAppBoundary(overrides: Record<string, unknown> = {}): voi
     },
     voiceTurn: { onRequest: eventSubscription, respond: () => undefined },
     getTranscriptionInfo: async () => null,
-    actions: {
-      onGatePending: eventSubscription,
-      onOutcome: eventSubscription,
-      resolveGate: async () => undefined,
-      undo: async () => ({ ok: true })
-    },
+    actions: appActionsBoundary(),
     ...overrides
   }
   const api = new Proxy(values, {

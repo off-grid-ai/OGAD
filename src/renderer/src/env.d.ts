@@ -131,8 +131,6 @@ interface RendererAPIOverrides {
     >
     resolveGate: (actionId: string, decision: unknown) => Promise<boolean>
     undo: (record: unknown) => Promise<{ ok: boolean; detail?: string }>
-    onGatePending: (cb: (request: unknown) => void) => () => void
-    onOutcome: (cb: (outcome: unknown) => void) => () => void
   }
   tasks?: {
     list: (limit?: number) => Promise<

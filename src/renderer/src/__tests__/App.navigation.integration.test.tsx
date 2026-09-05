@@ -25,11 +25,15 @@ import { registerSlot, SLOTS, clearRegisteredSlots } from '../bootstrap/slotRegi
 import { WatchedBrowserPane } from '../../../../pro/renderer/components/browser/WatchedBrowserPane'
 import {
   APP_PROJECTS,
+  appActionsBoundary,
   installAppBoundary,
   installAppBrowserBoundary,
   installAppStorage
 } from './harness/app-boundary'
-import { modelControlSnapshot } from '../components/__tests__/harness/model-control-snapshot'
+import {
+  modelControlBoundary,
+  modelControlSnapshot
+} from '../components/__tests__/harness/model-control-snapshot'
 
 const rendererActivation = vi.hoisted(() => ({
   load: vi.fn<() => Promise<void>>()
@@ -42,6 +46,15 @@ vi.mock('../bootstrap/loadProFeaturesRenderer', () => ({
 let App: typeof import('../App').default
 
 const MODEL_KINDS = ['text', 'image', 'computer_use', 'voice', 'transcription']
+
+function allModelKindsBoundary(): Record<string, unknown> {
+  const boundary = modelControlBoundary({ kinds: MODEL_KINDS, models: [] })
+  return {
+    getModelControlProjection: boundary.getModelControlProjection,
+    onModelControlProjection: boundary.onModelControlProjection,
+    controlModel: boundary.controlModel
+  }
+}
 
 function routedTabButton(label: string): HTMLButtonElement {
   const button = screen
@@ -56,10 +69,7 @@ describe('<App/> desktop navigation integration', () => {
     // App's renderer graph includes modules that capture the preload bridge at
     // module initialization. Install that real boundary once, then keep module
     // loading outside the interaction assertion's timeout budget.
-    installAppBoundary({
-      getModelControlProjection: async () =>
-        modelControlSnapshot({ kinds: MODEL_KINDS, models: [] })
-    })
+    installAppBoundary(allModelKindsBoundary())
     installAppBrowserBoundary()
     ;({ default: App } = await import('../App'))
   }, 30_000)
@@ -372,7 +382,7 @@ describe('<App/> desktop navigation integration', () => {
     const listeners = new Map<string, (payload: unknown) => void>()
     installAppBoundary({
       isPro: true,
-      actions: { onGatePending: () => () => {}, onOutcome: () => () => {} },
+      actions: appActionsBoundary(),
       vision: { onTaskState: () => () => {}, onStep: () => () => {} },
       proOn: (channel: string, listener: (payload: unknown) => void) => {
         listeners.set(channel, listener)
@@ -554,8 +564,7 @@ describe('<App/> desktop navigation integration', () => {
       registerProView(proView)
       installAppBoundary({
         isPro: true,
-        getModelControlProjection: async () =>
-          modelControlSnapshot({ kinds: MODEL_KINDS, models: [] }),
+        ...allModelKindsBoundary(),
         crmListEntities: async () => [],
         proInvoke: async (channel: string) => {
           if (channel === 'pro:sync:status') return undefined
@@ -612,8 +621,7 @@ describe('<App/> desktop navigation integration', () => {
       registerProView(proView)
       installAppBoundary({
         isPro: true,
-        getModelControlProjection: async () =>
-          modelControlSnapshot({ kinds: MODEL_KINDS, models: [] }),
+        ...allModelKindsBoundary(),
         crmListEntities: async () => [],
         proInvoke: async (channel: string) => {
           if (channel === 'pro:sync:status') return undefined
@@ -693,7 +701,9 @@ describe('<App/> desktop navigation integration', () => {
       isPro: true,
       tasks: { list: async () => [], onChanged: () => () => {} },
       browser: { setRegion },
-      actions: { onGatePending: () => () => {}, onOutcome: () => () => {} }
+      actions: appActionsBoundary(),
+      universalSearch: async () => [],
+      searchFacets: async () => []
     })
     render(
       <TooltipProvider>
@@ -764,7 +774,7 @@ describe('<App/> desktop navigation integration', () => {
           return () => {}
         }
       },
-      actions: { onGatePending: () => () => {}, onOutcome: () => () => {} }
+      actions: appActionsBoundary()
     })
     render(
       <TooltipProvider>
