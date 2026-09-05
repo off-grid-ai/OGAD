@@ -11,12 +11,18 @@
 //   readReasoning(ctx) → string | undefined              (read path)
 import type { ResponseCutoffContract } from '../../../shared/ipc-contracts'
 import type { GenerationMetrics } from '../../../shared/generation-metrics'
-import type { ChatTurnStatus, GenerationMessage } from '@offgrid/application'
+import {
+  isChatTurnStatus,
+  type ChatTurnStatus,
+  type GenerationMessage
+} from '@offgrid/models'
 
 export interface PersistedChatSessionTurn {
   turnId: string
   status: ChatTurnStatus
   responseMessages: readonly GenerationMessage[]
+  /** Shared turn intent projected for durable UI recovery. */
+  reasoningRequested?: boolean
 }
 
 /** Extra assistant-turn fields that ride in the persisted `context` blob. */
@@ -77,14 +83,11 @@ export function readPersistedChatSessionTurn(ctx: unknown): PersistedChatSession
   return {
     turnId: value.turnId,
     status: value.status,
-    responseMessages: value.responseMessages
+    responseMessages: value.responseMessages,
+    ...(typeof value.reasoningRequested === 'boolean'
+      ? { reasoningRequested: value.reasoningRequested }
+      : {})
   }
-}
-
-function isChatTurnStatus(value: unknown): value is ChatTurnStatus {
-  return ['queued', 'generating', 'completed', 'stopped', 'failed', 'invalidated'].includes(
-    String(value)
-  )
 }
 
 function isGenerationMessage(value: unknown): value is GenerationMessage {

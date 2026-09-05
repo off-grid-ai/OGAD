@@ -12,6 +12,7 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { modelControlBoundary } from './harness/model-control-snapshot'
+import { ModelsScreen } from '../ModelsScreen'
 
 interface Entry {
   id: string
@@ -39,9 +40,8 @@ const HUGE: Entry = {
   files: [{ name: 'huge.gguf', sizeBytes: 15_000_000_000 }] // 15GB
 }
 
-// ModelsScreen binds `window.api` at module load, so ONE persistent api object is
-// installed before the first import and the RAM value is mutated per test (the
-// mount always re-reads systemHealth). This is the correct pattern for this app.
+// ONE persistent api object is installed on window and the RAM value is mutated per
+// test (the mount always re-reads systemHealth through the bridge at use time).
 let ramGbValue = 16
 const modelControl = modelControlBoundary({ kinds: ['language'], models: [SMALL, HUGE] })
 ;(window as unknown as { api: unknown }).api = {
@@ -64,7 +64,6 @@ describe('<ModelsScreen/> — browse fit chip (never-block posture)', () => {
 
   it('flags a 15GB model "Won\'t fit — Load anyway" on a 16GB Mac; no warning on a small one', async () => {
     ramGbValue = 16
-    const { ModelsScreen } = await import('../ModelsScreen')
     render(<ModelsScreen />)
 
     // Both models render (neither is hidden — the never-block rule).
@@ -80,7 +79,6 @@ describe('<ModelsScreen/> — browse fit chip (never-block posture)', () => {
   it('the SAME 15GB model gets no fit warning on a 24GB Mac (verdict is RAM-relative)', async () => {
     // 15GB on 24GB is 62.5% — under the 65% soft budget → "fits", no chip.
     ramGbValue = 24
-    const { ModelsScreen } = await import('../ModelsScreen')
     render(<ModelsScreen />)
 
     await screen.findByText('Huge Model')

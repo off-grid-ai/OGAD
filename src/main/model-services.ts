@@ -1,11 +1,16 @@
 import { randomUUID } from 'crypto'
+import fs from 'node:fs'
 import os from 'node:os'
+import path from 'node:path'
 import {
   decodeModelRouteId,
   localCatalogRuntimeModels,
   runtimeModelRouteId,
   type ModelInventoryAdapter,
+  type AdvisoryModelType,
   type GenerationAdapter,
+  type MemorySnapshot,
+  type ModelMemoryAdvisoryArtifact,
   type ModelModality,
   type ModelSelectionStore,
   type ModelWorkspacePorts,
@@ -17,6 +22,7 @@ import {
 } from './model-selection-persistence'
 import { getRemoteVisionServer, desktopRemoteServerPorts } from './vision/remote-vision-server'
 import { peekRemoteReasoningMetadata, remoteReasoningMetadata } from './llm/remote-chat'
+import { llm } from './llm'
 import {
   DesktopLocalGenerationAdapter,
   desktopGenerationObservations,
@@ -28,13 +34,16 @@ import {
   DesktopRemoteVoiceGenerationAdapter,
   DesktopRemoteTranscriptionGenerationAdapter,
   DesktopRemoteEmbeddingGenerationAdapter,
-  DesktopEmbeddingGenerationAdapter
+  DesktopEmbeddingGenerationAdapter,
+  type DesktopLocalTextRuntime
 } from './model-generation-adapters'
 import { desktopToolExecutor } from './desktop-tool-executor'
 import { getResidencyMode } from './runtime-residency'
+import { modelsDir } from './runtime-env'
 import './models-manager'
 import { desktopModelManagerPorts } from './model-manager-ports'
 import { desktopModelLifecyclePorts } from './composition/model-lifecycle'
+import type { DesktopGuidedSetupRuntime } from './composition/guided-setup'
 import { refreshDesktopModels } from './composition/application-access'
 import {
   desktopAdapterId,
@@ -109,13 +118,23 @@ export class DesktopModelSelectionStore implements ModelSelectionStore {
     const nativeModelId = route?.modelId ?? modelId
     if (modality === 'text') {
       if (!nativeModelId) this.routes.clearLegacyTextConfig()
-      else if (!route?.serverId && this.projectTextSelection) {
+      else if (
+        !route?.serverId &&
+        this.projectTextSelection &&
+        this.routes.readCanonical(modality) !== modelId
+      ) {
+        // Canonical selection is the truth. Re-project native text metadata only when that truth
+        // changes: a lifecycle transaction selects the route after a successful load, and
+        // restarting the same native engine at that point would undo the successful transition.
         const result = await this.projectTextSelection(nativeModelId)
         if (!result.success) throw new Error(result.error ?? 'The model could not be selected.')
       }
       this.routes.write(modality, modelId)
       return
     }
+    // The legacy file is a compatibility projection, not an identity source. Write the canonical
+    // catalog model id even when the route is unchanged so an old artifact-filename projection is
+    // healed instead of surviving forever behind an idempotent canonical selection.
     this.routes.projectLegacyModality(modality, nativeModelId)
     this.routes.write(modality, modelId)
   }
@@ -123,6 +142,8 @@ export class DesktopModelSelectionStore implements ModelSelectionStore {
 
 class DesktopInventorySource {
   private inFlight: Promise<RuntimeModel[]> | null = null
+  private catalog: readonly DesktopInventoryModel[] = []
+  private installed = new Set<string>()
   constructor(
     private readonly ports: DesktopModelWorkspacePorts,
     private readonly ids: LegacyDesktopModelIdCodec,
@@ -142,14 +163,24 @@ class DesktopInventorySource {
     const [catalog, installedIds, localTextState, localVoiceState] = await Promise.all([
       this.ports.listCatalog(),
       this.ports.listInstalled(),
-      this.ports.localTextRuntimeState(),
+      this.ports.localTextRuntime.state(),
       this.ports.localVoiceRuntimeState?.() ?? Promise.resolve({ installed: false, ready: false })
     ])
     this.ids.index(catalog)
+    this.catalog = catalog
+    this.installed = new Set(installedIds)
     // Shared owns the local inventory projection (installed, ready, loaded, memory, residency,
     // derived text routes); this root hands in facts and names the executors.
     const catalogRoutes = localCatalogRuntimeModels({
-      catalog,
+      catalog: catalog.map((model) => ({
+        ...model,
+        files: model.files?.map((file) => ({
+          ...file,
+          ...(file.name && this.ports.installedArtifactBytes
+            ? { installed: this.ports.installedArtifactBytes(file.name) !== undefined }
+            : {})
+        }))
+      })),
       installedIds,
       activeText: this.selections.read('text'),
       textRuntime: localTextState,
@@ -178,6 +209,50 @@ class DesktopInventorySource {
     this.selections.indexRoutes(routes)
     return routes
   }
+
+  /**
+   * Device facts for Shared's memory advice: the artifact bytes of an installed catalog model.
+   * A verified on-disk size wins over the catalog's advertised size; the rule that turns bytes
+   * into "will it fit" lives in Shared, not here.
+   */
+  artifact(modelId: string, type: AdvisoryModelType): ModelMemoryAdvisoryArtifact | undefined {
+    const canonical = this.ids.canonical(decodeModelRouteId(modelId)?.modelId ?? modelId)
+    const model = this.catalog.find((candidate) => candidate.id === canonical)
+    if (!model) return undefined
+    const primary = model.files?.filter((file) => file.role !== 'mmproj') ?? []
+    const projector = model.files?.find((file) => file.role === 'mmproj')
+    // "Installed" is read on demand from the disk when this device can verify it, so an artifact
+    // that landed after the last inventory read is still a fact and not a stale-cache refusal.
+    const onDisk =
+      this.ports.installedArtifactBytes !== undefined &&
+      primary.length > 0 &&
+      primary.every(
+        (file) => file.name && this.ports.installedArtifactBytes?.(file.name) !== undefined
+      )
+    if (!onDisk && !this.installed.has(model.id)) return undefined
+    const bytes = (file: { name?: string; sizeBytes?: number }): number =>
+      (file.name ? this.ports.installedArtifactBytes?.(file.name) : undefined) ??
+      file.sizeBytes ??
+      0
+    const artifactBytes = primary.reduce((total, file) => total + bytes(file), 0)
+    if (artifactBytes <= 0) return undefined
+    return {
+      id: model.id,
+      name: model.name ?? model.id,
+      type,
+      artifactBytes,
+      projectorBytes: projector ? bytes(projector) : undefined,
+      platform: 'desktop'
+    }
+  }
+}
+
+function desktopDeviceMemory(): MemorySnapshot {
+  return {
+    totalMB: os.totalmem() / (1024 * 1024),
+    availableMB: os.freemem() / (1024 * 1024),
+    platform: 'desktop'
+  }
 }
 
 class DesktopModelInventoryAdapter implements ModelInventoryAdapter {
@@ -199,6 +274,7 @@ class DesktopModelInventoryAdapter implements ModelInventoryAdapter {
 export type DesktopModelPlatformPorts = ModelWorkspacePorts & {
   readonly inventoryAdapters: readonly ModelInventoryAdapter[]
   readonly generationAdapters: readonly GenerationAdapter[]
+  readonly guidedSetupRuntime: DesktopGuidedSetupRuntime
 }
 
 export function createDesktopModelWorkspacePorts(
@@ -212,15 +288,15 @@ export function createDesktopModelWorkspacePorts(
     ports.projectTextSelection
   )
   const lifecycleAdapters = new Map<string, GenerationAdapter>()
+  const source = new DesktopInventorySource(ports, ids, selections)
   const workspacePorts: ModelWorkspacePorts = {
     selection: selections,
-    memory: {
-      current: () => ({
-        totalMB: os.totalmem() / (1024 * 1024),
-        availableMB: os.freemem() / (1024 * 1024),
-        platform: 'desktop'
-      })
-    },
+    memory: { current: desktopDeviceMemory },
+    // Shared owns the advice rule; this device supplies memory and installed-artifact facts only.
+    memoryAdvisory: () => ({
+      deviceMemory: async () => desktopDeviceMemory(),
+      artifact: (modelId, type) => source.artifact(modelId, type)
+    }),
     // No deadline: a generation runs until it finishes or the user stops it.
     generation: { tools: desktopToolExecutor },
     remote: desktopRemoteServerPorts,
@@ -258,7 +334,6 @@ export function createDesktopModelWorkspacePorts(
   // the exact instance this app must not hold.
   const inventoryAdapters: ModelInventoryAdapter[] = []
   const generationAdapters: GenerationAdapter[] = []
-  const source = new DesktopInventorySource(ports, ids, selections)
   for (const adapterId of [
     'desktop.llama',
     'desktop.llama.classifier',
@@ -280,6 +355,7 @@ export function createDesktopModelWorkspacePorts(
     inventoryAdapters.push(new DesktopModelInventoryAdapter(adapterId, source))
   }
   const generationObservations = desktopGenerationObservations
+  const localTextRuntime = ports.localTextRuntime
   for (const adapterId of [
     'desktop.llama',
     'desktop.llama.classifier',
@@ -289,7 +365,7 @@ export function createDesktopModelWorkspacePorts(
     const adapter = new DesktopLocalGenerationAdapter(
       generationObservations,
       adapterId,
-      ports.localTextLifecycle
+      localTextRuntime
     )
     lifecycleAdapters.set(adapterId, adapter)
     generationAdapters.push(adapter)
@@ -315,7 +391,30 @@ export function createDesktopModelWorkspacePorts(
     generationAdapters.push(new DesktopRemoteGenerationAdapter(generationObservations, adapterId))
   }
 
-  return { ...workspacePorts, inventoryAdapters, generationAdapters }
+  return {
+    ...workspacePorts,
+    inventoryAdapters,
+    generationAdapters,
+    guidedSetupRuntime: {
+      getSettings: () => localTextRuntime.settings(),
+      isReady: async () => (await localTextRuntime.state()).ready
+    }
+  }
+}
+
+const desktopLocalTextRuntime: DesktopLocalTextRuntime = {
+  load: () => llm.init(),
+  unload: async () => {
+    await llm.unload()
+  },
+  state: async () => ({
+    ready: llm.isReady(),
+    loaded: llm.isReady(),
+    reasoning: llm.getReasoningMetadata(),
+    contextLength: llm.effectiveContextSize()
+  }),
+  settings: () => llm.getSettings(),
+  streamChatLocal: (...args) => llm.streamChatLocal(...args)
 }
 
 export const desktopModelWorkspacePorts = createDesktopModelWorkspacePorts({
@@ -324,15 +423,15 @@ export const desktopModelWorkspacePorts = createDesktopModelWorkspacePorts({
     return catalog.models as DesktopInventoryModel[]
   },
   listInstalled: () => desktopModelManagerPorts.listInstalled(),
-  localTextRuntimeState: async () => {
-    const { llm } = await import('./llm')
-    return {
-      ready: llm.isReady(),
-      loaded: llm.isReady(),
-      reasoning: llm.getReasoningMetadata(),
-      contextLength: llm.effectiveContextSize()
+  installedArtifactBytes: (fileName) => {
+    try {
+      const entry = fs.statSync(path.join(modelsDir(), fileName))
+      return entry.isFile() ? entry.size : undefined
+    } catch {
+      return undefined
     }
   },
+  localTextRuntime: desktopLocalTextRuntime,
   localVoiceRuntimeState: async () => {
     const { inspectTtsRuntimeState } = await import('./tts')
     return inspectTtsRuntimeState()

@@ -7,8 +7,9 @@
  */
 import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { modelControlBoundary } from './harness/model-control-snapshot'
+import { ModelsScreen } from '../ModelsScreen'
 
 const ACTIVE_ID = 'offgrid/active-model'
 const ACTIVE_IMAGE_ID = 'offgrid/active-image-model'
@@ -95,11 +96,6 @@ const modelControl = modelControlBoundary({
   estimateModelFit: async () => ({ level: 'ok', message: '' })
 }
 
-let ModelsScreen: () => React.JSX.Element
-
-beforeAll(async () => {
-  ModelsScreen = (await import('../ModelsScreen')).ModelsScreen
-})
 
 beforeEach(() => {
   modelControl.reset()
@@ -140,7 +136,7 @@ describe('<ModelsScreen/> active model settings', () => {
     expect(openSettings).toHaveBeenCalledOnce()
     expect((openSettings.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({ tab: 'model' })
     // Opening settings is not a selection: nothing but the initial catalog read crossed the bridge.
-    expect(modelControl.intents).toEqual([{ type: 'refresh' }])
+    expect(modelControl.intents).toEqual([{ type: 'refresh', operationId: expect.any(String) }])
   })
 
   it.each([

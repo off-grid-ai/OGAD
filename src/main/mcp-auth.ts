@@ -110,8 +110,7 @@ export function isActionAuthorized(req: http.IncomingMessage): boolean {
  *  packaged build the token is NEVER logged (that would defeat the gate); the
  *  shipped path surfaces it in a Settings copy-field instead. */
 export function logActionTokenForDev(mcpUrl: string): void {
-  // `app` is undefined when the gateway is booted outside Electron (integration
-  // tests). No app -> no userData -> nothing to log; and never in a real build.
+  // Integration tests supply the Electron process-boundary stub.
   if (app.isPackaged) {
     return
   }

@@ -99,6 +99,7 @@ describe('downloadedForCatalog', () => {
     expect(out).toEqual([
       {
         id: 'org/hf',
+        catalogEntry: false,
         name: 'HF',
         kind: 'vision',
         org: 'Hugging Face',

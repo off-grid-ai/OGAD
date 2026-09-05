@@ -5,7 +5,7 @@
  * The fake subprocess replaces only the heavyweight Kokoro/ONNX worker; Audio replaces
  * Chromium's media boundary. All Off Grid AI code between those boundaries stays production.
  */
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Blob as NodeBlob } from 'node:buffer'
@@ -20,9 +20,11 @@ import {
   renderChat
 } from '../src/renderer/src/components/__tests__/harness/chat-boundary'
 import {
+  installFakeActiveTextModel,
   startFakeLlamaServer,
   type FakeLlamaServer
 } from '../src/main/__tests__/harness/fake-llama-server'
+import type { OffGridAPI } from '../src/preload/index'
 
 type IpcEvent = {
   sender: EventEmitter & {
@@ -34,10 +36,13 @@ type IpcEvent = {
 type IpcHandler = (event: IpcEvent, ...args: unknown[]) => unknown
 const handlers = new Map<string, IpcHandler>()
 const listeners = new Map<string, (event: IpcEvent, ...args: unknown[]) => unknown>()
+const rendererListeners = new Map<string, Set<(payload: unknown) => void>>()
 const rendererSender = Object.assign(new EventEmitter(), {
   id: 1,
   isDestroyed: (): boolean => false,
-  send: (_channel: string, _payload: unknown): void => undefined
+  send: (channel: string, payload: unknown): void => {
+    for (const listener of rendererListeners.get(channel) ?? []) listener(payload)
+  }
 })
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-memory-chat-tts-'))
 const dataDir = path.join(root, 'data')
@@ -74,15 +79,22 @@ vi.mock('electron', () => ({
   ipcMain: {
     handle: (channel: string, handler: IpcHandler) => handlers.set(channel, handler),
     on: (channel: string, listener: (event: IpcEvent, ...args: unknown[]) => unknown) =>
-      listeners.set(channel, listener)
+      listeners.set(channel, listener),
+    removeHandler: (channel: string) => handlers.delete(channel),
+    removeListener: (
+      channel: string,
+      listener: (event: IpcEvent, ...args: unknown[]) => unknown
+    ) => {
+      if (listeners.get(channel) === listener) listeners.delete(channel)
+    }
   },
-  BrowserWindow: { fromWebContents: () => null },
+  BrowserWindow: { fromWebContents: () => null, getAllWindows: () => [] },
   clipboard: { readText: () => '', writeText: () => undefined },
   systemPreferences: {
     isTrustedAccessibilityClient: () => true,
     getMediaAccessStatus: () => 'granted'
   },
-  shell: { openExternal: async () => undefined },
+  shell: { openExternal: async () => undefined, openPath: async () => '' },
   desktopCapturer: { getSources: async () => [] }
 }))
 
@@ -94,6 +106,7 @@ const { setupIPC } = await import('../src/main/ipc')
 
 interface AudioBoundary {
   src: string
+  onended: (() => void) | null
   play: ReturnType<typeof vi.fn>
   pause: ReturnType<typeof vi.fn>
 }
@@ -101,6 +114,10 @@ interface AudioBoundary {
 const audios: AudioBoundary[] = []
 const pendingSpeech = new Set<Promise<unknown>>()
 let fakeLlama: FakeLlamaServer
+let stopApplication: (() => Promise<void>) | null = null
+let releaseApplication: (() => void) | null = null
+let disposePlayback: (() => void) | null = null
+let disposeTextCleaning: (() => void) | null = null
 
 class RecorderBoundary {
   static instances: RecorderBoundary[] = []
@@ -161,11 +178,21 @@ function installProductionVoiceBridge(boundary: ChatBoundary): void {
       invoke('rag:truncate-messages', id, keepCount),
     getSettings: () => invoke('settings:get'),
     saveSetting: (key: string, value: unknown) => invoke('settings:save', key, value),
-    transcribeAudio: (audio: ArrayBuffer | Uint8Array, ext: string, requestId: string) =>
-      invoke('voice:transcribe', audio, ext, requestId),
-    cancelTranscription: (requestId: string) => invoke('voice:cancel-transcription', requestId),
     ragChat: (...args: unknown[]) => invoke('rag:chat', ...args),
-    speak: (text: string, voice?: string) => invoke('tts:speak', text, voice)
+    askByVoice: {
+      start: (command: unknown) => invoke('ask-by-voice:start', command),
+      cancel: (operationId: string) => invoke('ask-by-voice:cancel', operationId),
+      onEvent: (listener: (message: unknown) => void) =>
+        onRendererChannel('ask-by-voice:event', listener)
+    },
+    voiceTurn: {
+      onRequest: (listener: (message: unknown) => void) =>
+        onRendererChannel('voice-turn:request', listener),
+      respond: (result: unknown) => {
+        listeners.get('voice-turn:result')?.({ sender: rendererSender }, result)
+      }
+    },
+    speechCommands: productionSpeechCommands()
   })
   installBoundary(boundary)
 }
@@ -176,12 +203,49 @@ function setEnv(name: string, original: string | undefined): void {
 }
 
 function installRealSpeechBridge(boundary: ChatBoundary): void {
-  ;(
-    boundary.api as unknown as {
-      speak: (text: string, voice?: string) => Promise<{ dataUrl: string }>
-    }
-  ).speak = (text, voice) => invoke('tts:speak', text, voice)
+  Object.assign(boundary.api, { speechCommands: productionSpeechCommands() })
   installBoundary(boundary)
+}
+
+function onRendererChannel(channel: string, listener: (payload: unknown) => void): () => void {
+  const channelListeners = rendererListeners.get(channel) ?? new Set<(payload: unknown) => void>()
+  channelListeners.add(listener)
+  rendererListeners.set(channel, channelListeners)
+  return () => {
+    channelListeners.delete(listener)
+    if (channelListeners.size === 0) rendererListeners.delete(channel)
+  }
+}
+
+type SpiedSpeechCommands = {
+  [K in keyof OffGridAPI['speechCommands']]: Mock<OffGridAPI['speechCommands'][K]>
+}
+
+// Typed against the preload contract (the source of truth), then wrapped in spies so the
+// harness boundary slot — which expects mocks — still runs the production IPC path.
+function productionSpeechCommands(): SpiedSpeechCommands {
+  const bridge: OffGridAPI['speechCommands'] = {
+    transcribe: (command) => invoke('speech:command:transcribe', command),
+    cancelTranscription: (operationId) =>
+      invoke('speech:command:cancel-transcription', operationId),
+    speak: (command) => invoke('speech:command:speak', command),
+    feedStream: (command) => invoke('speech:command:feed-stream', command),
+    finishStream: (operationId) => invoke('speech:command:finish-stream', operationId),
+    interrupt: () => invoke('speech:command:interrupt'),
+    onEvent: (listener) =>
+      onRendererChannel('speech:event', (event) =>
+        listener(event as Parameters<typeof listener>[0])
+      )
+  }
+  return {
+    transcribe: vi.fn(bridge.transcribe),
+    cancelTranscription: vi.fn(bridge.cancelTranscription),
+    speak: vi.fn(bridge.speak),
+    feedStream: vi.fn(bridge.feedStream),
+    finishStream: vi.fn(bridge.finishStream),
+    interrupt: vi.fn(bridge.interrupt),
+    onEvent: vi.fn(bridge.onEvent)
+  }
 }
 
 beforeAll(async () => {
@@ -189,10 +253,7 @@ beforeAll(async () => {
   fs.mkdirSync(resourceDir, { recursive: true })
   fs.mkdirSync(path.join(dataDir, 'models'), { recursive: true })
   fs.writeFileSync(path.join(dataDir, 'models', 'ggml-base.bin'), 'synthetic whisper model')
-  fs.writeFileSync(
-    path.join(dataDir, 'models', 'active-model.json'),
-    JSON.stringify({ id: 'desktop-test-text', primary: 'desktop-test-text.gguf' })
-  )
+  installFakeActiveTextModel(dataDir)
   executable('ffmpeg', ['#!/bin/sh', 'for last; do :; done', 'printf RIFF > "$last"'].join('\n'))
   executable('whisper/whisper-cli', '#!/bin/sh\nprintf "Schedule the stable release review\\n"')
   resourceExecutable(
@@ -218,6 +279,38 @@ beforeAll(async () => {
       '})'
     ].join('\n')
   )
+  const [{ setMainWindow }, application, applicationAccess] = await Promise.all([
+    import('../src/main/main-window'),
+    import('../src/main/composition/application'),
+    import('../src/main/composition/application-access')
+  ])
+  setMainWindow({
+    isDestroyed: () => false,
+    webContents: rendererSender
+  } as never)
+  await application.startDesktopApplication()
+  stopApplication = application.stopDesktopApplication
+  releaseApplication = applicationAccess.registerDesktopApplication(application.desktopApplication)
+  const voiceSelection = await application.desktopApplication.speech.selectModel(
+    'tts',
+    'software-mansion/executorch-kokoro'
+  )
+  if (!voiceSelection.ok)
+    throw new Error(
+      `The test voice model could not be selected: ${JSON.stringify({
+        failure: voiceSelection.failure,
+        application: application.desktopApplication.snapshot(),
+        speech: application.desktopApplication.speech.snapshot()
+      })}`
+    )
+  const transcriptionSelection = await application.desktopApplication.speech.selectModel(
+    'stt',
+    'ggerganov/whisper.cpp/base'
+  )
+  if (!transcriptionSelection.ok)
+    throw new Error('The test transcription model could not be selected.')
+  const { setupAskByVoiceIpc } = await import('../src/main/ask-by-voice-ipc')
+  setupAskByVoiceIpc(async () => application.desktopApplication)
   setupIPC()
   saveSetting('ttsVoice', 'af_bella')
   fakeLlama = await startFakeLlamaServer()
@@ -228,7 +321,7 @@ beforeAll(async () => {
   service.paused = false
 })
 
-beforeEach(() => {
+beforeEach(async () => {
   // The DB suite reuses one process across files. Recreate this file's explicit profile boundary
   // before every journey so another file's teardown cannot leave a closed database with no parent.
   fs.mkdirSync(dataDir, { recursive: true })
@@ -249,15 +342,39 @@ beforeEach(() => {
       onerror: (() => void) | null = null
       play = vi.fn(async () => undefined)
       pause = vi.fn()
+      load = vi.fn()
+      removeAttribute = vi.fn()
 
       constructor(readonly src: string) {
         audios.push(this)
       }
     }
   )
+  const [{ attachSpeechPlaybackAdapter }, { attachSpeechTextCleaningAdapter }] = await Promise.all([
+    import('../src/renderer/src/composition/speech-playback-adapter'),
+    import('../src/renderer/src/composition/speech-text-cleaning-adapter')
+  ])
+  disposePlayback = attachSpeechPlaybackAdapter({
+    onRequest: (listener) =>
+      onRendererChannel('speech:playback:request', (request) => listener(request as never)),
+    sendResult: (result) => {
+      listeners.get('speech:playback:result')?.({ sender: rendererSender }, result)
+    }
+  })
+  disposeTextCleaning = attachSpeechTextCleaningAdapter({
+    onRequest: (listener) =>
+      onRendererChannel('speech:text-clean:request', (request) => listener(request as never)),
+    sendResult: (result) => {
+      listeners.get('speech:text-clean:result')?.({ sender: rendererSender }, result)
+    }
+  })
 })
 
 afterEach(async () => {
+  disposeTextCleaning?.()
+  disposeTextCleaning = null
+  disposePlayback?.()
+  disposePlayback = null
   await Promise.allSettled([...pendingSpeech])
   cleanup()
   vi.unstubAllGlobals()
@@ -266,6 +383,8 @@ afterEach(async () => {
 afterAll(async () => {
   const { llm } = await import('../src/main/llm')
   llm.stop()
+  await stopApplication?.()
+  releaseApplication?.()
   await fakeLlama.close()
   getDB().close()
   setEnv('OFFGRID_DATA_DIR', originalDataDir)
@@ -307,13 +426,15 @@ describe('assistant reply speech integration (#105)', () => {
     // more than 10 seconds to schedule the native speech worker under DB-suite load.
     expect(await screen.findByRole('button', { name: 'Stop' }, { timeout: 30_000 })).toBeTruthy()
 
-    expect(audios).toHaveLength(1)
+    await waitFor(() => expect(audios).toHaveLength(1), { timeout: 30_000 })
     expect(audios[0]!.play).toHaveBeenCalledOnce()
     const [metadata, encoded] = audios[0]!.src.split(',')
     expect(metadata).toBe('data:audio/wav;base64')
     expect(Buffer.from(encoded!, 'base64').subarray(0, 4).toString('ascii')).toBe('RIFF')
     expect(fs.readFileSync(inputRecord, 'utf8')).toBe('Conversation B baseline')
     expect(path.basename(fs.readFileSync(voiceRecord, 'utf8'))).toContain('af_heart.bin')
+    audios[0]!.onended?.()
+    expect(await screen.findByRole('button', { name: 'Speak' })).toBeTruthy()
   }, 40_000)
 
   it('surfaces a real synthesis failure as an actionable rendered error', async () => {
@@ -340,10 +461,10 @@ describe('assistant reply speech integration (#105)', () => {
     database.createRagConversation(conversationId, 'Voice lifecycle')
     fs.writeFileSync(failureMarker, 'fail')
     fakeLlama.reset()
-    fakeLlama.enqueue(
-      { content: '{"intent":"chat","urls":[]}' },
-      { content: 'The release review is scheduled locally.', finishReason: 'stop' }
-    )
+    fakeLlama.enqueue({
+      content: 'The release review is scheduled locally.',
+      finishReason: 'stop'
+    })
 
     const trackStop = vi.fn()
     const stream = { getTracks: () => [{ stop: trackStop }] } as unknown as MediaStream
@@ -384,9 +505,7 @@ describe('assistant reply speech integration (#105)', () => {
       () => expect(inTranscript('The release review is scheduled locally.')).toBeTruthy(),
       { timeout: 10_000 }
     )
-    expect((await screen.findByRole('alert')).textContent).toMatch(
-      /speech could not be generated.*text-to-speech is installed in settings/i
-    )
+    expect((await screen.findByRole('alert')).textContent).toMatch(/speech failed.*try again/i)
     expect(trackStop).toHaveBeenCalledOnce()
 
     await waitFor(() => {
@@ -398,7 +517,7 @@ describe('assistant reply speech integration (#105)', () => {
       ])
     })
 
-    await user.click(screen.getAllByTitle('Play').at(-1)!)
+    await user.click(screen.getAllByTitle('Play')[0]!)
     expect(await screen.findByTitle('Pause', {}, { timeout: 10_000 })).toBeTruthy()
     expect(audios).toHaveLength(1)
     expect(audios[0]!.play).toHaveBeenCalledOnce()

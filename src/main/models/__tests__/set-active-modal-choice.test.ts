@@ -3,8 +3,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { encodeModelRouteId } from '@offgrid/models'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import type { OffGridApplication } from '@offgrid/application'
 
 const PROFILE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-modal-choice-'))
+let application: OffGridApplication
+let releaseApplication: () => void
 
 vi.mock('electron', () => ({
   app: { getPath: () => PROFILE_DIR, isPackaged: false, getAppPath: () => process.cwd() },
@@ -16,13 +19,27 @@ vi.mock('electron', () => ({
 }))
 
 beforeAll(async () => {
-  // The application composition root registers the real shared model services.
   const { configureRuntime } = await import('../../runtime-env')
   configureRuntime({ dataDir: PROFILE_DIR })
-  await import('../../model-services')
+  const [applicationModule, modelServices, manager, applicationAccess] = await Promise.all([
+    import('@offgrid/application'),
+    import('../../model-services'),
+    import('../../models-manager'),
+    import('../../composition/application-access')
+  ])
+  application = applicationModule.createOffGridApplication({
+    models: {
+      ...modelServices.desktopModelWorkspacePorts,
+      activation: { resolve: manager.resolveDesktopActivation }
+    }
+  })
+  releaseApplication = applicationAccess.registerDesktopApplication(application)
+  await application.start()
 })
 
-afterAll(() => {
+afterAll(async () => {
+  releaseApplication()
+  await application.stop()
   fs.rmSync(PROFILE_DIR, { recursive: true, force: true })
 })
 

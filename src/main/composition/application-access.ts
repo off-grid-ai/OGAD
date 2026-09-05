@@ -19,7 +19,20 @@ import {
   type UseFacade
 } from '@offgrid/application'
 
-let application: OffGridApplication | null = null
+interface DesktopApplicationRegistry {
+  current: OffGridApplication | null
+}
+
+const registryHost = globalThis as typeof globalThis & {
+  __offgridDesktopApplicationRegistry?: DesktopApplicationRegistry
+}
+
+// Vite can evaluate two module copies during an in-process module reset. The Electron main process
+// still has only ONE current application, so keep that identity on the process rather than inside a
+// module instance. Every proxy becomes a read-only view of this registry.
+const applicationRegistry = (registryHost.__offgridDesktopApplicationRegistry ??= {
+  current: null
+})
 
 /**
  * Register THE application, and get back the disposer for exactly this registration.
@@ -32,15 +45,15 @@ let application: OffGridApplication | null = null
  * lifecycle test, or the next late caller in production, then failed somewhere unrelated.
  */
 export function registerDesktopApplication(value: OffGridApplication): () => void {
-  application = value
+  applicationRegistry.current = value
   return () => {
-    if (application === value) application = null
+    if (applicationRegistry.current === value) applicationRegistry.current = null
   }
 }
 
 function current(): OffGridApplication {
-  if (!application) throw new Error('Desktop application is not initialized.')
-  return application
+  if (!applicationRegistry.current) throw new Error('Desktop application is not initialized.')
+  return applicationRegistry.current
 }
 
 export function desktopApplicationStatus(): OffGridApplicationSnapshot['status'] {

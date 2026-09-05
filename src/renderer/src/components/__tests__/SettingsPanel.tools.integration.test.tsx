@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SettingsPanel } from '../SettingsPanel'
 import { clearRegisteredSlots, registerSlot, SLOTS } from '../../bootstrap/slotRegistry'
+import { preloadCapabilityFakes } from './harness/chat-boundary'
 
 afterEach(() => {
   cleanup()
@@ -17,9 +18,20 @@ describe('<SettingsPanel/> tool settings', () => {
     let settings = { maxToolCalls: 25 }
     const setLlmSettings = vi.fn(async (patch: { maxToolCalls?: number }) => {
       settings = { ...settings, ...patch }
-      return settings
+      return {
+        ok: true as const,
+        value: {
+          operationId: 'tool-limit-save',
+          settings,
+          changed: ['maxToolCalls'],
+          launch: null,
+          published: [],
+          syncFailure: null
+        }
+      }
     })
     ;(window as unknown as { api: Record<string, unknown> }).api = {
+      ...preloadCapabilityFakes(),
       getLlmSettings: async () => settings,
       setLlmSettings,
       getModelCatalog: async () => ({ models: [] }),
@@ -43,6 +55,7 @@ describe('<SettingsPanel/> tool settings', () => {
   it('hosts licensed task settings in the shared Tasks tab', async () => {
     registerSlot(SLOTS.taskSettings, () => <div>Task settings content</div>)
     ;(window as unknown as { api: Record<string, unknown> }).api = {
+      ...preloadCapabilityFakes(),
       getLlmSettings: async () => ({}),
       getModelCatalog: async () => ({ models: [] }),
       getActiveModel: async () => null,
@@ -61,6 +74,7 @@ describe('<SettingsPanel/> tool settings', () => {
   it('shows meeting search and toggles it independently', async () => {
     const setToolEnabled = vi.fn(async () => undefined)
     ;(window as unknown as { api: Record<string, unknown> }).api = {
+      ...preloadCapabilityFakes(),
       getLlmSettings: async () => ({}),
       getModelCatalog: async () => ({ models: [] }),
       getActiveModel: async () => null,

@@ -56,13 +56,24 @@ export function useCaptureReadiness(isPro: boolean): CaptureReadinessController 
     }
   }, [isPro, refresh])
 
-  const repairOperation =
+  // Newest first: `active` precedes `recent`, and Shared keeps `recent` newest-first. Both the
+  // repair itself (`projector_repair`) and the control door's own record of the intent
+  // (`control` / `repair-projector`) count, so a refusal at the door is read from the same
+  // canonical projection as a failure mid-download.
+  const repairOperations =
     projection?.kind === 'missing-projector'
-      ? [...(operations?.active ?? []), ...(operations?.recent ?? [])].find(
+      ? [...(operations?.active ?? []), ...(operations?.recent ?? [])].filter(
           (operation) =>
-            operation.kind === 'projector_repair' && operation.modelId === projection.modelId
+            operation.modelId === projection.modelId &&
+            (operation.kind === 'projector_repair' ||
+              (operation.kind === 'control' && operation.controlOperation === 'repair-projector'))
         )
-      : undefined
+      : []
+  // The live download carries the measured progress; the door's record only frames it.
+  const repairOperation =
+    repairOperations.find(
+      (operation) => operation.kind === 'projector_repair' && operation.state === 'active'
+    ) ?? repairOperations[0]
   const repairing = repairOperation?.state === 'active'
   const progress: ProgressLike | null = repairing ? (repairOperation.progress ?? null) : null
   const failure = repairOperation?.failure ? modelsFailureMessage(repairOperation.failure) : null

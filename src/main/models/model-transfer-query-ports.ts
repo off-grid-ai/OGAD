@@ -63,10 +63,12 @@ function verificationFiles(directory: string): ArtifactVerificationFilePort {
 }
 
 /** Capture one library root per query; no async step can switch to a different library. */
-export function createDesktopModelTransferQueryPorts(): TransferableModelQueryPorts {
+export function createDesktopModelTransferQueryPorts(
+  modelsDir: () => string = () => llm.getModelsDir()
+): TransferableModelQueryPorts {
   return {
     snapshot() {
-      const directory = path.resolve(llm.getModelsDir())
+      const directory = path.resolve(modelsDir())
       const registry = desktopDownloadedRegistryPorts(directory)
       return {
         locals: new LocalModelRegistry(directory).read(),

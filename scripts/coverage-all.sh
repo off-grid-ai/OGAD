@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Every suite's coverage, in one number, over the code this branch ADDS.
 #
-# Desktop runs its tests in four places, and until now each reported alone - so any file covered by one suite
-# read as 0% in the others' reports, and no single figure described the app:
+# Desktop has several test projects. The canonical coverage command runs the product and database
+# projects in one Vitest process, so core and Pro contribute to one instrumented report:
 #
 #   1. product-integration  (npm test)          unit + integration, jsdom + node
-#   2. the DB journeys       (npm run test:db)   real native SQLite, whole relaunch journeys, ABI-swapped
+#   2. the DB journeys                          real native SQLite, whole relaunch journeys, ABI-swapped
 #   3. the heavy projects    (npm run test:heavy) model-port + packaging; some self-skip without real engines
 #   4. the e2e tour          (npm run test:e2e)  the built Electron app, driven by Playwright
 #
-# This runs 1 and 2 locally, folds in 4 if a report is present, and reports the four metrics over the added
+# This runs 1 and 2 together, folds in 4 if a report is present, and reports the four metrics over the added
 # lines. 3 is not included by default: three of its specs need engine binaries and real model files that a dev
 # machine usually lacks, and a suite that cannot run must not silently lower a number.
 #
@@ -20,22 +20,33 @@
 #   ./scripts/coverage-all.sh                        both local suites
 #   ./scripts/coverage-all.sh --with-e2e             also capture e2e locally (needs a display)
 #   E2E_COVERAGE_REPORT=path ./scripts/coverage-all.sh   fold in a report from CI's e2e-coverage artifact
+#   ./scripts/coverage-all.sh --print-gate           print the coverage floor flags and exit
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
 MERGE="../shared/scripts/new-code-coverage.mjs"
 
-echo "▶ product-integration (unit + integration)…"
-rm -rf coverage
-OFFGRID_AGGREGATE_COVERAGE=1 npm run test:coverage 2>&1 \
-  | tee /tmp/coverage-all-product.log
-PRODUCT_STATUS=${PIPESTATUS[0]}
+# The four floor percentages are owned by coverage-gate.json alone — the same file vitest.config.ts
+# reads for its `thresholds`. Deriving the merged new-code run's flags from it is what makes the two
+# gates ONE gate: raising or lowering the floor is a one-file edit that both runners pick up, and
+# neither can drift below the other. `--print-gate` prints the derived flags and exits, so a test can
+# assert this script and vitest agree without running a suite.
+if ! GATE_FLAGS="$(node -e 'const gate = require(process.argv[1]); process.stdout.write(Object.entries(gate).map(([metric, min]) => `--min-${metric}=${min}`).join(" "))' "$PWD/coverage-gate.json" 2>/dev/null)"; then
+  echo "coverage-gate.json is missing or unreadable - refusing to run without the coverage floor." >&2
+  exit 1
+fi
 
-echo "▶ DB journeys (real SQLite)…"
-rm -rf coverage-db
-OFFGRID_DB_VITEST_CONFIG=vitest.db.coverage.config.ts npm run test:db -- --coverage \
-  2>&1 | tee /tmp/coverage-all-db.log
-DB_STATUS=${PIPESTATUS[0]}
+if [ "${1:-}" = "--print-gate" ]; then
+  echo "$GATE_FLAGS"
+  exit 0
+fi
+
+echo "▶ Desktop + Desktop Pro (product + database journeys)…"
+rm -rf coverage
+OFFGRID_AGGREGATE_COVERAGE=1 npm run test:coverage -- \
+  --silent --reporter=verbose --color 2>&1 \
+  | tee /tmp/coverage-all-desktop.log
+DESKTOP_STATUS=${PIPESTATUS[0]}
 
 if [ "${1:-}" = "--with-e2e" ]; then
   echo "▶ e2e tour (built app, needs a display)…"
@@ -50,7 +61,6 @@ fi
 
 REPORTS=()
 [ -f coverage/coverage-final.json ] && REPORTS+=("coverage/coverage-final.json")
-[ -f coverage-db/coverage-final.json ] && REPORTS+=("coverage-db/coverage-final.json")
 
 COARSE=""
 E2E_REPORT="${E2E_COVERAGE_REPORT:-coverage-e2e/coverage-final.json}"
@@ -66,16 +76,8 @@ echo
 E2E_NOTE="without the e2e tour"
 [ -n "$COARSE" ] && E2E_NOTE="including the e2e tour"
 echo "▶ new-code coverage from ${#REPORTS[@]} source-instrumented report(s), $E2E_NOTE:"
-node "$MERGE" . "${REPORTS[@]}" $COARSE \
-  --min-statements=78 --min-branches=57 --min-functions=52 --min-lines=78
-CORE_COVERAGE_STATUS=$?
-echo
-PRO_COVERAGE_STATUS=0
-if [ -d pro ]; then
-  node "$MERGE" ./pro "${REPORTS[@]}" $COARSE \
-    --min-statements=72 --min-branches=45 --min-functions=46 --min-lines=72
-  PRO_COVERAGE_STATUS=$?
-fi
+node "$MERGE" . "${REPORTS[@]}" $COARSE $GATE_FLAGS
+DESKTOP_COVERAGE_STATUS=$?
 
 if [ -z "$COARSE" ]; then
   echo
@@ -85,10 +87,9 @@ if [ -z "$COARSE" ]; then
 fi
 
 # The suites' own exit codes are surfaced, so a green number from a red suite is impossible to mistake.
-[ $PRODUCT_STATUS -eq 0 ] || echo "warning: product-integration exited $PRODUCT_STATUS"
-[ $DB_STATUS -eq 0 ] || echo "warning: DB journeys exited $DB_STATUS"
+[ $DESKTOP_STATUS -eq 0 ] || echo "warning: Desktop + Desktop Pro exited $DESKTOP_STATUS"
 
-if [ $PRODUCT_STATUS -ne 0 ] || [ $DB_STATUS -ne 0 ] || \
-  [ $CORE_COVERAGE_STATUS -ne 0 ] || [ $PRO_COVERAGE_STATUS -ne 0 ]; then
+if [ $DESKTOP_STATUS -ne 0 ] || \
+  [ $DESKTOP_COVERAGE_STATUS -ne 0 ]; then
   exit 1
 fi

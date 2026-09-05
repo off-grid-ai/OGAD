@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { OffGridApplication } from '@offgrid/application'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 
@@ -17,7 +18,32 @@ const { buildMcpServer } = await import('../mcp-server')
 const { authorizeActionRequest, registerActiveActionCredentials } = await import('../mcp-auth')
 const { registerRemoteTaskPermissionProvider } = await import('../remote-task-permission')
 const { registerToolExtension, unregisterToolExtension } = await import('../tools')
-const { configureTaskExecutionDevice } = await import('../tasks/task-history')
+
+let application: OffGridApplication
+let releaseApplication: () => void
+
+beforeAll(async () => {
+  const [{ createOffGridApplication }, { desktopModelWorkspacePorts }, applicationAccess] =
+    await Promise.all([
+      import('@offgrid/application'),
+      import('../model-services'),
+      import('../composition/application-access')
+    ])
+  application = createOffGridApplication({
+    models: desktopModelWorkspacePorts,
+    automation: {
+      history: { load: () => [], save: () => undefined, remove: () => undefined },
+      device: { id: 'desktop-1', name: 'Studio Mac' }
+    }
+  })
+  releaseApplication = applicationAccess.registerDesktopApplication(application)
+  await application.start()
+})
+
+afterAll(async () => {
+  await application.stop()
+  releaseApplication()
+})
 
 const calls: Array<{
   name: string
@@ -72,10 +98,6 @@ async function clientFor(deviceId: string): Promise<{
 }
 
 describe('authenticated Mobile task calls through the Desktop MCP surface', () => {
-  beforeEach(() => {
-    configureTaskExecutionDevice({ id: 'desktop-1', name: 'Studio Mac' })
-  })
-
   afterEach(() => {
     calls.length = 0
     unregisterToolExtension(executionBoundary.id, executionBoundary)

@@ -8,6 +8,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import type { OffGridApplication } from '@offgrid/application'
 import { CATALOG, primaryFileName } from '@offgrid/models'
 
 const fixture = (() => {
@@ -41,10 +42,14 @@ const PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 
 let jobs: typeof import('../imagegen/job-service').imageGenerationJobs
+let application: OffGridApplication | undefined
+let releaseApplication: (() => void) | undefined
 
 beforeAll(async () => {
   process.env.OFFGRID_DATA_DIR = fixture.dataDir
   process.env.OFFGRID_BIN_DIR = fixture.binDir
+  vi.spyOn(os, 'totalmem').mockReturnValue(64_000_000_000)
+  vi.spyOn(os, 'freemem').mockReturnValue(48_000_000_000)
   const models = path.join(fixture.dataDir, 'models')
   fs.mkdirSync(models, { recursive: true })
   fs.writeFileSync(
@@ -69,13 +74,25 @@ setTimeout(() => fs.writeFileSync(output, Buffer.from('${PNG_BASE64}', 'base64')
   )
   fs.chmodSync(executable, 0o755)
 
-  const database = await import('../database')
+  const [database, applicationModule, applicationAccess, modelServices] = await Promise.all([
+    import('../database'),
+    import('@offgrid/application'),
+    import('../composition/application-access'),
+    import('../model-services')
+  ])
   database.saveSetting('enhanceImagePrompts', false)
-  await import('../model-services')
+  application = applicationModule.createOffGridApplication({
+    models: modelServices.desktopModelWorkspacePorts
+  })
+  releaseApplication = applicationAccess.registerDesktopApplication(application)
+  await application.start()
   jobs = (await import('../imagegen/job-service')).imageGenerationJobs
 })
 
 afterAll(async () => {
+  await application?.stop()
+  releaseApplication?.()
+  vi.restoreAllMocks()
   const { getDB } = await import('../database')
   if (getDB().open) getDB().close()
   delete process.env.OFFGRID_DATA_DIR

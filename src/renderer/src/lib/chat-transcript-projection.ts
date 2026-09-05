@@ -100,12 +100,14 @@ export function projectedTurnTools(turn: ProjectedTurn): Partial<ChatMessage> {
 
 export function projectChatMessage(turn: ProjectedTurn, context?: RagContext): ChatMessage {
   const imageReference = readGeneratedImageReference(context)
+  const session = readPersistedChatSessionTurn(context)
   return {
     id: turn.id,
     role: turn.role,
     content: projectedTurnContent(turn),
     context,
     reasoning: turn.reasoning ?? readReasoning(context),
+    reasoningRequested: session?.reasoningRequested,
     cutoff: readResponseCutoff(context),
     metrics: readGenerationMetrics(context),
     ...projectedTurnTools(turn),
@@ -179,7 +181,12 @@ export function restoredChatSessionTurns(
           operation: imageOperation
             ? { type: 'image', prompt: userMessage.content }
             : { type: 'text' },
-          request: { profile: desktopChatTurnProfile(imageOperation ? 'image' : 'chat') }
+          request: {
+            profile: desktopChatTurnProfile(imageOperation ? 'image' : 'chat'),
+            ...(session.reasoningRequested === undefined
+              ? {}
+              : { reasoning: { enabled: session.reasoningRequested } })
+          }
         }
       }
     ]

@@ -31,6 +31,7 @@ import {
   openAIToolToDefinition,
   parseToolArguments,
   prepareToolCallWithQueryFallback,
+  resolveTemporalSearchScope,
   selectAvailableToolDefinitions,
   selectToolExtensions,
   toolSchemaTokenBudget,
@@ -147,17 +148,26 @@ export async function searchMemoryToolResult(
     excludeChatId?: string
     emptyText?: string
     errorSubject?: string
+    /** The original user request, which the model-made search query may paraphrase. */
+    temporalQuery?: string
   } = {}
 ): Promise<ToolResult> {
   try {
     const { universalSearch } = await import('./search')
     const limit = Math.min(20, Math.max(1, Number(options.limit) || 8))
+    const temporalScope = resolveTemporalSearchScope(options.temporalQuery ?? query, {
+      nowMs: Date.now(),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+    })
     const hits = await universalSearch(query, {
       limit,
       semantic: true,
       kinds: options.kinds,
       collapseScreenMoments: options.collapseScreenMoments,
-      excludeChatId: options.excludeChatId
+      excludeChatId: options.excludeChatId,
+      timeRange: temporalScope
+        ? { startMs: temporalScope.startMs, endMs: temporalScope.endMs }
+        : undefined
     })
     const sources: UnifiedSource[] = hits.map((hit) => ({ ...hit }))
     const text = hits.length
@@ -316,7 +326,8 @@ const TOOLS: ToolDef[] = [
     run: (args, context) =>
       searchMemoryToolResult(String(args.query ?? ''), {
         limit: Number(args.limit) || 8,
-        excludeChatId: context.conversationId
+        excludeChatId: context.conversationId,
+        temporalQuery: context.userQuery
       })
   },
   {

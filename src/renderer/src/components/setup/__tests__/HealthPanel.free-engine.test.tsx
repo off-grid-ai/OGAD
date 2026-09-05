@@ -15,7 +15,13 @@ const HEALTH: SystemHealthContract = {
   ramGb: 16,
   activeModel: 'gemma-4-E2B',
   components: [
-    { id: 'chat', label: 'Chat model (llama-server)', status: 'ready', port: 8439, canRestart: true }
+    {
+      id: 'chat',
+      label: 'Chat model (llama-server)',
+      status: 'ready',
+      port: 8439,
+      canRestart: true
+    }
   ]
 }
 
@@ -25,6 +31,7 @@ function installApi(unload: () => Promise<{ outcome: string; portFree: boolean }
   const state = { unloadCalls: 0 }
   ;(globalThis as unknown as { window: { api: unknown } }).window.api = {
     systemHealth: async () => HEALTH,
+    onChatHealthChanged: () => () => undefined,
     restartComponent: async () => ({ success: true }),
     unloadLlmEngine: async () => {
       state.unloadCalls++

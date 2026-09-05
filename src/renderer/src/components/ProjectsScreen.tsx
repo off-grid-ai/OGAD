@@ -18,9 +18,6 @@ import { timeAgo } from '@renderer/lib/time'
 import { useRendererEntitlement } from '@renderer/bootstrap/useRendererEntitlement'
 import { ProjectArtifacts } from './ProjectArtifacts'
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const api = (window as any).api
-
 interface Project {
   id: string
   name: string
@@ -95,7 +92,7 @@ export function ProjectsScreen({
     return list
   }, [])
   const loadProjects = useCallback(async (): Promise<Project[]> => {
-    return ((await api.listProjects?.()) ?? []) as Project[]
+    return ((await window.api.listProjects()) ?? []) as Project[]
   }, [])
   const refreshProjects = useCallback(async (): Promise<Project[]> => {
     return applyProjects(await loadProjects())
@@ -118,7 +115,7 @@ export function ProjectsScreen({
       setCreating(false)
       return
     }
-    const id = await api.createProject?.({ name })
+    const id = await window.api.createProject({ name })
     setNewName('')
     setCreating(false)
     await refreshProjects()
@@ -138,7 +135,7 @@ export function ProjectsScreen({
     }
     setDeleteFailure('')
     try {
-      await api.deleteProject?.(id)
+      await window.api.deleteProject(id)
     } catch (error) {
       // The delete is refused when the project's knowledge base or its sync cleanup only partly
       // succeeded: the project is still there, deliberately, and the user has to be told why
@@ -290,15 +287,15 @@ function ProjectChats({
   useEffect(() => {
     let alive = true
     const refresh = (): void => {
-      void api
-        .getRagConversations?.(project.id)
+      void window.api
+        .getRagConversations(project.id)
         .then((c: RagConvo[]) => {
           if (alive) setChats(c)
         })
         .catch(() => {})
     }
     refresh()
-    const offChanged = api.onRagConversationsChanged?.(() => {
+    const offChanged = window.api.onRagConversationsChanged?.(() => {
       refresh()
     })
     return () => {
@@ -380,7 +377,7 @@ function ProjectConfig({
   const save = async (): Promise<void> => {
     setSaving(true)
     try {
-      await api.updateProject?.(project.id, { name, description, systemPrompt, includeMemory })
+      await window.api.updateProject(project.id, { name, description, systemPrompt, includeMemory })
       setSavedAt('Saved')
       onSaved()
     } finally {
@@ -501,28 +498,24 @@ function KnowledgeBase({ projectId }: { projectId: string }): React.ReactElement
   const [busy, setBusy] = useState(false)
 
   const refresh = useCallback(async (): Promise<void> => {
-    setDocs((await api.listProjectDocuments?.(projectId)) ?? [])
+    setDocs((await window.api.listProjectDocuments(projectId)) ?? [])
   }, [projectId])
 
   useEffect(() => {
     refresh()
-    const off = api.onProjectIndexProgress?.(
-      (d: { name: string; stage: string; error?: string }) => {
-        if (d.stage === 'error') setStatus(`${d.name}: ${d.error}`)
-        else if (d.stage === 'done') {
-          setStatus(`${d.name}: indexed`)
-          refresh()
-        } else setStatus(`${d.name}: ${d.stage}…`)
-      }
-    )
-    const offChanged = api.onProjectDocumentsChanged?.(
-      ({ projectId: changedProjectId }: { projectId: string }) => {
-        if (changedProjectId === projectId) refresh()
-      }
-    )
+    const off = window.api.onProjectIndexProgress((progress) => {
+      if (progress.stage === 'error') setStatus(`${progress.name}: ${progress.error}`)
+      else if (progress.stage === 'done') {
+        setStatus(`${progress.name}: indexed`)
+        refresh()
+      } else setStatus(`${progress.name}: ${progress.stage}…`)
+    })
+    const offChanged = window.api.onProjectDocumentsChanged(({ projectId: changedProjectId }) => {
+      if (changedProjectId === projectId) refresh()
+    })
     return () => {
-      off?.()
-      offChanged?.()
+      off()
+      offChanged()
     }
   }, [projectId, refresh])
 
@@ -530,7 +523,7 @@ function KnowledgeBase({ projectId }: { projectId: string }): React.ReactElement
     setBusy(true)
     setStatus('Choose files…')
     try {
-      await api.addProjectDocuments?.(projectId)
+      await window.api.addProjectDocuments(projectId)
     } finally {
       setBusy(false)
       refresh()
@@ -578,7 +571,7 @@ function KnowledgeBase({ projectId }: { projectId: string }): React.ReactElement
               </div>
               <button
                 onClick={async () => {
-                  await api.toggleProjectDocument?.(d.id, !d.enabled)
+                  await window.api.toggleProjectDocument(d.id, !d.enabled)
                   setDocs((cur) =>
                     cur.map((x) => (x.id === d.id ? { ...x, enabled: !x.enabled } : x))
                   )
@@ -593,7 +586,7 @@ function KnowledgeBase({ projectId }: { projectId: string }): React.ReactElement
               </button>
               <button
                 onClick={async () => {
-                  await api.deleteProjectDocument?.(d.id)
+                  await window.api.deleteProjectDocument(d.id)
                   setDocs((cur) => cur.filter((x) => x.id !== d.id))
                 }}
                 aria-label={`Delete ${d.name}`}

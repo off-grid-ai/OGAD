@@ -256,7 +256,20 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
         role: 'assistant',
         content: 'Answer.',
         context: {
-          unified: [],
+          unified: [
+            {
+              key: 'meeting:1',
+              kind: 'meeting',
+              refId: 1,
+              title: 'Planning review',
+              snippet: 'Release plan',
+              surface: 'Meeting',
+              url: null,
+              ts: 1,
+              imagePath: null,
+              score: 1
+            }
+          ],
           toolCalls: [
             { name: 'search_memory', result: 'memory hits' },
             { name: 'search_replay', result: 'Replay hits' }
@@ -270,9 +283,14 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
 
     await screen.findByText('Answer.')
     const work = await screen.findByRole('button', { name: /Work done/ })
+    expect(screen.queryByRole('button', { name: 'Searched your memory — 1 results' })).toBeNull()
     await user.click(work)
-    expect(screen.getByRole('button', { name: 'Searched memory, complete' })).toBeTruthy()
+    const memoryStep = screen.getByRole('button', {
+      name: 'Searched your memory — 1 result, complete'
+    })
     expect(screen.getByRole('button', { name: 'Searched activity, complete' })).toBeTruthy()
+    await user.click(memoryStep)
+    expect(screen.getByText('Planning review')).toBeTruthy()
   })
 
   it('keeps one live inline tool row and clears the old running label when it completes', async () => {

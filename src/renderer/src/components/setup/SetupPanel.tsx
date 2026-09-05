@@ -14,11 +14,11 @@ import {
 import { cn } from '@renderer/lib/utils'
 import { deviceNoun } from '@renderer/lib/device'
 import { HealthPanel } from './HealthPanel'
-import { formatTransferSpeed, modelsFailureMessage } from '@offgrid/application'
+import { modelsFailureMessage } from '@offgrid/application'
 import type { ModelsFailure } from '@offgrid/application'
 import type { GuidedSetupResult } from '@offgrid/models'
 import { projectProgress } from '@offgrid/ui'
-import { formatStorageBytes } from './storage-format'
+import { downloadProgressSummary } from '@renderer/lib/download-progress'
 import { modelControlClient } from '@renderer/lib/model-control-client'
 import { invalidateLlmSettings } from '@renderer/lib/settings-invalidation'
 
@@ -54,18 +54,7 @@ const KIND_ICON: Record<
   image: ImageIcon
 }
 
-interface SetupProgress {
-  phase: 'select' | 'download' | 'activate' | 'start' | 'verify' | 'done' | 'error' | 'cancelled'
-  message: string
-  modelId?: string
-  modelName?: string
-  percent?: number
-  downloadedMB?: string
-  totalMB?: string
-  downloadedBytes?: number
-  totalBytes?: number
-  bytesPerSecond?: number
-}
+type SetupProgress = import('../../../../shared/ipc-contracts').SetupProgressContract
 interface SetupItem {
   kind: ItemKind
   capability: string
@@ -161,6 +150,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
   const mounted = useRef(false)
   const [plan, setPlan] = useState<SetupPlan | null>(null)
   const downloadProgress = progress?.phase === 'download' ? projectProgress(progress) : null
+  const downloadSummary = downloadProgress ? downloadProgressSummary(downloadProgress) : null
   const downloading = downloadProgress !== null
   // The run THIS panel started, for exactly as long as it is in flight. It owns the one thing
   // progress must never choose: which model `cancel-download` targets. Display still reads
@@ -215,9 +205,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
 
   // Progress stream for the whole lifetime.
   useEffect(() => {
-    const off = (
-      api as unknown as { onSetupProgress?: (cb: (p: SetupProgress) => void) => () => void }
-    ).onSetupProgress?.((p) => {
+    const off = api.onSetupProgress((p) => {
       // Advisory for DISPLAY only: a spinner, a line of text and a byte counter. It decides
       // neither pending nor terminal state - `configure`'s await owns the outcome and its
       // `finally` owns pending.
@@ -228,7 +216,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
       const run = activeRun.current
       if (run && p.modelId) run.target = p.modelId
     })
-    return () => off?.()
+    return () => off()
   }, [api])
 
   const pickMode = (m: Mode): void => {
@@ -494,12 +482,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
                   {downloadProgress.determinate
                     ? `${Math.round(downloadProgress.percentage ?? 0)}%`
                     : 'Downloading'}
-                  {downloadProgress.totalBytes !== undefined
-                    ? ` · ${formatStorageBytes(downloadProgress.currentBytes)} / ${formatStorageBytes(downloadProgress.totalBytes)}`
-                    : ''}
-                  {downloadProgress.bytesPerSecond !== undefined
-                    ? ` · ${formatTransferSpeed(downloadProgress.bytesPerSecond)}`
-                    : ''}
+                  {downloadSummary && ` · ${downloadSummary.bytes} · ${downloadSummary.rate}`}
                 </div>
               </div>
             )}

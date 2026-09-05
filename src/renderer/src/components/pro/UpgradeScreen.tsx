@@ -125,10 +125,7 @@ export function UpgradeScreen({
     ? !featureSupportsPlatform(f, currentPlatform())
     : PRO_FEATURES.some((x) => !featureSupportsPlatform(x, currentPlatform()))
   const open = (url: string): void => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const api = (window as any).api
-    if (api?.openExternal) api.openExternal(url)
-    else window.open(url, '_blank')
+    window.api.openExternal(url)
   }
 
   return (

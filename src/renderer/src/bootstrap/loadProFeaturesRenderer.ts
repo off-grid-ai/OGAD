@@ -34,8 +34,7 @@ export function clearProFeaturesRenderer(): void {
 }
 
 export async function loadProFeaturesRenderer(): Promise<ProRendererActivation> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const bootstrapEnabled = Boolean((window as any).api?.proEntitlementBootstrapEnabled)
+  const bootstrapEnabled = Boolean(window.api?.proEntitlementBootstrapEnabled)
   let pro: unknown
   try {
     pro = await import('@offgrid/pro/renderer')

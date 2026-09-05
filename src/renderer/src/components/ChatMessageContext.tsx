@@ -6,10 +6,26 @@ import { preprocessChatMarkdown } from '@offgrid/application'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
-import { type RagContext, type RagEntity, type RagEntityFact, type RagMemory, type RagSummary } from '@renderer/lib/chat-transcript-types'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@renderer/components/ui/collapsible'
+import {
+  type RagContext,
+  type RagEntity,
+  type RagEntityFact,
+  type RagMemory,
+  type RagSummary
+} from '@renderer/lib/chat-transcript-types'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger
+} from '@renderer/components/ui/collapsible'
 import { captureUrlForPath } from '../../../shared/ogcapture-url'
-import { contextResultCount, markdownComponents, openUnifiedContext, type ContextNavigation, type UnifiedContextItem } from './chat-message-projection'
+import {
+  contextResultCount,
+  markdownComponents,
+  openUnifiedContext,
+  type ContextNavigation,
+  type UnifiedContextItem
+} from './chat-message-projection'
 
 function UnifiedContextSection({
   items,
@@ -222,6 +238,35 @@ function EntityFactsContextSection({
   )
 }
 
+export function ContextDetails({
+  context,
+  navigation
+}: Readonly<{
+  context: RagContext
+  navigation: ContextNavigation
+}>): React.JSX.Element {
+  return (
+    <>
+      <UnifiedContextSection items={context.unified} navigation={navigation} />
+      <SourceScoresSection sources={context.sources} />
+      <MasterMemorySection content={context.masterMemory} />
+      <MemoriesContextSection
+        memories={context.memories}
+        onNavigate={navigation.onNavigateToMemory}
+      />
+      <SummariesContextSection
+        summaries={context.summaries}
+        onNavigate={navigation.onNavigateToChat}
+      />
+      <EntitiesContextSection
+        entities={context.entities}
+        onNavigate={navigation.onNavigateToEntity}
+      />
+      <EntityFactsContextSection facts={context.entityFacts} />
+    </>
+  )
+}
+
 export function ContextDisclosure({
   context,
   navigation
@@ -259,24 +304,8 @@ export function ContextDisclosure({
         </svg>
       </CollapsibleTrigger>
       <CollapsibleContent className="mt-1.5 max-h-[400px] max-w-full overflow-y-auto rounded-md border border-neutral-800 bg-neutral-900/40 p-4 text-sm">
-        <UnifiedContextSection items={context.unified} navigation={navigation} />
-        <SourceScoresSection sources={context.sources} />
-        <MasterMemorySection content={context.masterMemory} />
-        <MemoriesContextSection
-          memories={context.memories}
-          onNavigate={navigation.onNavigateToMemory}
-        />
-        <SummariesContextSection
-          summaries={context.summaries}
-          onNavigate={navigation.onNavigateToChat}
-        />
-        <EntitiesContextSection
-          entities={context.entities}
-          onNavigate={navigation.onNavigateToEntity}
-        />
-        <EntityFactsContextSection facts={context.entityFacts} />
+        <ContextDetails context={context} navigation={navigation} />
       </CollapsibleContent>
     </Collapsible>
   )
 }
-

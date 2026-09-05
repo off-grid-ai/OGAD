@@ -6,7 +6,7 @@
 // closed — we don't hold long-lived child processes.
 
 import { getDB } from './database'
-import { deleteSecretsByPrefix, ensureSecretsStorage, getSecret } from './secrets'
+import { deleteSecretsByPrefix, ensureSecretsStorage, getSecret, setSecret } from './secrets'
 import { makeOAuthProvider, ensureLoopback, hasOAuthTokens } from './mcp-oauth'
 import { cancelOAuthAuthorization } from './mcp-oauth-cancellation'
 import { callHook, HOOKS } from './bootstrap/hookRegistry'
@@ -15,6 +15,9 @@ import type { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js
 import type { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import {
   DEFAULT_CONNECTOR_OPERATION_TIMEOUT_MS,
+  type McpConnectorCreateCommand,
+  type McpConnectorConnectionResult,
+  type McpConnectorSnapshot,
   type McpConnectorApplicationService,
   type McpConnectorStatus
 } from '@offgrid/models'
@@ -347,6 +350,25 @@ export function desktopMcpConnectorPorts(): McpConnectorPorts {
     },
     transport: {
       discover: discoverConnectorTools
+    },
+    connection: {
+      create(connector) {
+        return addConnector({
+          name: connector.name,
+          transport: connector.transport,
+          command: connector.command,
+          args: connector.args,
+          url: connector.url,
+          envKeys: connector.credentialKeys
+        })
+      },
+      async persistCredentials(id, credentials) {
+        for (const [key, value] of Object.entries(credentials)) {
+          if (value && !setSecret(`connector:${id}:${key}`, value)) {
+            throw new Error('Secure credential storage is unavailable.')
+          }
+        }
+      }
     }
   }
 }
@@ -359,6 +381,15 @@ export async function testConnector(
 ): Promise<{ ok: boolean; tools: { name: string; description?: string }[]; error?: string }> {
   const connectorApplication = mcpConnectorApplication()
   return connectorApplication.verifyAndDiscover(id)
+}
+
+/** One Desktop application entry point for Shared-owned connection and recovery transactions. */
+export async function connectConnector(
+  command: McpConnectorCreateCommand
+): Promise<{ result: McpConnectorConnectionResult; snapshot: McpConnectorSnapshot }> {
+  const connectorApplication = mcpConnectorApplication()
+  const result = await connectorApplication.connect(command)
+  return { result, snapshot: connectorApplication.snapshot() }
 }
 
 // A background tool load must never hang the chat turn it runs inside: one dead or
@@ -398,41 +429,62 @@ export function resolveConnectorId(reference: string | null | undefined): number
   )?.id
 }
 
+type ConnectorToolCaller = (tool: string, args: unknown) => Promise<ConnectorToolCallResult>
+
+/**
+ * Resolve the background (saved-tokens-only) tool caller for a connector: the
+ * registered provider source when Pro serves it, otherwise ONE live MCP session.
+ * Single rule for every background call path. Caller MUST close().
+ */
+async function openToolCaller(
+  c: Connector
+): Promise<{ call: ConnectorToolCaller; close: () => Promise<void> }> {
+  const source = connectorToolSource(c)
+  if (source) {
+    return { call: (tool, args) => source.callTool(tool, args), close: async () => {} }
+  }
+  const { client, close } = await connect(c, false)
+  return {
+    call: async (tool, args) => ({
+      ok: true,
+      result: await client.callTool({
+        name: tool,
+        arguments: (args ?? {}) as Record<string, unknown>
+      })
+    }),
+    close
+  }
+}
+
+async function guardedCall(
+  call: ConnectorToolCaller,
+  tool: string,
+  args: unknown
+): Promise<ConnectorToolCallResult> {
+  try {
+    return await call(tool, args)
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 /**
  * Open ONE connection (one stdio process / one HTTP session) and run multiple
  * tool calls over it. Essential for multi-step adapters (e.g. Slack: users →
  * channels → history) — otherwise each call would cold-spawn npx and hang.
+ * A connector served by a registered provider source is routed to that source.
  */
 export async function withConnector<T>(
   id: number,
-  fn: (
-    call: (
-      tool: string,
-      args: unknown
-    ) => Promise<{ ok: boolean; result?: unknown; error?: string }>
-  ) => Promise<T>
+  fn: (call: ConnectorToolCaller) => Promise<T>
 ): Promise<T> {
   ensure()
   const c = getConnector(id)
   if (!c) throw new Error('connector not found')
   if (!c.enabled) throw new Error('connector disabled')
-  const { client, close } = await connect(c, false)
+  const { call, close } = await openToolCaller(c)
   try {
-    const call = async (
-      tool: string,
-      args: unknown
-    ): Promise<{ ok: boolean; result?: unknown; error?: string }> => {
-      try {
-        const result = await client.callTool({
-          name: tool,
-          arguments: (args ?? {}) as Record<string, unknown>
-        })
-        return { ok: true, result }
-      } catch (e) {
-        return { ok: false, error: e instanceof Error ? e.message : String(e) }
-      }
-    }
-    return await fn(call)
+    return await fn((tool, args) => guardedCall(call, tool, args))
   } finally {
     await close()
   }
@@ -449,15 +501,12 @@ export async function callConnectorTool(
   if (!c) return { ok: false, error: 'connector not found' }
   if (!c.enabled) return { ok: false, error: 'connector disabled' }
   try {
-    const source = connectorToolSource(c)
-    if (source) return await source.callTool(tool, args)
-    const { client, close } = await connect(c, false) // background → saved tokens only
-    const result = await client.callTool({
-      name: tool,
-      arguments: (args ?? {}) as Record<string, unknown>
-    })
-    await close()
-    return { ok: true, result }
+    const { call, close } = await openToolCaller(c)
+    try {
+      return await call(tool, args)
+    } finally {
+      await close()
+    }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }

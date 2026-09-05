@@ -8,7 +8,6 @@
 // Everything here is on-device; no network except the model download itself.
 import { llm } from './llm'
 import { desktopModels } from './composition/application-access'
-import { desktopApplication } from './composition/application'
 import { desktopRamGb, pingLocalJson } from './composition/guided-setup'
 import { decideChatStatus, type ModelsFailure } from '@offgrid/application'
 import { getActiveModel } from './models-manager'
@@ -38,15 +37,25 @@ export type SystemHealth = SystemHealthContract
 export type SetupProgress = GuidedSetupProgress
 export type SetupProgressCb = (p: SetupProgress) => void
 
+export interface ChatHealthDependencies {
+  activeRoute(): { source: 'local' | 'remote'; name: string } | null
+}
+
+const productionChatHealthDependencies: ChatHealthDependencies = {
+  activeRoute: () => desktopModels.snapshot().active.text?.model ?? null
+}
+
 /** The authoritative live health record for the chat engine. Sidebar status and
  * the full System Health snapshot both use this owner, so they cannot disagree.
  * This deliberately probes only llama-server; callers that need the complete
  * machine record must use getSystemHealth(). */
-export async function getChatHealth(): Promise<HealthComponent> {
+export async function getChatHealth(
+  dependencies: ChatHealthDependencies = productionChatHealthDependencies
+): Promise<HealthComponent> {
   const activeModel = getActiveModel()
   const modelsExist = llm.modelsExist()
   const llamaHealth = await pingLocalJson(llm.getPort())
-  const activeRoute = desktopModels.snapshot().active.text?.model
+  const activeRoute = dependencies.activeRoute()
   const { status, detail } = decideChatStatus({
     remote: activeRoute?.source === 'remote' ? { name: activeRoute.name } : null,
     // A healthy socket is not sufficient: another app/profile can own this port.
@@ -68,12 +77,14 @@ export async function getChatHealth(): Promise<HealthComponent> {
 }
 
 /** One aggregated snapshot of every local component. */
-export async function getSystemHealth(): Promise<SystemHealth> {
+export async function getSystemHealth(
+  dependencies: ChatHealthDependencies = productionChatHealthDependencies
+): Promise<SystemHealth> {
   const activeModel = getActiveModel()
 
   // Live probes (run in parallel): the authoritative chat record and the gateway.
   const [chatHealth, gatewayHealth] = await Promise.all([
-    getChatHealth(),
+    getChatHealth(dependencies),
     pingLocalJson(getGatewayPort())
   ])
 
@@ -131,7 +142,7 @@ export async function getSystemHealth(): Promise<SystemHealth> {
 export async function recommendChatModel(
   modeOverride?: RecMode
 ): Promise<{ id: string; name: string } | null> {
-  const recommendation = await desktopApplication.models.guidedSetup.recommendation(modeOverride)
+  const recommendation = await desktopModels.guidedSetup.recommendation(modeOverride)
   return recommendation ? { id: recommendation.id, name: recommendation.name } : null
 }
 
@@ -165,7 +176,7 @@ export type Recommendation = Omit<GuidedSetupRecommendation, 'sizeBytes'>
 /** Preview what "Configure for me" would pick for a given mode (no side effects),
  *  so the setup UI can show the exact model + size before the user commits. */
 export async function getRecommendation(mode?: RecMode): Promise<Recommendation | null> {
-  const recommendation = await desktopApplication.models.guidedSetup.recommendation(mode)
+  const recommendation = await desktopModels.guidedSetup.recommendation(mode)
   if (!recommendation) return null
   return {
     id: recommendation.id,
@@ -199,7 +210,7 @@ export interface SetupPlan {
  *  preview — no downloads — so the UI can list everything before the user commits.
  *  autoConfigure() consumes the same plan, so the preview and the action never drift. */
 export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
-  const plan = await desktopApplication.models.guidedSetup.plan(mode)
+  const plan = await desktopModels.guidedSetup.plan(mode)
   if (!plan) throw new Error('Guided model setup is not available.')
   return compatiblePlan(plan)
 }
@@ -216,7 +227,7 @@ export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
 export async function autoConfigure(
   onProgress?: SetupProgressCb
 ): Promise<GuidedSetupResult<ModelsFailure>> {
-  return desktopApplication.models.guidedSetup.run(onProgress)
+  return desktopModels.guidedSetup.run(onProgress)
 }
 
 function compatiblePlan(plan: GuidedSetupPlan): SetupPlan {

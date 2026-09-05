@@ -1,16 +1,13 @@
 import { defineConfig } from 'vitest/config'
 import { resolve } from 'node:path'
 
-// Dedicated config for core + Pro DB integration tests (*.dbtest.ts). Kept separate from the
-// default vitest run because they load the better-sqlite3 native module (see
-// scripts/test-db.sh). Run via `npm run test:db`.
-export default defineConfig({
+export const databaseProjectOptions = {
   // Vitest executes jsdom suites in Node. Keep its Vite transform on the server
   // dependency boundary so a rendered DB journey can import Node built-ins
   // without Vite trying to bundle them for a browser.
   environments: {
     client: {
-      consumer: 'server'
+      consumer: 'server' as const
     }
   },
   resolve: {
@@ -22,6 +19,7 @@ export default defineConfig({
     }
   },
   test: {
+    name: 'database-integration',
     include: [
       'integration-tests/*.dbtest.ts',
       'integration-tests/*.dbtest.tsx',
@@ -30,27 +28,33 @@ export default defineConfig({
       'pro/main/__tests__/*.dbtest.ts'
     ],
     exclude: ['node_modules/**', 'out/**', 'e2e/**'],
-    // Every file leaves the model port free for the next one - see the harness for why that has to be
-    // suite-wide rather than each file's own business.
     setupFiles: [
       'src/main/__tests__/harness/db-teardown.ts',
-      // The UI journeys in this suite render real Radix components, which construct a
-      // ResizeObserver in a layout effect. Inert in the node-environment files.
       'src/renderer/src/__tests__/dom-globals.setup.ts'
     ],
+    fileParallelism: false as const,
+    maxWorkers: 1
+  }
+}
+
+// Dedicated config for core + Pro DB integration tests (*.dbtest.ts). Kept separate from the
+// default command for focused diagnosis. The canonical coverage command imports these same project
+// options into vitest.config.ts, so Desktop and Desktop Pro have one run and one coverage report.
+export default defineConfig({
+  ...databaseProjectOptions,
+  test: {
+    ...databaseProjectOptions.test,
     // These 266 journey tests were measuring nothing, and the default config counts on them: it
     // EXCLUDES src/main/database.ts, src/main/rag/store.ts, prompt-store and runtime-residency with the
     // note "covered by the tests in *.dbtest.ts via npm run test:db". That claim was never checked,
     // because this config had no coverage block - the one suite that loads the real native SQLite, opens
     // real databases and runs whole relaunch journeys produced no report at all.
     //
-    // Deliberately complementary rather than a second opinion:
-    //   all: false  - only what this run actually loaded. all:true would put every logic file in the
-    //                 denominator, and this suite is not trying to cover all of them; the default run
-    //                 owns that denominator. Merging the two reports is what gives the whole picture,
-    //                 and a file only ever contributes the totals of the report that measured it.
-    //   its own reportsDirectory, so it cannot overwrite the default run's report - they are merged
-    //   afterwards by shared/scripts/merge-line-coverage.mjs.
+    // Deliberately scoped for the focused `test:db --coverage` diagnostic command. The canonical
+    // workspace coverage run uses vitest.config.ts and one collector across product + database:
+    //   include limits the focused report to its production source surface; Vitest 4 no longer uses
+    //   the former `all` switch.
+    //   its own reportsDirectory, so a focused diagnostic cannot overwrite the canonical report.
     // provider v8 to match the default run, so both express coverage against the same source positions.
     coverage: {
       provider: 'v8',
@@ -59,7 +63,6 @@ export default defineConfig({
       // as 0%. The coverage-only variant (vitest.db.coverage.config.ts) already
       // drops the tests with OPEN failures; this covers the intermittent ones.
       reportOnFailure: true,
-      all: false,
       include: ['src/**/*.ts', 'pro/**/*.ts'],
       exclude: [
         '**/*.test.ts',

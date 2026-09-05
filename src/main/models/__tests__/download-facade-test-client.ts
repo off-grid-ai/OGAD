@@ -6,7 +6,12 @@
 // a `{ modelId, percent, status, ... }` row and a `{ success, error }` result — expressed over the
 // typed facade commands. It fakes nothing: every call below is the production command the Models
 // screen issues, over the production Desktop download ports.
-import { CATALOG, type PublicDownloadEvent, type PublicDownloadInfo } from '@offgrid/models'
+import {
+  CATALOG,
+  DOWNLOAD_INTERRUPTED_ERROR,
+  type PublicDownloadEvent,
+  type PublicDownloadInfo
+} from '@offgrid/models'
 import { modelsFailureMessage, type OffGridApplication } from '@offgrid/application'
 
 export interface DownloadProgress {
@@ -94,7 +99,9 @@ function projectInfo(info: PublicDownloadInfo): DownloadProgress {
   return {
     ...progressFields(info),
     status: status(info.status),
-    error: info.reason ?? reconciliationFailure(info)
+    error:
+      info.reason ??
+      (info.status === 'interrupted' ? DOWNLOAD_INTERRUPTED_ERROR : reconciliationFailure(info))
   }
 }
 
@@ -119,7 +126,8 @@ function downloadApplication(): Promise<OffGridApplication> {
       models: {
         ...modelServices.desktopModelWorkspacePorts,
         downloads: downloads.desktopModelDownloads.ports,
-        activation: { resolve: modelManager.resolveDesktopActivation }
+        activation: { resolve: modelManager.resolveDesktopActivation },
+        library: modelManager.desktopModelLibraryPorts
       }
     })
     access.registerDesktopApplication(application)
@@ -137,7 +145,9 @@ async function facade(): Promise<OffGridApplication['models']> {
 }
 
 /** The catalog request the Desktop download ports resolve, read from the live catalog per call. */
-async function requestFor(modelId: string): ReturnType<
+async function requestFor(
+  modelId: string
+): ReturnType<
   (typeof import('../desktop-model-download-ports'))['desktopModelDownloads']['request']
 > {
   const { desktopModelDownloads } = await import('../desktop-model-download-ports')
@@ -162,8 +172,12 @@ async function observe(
   }
 }
 
-function result(outcome: { ok: true } | { ok: false; failure: Parameters<typeof modelsFailureMessage>[0] }): DownloadResult {
-  return outcome.ok ? { success: true } : { success: false, error: modelsFailureMessage(outcome.failure) }
+function result(
+  outcome: { ok: true } | { ok: false; failure: Parameters<typeof modelsFailureMessage>[0] }
+): DownloadResult {
+  return outcome.ok
+    ? { success: true }
+    : { success: false, error: modelsFailureMessage(outcome.failure) }
 }
 
 export function downloadModel(

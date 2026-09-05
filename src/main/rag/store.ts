@@ -439,4 +439,5 @@ export function deleteProject(id: string): void {
       kind: 'put'
     })
   }
+  emitSyncMutation({ entity: CORE_SYNC_ENTITIES.project, entityId: id, kind: 'delete' })
 }

@@ -4,6 +4,7 @@ import {
   downloadModelType,
   once,
   resolveHuggingFaceModel,
+  resolveHuggingFaceArtifactMetadata,
   type ModelEntry,
   type ModelMetadataRepairCommandPorts,
   type PublicDownloadRequest,
@@ -97,9 +98,8 @@ class DesktopDownloadSources {
         catalog ?? (await resolveHuggingFaceModel(modelId, { fetchImpl: platformFetch }))
       if (!entry) throw new Error(`Unknown model: ${modelId}`)
       return { entry, catalogEntry: Boolean(catalog) }
-    })().catch((error) => {
+    })().finally(() => {
       this.resolutions.delete(modelId)
-      throw error
     })
     this.resolutions.set(modelId, resolution)
     return resolution
@@ -118,27 +118,36 @@ class DesktopDownloadSources {
     }
   }
 
-  async resolve(request: PublicDownloadRequest): Promise<PublicDownloadSources> {
+  async resolve(
+    request: PublicDownloadRequest,
+    selected?: PublicDownloadSources
+  ): Promise<PublicDownloadSources> {
+    if (selected) return resolveHuggingFaceArtifactMetadata(selected, platformFetch)
     const { entry, catalogEntry } = await this.resolveModel(request.modelId)
-    return {
-      revision: 'desktop-v1',
-      displayName: entry.name,
-      catalogEntry,
-      availability:
-        entry.availability === 'coming_soon'
-          ? 'coming_soon'
-          : entry.artifactDelivery === 'runtime'
-            ? 'runtime'
-            : 'available',
-      unavailableReason: entry.availabilityNote,
-      artifacts: entry.files.map((file) => ({
-        fileName: file.name,
-        url: file.url,
-        totalBytes: file.sizeBytes,
-        sha256: file.sha256,
-        role: file.role
-      }))
-    }
+    const sources: PublicDownloadSources = {
+        revision: 'desktop-v1',
+        displayName: entry.name,
+        catalogEntry,
+        availability:
+          entry.availability === 'coming_soon'
+            ? 'coming_soon'
+            : entry.artifactDelivery === 'runtime'
+              ? 'runtime'
+              : 'available',
+        unavailableReason: entry.availabilityNote,
+        artifacts: entry.files.map((file) => ({
+          fileName: file.name,
+          url: file.url,
+          totalBytes: file.sizeBytes,
+          sha256: file.sha256,
+          role: file.role
+        }))
+      }
+    // Unavailable and runtime-managed entries never transfer artifacts. Preserve their catalog
+    // facts for Shared's canonical refusal without making an irrelevant metadata network call.
+    return sources.availability === 'available'
+      ? resolveHuggingFaceArtifactMetadata(sources, platformFetch)
+      : sources
   }
 }
 

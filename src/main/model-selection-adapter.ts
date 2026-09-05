@@ -1,11 +1,12 @@
-import { type ModelModality, type ModelReasoningMetadata } from '@offgrid/models'
+import { type ModelModality } from '@offgrid/models'
+import type { DesktopLocalTextRuntime } from './model-generation-adapters'
 
 export interface DesktopInventoryModel {
   id: string
   familyId?: string
   name?: string
   kind?: string
-  files?: Array<{ name?: string; sizeBytes?: number; role?: string }>
+  files?: Array<{ name?: string; sizeBytes?: number; role?: string; installed?: boolean }>
   availability?: 'ready' | 'coming_soon'
   runtime?: string
   engine?: string
@@ -23,18 +24,11 @@ export interface DesktopInventoryModel {
 export interface DesktopModelWorkspacePorts {
   listCatalog(): Promise<DesktopInventoryModel[]>
   listInstalled(): Promise<string[]>
-  localTextRuntimeState(): Promise<{
-    ready: boolean
-    loaded: boolean
-    reasoning?: ModelReasoningMetadata
-    /** The window llama-server runs with; Shared bounds tool results to the room left in it. */
-    contextLength?: number
-  }>
+  /** Verified on-disk bytes of an installed artifact file; undefined when not on disk. */
+  installedArtifactBytes?(fileName: string): number | undefined
   localVoiceRuntimeState?(): Promise<{ installed: boolean; ready: boolean; error?: string }>
-  localTextLifecycle?: {
-    load(): Promise<void>
-    unload(): Promise<void>
-  }
+  /** The ONE native text-runtime boundary: lifecycle, readiness facts, settings, and generation. */
+  localTextRuntime: DesktopLocalTextRuntime
   projectTextSelection?(modelId: string): Promise<{ success: boolean; error?: string }>
   residencySetting?(modality: 'image' | 'stt'): 'resident' | 'on-demand'
 }

@@ -21,15 +21,23 @@ function stubApi(): void {
     }
   ]
   const projection = modelControlSnapshot({
-        kinds: ['voice', 'transcription'],
-        models,
-        installed: ['kokoro', 'whisper'],
-        active: { speech: 'kokoro', transcription: 'whisper' }
-      })
+    kinds: ['voice', 'transcription'],
+    models,
+    installed: ['kokoro', 'whisper'],
+    active: { speech: 'kokoro', transcription: 'whisper' }
+  })
   ;(globalThis as unknown as { window: { api: unknown } }).window.api = {
     getModelControlProjection: async () => projection,
-    controlModel: async () =>
-      ok({ status: 'completed', operationId: 'test-operation', projection }),
+    controlModel: async (intent: {
+      type: string
+      surface?: 'speech' | 'transcription'
+      operationId: string
+    }) => {
+      if (intent.type === 'unload' && intent.surface) {
+        projection.active[intent.surface] = { ...projection.active[intent.surface], ready: false }
+      }
+      return ok({ status: 'completed', operationId: intent.operationId, projection })
+    },
     getComputerUseActiveModels: async () => ({
       strategy: 'separate_specialist',
       strategyLabel: 'Separate specialist',

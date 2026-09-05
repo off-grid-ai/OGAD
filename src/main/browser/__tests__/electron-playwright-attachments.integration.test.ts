@@ -10,6 +10,7 @@ import {
   type ElectronPlaywrightPageProvider,
   type RelayPage
 } from '../electron-playwright-attachments'
+import type { CdpEvent } from '../electron-playwright-relay-protocol'
 
 class DebuggerBoundary extends EventEmitter {
   attached = false
@@ -55,7 +56,7 @@ describe('Electron Playwright attachment lifecycle', () => {
       create: vi.fn(),
       close: vi.fn()
     }
-    const events: Array<Record<string, unknown>> = []
+    const events: CdpEvent[] = []
     const failures: Error[] = []
     const attachments = new ElectronPlaywrightAttachments(
       provider,

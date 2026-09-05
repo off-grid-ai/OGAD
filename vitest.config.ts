@@ -1,16 +1,17 @@
 import { resolve } from 'path'
-import { existsSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
+import { availableParallelism } from 'os'
 import { defineConfig } from 'vitest/config'
 import { createProductTestFiles, createVitestProjects } from './src/main/__tests__/vitest-projects'
+import { databaseProjectOptions } from './vitest.db.config'
 
 // The pro/ submodule is present in the working tree when you have access, absent
 // otherwise (and in a fork CI without the cross-repo token). Only enforce the
 // pro-specific threshold group when pro is actually checked out, so a core-only
 // run measures + gates core alone instead of erroring on an empty pro/** glob.
 const hasPro = existsSync(resolve(__dirname, 'pro/tsconfig.json'))
-// CI and the pre-push hook merge this report with the DB and optional e2e reports, then
-// gate only the lines this branch adds. The fast suite is one input to that aggregate,
-// so applying the whole-tree floor here would stop before the complementary reports run.
+// Set by CI and the pre-push hook, which may fold optional e2e evidence into this unified
+// product + database report before gating. See resolveCoverageThresholds below.
 const usesAggregateCoverageGate = process.env.OFFGRID_AGGREGATE_COVERAGE === '1'
 // The pro test globs are gated the same way the pro thresholds already are:
 // a core-only checkout can carry stray pro/ files (this repo tracks a handful
@@ -18,6 +19,74 @@ const usesAggregateCoverageGate = process.env.OFFGRID_AGGREGATE_COVERAGE === '1'
 // orphan tests fails the suite for everyone without desktop-pro access.
 const productTestFiles = createProductTestFiles(hasPro)
 const commonExcludes = ['e2e/**', 'node_modules/**', 'out/**']
+const configuredProjects = createVitestProjects(productTestFiles, commonExcludes)
+const productProject = configuredProjects[0]!
+const nonConsumerProjects = configuredProjects.slice(1)
+const desktopWorkerCount = Math.max(1, Math.min(8, availableParallelism() - 2))
+const databaseWorkerCount = Math.max(1, Math.min(4, availableParallelism() - 2))
+
+// These journeys own a fixed model port, a long-running transfer, or a background
+// capture lifecycle. They must not compete with another DB worker. All other DB
+// journeys use process-isolated temporary profiles and can run in parallel safely.
+export const DATABASE_EXCLUSIVE_TESTS = [
+  'integration-tests/memory-chat-tts.ui.integration.dbtest.ts',
+  'integration-tests/workspace-production-bridge.ui.integration.dbtest.tsx',
+  'src/main/__tests__/active-text-model-transport.integration.dbtest.ts',
+  'src/main/__tests__/fresh-setup-first-use.integration.dbtest.ts',
+  'src/main/__tests__/image-runtime-reliability.integration.dbtest.ts',
+  'src/main/__tests__/memory-rag-chat-lifecycle.integration.dbtest.ts',
+  'src/main/__tests__/model-server-image.integration.dbtest.ts',
+  'src/main/__tests__/multimodal-rag-lifecycle.integration.dbtest.ts',
+  'src/main/__tests__/rag-empty-memory.dbtest.ts',
+  'src/main/__tests__/tools-loop.dbtest.ts',
+  'src/main/__tests__/tools-search.dbtest.ts',
+  'src/main/__tests__/tools-vision.dbtest.ts',
+  'pro/main/__tests__/capture-backlog-deletion-race.integration.dbtest.ts',
+  'pro/main/__tests__/capture-deletion-race.integration.dbtest.ts',
+  'pro/main/__tests__/manual-todo-journey.integration.dbtest.ts',
+  'pro/main/__tests__/meeting-chat.integration.dbtest.ts',
+  'pro/main/__tests__/meeting-persistence.dbtest.ts',
+  'pro/main/__tests__/model-transfer-service.integration.dbtest.ts',
+  'pro/main/__tests__/replay-chat.integration.dbtest.ts',
+  'pro/main/__tests__/sync-service.integration.dbtest.ts'
+]
+
+/**
+ * The one workspace coverage gate — READ, never redeclared.
+ *
+ * coverage-gate.json beside this file is the single machine-readable owner of the four numbers.
+ * Every runner that measures this repository reads that one file: vitest here (one combined
+ * product + database report) and scripts/coverage-all.sh, which turns the
+ * same object into the merged new-code run's `--min-*` flags. There is no second, softer floor
+ * anywhere, no per-package group, and no copy of the numbers to drift out of step.
+ *
+ * All four metrics use a 65% minimum, as requested by the maintainer.
+ * Change coverage-gate.json to update the minimum for every runner.
+ */
+export interface CoverageGate {
+  statements: number
+  branches: number
+  functions: number
+  lines: number
+}
+
+export const WORKSPACE_COVERAGE_GATE: CoverageGate = JSON.parse(
+  readFileSync(resolve(__dirname, 'coverage-gate.json'), 'utf-8')
+) as CoverageGate
+
+/**
+ * WHICH report this run's gate is applied to — never WHETHER the gate exists.
+ *
+ * A direct run applies the gate to Vitest's one product + database report. Under the aggregate
+ * run (scripts/coverage-all.sh and CI), optional e2e evidence can still be folded in and new-code
+ * coverage is calculated afterwards. Enforcement moves downstream in that mode, using the same
+ * WORKSPACE_COVERAGE_GATE numbers.
+ */
+export function resolveCoverageThresholds(
+  mergesWithComplementaryReports: boolean
+): CoverageGate | undefined {
+  return mergesWithComplementaryReports ? undefined : WORKSPACE_COVERAGE_GATE
+}
 
 // Unit + integration tests (fast, deterministic). The Playwright Electron E2E lives
 // in e2e/ and runs via `npm run test:e2e`, NOT here.
@@ -26,8 +95,9 @@ const commonExcludes = ['e2e/**', 'node_modules/**', 'out/**']
 // decision logic the codebase deliberately extracts so it can be exercised in-process
 // (see CLAUDE.md "pull the pure part out"). Electron/DB/native-bound shells are excluded
 // because they can't be unit-tested directly — cover the logic you pulled out of them.
-// The 85% floor is enforced here and on pre-push. `all: true` means a new pure module
-// with no test drags the number down, so untested logic cannot sneak in.
+// WORKSPACE_COVERAGE_GATE above is the floor, enforced here and on pre-push, and `include`
+// means a new pure module with no test drags the number down, so untested logic cannot
+// sneak in.
 export default defineConfig({
   // Renderer path aliases, mirrored 1:1 from tsconfig.web.json `paths`. Without these
   // a .tsx render test cannot import any renderer module (electron-vite provides them
@@ -74,7 +144,34 @@ export default defineConfig({
     // build. Run them in a second project only after ordinary product tests finish;
     // otherwise coverage workers can starve the build past its timeout even when the
     // cross-process filesystem lock prevents config-file races.
-    projects: createVitestProjects(productTestFiles, commonExcludes),
+    projects: [
+      {
+        ...productProject,
+        test: { ...productProject.test, maxWorkers: desktopWorkerCount }
+      },
+      {
+        extends: true,
+        ...databaseProjectOptions,
+        test: {
+          ...databaseProjectOptions.test,
+          exclude: [...databaseProjectOptions.test.exclude, ...DATABASE_EXCLUSIVE_TESTS],
+          fileParallelism: true,
+          maxWorkers: databaseWorkerCount,
+          sequence: { groupOrder: 1 }
+        }
+      },
+      {
+        extends: true,
+        ...databaseProjectOptions,
+        test: {
+          ...databaseProjectOptions.test,
+          name: 'database-exclusive-integration',
+          include: DATABASE_EXCLUSIVE_TESTS,
+          sequence: { groupOrder: 2 }
+        }
+      },
+      ...nonConsumerProjects
+    ],
     coverage: {
       provider: 'v8',
       // Write the report even when a test FAILS. Without this, one flaky pro
@@ -86,11 +183,12 @@ export default defineConfig({
       // fails the run; this only decouples "a test flaked" from "the coverage
       // report is missing". Mirrors vitest.db.config.ts.
       reportOnFailure: true,
-      // all:true + one workspace include (core + Pro, production TypeScript + rendered TSX)
-      // keeps every consumer-owned module visible even when no test imports it. Render tests and
-      // e2e coverage now contribute to the same report instead of leaving Pro UI as an unmeasured
+      // One workspace include (core + Pro, production TypeScript + rendered TSX) keeps every
+      // consumer-owned module visible even when no test imports it: since vitest 4 `include`
+      // alone decides the report's file set (the former `all: true` is the only behaviour), so an
+      // untested file matching it is reported at 0% rather than silently dropped. Render tests and
+      // e2e coverage contribute to the same report instead of leaving Pro UI as an unmeasured
       // blind spot.
-      all: true,
       include: ['src/**/*.ts', 'src/**/*.tsx', 'pro/**/*.ts', 'pro/**/*.tsx'],
       // text-summary is the console line, json-summary powers the README badges.
       reporter: ['text-summary', 'json-summary', 'json'],
@@ -243,24 +341,7 @@ export default defineConfig({
         'pro/main/dictation/hotkey/toggle.ts',
         'pro/main/crm/notify.ts' // pure Electron Notification shell (isSupported/new Notification/show) — no branchable logic
       ],
-      thresholds: usesAggregateCoverageGate
-        ? undefined
-        : {
-            // Uniform 80% floor across every metric. Set deliberately per the maintainer's call
-            // (2026-08-05), down from 85: pro BRANCHES sit right on the old line (85.5% local, ~85.2%
-            // measured in CI, because CI legitimately skips the native-dep ambient journeys), so a
-            // 0.3% environment swing decided whether the gate was red. That is a gate reporting the
-            // runner rather than the code.
-            //
-            // What 80 actually loosens is branches ALONE — statements, functions and lines all measure
-            // 91-93% in pro and higher in core, so they stay far above either line. It is a floor
-            // against regression, not a target: the standard in CLAUDE.md is still 85%, every change
-            // that adds logic adds tests, and this number only moves back UP.
-            statements: 80,
-            branches: 80,
-            functions: 80,
-            lines: 80
-          }
+      thresholds: resolveCoverageThresholds(usesAggregateCoverageGate)
     }
   }
 })

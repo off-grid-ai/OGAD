@@ -2,7 +2,11 @@ import * as http from 'node:http'
 import os from 'node:os'
 import { CATALOG, normalizeGuidedSetupMode, type GuidedSetupHostPorts } from '@offgrid/models'
 import { deviceNoun } from '../../shared/device'
-import { llm } from '../llm'
+
+export interface DesktopGuidedSetupRuntime {
+  isReady(): Promise<boolean>
+  getSettings(): { performanceMode?: string }
+}
 
 export function desktopRamGb(): number {
   return Math.round(os.totalmem() / 1e9)
@@ -49,20 +53,24 @@ export function pingLocalJson(
  * can answer: its memory, the mode the user committed, what to call the device, and whether the
  * local server is answering.
  */
-export function createDesktopGuidedSetupPorts(): GuidedSetupHostPorts {
+export function createDesktopGuidedSetupPorts(
+  runtime: DesktopGuidedSetupRuntime
+): GuidedSetupHostPorts {
   return {
     catalog: CATALOG,
     totalRamGb: desktopRamGb,
     loadMode: () => {
       try {
-        return normalizeGuidedSetupMode(
-          (llm.getSettings() as { performanceMode?: string }).performanceMode
-        )
+        return normalizeGuidedSetupMode(runtime.getSettings().performanceMode)
       } catch {
         return 'balanced'
       }
     },
-    verifyChat: async () => Boolean(await pingLocalJson(llm.getPort(), '/health', 3000)),
+    // `startChat` reaches this port only after the same LLMService has completed its native
+    // readiness probe. Keep that service as the one owner of process readiness: a second HTTP
+    // probe here is an independent, fallible copy of a fact it has already established and can
+    // report `warming_up` after the runtime has logged ready.
+    verifyChat: async () => runtime.isReady(),
     deviceLabel: () => deviceNoun(process.platform)
   }
 }

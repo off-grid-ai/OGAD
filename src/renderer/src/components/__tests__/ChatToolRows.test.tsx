@@ -35,6 +35,46 @@ afterEach(() => {
 })
 
 describe('<ChatToolRows/> work timeline', () => {
+  it('keeps retrieved memory evidence inside the one work timeline', async () => {
+    const user = userEvent.setup()
+    render(
+      <ChatToolRows
+        tools={[
+          {
+            name: 'search_meetings',
+            status: 'completed',
+            result: 'Meeting 1: Planning review'
+          }
+        ]}
+        context={{
+          unified: [
+            {
+              key: 'meeting:1',
+              kind: 'meeting',
+              refId: 1,
+              title: 'Planning review',
+              snippet: 'Release plan',
+              surface: 'Meeting',
+              url: null,
+              ts: 1,
+              imagePath: null,
+              score: 1
+            }
+          ]
+        }}
+        navigation={{}}
+      />
+    )
+
+    expect(screen.getAllByRole('button', { name: /Work done/ })).toHaveLength(1)
+    await user.click(screen.getByRole('button', { name: /Work done/ }))
+    const step = screen.getByRole('button', {
+      name: 'Searched your memory — 1 result, complete'
+    })
+    await user.click(step)
+    expect(screen.getByText('Planning review')).toBeTruthy()
+  })
+
   it('uses the meeting search result for the collapsed summary', async () => {
     const user = userEvent.setup()
     render(

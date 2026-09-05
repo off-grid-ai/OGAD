@@ -2,6 +2,8 @@ import type { Attachment } from '@renderer/lib/chat-transcript-types'
 import type { ImageGenerationRequestContract } from '../../../shared/image-generation-contract'
 
 export interface ChatSendOptions {
+  /** An upstream workflow can own the identity of a new turn without making it a replay. */
+  turnId?: string
   regen?: boolean
   voiceClip?: { url: string; duration: number }
   atts?: Attachment[]

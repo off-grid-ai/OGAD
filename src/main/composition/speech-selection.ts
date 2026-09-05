@@ -1,6 +1,7 @@
 import type { ModelModality, RuntimeModel, SpeechPlatformPorts } from '@offgrid/application'
 import type { SpeechModel } from '@offgrid/speech'
 import { getSetting, saveSetting } from '../database'
+import { desktopModelSelectionPersistence } from '../model-selection-persistence'
 import { DesktopModelsOperationError, desktopModels } from './application-access'
 
 type SpeechModality = Extract<ModelModality, 'transcription' | 'voice'>
@@ -20,16 +21,13 @@ export interface SpeechModelRouting {
 }
 
 /**
- * Facade-backed routing. `snapshot().active[modality]` is the same `{ selectedRouteId, selectedId }`
- * the workspace's `active()` returned, so the identity this port reads and writes back is
- * unchanged - deliberately NOT `activeModelId`, which answers a different question (the stable
- * client-facing identity, which for a plain local route is the model id rather than the route id).
+ * The canonical selection file is safe to read while the application is being composed. Looking
+ * through the application facade at that point creates a cycle: Speech waits for Models, while the
+ * facade cannot exist until Speech construction finishes. Writes and model descriptions still go
+ * through the Models facade after composition, so Models remains the only runtime routing owner.
  */
 const facadeRouting: SpeechModelRouting = {
-  activeRoute(modality) {
-    const active = desktopModels.snapshot().active[modality]
-    return active ? (active.selectedRouteId ?? active.selectedId) : null
-  },
+  activeRoute: (modality) => desktopModelSelectionPersistence.read(modality),
   lookup: (routeId) => desktopModels.lookup(routeId),
   async select(modality, routeId) {
     const outcome = await desktopModels.select({ modality, modelId: routeId })

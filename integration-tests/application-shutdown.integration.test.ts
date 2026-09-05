@@ -55,9 +55,14 @@ describe('application shutdown integration', () => {
     const downloads = resource(trace, 'core:downloads')
     registerCoreShutdownOwners(registry, {
       stopGateway: () => gateway.stop(),
-      stopMediaServer: () => media.stop(),
-      stopModelRuntimes: () => runtimes.stop(),
-      stopModelDownloads: () => downloads.stop()
+      stopMediaServer: () => media.stop()
+    })
+    registry.register({
+      name: 'core:application',
+      shutdown: () => {
+        downloads.stop()
+        runtimes.stop()
+      }
     })
 
     // Clipboard and dictation stand at the OS/native boundary in production: one

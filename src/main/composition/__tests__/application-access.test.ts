@@ -1,13 +1,24 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+
+// The composition root reaches the real profile DB through `app.getPath('userData')`, so the fake
+// must hand it a throwaway profile - never the repo root - or `memories.db*` lands in the tree.
+const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-application-access-'))
 
 // The registry's own lifecycle, proved through the real proxy rather than through a fake registry:
 // `desktopModels` resolves `current()` on every access, so whether the registration is live is
 // observable as whether that access throws.
 vi.mock('electron', () => ({
-  app: { getPath: () => process.cwd(), isPackaged: false, getAppPath: () => process.cwd() },
+  app: { getPath: () => profile, isPackaged: false, getAppPath: () => process.cwd() },
   ipcMain: { on: vi.fn(), removeListener: vi.fn() },
   BrowserWindow: { getAllWindows: () => [] }
 }))
+
+afterAll(() => {
+  fs.rmSync(profile, { recursive: true, force: true })
+})
 
 describe('desktop application registration', () => {
   it('disposing the registration makes every accessor refuse rather than serve a dead application', async () => {

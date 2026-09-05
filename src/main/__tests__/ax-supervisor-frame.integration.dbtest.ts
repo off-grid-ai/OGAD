@@ -6,7 +6,8 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import type { OffGridApplication } from '@offgrid/application'
 
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-ax-supervisor-frame-'))
 const captureSources = vi.hoisted(() => vi.fn())
@@ -67,14 +68,33 @@ import { getDB } from '../database'
 import { configureRuntime } from '../runtime-env'
 import {
   configureTaskExecutionDevice,
-  getTaskRun,
-  resetTaskHistoryForTests
+  createDesktopAutomationPorts,
+  getTaskRun
 } from '../tasks/task-history'
 import { emitVisionState } from '../vision/vision-controller'
 import { showSupervisorWindow } from '../vision/supervisor-window'
 
-afterAll(() => {
-  resetTaskHistoryForTests()
+let application: OffGridApplication
+let releaseApplication: () => void
+
+beforeAll(async () => {
+  const [{ createOffGridApplication }, { desktopModelWorkspacePorts }, applicationAccess] =
+    await Promise.all([
+      import('@offgrid/application'),
+      import('../model-services'),
+      import('../composition/application-access')
+    ])
+  application = createOffGridApplication({
+    models: desktopModelWorkspacePorts,
+    automation: createDesktopAutomationPorts()
+  })
+  releaseApplication = applicationAccess.registerDesktopApplication(application)
+  await application.start()
+})
+
+afterAll(async () => {
+  await application.stop()
+  releaseApplication()
   configureRuntime({ binRoots: undefined })
   if (originalCaptureAttempts === undefined) delete process.env.OFFGRID_AX_CAPTURE_ATTEMPTS
   else process.env.OFFGRID_AX_CAPTURE_ATTEMPTS = originalCaptureAttempts

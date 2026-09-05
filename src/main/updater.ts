@@ -8,6 +8,7 @@
 import { autoUpdater } from 'electron-updater'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import type { UpdateInfo } from 'builder-util-runtime'
+import { UPDATE_DOWNLOADED_CHANNEL, type UpdateDownloadedContract } from '../shared/ipc-contracts'
 import type { ProgressInfo } from 'electron-updater'
 import { valid } from 'semver'
 import { getSetting, saveSetting } from './database'
@@ -288,8 +289,9 @@ export function startAutoUpdates(): void {
       status: 'completed',
       version: i.version
     })
+    const downloaded: UpdateDownloadedContract = { version: i.version }
     BrowserWindow.getAllWindows().forEach((w) =>
-      w.webContents.send('update:downloaded', { version: i.version })
+      w.webContents.send(UPDATE_DOWNLOADED_CHANNEL, downloaded)
     )
   })
 

@@ -49,6 +49,7 @@ function renderPicker(onClose = vi.fn()): ReturnType<typeof vi.fn> {
   })
   ;(window as unknown as { api: Record<string, unknown> }).api = {
     getModelControlProjection: modelControl.getModelControlProjection,
+    onModelControlProjection: modelControl.onModelControlProjection,
     controlModel: modelControl.controlModel,
     getModelCatalog: vi.fn().mockResolvedValue({ models }),
     getInstalledModels: vi.fn().mockResolvedValue(['local/qwen']),
@@ -81,6 +82,7 @@ function renderPickerWithRemote(): ReturnType<typeof modelControlBoundary> {
   })
   ;(window as unknown as { api: Record<string, unknown> }).api = {
     getModelControlProjection: modelControl.getModelControlProjection,
+    onModelControlProjection: modelControl.onModelControlProjection,
     controlModel: modelControl.controlModel,
     getModelCatalog: vi.fn().mockResolvedValue({ models }),
     getInstalledModels: vi.fn().mockResolvedValue([REMOTE_MODEL_ID]),
@@ -130,7 +132,8 @@ describe('<ModelPicker/> dismissal', () => {
     expect(modelControl.intents).toContainEqual({
       type: 'activate',
       modelId: REMOTE_MODEL_ID,
-      surface: 'text'
+      surface: 'text',
+      operationId: expect.any(String)
     })
     expect(await screen.findByText('Remote')).toBeTruthy()
   })

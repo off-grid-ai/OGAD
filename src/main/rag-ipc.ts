@@ -10,6 +10,10 @@ import { desktopApplication } from './composition/application'
 import { requireApplicationOutcome } from './composition/application-outcome'
 import { attachmentPickerExtensions } from '@offgrid/sync'
 import { workflowFailureMessage } from '@offgrid/application'
+import {
+  PROJECT_INDEX_PROGRESS_CHANNEL,
+  type ProjectIndexProgressContract
+} from '../shared/ipc-contracts'
 
 // Built from the shared attachment classifier (@offgrid/sync) so the picker allowlist
 // and the processor can never drift: it used to hardcode a subset that omitted
@@ -65,18 +69,20 @@ export function setupRagIPC(): void {
         const indexed = await desktopRag.addDocument(
           { projectId, path: filePath, fileName: name, size },
           (stage) => {
-            e.sender.send('projects:index-progress', { projectId, name, stage })
+            const progress: ProjectIndexProgressContract = { projectId, name, stage }
+            e.sender.send(PROJECT_INDEX_PROGRESS_CHANNEL, progress)
           }
         )
         requireApplicationOutcome(indexed)
         added++
       } catch (err) {
-        e.sender.send('projects:index-progress', {
+        const failed: ProjectIndexProgressContract = {
           projectId,
           name,
           stage: 'error',
           error: err instanceof Error ? err.message : String(err)
-        })
+        }
+        e.sender.send(PROJECT_INDEX_PROGRESS_CHANNEL, failed)
       }
     }
     return { added }

@@ -46,7 +46,7 @@ export type {
 } from './desktop-chat-session-contract'
 
 export class DesktopChatSession {
-  private readonly repository = new DesktopTurnRepository()
+  private readonly repository: DesktopTurnRepository
   /**
    * The live turn's buffer belongs to the session, not to a component: the session is what knows
    * a turn is in flight, and one owner is what makes "at most one visual publication per frame" a
@@ -60,6 +60,7 @@ export class DesktopChatSession {
   private readonly compaction: DesktopChatCompaction
 
   constructor(private readonly boundary: DesktopChatSessionBoundary) {
+    this.repository = new DesktopTurnRepository(boundary)
     this.generation = new DesktopChatGenerationAdapter(boundary)
     this.compaction = new DesktopChatCompaction(boundary)
     this.service = chatSessionService(
@@ -67,6 +68,7 @@ export class DesktopChatSession {
         generate: (request, events) =>
           this.generate(request.identity?.turnId, {
             messages: request.messages ?? [],
+            reasoning: request.reasoning,
             signal: request.signal,
             events
           })
@@ -143,15 +145,11 @@ export class DesktopChatSession {
       })
   }
 
-  restoreConversation(conversationId: string, turns: readonly ChatTurn[]): void {
-    if (
-      this.service
-        .queueProjection()
-        .entries.some((entry) => entry.conversationId === conversationId)
-    ) {
-      return
-    }
-    this.repository.restore(conversationId, turns)
+  restoreConversation(
+    conversationId: string,
+    legacyTurns: readonly ChatTurn[] = []
+  ): Promise<readonly ChatTurn[]> {
+    return this.service.restoreConversation(conversationId, legacyTurns)
   }
 
   async send(input: DesktopImageChatSessionInput): Promise<DesktopImageChatSessionResult>
@@ -197,7 +195,10 @@ export class DesktopChatSession {
           : input.images.length
             ? { type: 'vision' }
             : { type: 'text' },
-      request: { profile: desktopChatTurnProfile(input.kind) }
+      request: {
+        profile: desktopChatTurnProfile(input.kind),
+        ...(input.kind === 'image' ? {} : { reasoning: { enabled: input.thinking === true } })
+      }
     }
   }
 

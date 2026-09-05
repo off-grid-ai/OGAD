@@ -24,6 +24,12 @@ vi.mock('electron', () => ({
     isEncryptionAvailable: () => false,
     encryptString: (s: string) => Buffer.from(s),
     decryptString: (b: Buffer) => b.toString()
+  },
+  ipcMain: {
+    on: () => undefined,
+    removeListener: () => undefined,
+    handle: () => undefined,
+    removeHandler: () => undefined
   }
 }))
 
@@ -33,12 +39,16 @@ import { modelsDir } from '../runtime-env'
 
 let fake: FakeLlamaServer
 let imgPath: string
+let stopApplication: (() => Promise<void>) | undefined
 
 beforeAll(async () => {
   // The selected model is installed through the one durable selection the real shared inventory
   // reads, before the first inventory refresh; each test only decides whether its projector file exists.
   installFakeActiveTextModel(TMP_DIR)
   fake = await startFakeLlamaServer()
+  const application = await import('../composition/application')
+  await application.startDesktopApplication()
+  stopApplication = application.stopDesktopApplication
   const svc = llm as unknown as { port: number; initialized: boolean; paused: boolean }
   svc.port = fake.port
   svc.initialized = true
@@ -52,6 +62,7 @@ beforeEach(() => {
   fake.reset()
 })
 afterAll(async () => {
+  await stopApplication?.()
   await fake.close()
   try {
     fs.rmSync(TMP_DIR, { recursive: true, force: true })

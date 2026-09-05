@@ -6,22 +6,29 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SettingsPanel } from '../SettingsPanel'
+import { modelControlBoundary } from './harness/model-control-snapshot'
 
 const saveSetting = vi.fn(async () => undefined)
 const setActiveModalModel = vi.fn<(kind: string, modelId: string | null) => Promise<void>>(
   async () => undefined
 )
 const getTranscriptionInfo = vi.fn()
+let modelControl: ReturnType<typeof modelControlBoundary>
 let emitVoiceProgress:
   | ((data: {
       progress: number | null
       downloadedBytes?: number
       totalBytes?: number | null
-      bytesPerSecond?: number
+      sampledAtMs?: number
     }) => void)
   | undefined
 
 beforeEach(() => {
+  modelControl = modelControlBoundary({
+    kinds: ['transcription'],
+    models: [],
+    active: { transcription: 'whisper-large-v3' }
+  })
   emitVoiceProgress = undefined
   saveSetting.mockClear()
   setActiveModalModel.mockClear()
@@ -45,6 +52,9 @@ beforeEach(() => {
   })
   ;(window as unknown as { api: Record<string, unknown> }).api = {
     getLlmSettings: vi.fn().mockResolvedValue({}),
+    getModelControlProjection: modelControl.getModelControlProjection,
+    onModelControlProjection: modelControl.onModelControlProjection,
+    controlModel: modelControl.controlModel,
     getModelCatalog: vi.fn().mockResolvedValue({ models: [] }),
     getActiveModel: vi.fn().mockResolvedValue(null),
     ttsVoices: vi.fn().mockResolvedValue([
@@ -60,6 +70,7 @@ beforeEach(() => {
       return vi.fn()
     }),
     getTranscriptionInfo,
+    speechCommands: { onEvent: vi.fn(() => vi.fn()) },
     setActiveModalModel,
     listTools: vi.fn().mockResolvedValue([]),
     getSettings: vi.fn().mockResolvedValue({ ttsVoice: 'af_heart' }),
@@ -205,14 +216,20 @@ describe('<SettingsPanel/> speech languages', () => {
     ])
     expect(await screen.findByText('Checking voice files...')).toBeTruthy()
     emitVoiceProgress?.({
+      progress: 41,
+      downloadedBytes: 41 * 1024 * 1024,
+      totalBytes: 100 * 1024 * 1024,
+      sampledAtMs: 1_000
+    })
+    emitVoiceProgress?.({
       progress: 43,
       downloadedBytes: 43 * 1024 * 1024,
       totalBytes: 100 * 1024 * 1024,
-      bytesPerSecond: 2 * 1024 * 1024
+      sampledAtMs: 2_000
     })
-    expect(await screen.findByText(/Downloading English \(US\) audio - 43%/)).toBeTruthy()
-    expect(screen.getByText(/45 MB \/ 105 MB/)).toBeTruthy()
-    expect(screen.getByText(/2\.0 MB\/s/)).toBeTruthy()
+    const downloadStatus = await screen.findByText(/Downloading English \(US\) audio - 43%/)
+    expect(downloadStatus.textContent).toContain('45 MB of 105 MB')
+    expect(downloadStatus.textContent).toContain('2.0 MB/s')
     finishPreparing()
     expect(await screen.findByText('English (US) voice ready.')).toBeTruthy()
     expect(
@@ -304,10 +321,15 @@ describe('<SettingsPanel/> speech languages', () => {
       ]
     })
     getTranscriptionInfo.mockImplementation(async () => info())
-    setActiveModalModel.mockImplementation(async (kind: string, modelId: string | null) => {
-      expect(kind).toBe('transcription')
-      activeModel = modelId ?? 'whisper-large-v3'
-    })
+    const controlModel = modelControl.controlModel
+    ;(window as unknown as { api: Record<string, unknown> }).api.controlModel = vi.fn(
+      async (intent: Parameters<typeof controlModel>[0]) => {
+        if (intent.type === 'select' && intent.surface === 'transcription') {
+          activeModel = intent.modelId ?? 'whisper-large-v3'
+        }
+        return controlModel(intent)
+      }
+    )
 
     const first = render(<SettingsPanel onClose={vi.fn()} initialTab="transcription" />)
     const user = userEvent.setup()
@@ -318,7 +340,11 @@ describe('<SettingsPanel/> speech languages', () => {
     await user.click(screen.getByRole('menuitemradio', { name: 'Parakeet v2' }))
 
     await waitFor(() =>
-      expect(setActiveModalModel).toHaveBeenCalledWith('transcription', 'parakeet-v2')
+      expect(modelControl.intents).toContainEqual({
+        type: 'select',
+        surface: 'transcription',
+        modelId: 'parakeet-v2'
+      })
     )
     expect(model.textContent).toContain('Parakeet v2')
     expect(screen.getByRole('button', { name: 'Spoken language' }).textContent).toContain('English')
@@ -328,7 +354,7 @@ describe('<SettingsPanel/> speech languages', () => {
     expect(
       (await screen.findByRole('button', { name: 'Current transcription model' })).textContent
     ).toContain('Parakeet v2')
-    expect(setActiveModalModel).toHaveBeenCalledTimes(1)
+    expect(modelControl.intents.filter((intent) => intent.type === 'select')).toHaveLength(1)
   })
 
   it('restores the persisted STT language when saving fails', async () => {

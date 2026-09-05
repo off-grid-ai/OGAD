@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import { createOffGridApplication, type OffGridApplication } from '@offgrid/application'
 import {
   serializeComputerUsePolicyResponse,
@@ -28,6 +28,28 @@ import {
 } from '../vision-policy-runner'
 import { VisionGuard } from '../vision-guard'
 import { runVisionTaskGraph } from '../vision-task-graph'
+import { createFakeLocalTextRuntime } from '../../__tests__/harness/local-text-runtime'
+
+const electronBoundary = vi.hoisted(() => ({
+  profile: `${process.env.TMPDIR ?? '/tmp'}/offgrid-general-vision-${process.pid}`
+}))
+
+vi.mock('electron', () => ({
+  app: {
+    getPath: () => electronBoundary.profile,
+    getAppPath: () => process.cwd(),
+    isPackaged: false
+  },
+  safeStorage: {
+    isEncryptionAvailable: () => false
+  }
+}))
+
+fs.mkdirSync(electronBoundary.profile, { recursive: true })
+
+afterAll(() => {
+  fs.rmSync(electronBoundary.profile, { recursive: true, force: true })
+})
 
 interface ScriptedVisionResponse extends VisionPolicyResponse {
   reasoning?: string
@@ -41,7 +63,7 @@ function createVisionApplication(): OffGridApplication {
     models: createDesktopModelWorkspacePorts({
       listCatalog: async () => [],
       listInstalled: async () => [],
-      localTextRuntimeState: async () => ({ ready: false, loaded: false })
+      localTextRuntime: createFakeLocalTextRuntime().runtime
     })
   })
   registerDesktopApplication(application)

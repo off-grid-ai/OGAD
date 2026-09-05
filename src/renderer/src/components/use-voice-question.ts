@@ -18,6 +18,8 @@ import { workflowFailureMessage } from '@offgrid/application'
 import type { ChatVoiceClip } from './use-chat-voice-turns'
 
 export interface VoiceTurnAssignment {
+  /** Shared's authoritative identity for this workflow turn. */
+  readonly turnId: string
   readonly conversationId: string
   readonly projectId: string | null
   readonly text: string
@@ -48,10 +50,13 @@ export interface VoiceQuestion {
   abandon: () => void
   /** What the run reported, in the user's words. Null when it has nothing to say. */
   error: string | null
+  /** Shared reports that this correlated answer is being spoken. */
+  speaking: boolean
 }
 
 export function useVoiceQuestion(options: VoiceQuestionOptions): VoiceQuestion {
   const [error, setError] = useState<string | null>(null)
+  const [speaking, setSpeaking] = useState(false)
   const runRef = useRef<string | null>(null)
   const clipRef = useRef<ChatVoiceClip | null>(null)
   const hostTurnConversationsRef = useRef(new Map<string, string>())
@@ -115,14 +120,20 @@ export function useVoiceQuestion(options: VoiceQuestionOptions): VoiceQuestion {
       }
       if (event.type === 'failed') {
         runRef.current = null
+        setSpeaking(false)
         // "Didn't catch that" and every transcription, model or playback failure arrive here, in
         // the words of the domain that failed.
         setError(workflowFailureMessage(event.failure))
         return
       }
-      if (event.type === 'cancelled') runRef.current = null
+      if (event.type === 'speaking') setSpeaking(true)
+      if (event.type === 'cancelled') {
+        runRef.current = null
+        setSpeaking(false)
+      }
       if (event.type === 'completed') {
         runRef.current = null
+        setSpeaking(false)
         setError(null)
       }
     })
@@ -149,6 +160,7 @@ export function useVoiceQuestion(options: VoiceQuestionOptions): VoiceQuestion {
       void optionsRef.current
         .runTurn(
           {
+            turnId: message.turnId,
             conversationId: message.conversationId,
             projectId: message.projectId,
             text: message.text,
@@ -177,5 +189,5 @@ export function useVoiceQuestion(options: VoiceQuestionOptions): VoiceQuestion {
     })
   }, [])
 
-  return { capture, abandon, error }
+  return { capture, abandon, error, speaking }
 }

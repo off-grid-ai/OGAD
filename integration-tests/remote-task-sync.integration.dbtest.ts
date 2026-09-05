@@ -8,7 +8,7 @@ import path from 'node:path'
 import sharp from 'sharp'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { OffGridApplication } from '@offgrid/application'
-import { parseSyncedTaskRun } from '@offgrid/sync'
+import { parseSyncedTaskRun, type SyncedTaskControlResult } from '@offgrid/sync'
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-remote-task-sync-'))
 process.env.OFFGRID_DATA_DIR = root
@@ -87,7 +87,7 @@ describe('a task controlled from its synced Mobile chat', () => {
       const request = new AbortController()
       const release = registerVisionSession(taskId, guard, request)
       const consumed: string[] = []
-      const settled: Array<Record<string, unknown>> = []
+      const settled: SyncedTaskControlResult[] = []
       const fields = {
         version: 1 as const,
         controlId: `control-${kind}`,
@@ -155,7 +155,7 @@ describe('a task controlled from its synced Mobile chat', () => {
       guard.pause('paused for the integration journey')
       const request = new AbortController()
       const release = registerVisionSession(taskId, guard, request)
-      const receipts: Array<Record<string, unknown>> = []
+      const receipts: SyncedTaskControlResult[] = []
       const control = (controlKind: 'resume' | 'stop', sequence: number): boolean =>
         applySyncedTaskControl(
           `${controlKind}-${kind}`,
@@ -266,7 +266,7 @@ describe('a task controlled from its synced Mobile chat', () => {
       executionDeviceId: DEVICE_ID,
       executionDeviceName: 'Studio Mac'
     })
-    const results: Array<Record<string, unknown>> = []
+    const results: SyncedTaskControlResult[] = []
     const consumed: string[] = []
     const fields = {
       version: 1 as const,

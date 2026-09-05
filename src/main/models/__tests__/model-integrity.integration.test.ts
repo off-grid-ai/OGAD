@@ -143,6 +143,39 @@ function registerTestCatalogEntries(catalog: typeof CATALOG): void {
   }
 }
 
+function huggingFaceMetadata(input: RequestInfo | URL): Response | null {
+  const url = new URL(String(input))
+  const match = /^\/api\/models\/(.+)\/revision\/([^/]+)$/.exec(url.pathname)
+  if (url.hostname !== 'huggingface.co' || !match) return null
+  const repository = decodeURIComponent(match[1]!)
+  const requestedRevision = decodeURIComponent(match[2]!)
+  const files = CATALOG.flatMap((entry) =>
+    entry.files.filter((file) => file.url.includes(`huggingface.co/${repository}/resolve/`))
+  )
+  const sha = /^[a-f0-9]{40}$/i.test(requestedRevision) ? requestedRevision : 'a'.repeat(40)
+  return Response.json({
+    sha,
+    siblings: files.map((file) => ({
+      rfilename: decodeURIComponent(new URL(file.url).pathname.split('/').slice(5).join('/')),
+      size: file.sizeBytes,
+      ...(file.sha256
+        ? { lfs: { sha256: file.sha256, size: file.sizeBytes } }
+        : {})
+    }))
+  })
+}
+
+function stubArtifactFetch(
+  deliver: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+      huggingFaceMetadata(input) ?? deliver(input, init)
+    )
+  )
+}
+
 interface CapacityProbe {
   acceptedBytes: number
   partialExistedAtFailure: boolean
@@ -261,15 +294,12 @@ describe('model-manager GGUF integrity', () => {
 
   it('rejects a truncated GGUF download before promotion or installation', async () => {
     const truncated = Buffer.from('GGUF', 'ascii')
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () =>
-        Promise.resolve(
-          new Response(truncated, {
-            status: 200,
-            headers: { 'content-length': String(truncated.length) }
-          })
-        )
+    stubArtifactFetch(async () =>
+      Promise.resolve(
+        new Response(truncated, {
+          status: 200,
+          headers: { 'content-length': String(truncated.length) }
+        })
       )
     )
 
@@ -299,9 +329,7 @@ describe('model-manager GGUF integrity', () => {
   it('retries an invalid completed GGUF from byte zero', async () => {
     const requests: Array<RequestInit | undefined> = []
     let attempt = 0
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (_url: string, init?: RequestInit) => {
+    stubArtifactFetch(async (_url, init) => {
         requests.push(init)
         const bytes = attempt++ === 0 ? invalidRetryBytes : validRetryBytes
         return new Response(bytes, {
@@ -309,7 +337,6 @@ describe('model-manager GGUF integrity', () => {
           headers: { 'content-length': String(bytes.length) }
         })
       })
-    )
 
     const firstAttempt = await manager.downloadModel(invalidRetryModel.id)
 
@@ -331,15 +358,12 @@ describe('model-manager GGUF integrity', () => {
   })
 
   it('rejects same-shape catalog bytes when their SHA-256 does not match', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () =>
-        Promise.resolve(
-          new Response(checksumWrongBytes, {
-            status: 200,
-            headers: { 'content-length': String(checksumWrongBytes.length) }
-          })
-        )
+    stubArtifactFetch(async () =>
+      Promise.resolve(
+        new Response(checksumWrongBytes, {
+          status: 200,
+          headers: { 'content-length': String(checksumWrongBytes.length) }
+        })
       )
     )
 
@@ -374,15 +398,12 @@ describe('model-manager GGUF integrity', () => {
     expect(await manager.listInstalled()).toContain(primary.entry.id)
 
     const body = Buffer.concat([Buffer.from('GGUF', 'ascii'), Buffer.alloc(2_000)])
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () =>
-        Promise.resolve(
-          new Response(body, {
-            status: 200,
-            headers: { 'content-length': String(body.length) }
-          })
-        )
+    stubArtifactFetch(async () =>
+      Promise.resolve(
+        new Response(body, {
+          status: 200,
+          headers: { 'content-length': String(body.length) }
+        })
       )
     )
 
@@ -422,9 +443,7 @@ describe('model-manager GGUF integrity', () => {
     let delivery = 0
     let retryRange: string | undefined
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (_input, init?: RequestInit) => {
+    stubArtifactFetch(async (_input, init) => {
         delivery++
         if (delivery === 1) {
           let pull = 0
@@ -446,10 +465,12 @@ describe('model-manager GGUF integrity', () => {
         retryRange = new Headers(init?.headers).get('range') ?? undefined
         return new Response(suffix, {
           status: 206,
-          headers: { 'content-length': String(suffix.length) }
+          headers: {
+            'content-length': String(suffix.length),
+            'content-range': `bytes ${prefix.length}-${complete.length - 1}/${complete.length}`
+          }
         })
       })
-    )
 
     const firstAttempt = await manager.downloadModel(interruptedModel.id)
 
@@ -502,16 +523,13 @@ describe('model-manager GGUF integrity', () => {
     })
     const offlineError = Object.assign(new TypeError('fetch failed'), { cause: offlineCause })
     let attempts = 0
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => {
+    stubArtifactFetch(async () => {
         if (attempts++ === 0) throw offlineError
         return new Response(validGguf, {
           status: 200,
           headers: { 'content-length': String(validGguf.length) }
         })
       })
-    )
 
     const firstAttempt = await manager.downloadModel(offlineRetryModel.id)
 

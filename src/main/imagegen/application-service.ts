@@ -36,6 +36,7 @@ import {
   parseImageMemoryGuardError
 } from '../../shared/image-generation-contract'
 import { generateDesktopOperation } from '../desktop-generation'
+import { registerDesktopImageProgress } from '../generation-progress'
 import { getSetting } from '../database'
 import {
   desktopModels,
@@ -266,24 +267,23 @@ export function desktopImageApplicationPorts(): ImageGenerationApplicationPorts<
         executionPlan: input.plan
       })
       const turnId = input.request.requestId ?? randomUUID()
+      const stopProgress = registerDesktopImageProgress(turnId, (update) => {
+        const progress = update.progress
+        if (!progress) return
+        onProgress({
+          step: progress.step,
+          totalSteps: progress.total,
+          previewUri: progress.preview,
+          secondsPerStep: progress.secPerStep,
+          stage: progress.phase ?? (update.stage === 'decoding' ? 'decoding' : 'sampling')
+        })
+      })
       const result = await generateDesktopOperation(operation, {
         routeId: routeIdentity(input.model),
         profile: 'image-generation',
         identity: { conversationId: input.request.conversationId ?? turnId, turnId },
-        signal: input.signal,
-        events: {
-          chunk(chunk) {
-            const progress = chunk.progress
-            if (!progress) return
-            onProgress({
-              step: progress.completed,
-              totalSteps: progress.total,
-              previewUri: progress.preview?.uri,
-              stage: progress.stage === 'decoding' ? 'decoding' : 'sampling'
-            })
-          }
-        }
-      })
+        signal: input.signal
+      }).finally(stopProgress)
       if (result.output.type !== 'image' || !result.output.images[0]) {
         throw new Error('The image engine returned no image artifact.')
       }

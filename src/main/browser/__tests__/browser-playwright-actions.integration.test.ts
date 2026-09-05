@@ -106,11 +106,22 @@ describe('Desktop Playwright action adapter', () => {
   it('projects drag targets and rejects incomplete or unsafe decisions before the boundary', async () => {
     const projected: Array<{ ref: string; snapshot: string }> = []
     const driver = {
-      projectSemanticTarget: async (ref: string, snapshot: string) => {
+      projectSemanticTarget: async (ref: string, snapshot: string): Promise<boolean> => {
         projected.push({ ref, snapshot })
+        return true
       }
     } as BrowserDriver
-    const session = { call: async () => ({ text: '', isError: false }) } as PlaywrightMcpSession
+    const reached: Array<{ name: string; args: Record<string, unknown>; signal?: AbortSignal }> = []
+    const session = {
+      call: async (
+        name: string,
+        args: Record<string, unknown>,
+        signal?: AbortSignal
+      ): Promise<PlaywrightToolResult> => {
+        reached.push({ name, args, signal })
+        return { text: '', isError: false }
+      }
+    } as PlaywrightMcpSession
 
     await projectPlaywrightPointer(
       driver,
@@ -139,5 +150,6 @@ describe('Desktop Playwright action adapter', () => {
     await expect(executePlaywrightAction(session, decision({ action: 'done' }))).rejects.toThrow(
       'Web Use cannot execute terminal action done.'
     )
+    expect(reached).toEqual([])
   })
 })

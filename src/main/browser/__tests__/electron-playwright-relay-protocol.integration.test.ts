@@ -32,7 +32,9 @@ describe('Desktop Playwright relay protocol', () => {
     servers.push(server)
     await new Promise<void>((resolve) => server.once('listening', resolve))
     const address = server.address()
-    if (typeof address === 'string') throw new Error('Expected a TCP WebSocket listener.')
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected a TCP WebSocket listener.')
+    }
 
     const accepted = new Promise<WebSocket>((resolve) => server.once('connection', resolve))
     const client = new WebSocket(`ws://127.0.0.1:${address.port}`)

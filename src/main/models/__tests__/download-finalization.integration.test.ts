@@ -35,6 +35,7 @@ const artifact = (marker: number): Buffer =>
   Buffer.concat([Buffer.from('GGUF', 'ascii'), Buffer.alloc(2_048, marker)])
 const primaryBytes = artifact(21)
 const projectorBytes = artifact(22)
+const HUB_REVISION = '0123456789abcdef0123456789abcdef01234567'
 
 beforeAll(() => {
   fs.mkdirSync(path.join(dataDir, 'models'), { recursive: true })
@@ -54,10 +55,22 @@ describe('download finalization', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: string | URL | Request) => {
-        const url = String(input)
+        const url = input instanceof Request ? input.url : String(input)
         if (url.endsWith(`/api/models/${MODEL_ID}`)) {
           return new Response(
             JSON.stringify({
+              siblings: [
+                { rfilename: PRIMARY, size: primaryBytes.length },
+                { rfilename: PROJECTOR, size: projectorBytes.length }
+              ]
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } }
+          )
+        }
+        if (url.includes(`/api/models/${MODEL_ID}/revision/`)) {
+          return new Response(
+            JSON.stringify({
+              sha: HUB_REVISION,
               siblings: [
                 { rfilename: PRIMARY, size: primaryBytes.length },
                 { rfilename: PROJECTOR, size: projectorBytes.length }

@@ -320,6 +320,13 @@ interface RendererAPIOverrides {
   setRagConversationProject: (id: string, projectId: string | null) => Promise<boolean>
   getRagConversation: (id: string) => Promise<RagConversation | null>
   getRagMessages: (conversationId: string) => Promise<RagMessage[]>
+  readChatSessionTurns: (
+    conversationId: string
+  ) => Promise<import('@offgrid/application').ChatTurn[]>
+  writeChatSessionTurns: (
+    conversationId: string,
+    turns: readonly import('@offgrid/application').ChatTurn[]
+  ) => Promise<void>
   addRagMessage: (
     conversationId: string,
     role: 'user' | 'assistant',
@@ -448,7 +455,12 @@ interface RendererAPIOverrides {
     }) => void
   ) => () => void
   onReprocessProgress: (callback: (data: ReprocessProgress) => void) => () => void
-  onUpdateDownloaded: (callback: (data: { version: string }) => void) => () => void
+  onUpdateDownloaded: (
+    callback: (data: import('../../shared/ipc-contracts').UpdateDownloadedContract) => void
+  ) => () => void
+  onSetupProgress: (
+    callback: (data: import('../../shared/ipc-contracts').SetupProgressContract) => void
+  ) => () => void
   getStagedUpdateVersion: () => Promise<string | null>
   installUpdate: () => Promise<void>
 

@@ -45,6 +45,11 @@ function childGroup(command, args, cwd) {
           return true
         } catch (error) {
           if (error.code === 'ESRCH') return false
+          // A terminating group can still exist after its leader exits. Some POSIX hosts return
+          // EPERM for the signal-0 existence probe during that window, even though the TERM sent
+          // by this owner succeeded. Treat that probe as "still present" and keep the bounded
+          // shutdown loop in control. Real termination signals must still fail loudly.
+          if (error.code === 'EPERM' && name === 0) return true
           throw error
         }
       }

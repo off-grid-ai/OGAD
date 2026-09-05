@@ -1,19 +1,23 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { failed, formatTransferSpeed, ok, type ModelControlIntent } from '@offgrid/application'
 import { createRealDownloadControlHarness } from './harness/real-download-control'
+// Static imports are safe: neither StoragePanel nor ModelsScreen touches `window.api` at module
+// scope any more (StoragePanel reads it inside the component body; ModelsScreen reads it at use
+// time through its `bridge()` accessor), so the stub below only has to exist before the first
+// render, not before module evaluation.
+import { StoragePanel } from '../setup/StoragePanel'
+import { ModelsScreen } from '../ModelsScreen'
 
-// Storage rows read ONLY Shared's control projection (11a15d34 "one owner for model control,
-// downloads, and the workspace"): the pushed `onModelControlProjection` stream plus each control
-// outcome. `Refresh` re-reads disk usage, not the projection, and `onModelProgress` events are
-// not a second source of row state. Tests therefore move rows the way production does - by
-// publishing a new projection - and assert that progress events alone change nothing.
-type ProgressListener = (progress: Record<string, unknown>) => void
+// Every download surface reads ONLY Shared's control projection (11a15d34 "one owner for model
+// control, downloads, and the workspace"): the pushed `onModelControlProjection` stream plus each
+// control outcome. `Refresh` re-reads disk usage, not the projection, and there is no second
+// progress channel. Tests therefore move rows the way production does - by publishing a new
+// projection - and assert what the screen then shows.
 type ProjectionListener = (projection: Record<string, unknown>) => void
-let listeners: ProgressListener[] = []
 let projectionListeners: ProjectionListener[] = []
 let downloads: Array<Record<string, unknown>> = []
 const publishProjection = (): void =>
@@ -68,28 +72,10 @@ const catalogModels = [
   },
   controlModel,
   getModelVisionStatus: async () => ({}),
-  onModelProgress: (next: ProgressListener) => {
-    listeners.push(next)
-    return () => {
-      listeners = listeners.filter((listener) => listener !== next)
-    }
-  },
   systemHealth: async () => ({ ramGb: 32 }),
   deleteOrphans: async () => true,
   getCacheCleanupStatus: async () => null
 }
-
-let StoragePanel: () => React.JSX.Element
-let ModelsScreen: typeof import('../ModelsScreen').ModelsScreen
-
-// Dynamic imports are load-bearing: ModelsScreen reads `window.api` at module scope
-// (ModelsScreen.tsx `const api = (window as any).api`), so the stub above must exist before that
-// module evaluates. A static import would hoist above the stub and render with `api` undefined.
-// The imports use the standard hook budget so a stalled component graph fails visibly.
-beforeAll(async () => {
-  StoragePanel = (await import('../setup/StoragePanel')).StoragePanel
-  ModelsScreen = (await import('../ModelsScreen')).ModelsScreen
-})
 
 function currentProjection(): Record<string, unknown> {
   return {
@@ -110,7 +96,6 @@ function currentProjection(): Record<string, unknown> {
 }
 
 beforeEach(() => {
-  listeners = []
   projectionListeners = []
   downloads = []
   retryDownload.mockReset()
@@ -264,36 +249,11 @@ describe('Models > Storage download rows', () => {
     ]
     render(<StoragePanel />)
     await screen.findByRole('button', { name: 'Cancel same-model' })
-    act(() =>
-      listeners.forEach((listener) =>
-        listener({
-          downloadId: 'job',
-          modelId: 'same-model',
-          status: 'downloading',
-          fileName: 'file.gguf',
-          bytesDownloaded: 50,
-          totalBytes: 100
-        })
-      )
-    )
-    // A bare progress event is not row state: the registry still says 10%.
+    // The published registry owns the row: it says 10%, so the row says 10%.
     expect(screen.getByText('10%')).toBeTruthy()
     downloads = [{ ...downloads[0], status: 'interrupted', reason: 'stopped on disk' }]
     publishProjection()
     await screen.findByText('stopped on disk')
-    expect(screen.queryByRole('button', { name: 'Cancel same-model' })).toBeNull()
-    act(() =>
-      listeners.forEach((listener) =>
-        listener({
-          downloadId: 'job',
-          modelId: 'same-model',
-          status: 'downloading',
-          fileName: 'file.gguf',
-          bytesDownloaded: 80,
-          totalBytes: 100
-        })
-      )
-    )
     expect(screen.queryByRole('button', { name: 'Cancel same-model' })).toBeNull()
     downloads = [{ ...downloads[0], status: 'downloading', bytesDownloaded: 60, reason: undefined }]
     publishProjection()
@@ -407,18 +367,6 @@ describe('Models > Storage download rows', () => {
     ]
     render(<StoragePanel />)
     await screen.findByText('old interrupted job')
-    act(() =>
-      listeners.forEach((listener) =>
-        listener({
-          downloadId: 'old',
-          modelId: 'same-model',
-          status: 'downloading',
-          fileName: 'old.gguf',
-          bytesDownloaded: 50,
-          totalBytes: 100
-        })
-      )
-    )
     expect(screen.getByText('10%')).toBeTruthy()
     downloads = downloads.map((download) =>
       download.downloadId === 'current' ? { ...download, bytesDownloaded: 50 } : download
@@ -502,7 +450,7 @@ describe('Models > Storage download rows', () => {
     expect(await screen.findByText('network still unavailable')).toBeTruthy()
   })
 
-  it('projects facade progress facts into the model browser', async () => {
+  it('projects Shared download facts into the model browser', async () => {
     downloads = [
       {
         downloadId: 'download:qwen',
@@ -515,26 +463,23 @@ describe('Models > Storage download rows', () => {
     ]
     render(<ModelsScreen navigationSubroute={null} />)
     await screen.findByText('Qwen 3.5 9B')
-    expect(listeners).toHaveLength(1)
+    expect(await screen.findByText('Queued')).toBeTruthy()
 
-    const firstProgress = {
-      downloadId: 'download:qwen',
-      modelId: 'Qwen/Qwen3.5-9B',
-      status: 'downloading',
-      fileName: 'qwen.gguf',
-      bytesDownloaded: 1_293_000_000,
-      totalBytes: 6_000_000_000
-    }
-    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000)
-    listeners.forEach((listener) => listener(firstProgress))
-    clock.mockReturnValue(3_500)
-    listeners.forEach((listener) => listener({ ...firstProgress, bytesDownloaded: 1_300_000_000 }))
-    clock.mockRestore()
+    // Shared measures the transfer and publishes ONE projection. The browser reports that job's
+    // facts - percent, bytes, rate - and derives none of them itself.
+    downloads = [
+      {
+        ...downloads[0],
+        status: 'downloading',
+        bytesDownloaded: 1_300_000_000,
+        bytesPerSecond: 2_800_000
+      }
+    ]
+    publishProjection()
 
     expect(await screen.findByText('22%')).toBeTruthy()
     expect(screen.getByText(/1\.3 GB of 6\.0 GB/)).toBeTruthy()
-    expect(screen.getByText(/2\.7 MB\/s/)).toBeTruthy()
-
+    expect(document.body.textContent).toContain(formatTransferSpeed(2_800_000))
     expect(document.body.textContent).not.toContain('Total size unavailable')
   })
 })

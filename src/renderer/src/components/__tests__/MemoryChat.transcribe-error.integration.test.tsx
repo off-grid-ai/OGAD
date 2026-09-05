@@ -11,6 +11,9 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatBoundary, installBoundary, renderChat } from './harness/chat-boundary'
 import { HINDI_SCRIPT_RECOVERY_MESSAGE } from '@offgrid/models'
+import { transcriptionOutcomeMessage } from '@offgrid/speech'
+
+const TRANSCRIPTION_FAILED_MESSAGE = transcriptionOutcomeMessage({ kind: 'decode-failed' })!
 
 // Emits a non-empty chunk on start so the recording isn't treated as "no audio".
 class DataRecorder {
@@ -48,18 +51,19 @@ describe('<MemoryChat/> voice note — transcription failure is surfaced', () =>
     vi.stubGlobal('MediaRecorder', DataRecorder)
 
     const boundary = new ChatBoundary()
-    Object.assign(boundary.api, {
-      transcribeAudio: vi.fn().mockRejectedValue(new Error('whisper-cli failed to load'))
-    })
     installBoundary(boundary)
     const user = userEvent.setup()
     renderChat({ conversationId: 'conversation-a' })
 
     await user.click(await screen.findByRole('button', { name: 'Record voice' }))
     await user.click(await screen.findByRole('button', { name: 'Stop recording' }))
+    boundary.failVoiceQuestion({
+      kind: 'speech',
+      failure: { kind: 'runtime', message: TRANSCRIPTION_FAILED_MESSAGE }
+    })
 
     const alert = await screen.findByRole('alert')
-    expect(alert.textContent).toContain('Transcription failed')
+    expect(alert.textContent).toContain(TRANSCRIPTION_FAILED_MESSAGE)
   })
 
   it('shows the Hindi recovery action without sending the wrong-script text', async () => {
@@ -71,14 +75,16 @@ describe('<MemoryChat/> voice note — transcription failure is surfaced', () =>
     vi.stubGlobal('MediaRecorder', DataRecorder)
 
     const boundary = new ChatBoundary()
-    const transcribeAudio = vi.fn().mockRejectedValue(new Error(HINDI_SCRIPT_RECOVERY_MESSAGE))
-    Object.assign(boundary.api, { transcribeAudio })
     installBoundary(boundary)
     const user = userEvent.setup()
     renderChat({ conversationId: 'conversation-a' })
 
     await user.click(await screen.findByRole('button', { name: 'Record voice' }))
     await user.click(await screen.findByRole('button', { name: 'Stop recording' }))
+    boundary.failVoiceQuestion({
+      kind: 'speech',
+      failure: { kind: 'runtime', message: HINDI_SCRIPT_RECOVERY_MESSAGE }
+    })
 
     expect((await screen.findByRole('alert')).textContent).toContain(HINDI_SCRIPT_RECOVERY_MESSAGE)
     expect(boundary.calls).toHaveLength(0)

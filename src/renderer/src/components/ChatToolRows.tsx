@@ -21,6 +21,9 @@ import {
 import { ComputerUseStepDetails } from './tasks/ComputerUseStepDetails'
 import { RetryTaskButton } from './tasks/RetryTaskButton'
 import { taskReferenceFromResult, visibleToolResult } from './chat-tool-projection'
+import { ContextDetails } from './ChatMessageContext'
+import { contextResultCount, type ContextNavigation } from './chat-message-projection'
+import type { RagContext } from '@renderer/lib/chat-transcript-types'
 
 type DisplayTool = (
   | Pick<ProjectedSyncedTool, 'name' | 'arguments' | 'result' | 'status' | 'durationMs' | 'error'>
@@ -34,6 +37,9 @@ interface ChatToolRowsProps {
   tools?: readonly DisplayTool[]
   /** The task that belongs to this live Chat turn before its tool result contains a task id. */
   liveTask?: TaskSession
+  /** Retrieved evidence belongs to the search step that produced it. */
+  context?: RagContext
+  navigation?: ContextNavigation
 }
 
 type WorkStatus = ToolWorkStatus
@@ -115,13 +121,21 @@ function titleFromIdentifier(name: string): string {
   return clean.charAt(0).toUpperCase() + clean.slice(1)
 }
 
-function workStepLabel(tool: DisplayTool): string {
+function isMemorySearch(tool: DisplayTool): boolean {
+  const key = normalizedToolKey(tool.name)
+  return key === 'search_memory' || key === 'search_meetings'
+}
+
+function workStepLabel(tool: DisplayTool, memoryResultCount = 0): string {
   const key = normalizedToolKey(tool.name)
   if (key === 'proposal_deck') {
     const action = String(
       parseArguments('arguments' in tool ? tool.arguments : undefined)?.action ?? ''
     )
     return PROPOSAL_STAGE_LABELS[action] ?? 'Updated proposal deck'
+  }
+  if (isMemorySearch(tool) && memoryResultCount > 0) {
+    return `Searched your memory — ${memoryResultCount} result${memoryResultCount === 1 ? '' : 's'}`
   }
   return TOOL_LABELS[key] ?? titleFromIdentifier(key)
 }
@@ -255,7 +269,9 @@ function liveTaskToolIndex(
 /** One persisted execution timeline for both live previews and durable assistant turns. */
 export function ChatToolRows({
   tools,
-  liveTask
+  liveTask,
+  context,
+  navigation
 }: Readonly<ChatToolRowsProps>): React.JSX.Element | null {
   const { tasks } = useTaskSessions()
   const taskWorkspaceOpen = useTaskWorkspaceOpen()
@@ -281,6 +297,8 @@ export function ChatToolRows({
       linkedTaskForReference(tasks, taskId) ?? (index === liveToolIndex ? liveTask : undefined)
     return { tool, taskId, linkedTask, status: taskWorkStatus(linkedTask) ?? workStatus(tool) }
   })
+  const memoryResultCount = context ? contextResultCount(context) : 0
+  const contextStepIndex = projected.findIndex(({ tool }) => isMemorySearch(tool))
   const projectedStatuses = projected.map((item) => item.status)
   const status = projectedStatuses.includes('running')
     ? 'running'
@@ -321,8 +339,17 @@ export function ChatToolRows({
             const durationMs = 'durationMs' in tool ? tool.durationMs : undefined
             const hasComputerDetails = Boolean(linkedTask?.stepDetails?.length)
             const reasoning = tool.reasoning?.trim()
+            const ownsContext =
+              index === contextStepIndex &&
+              memoryResultCount > 0 &&
+              context !== undefined &&
+              navigation !== undefined
             const hasDisclosure =
-              Boolean(details) || hasComputerDetails || Boolean(linkedTask) || Boolean(reasoning)
+              Boolean(details) ||
+              hasComputerDetails ||
+              Boolean(linkedTask) ||
+              Boolean(reasoning) ||
+              Boolean(ownsContext)
             return (
               <li key={`${tool.name}:${index}`} className="relative pb-2 pl-4 last:pb-0">
                 <span className="absolute -left-1.5 top-1 flex h-3 w-3 items-center justify-center bg-neutral-950">
@@ -332,7 +359,7 @@ export function ChatToolRows({
                   <CollapsibleTrigger
                     disabled={!hasDisclosure}
                     className="group flex w-full items-start gap-2 text-left disabled:cursor-default"
-                    aria-label={`${workStepLabel(tool)}, ${stepStatus}`}
+                    aria-label={`${workStepLabel(tool, memoryResultCount)}, ${stepStatus}`}
                     onClick={() => {
                       if (linkedTask) {
                         openTaskSidePanel({
@@ -344,7 +371,9 @@ export function ChatToolRows({
                     }}
                   >
                     <span className="min-w-0 flex-1">
-                      <span className="block text-xs text-neutral-300">{workStepLabel(tool)}</span>
+                      <span className="block text-xs text-neutral-300">
+                        {workStepLabel(tool, memoryResultCount)}
+                      </span>
                       <span className="mt-0.5 block text-[10px] leading-relaxed text-neutral-500 group-data-[state=open]:hidden">
                         {shortResult(tool, stepStatus, rowSummary)}
                       </span>
@@ -366,6 +395,11 @@ export function ChatToolRows({
                         <ChatThinkingBlock content={reasoning} className="mb-1.5" />
                       ) : null}
                       {details ? <ChatMarkdown content={details} /> : null}
+                      {ownsContext ? (
+                        <div className="mt-2 max-h-[400px] overflow-y-auto border-t border-neutral-800 pt-2">
+                          <ContextDetails context={context} navigation={navigation} />
+                        </div>
+                      ) : null}
                       <ComputerUseStepDetails details={linkedTask?.stepDetails} />
                       {linkedTask ? (
                         <div className="flex flex-wrap gap-2">

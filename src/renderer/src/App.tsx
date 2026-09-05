@@ -131,6 +131,62 @@ interface NavigationState {
   selectedProjectId: string | null
 }
 
+interface BrowserRoute {
+  viewMode: ViewMode
+  subroute: string | null
+  settingsSection: string | null
+}
+
+const VIEW_BY_PATH: Readonly<Record<string, ViewMode>> = {
+  '/': 'day',
+  '/explore': 'explore',
+  '/day': 'day',
+  '/replay': 'replay',
+  '/reflect': 'reflect',
+  '/actions': 'actions',
+  '/connectors': 'connectors',
+  '/meetings': 'meetings',
+  '/chat': CHAT_VIEW,
+  '/chats': 'chats',
+  '/memories': 'memories',
+  '/entities': 'entities',
+  '/models': 'models',
+  '/gateway': 'gateway',
+  '/projects': 'projects',
+  '/notifications': 'notifications',
+  '/search': 'search',
+  '/settings': 'settings',
+  '/voice': 'voice',
+  '/devices': 'devices'
+}
+
+function browserRoute(path: string, fallback: ViewMode): BrowserRoute {
+  const internalTab = internalTabLocation(path)
+  if (internalTab) {
+    return {
+      viewMode: internalTab.view,
+      subroute: internalTab.subroute,
+      settingsSection: null
+    }
+  }
+
+  if (path.startsWith('/settings/')) {
+    let settingsSection: string | null = null
+    try {
+      settingsSection = decodeURIComponent(path.slice('/settings/'.length)) || null
+    } catch {
+      settingsSection = null
+    }
+    return { viewMode: 'settings', subroute: null, settingsSection }
+  }
+
+  return {
+    viewMode: VIEW_BY_PATH[path] ?? fallback,
+    subroute: null,
+    settingsSection: null
+  }
+}
+
 function ReprocessingBanner(): React.ReactElement | null {
   const { reprocessing, progress } = useReprocessing()
   if (!reprocessing) return null
@@ -206,8 +262,7 @@ function ModelStatusDot({
   useEffect(() => {
     let live = true
     let refreshInFlight: Promise<void> | null = null
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const api = (window as any).api
+    const api = window.api
     const applyHealth = (chat: { status?: string } | null | undefined): void => {
       const next: ChatHealth =
         chat?.status === 'ready' ? 'ready' : chat?.status === 'starting' ? 'starting' : 'down'
@@ -215,7 +270,7 @@ function ModelStatusDot({
     }
     const refresh = (): void => {
       if (refreshInFlight !== null) return
-      refreshInFlight = Promise.resolve(api?.chatHealth?.())
+      refreshInFlight = Promise.resolve(api.chatHealth())
         .then(applyHealth)
         .catch(() => {
           if (live) setStatus('down')
@@ -227,7 +282,7 @@ function ModelStatusDot({
     const refreshWhenVisible = (): void => {
       if (document.visibilityState === 'visible') refresh()
     }
-    const offChanged = api?.onChatHealthChanged?.(applyHealth)
+    const offChanged = api.onChatHealthChanged(applyHealth)
     refresh()
     window.addEventListener('focus', refreshWhenVisible)
     document.addEventListener('visibilitychange', refreshWhenVisible)
@@ -238,7 +293,7 @@ function ModelStatusDot({
       window.removeEventListener('focus', refreshWhenVisible)
       document.removeEventListener('visibilitychange', refreshWhenVisible)
       try {
-        offChanged?.()
+        offChanged()
       } catch {
         /* preload subscription already closed */
       }
@@ -338,10 +393,15 @@ function AppContent(): React.ReactElement {
 
   // Free users land on Models (download a model first, with the sidebar to
   // explore); Mac Pro users land on Day. Never land on a locked or unavailable tab.
-  const [viewMode, commitViewMode] = useState<ViewMode>(isPro && isMac() ? 'day' : 'models')
-  const [settingsSection, setSettingsSection] = useState<string | null>(null)
+  const initialRoute = useRef(
+    browserRoute(window.location.pathname, isPro && isMac() ? 'day' : 'models')
+  ).current
+  const [viewMode, commitViewMode] = useState<ViewMode>(initialRoute.viewMode)
+  const [settingsSection, setSettingsSection] = useState<string | null>(
+    initialRoute.settingsSection
+  )
   const [settingsNavigationKey, setSettingsNavigationKey] = useState(0)
-  const [navigationSubroute, setNavigationSubroute] = useState<string | null>(null)
+  const [navigationSubroute, setNavigationSubroute] = useState<string | null>(initialRoute.subroute)
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false)
   const [modelSettingsTab, setModelSettingsTab] = useState<ModelSettingsPanelTab>('model')
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
@@ -509,56 +569,6 @@ function AppContent(): React.ReactElement {
       off()
     }
   }, [removePaidRendererAccess, setIsPro])
-
-  // Handle browser URL changes
-  useEffect(() => {
-    void Promise.resolve().then(() => {
-      const path = window.location.pathname
-      const viewMap: Record<string, ViewMode> = {
-        '/': 'day',
-        '/explore': 'explore',
-        '/day': 'day',
-        '/replay': 'replay',
-        '/reflect': 'reflect',
-        '/actions': 'actions',
-        '/connectors': 'connectors',
-        '/meetings': 'meetings',
-        '/chat': CHAT_VIEW,
-        '/chats': 'chats',
-        '/memories': 'memories',
-        '/entities': 'entities',
-        '/models': 'models',
-        '/gateway': 'gateway',
-        '/projects': 'projects',
-        '/notifications': 'notifications',
-        '/search': 'search',
-        '/settings': 'settings',
-        '/voice': 'voice',
-        '/devices': 'devices'
-      }
-
-      const internalTab = internalTabLocation(path)
-      if (internalTab) {
-        setNavigationSubroute(internalTab.subroute)
-        setSettingsSection(null)
-        commitViewMode(internalTab.view)
-      } else if (path.startsWith('/settings/')) {
-        let section: string | null = null
-        try {
-          section = decodeURIComponent(path.slice('/settings/'.length)) || null
-        } catch {
-          section = null
-        }
-        setSettingsSection(section)
-        setNavigationSubroute(null)
-        commitViewMode('settings')
-      } else if (viewMap[path]) {
-        setNavigationSubroute(null)
-        setSettingsSection(null)
-        commitViewMode(viewMap[path])
-      }
-    })
-  }, [])
 
   // Programmatic navigation from outside the shell (e.g. the first-run gate's
   // "pick a model yourself" CTA) — switch the active view without a remount.

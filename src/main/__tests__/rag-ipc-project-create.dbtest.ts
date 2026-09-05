@@ -8,26 +8,43 @@ const handlers = new Map<string, Handler>()
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-rag-ipc-project-'))
 
 vi.mock('electron', () => ({
-  app: { getPath: () => TMP_DIR, isPackaged: false, getAppPath: () => process.cwd() },
+  app: {
+    getPath: () => TMP_DIR,
+    isPackaged: false,
+    getAppPath: () => process.cwd(),
+    on: () => undefined
+  },
   safeStorage: {
     isEncryptionAvailable: () => false,
     encryptString: (value: string) => Buffer.from(value),
     decryptString: (value: Buffer) => value.toString()
   },
-  ipcMain: { handle: (channel: string, handler: Handler) => handlers.set(channel, handler) },
+  ipcMain: {
+    handle: (channel: string, handler: Handler) => handlers.set(channel, handler),
+    on: () => undefined,
+    removeListener: () => undefined
+  },
   dialog: { showOpenDialog: vi.fn() },
-  BrowserWindow: { fromWebContents: () => undefined }
+  BrowserWindow: { fromWebContents: () => undefined, getAllWindows: () => [] },
+  clipboard: { readText: () => '', writeText: () => undefined },
+  systemPreferences: {
+    isTrustedAccessibilityClient: () => true,
+    getMediaAccessStatus: () => 'granted'
+  },
+  shell: { openExternal: async () => undefined, openPath: async () => '' },
+  desktopCapturer: { getSources: async () => [] }
 }))
-
-import { setupRagIPC } from '../rag-ipc'
-import { listProjects } from '../rag/store'
 
 afterAll(() => {
   fs.rmSync(TMP_DIR, { recursive: true, force: true })
 })
 
 describe('project IPC persistence', () => {
-  it('creates durable projects with unique opaque identifiers', () => {
+  it('creates durable projects with unique opaque identifiers', async () => {
+    const [{ setupRagIPC }, { listProjects }] = await Promise.all([
+      import('../rag-ipc'),
+      import('../rag/store')
+    ])
     setupRagIPC()
     const create = handlers.get('projects:create')
     expect(create).toBeTypeOf('function')
@@ -47,6 +64,7 @@ describe('project IPC persistence', () => {
   })
 
   it('edits every project field and restores the persisted values after a module reload', async () => {
+    const { setupRagIPC } = await import('../rag-ipc')
     setupRagIPC()
     const create = handlers.get('projects:create')
     const update = handlers.get('projects:update')

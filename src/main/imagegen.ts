@@ -869,14 +869,8 @@ async function runImageGen(
         // Pure progress reducer owns the seed parse + the denoise->decode phase
         // transition; the shell only handles the preview PNG read + the callback.
         let progress = initialProgressState(seed)
-        let progressBuffer = ''
-        const capture = (d: Buffer): void => {
-          const s = d.toString()
-          log += s
-          // Terminal progress lines can arrive across multiple data chunks. Keep a
-          // short rolling buffer so "12/" and "42" still become step 12 of 42.
-          progressBuffer = `${progressBuffer}${s}`.slice(-2048)
-          const { state, event } = reduceProgress(progress, progressBuffer, plan.steps)
+        const publishProgress = (line: string): void => {
+          const { state, event } = reduceProgress(progress, line, plan.steps)
           progress = state
           if (onProgress && event) {
             let preview: string | undefined
@@ -889,10 +883,30 @@ async function runImageGen(
             onProgress({ ...event, preview })
           }
         }
-        child.stdout.on('data', capture)
-        child.stderr.on('data', capture)
+        const progressStream = (): { capture: (data: Buffer) => void; flush: () => void } => {
+          let pending = ''
+          return {
+            capture: (data) => {
+              const text = data.toString()
+              log += text
+              const lines = `${pending}${text}`.split(/\r\n|\r|\n/)
+              pending = lines.pop() ?? ''
+              for (const line of lines) publishProgress(line)
+            },
+            flush: () => {
+              if (pending) publishProgress(pending)
+              pending = ''
+            }
+          }
+        }
+        const stdoutProgress = progressStream()
+        const stderrProgress = progressStream()
+        child.stdout.on('data', stdoutProgress.capture)
+        child.stderr.on('data', stderrProgress.capture)
         child.on('error', reject)
         child.on('close', (code) => {
+          stdoutProgress.flush()
+          stderrProgress.flush()
           if (signal.aborted) {
             reject(new Error(IMAGE_CANCELLED_MESSAGE))
           } else if (code === 0) {

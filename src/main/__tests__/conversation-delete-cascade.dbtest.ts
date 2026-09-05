@@ -49,10 +49,20 @@ describe('deleting a conversation removes its messages + artifacts (D23)', () =>
     dbmod.createRagConversation('c1', 'A chat', null)
     dbmod.addRagMessage('c1', 'user', 'make me a chart')
     dbmod.addRagMessage('c1', 'assistant', 'here')
+    dbmod.writeChatSessionTurns('c1', [
+      {
+        id: 'turn-c1',
+        conversationId: 'c1',
+        userMessage: { role: 'user', content: 'make me a chart' },
+        status: 'completed',
+        request: { operation: { type: 'text' }, request: {} }
+      }
+    ])
     saveArtifact({ kind: 'text', code: 'chart code', title: 'Chart', conversationId: 'c1' })
 
     // Precondition: the messages + artifact are really there.
     expect(count('SELECT COUNT(*) AS c FROM rag_messages WHERE conversation_id = ?', 'c1')).toBe(2)
+    expect(count('SELECT COUNT(*) AS c FROM chat_session_turns WHERE conversation_id = ?', 'c1')).toBe(1)
     expect(listArtifacts({ conversationId: 'c1' }).length).toBe(1)
 
     // Exactly what the rag:delete-conversation handler does.
@@ -62,6 +72,7 @@ describe('deleting a conversation removes its messages + artifacts (D23)', () =>
     // Terminal artifact: nothing scoped to the deleted conversation survives.
     expect(count('SELECT COUNT(*) AS c FROM rag_conversations WHERE id = ?', 'c1')).toBe(0)
     expect(count('SELECT COUNT(*) AS c FROM rag_messages WHERE conversation_id = ?', 'c1')).toBe(0)
+    expect(count('SELECT COUNT(*) AS c FROM chat_session_turns WHERE conversation_id = ?', 'c1')).toBe(0)
     expect(listArtifacts({ conversationId: 'c1' }).length).toBe(0)
   })
 })

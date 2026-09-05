@@ -8,6 +8,7 @@ import fs from 'fs'
 import crypto from 'crypto'
 import { createSettingsStore, initializeSettingsStore } from './settings-store'
 import { CORE_SYNC_ENTITIES } from '@offgrid/application'
+import type { ChatTurn } from '@offgrid/models'
 import { emitSyncMutation } from './sync-mutation'
 import type {
   RagConversationContract,
@@ -334,6 +335,15 @@ export function getDB(): Database.Database {
       origin_device_id TEXT,
       origin_device_name TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(conversation_id) REFERENCES rag_conversations(id) ON DELETE CASCADE
+    );
+
+    -- Provider-neutral Shared chat lifecycle state. Message rows remain the portable transcript;
+    -- this local checkpoint makes admitted work recoverable after the renderer or app restarts.
+    CREATE TABLE IF NOT EXISTS chat_session_turns (
+      conversation_id TEXT PRIMARY KEY,
+      turns_json TEXT NOT NULL,
+      updated_at DATETIME NOT NULL,
       FOREIGN KEY(conversation_id) REFERENCES rag_conversations(id) ON DELETE CASCADE
     );
   `)
@@ -1412,6 +1422,7 @@ export function deleteRagConversation(id: string): boolean {
   // FKs are off (no PRAGMA foreign_keys), so rag_messages' ON DELETE CASCADE never
   // fires — delete the conversation's messages explicitly or they orphan (D23).
   db.prepare('DELETE FROM rag_messages WHERE conversation_id = ?').run(id)
+  db.prepare('DELETE FROM chat_session_turns WHERE conversation_id = ?').run(id)
   const info = db.prepare('DELETE FROM rag_conversations WHERE id = ?').run(id)
   if (info.changes === 0) return false
   for (const message of messages) {
@@ -1481,6 +1492,34 @@ export function addRagMessage(
     kind: 'put'
   })
   return { id: Number(info.lastInsertRowid), uuid }
+}
+
+export function readChatSessionTurns(conversationId: string): ChatTurn[] {
+  const row = getDB()
+    .prepare('SELECT turns_json FROM chat_session_turns WHERE conversation_id = ?')
+    .get(conversationId) as { turns_json: string } | undefined
+  if (!row) return []
+  try {
+    const value: unknown = JSON.parse(row.turns_json)
+    return Array.isArray(value) ? (value as ChatTurn[]) : []
+  } catch {
+    return []
+  }
+}
+
+export function writeChatSessionTurns(
+  conversationId: string,
+  turns: readonly ChatTurn[]
+): void {
+  getDB()
+    .prepare(
+      `INSERT INTO chat_session_turns (conversation_id, turns_json, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(conversation_id) DO UPDATE SET
+         turns_json = excluded.turns_json,
+         updated_at = excluded.updated_at`
+    )
+    .run(conversationId, JSON.stringify(turns), nowIso())
 }
 
 // Keep the first `keepCount` messages of a conversation (chronological) and

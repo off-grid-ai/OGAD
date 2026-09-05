@@ -11,7 +11,10 @@ const engine = vi.hoisted(() => ({
   port: 1,
   route: null as null | { source: 'local' | 'remote'; name: string },
   gatewayPort: 1,
-  image: { available: false, reason: 'No image model installed' } as { available: boolean; reason?: string }
+  image: { available: false, reason: 'No image model installed' } as {
+    available: boolean
+    reason?: string
+  }
 }))
 vi.mock('../llm', () => ({
   llm: {
@@ -21,9 +24,6 @@ vi.mock('../llm', () => ({
     isStarting: () => engine.starting,
     lastError: () => engine.lastError
   }
-}))
-vi.mock('../model-service-access', () => ({
-  desktopModelServices: { llm: { active: () => ({ model: engine.route }) } }
 }))
 vi.mock('../models-manager', () => ({
   getActiveModel: () => 'qwen-small',
@@ -40,8 +40,12 @@ vi.mock('../imagegen', () => ({ imageGenStatus: () => engine.image }))
 
 import { getChatHealth, getSystemHealth } from '../setup'
 
+const healthDependencies = { activeRoute: () => engine.route }
+
 let server: http.Server
-let servedGateway: unknown = { modalities: { vision_understanding: 'ready', embeddings: 'not_installed' } }
+let servedGateway: unknown = {
+  modalities: { vision_understanding: 'ready', embeddings: 'not_installed' }
+}
 
 beforeAll(async () => {
   server = http.createServer((req, res) => {
@@ -63,19 +67,24 @@ describe('system health snapshot', () => {
   it('reads a healthy engine only when the socket answers AND the engine owns it', async () => {
     engine.ready = false
     engine.starting = true
-    const loading = await getChatHealth()
-    expect(loading).toMatchObject({ id: 'chat', status: 'starting', port: engine.port, canRestart: true })
+    const loading = await getChatHealth(healthDependencies)
+    expect(loading).toMatchObject({
+      id: 'chat',
+      status: 'starting',
+      port: engine.port,
+      canRestart: true
+    })
 
     engine.ready = true
     engine.starting = false
-    const ready = await getChatHealth()
+    const ready = await getChatHealth(healthDependencies)
     expect(ready.status).toBe('ready')
   })
 
   it('reports a remote chat route as ready rather than as a stopped local engine', async () => {
     engine.ready = false
     engine.route = { source: 'remote', name: 'Mac mini' }
-    const health = await getChatHealth()
+    const health = await getChatHealth(healthDependencies)
     expect(health.status).toBe('ready')
     expect(health.detail).toContain('Mac mini')
     engine.route = null
@@ -83,20 +92,27 @@ describe('system health snapshot', () => {
 
   it('aggregates gateway modalities, in-process image status, and native helpers into one record', async () => {
     engine.ready = true
-    const health = await getSystemHealth()
+    const health = await getSystemHealth(healthDependencies)
     expect(health.activeModel).toBe('qwen-small')
     expect(health.ramGb).toBeGreaterThan(0)
     const byId = Object.fromEntries(health.components.map((c) => [c.id, c]))
-    expect(byId.gateway).toMatchObject({ status: 'ready', detail: 'OpenAI-compatible API', canRestart: true })
+    expect(byId.gateway).toMatchObject({
+      status: 'ready',
+      detail: 'OpenAI-compatible API',
+      canRestart: true
+    })
     expect(byId.vision?.status).toBe('ready')
     expect(byId.embeddings?.status).toBe('not_installed')
     expect(byId.transcription?.status).toBe('down')
-    expect(byId.image).toMatchObject({ status: 'not_installed', detail: 'No image model installed' })
+    expect(byId.image).toMatchObject({
+      status: 'not_installed',
+      detail: 'No image model installed'
+    })
     expect(byId.helper?.status).toBe('ready')
 
     engine.image = { available: true }
     servedGateway = { modalities: { speech: 'ready' } }
-    const next = await getSystemHealth()
+    const next = await getSystemHealth(healthDependencies)
     const nextById = Object.fromEntries(next.components.map((c) => [c.id, c]))
     expect(nextById.image).toMatchObject({ status: 'ready' })
     expect(nextById.speech?.status).toBe('ready')
@@ -106,7 +122,7 @@ describe('system health snapshot', () => {
   it('marks the gateway and every gateway-owned modality down when nothing answers', async () => {
     const closed = engine.gatewayPort
     engine.gatewayPort = 1
-    const health = await getSystemHealth()
+    const health = await getSystemHealth(healthDependencies)
     const byId = Object.fromEntries(health.components.map((c) => [c.id, c]))
     expect(byId.gateway).toMatchObject({ status: 'down', detail: 'Not responding' })
     expect(byId.speech?.status).toBe('down')

@@ -27,7 +27,7 @@ describe('ModelDownloadQueue', () => {
         async () => {
           started.push(id)
           await boundaries[index]!.promise
-          return { success: true }
+          return { outcome: { kind: 'installed' } }
         },
         (state) => states[id]!.push(state)
       )
@@ -57,7 +57,7 @@ describe('ModelDownloadQueue', () => {
       'active',
       async () => {
         await active.promise
-        return { success: true }
+        return { outcome: { kind: 'installed' } }
       },
       () => {}
     )
@@ -66,7 +66,7 @@ describe('ModelDownloadQueue', () => {
       'waiting',
       async () => {
         queuedStarted = true
-        return { success: true }
+        return { outcome: { kind: 'installed' } }
       },
       (state) => states.push(state)
     )
@@ -74,15 +74,14 @@ describe('ModelDownloadQueue', () => {
     await expect(
       queue.enqueue(
         'waiting',
-        async () => ({ success: true }),
+        async () => ({ outcome: { kind: 'installed' } }),
         () => {}
       )
     ).resolves.toEqual({
-      success: false,
-      error: 'already downloading'
+      outcome: { kind: 'failed', reason: 'already downloading' }
     })
     expect(queue.cancel('waiting')).toBe(true)
-    await expect(waiting).resolves.toEqual({ success: false, error: 'cancelled' })
+    await expect(waiting).resolves.toEqual({ outcome: { kind: 'cancelled' } })
     expect(states).toEqual(['queued', 'cancelled'])
     expect(queuedStarted).toBe(false)
 
@@ -105,13 +104,13 @@ describe('ModelDownloadQueue', () => {
       'second',
       async () => {
         started.push('second')
-        return { success: true }
+        return { outcome: { kind: 'installed' } }
       },
       () => {}
     )
 
-    await expect(first).resolves.toEqual({ success: false, error: 'network down' })
-    await expect(second).resolves.toEqual({ success: true })
+    await expect(first).resolves.toEqual({ outcome: { kind: 'failed', reason: 'network down' } })
+    await expect(second).resolves.toEqual({ outcome: { kind: 'installed' } })
     expect(started).toEqual(['first', 'second'])
   })
 
@@ -124,7 +123,7 @@ describe('ModelDownloadQueue', () => {
         new Promise((resolve) => {
           signal.addEventListener(
             'abort',
-            () => resolve({ success: false, error: String(signal.reason) }),
+            () => resolve({ outcome: { kind: 'aborted', reason: String(signal.reason) } }),
             { once: true }
           )
         }),
@@ -132,18 +131,16 @@ describe('ModelDownloadQueue', () => {
     )
     const queued = queue.enqueue(
       'queued',
-      async () => ({ success: true }),
+      async () => ({ outcome: { kind: 'installed' } }),
       (state) => states.push(state)
     )
 
     const shutdown = queue.shutdown()
     await expect(queued).resolves.toEqual({
-      success: false,
-      error: DOWNLOAD_INTERRUPTED_ERROR
+      outcome: { kind: 'interrupted', reason: DOWNLOAD_INTERRUPTED_ERROR }
     })
     await expect(active).resolves.toEqual({
-      success: false,
-      error: DOWNLOAD_INTERRUPTED_ERROR
+      outcome: { kind: 'interrupted', reason: DOWNLOAD_INTERRUPTED_ERROR }
     })
     await expect(shutdown).resolves.toBeUndefined()
     expect(states).toEqual(['queued', 'interrupted'])
@@ -151,9 +148,9 @@ describe('ModelDownloadQueue', () => {
     await expect(
       queue.enqueue(
         'late',
-        async () => ({ success: true }),
+        async () => ({ outcome: { kind: 'installed' } }),
         () => {}
       )
-    ).resolves.toEqual({ success: false, error: DOWNLOAD_INTERRUPTED_ERROR })
+    ).resolves.toEqual({ outcome: { kind: 'interrupted', reason: DOWNLOAD_INTERRUPTED_ERROR } })
   })
 })

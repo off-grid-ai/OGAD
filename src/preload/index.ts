@@ -1,17 +1,33 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { ModelsEvent, ModelsFailure } from '@offgrid/application'
-import type { GuidedSetupResult } from '@offgrid/models'
+import type {
+  ModelControlIntent,
+  ModelControlOutcome,
+  ModelControlProjection,
+  ModelsOperationsSnapshot,
+  ModelsEvent,
+  ModelsFailure
+} from '@offgrid/application'
+import type { GuidedSetupResult, HFSearchResult, VisionStatus } from '@offgrid/models'
 
 type PublicDownloadEvent = Extract<ModelsEvent, { type: 'download' }>['event']
 import {
   CACHE_CLEANUP_CHANNEL,
+  PROJECT_DOCUMENTS_CHANGED_CHANNEL,
+  PROJECT_INDEX_PROGRESS_CHANNEL,
+  SETUP_PROGRESS_CHANNEL,
+  UPDATE_DOWNLOADED_CHANNEL,
   type ArtifactKindContract,
   type ModelSetupStatusContract,
+  type ModelImportResultContract,
   type ActiveChatStreamContract,
   type CacheCleanupResultContract,
+  type ProjectDocumentsChangedContract,
+  type ProjectIndexProgressContract,
   type RagChatResultContract,
+  type SetupProgressContract,
   type SystemHealthComponentContract,
-  type SystemHealthContract
+  type SystemHealthContract,
+  type UpdateDownloadedContract
 } from '../shared/ipc-contracts'
 import type {
   ImageGenerationRequestContract,
@@ -130,22 +146,16 @@ const offGridApi = {
     getProjection: (): Promise<import('@offgrid/application').UseSnapshot> =>
       ipcRenderer.invoke('actions:get-projection'),
     onProjection: (cb: (snapshot: import('@offgrid/application').UseSnapshot) => void) => {
-      const sub = (
-        _e: unknown,
-        snapshot: import('@offgrid/application').UseSnapshot
-      ): void => cb(snapshot)
+      const sub = (_e: unknown, snapshot: import('@offgrid/application').UseSnapshot): void =>
+        cb(snapshot)
       ipcRenderer.on('actions:projection-changed', sub)
       return unsubscribe('actions:projection-changed', sub)
     },
     retry: (
       actionId: string
     ): Promise<
-      import('@offgrid/application').Outcome<
-        boolean,
-        import('@offgrid/application').UseFailure
-      >
-    > =>
-      ipcRenderer.invoke('actions:retry', actionId),
+      import('@offgrid/application').Outcome<boolean, import('@offgrid/application').UseFailure>
+    > => ipcRenderer.invoke('actions:retry', actionId),
     resolveGate: (actionId: string, decision: unknown) =>
       ipcRenderer.invoke('actions:resolve-gate', actionId, decision),
     undo: (record: unknown) => ipcRenderer.invoke('actions:undo', record),
@@ -375,6 +385,10 @@ const offGridApi = {
   getRagConversation: (id: string) => ipcRenderer.invoke('rag:get-conversation', id),
   getRagMessages: (conversationId: string) =>
     ipcRenderer.invoke('rag:get-messages', conversationId),
+  readChatSessionTurns: (conversationId: string) =>
+    ipcRenderer.invoke('chat-session:read-turns', conversationId),
+  writeChatSessionTurns: (conversationId: string, turns: unknown[]) =>
+    ipcRenderer.invoke('chat-session:write-turns', conversationId, turns),
   addRagMessage: (
     conversationId: string,
     role: 'user' | 'assistant',
@@ -440,10 +454,10 @@ const offGridApi = {
   // Auto-update — fired when a new version finished downloading and is staged.
   // installUpdate() forces the quit+swap (Squirrel only applies on a graceful
   // quit; a force-kill would otherwise leave the download unapplied).
-  onUpdateDownloaded: (callback: (data: { version: string }) => void) => {
-    const subscription = (_event: unknown, data: { version: string }): void => callback(data)
-    ipcRenderer.on('update:downloaded', subscription)
-    return unsubscribe('update:downloaded', subscription)
+  onUpdateDownloaded: (callback: (data: UpdateDownloadedContract) => void) => {
+    const subscription = (_event: unknown, data: UpdateDownloadedContract): void => callback(data)
+    ipcRenderer.on(UPDATE_DOWNLOADED_CHANNEL, subscription)
+    return unsubscribe(UPDATE_DOWNLOADED_CHANNEL, subscription)
   },
   getStagedUpdateVersion: () => ipcRenderer.invoke('update:staged-version'),
   installUpdate: () => ipcRenderer.invoke('update:install'),
@@ -525,13 +539,30 @@ const offGridApi = {
   openExternal: (url: string) => ipcRenderer.invoke('app:open-external', url),
 
   // Model Download APIs
-  checkModelStatus: (): Promise<ModelSetupStatusContract> => ipcRenderer.invoke('model:check-status'),
+  checkModelStatus: (): Promise<ModelSetupStatusContract> =>
+    ipcRenderer.invoke('model:check-status'),
   // Off Grid AI model catalog (text, vision, image, voice, transcription)
   getModelControlProjection: () => ipcRenderer.invoke('models:control-projection'),
-  controlModel: (intent: import('@offgrid/application').ModelControlIntent) =>
+  onModelControlProjection: (callback: (projection: ModelControlProjection) => void) => {
+    const subscription = (_event: unknown, projection: ModelControlProjection): void =>
+      callback(projection)
+    ipcRenderer.on('models:control-projection-changed', subscription)
+    return unsubscribe('models:control-projection-changed', subscription)
+  },
+  getModelOperationsProjection: (): Promise<ModelsOperationsSnapshot> =>
+    ipcRenderer.invoke('models:operations-projection'),
+  onModelOperationsProjection: (callback: (projection: ModelsOperationsSnapshot) => void) => {
+    const subscription = (_event: unknown, projection: ModelsOperationsSnapshot): void =>
+      callback(projection)
+    ipcRenderer.on('models:operations-projection-changed', subscription)
+    return unsubscribe('models:operations-projection-changed', subscription)
+  },
+  controlModel: (intent: ModelControlIntent): ModelControlOutcome =>
     ipcRenderer.invoke('models:control', intent),
-  getModelVisionStatus: () => ipcRenderer.invoke('models:vision-status'),
-  searchModels: (query: string, kind?: string) => ipcRenderer.invoke('models:search', query, kind),
+  getModelVisionStatus: (): Promise<Record<string, VisionStatus>> =>
+    ipcRenderer.invoke('models:vision-status'),
+  searchModels: (query: string, kind?: string): Promise<HFSearchResult[]> =>
+    ipcRenderer.invoke('models:search', query, kind),
   getComputerUseActiveModels: () => ipcRenderer.invoke('models:computer-use-active'),
   onModelProgress: (callback: (data: PublicDownloadEvent) => void) => {
     const subscription = (_event: unknown, data: PublicDownloadEvent): void => callback(data)
@@ -580,7 +611,7 @@ const offGridApi = {
   deleteOrphans: () => ipcRenderer.invoke('models:delete-orphans'),
   clearAppCache: () =>
     ipcRenderer.invoke(CACHE_CLEANUP_CHANNEL) as Promise<CacheCleanupResultContract>,
-  importLocalModel: () => ipcRenderer.invoke('models:import'),
+  importLocalModel: (): Promise<ModelImportResultContract> => ipcRenderer.invoke('models:import'),
 
   // Data & privacy
   getDataSummary: () => ipcRenderer.invoke('data:summary'),
@@ -591,10 +622,10 @@ const offGridApi = {
     ipcRenderer.invoke(BACKUP_EXPORT_ALL_CHANNEL) as Promise<BackupDeliveryContract | null>,
   importBackup: () =>
     ipcRenderer.invoke(BACKUP_IMPORT_CHANNEL) as Promise<BackupRestoreSummaryContract | null>,
-  onSetupProgress: (callback: (data: unknown) => void) => {
-    const subscription = (_event: unknown, data: unknown): void => callback(data)
-    ipcRenderer.on('setup:progress', subscription)
-    return unsubscribe('setup:progress', subscription)
+  onSetupProgress: (callback: (data: SetupProgressContract) => void) => {
+    const subscription = (_event: unknown, data: SetupProgressContract): void => callback(data)
+    ipcRenderer.on(SETUP_PROGRESS_CHANNEL, subscription)
+    return unsubscribe(SETUP_PROGRESS_CHANNEL, subscription)
   },
 
   // --- Agentic tool-calling (built-in tools) ---
@@ -904,15 +935,17 @@ const offGridApi = {
   toggleProjectDocument: (docId: number, enabled: boolean) =>
     ipcRenderer.invoke('projects:toggle-document', docId, enabled),
   deleteProjectDocument: (docId: number) => ipcRenderer.invoke('projects:delete-document', docId),
-  onProjectIndexProgress: (callback: (data: unknown) => void) => {
-    const subscription = (_event: unknown, data: unknown): void => callback(data)
-    ipcRenderer.on('projects:index-progress', subscription)
-    return unsubscribe('projects:index-progress', subscription)
+  onProjectIndexProgress: (callback: (data: ProjectIndexProgressContract) => void) => {
+    const subscription = (_event: unknown, data: ProjectIndexProgressContract): void =>
+      callback(data)
+    ipcRenderer.on(PROJECT_INDEX_PROGRESS_CHANNEL, subscription)
+    return unsubscribe(PROJECT_INDEX_PROGRESS_CHANNEL, subscription)
   },
-  onProjectDocumentsChanged: (callback: (data: { projectId: string }) => void) => {
-    const subscription = (_event: unknown, data: { projectId: string }): void => callback(data)
-    ipcRenderer.on('projects:documents-changed', subscription)
-    return unsubscribe('projects:documents-changed', subscription)
+  onProjectDocumentsChanged: (callback: (data: ProjectDocumentsChangedContract) => void) => {
+    const subscription = (_event: unknown, data: ProjectDocumentsChangedContract): void =>
+      callback(data)
+    ipcRenderer.on(PROJECT_DOCUMENTS_CHANGED_CHANNEL, subscription)
+    return unsubscribe(PROJECT_DOCUMENTS_CHANGED_CHANNEL, subscription)
   },
 
   // --- CRM: entity records (Entity -> App -> frames) + resolution/corrections ---

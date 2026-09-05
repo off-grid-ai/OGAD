@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { VoiceBubble } from '../VoiceBubble'
 
 afterEach(cleanup)
+
+beforeEach(() => {
+  ;(window as unknown as { api: Record<string, unknown> }).api = {
+    speechCommands: { onEvent: vi.fn(() => () => undefined) }
+  }
+})
 
 const synthesize = vi.fn(async () => ({ dataUrl: 'data:audio/wav;base64,AAAA' }))
 

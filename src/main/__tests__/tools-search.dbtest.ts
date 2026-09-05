@@ -8,6 +8,7 @@
 // universalSearch already catches a failed semantic pass and falls back to keyword, so
 // the search is deterministic on real FTS with zero mocks of OUR code.
 import { describe, it, expect, afterAll, beforeAll, beforeEach, vi } from 'vitest'
+import type { OffGridApplication } from '@offgrid/application'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -47,9 +48,20 @@ import { llm } from '../llm'
 import { getDB } from '../database'
 
 let fake: FakeLlamaServer
+let application: OffGridApplication
+let releaseApplication: () => void
 
 beforeAll(async () => {
   installFakeActiveTextModel(TMP_DIR)
+  const [{ createOffGridApplication }, { desktopModelWorkspacePorts }, applicationAccess] =
+    await Promise.all([
+      import('@offgrid/application'),
+      import('../model-services'),
+      import('../composition/application-access')
+    ])
+  application = createOffGridApplication({ models: desktopModelWorkspacePorts })
+  releaseApplication = applicationAccess.registerDesktopApplication(application)
+  await application.start()
   fake = await startFakeLlamaServer()
   const svc = llm as unknown as { port: number; initialized: boolean; paused: boolean }
   svc.port = fake.port
@@ -92,6 +104,8 @@ beforeEach(() => {
 })
 afterAll(async () => {
   await fake.close()
+  await application.stop()
+  releaseApplication()
   try {
     fs.rmSync(TMP_DIR, { recursive: true, force: true })
   } catch {
@@ -108,6 +122,15 @@ function seedObservation(summary: string, surface: string): string {
     getDB()
       .prepare('INSERT INTO observations (summary, surface, category) VALUES (?, ?, ?)')
       .run(summary, surface, 'work').lastInsertRowid
+  )
+  return `obs:${id}`
+}
+
+function seedObservationAt(summary: string, surface: string, timestamp: number): string {
+  const id = Number(
+    getDB()
+      .prepare('INSERT INTO observations (summary, surface, category, ts) VALUES (?, ?, ?, ?)')
+      .run(summary, surface, 'work', new Date(timestamp).toISOString()).lastInsertRowid
   )
   return `obs:${id}`
 }
@@ -195,5 +218,24 @@ describe('search_memory citations — real universalSearch over the real full sc
     expect(source?.url).toBe('conversation-release')
     expect(source?.snippet).toContain('starling rollout')
     expect(result.answer).toBe('The rollout is planned for Friday.')
+  })
+
+  it('applies the user-requested local day even when the model shortens its tool query', async () => {
+    const today = seedObservationAt('reviewed atlas planning', 'Meeting', Date.now())
+    const older = seedObservationAt(
+      'reviewed atlas planning',
+      'Meeting',
+      Date.now() - 3 * 24 * 60 * 60 * 1000
+    )
+    fake.enqueue(
+      { toolCalls: [{ name: 'search_memory', args: { query: 'atlas planning' } }] },
+      { content: 'You reviewed Atlas planning today.' }
+    )
+
+    const result = await toolChat('What did I work on today?', [], { allMemory: true })
+    const keys = result.unified.map((source) => source.key)
+
+    expect(keys).toContain(today)
+    expect(keys).not.toContain(older)
   })
 })

@@ -1,7 +1,8 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import type { OffGridApplication } from '@offgrid/application'
 
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-task-result-chat-'))
 
@@ -21,11 +22,39 @@ vi.mock('electron', () => ({
 }))
 
 import { createRagConversation, getDB, getRagMessages } from '../database'
-import { recordTaskRun, resetTaskHistoryForTests } from '../tasks/task-history'
+import {
+  createDesktopAutomationPorts,
+  forwardDesktopAutomationEvent,
+  recordTaskRun
+} from '../tasks/task-history'
 import { HOOKS, registerHook, unregisterHook } from '../bootstrap/hookRegistry'
 
-afterAll(() => {
-  resetTaskHistoryForTests()
+let application: OffGridApplication | undefined
+let releaseApplication: (() => void) | undefined
+let stopForwarding: (() => void) | undefined
+
+beforeAll(async () => {
+  const [{ createOffGridApplication }, { registerDesktopApplication }, modelServices] =
+    await Promise.all([
+      import('@offgrid/application'),
+      import('../composition/application-access'),
+      import('../model-services')
+    ])
+  application = createOffGridApplication({
+    models: modelServices.desktopModelWorkspacePorts,
+    automation: createDesktopAutomationPorts()
+  })
+  releaseApplication = registerDesktopApplication(application)
+  await application.start()
+  stopForwarding = application.automation.events((event) => {
+    if (event.type !== 'operation_failed') forwardDesktopAutomationEvent(event)
+  })
+})
+
+afterAll(async () => {
+  stopForwarding?.()
+  await application?.stop()
+  releaseApplication?.()
   getDB().close()
   fs.rmSync(profile, { recursive: true, force: true })
 })

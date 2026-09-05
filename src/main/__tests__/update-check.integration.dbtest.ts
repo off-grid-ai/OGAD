@@ -213,7 +213,7 @@ describe('manual update check', () => {
     const card = await renderUpdateCard()
     expect(await within(card).findByText('Downloading v0.0.104')).toBeTruthy()
     expect(within(card).getByText('25%')).toBeTruthy()
-    expect(within(card).getByText(/26 MB \/ 105 MB/)).toBeTruthy()
+    expect(within(card).getByText(/26 MB of 105 MB/)).toBeTruthy()
     expect(within(card).getByText(/2\.0 MB\/s/)).toBeTruthy()
 
     updaterEvents.emit('update-downloaded', { version: '0.0.104' })

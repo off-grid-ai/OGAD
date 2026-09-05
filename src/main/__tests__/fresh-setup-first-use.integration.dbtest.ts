@@ -13,6 +13,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { WHISPER_MIN_BYTES } from '@offgrid/models'
+import { modelsFailureMessage, type OffGridApplication } from '@offgrid/application'
 
 const originalDataDir = process.env.OFFGRID_DATA_DIR
 const originalBinDir = process.env.OFFGRID_BIN_DIR
@@ -75,6 +76,23 @@ const interrupted = new Set<string>()
 const resumedRanges = new Map<string, string>()
 let interruptDownloads = true
 let remoteRequests = 0
+
+type DesktopApplicationComposition = typeof import('../composition/application')
+
+// A module reset creates a new production composition root. Keep each root until its own lifecycle
+// has stopped it so a failed assertion cannot leave runtime processes, subscriptions, or adapters
+// alive behind the next test.
+const startedApplicationCompositions = new Set<DesktopApplicationComposition>()
+
+async function startApplication(composition: DesktopApplicationComposition): Promise<void> {
+  startedApplicationCompositions.add(composition)
+  await composition.startDesktopApplication()
+}
+
+async function stopApplication(composition: DesktopApplicationComposition): Promise<void> {
+  await composition.stopDesktopApplication()
+  startedApplicationCompositions.delete(composition)
+}
 
 async function generatedText(prompt: string, images: string[] = []): Promise<string> {
   const { generateDesktopText } = await import('../desktop-generation')
@@ -176,15 +194,44 @@ function fixtureBytes(fileName: string, seed: number): Buffer {
 }
 
 function installDownloadBoundary(models: JourneyModel[]): void {
+  const metadata = new Map<
+    string,
+    { revision: string; files: Array<{ name: string; bytes: Buffer }> }
+  >()
   models.forEach((model, modelIndex) => {
     model.files.forEach((file, fileIndex) => {
-      delivery.set(file.url, fixtureBytes(file.name, modelIndex * 10 + fileIndex + 1))
+      const bytes = fixtureBytes(file.name, modelIndex * 10 + fileIndex + 1)
+      delivery.set(file.url, bytes)
+      const source = new URL(file.url)
+      const match = /^\/([^/]+\/[^/]+)\/resolve\/([^/]+)\/(.+)$/.exec(source.pathname)
+      if (!match || source.hostname !== 'huggingface.co') return
+      const repo = match[1]!
+      const requestedRevision = decodeURIComponent(match[2]!)
+      const revision = /^[a-f0-9]{40}$/i.test(requestedRevision)
+        ? requestedRevision
+        : 'a'.repeat(40)
+      const record = metadata.get(repo) ?? { revision, files: [] }
+      record.files.push({ name: decodeURIComponent(match[3]!), bytes })
+      metadata.set(repo, record)
+      delivery.set(`https://huggingface.co/${repo}/resolve/${revision}/${match[3]!}`, bytes)
     })
   })
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      const metadataUrl = new URL(url)
+      const metadataMatch = /^\/api\/models\/([^/]+\/[^/]+)\/revision\/[^/]+$/.exec(
+        metadataUrl.pathname
+      )
+      if (metadataUrl.hostname === 'huggingface.co' && metadataMatch) {
+        const record = metadata.get(metadataMatch[1]!)
+        if (!record) return new Response(null, { status: 404 })
+        return Response.json({
+          sha: record.revision,
+          siblings: record.files.map((file) => ({ rfilename: file.name, size: file.bytes.length }))
+        })
+      }
       const bytes = delivery.get(url)
       if (!bytes) return hostFetch(input, init)
       remoteRequests++
@@ -192,6 +239,7 @@ function installDownloadBoundary(models: JourneyModel[]): void {
       const range = new Headers(init?.headers).get('range')
       if (range) {
         resumedRanges.set(url, range)
+        resumedRanges.set(decodeURIComponent(new URL(url).pathname.split('/').at(-1)!), range)
         const offset = Number(/^bytes=(\d+)-$/.exec(range)?.[1] ?? 0)
         const suffix = bytes.subarray(offset)
         return new Response(new Uint8Array(suffix), {
@@ -256,9 +304,53 @@ function expectWav(dataUrl: string): void {
   )
 }
 
+function findFile(rootDirectory: string, fileName: string): string | undefined {
+  for (const entry of fs.readdirSync(rootDirectory, { withFileTypes: true })) {
+    const candidate = path.join(rootDirectory, entry.name)
+    if (entry.isDirectory()) {
+      const nested = findFile(candidate, fileName)
+      if (nested) return nested
+    } else if (entry.name.endsWith(fileName)) {
+      return candidate
+    }
+  }
+  return undefined
+}
+
+async function downloadThrough(
+  application: OffGridApplication,
+  modelId: string
+): Promise<{ success: boolean; error?: string }> {
+  const outcome = await application.models.control({ type: 'download', modelId })
+  return outcome.ok && outcome.value.status === 'completed'
+    ? { success: true }
+    : outcome.ok
+      ? { success: false, error: outcome.value.status }
+      : { success: false, error: modelsFailureMessage(outcome.failure) }
+}
+
+async function selectThrough(
+  application: OffGridApplication,
+  surface: 'text' | 'image' | 'speech' | 'transcription',
+  modelId: string
+): Promise<{ success: boolean; error?: string }> {
+  const outcome = await application.models.control({ type: 'select', surface, modelId })
+  if (!outcome.ok) return { success: false, error: modelsFailureMessage(outcome.failure) }
+  const prepared = await application.models.prepare(surface === 'speech' ? 'voice' : surface)
+  return prepared.ok
+    ? { success: true }
+    : { success: false, error: modelsFailureMessage(prepared.failure) }
+}
+
 afterAll(async () => {
-  vi.unstubAllGlobals()
-  vi.restoreAllMocks()
+  const shutdownFailures: unknown[] = []
+  for (const composition of [...startedApplicationCompositions].reverse()) {
+    try {
+      await stopApplication(composition)
+    } catch (error) {
+      shutdownFailures.push(error)
+    }
+  }
   try {
     const { llm } = await import('../llm')
     llm.stop()
@@ -271,6 +363,8 @@ afterAll(async () => {
   } catch {
     // The profile may not have reached first TTS use.
   }
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
   if (originalDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
   else process.env.OFFGRID_DATA_DIR = originalDataDir
   if (originalBinDir === undefined) delete process.env.OFFGRID_BIN_DIR
@@ -283,6 +377,9 @@ afterAll(async () => {
     process.env.OFFGRID_SKIP_COMPATIBLE_GENERATION_MODEL = originalSkipCompatibleGenerationModel
   }
   fs.rmSync(root, { recursive: true, force: true })
+  if (shutdownFailures.length > 0) {
+    throw new AggregateError(shutdownFailures, 'Desktop application shutdown failed')
+  }
 })
 
 describe('fresh setup to first use', () => {
@@ -292,27 +389,30 @@ describe('fresh setup to first use', () => {
     // Electron owns the userData directory before main-process composition begins.
     fs.mkdirSync(dataDir, { recursive: true })
 
-    const [{ llm }, setup, managerBase, { CATALOG, MODEL_KINDS }, downloads] = await Promise.all([
-      import('../llm'),
-      import('../setup'),
-      import('../models-manager'),
-      import('@offgrid/models'),
-      import('../models/__tests__/download-facade-test-client')
-    ])
-    const manager = { ...managerBase, ...downloads }
+    // Load one production composition graph. Parallel imports immediately after a module reset can
+    // instantiate separate copies of singleton-bearing modules in Vitest's module runner, which is
+    // not a Desktop relaunch and makes setup inspect a different runtime from the lifecycle adapter.
+    const setup = await import('../setup')
+    const initialApplication = await import('../composition/application')
+    const { llm } = await import('../llm')
+    const managerBase = await import('../models-manager')
+    const { CATALOG, MODEL_KINDS } = await import('@offgrid/models')
+    const manager = managerBase
 
-    // This is the real settings owner. Fresh setup cannot start the model yet, but
-    // the selected mode is persisted before that expected missing-model failure.
-    await expect(llm.setSettings({ performanceMode: 'conservative' })).rejects.toThrow(
-      'Models not downloaded'
-    )
+    // The native settings adapter persists launch facts only. Shared's application
+    // command owns any restart after a model exists, so a fresh profile reports the
+    // pending launch change without trying to start a missing model.
+    await expect(llm.setSettings({ performanceMode: 'conservative' })).resolves.toEqual({
+      launchChanged: true
+    })
     const plan = await setup.getSetupPlan()
     expect(plan.mode).toBe('conservative')
     expect(plan.items.map((item) => item.kind)).toEqual(['chat', 'transcription', 'voice'])
     expect(plan.items.find((item) => item.kind === 'chat')?.installed).toBe(false)
     expect(plan.items.find((item) => item.kind === 'transcription')?.installed).toBe(false)
-    // Executorch Kokoro is bundled with Desktop and is ready without a model download.
-    expect(plan.items.find((item) => item.kind === 'voice')?.installed).toBe(true)
+    // Desktop bundles the speech runtime, but Shared still owns the voice-model
+    // artifact and must report a fresh profile as not installed until it arrives.
+    expect(plan.items.find((item) => item.kind === 'voice')?.installed).toBe(false)
 
     const baselineModels: JourneyModel[] = plan.items.map((item) => {
       const catalogEntry = CATALOG.find((entry) => entry.id === item.id)
@@ -356,23 +456,25 @@ describe('fresh setup to first use', () => {
     const downloadableModels = models.filter((model) => model.files.length > 0)
     expect(new Set(models.map((model) => model.kind))).toEqual(new Set(requiredKinds))
     installDownloadBoundary(models)
+    await startApplication(initialApplication)
 
     // Each representative modality download loses its connection after writing a
     // real .part prefix. No model is installed or selectable from partial bytes.
     const interruptedFileByModel = new Map<string, CatalogFile>()
     for (const model of downloadableModels) {
-      await expect(manager.downloadModel(model.id)).resolves.toEqual({
+      await expect(
+        downloadThrough(initialApplication.desktopApplication, model.id)
+      ).resolves.toEqual({
         success: false,
         error: 'network connection interrupted'
       })
       const interruptedFile = model.files.find((file) =>
-        fs.existsSync(path.join(dataDir, 'models', `${file.name}.part`))
+        findFile(path.join(dataDir, 'models'), `${file.name}.part`)
       )
       expect(interruptedFile).toBeDefined()
       interruptedFileByModel.set(model.id, interruptedFile!)
-      expect(fs.statSync(path.join(dataDir, 'models', `${interruptedFile!.name}.part`)).size).toBe(
-        700
-      )
+      const partialPath = findFile(path.join(dataDir, 'models'), `${interruptedFile!.name}.part`)
+      expect(fs.statSync(partialPath!).size).toBe(700)
       expect(await manager.listInstalled()).not.toContain(model.id)
     }
 
@@ -393,52 +495,63 @@ describe('fresh setup to first use', () => {
     // Relaunch the module graph like a newly started main process. The production
     // registry restores every interrupted row. Configure for me resumes its baseline,
     // then the same download owner resumes the remaining catalog modalities.
+    await stopApplication(initialApplication)
     vi.resetModules()
     interruptDownloads = false
     // Electron creates this profile directory before it loads the main graph. The module-reset
     // relaunch must reproduce that native boundary instead of asking SQLite to create its parent.
     fs.mkdirSync(dataDir, { recursive: true })
-    const [{ llm: resumedLlm }, resumedSetup, resumedManagerBase, resumedDownloads] =
-      await Promise.all([
-        import('../llm'),
-        import('../setup'),
-        import('../models-manager'),
-        import('../models/__tests__/download-facade-test-client')
-      ])
-    const resumedManager = { ...resumedManagerBase, ...resumedDownloads }
-    expect(await resumedManager.listDownloads()).toEqual(
+    const resumedApplication = await import('../composition/application')
+    const { llm: resumedLlm } = await import('../llm')
+    const resumedManagerBase = await import('../models-manager')
+    const resumedManager = resumedManagerBase
+    await startApplication(resumedApplication)
+    expect(resumedApplication.desktopApplication.models.snapshot().downloads).toEqual(
       expect.arrayContaining(
         downloadableModels.map((model) =>
           expect.objectContaining({
             modelId: model.id,
             status: 'failed',
-            error: 'network connection interrupted'
+            reason: 'network connection interrupted'
           })
         )
       )
     )
 
     const progress: import('../setup').SetupProgress[] = []
-    const resumedResult = await resumedSetup.autoConfigure((event) => progress.push(event))
-    expect(resumedResult.success, JSON.stringify(resumedResult)).toBe(true)
+    const resumedResult = await resumedApplication.desktopApplication.models.guidedSetup.run(
+      (event) => progress.push(event)
+    )
+    expect(resumedResult).toMatchObject({
+      success: true,
+      status: 'ready'
+    })
     expect(resumedResult.modelId).toBe(baselineModels[0]!.id)
     expect(progress.at(-1)).toMatchObject({
       phase: 'done',
       modelId: baselineModels[0]!.id
     })
     for (const model of additionalModels.filter((candidate) => candidate.files.length > 0)) {
-      await expect(resumedManager.retryDownload(model.id)).resolves.toEqual({ success: true })
-      await expect(resumedManager.activateModel(model.id)).resolves.toEqual({ success: true })
+      await expect(
+        downloadThrough(resumedApplication.desktopApplication, model.id)
+      ).resolves.toEqual({
+        success: true
+      })
+      await expect(
+        selectThrough(
+          resumedApplication.desktopApplication,
+          model.kind === 'voice' ? 'speech' : model.kind === 'vision' ? 'text' : model.kind,
+          model.id
+        )
+      ).resolves.toEqual({ success: true })
     }
     expect(await resumedManager.listInstalled()).toEqual(
       expect.arrayContaining(models.map((model) => model.id))
     )
     for (const model of downloadableModels) {
       const interruptedFile = interruptedFileByModel.get(model.id)!
-      expect(resumedRanges.get(interruptedFile.url)).toBe('bytes=700-')
-      expect(fs.existsSync(path.join(dataDir, 'models', `${interruptedFile.name}.part`))).toBe(
-        false
-      )
+      expect(resumedRanges.get(interruptedFile.name)).toBe('bytes=700-')
+      expect(findFile(path.join(dataDir, 'models'), `${interruptedFile.name}.part`)).toBeUndefined()
     }
 
     // A SECOND chat model, not the one being activated. What the assertion below protects is that
@@ -459,12 +572,15 @@ describe('fresh setup to first use', () => {
     // all the import checks before copying. Nothing loads these weights; the llama socket is faked.
     const localGgufPath = path.join(dataDir, 'text-only-chat-Q4_K_M.gguf')
     fs.writeFileSync(localGgufPath, Buffer.concat([Buffer.from('GGUF'), Buffer.alloc(4096)]))
-    const imported = await manager.importLocalModel(localGgufPath)
-    expect(imported).toMatchObject({ success: true })
+    const imported = await resumedManager.importLocalModel(localGgufPath)
+    expect(imported, JSON.stringify(imported)).toMatchObject({ success: true })
     const textModel = { id: imported.id!, kind: 'text' as const }
-    expect(manager.getLocalModels().map(({ id, kind }) => ({ id, kind }))).toContainEqual({
+    expect(resumedManager.getLocalModels().map(({ id, kind }) => ({ id, kind }))).toContainEqual({
       id: textModel.id,
       kind: 'text'
+    })
+    await expect(resumedApplication.desktopApplication.models.refresh()).resolves.toMatchObject({
+      ok: true
     })
 
     const visionModel = models.find((model) => model.kind === 'vision')!
@@ -474,7 +590,9 @@ describe('fresh setup to first use', () => {
 
     const { generateImage } = await import('../imagegen')
 
-    await expect(resumedManager.activateModel(textModel.id)).resolves.toEqual({ success: true })
+    await expect(
+      selectThrough(resumedApplication.desktopApplication, 'text', textModel.id)
+    ).resolves.toEqual({ success: true })
     expect(await generatedText('Prove the fresh chat model can answer')).toBe(
       'fresh setup chat ready'
     )
@@ -489,13 +607,17 @@ describe('fresh setup to first use', () => {
 
     const visionInput = path.join(root, 'vision-input.png')
     fs.writeFileSync(visionInput, Buffer.from(PNG_BASE64, 'base64'))
-    await expect(resumedManager.activateModel(visionModel.id)).resolves.toEqual({ success: true })
+    await expect(
+      selectThrough(resumedApplication.desktopApplication, 'text', visionModel.id)
+    ).resolves.toEqual({ success: true })
     expect(resumedLlm.hasVision()).toBe(true)
     await expect(generatedText('Describe this image', [visionInput])).resolves.toBe(
       'fresh setup vision ready'
     )
 
-    await expect(resumedManager.activateModel(imageModel.id)).resolves.toEqual({ success: true })
+    await expect(
+      selectThrough(resumedApplication.desktopApplication, 'image', imageModel.id)
+    ).resolves.toEqual({ success: true })
     const generated = await generateImage({
       prompt: 'A green cabin under stars',
       seed: 314,
@@ -521,7 +643,7 @@ describe('fresh setup to first use', () => {
 
     const requestsAfterFirstUse = remoteRequests
     const resumedPort = resumedLlm.getPort()
-    resumedLlm.stop()
+    await stopApplication(resumedApplication)
     const database = await import('../database')
     database.getDB().close()
     await waitForPortRelease(resumedPort)
@@ -529,13 +651,12 @@ describe('fresh setup to first use', () => {
     // A second relaunch must consume the exact persisted install and selections.
     // It must not repair or redownload anything to make first use work again.
     vi.resetModules()
-    const [{ llm: relaunchedLlm }, relaunchedSetup, relaunchedManager, relaunchedImage] =
-      await Promise.all([
-        import('../llm'),
-        import('../setup'),
-        import('../models-manager'),
-        import('../imagegen')
-      ])
+    const relaunchedSetup = await import('../setup')
+    const relaunchedApplication = await import('../composition/application')
+    const { llm: relaunchedLlm } = await import('../llm')
+    const relaunchedManager = await import('../models-manager')
+    const relaunchedImage = await import('../imagegen')
+    await startApplication(relaunchedApplication)
     const relaunchedPlan = await relaunchedSetup.getSetupPlan()
     expect(relaunchedPlan.items.every((item) => item.installed)).toBe(true)
     expect(relaunchedPlan.totalDownloadGb).toBe(0)
@@ -549,13 +670,15 @@ describe('fresh setup to first use', () => {
     await expect(generatedText('Describe this persisted image', [visionInput])).resolves.toBe(
       'fresh setup vision ready'
     )
-    await expect(relaunchedManager.activateModel(textModel.id)).resolves.toEqual({ success: true })
+    await expect(
+      selectThrough(relaunchedApplication.desktopApplication, 'text', textModel.id)
+    ).resolves.toEqual({ success: true })
     expect(await generatedText('Prove the persisted text model can answer')).toBe(
       'fresh setup chat ready'
     )
-    await expect(relaunchedManager.activateModel(visionModel.id)).resolves.toEqual({
-      success: true
-    })
+    await expect(
+      selectThrough(relaunchedApplication.desktopApplication, 'text', visionModel.id)
+    ).resolves.toEqual({ success: true })
     const { getActiveTranscription: getRelaunchedTranscription } =
       await import('../transcription/select')
     await expect(
@@ -574,7 +697,7 @@ describe('fresh setup to first use', () => {
     expect(remoteRequests).toBe(requestsAfterFirstUse)
 
     const relaunchedPort = relaunchedLlm.getPort()
-    relaunchedLlm.stop()
+    await stopApplication(relaunchedApplication)
     await waitForPortRelease(relaunchedPort)
     const relaunchedDatabase = await import('../database')
     relaunchedDatabase.getDB().close()

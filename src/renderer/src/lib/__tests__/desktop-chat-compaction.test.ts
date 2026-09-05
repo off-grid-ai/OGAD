@@ -84,4 +84,69 @@ describe('DesktopChatCompaction', () => {
     })
     expect(result).toBeNull()
   })
+
+  it('returns null when Desktop has generation but no llama settings port', async () => {
+    const b = boundary({ getLlmSettings: undefined })
+    const compaction = new DesktopChatCompaction(b)
+    const result = await compaction.compact({
+      identity,
+      messages: history,
+      responseMessages: [],
+      error: new Error('overflow'),
+      partial: { content: '', reasoning: '' },
+      signal
+    })
+    expect(result).toBeNull()
+    expect(b.generateText).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the configured ctxSize when llama reports no effective window', async () => {
+    async function summaryBudget(settings: {
+      ctxSize?: number
+      effectiveCtxSize?: number
+    }): Promise<number | undefined> {
+      const b = boundary({ getLlmSettings: vi.fn(async () => settings) })
+      const compacted = await new DesktopChatCompaction(b).compact({
+        identity,
+        messages: history,
+        responseMessages: [],
+        error: new Error('overflow'),
+        partial: { content: '', reasoning: '' },
+        signal
+      })
+      expect(compacted).not.toBeNull()
+      const call = vi.mocked(b.generateText!).mock.calls[0]
+      return call?.[1]?.maxTokens
+    }
+    const effective = await summaryBudget({ ctxSize: 8192, effectiveCtxSize: 2000 })
+    const configuredOnly = await summaryBudget({ ctxSize: 2000 })
+    const wide = await summaryBudget({ ctxSize: 8192 })
+    expect(effective).toEqual(expect.any(Number))
+    expect(configuredOnly).toBe(effective)
+    // The whole history fits an 8192 window, so nothing is summarized: the window was ctxSize.
+    expect(wide).toBeUndefined()
+  })
+
+  it('feeds the summary it persisted last time into the next compaction of the same conversation', async () => {
+    const b = boundary()
+    const compaction = new DesktopChatCompaction(b)
+    const context = {
+      identity,
+      messages: history,
+      responseMessages: [],
+      error: new Error('overflow'),
+      partial: { content: '', reasoning: '' },
+      signal
+    }
+    await compaction.compact(context)
+    await compaction.compact(context)
+    await compaction.compact({ ...context, identity: { conversationId: 'other', turnId: 'turn' } })
+
+    const prompts = vi
+      .mocked(b.generateText!)
+      .mock.calls.map((call) => String(call[0].at(-1)!.content))
+    expect(prompts[0]).not.toContain('Previous summary:')
+    expect(prompts[1]).toContain('Previous summary:\nthe summary')
+    expect(prompts[2]).not.toContain('Previous summary:')
+  })
 })

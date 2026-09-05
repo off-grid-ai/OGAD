@@ -58,8 +58,10 @@ describe('macOS native application adapter', () => {
     ])
     await expect(platform.listInstalled()).resolves.toBe(installed)
 
-    const safari = await platform.identify(installed[0]!)
-    const notes = await platform.identify(installed[1]!)
+    const { identify } = platform
+    if (!identify) throw new Error('The macOS adapter must identify installed applications.')
+    const safari = await identify.call(platform, installed[0]!)
+    const notes = await identify.call(platform, installed[1]!)
     expect(safari.id).toBe('com.apple.Safari')
     expect(notes.id).toBe('com.apple.Notes')
 

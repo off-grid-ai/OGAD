@@ -40,8 +40,11 @@ afterEach(() => {
 })
 
 describe('downloaded-models registry (real temp dir)', () => {
-  it('gives the facade async durable registry I/O without hiding damaged state', async () => {
+  it('gives the Shared owner atomic durable registry I/O without hiding damaged state', async () => {
     const ports = desktopAsyncDownloadedRegistryPorts(dir)
+    if (!('read' in ports)) {
+      throw new Error('Desktop downloaded-model storage must expose atomic row updates')
+    }
     await expect(ports.read()).resolves.toEqual([])
 
     fs.writeFileSync(path.join(dir, 'downloaded-models.json'), 'not json{')
@@ -50,7 +53,7 @@ describe('downloaded-models registry (real temp dir)', () => {
 
     fs.rmSync(path.join(dir, 'downloaded-models.json'))
     writeFiles(MINICPM.files)
-    await ports.writeAtomically([MINICPM])
+    await ports.updateAtomically(() => [MINICPM])
     await expect(ports.read()).resolves.toEqual([MINICPM])
     await expect(ports.fileSize(MINICPM.files[0]!)).resolves.toBe(2048)
     expect(fs.readdirSync(dir).some((name) => name.includes('.tmp-'))).toBe(false)

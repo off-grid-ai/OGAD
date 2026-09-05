@@ -19,6 +19,8 @@ export type RagEntity = { id: number; name?: string }
 export type RagEntityFact = { fact?: string } | string
 
 export type RagContext = {
+  /** Local durable ChatSession correlation. Lifecycle state remains in the Shared turn store. */
+  chatTurnId?: string
   masterMemory?: string | null
   memories?: RagMemory[]
   messages?: unknown[]

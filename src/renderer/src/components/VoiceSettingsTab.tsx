@@ -25,10 +25,10 @@ import { SettingsSelect } from './SettingsSelect'
 import { SettingsSlider } from './SettingsSlider'
 import type { SettingsWriteOutcome } from './SettingsTextField'
 import { LoadingDots } from './ui/loading-dots'
-import { failed, formatTransferSpeed, ok } from '@offgrid/application'
+import { failed, ok } from '@offgrid/application'
 import { projectProgress } from '@offgrid/ui'
 import { useTransferRate } from '@renderer/hooks/useTransferRate'
-import { formatStorageBytes } from './setup/storage-format'
+import { downloadProgressSummary } from '@renderer/lib/download-progress'
 
 /** Playback speed as the row has always shown it. */
 const speedLabel = (speed: number): string => `${speed.toFixed(1)}x`
@@ -102,6 +102,7 @@ function VoiceAssetStatus({
     )
   }
   if (state === 'downloading') {
+    const summary = downloadProgressSummary(progress)
     return (
       <div
         role="status"
@@ -111,12 +112,7 @@ function VoiceAssetStatus({
         <LoadingDots />
         Downloading {runtimeVoiceLanguage({ id: voice })?.label ?? language} audio
         {progress.determinate ? ` - ${Math.round(progress.percentage ?? 0)}%` : '...'}
-        {progress.totalBytes !== undefined
-          ? ` · ${formatStorageBytes(progress.currentBytes)} / ${formatStorageBytes(progress.totalBytes)}`
-          : ''}
-        {progress.bytesPerSecond !== undefined
-          ? ` · ${formatTransferSpeed(progress.bytesPerSecond)}`
-          : ''}
+        {` · ${summary.bytes} · ${summary.rate}`}
       </div>
     )
   }

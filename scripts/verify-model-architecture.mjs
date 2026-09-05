@@ -623,6 +623,41 @@ function checkTransferOwnership(fileName, source) {
   inspect(source)
 }
 
+// Structural startup guard, not evidence that Electron's live startup completed.
+const startupFile = 'src/main/application-main.ts'
+const startupSource = ts.createSourceFile(
+  startupFile,
+  fs.readFileSync(path.join(repoRoot, startupFile), 'utf8'),
+  ts.ScriptTarget.Latest,
+  true
+)
+const startupCalls = new Map()
+function collectStartupCalls(node) {
+  if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+    const name = node.expression.text
+    if (!startupCalls.has(name)) startupCalls.set(name, node)
+  }
+  ts.forEachChild(node, collectStartupCalls)
+}
+collectStartupCalls(startupSource)
+const tracingCall = startupCalls.get('installIpcDiagnostics')
+const tracesMainIpc =
+  tracingCall?.arguments.length === 1 &&
+  ts.isIdentifier(tracingCall.arguments[0]) &&
+  tracingCall.arguments[0].text === 'ipcMain'
+for (const handlerRegistration of ['setupLicenseIpc', 'setupIPC', 'loadProFeaturesMain']) {
+  const registrationCall = startupCalls.get(handlerRegistration)
+  if (!tracesMainIpc || !registrationCall || tracingCall.pos >= registrationCall.pos) {
+    report(
+      'startup-ipc-tracing-precedes-handler-registration',
+      startupFile,
+      startupSource,
+      registrationCall ?? startupSource,
+      `IPC tracing must precede ${handlerRegistration}; both calls must exist`
+    )
+  }
+}
+
 for (const file of files) {
   const text = fs.readFileSync(file, 'utf8')
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true)

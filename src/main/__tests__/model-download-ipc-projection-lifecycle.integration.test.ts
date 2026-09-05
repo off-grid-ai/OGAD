@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { ModelsOperationsSnapshot } from '@offgrid/application'
 import {
   createOffGridApplication,
   EMPTY_MODELS_OPERATIONS,
@@ -143,5 +144,44 @@ describe('model download IPC projection lifecycle', () => {
     expect(() => lifecycle.install(application.models)).not.toThrow()
     expect(await shutdown.shutdown()).toEqual([])
     expect(send).not.toHaveBeenCalled()
+  })
+})
+
+describe('refused repair-projector intent', () => {
+  it('lands the refusal in the canonical Shared operations projection that Electron forwards', async () => {
+    const application = createOffGridApplication({ models: desktopModelWorkspacePorts })
+    const published: ModelsOperationsSnapshot[] = []
+    const release = observeModelOperationsIpcProjection({
+      models: application.models,
+      targets: () => [
+        {
+          isDestroyed: () => false,
+          send: (_channel, projection) => published.push(projection as ModelsOperationsSnapshot)
+        }
+      ],
+      report: vi.fn()
+    })
+    try {
+      const outcome = await application.models.control({
+        type: 'repair-projector',
+        modelId: 'missing/vision-model',
+        operationId: 'repair-refused'
+      })
+
+      expect(outcome.ok).toBe(false)
+      if (outcome.ok) throw new Error('unreachable')
+      const projected = application.models.snapshot().operations
+      expect(projected.recent.find((op) => op.operationId === 'repair-refused')).toMatchObject({
+        kind: 'control',
+        controlOperation: 'repair-projector',
+        modelId: 'missing/vision-model',
+        state: 'failed',
+        failure: outcome.failure
+      })
+      expect(projected.active.some((op) => op.operationId === 'repair-refused')).toBe(false)
+      expect(published.at(-1)).toEqual(projected)
+    } finally {
+      release()
+    }
   })
 })

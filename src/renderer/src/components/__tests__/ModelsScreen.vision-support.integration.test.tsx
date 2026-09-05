@@ -2,14 +2,14 @@
 
 // Integration: the Models screen offers "Add vision support" for an INSTALLED
 // vision-capable model whose projector isn't on disk (the Gemma 4 E2B case), and
-// clicking it downloads the model (which fetches only the missing projector). Real
-// ModelsScreen; only window.api is faked. ModelsScreen captures window.api at module
-// load, so it's set before a dynamic import and methods read mutable per-test state.
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+// clicking it repairs the model by fetching only the missing projector. Real
+// ModelsScreen; only window.api is faked, and its methods read mutable per-test state.
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { render } from '@testing-library/react'
 import { modelControlBoundary } from './harness/model-control-snapshot'
+import { ModelsScreen } from '../ModelsScreen'
 
 type VisionStatus = Record<string, { supportsVision: boolean; projectorInstalled: boolean }>
 
@@ -43,17 +43,13 @@ const modelControl = modelControlBoundary({
   estimateModelFit: async () => ({ level: 'ok' })
 }
 
-let ModelsScreen: () => React.JSX.Element
-beforeAll(async () => {
-  ModelsScreen = (await import('../ModelsScreen')).ModelsScreen
-})
 beforeEach(() => {
   modelControl.reset()
 })
 afterEach(cleanup)
 
 describe('<ModelsScreen/> — Add vision support', () => {
-  it('shows the affordance for an installed vision model missing its projector, and downloads on click', async () => {
+  it('shows the affordance for an installed vision model missing its projector, and repairs it on click', async () => {
     visionStatus = { [VISION_MODEL.id]: { supportsVision: true, projectorInstalled: false } }
     const user = userEvent.setup()
     render(<ModelsScreen />)
@@ -63,8 +59,12 @@ describe('<ModelsScreen/> — Add vision support', () => {
     // The projector arrives through the one model-control command, named for this model.
     await waitFor(() =>
       expect(modelControl.intents).toEqual([
-        { type: 'refresh' },
-        { type: 'download', modelId: VISION_MODEL.id }
+        { type: 'refresh', operationId: expect.any(String) },
+        {
+          type: 'repair-projector',
+          modelId: VISION_MODEL.id,
+          operationId: expect.any(String)
+        }
       ])
     )
   })

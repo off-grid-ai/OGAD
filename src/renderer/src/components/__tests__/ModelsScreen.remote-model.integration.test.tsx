@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { modelControlBoundary } from './harness/model-control-snapshot'
+import { ModelsScreen } from '../ModelsScreen'
 
 const REMOTE_ID = 'remote-vision:home:google%2Fgemma-4'
 
@@ -39,10 +40,6 @@ const modelControl = modelControlBoundary({
   onModelProgress: () => () => {}
 }
 
-let ModelsScreen: () => React.JSX.Element
-beforeAll(async () => {
-  ModelsScreen = (await import('../ModelsScreen')).ModelsScreen
-})
 afterEach(() => {
   modelControl.reset()
   cleanup()

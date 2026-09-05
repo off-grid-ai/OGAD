@@ -1,4 +1,5 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import type { OffGridApplication } from '@offgrid/application'
 import {
   pickTranscription,
   resolveTranscription,
@@ -12,10 +13,24 @@ const service = (available: boolean, text: string): TranscriptionService => ({
   transcribe: async () => ({ text })
 })
 
+let application: OffGridApplication
+let releaseApplication: (() => void) | undefined
+
 beforeAll(async () => {
-  // Production registers Shared LLM, generation, and residency services at the
-  // application composition root. Keep the real services in this adapter test.
-  await import('../../model-services')
+  const [applicationModule, modelServices, applicationAccess] = await Promise.all([
+    import('@offgrid/application'),
+    import('../../model-services'),
+    import('../../composition/application-access')
+  ])
+  application = applicationModule.createOffGridApplication({
+    models: modelServices.desktopModelWorkspacePorts
+  })
+  releaseApplication = applicationAccess.registerDesktopApplication(application)
+})
+
+afterAll(async () => {
+  releaseApplication?.()
+  await application?.stop()
 })
 
 describe('Desktop transcription adapter selection', () => {

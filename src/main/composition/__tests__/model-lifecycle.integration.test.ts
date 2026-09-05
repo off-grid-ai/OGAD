@@ -46,14 +46,17 @@ describe('Desktop model lifecycle composition', () => {
         modality,
         selectedId: model.id,
         selectedRouteId: model.routeId ?? null,
-        model: modality === 'text' ? model : null
+        model: modality === 'text' ? model : null,
+        // shared 59f0862 separates install from runtime readiness on the active snapshot.
+        ready: modality === 'text'
       }),
       select,
       refresh
     }
     const ports = desktopModelLifecyclePorts(new Map([[adapter.id, adapter]]), routing)
 
-    const load = ports.resolveLoad('text', 'local:gemma-local')
+    // shared 48adf0b: resolveLoad carries the load command and may settle asynchronously.
+    const load = await ports.resolveLoad('text', 'local:gemma-local', { override: false })
     expect(load).toMatchObject({
       routeId: 'local:gemma-local',
       spec: {
@@ -71,10 +74,10 @@ describe('Desktop model lifecycle composition', () => {
     expect(loaded).toEqual([model])
     expect(unloaded).toEqual([model])
 
-    const unload = ports.resolveUnload('text')
+    const unload = await ports.resolveUnload('text')
     expect(unload).toMatchObject({ key: 'text:local:gemma-local', hadRuntime: true })
     await expect(unload.unload()).resolves.toEqual({ reclaimed: true })
-    const inactive = ports.resolveUnload('voice')
+    const inactive = await ports.resolveUnload('voice')
     expect(inactive).toMatchObject({ key: 'voice:inactive', hadRuntime: false })
     await expect(inactive.unload()).resolves.toEqual({ reclaimed: true })
 
@@ -88,17 +91,25 @@ describe('Desktop model lifecycle composition', () => {
   it('fails closed when an identifier or native lifecycle adapter is unavailable', () => {
     const routing: WorkspaceLifecycleRouting = {
       lookup: () => null,
-      active: (modality) => ({ modality, selectedId: null, selectedRouteId: null, model: null }),
+      active: (modality) => ({
+        modality,
+        selectedId: null,
+        selectedRouteId: null,
+        model: null,
+        ready: false
+      }),
       select: async () => undefined,
       refresh: async () => []
     }
     expect(() =>
-      desktopModelLifecyclePorts(new Map(), routing).resolveLoad('text', 'missing')
+      desktopModelLifecyclePorts(new Map(), routing).resolveLoad('text', 'missing', { override: false })
     ).toThrow('No local text model matches missing.')
 
     const knownRouting = { ...routing, lookup: () => model }
     expect(() =>
-      desktopModelLifecyclePorts(new Map(), knownRouting).resolveLoad('text', model.id)
+      desktopModelLifecyclePorts(new Map(), knownRouting).resolveLoad('text', model.id, {
+        override: false
+      })
     ).toThrow('Model lifecycle adapter is unavailable: native-llama.')
   })
 })

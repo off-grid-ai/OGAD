@@ -155,18 +155,9 @@ describe('<MemoryChat/> Desktop voice turn modes', () => {
 
   it('uses the active transcription model for text dictation and lets the user cancel', async () => {
     installMicrophone()
-    let resolveTranscript!: (text: string) => void
-    const transcript = new Promise<string>((resolve) => {
-      resolveTranscript = resolve
-    })
     const boundary = new ChatBoundary()
-    const transcribeAudio = vi
-      .fn()
-      .mockImplementationOnce(() => transcript)
-      .mockResolvedValueOnce('This text came from the selected speech model')
-    const cancelTranscription = vi.fn(async () => true)
     const getTranscriptionInfo = vi.fn(transcriptionInfo)
-    Object.assign(boundary.api, { transcribeAudio, cancelTranscription, getTranscriptionInfo })
+    Object.assign(boundary.api, { getTranscriptionInfo })
     installBoundary(boundary)
     const user = userEvent.setup()
     renderChat({ conversationId: 'conversation-a' })
@@ -174,37 +165,26 @@ describe('<MemoryChat/> Desktop voice turn modes', () => {
     await user.click(await screen.findByRole('button', { name: 'Record voice' }))
     await user.click(await screen.findByRole('button', { name: 'Stop recording' }))
 
-    expect(await screen.findByRole('button', { name: 'Cancel transcription' })).toBeTruthy()
-    expect(transcribeAudio).toHaveBeenCalledOnce()
+    expect(boundary.voiceQuestionOperations).toHaveLength(1)
     expect(getTranscriptionInfo).toHaveBeenCalledOnce()
     expect(boundary.calls).toHaveLength(0)
-
-    await user.click(screen.getByRole('button', { name: 'Cancel transcription' }))
-    const firstRequestId = transcribeAudio.mock.calls[0]?.[2]
-    expect(firstRequestId).toEqual(expect.any(String))
-    expect(cancelTranscription).toHaveBeenCalledOnce()
-    expect(cancelTranscription).toHaveBeenCalledWith(firstRequestId)
-    resolveTranscript('This cancelled result must not appear')
-    await flush()
-    expect((screen.getByPlaceholderText(/Ask about/) as HTMLTextAreaElement).value).toBe('')
-
-    await user.click(screen.getByRole('button', { name: 'Record voice' }))
-    await user.click(screen.getByRole('button', { name: 'Stop recording' }))
+    boundary.emitVoiceQuestion({
+      type: 'transcribed',
+      text: 'This text came from the selected speech model'
+    })
     await waitFor(() =>
       expect((screen.getByPlaceholderText(/Ask about/) as HTMLTextAreaElement).value).toBe(
         'This text came from the selected speech model'
       )
     )
-    expect(transcribeAudio).toHaveBeenCalledTimes(2)
+    boundary.emitVoiceQuestion({ type: 'cancelled' })
   })
 
   it('keeps the voice composer compact and Auto sends after speech ends in silence', async () => {
     const { getUserMedia } = installMicrophone()
     const boundary = new ChatBoundary()
-    const transcribeAudio = vi.fn(async () => 'Schedule the planning review')
     Object.assign(boundary.api, {
       getSettings: vi.fn(async () => ({ composerVoiceMode: true })),
-      transcribeAudio,
       getTranscriptionInfo: vi.fn(transcriptionInfo)
     })
     installBoundary(boundary)
@@ -233,7 +213,9 @@ describe('<MemoryChat/> Desktop voice turn modes', () => {
     act(() => vi.advanceTimersByTime(5_200))
     await flush()
 
-    expect(transcribeAudio).toHaveBeenCalledOnce()
+    expect(boundary.voiceQuestionOperations).toHaveLength(1)
+    boundary.requestVoiceTurn('Schedule the planning review')
+    await flush()
     expect(boundary.calls).toHaveLength(1)
     expect(boundary.calls[0]?.query).toBe('Schedule the planning review')
   })
@@ -261,11 +243,9 @@ describe('<MemoryChat/> Desktop voice turn modes', () => {
 
   it('keeps Hands-free off during the reply, rearms after playback, and can pause', async () => {
     const { getUserMedia } = installMicrophone()
-    vi.stubGlobal('Audio', AudioBoundary)
     const boundary = new ChatBoundary()
     Object.assign(boundary.api, {
       getSettings: vi.fn(async () => ({ composerVoiceMode: true })),
-      transcribeAudio: vi.fn(async () => 'What is on my schedule?'),
       getTranscriptionInfo: vi.fn(transcriptionInfo)
     })
     installBoundary(boundary)
@@ -287,19 +267,31 @@ describe('<MemoryChat/> Desktop voice turn modes', () => {
     microphoneLevel = 0.01
     act(() => vi.advanceTimersByTime(5_200))
     await flush()
+    expect(boundary.voiceQuestionOperations).toHaveLength(1)
+    boundary.requestVoiceTurn('What is on my schedule?')
+    await flush()
     expect(boundary.calls).toHaveLength(1)
 
     boundary.resolve(0, 'You have a planning review at 10.')
     await flush()
-    expect(boundary.speechTurns).toHaveLength(1)
+    expect(boundary.api.voiceTurn.respond).toHaveBeenCalledWith({
+      requestId: 'request-voice-question-1',
+      status: 'completed',
+      answer: 'You have a planning review at 10.'
+    })
     expect(getUserMedia).toHaveBeenCalledOnce()
 
-    boundary.speechTurns[0]?.resolve({ dataUrl: 'data:audio/wav;base64,reply' })
+    boundary.emitVoiceQuestion({
+      type: 'speaking',
+      handle: { operationId: 'speech-voice-question-1' }
+    })
     await flush()
-    expect(AudioBoundary.instances).toHaveLength(1)
     expect(getUserMedia).toHaveBeenCalledOnce()
 
-    AudioBoundary.instances[0]?.end()
+    boundary.emitVoiceQuestion({
+      type: 'completed',
+      answer: 'You have a planning review at 10.'
+    })
     await flush()
     act(() => vi.advanceTimersByTime(1_999))
     expect(getUserMedia).toHaveBeenCalledOnce()
@@ -318,20 +310,29 @@ describe('<MemoryChat/> Desktop voice turn modes', () => {
     installMicrophone()
     const boundary = new ChatBoundary()
     Object.assign(boundary.api, {
-      getSettings: vi.fn(async () => ({ composerVoiceMode: true })),
-      transcribeAudio: vi.fn(async () => 'Check my calendar'),
+      getSettings: vi.fn(async () => ({ composerVoiceMode: true, composerThinking: false })),
       getTranscriptionInfo: vi.fn(transcriptionInfo)
     })
     installBoundary(boundary)
     const user = userEvent.setup()
     renderChat({ conversationId: 'conversation-a' })
 
+    const thinking = await screen.findByRole('button', { name: 'Thinking' })
+    await user.click(thinking)
+    await waitFor(() => expect(thinking.className).toContain('text-primary'))
     await user.click(await screen.findByRole('button', { name: 'Start voice recording' }))
     await user.click(screen.getByRole('button', { name: 'Stop voice recording' }))
+    await waitFor(() => expect(boundary.voiceQuestionOperations).toHaveLength(1))
+    boundary.requestVoiceTurn('Check my calendar')
     await waitFor(() => expect(boundary.calls).toHaveLength(1))
+    expect(boundary.calls[0]?.thinking).toBe(true)
+    expect(boundary.calls[0]?.streamId).toBe('turn-voice-question-1')
+    await flush()
 
-    boundary.emitReasoning(0, 'Check the calendar before answering.')
-    boundary.emit(0, 'You have a planning review at 10.')
+    act(() => {
+      boundary.emitReasoning(0, 'Check the calendar before answering.')
+      boundary.emit(0, 'You have a planning review at 10.')
+    })
     expect(await screen.findByText('Check the calendar before answering.')).toBeTruthy()
     expect(screen.getByRole('button', { name: /Thinking…/ })).toBeTruthy()
 
@@ -349,21 +350,25 @@ describe('<MemoryChat/> Desktop voice turn modes', () => {
     installMicrophone()
     const boundary = new ChatBoundary()
     Object.assign(boundary.api, {
-      getSettings: vi.fn(async () => ({ composerVoiceMode: true })),
-      transcribeAudio: vi.fn(async () => 'Hello. How are you?'),
+      getSettings: vi.fn(async () => ({ composerVoiceMode: true, composerThinking: true })),
       getTranscriptionInfo: vi.fn(transcriptionInfo)
     })
     installBoundary(boundary)
     const user = userEvent.setup()
     renderChat({ conversationId: 'conversation-a' })
 
-    await user.click(await screen.findByRole('button', { name: 'Thinking' }))
-    await user.click(screen.getByRole('button', { name: 'Start voice recording' }))
+    await user.click(await screen.findByRole('button', { name: 'Start voice recording' }))
     await user.click(screen.getByRole('button', { name: 'Stop voice recording' }))
+    await waitFor(() => expect(boundary.voiceQuestionOperations).toHaveLength(1))
+    boundary.requestVoiceTurn('Hello. How are you?')
     await waitFor(() => expect(boundary.calls).toHaveLength(1))
 
     boundary.resolve(0, 'I am doing well. How can I help?')
-    const unavailable = await screen.findByRole('button', { name: /Thinking unavailable/i })
+    expect(await screen.findByText('I am doing well. How can I help?')).toBeTruthy()
+    const unavailableButtons = await screen.findAllByRole('button', {
+      name: /Thinking unavailable/i
+    })
+    const unavailable = unavailableButtons.at(-1)!
     await user.click(unavailable)
     expect(
       await screen.findByText('This model did not return readable thinking details for this turn.')

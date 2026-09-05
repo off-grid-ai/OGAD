@@ -15,7 +15,7 @@ import type {
   ResidentReclaim,
   RuntimeModel
 } from '@offgrid/models'
-import { llm, type StreamChatOptions } from './llm'
+import { llm, type LlmSettings, type StreamChatOptions } from './llm'
 import type { StreamResult } from './llm/stream'
 import type { GenerationMetrics } from '../shared/generation-metrics'
 import { getRemoteVisionServer } from './vision/remote-vision-server'
@@ -119,39 +119,55 @@ export class DesktopGenerationObservations {
 /** Desktop-only runtime metrics. Model behavior and state remain in ModelsFacade. */
 export const desktopGenerationObservations = new DesktopGenerationObservations()
 
+export interface DesktopLocalTextRuntime {
+  load(): Promise<void>
+  unload(): Promise<void>
+  state(): Promise<{
+    ready: boolean
+    loaded: boolean
+    reasoning?: ReturnType<typeof llm.getReasoningMetadata>
+    contextLength?: number
+  }>
+  settings(): LlmSettings
+  streamChatLocal(
+    ...args: Parameters<typeof llm.streamChatLocal>
+  ): ReturnType<typeof llm.streamChatLocal>
+}
+
 export class DesktopLocalGenerationAdapter extends DesktopGenerationAdapter {
   constructor(
     observations: DesktopGenerationObservations,
-    readonly id = 'desktop.llama',
-    private readonly lifecycle: {
-      load(): Promise<void>
-      unload(): Promise<void>
-    } = {
-      load: () => llm.init(),
-      unload: async () => {
-        await llm.unload()
-      }
-    }
+    readonly id: string,
+    private readonly runtime: DesktopLocalTextRuntime
   ) {
     super(observations)
   }
 
-  load(): Promise<void> {
-    return this.lifecycle.load()
+  async load(): Promise<void> {
+    await this.runtime.load()
+  }
+
+  runtimeState(): ReturnType<DesktopLocalTextRuntime['state']> {
+    return this.runtime.state()
+  }
+
+  runtimeSettings(): LlmSettings {
+    return this.runtime.settings()
   }
 
   async unload(): Promise<void> {
-    await this.lifecycle.unload()
+    await this.runtime.unload()
   }
 
-  protected run(
+  protected async run(
     model: RuntimeModel,
     messages: OpenAIProjectedMessage[],
     onDelta: (text: string, kind: 'content' | 'reasoning') => void,
     options: StreamChatOptions,
     timeoutMs: number | undefined
   ): Promise<StreamResult> {
-    return llm.streamChatLocal(
+    const runtimeState = await this.runtime.state()
+    return this.runtime.streamChatLocal(
       messages,
       onDelta,
       {
@@ -159,7 +175,7 @@ export class DesktopLocalGenerationAdapter extends DesktopGenerationAdapter {
         reasoningWire: reasoningWireForGeneration(
           { reasoning: options.reasoning },
           {
-            reasoning: llm.getReasoningMetadata() ?? model.reasoning
+            reasoning: runtimeState.reasoning ?? model.reasoning
           }
         )
       },

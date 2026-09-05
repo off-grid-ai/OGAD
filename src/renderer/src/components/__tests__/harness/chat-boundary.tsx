@@ -1,12 +1,23 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { vi, type Mock } from 'vitest'
+import { vi } from 'vitest'
 import { MemoryChat } from '../../MemoryChat'
 import { TooltipProvider } from '../../ui/tooltip'
 import type {
   ActiveChatStreamContract,
   RagChatResultContract
 } from '../../../../../shared/ipc-contracts'
+import { modelControlSnapshot } from './model-control-snapshot'
+import type { WorkflowFailure } from '@offgrid/application'
+import type { AskByVoiceEvent } from '@offgrid/application'
+import type { AskByVoiceEventMessage } from '../../../../../shared/ask-by-voice-contract'
+import type { VoiceTurnHostMessage } from '../../../../../shared/voice-turn-contract'
+
+type VoiceQuestionEvent = AskByVoiceEvent extends infer Event
+  ? Event extends { readonly operationId: string }
+    ? Omit<Event, 'operationId'>
+    : never
+  : never
 
 export type StreamEvent = {
   streamId: string
@@ -100,9 +111,37 @@ function deferred<T>(): {
  * instead of failing each journey with "is not a function". A journey that needs a
  * capability on installs its own boundary after the spread.
  */
-export function preloadCapabilityFakes(): { chatVisionAvailable: Mock<() => Promise<boolean>> } {
-  return { chatVisionAvailable: vi.fn(async () => false) }
+function boundaryFactory<T>(factory: () => T): () => T {
+  return factory
 }
+
+export const preloadCapabilityFakes = boundaryFactory(() => {
+  const modelControl = modelControlSnapshot({ kinds: [], models: [] })
+  return {
+    chatVisionAvailable: vi.fn(async () => false),
+    getModelControlProjection: vi.fn(async () => modelControl),
+    onModelControlProjection: vi.fn(() => () => {}),
+    onImageGenJobState: vi.fn(() => () => {}),
+    onImageGenConversationUpdated: vi.fn(() => () => {}),
+    imageGenJobStatus: vi.fn(async () => []),
+    getTranscriptionInfo: vi.fn(async () => null),
+    speechCommands: {
+      transcribe: vi.fn(),
+      cancelTranscription: vi.fn(),
+      speak: vi.fn(async () => ({ ok: true, value: { operationId: 'test-speech' } })),
+      feedStream: vi.fn(async () => {}),
+      finishStream: vi.fn(async () => {}),
+      interrupt: vi.fn(async () => {}),
+      onEvent: vi.fn(() => () => {})
+    },
+    askByVoice: {
+      start: vi.fn(async () => {}),
+      cancel: vi.fn(async () => {}),
+      onEvent: vi.fn(() => () => {})
+    },
+    voiceTurn: { onRequest: vi.fn(() => () => {}), respond: vi.fn() }
+  }
+})
 
 export class ChatBoundary {
   constructor(private readonly createSplitter?: ThinkSplitterFactory) {}
@@ -135,6 +174,9 @@ export class ChatBoundary {
   }[] = []
 
   readonly speechTurns: ReturnType<typeof deferred<{ dataUrl: string }>>[] = []
+  readonly manualSpeechTurns: ReturnType<
+    typeof deferred<{ ok: true; value: { operationId: string } }>
+  >[] = []
   readonly activeRagStreams: ActiveChatStreamContract[] = []
 
   private streamCallback: ((event: StreamEvent) => void) | null = null
@@ -142,6 +184,10 @@ export class ChatBoundary {
   private conversationChangedCallback:
     | ((change: { conversationId: string; projectId?: string | null }) => void)
     | null = null
+  private askByVoiceEventCallback: ((message: AskByVoiceEventMessage) => void) | null = null
+  private voiceTurnRequestCallback: ((message: VoiceTurnHostMessage) => void) | null = null
+  private nextVoiceQuestionOperation = 0
+  readonly voiceQuestionOperations: string[] = []
   private readonly rawSplitters = new Map<number, ThinkSplitter>()
   private nextMessageId = 10
   private pendingUserWrite: ReturnType<typeof deferred<void>> | null = null
@@ -200,7 +246,7 @@ export class ChatBoundary {
     const active = (await boundary.getActiveModalities?.()) as
       | Record<string, string | null>
       | undefined
-    return {
+    return modelControlSnapshot({
       kinds: catalog?.kinds ?? [],
       models: catalog?.models ?? [],
       installed: [],
@@ -213,7 +259,7 @@ export class ChatBoundary {
         computer_use: active?.computer_use ?? null
       },
       computerUse: null
-    }
+    })
   }
 
   readonly api = {
@@ -263,6 +309,8 @@ export class ChatBoundary {
     vision: { control: this.stopComputerTask },
     onImageGenProgress: vi.fn(() => () => {}),
     onImageGenJobState: vi.fn(() => () => {}),
+    onImageGenConversationUpdated: vi.fn(() => () => {}),
+    imageGenJobStatus: vi.fn(async () => []),
     onRagConversationsChanged: vi.fn(
       (callback: (change: { conversationId: string; projectId?: string | null }) => void) => {
         this.conversationChangedCallback = callback
@@ -321,7 +369,12 @@ export class ChatBoundary {
     speechCommands: {
       transcribe: vi.fn(),
       cancelTranscription: vi.fn(),
-      speak: vi.fn(async () => ({ kind: 'spoken' as const })),
+      speak: vi.fn((command: { operationId: string }) => {
+        void command
+        const turn = deferred<{ ok: true; value: { operationId: string } }>()
+        this.manualSpeechTurns.push(turn)
+        return turn.promise
+      }),
       feedStream: vi.fn(async () => {}),
       finishStream: vi.fn(async () => {}),
       interrupt: vi.fn(async () => {}),
@@ -332,14 +385,47 @@ export class ChatBoundary {
     // "window.api.<name>.<door> is not a function" and tears the render down before any
     // assertion is reached.
     askByVoice: {
-      start: vi.fn(async () => {}),
+      start: vi.fn(async () => {
+        const operationId = `voice-question-${++this.nextVoiceQuestionOperation}`
+        this.voiceQuestionOperations.push(operationId)
+        return { operationId }
+      }),
       cancel: vi.fn(async () => {}),
-      onEvent: vi.fn(() => () => {})
+      onEvent: vi.fn((callback: (message: AskByVoiceEventMessage) => void) => {
+        this.askByVoiceEventCallback = callback
+        return () => {
+          if (this.askByVoiceEventCallback === callback) this.askByVoiceEventCallback = null
+        }
+      })
     },
-    voiceTurn: { onRequest: vi.fn(() => () => {}), respond: vi.fn() },
+    voiceTurn: {
+      onRequest: vi.fn((callback: (message: VoiceTurnHostMessage) => void) => {
+        this.voiceTurnRequestCallback = callback
+        return () => {
+          if (this.voiceTurnRequestCallback === callback) this.voiceTurnRequestCallback = null
+        }
+      }),
+      respond: vi.fn()
+    },
     getTranscriptionInfo: vi.fn(async () => null),
     getSettings: vi.fn(async () => ({})),
+    getLlmSettings: vi.fn(async () => ({})),
+    listTools: vi.fn(async () => []),
+    mcpList: vi.fn(async () => []),
     getModelControlProjection: vi.fn(() => this.modelControlSnapshot()),
+    controlModel: vi.fn(async (intent: { operationId?: string }) => ({
+      ok: true as const,
+      value: {
+        status: 'completed' as const,
+        operationId: intent.operationId ?? 'chat-boundary-control',
+        projection: await this.modelControlSnapshot()
+      }
+    })),
+    getComputerUseActiveModels: vi.fn(async () => ({
+      strategy: 'same_as_chat' as const,
+      strategyLabel: 'Same as Chat',
+      models: []
+    })),
     saveSetting: vi.fn(async () => {}),
     listProjects: vi.fn(async () => this.projects.map((item) => ({ ...item }))),
     styleThumbs: vi.fn(async () => ({})),
@@ -391,6 +477,38 @@ export class ChatBoundary {
   emitReasoning(callIndex: number, text: string): void {
     const call = this.calls[callIndex]!
     this.streamCallback?.({ streamId: call.streamId, type: 'reasoning', text })
+  }
+
+  failVoiceQuestion(failure: WorkflowFailure): void {
+    const operationId = this.voiceQuestionOperations.at(-1)
+    if (!operationId) throw new Error('No voice question is active')
+    this.askByVoiceEventCallback?.({
+      operationId,
+      event: { type: 'failed', operationId, failure }
+    })
+  }
+
+  emitVoiceQuestion(event: VoiceQuestionEvent): void {
+    const operationId = this.voiceQuestionOperations.at(-1)
+    if (!operationId) throw new Error('No voice question is active')
+    this.askByVoiceEventCallback?.({
+      operationId,
+      event: { ...event, operationId } as AskByVoiceEvent
+    })
+  }
+
+  requestVoiceTurn(text: string, conversationId = 'conversation-a'): void {
+    const operationId = this.voiceQuestionOperations.at(-1)
+    if (!operationId) throw new Error('No voice question is active')
+    this.voiceTurnRequestCallback?.({
+      type: 'run',
+      requestId: `request-${operationId}`,
+      operationId,
+      turnId: `turn-${operationId}`,
+      conversationId,
+      projectId: null,
+      text
+    })
   }
 
   emitToolStep(callIndex: number, name: string): void {

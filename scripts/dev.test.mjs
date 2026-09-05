@@ -10,7 +10,7 @@ import {
   symlinkSync,
   writeFileSync
 } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import process from 'node:process'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
@@ -81,6 +81,60 @@ setInterval(()=>{},1000);
     assert.equal(statSync(proofPath).mtimeMs, proofTime, 'valid proof starts without rebuilding')
     assert.throws(() => startDevSupervisor(options), /Another development supervisor/)
     assertPassed(fixture.verify())
+
+    const rendererSource = join(fixture.desktop, 'src/renderer/source.tsx')
+    mkdirSync(join(fixture.desktop, 'src/renderer'), { recursive: true })
+    writeFileSync(rendererSource, 'export const rendererEdit = true')
+    await new Promise((resolve) => setTimeout(resolve, 250))
+    assert.equal(starts(), 1, 'renderer edits must stay inside the existing HMR process')
+    assert.doesNotThrow(() => process.kill(events()[0].pid, 0))
+    assert.equal(statSync(proofPath).mtimeMs, proofTime, 'renderer edits must not rebuild Shared')
+
+    const ignoredSharedWrites = [
+      ['packages/models/test/watcher-noise.test.mjs', 'test'],
+      ['packages/models/__tests__/watcher-noise.ts', 'nested test'],
+      ['packages/models/__snapshots__/watcher-noise.snap', 'test snapshot'],
+      ['packages/models/test-results/results.json', 'test results'],
+      ['packages/models/playwright-report/index.html', 'test report'],
+      ['packages/models/dist/watcher-output.js', 'dist'],
+      ['packages/models/build/watcher-output.js', 'build output'],
+      ['packages/models/out/watcher-output.js', 'other output'],
+      ['packages/models/coverage/report.json', 'coverage'],
+      ['packages/models/.nyc_output/process.json', 'coverage process output'],
+      ['packages/models/.cache/tool-state.json', 'cache'],
+      ['packages/models/.turbo/tool-state.json', 'task runner output'],
+      ['packages/models/.vite/tool-state.json', 'bundler output'],
+      ['packages/models/.vitest/tool-state.json', 'test runner output'],
+      ['packages/models/tmp/generated.txt', 'temporary output'],
+      ['packages/models/temp/generated.txt', 'temporary output'],
+      ['packages/models/.tmp/generated.txt', 'temporary output'],
+      ['packages/models/src/editor-write.tmp', 'temporary file'],
+      ['packages/models/src/watcher.log', 'log file'],
+      ['packages/models/src/.eslintcache', 'linter cache'],
+      ['packages/models/build.tsbuildinfo', 'incremental compiler state'],
+      ['packages/models/src/.DS_Store', 'filesystem metadata'],
+      ['packages/models/.git/index', 'git metadata']
+    ]
+    for (const [relativePath, contents] of ignoredSharedWrites) {
+      const file = join(fixture.shared, relativePath)
+      mkdirSync(dirname(file), { recursive: true })
+      writeFileSync(file, contents)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250))
+    assert.equal(
+      starts(),
+      1,
+      'tests, generated output, git metadata, coverage, caches, and transient files must not restart Electron'
+    )
+    assert.equal(
+      statSync(proofPath).mtimeMs,
+      proofTime,
+      'ignored Shared writes must not invalidate or rebuild proven artifacts'
+    )
+    const proofContents = readFileSync(proofPath)
+    writeFileSync(proofPath, proofContents)
+    await new Promise((resolve) => setTimeout(resolve, 250))
+    assert.equal(starts(), 1, 'provenance publication must not restart Electron')
 
     const input = join(fixture.shared, 'packages/models/payload/watched-change.txt')
     writeFileSync(input, 'first edit')

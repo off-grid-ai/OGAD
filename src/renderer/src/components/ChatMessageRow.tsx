@@ -131,7 +131,7 @@ function VoiceMessageRow({
         defaultSpeed={playbackSpeed}
       />
     )
-  } else if (isSupportingMessage(message)) {
+  } else if (!message.streaming && isSupportingMessage(message)) {
     body = <ChatThinkingBlock content={message.reasoning ?? ''} label={message.reasoningLabel} />
   } else if (message.image) {
     body = (
@@ -352,7 +352,6 @@ function MessageBubble({
         <MessageMarkdown message={message} navigation={navigation} />
       )}
       <ResponseCutoffNotice cutoff={message.cutoff} />
-      {state.showGenerationDetails ? <GenerationMetricsRow metrics={message.metrics} /> : null}
       <ImageMemoryRetryAction
         message={message}
         loading={state.loading}
@@ -386,7 +385,12 @@ function StandardMessageRow({
     <div className={standardMessageRowClass(message)} data-testid={`chat-message-${message.id}`}>
       <MessageThinkingHeader message={message} />
       <MessageBubble message={message} state={state} actions={actions} navigation={navigation} />
-      <ChatToolRows tools={message.toolCalls} liveTask={liveTask} />
+      <ChatToolRows
+        tools={message.toolCalls}
+        liveTask={liveTask}
+        context={message.context}
+        navigation={navigation}
+      />
       {message.role === 'user' ? (
         message.context?.taskGuidance ? (
           <div className="mt-1.5 flex items-center gap-3">
@@ -413,10 +417,13 @@ function StandardMessageRow({
           onOpenArtifact={actions.openArtifact}
           onRegenerate={() => actions.regenerate(message.id)}
           onSelectVariant={(direction) => actions.selectVariant(message.id, direction)}
-          onSpeak={() => actions.speak(message.id, message.content)}
+          onSpeak={() => actions.speak(message.id, messageToSpeakable(message.content))}
         />
       )}
-      {message.role === 'assistant' ? (
+      {message.role === 'assistant' && state.showGenerationDetails ? (
+        <GenerationMetricsRow metrics={message.metrics} />
+      ) : null}
+      {message.role === 'assistant' && !message.toolCalls?.length && !liveTask ? (
         <ContextDisclosure context={message.context} navigation={navigation} />
       ) : null}
     </div>

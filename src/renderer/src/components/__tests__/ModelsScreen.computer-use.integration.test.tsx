@@ -3,11 +3,12 @@
 // Computer Use enters through the real Models screen and uses the same catalog projection, filters,
 // installed/available sections, card actions, and progress state as every other model kind. Only the
 // Electron IPC bridge is controlled because it is outside the renderer process.
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { CATALOG, MODEL_KINDS, modelsByKind } from '@offgrid/models'
 import { modelControlBoundary } from './harness/model-control-snapshot'
+import { ModelsScreen } from '../ModelsScreen'
 
 const computerUseModels = modelsByKind('computer_use')
 const uiMate = computerUseModels.find((model) => model.id === 'bartowski/tencent_UI-Mate-9B-GGUF')
@@ -33,10 +34,6 @@ const modelControl = modelControlBoundary({
   onModelProgress: () => () => {}
 }
 
-let ModelsScreen: typeof import('../ModelsScreen').ModelsScreen
-beforeAll(async () => {
-  ModelsScreen = (await import('../ModelsScreen')).ModelsScreen
-})
 afterEach(() => {
   modelControl.reset()
   cleanup()

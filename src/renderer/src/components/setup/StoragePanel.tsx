@@ -14,15 +14,10 @@ import {
   isFailedDownloadStatus,
   modelsFailureMessage,
   type DownloadDurabilityHealth,
-  type ModelControlProjection,
-  type PublicDownloadInfo
+  type ModelControlProjection
 } from '@offgrid/application'
 import { modelControlClient } from '@renderer/lib/model-control-client'
 import { modelControlSurfaceForKind } from '@offgrid/application'
-import {
-  useModelDownloadProgress,
-  type ModelDownloadProgressEvent
-} from '@renderer/hooks/useModelDownloadProgress'
 import { ModelDownloadRows, type DownloadEntry } from './ModelDownloadRows'
 
 interface ModelDiskEntry {
@@ -71,101 +66,89 @@ export function StoragePanel(): React.ReactElement {
   const [cleanupFailure, setCleanupFailure] = useState<OrphanCleanupResult | null>(null)
   const [modelActionNotice, setModelActionNotice] = useState<ModelActionNotice | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
-  const liveProgress = useRef(new Map<string, DownloadEntry>())
+  const [retryBusy, setRetryBusy] = useState<ReadonlySet<string>>(new Set())
+  const [cancelBusy, setCancelBusy] = useState<ReadonlySet<string>>(new Set())
+  const retrying = useRef(new Set<string>())
+  const changingDownloads = useRef(new Set<string>())
+  const refreshVersion = useRef(0)
 
-  const applyModelControlProjection = useCallback(
-    (projection: ModelControlProjection): void =>
-      setActiveIds(new Set(projection.activeIds)),
-    []
-  )
+  const applyModelControlProjection = useCallback((projection: ModelControlProjection): void => {
+    setActiveIds(new Set(projection.activeIds))
+    setDownloads(
+      projection.downloads.map(
+        (entry): DownloadEntry => ({
+          downloadId: entry.downloadId,
+          modelId: entry.modelId,
+          status: entry.status,
+          currentFile: entry.currentFile ?? entry.fileName,
+          currentFileRole: entry.currentFileRole,
+          downloadedBytes: entry.bytesDownloaded,
+          totalBytes: entry.totalBytes,
+          downloadedMB: (entry.bytesDownloaded / 1024 / 1024).toFixed(1),
+          totalMB: (entry.totalBytes / 1024 / 1024).toFixed(1),
+          ...(entry.totalBytes > 0
+            ? {
+                percent: Math.min(100, Math.round((entry.bytesDownloaded / entry.totalBytes) * 100))
+              }
+            : {}),
+          error: entry.reason,
+          bytesPerSecond: entry.bytesPerSecond
+        })
+      )
+    )
+    setRecoveryHealth(projection.downloadDurability)
+  }, [])
 
   const refresh = useCallback(async () => {
+    const version = ++refreshVersion.current
+    const currentRead = (): boolean => version === refreshVersion.current
     try {
       const s = await api.getStorageInfo()
+      if (!currentRead()) return
       if (s) setInfo(s as StorageInfo)
       setStorageError(null)
     } catch (error) {
+      if (!currentRead()) return
       setStorageError(
         error instanceof Error ? error.message : 'Your model library could not be read.'
       )
     }
-    let control: ModelControlProjection | null = null
-    try {
-      control = await modelControlClient.projection()
-      applyModelControlProjection(control)
-    } catch {
-      // Never keep a stale active identity when the canonical projection is unavailable.
-      setActiveIds(new Set())
-    }
-    try {
-      const d = control?.downloads ?? []
-      if (Array.isArray(d)) {
-        const registry = (d as readonly PublicDownloadInfo[]).map(
-          (entry): DownloadEntry => ({
-            downloadId: entry.downloadId,
-            modelId: entry.modelId,
-            status: entry.status,
-            currentFile: entry.fileName,
-            downloadedBytes: entry.bytesDownloaded,
-            totalBytes: entry.totalBytes,
-            downloadedMB: (entry.bytesDownloaded / 1024 / 1024).toFixed(1),
-            totalMB: (entry.totalBytes / 1024 / 1024).toFixed(1),
-            ...(entry.totalBytes > 0
-              ? {
-                  percent: Math.min(
-                    100,
-                    Math.round((entry.bytesDownloaded / entry.totalBytes) * 100)
-                  )
-                }
-              : {}),
-            error: entry.reason,
-            ...liveProgress.current.get(entry.modelId)
-          })
-        )
-        const known = new Set(registry.map((entry) => entry.modelId))
-        setDownloads([
-          ...registry,
-          ...Array.from(liveProgress.current.values()).filter((entry) => !known.has(entry.modelId))
-        ])
-      }
-      setRecoveryHealth(
-        control?.downloadDurability ?? {
-          status: 'degraded',
-          reason: 'Download recovery status is unavailable.'
-        }
-      )
-    } catch (error) {
-      setRecoveryHealth({
-        status: 'degraded',
-        reason: error instanceof Error ? error.message : 'Download recovery status is unavailable.'
-      })
-    }
-  }, [api, applyModelControlProjection])
+  }, [api])
 
   useEffect(() => {
     refresh()
     const t = setInterval(refresh, 3000)
     return () => {
       clearInterval(t)
+      ++refreshVersion.current
     }
   }, [refresh, api])
 
-  useModelDownloadProgress((event: ModelDownloadProgressEvent) => {
-    const progress = event as DownloadEntry
-    // The live model job is authoritative. Keep its aggregate byte and rate fields instead of
-    // waiting for a reduced or stale registry poll to replace them.
-    liveProgress.current.set(progress.modelId, {
-      ...liveProgress.current.get(progress.modelId),
-      ...progress
+  useEffect(() => {
+    let disposed = false
+    let observed = false
+    const unsubscribe = modelControlClient.observe((projection) => {
+      observed = true
+      if (!disposed) applyModelControlProjection(projection)
     })
-    setDownloads((current) => {
-      const index = current.findIndex((item) => item.modelId === progress.modelId)
-      if (index < 0) return [...current, progress]
-      const next = [...current]
-      next[index] = { ...current[index], ...progress }
-      return next
-    })
-  })
+    void modelControlClient
+      .projection()
+      .then((projection) => {
+        if (!disposed && !observed) applyModelControlProjection(projection)
+      })
+      .catch(() => {
+        if (disposed || observed) return
+        setActiveIds(new Set())
+        setRecoveryHealth({
+          status: 'degraded',
+          reason: 'Download recovery status is unavailable.'
+        })
+      })
+    return () => {
+      disposed = true
+      unsubscribe()
+    }
+  }, [applyModelControlProjection])
 
   const del = async (id: string, name: string): Promise<void> => {
     if (!window.confirm(`Delete "${name}"? This removes its files from disk.`)) return
@@ -242,41 +225,50 @@ export function StoragePanel(): React.ReactElement {
     }
   }
   const retry = async (id: string): Promise<void> => {
-    setBusy(id)
+    if (retrying.current.has(id)) return
+    retrying.current.add(id)
+    setRetryBusy(new Set(retrying.current))
     try {
       const outcome = await modelControlClient.control({ type: 'retry-download', modelId: id })
       if (!outcome.ok) {
         setModelActionNotice({ type: 'error', message: modelsFailureMessage(outcome.failure) })
         return
       }
+      applyModelControlProjection(outcome.value.projection)
       setModelActionNotice(null)
-      await refresh()
     } catch (error) {
       setModelActionNotice({
         type: 'error',
         message: error instanceof Error ? error.message : 'The download could not be retried.'
       })
     } finally {
-      setBusy(null)
+      retrying.current.delete(id)
+      setRetryBusy(new Set(retrying.current))
     }
   }
-  const cancel = async (id: string): Promise<void> => {
-    setBusy(id)
+  const changeDownload = async (
+    id: string,
+    type: 'cancel-download' | 'pause-download' | 'resume-download'
+  ): Promise<void> => {
+    if (changingDownloads.current.has(id)) return
+    changingDownloads.current.add(id)
+    setCancelBusy(new Set(changingDownloads.current))
     try {
-      const outcome = await modelControlClient.control({ type: 'cancel-download', modelId: id })
+      const outcome = await modelControlClient.control({ type, modelId: id })
       if (!outcome.ok) {
         setModelActionNotice({ type: 'error', message: modelsFailureMessage(outcome.failure) })
         return
       }
+      applyModelControlProjection(outcome.value.projection)
       setModelActionNotice(null)
-      await refresh()
     } catch (error) {
       setModelActionNotice({
         type: 'error',
-        message: error instanceof Error ? error.message : 'The download could not be cancelled.'
+        message: error instanceof Error ? error.message : 'The download could not be changed.'
       })
     } finally {
-      setBusy(null)
+      changingDownloads.current.delete(id)
+      setCancelBusy(new Set(changingDownloads.current))
     }
   }
   const clearOne = async (id: string): Promise<void> => {
@@ -287,8 +279,8 @@ export function StoragePanel(): React.ReactElement {
         setModelActionNotice({ type: 'error', message: modelsFailureMessage(outcome.failure) })
         return
       }
+      applyModelControlProjection(outcome.value.projection)
       setModelActionNotice(null)
-      await refresh()
     } catch (error) {
       setModelActionNotice({
         type: 'error',
@@ -306,8 +298,8 @@ export function StoragePanel(): React.ReactElement {
         setModelActionNotice({ type: 'error', message: modelsFailureMessage(outcome.failure) })
         return
       }
+      applyModelControlProjection(outcome.value.projection)
       setModelActionNotice(null)
-      await refresh()
     } catch (error) {
       setModelActionNotice({
         type: 'error',
@@ -420,7 +412,11 @@ export function StoragePanel(): React.ReactElement {
         active={active}
         incomplete={incomplete}
         busy={busy}
-        onCancel={cancel}
+        retryBusy={retryBusy}
+        cancelBusy={cancelBusy}
+        onCancel={(id) => changeDownload(id, 'cancel-download')}
+        onPause={(id) => changeDownload(id, 'pause-download')}
+        onResume={(id) => changeDownload(id, 'resume-download')}
         onRetry={retry}
         onClear={clearOne}
         onClearAll={clearAllIncomplete}

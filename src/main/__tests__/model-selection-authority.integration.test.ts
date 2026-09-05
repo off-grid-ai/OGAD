@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { OffGridApplication } from '@offgrid/application'
+import { createFakeLocalTextRuntime } from './harness/local-text-runtime'
 import {
   CATALOG,
   LLMService,
@@ -98,23 +99,11 @@ describe('Desktop active-model authority', () => {
 
     const { DesktopModelSelectionPersistence } = await import('../model-selection-persistence')
     const persistence = new DesktopModelSelectionPersistence(() => modelDirectory)
-    let textRuntimeLoaded = false
     const application = await createModelsApplication(
       {
         listCatalog: async () => selectedModels,
         listInstalled: async () => selectedModels.map((model) => model.id),
-        localTextRuntimeState: async () => ({
-          ready: textRuntimeLoaded,
-          loaded: textRuntimeLoaded
-        }),
-        localTextLifecycle: {
-          load: async () => {
-            textRuntimeLoaded = true
-          },
-          unload: async () => {
-            textRuntimeLoaded = false
-          }
-        },
+        localTextRuntime: createFakeLocalTextRuntime().runtime,
         localVoiceRuntimeState: async () => ({ installed: true, ready: true })
       },
       persistence
@@ -291,7 +280,7 @@ describe('Desktop active-model authority', () => {
         {
           listCatalog: async () => [],
           listInstalled: async () => [],
-          localTextRuntimeState: async () => ({ ready: false, loaded: false })
+          localTextRuntime: createFakeLocalTextRuntime().runtime
         },
         persistence
       )

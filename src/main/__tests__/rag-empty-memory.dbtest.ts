@@ -4,11 +4,16 @@
 // SQLite schema, retrieval queries, prompt assembly, modality queue, and LLM
 // transport. Only true process boundaries are faked: Electron registration,
 // MiniLM embeddings, LanceDB, and llama-server (a real loopback HTTP socket).
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { startFakeLlamaServer, type FakeLlamaServer } from './harness/fake-llama-server'
+import type { OffGridApplication } from '@offgrid/application'
+import {
+  installFakeActiveTextModel,
+  startFakeLlamaServer,
+  type FakeLlamaServer
+} from './harness/fake-llama-server'
 
 type IpcHandler = (event: IpcEvent, ...args: unknown[]) => unknown
 interface IpcEvent {
@@ -16,6 +21,8 @@ interface IpcEvent {
 }
 
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-empty-memory-it-'))
+const originalDataDir = process.env.OFFGRID_DATA_DIR
+process.env.OFFGRID_DATA_DIR = TMP_DIR
 const handlers = new Map<string, IpcHandler>()
 
 vi.mock('electron', () => ({
@@ -34,7 +41,7 @@ vi.mock('electron', () => ({
     handle: (channel: string, handler: IpcHandler) => handlers.set(channel, handler),
     on: () => undefined
   },
-  BrowserWindow: { fromWebContents: () => undefined },
+  BrowserWindow: { fromWebContents: () => undefined, getAllWindows: () => [] },
   clipboard: { readText: () => '', writeText: () => undefined },
   systemPreferences: {
     isTrustedAccessibilityClient: () => true,
@@ -65,8 +72,20 @@ import { llm } from '../llm'
 import { listProjects } from '../rag/store'
 
 let fake: FakeLlamaServer
+let application: OffGridApplication
+let releaseApplication: () => void
 
 beforeAll(async () => {
+  installFakeActiveTextModel(TMP_DIR)
+  const [{ createOffGridApplication }, { desktopModelWorkspacePorts }, applicationAccess] =
+    await Promise.all([
+      import('@offgrid/application'),
+      import('../model-services'),
+      import('../composition/application-access')
+    ])
+  application = createOffGridApplication({ models: desktopModelWorkspacePorts })
+  releaseApplication = applicationAccess.registerDesktopApplication(application)
+  await application.start()
   fake = await startFakeLlamaServer()
   const service = llm as unknown as { port: number; initialized: boolean; paused: boolean }
   service.port = fake.port
@@ -116,12 +135,18 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await fake.close()
+  await application.stop()
+  releaseApplication()
   try {
     fs.rmSync(TMP_DIR, { recursive: true, force: true })
   } catch {
     /* best effort */
   }
+  if (originalDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = originalDataDir
 })
+
+beforeEach(() => fake.reset())
 
 describe('rag:chat on an empty memory corpus', () => {
   it('returns the configured transcription language through the registered IPC path', async () => {
@@ -164,12 +189,7 @@ describe('rag:chat on an empty memory corpus', () => {
       }
     }
 
-    fake.enqueue(
-      { content: '{"intent":"chat","urls":[]}' },
-      { content: 'I do not have any saved memory yet, but I can still help.' },
-      { content: '{"intent":"chat","urls":[]}' },
-      { content: 'This second response is ready.' }
-    )
+    fake.enqueue({ content: 'I do not have any saved memory yet, but I can still help.' })
 
     const first = (await handler!(
       event,
@@ -197,7 +217,7 @@ describe('rag:chat on an empty memory corpus', () => {
       entityFacts: [],
       unified: []
     })
-    const modelPrompt = JSON.stringify(fake.requests[1]?.messages ?? [])
+    const modelPrompt = JSON.stringify(fake.requests[0]?.messages ?? [])
     expect(modelPrompt).toContain('RELEVANT MEMORIES:\\n(none)')
     expect(modelPrompt).toContain('RELEVANT MESSAGES:\\n(none)')
     expect(modelPrompt).toContain('RELEVANT SUMMARIES:\\n(none)')
@@ -215,6 +235,7 @@ describe('rag:chat on an empty memory corpus', () => {
       }
     })
 
+    fake.enqueue({ content: 'This second response is ready.' })
     const second = (await handler!(
       event,
       'Can I ask another question?',
@@ -229,7 +250,7 @@ describe('rag:chat on an empty memory corpus', () => {
     )) as { answer: string }
 
     expect(second.answer).toBe('This second response is ready.')
-    expect(fake.requests).toHaveLength(4)
+    expect(fake.requests).toHaveLength(2)
   })
 
   it('retrieves seeded local memory and returns its citation in All memory mode (#34)', async () => {
@@ -257,10 +278,7 @@ describe('rag:chat on an empty memory corpus', () => {
         send: (channel, payload) => streamed.push({ channel, payload })
       }
     }
-    fake.enqueue(
-      { content: '{"intent":"chat","urls":[]}' },
-      { content: 'The Aurora release code is obsidian [S1].' }
-    )
+    fake.enqueue({ content: 'The Aurora release code is obsidian [S1].' })
 
     const result = (await handler!(
       event,

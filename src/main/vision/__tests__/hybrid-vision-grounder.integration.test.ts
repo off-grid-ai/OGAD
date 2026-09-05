@@ -8,7 +8,10 @@ import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import sharp from 'sharp'
 import { TASK_GUIDANCE_APPLIED_TRACE } from '../../tasks/task-guide'
-import { createHybridVisionGrounder } from '../hybrid-vision-grounder'
+import {
+  createHybridVisionGrounder,
+  type HybridVisionGrounderDependencies
+} from '../hybrid-vision-grounder'
 import type { VisionGroundingInput } from '../vision-agent'
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-hybrid-grounder-'))
@@ -43,7 +46,7 @@ function input(): VisionGroundingInput {
 
 describe('Desktop hybrid vision grounder', () => {
   it('turns a real prepared screenshot and one reasoner tool call into a terminal decision', async () => {
-    const runReasoner = vi.fn(async () => ({
+    const runReasoner = vi.fn<HybridVisionGrounderDependencies['runReasoner']>(async () => ({
       content: '',
       toolCalls: [
         {

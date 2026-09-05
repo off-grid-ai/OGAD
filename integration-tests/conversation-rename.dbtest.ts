@@ -29,10 +29,13 @@ const database = await import('@offgrid/core/main/database')
 const skills = await import('@offgrid/core/main/skills')
 const { MemoryChat } = await import('@renderer/components/MemoryChat')
 const { TooltipProvider } = await import('@renderer/components/ui/tooltip')
+const { ChatBoundary } = await import('@renderer/components/__tests__/harness/chat-boundary')
 
 function installApi(): void {
+  const boundary = new ChatBoundary()
   Object.assign(window, {
     api: {
+      ...boundary.api,
       getRagConversations: async () => database.getRagConversations(),
       getRagConversation: async (id: string) => database.getRagConversation(id),
       getRagMessages: async (id: string) => database.getRagMessages(id),
@@ -41,20 +44,6 @@ function installApi(): void {
       getSettings: async () => database.getSettings(),
       saveSetting: async (key: string, value: unknown) => database.saveSetting(key, value),
       chatVisionAvailable: async () => false,
-      getModelControlSnapshot: async () => ({
-        kinds: [],
-        models: [],
-        installed: [],
-        activeIds: [],
-        active: {
-          text: null,
-          image: null,
-          speech: null,
-          transcription: null,
-          computer_use: null
-        },
-        computerUse: null
-      }),
       listSkills: async () => skills.listSkills(),
       imageGenStatus: async () => ({ available: false, models: [], active: '' }),
       onRagStream: () => () => undefined,

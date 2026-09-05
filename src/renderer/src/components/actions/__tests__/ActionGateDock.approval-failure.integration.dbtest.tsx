@@ -1,10 +1,24 @@
 // @vitest-environment jsdom
-import { DatabaseSync } from 'node:sqlite'
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 import { act, cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createUseApplication, type GateDecision, type SqlDriver } from '@offgrid/use'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ActionGateDock } from '../ActionGateDock'
+
+const isSqlInputValue = (value: unknown): value is SQLInputValue =>
+  value === null ||
+  typeof value === 'number' ||
+  typeof value === 'bigint' ||
+  typeof value === 'string' ||
+  ArrayBuffer.isView(value)
+
+/** The SqlDriver contract carries `unknown[]`; node:sqlite binds only SQL scalars. */
+const bindable = (params: unknown[]): SQLInputValue[] =>
+  params.map((value) => {
+    if (!isSqlInputValue(value)) throw new TypeError(`Unbindable SQL parameter: ${String(value)}`)
+    return value
+  })
 
 const makeDriver = (): SqlDriver => {
   const database = new DatabaseSync(':memory:')
@@ -13,16 +27,16 @@ const makeDriver = (): SqlDriver => {
       const statement = database.prepare(sql)
       return {
         changes: sql.trimStart().toUpperCase().startsWith('SELECT')
-          ? statement.all(...params).length
-          : Number(statement.run(...params).changes)
+          ? statement.all(...bindable(params)).length
+          : Number(statement.run(...bindable(params)).changes)
       }
     },
-    async get(sql, params = []) {
+    async get<T>(sql: string, params: unknown[] = []) {
       const statement = database.prepare(sql)
-      return statement.get(...params)
+      return statement.get(...bindable(params)) as T | undefined
     },
-    async all(sql, params = []) {
-      return database.prepare(sql).all(...params)
+    async all<T>(sql: string, params: unknown[] = []) {
+      return database.prepare(sql).all(...bindable(params)) as T[]
     }
   }
 }

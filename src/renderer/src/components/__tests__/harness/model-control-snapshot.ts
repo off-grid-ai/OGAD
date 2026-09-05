@@ -1,3 +1,5 @@
+import { EMPTY_MODELS_OPERATIONS, type ModelsOperationsSnapshot } from '@offgrid/application'
+
 interface ActiveModels {
   text: string | null
   image: string | null
@@ -23,6 +25,14 @@ interface SnapshotInput<Model> {
   computerUse?: unknown
 }
 
+interface DownloadSnapshot {
+  downloadId: string
+  modelId: string | null | undefined
+  fileName: string
+  status: 'queued' | 'completed'
+  bytesDownloaded: number
+}
+
 interface ModelControlSnapshot<Model> {
   kinds: readonly string[]
   models: readonly Model[]
@@ -32,7 +42,7 @@ interface ModelControlSnapshot<Model> {
     keyof ActiveModels,
     { modelId: string | null; routeId: string | null; ready: boolean }
   >
-  downloads: readonly unknown[]
+  downloads: readonly DownloadSnapshot[]
   downloadDurability: { status: 'healthy' }
   /**
    * The Computer Use strategy the picker renders. Carried through from the input: it used to be
@@ -94,6 +104,16 @@ interface ControlSuccess<Model> {
 export interface ModelControlBoundary<Model> {
   /** The read the composer indicator and the drawer still use. */
   getModelControlProjection: () => Promise<ModelControlSnapshot<Model>>
+  /** The reactive projection stream exposed by the Electron preload boundary. */
+  onModelControlProjection: (
+    listener: (projection: ModelControlSnapshot<Model>) => void
+  ) => () => void
+  /** Shared-owned lifecycle state exposed through the Electron process boundary. */
+  getModelOperationsProjection: () => Promise<ModelsOperationsSnapshot>
+  /** The reactive lifecycle projection stream exposed by the Electron preload boundary. */
+  onModelOperationsProjection: (
+    listener: (projection: ModelsOperationsSnapshot) => void
+  ) => () => void
   /** The one write door every model surface goes through. */
   controlModel: (
     intent: ControlIntent
@@ -128,8 +148,13 @@ export function modelControlBoundary<Model extends { id: string }>(
   let state = modelControlSnapshot(input)
   const intents: ControlIntent[] = []
   const held: Array<() => void> = []
+  const listeners = new Set<(projection: ModelControlSnapshot<Model>) => void>()
   let operation = 0
-  const nextOperationId = (): string => `test-operation-${++operation}`
+  const responseOperationId = (intent: ControlIntent): string =>
+    intent.operationId ?? `test-operation-${++operation}`
+  const publish = (): void => {
+    for (const listener of listeners) listener(state)
+  }
 
   const withActive = (surface: Surface, modelId: string | null): void => {
     const active = { ...state.active, [surface]: activeEntry(modelId) }
@@ -153,18 +178,45 @@ export function modelControlBoundary<Model extends { id: string }>(
       case 'unload':
         if (intent.surface) withActive(intent.surface, null)
         break
-      case 'download': {
+      case 'download':
+      case 'queue-download': {
         const modelId = intent.modelId
         const install = (): void => {
-          if (modelId) state = { ...state, installed: [...new Set([...state.installed, modelId])] }
+          if (!modelId) return
+          state = {
+            ...state,
+            installed: [...new Set([...state.installed, modelId])],
+            downloads: state.downloads.map((download) =>
+              download.modelId === modelId ? { ...download, status: 'completed' } : download
+            )
+          }
         }
         if (input.holdDownloads) {
+          state = {
+            ...state,
+            downloads: [
+              ...state.downloads,
+              {
+                downloadId: `test-download:${modelId}`,
+                modelId,
+                fileName: '',
+                status: 'queued',
+                bytesDownloaded: 0
+              }
+            ]
+          }
+          publish()
           return new Promise((resolve) => {
             held.push(() => {
               install()
+              publish()
               resolve({
                 ok: true,
-                value: { status: 'completed', operationId: nextOperationId(), projection: state }
+                value: {
+                  status: 'completed',
+                  operationId: responseOperationId(intent),
+                  projection: state
+                }
               })
             })
           })
@@ -184,19 +236,30 @@ export function modelControlBoundary<Model extends { id: string }>(
       case 'cancel-download':
         return {
           ok: true,
-          value: { status: 'cancelled', operationId: nextOperationId(), projection: state }
+          value: {
+            status: 'cancelled',
+            operationId: responseOperationId(intent),
+            projection: state
+          }
         }
       default:
         break
     }
+    publish()
     return {
       ok: true,
-      value: { status: 'completed', operationId: nextOperationId(), projection: state }
+      value: { status: 'completed', operationId: responseOperationId(intent), projection: state }
     }
   }
 
   return {
     getModelControlProjection: async () => state,
+    onModelControlProjection: (listener) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    getModelOperationsProjection: async () => EMPTY_MODELS_OPERATIONS,
+    onModelOperationsProjection: () => () => undefined,
     controlModel,
     projection: () => state,
     intents,

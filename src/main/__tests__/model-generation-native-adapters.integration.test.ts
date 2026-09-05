@@ -3,11 +3,11 @@ import type { GenerationChunk, GenerationRequest, RuntimeModel } from '@offgrid/
 
 const native = vi.hoisted(() => ({
   imageWarm: vi.fn(async () => undefined),
-  imageEvict: vi.fn(async () => undefined),
+  imageEvict: vi.fn(async () => ({ reclaimed: true as const })),
   voiceWarm: vi.fn(async () => undefined),
-  voiceEvict: vi.fn(async () => undefined),
+  voiceEvict: vi.fn(async () => ({ reclaimed: true as const })),
   transcriptionWarm: vi.fn(async () => undefined),
-  transcriptionEvict: vi.fn(async () => undefined),
+  transcriptionEvict: vi.fn(async () => ({ reclaimed: true as const })),
   embeddingInit: vi.fn(async () => undefined),
   embeddingUnload: vi.fn(async () => undefined)
 }))

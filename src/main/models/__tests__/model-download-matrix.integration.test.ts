@@ -50,7 +50,15 @@ const fixtureCatalog = productionCatalog.map((entry) => ({
 }))
 CATALOG.splice(0, CATALOG.length, ...fixtureCatalog)
 
-await import('../../model-services')
+const [applicationModule, modelServices, applicationAccess] = await Promise.all([
+  import('@offgrid/application'),
+  import('../../model-services'),
+  import('../../composition/application-access')
+])
+const application = applicationModule.createOffGridApplication({
+  models: modelServices.desktopModelWorkspacePorts
+})
+const releaseApplication = applicationAccess.registerDesktopApplication(application)
 const manager = {
   ...(await import('../../models-manager')),
   ...(await import('./download-facade-test-client'))
@@ -71,7 +79,11 @@ const byKind = (kind: CatalogModel['kind'], fileCount?: number): CatalogModel =>
 // mechanics are exercised with any single-file model (image/voice exist).
 const singleFileModels = CATALOG.filter((m) => m.files.length === 1)
 const chatModel = byKind('vision', 2)
-const visionModel = byKind('vision', 2)
+const visionModel = CATALOG.find(
+  (candidate) =>
+    candidate.kind === 'vision' && candidate.files.length === 2 && candidate.id !== chatModel.id
+)
+if (!visionModel) throw new Error('Model catalog needs two installable vision fixtures')
 const holoGrounder = CATALOG.find((candidate) => candidate.id === 'mradermacher/Holo-3.1-4B-GGUF')
 if (!holoGrounder) throw new Error('Model catalog needs the Computer Use Holo3.1-4B fixture')
 const imageModel = byKind('image', 3)
@@ -100,16 +112,63 @@ interface PendingResponse {
   resolve: (response: Response) => void
 }
 
+const HUB_REVISION = '0123456789abcdef0123456789abcdef01234567'
+
+function requestUrl(input: string | URL | Request): string {
+  return typeof input === 'string' || input instanceof URL ? String(input) : input.url
+}
+
+function huggingFaceSource(url: string): { repositoryId: string; fileName: string } | null {
+  const match = /^\/([^/]+\/[^/]+)\/resolve\/[^/]+\/(.+)$/.exec(new URL(url).pathname)
+  if (!match) return null
+  return {
+    repositoryId: decodeURIComponent(match[1]!),
+    fileName: decodeURIComponent(match[2]!)
+  }
+}
+
+function resolvedArtifactUrl(file: ModelFile): string {
+  const sourceRevision = /\/resolve\/([^/]+)\//.exec(file.url)?.[1] ?? 'main'
+  const revision = /^[a-f0-9]{40}$/i.test(sourceRevision) ? sourceRevision : HUB_REVISION
+  return file.url.replace(/\/resolve\/[^/]+\//, `/resolve/${revision}/`)
+}
+
 function controlledHttp(): PendingResponse[] {
   const pending: PendingResponse[] = []
   vi.stubGlobal(
     'fetch',
-    vi.fn(
-      (input: string | URL | Request) =>
-        new Promise<Response>((resolve) => {
-          pending.push({ url: String(input), resolve })
-        })
-    )
+    vi.fn((input: string | URL | Request) => {
+      const url = requestUrl(input)
+      if (url.includes('/api/models/') && url.includes('/revision/')) {
+        const match = /\/api\/models\/(.+)\/revision\/([^?]+)/.exec(url)
+        const repositoryId = match?.[1]
+        const repositoryFiles = CATALOG.flatMap((candidate) => candidate.files).filter(
+          (file) => huggingFaceSource(file.url)?.repositoryId === repositoryId
+        )
+        if (repositoryFiles.length === 0) {
+          return Promise.resolve(new Response('{}', { status: 404 }))
+        }
+        const requestedRevision = decodeURIComponent(match?.[2] ?? 'main')
+        const revision = /^[a-f0-9]{40}$/i.test(requestedRevision)
+          ? requestedRevision
+          : HUB_REVISION
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              sha: revision,
+              siblings: repositoryFiles.map((file) => ({
+                rfilename: huggingFaceSource(file.url)!.fileName,
+                size: file.sizeBytes ?? fixtureSize(file)
+              }))
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } }
+          )
+        )
+      }
+      return new Promise<Response>((resolve) => {
+        pending.push({ url, resolve })
+      })
+    })
   )
   return pending
 }
@@ -133,7 +192,7 @@ async function downloadEveryRequiredFile(entry: CatalogModel): Promise<{
 
   for (const [index, file] of entry.files.entries()) {
     await waitFor(() => pending.length === index + 1)
-    expect(pending[index]!.url).toBe(file.url)
+    expect(pending[index]!.url).toBe(resolvedArtifactUrl(file))
 
     // A model is never ready while its current or any later required file is pending.
     expect(await manager.listInstalled()).not.toContain(entry.id)
@@ -202,14 +261,22 @@ afterEach(async () => {
   vi.restoreAllMocks()
   for (const id of installedByTest) {
     await manager.deleteModel(id)
-    await manager.clearDownload(id)
+    const record = applicationAccess.desktopModels
+      .snapshot()
+      .downloads.find((download) => download.modelId === id)
+    if (record) {
+      await applicationAccess.desktopModels.removeDownload({ downloadId: record.downloadId })
+    }
   }
   installedByTest.clear()
   fs.rmSync(path.join(dataDir, 'models', 'active-model.json'), { force: true })
   fs.rmSync(path.join(dataDir, 'models', 'active-modalities.json'), { force: true })
 })
 
-afterAll(() => {
+afterAll(async () => {
+  await manager.shutdownModelDownloads()
+  releaseApplication()
+  await application.stop()
   CATALOG.splice(0, CATALOG.length, ...productionCatalog)
   if (originalDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
   else process.env.OFFGRID_DATA_DIR = originalDataDir
@@ -444,7 +511,9 @@ describe('model download release matrix', () => {
 
     try {
       const firstPending = pending[0]!
-      const firstIndex = queueModels.findIndex((model) => model.files[0]?.url === firstPending.url)
+      const firstIndex = queueModels.findIndex(
+        (model) => model.files[0] && resolvedArtifactUrl(model.files[0]) === firstPending.url
+      )
       expect(firstIndex).toBeGreaterThanOrEqual(0)
       const firstFile = queueModels[firstIndex]!.files[0]!
       const firstBytes = modelBytes(firstFile, 61)
@@ -464,7 +533,9 @@ describe('model download release matrix', () => {
       })
 
       for (const response of pending.slice(1)) {
-        const modelIndex = queueModels.findIndex((model) => model.files[0]?.url === response.url)
+        const modelIndex = queueModels.findIndex(
+          (model) => model.files[0] && resolvedArtifactUrl(model.files[0]) === response.url
+        )
         expect(modelIndex).toBeGreaterThanOrEqual(0)
         const file = queueModels[modelIndex]!.files[0]!
         const bytes = modelBytes(file, 61 + modelIndex)

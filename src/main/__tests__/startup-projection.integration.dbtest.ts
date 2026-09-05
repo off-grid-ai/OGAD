@@ -78,7 +78,7 @@ describe('Desktop startup projection over the real Shared lifecycle', () => {
     })
 
     await application.start()
-    projection.stageSettled({ name: 'application', required: true, status: 'ready' })
+    projection.stageSettled({ name: 'application', required: true, status: 'completed' })
     expect(projection.snapshot()).toMatchObject({
       phase: 'degraded',
       applicationStatus: 'running',

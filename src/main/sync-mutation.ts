@@ -33,5 +33,9 @@ export function emitChangedLlmSettings(
  * this is an inert call with no sync engine or Pro business logic in the public application.
  */
 export function emitSyncMutation(mutation: SyncMutation): void {
-  callHook(HOOKS.syncRecordLocalMutation, mutation)
+  try {
+    callHook(HOOKS.syncRecordLocalMutation, mutation)
+  } catch (error) {
+    console.error('[sync] Failed to record committed mutation', mutation, error)
+  }
 }

@@ -11,9 +11,16 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import type { TickOutcome } from '@offgrid/use'
-import { startFakeLlamaServer, type FakeLlamaServer } from './harness/fake-llama-server'
+import type { OffGridApplication } from '@offgrid/application'
+import {
+  installFakeActiveTextModel,
+  startFakeLlamaServer,
+  type FakeLlamaServer
+} from './harness/fake-llama-server'
 
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-tools-it-'))
+const originalDataDir = process.env.OFFGRID_DATA_DIR
+process.env.OFFGRID_DATA_DIR = TMP_DIR
 vi.mock('electron', () => ({
   app: { getPath: () => TMP_DIR, isPackaged: false, getAppPath: () => process.cwd() },
   safeStorage: {
@@ -38,6 +45,8 @@ import { HOOKS, registerHook, unregisterHook } from '../bootstrap/hookRegistry'
 import { NativeActionToolExtension, type ActionsPort } from '../tools/nativeActionToolExtension'
 
 let fake: FakeLlamaServer
+let application: OffGridApplication
+let releaseApplication: () => void
 type FakeTurn = Parameters<FakeLlamaServer['enqueue']>[number]
 
 /** Queue the model turns consumed by the normal tool-calling loop. */
@@ -46,6 +55,16 @@ function enqueueReactiveAfterEmptyPlan(...turns: FakeTurn[]): void {
 }
 
 beforeAll(async () => {
+  installFakeActiveTextModel(TMP_DIR)
+  const [{ createOffGridApplication }, { desktopModelWorkspacePorts }, applicationAccess] =
+    await Promise.all([
+      import('@offgrid/application'),
+      import('../model-services'),
+      import('../composition/application-access')
+    ])
+  application = createOffGridApplication({ models: desktopModelWorkspacePorts })
+  releaseApplication = applicationAccess.registerDesktopApplication(application)
+  await application.start()
   fake = await startFakeLlamaServer()
   // Point the REAL LLMService at the fake engine socket and mark it ready — init() then
   // no-ops (early-returns when initialized), so no native binary spawns. Every other line
@@ -58,11 +77,15 @@ beforeAll(async () => {
 beforeEach(() => fake.reset())
 afterAll(async () => {
   await fake.close()
+  await application.stop()
+  releaseApplication()
   try {
     fs.rmSync(TMP_DIR, { recursive: true, force: true })
   } catch {
     /* best effort */
   }
+  if (originalDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = originalDataDir
 })
 
 describe('agentic tool loop — real toolChat + real LLMService over a fake llama socket', () => {
@@ -543,14 +566,14 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     expect(r.answer).toBe('done')
   })
 
-  it('surfaces an actionable server error (context overflow) instead of a bare status', async () => {
+  it('surfaces the Shared model-context failure instead of a bare server status', async () => {
     enqueueReactiveAfterEmptyPlan({
       errorStatus: 400,
       errorBody: JSON.stringify({
         error: { message: 'the request exceeds the available context size' }
       })
     })
-    await expect(toolChat('anything', [])).rejects.toThrow(/context window|connectors/i)
+    await expect(toolChat('anything', [])).rejects.toThrow('The model context is full.')
   })
 
   // --- generate_image (gated + deferred side-channel) ---------------------------

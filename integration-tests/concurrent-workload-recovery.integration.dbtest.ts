@@ -37,17 +37,23 @@ vi.mock('electron', () => ({
 interface TransferBoundary {
   modelId: string
   fileName: string
+  remoteFile: string
   full: Buffer
   prefix: Buffer
+}
+
+function huggingFaceArtifact(rawUrl: string): { repo: string; file: string } | undefined {
+  const match = /^\/([^/]+\/[^/]+)\/resolve\/[^/]+\/(.+)$/.exec(new URL(rawUrl).pathname)
+  return match ? { repo: match[1]!, file: decodeURIComponent(match[2]!) } : undefined
 }
 
 function gguf(seed: number): Buffer {
   return Buffer.concat([Buffer.from('GGUF', 'ascii'), Buffer.alloc(64 * 1_024 - 4, seed)])
 }
 
-async function waitFor(condition: () => boolean): Promise<void> {
+async function waitFor(condition: () => boolean | Promise<boolean>): Promise<void> {
   const deadline = Date.now() + 2_000
-  while (!condition()) {
+  while (!(await condition())) {
     if (Date.now() >= deadline) throw new Error('Timed out waiting for workload boundary')
     await new Promise((resolve) => setTimeout(resolve, 5))
   }
@@ -64,10 +70,9 @@ afterAll(() => {
 describe('concurrent workload shutdown and crash recovery', () => {
   it('interrupts every owned transfer, preserves resumable bytes, and relaunches cleanly', async () => {
     fs.mkdirSync(crashedProfile, { recursive: true })
-    const [{ CATALOG }, database, manager, shutdown] = await Promise.all([
+    const [{ CATALOG, DOWNLOAD_INTERRUPTED_ERROR }, database, shutdown] = await Promise.all([
       import('@offgrid/models'),
       import('../src/main/database'),
-      import('../src/main/models-manager'),
       import('../src/main/shutdown')
     ])
     // Chat models, which the catalog calls 'vision': no entry is kind 'text' any more, because every model
@@ -100,23 +105,54 @@ describe('concurrent workload shutdown and crash recovery', () => {
     )
 
     const transfers: TransferBoundary[] = models.slice(0, 3).map((model, index) => {
-      const fileName = (model.files.find((file) => file.role === 'primary') ?? model.files[0])!.name
+      const file = model.files.find((candidate) => candidate.role === 'primary') ?? model.files[0]!
+      const address = huggingFaceArtifact(file.url)
+      if (!address || address.repo !== model.id)
+        throw new Error(`Invalid Hugging Face primary artifact for ${model.id}`)
       const full = gguf(20 + index)
       return {
         modelId: model.id,
-        fileName,
+        fileName: file.name,
+        remoteFile: address.file,
         full,
         // Cross the fs.WriteStream high-water mark so the partial is observably durable
         // while the controlled HTTP body remains open, just like a large real model.
         prefix: full.subarray(0, 32 * 1_024)
       }
     })
+    const transferFor = (rawUrl: string): TransferBoundary | undefined => {
+      const address = huggingFaceArtifact(rawUrl)
+      return address
+        ? transfers.find(
+            (candidate) =>
+              candidate.modelId === address.repo && candidate.remoteFile === address.file
+          )
+        : undefined
+    }
+    const metadata = (rawUrl: string): Response | undefined => {
+      const match = /^\/api\/models\/(.+)\/revision\//.exec(new URL(rawUrl).pathname)
+      if (!match) return undefined
+      const model = models.find((candidate) => candidate.id === match[1])
+      if (!model) return new Response('Not found', { status: 404 })
+      return Response.json({
+        sha: '0123456789abcdef0123456789abcdef01234567',
+        siblings: model.files.map((file) => ({
+          rfilename: huggingFaceArtifact(file.url)?.file,
+          size: file.sizeBytes
+        }))
+      })
+    }
     let fetches = 0
     vi.stubGlobal(
       'fetch',
-      vi.fn((_input: string | URL | Request, init?: RequestInit) => {
-        const transfer = transfers[fetches++]
-        if (!transfer) throw new Error('A queued transfer crossed the HTTP boundary')
+      vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        const metadataResponse = metadata(input instanceof Request ? input.url : String(input))
+        if (metadataResponse) return Promise.resolve(metadataResponse)
+        const rawUrl = input instanceof Request ? input.url : String(input)
+        const transfer = transferFor(rawUrl)
+        if (!transfer)
+          throw new Error(`An unexpected artifact crossed the HTTP boundary: ${rawUrl}`)
+        fetches += 1
         const body = new ReadableStream<Uint8Array>({
           start(controller) {
             controller.enqueue(transfer.prefix)
@@ -137,59 +173,93 @@ describe('concurrent workload shutdown and crash recovery', () => {
       })
     )
 
+    const manager = await import('../src/main/models/__tests__/download-facade-test-client')
+    await manager.listDownloads()
     const results = models.map((model) => manager.downloadModel(model.id))
     const modelsDir = path.join(crashedProfile, 'models')
-    await waitFor(
-      () =>
+    const downloadsFile = path.join(modelsDir, 'downloads.json')
+    const stagedPartialPath = (transfer: TransferBoundary): string | undefined => {
+      try {
+        const records = JSON.parse(fs.readFileSync(downloadsFile, 'utf8')) as Array<{
+          manifest: {
+            modelId: string
+            artifacts: Array<{ name: string; localName: string }>
+          }
+        }>
+        const record = records.find((candidate) => candidate.manifest.modelId === transfer.modelId)
+        const artifact = record?.manifest.artifacts.find(
+          (candidate) => candidate.name === transfer.fileName
+        )
+        return artifact ? path.join(modelsDir, `${artifact.localName}.part`) : undefined
+      } catch {
+        return undefined
+      }
+    }
+    await waitFor(async () => {
+      const records = await manager.listDownloads()
+      const failed = records.find((record) => record.status === 'failed')
+      if (failed) throw new Error(`A concurrent download failed before shutdown: ${failed.error}`)
+      return (
         fetches === 3 &&
         transfers.every((transfer) => {
           try {
-            return (
-              fs.statSync(path.join(modelsDir, `${transfer.fileName}.part`)).size ===
-              transfer.prefix.length
-            )
+            const partial = stagedPartialPath(transfer)
+            return partial !== undefined && fs.statSync(partial).size === transfer.prefix.length
           } catch {
             return false
           }
         })
+      )
+    })
+    expect(
+      (await manager.listDownloads()).filter((item) => item.status === 'downloading')
+    ).toHaveLength(3)
+    expect((await manager.listDownloads()).filter((item) => item.status === 'queued')).toHaveLength(
+      1
     )
-    expect(manager.listDownloads().filter((item) => item.status === 'downloading')).toHaveLength(3)
-    expect(manager.listDownloads().filter((item) => item.status === 'queued')).toHaveLength(1)
 
-    const downloadsFile = path.join(modelsDir, 'downloads.json')
     await waitFor(() => {
       const persisted: unknown = JSON.parse(fs.readFileSync(downloadsFile, 'utf8'))
       if (!Array.isArray(persisted)) return false
       const phases = persisted.map((record) =>
-        record && typeof record === 'object' && 'phase' in record ? record.phase : undefined)
-      return phases.filter((phase) => phase === 'downloading').length === 3 &&
+        record && typeof record === 'object' && 'phase' in record ? record.phase : undefined
+      )
+      return (
+        phases.filter((phase) => phase === 'downloading').length === 3 &&
         phases.filter((phase) => phase === 'queued').length === 1
+      )
     })
     // This is the exact durable filesystem state an abrupt process exit leaves behind.
     const crashRegistry = fs.readFileSync(downloadsFile)
     const registry = new shutdown.ShutdownRegistry()
     const stops: string[] = []
     shutdown.registerCoreShutdownOwners(registry, {
-      stopGateway: () => stops.push('gateway'),
-      stopMediaServer: () => stops.push('media'),
-      stopModelRuntimes: () => stops.push('runtimes'),
-      stopModelDownloads: () => manager.shutdownModelDownloads()
+      stopGateway: () => {
+        stops.push('gateway')
+      },
+      stopMediaServer: () => {
+        stops.push('media')
+      }
     })
 
+    // The Shared application owns model generation and download workers. The Core registry owns
+    // only independent Desktop sockets, so application stop must settle its active and queued work
+    // before those platform resources are released.
+    await manager.shutdownModelDownloads()
     await expect(registry.shutdown()).resolves.toEqual([])
     await expect(Promise.all(results)).resolves.toEqual(
-      models.map(() => ({ success: false, error: manager.DOWNLOAD_INTERRUPTED_ERROR }))
+      models.map(() => ({ success: false, error: DOWNLOAD_INTERRUPTED_ERROR }))
     )
-    expect(stops).toEqual(['runtimes', 'media', 'gateway'])
+    expect(stops).toEqual(['media', 'gateway'])
     expect(fetches).toBe(3)
     for (const transfer of transfers) {
-      expect(fs.statSync(path.join(modelsDir, `${transfer.fileName}.part`)).size).toBe(
-        transfer.prefix.length
-      )
+      const partial = stagedPartialPath(transfer)
+      expect(partial).toBeDefined()
+      expect(fs.statSync(partial!).size).toBe(transfer.prefix.length)
     }
     await expect(manager.downloadModel(models[0]!.id)).resolves.toEqual({
       success: false,
-      error: manager.DOWNLOAD_INTERRUPTED_ERROR
+      error: 'Model download coordinator is stopped'
     })
 
     database.getDB().close()
@@ -199,24 +269,23 @@ describe('concurrent workload shutdown and crash recovery', () => {
     boundary.profile = relaunchedProfile
     process.env.OFFGRID_DATA_DIR = relaunchedProfile
     const resumedFiles = new Set<string>()
-    let resumedIndex = 0
     vi.stubGlobal(
       'fetch',
       vi.fn((input: string | URL | Request, init?: RequestInit) => {
         // Explicit retry resumes interrupted work. Partial primaries use Range; untouched
         // companions start at zero.
-        const rawUrl = typeof input === 'string'
-          ? input
-          : input instanceof URL
-            ? input.toString()
-            : input.url
-        const requested = decodeURIComponent(rawUrl)
-        const transfer = transfers.find((candidate) => requested.includes(candidate.fileName))
-        const headers = (init?.headers ?? {}) as Record<string, string>
-        if (headers.Range) {
-          const interrupted = transfer ?? transfers[resumedIndex++]
-          if (!interrupted) throw new Error('An unexpected extra Range request crossed the boundary')
-          expect(headers).toEqual({ Range: `bytes=${String(interrupted.prefix.length)}-` })
+        const rawUrl =
+          typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+        const metadataResponse = metadata(rawUrl)
+        if (metadataResponse) return Promise.resolve(metadataResponse)
+        const headers = new Headers(input instanceof Request ? input.headers : undefined)
+        new Headers(init?.headers).forEach((value, name) => headers.set(name, value))
+        const range = headers.get('range')
+        if (range) {
+          const interrupted = transferFor(rawUrl)
+          if (!interrupted)
+            throw new Error(`An unexpected ranged artifact crossed the boundary: ${rawUrl}`)
+          expect(range).toBe(`bytes=${String(interrupted.prefix.length)}-`)
           resumedFiles.add(interrupted.fileName)
           const remainder = interrupted.full.subarray(interrupted.prefix.length)
           return Promise.resolve(
@@ -238,20 +307,22 @@ describe('concurrent workload shutdown and crash recovery', () => {
     vi.resetModules()
     const [relaunchedDatabase, relaunchedManager] = await Promise.all([
       import('../src/main/database'),
-      import('../src/main/models-manager')
+      import('../src/main/models/__tests__/download-facade-test-client')
     ])
-    await waitFor(() => {
-      const records = relaunchedManager.listDownloads()
-      return records.filter((item) => item.status === 'failed').length === 3 &&
+    await waitFor(async () => {
+      const records = await relaunchedManager.listDownloads()
+      return (
+        records.filter((item) => item.status === 'failed').length === 3 &&
         records.filter((item) => item.status === 'completed').length === 1
+      )
     })
-    expect(relaunchedManager.listDownloads()).toEqual(
+    expect(await relaunchedManager.listDownloads()).toEqual(
       expect.arrayContaining(
         models.slice(0, 3).map((model) =>
           expect.objectContaining({
             modelId: model.id,
             status: 'failed',
-            error: relaunchedManager.DOWNLOAD_INTERRUPTED_ERROR
+            error: DOWNLOAD_INTERRUPTED_ERROR
           })
         )
       )
@@ -261,12 +332,13 @@ describe('concurrent workload shutdown and crash recovery', () => {
     await expect(
       Promise.all(models.slice(0, 3).map((model) => relaunchedManager.retryDownload(model.id)))
     ).resolves.toEqual(models.slice(0, 3).map(() => ({ success: true })))
-    await waitFor(
-      () =>
-        relaunchedManager.listDownloads().length === models.length &&
-        relaunchedManager.listDownloads().every((item) => item.status === 'completed')
-    )
-    expect(relaunchedManager.listDownloads()).toEqual(
+    await waitFor(async () => {
+      const records = await relaunchedManager.listDownloads()
+      return (
+        records.length === models.length && records.every((item) => item.status === 'completed')
+      )
+    })
+    expect(await relaunchedManager.listDownloads()).toEqual(
       expect.arrayContaining(
         models.map((model) =>
           expect.objectContaining({

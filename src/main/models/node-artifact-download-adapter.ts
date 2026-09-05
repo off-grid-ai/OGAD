@@ -6,7 +6,8 @@ import {
   NonRecoverableDownloadError,
   planResumedTransfer,
   type DownloadFilePort,
-  type DownloadTransferPort
+  type DownloadTransferPort,
+  type DownloadTransferStopDisposition
 } from '@offgrid/models'
 import { pumpToFile } from './download-pump'
 import { verifyDownloadedPart } from './download-verify'
@@ -57,11 +58,35 @@ async function sha256(filePath: string): Promise<string> {
   })
 }
 
+/** How many reported-but-unconsumed completions the transfer port remembers; see `stop()`. */
+const COMPLETED_TRANSFER_MEMORY = 64
+
 /** Raw Node filesystem and HTTP adapters for Shared's authoritative coordinator. */
 export function createNodeModelDownloadPorts(
   modelsDir: string,
   expectedSha256For?: (destination: string) => string | undefined
 ): DesktopModelDownloadPorts {
+  // Active transfers, keyed by id, carrying the retention policy an explicit `stop()` chose for
+  // them. The coordinator calls `stop()` BEFORE it aborts the signal, so a `delete-partial` stop
+  // cannot remove the `.part` on the spot - the write stream is still open on it. The policy is
+  // recorded here and applied once the transfer actually settles with a rejection.
+  const activeTransfers = new Map<string, DownloadTransferStopDisposition | undefined>()
+  // Completed transfer ids exist for ONE reason: a `stop()` that races a completion must answer
+  // `completed`, never `not-found`. That race closes within moments of the completion, so the
+  // memory is bounded: an id is forgotten when a `stop()` consumes it, and the oldest ids are
+  // evicted once more than COMPLETED_TRANSFER_MEMORY completions have been reported without a
+  // matching stop. A long session therefore holds at most that many ids, not one per download.
+  const completedTransfers = new Set<string>()
+  const removePartial = async (filePath: string): Promise<void> => {
+    await fs.promises.rm(`${filePath}.part`, { force: true })
+  }
+  const rememberCompleted = (id: string): void => {
+    completedTransfers.add(id)
+    for (const oldest of completedTransfers) {
+      if (completedTransfers.size <= COMPLETED_TRANSFER_MEMORY) break
+      completedTransfers.delete(oldest)
+    }
+  }
   return {
     files: {
       pathFor: (localName) => path.join(modelsDir, localName),
@@ -81,6 +106,14 @@ export function createNodeModelDownloadPorts(
           throw error
         }
       },
+      partialSize: async (filePath) => {
+        try {
+          return (await fs.promises.stat(`${filePath}.part`)).size
+        } catch (error) {
+          if (isMissing(error)) return 0
+          throw error
+        }
+      },
       readPrefix: async (filePath, bytes) => {
         const handle = await fs.promises.open(filePath, 'r')
         try {
@@ -92,6 +125,7 @@ export function createNodeModelDownloadPorts(
         }
       },
       sha256,
+      removePartial,
       remove: async (filePath) => {
         await Promise.all([
           fs.promises.rm(filePath, { force: true }),
@@ -100,68 +134,90 @@ export function createNodeModelDownloadPorts(
       }
     },
     transfers: {
-      async start(input) {
-        const partPath = `${input.destination}.part`
-        await fs.promises.mkdir(path.dirname(partPath), { recursive: true })
-        let partialBytes = 0
-        try {
-          partialBytes = (await fs.promises.stat(partPath)).size
-        } catch (error) {
-          if (!isMissing(error)) throw error
-        }
-        const resumeFrom = input.resume ? partialBytes : 0
-        let response: Response
-        try {
-          response = await fetch(input.url, {
-            signal: input.signal,
-            headers: resumeFrom > 0 ? { Range: `bytes=${resumeFrom}-` } : undefined
+      start(input) {
+        activeTransfers.set(input.id, undefined)
+        return (async () => {
+          const partPath = `${input.destination}.part`
+          await fs.promises.mkdir(path.dirname(partPath), { recursive: true })
+          let partialBytes = 0
+          try {
+            partialBytes = (await fs.promises.stat(partPath)).size
+          } catch (error) {
+            if (!isMissing(error)) throw error
+          }
+          const resumeFrom = input.resume ? partialBytes : 0
+          let response: Response
+          try {
+            response = await fetch(input.url, {
+              signal: input.signal,
+              headers: resumeFrom > 0 ? { Range: `bytes=${resumeFrom}-` } : undefined
+            })
+          } catch (error) {
+            // This used to rethrow `new Error(modelDownloadFailureMessage(error))`, which flattened
+            // the cause: it erased the `name` that identified an abort - the reason the lane had to
+            // guess from the signal at all - and dropped the `code` that classifies ENOSPC and
+            // network conditions. The coordinator still renders one stable message from it.
+            reportTransferRejection(error)
+          }
+          if (!response.ok || !response.body) {
+            throw new Error(`HTTP ${response.status} for ${path.basename(input.destination)}`)
+          }
+          const transfer = planResumedTransfer({
+            partialBytes: resumeFrom,
+            responseStatus: response.status,
+            responseBytes: Number(response.headers.get('content-length') ?? 0)
           })
-        } catch (error) {
-          // This used to rethrow `new Error(modelDownloadFailureMessage(error))`, which flattened
-          // the cause: it erased the `name` that identified an abort - the reason the lane had to
-          // guess from the signal at all - and dropped the `code` that classifies ENOSPC and
-          // network conditions. The coordinator still renders one stable message from it.
-          reportTransferRejection(error)
-        }
-        if (!response.ok || !response.body) {
-          throw new Error(`HTTP ${response.status} for ${path.basename(input.destination)}`)
-        }
-        const transfer = planResumedTransfer({
-          partialBytes: resumeFrom,
-          responseStatus: response.status,
-          responseBytes: Number(response.headers.get('content-length') ?? 0)
-        })
-        input.onStarted?.(input.id)
-        let writtenBytes = transfer.writtenBytes
-        const output = fs.createWriteStream(partPath, transfer.append ? { flags: 'a' } : {})
-        try {
-          await pumpToFile(response.body.getReader(), output, (bytes) => {
-            writtenBytes += bytes
-            input.onProgress({ bytesDownloaded: writtenBytes, totalBytes: transfer.totalBytes })
+          input.onStarted?.(input.id)
+          let writtenBytes = transfer.writtenBytes
+          const output = fs.createWriteStream(partPath, transfer.append ? { flags: 'a' } : {})
+          try {
+            await pumpToFile(response.body.getReader(), output, (bytes) => {
+              writtenBytes += bytes
+              input.onProgress({ bytesDownloaded: writtenBytes, totalBytes: transfer.totalBytes })
+            })
+          } catch (error) {
+            // The abort that matters in practice arrives HERE, not at the header fetch: a person
+            // cancels while bytes are moving, and the body reader rejects with `AbortError`. Left
+            // unclassified it reached the lane as an ordinary fault, so a real cancel of an active
+            // download reported `failed`. A write fault keeps its own error and its `code`.
+            reportTransferRejection(error)
+          }
+          const integrityError = await verifyDownloadedPart({
+            name: path.basename(input.destination),
+            writtenBytes,
+            responseTotalBytes: transfer.totalBytes,
+            partPath,
+            expectedBytes: input.expectedBytes,
+            expectedSha256: expectedSha256For?.(input.destination)
           })
-        } catch (error) {
-          // The abort that matters in practice arrives HERE, not at the header fetch: a person
-          // cancels while bytes are moving, and the body reader rejects with `AbortError`. Left
-          // unclassified it reached the lane as an ordinary fault, so a real cancel of an active
-          // download reported `failed`. A write fault keeps its own error and its `code`.
-          reportTransferRejection(error)
-        }
-        const integrityError = await verifyDownloadedPart({
-          name: path.basename(input.destination),
-          writtenBytes,
-          responseTotalBytes: transfer.totalBytes,
-          partPath,
-          expectedBytes: input.expectedBytes,
-          expectedSha256: expectedSha256For?.(input.destination)
-        })
-        if (integrityError) throw new NonRecoverableDownloadError(integrityError)
-        await fs.promises.rename(partPath, input.destination)
-        return { transferId: input.id }
+          if (integrityError) throw new NonRecoverableDownloadError(integrityError)
+          await fs.promises.rename(partPath, input.destination)
+          return { transferId: input.id }
+        })().then(
+          (result) => {
+            // A completion that won the race against a stop keeps its promoted file whatever the
+            // stop asked for; there is no `.part` left to retain or discard after the rename.
+            activeTransfers.delete(input.id)
+            rememberCompleted(input.id)
+            return result
+          },
+          async (error) => {
+            // `pumpToFile` has already ended and flushed the write stream by the time a rejection
+            // reaches here, so removing the `.part` now cannot race a late write.
+            const disposition = activeTransfers.get(input.id)
+            activeTransfers.delete(input.id)
+            if (disposition === 'delete-partial') await removePartial(input.destination)
+            throw error
+          }
+        )
       },
-      async cancel() {
-        // The coordinator aborts the owning signal; fetch and the body reader observe it and
-        // reject with `AbortError`, which `start` reports as `DownloadAbortedError`. Nothing to
-        // throw here: `cancel` is the request, not the transfer whose outcome is being reported.
+      async stop(input) {
+        if (activeTransfers.has(input.transferId)) {
+          activeTransfers.set(input.transferId, input.disposition)
+          return { outcome: 'stopped' }
+        }
+        if (completedTransfers.delete(input.transferId)) return { outcome: 'completed' }
+        return { outcome: 'not-found' }
       }
     }
   }

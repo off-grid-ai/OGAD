@@ -94,6 +94,7 @@ export function desktopModelLifecyclePorts(
         // back.
         return {
           key: `${modality}:inactive`,
+          routeId: null,
           hadRuntime: false,
           unload: async () => ({ reclaimed: true }) as const
         }
@@ -101,6 +102,7 @@ export function desktopModelLifecyclePorts(
       const adapter = lifecycleAdapter(adapters, active)
       return {
         key: `${modality}:${routeId(active)}`,
+        routeId: routeId(active),
         hadRuntime: active.loaded,
         unload: () => reclaimAttempt(() => adapter.unload(active))
       }

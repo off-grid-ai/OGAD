@@ -36,9 +36,8 @@ const coreProductTestFiles = [
 const proProductTestFiles = ['pro/**/*.test.ts', 'pro/**/*.test.tsx']
 
 /**
- * The Desktop repository owns one product-test entry point. When Desktop Pro is
- * checked out, its tests join that same Vitest project instead of requiring a
- * second runner invocation.
+ * Desktop core and Desktop Pro always join the same product project. The canonical `npm test`
+ * also selects the database project in that same Vitest invocation.
  */
 export function createProductTestFiles(hasPro: boolean): string[] {
   return [...coreProductTestFiles, ...(hasPro ? proProductTestFiles : [])]
@@ -65,7 +64,7 @@ export function createVitestProjects(
         include: modelPortIntegrationTests,
         exclude: commonExcludes,
         fileParallelism: false,
-        sequence: { groupOrder: 1 }
+        sequence: { groupOrder: 2 }
       }
     },
     {
@@ -75,7 +74,7 @@ export function createVitestProjects(
         include: packagingIntegrationTests,
         exclude: commonExcludes,
         fileParallelism: false,
-        sequence: { groupOrder: 2 }
+        sequence: { groupOrder: 3 }
       }
     }
   ]

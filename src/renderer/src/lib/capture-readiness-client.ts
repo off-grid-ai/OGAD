@@ -47,13 +47,18 @@ export const captureReadinessClient = {
     })
   },
 
+  /**
+   * Runs the recovery the projection asks for. The outcome is not surfaced here: Shared's control
+   * door records every refusal and failure in the canonical operations projection, which the
+   * readiness hook already observes.
+   */
   async repair(projection: CaptureReadinessProjection): Promise<void> {
     if (projection.kind === 'choose-vision-model') {
       openModels()
       return
     }
     if (projection.kind !== 'missing-projector') return
-    return modelControlClient.control({
+    await modelControlClient.control({
       type: 'repair-projector',
       modelId: projection.modelId
     })

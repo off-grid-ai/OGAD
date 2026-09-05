@@ -60,14 +60,29 @@ interface Pending {
 /** HTTP under the test's control, so each file can be served on cue and the progress in between read. */
 function controlledHttp(): Pending[] {
   const pending: Pending[] = []
+  const revision = '0123456789abcdef0123456789abcdef01234567'
   vi.stubGlobal(
     'fetch',
-    vi.fn(
-      (input: string | URL | Request) =>
-        new Promise<Response>((resolve) => {
-          pending.push({ url: String(input), resolve })
-        })
-    )
+    vi.fn((input: string | URL | Request) => {
+      const url = input instanceof Request ? input.url : String(input)
+      if (url.includes('/api/models/') && url.includes('/revision/')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              sha: revision,
+              siblings: twoFileModel.files.map((file) => ({
+                rfilename: decodeURIComponent(new URL(file.url).pathname.split('/').at(-1)!),
+                size: file.sizeBytes
+              }))
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } }
+          )
+        )
+      }
+      return new Promise<Response>((resolve) => {
+        pending.push({ url, resolve })
+      })
+    })
   )
   return pending
 }

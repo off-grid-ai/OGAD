@@ -32,7 +32,7 @@ export async function publishDesktopChatEvent({
         input.conversationId,
         'user',
         persistence.content,
-        persistence.context
+        { ...(persistence.context ?? {}), chatTurnId: event.turn.id }
       )
     }
   }

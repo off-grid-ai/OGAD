@@ -1,19 +1,43 @@
 // Real model-manager boundary for device-transferred models. Bytes are already in the receiving
 // profile's models directory, exactly as the Pro transfer owner leaves them after checksum
 // verification; this proves registration makes them installed, transferable again, and protected.
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, assert } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import type { TransferredModelManifest } from '@offgrid/sync'
+import type { TransferableModelSource } from '@offgrid/models'
 
 const originalDataDir = process.env.OFFGRID_DATA_DIR
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-model-transfer-registration-'))
 process.env.OFFGRID_DATA_DIR = dataDir
 
-await import('../../model-services')
+const { desktopModelWorkspacePorts } = await import('../../model-services')
+const { createOffGridApplication } = await import('@offgrid/application')
+const { registerDesktopApplication } = await import('../../composition/application-access')
+const { createDesktopModelTransferQueryPorts } = await import('../model-transfer-query-ports')
 const manager = await import('../../models-manager')
 const downloaded = await import('../../downloaded-models')
+const application = createOffGridApplication({
+  models: {
+    ...desktopModelWorkspacePorts,
+    activation: { resolve: manager.resolveDesktopActivation },
+    library: {
+      ...manager.desktopModelLibraryPorts,
+      transferable: createDesktopModelTransferQueryPorts()
+    }
+  }
+})
+registerDesktopApplication(application)
+const registerTransfer = (
+  manifest: TransferredModelManifest
+): ReturnType<typeof application.models.registerTransfer> =>
+  application.models.registerTransfer({ manifest, expectedLibraryId: path.join(dataDir, 'models') })
+async function transferable(modelId: string): Promise<TransferableModelSource | null> {
+  const result = await application.models.transferableModels.resolve(modelId)
+  assert(result.ok, JSON.stringify(result))
+  return result.value
+}
 
 function validGguf(marker: number): Buffer {
   return Buffer.concat([Buffer.from('GGUF', 'ascii'), Buffer.alloc(2_048, marker)])
@@ -23,7 +47,8 @@ beforeAll(() => {
   fs.mkdirSync(path.join(dataDir, 'models'), { recursive: true })
 })
 
-afterAll(() => {
+afterAll(async () => {
+  await application.stop()
   if (originalDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
   else process.env.OFFGRID_DATA_DIR = originalDataDir
   fs.rmSync(dataDir, { recursive: true, force: true })
@@ -35,7 +60,7 @@ describe('device-transferred model registration', () => {
     const primaryBytes = validGguf(10)
     fs.writeFileSync(path.join(dataDir, 'models', primary), primaryBytes)
 
-    const registered = await manager.registerTransferredModel({
+    const registered = await registerTransfer({
       id: 'ggerganov/whisper.cpp/small.en',
       name: 'Whisper Small English',
       kind: 'transcription',
@@ -43,10 +68,12 @@ describe('device-transferred model registration', () => {
       files: [{ name: primary, sizeBytes: primaryBytes.length }]
     })
 
-    expect(registered.success).toBe(true)
-    await expect(manager.activateModel(registered.id!)).resolves.toEqual({ success: true })
-    expect(manager.getActiveModalities()).toMatchObject({ transcription: registered.id })
-    expect(manager.getActiveModel()).not.toBe(registered.id)
+    assert(registered.ok, JSON.stringify(registered))
+    await expect(manager.activateModel(registered.value.modelId)).resolves.toEqual({
+      success: true
+    })
+    expect(manager.getActiveModalities()).toMatchObject({ transcription: registered.value.modelId })
+    expect(manager.getActiveModel()).not.toBe(registered.value.modelId)
   })
 
   it('registers a valid vision variant whose files differ from the download catalog', async () => {
@@ -57,7 +84,7 @@ describe('device-transferred model registration', () => {
     fs.writeFileSync(path.join(dataDir, 'models', primary), primaryBytes)
     fs.writeFileSync(path.join(dataDir, 'models', projector), projectorBytes)
 
-    const result = await manager.registerTransferredModel({
+    const result = await registerTransfer({
       id: 'unsloth/Qwen3.5-0.8B-GGUF',
       name: 'Qwen3.5 0.8B',
       kind: 'vision',
@@ -68,13 +95,13 @@ describe('device-transferred model registration', () => {
       ]
     })
 
-    expect(result.success).toBe(true)
-    expect(result.id).toMatch(/^model-package-v1:[0-9a-f]{64}$/)
-    expect(await manager.listInstalled()).toContain(result.id)
-    expect(await manager.getTransferableModel(result.id!)).toMatchObject({
-      id: result.id,
+    assert(result.ok, JSON.stringify(result))
+    expect(result.value.modelId).toMatch(/^model-package-v1:[0-9a-f]{64}$/)
+    expect(await manager.listInstalled()).toContain(result.value.modelId)
+    expect(await transferable(result.value.modelId)).toMatchObject({
+      id: result.value.modelId,
       familyId: 'unsloth/Qwen3.5-0.8B-GGUF',
-      packageIdentity: result.id,
+      packageIdentity: result.value.modelId,
       kind: 'vision',
       source: 'downloaded',
       files: [
@@ -86,7 +113,7 @@ describe('device-transferred model registration', () => {
     const otherPrimary = 'Qwen3.5-0.8B-Q5_K_M.gguf'
     const otherBytes = validGguf(5)
     fs.writeFileSync(path.join(dataDir, 'models', otherPrimary), otherBytes)
-    const other = await manager.registerTransferredModel({
+    const other = await registerTransfer({
       id: 'unsloth/Qwen3.5-0.8B-GGUF',
       name: 'Qwen3.5 0.8B',
       kind: 'vision',
@@ -96,9 +123,11 @@ describe('device-transferred model registration', () => {
         { name: projector, sizeBytes: projectorBytes.length }
       ]
     })
-    expect(other.success).toBe(true)
-    expect(other.id).not.toBe(result.id)
-    expect(await manager.listInstalled()).toEqual(expect.arrayContaining([result.id, other.id]))
+    assert(other.ok, JSON.stringify(other))
+    expect(other.value.modelId).not.toBe(result.value.modelId)
+    expect(await manager.listInstalled()).toEqual(
+      expect.arrayContaining([result.value.modelId, other.value.modelId])
+    )
   })
 
   it('reports active-projector finalization failure and repairs it on an idempotent retry', async () => {
@@ -124,20 +153,23 @@ describe('device-transferred model registration', () => {
     fs.writeFileSync(activePath, JSON.stringify({ id: packageId, primary, mmproj: null }))
     fs.chmodSync(activePath, 0o400)
 
-    const failed = await manager.registerTransferredModel(manifest)
+    const failed = await registerTransfer(manifest)
 
     expect(failed).toEqual({
-      success: false,
-      error:
-        'Model files are ready, but the active vision model could not be updated. Retry to finish setup.'
+      ok: false,
+      failure: {
+        kind: 'runtime',
+        message:
+          'Model files are ready, but the active vision model could not be updated. Retry to finish setup.'
+      }
     })
     expect(await manager.listInstalled()).toContain(packageId)
     expect(JSON.parse(fs.readFileSync(activePath, 'utf8')).mmproj).toBeNull()
 
     fs.chmodSync(activePath, 0o600)
-    await expect(manager.registerTransferredModel(manifest)).resolves.toEqual({
-      success: true,
-      id: packageId
+    await expect(registerTransfer(manifest)).resolves.toEqual({
+      ok: true,
+      value: { modelId: packageId }
     })
     expect(JSON.parse(fs.readFileSync(activePath, 'utf8')).mmproj).toBe(projector)
   })
@@ -150,7 +182,7 @@ describe('device-transferred model registration', () => {
     fs.writeFileSync(path.join(dataDir, 'models', primary), primaryBytes)
     fs.writeFileSync(path.join(dataDir, 'models', projector), projectorBytes)
 
-    const result = await manager.registerTransferredModel({
+    const result = await registerTransfer({
       id: 'off-grid/test-shared-model',
       name: 'Test shared model',
       kind: 'vision',
@@ -161,12 +193,12 @@ describe('device-transferred model registration', () => {
       ]
     })
 
-    expect(result.success).toBe(true)
-    expect(result.id).toMatch(/^model-package-v1:[0-9a-f]{64}$/)
-    expect(await manager.listInstalled()).toContain(result.id)
+    assert(result.ok, JSON.stringify(result))
+    expect(result.value.modelId).toMatch(/^model-package-v1:[0-9a-f]{64}$/)
+    expect(await manager.listInstalled()).toContain(result.value.modelId)
     expect((await manager.getStorageInfo()).orphans).toEqual([])
-    expect(await manager.getTransferableModel(result.id!)).toMatchObject({
-      id: result.id,
+    expect(await transferable(result.value.modelId)).toMatchObject({
+      id: result.value.modelId,
       familyId: 'off-grid/test-shared-model',
       name: 'Test shared model',
       kind: 'vision',
@@ -189,11 +221,8 @@ describe('device-transferred model registration', () => {
     fs.writeFileSync(path.join(dataDir, 'models', firstPrimary), firstBytes)
     fs.writeFileSync(path.join(dataDir, 'models', secondPrimary), secondBytes)
 
-    const register = (
-      primary: string,
-      bytes: Buffer
-    ): ReturnType<typeof manager.registerTransferredModel> =>
-      manager.registerTransferredModel({
+    const register = (primary: string, bytes: Buffer): ReturnType<typeof registerTransfer> =>
+      registerTransfer({
         id: 'off-grid/delete-family',
         name: 'Delete family',
         kind: 'vision',
@@ -205,36 +234,42 @@ describe('device-transferred model registration', () => {
       })
     const first = await register(firstPrimary, firstBytes)
     const second = await register(secondPrimary, secondBytes)
-    expect(first.success).toBe(true)
-    expect(second.success).toBe(true)
+    assert(first.ok, JSON.stringify(first))
+    assert(second.ok, JSON.stringify(second))
 
-    expect(await manager.deleteModel(first.id!)).toEqual({ success: true, freedFiles: 1 })
+    expect(await manager.deleteModel(first.value.modelId)).toEqual({ success: true, freedFiles: 1 })
     expect(fs.existsSync(path.join(dataDir, 'models', firstPrimary))).toBe(false)
     expect(fs.existsSync(path.join(dataDir, 'models', sharedProjector))).toBe(true)
-    expect(await manager.listInstalled()).not.toContain(first.id)
-    expect(await manager.listInstalled()).toContain(second.id)
+    expect(await manager.listInstalled()).not.toContain(first.value.modelId)
+    expect(await manager.listInstalled()).toContain(second.value.modelId)
 
-    expect(await manager.deleteModel(second.id!)).toEqual({ success: true, freedFiles: 2 })
+    expect(await manager.deleteModel(second.value.modelId)).toEqual({
+      success: true,
+      freedFiles: 2
+    })
     expect(fs.existsSync(path.join(dataDir, 'models', secondPrimary))).toBe(false)
     expect(fs.existsSync(path.join(dataDir, 'models', sharedProjector))).toBe(false)
-    expect(await manager.listInstalled()).not.toContain(second.id)
+    expect(await manager.listInstalled()).not.toContain(second.value.modelId)
   })
 
   it('rejects traversal and corrupt GGUF manifests without registering them', async () => {
     expect(
-      await manager.registerTransferredModel({
+      await registerTransfer({
         id: 'off-grid/traversal',
         name: 'Traversal',
         kind: 'text',
         source: 'downloaded',
         files: [{ name: '../outside.gguf', sizeBytes: 2_052 }]
       })
-    ).toEqual({ success: false, error: 'model manifest contains an invalid file' })
+    ).toEqual({
+      ok: false,
+      failure: { kind: 'runtime', message: 'model manifest contains an invalid file' }
+    })
 
     const corrupt = 'corrupt.gguf'
     fs.writeFileSync(path.join(dataDir, 'models', corrupt), Buffer.from('GGUF'))
     expect(
-      await manager.registerTransferredModel({
+      await registerTransfer({
         id: 'off-grid/corrupt',
         name: 'Corrupt',
         kind: 'text',
@@ -242,8 +277,11 @@ describe('device-transferred model registration', () => {
         files: [{ name: corrupt, sizeBytes: 4 }]
       })
     ).toEqual({
-      success: false,
-      error: 'corrupt.gguf: transferred file is not a valid GGUF model'
+      ok: false,
+      failure: {
+        kind: 'runtime',
+        message: 'corrupt.gguf: transferred file is not a valid GGUF model'
+      }
     })
     expect(await manager.listInstalled()).not.toContain('off-grid/corrupt')
   })
@@ -262,7 +300,7 @@ describe('device-transferred model registration', () => {
     })
 
     expect(
-      await manager.registerTransferredModel({
+      await registerTransfer({
         id: 'off-grid/linked',
         name: 'Linked',
         kind: 'text',
@@ -270,9 +308,12 @@ describe('device-transferred model registration', () => {
         files: [{ name: linked, sizeBytes: bytes.length }]
       })
     ).toEqual({
-      success: false,
-      error: 'linked.gguf: transferred file is not a regular file'
+      ok: false,
+      failure: { kind: 'runtime', message: 'linked.gguf: transferred file is not a regular file' }
     })
-    expect(await manager.getTransferableModel('off-grid/linked')).toBeNull()
+    expect(await application.models.transferableModels.resolve('off-grid/linked')).toMatchObject({
+      ok: false,
+      failure: { kind: 'invalid_artifact' }
+    })
   })
 })

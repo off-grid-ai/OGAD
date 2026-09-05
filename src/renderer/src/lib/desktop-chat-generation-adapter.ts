@@ -2,6 +2,7 @@ import {
   generatedImagePrompt,
   type GenerationEvents,
   type GenerationMessage,
+  type GenerationReasoning,
   type GenerationResult
 } from '@offgrid/models'
 import type { RagChatResultContract } from '../../../shared/ipc-contracts'
@@ -36,6 +37,7 @@ export interface DesktopTurnExecution {
 
 export interface DesktopGenerationContext {
   messages: readonly GenerationMessage[]
+  reasoning: GenerationReasoning | undefined
   signal: AbortSignal | undefined
   events?: GenerationEvents
 }
@@ -64,7 +66,7 @@ export class DesktopChatGenerationAdapter {
     try {
       if (input.kind === 'image') return this.generateImage(execution, context.signal)
       if (input.kind === 'tools') return this.generateTools(execution, context)
-      return this.generateRag(execution, context.messages, context.signal)
+      return this.generateRag(execution, context)
     } finally {
       unsubscribe()
     }
@@ -103,7 +105,7 @@ export class DesktopChatGenerationAdapter {
       images: input.images,
       imageAvailable: input.imageAvailable,
       streamId: input.turnId,
-      thinking: input.thinking ?? false
+      thinking: context.reasoning?.enabled === true
     })
     execution.toolResponse = response
     await this.generateDeferredImages(execution, context)
@@ -245,25 +247,24 @@ export class DesktopChatGenerationAdapter {
 
   private async generateRag(
     execution: DesktopTurnExecution,
-    messages: readonly GenerationMessage[],
-    signal: AbortSignal | undefined
+    context: DesktopGenerationContext
   ): Promise<GenerationResult> {
     const { input } = execution
     const response = await this.boundary.ragChat(
       input.query,
       'All',
-      desktopHistory(messages),
+      desktopHistory(context.messages),
       input.projectId,
       input.conversationId,
       input.noMemory && !input.projectId,
       input.turnId,
-      input.thinking ?? false,
+      context.reasoning?.enabled === true,
       input.images
     )
     execution.response = response
     const prompt = generatedImagePrompt(response.answer)
-    if (!prompt || !this.boundary.generateImage || signal?.aborted) {
-      return desktopTextResult(response.answer, signal, response.model)
+    if (!prompt || !this.boundary.generateImage || context.signal?.aborted) {
+      return desktopTextResult(response.answer, context.signal, response.model)
     }
     execution.imageActive = true
     try {
@@ -273,7 +274,7 @@ export class DesktopChatGenerationAdapter {
         projectId: input.projectId
       })
       execution.generatedImages.push(image)
-      return desktopImageResult(image, signal)
+      return desktopImageResult(image, context.signal)
     } finally {
       execution.imageActive = false
     }

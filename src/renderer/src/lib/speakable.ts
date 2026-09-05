@@ -43,6 +43,9 @@ function collect(node: Nodes, out: string[]): void {
     }
     return // toString already walked this block's inline children
   }
+  if (!('children' in node) || !Array.isArray(node.children)) {
+    return
+  }
   for (const child of (node as Parent).children) {
     collect(child, out)
   }

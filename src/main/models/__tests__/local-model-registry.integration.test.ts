@@ -7,10 +7,24 @@ const originalDataDir = process.env.OFFGRID_DATA_DIR
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-local-registry-integration-'))
 process.env.OFFGRID_DATA_DIR = dataDir
 
-await import('../../model-services')
-const manager = await import('../../models-manager')
+const [applicationModule, modelServices, manager, applicationAccess] = await Promise.all([
+  import('@offgrid/application'),
+  import('../../model-services'),
+  import('../../models-manager'),
+  import('../../composition/application-access')
+])
+const application = applicationModule.createOffGridApplication({
+  models: {
+    ...modelServices.desktopModelWorkspacePorts,
+    library: manager.desktopModelLibraryPorts
+  }
+})
+const releaseApplication = applicationAccess.registerDesktopApplication(application)
+await application.start()
 
-afterAll(() => {
+afterAll(async () => {
+  await application.stop()
+  releaseApplication()
   if (originalDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
   else process.env.OFFGRID_DATA_DIR = originalDataDir
   fs.rmSync(dataDir, { recursive: true, force: true })

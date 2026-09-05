@@ -22,6 +22,42 @@ function input(turnId: string, conversationId = 'conversation-a'): DesktopChatSe
 }
 
 describe('DesktopChatSession', () => {
+  it('persists the Shared restart recovery state through the Desktop adapter', async () => {
+    const persisted = [
+      {
+        id: 'turn-interrupted',
+        conversationId: 'conversation-a',
+        userMessage: { role: 'user' as const, content: 'Keep this request' },
+        status: 'generating' as const,
+        request: { operation: { type: 'text' as const }, request: {} }
+      }
+    ]
+    const writeChatSessionTurns = vi.fn(async () => undefined)
+    const boundary: DesktopChatSessionBoundary = {
+      ragChat: vi.fn(async () => ({ answer: 'unused' })),
+      onRagStream: () => () => undefined,
+      cancelRag: vi.fn(),
+      readChatSessionTurns: vi.fn(async () => persisted),
+      writeChatSessionTurns
+    }
+    const session = new DesktopChatSession(boundary)
+    const events: string[] = []
+    session.subscribe((event) => events.push(event.type))
+
+    const recovered = await session.restoreConversation('conversation-a')
+
+    expect(recovered).toEqual([
+      expect.objectContaining({ id: 'turn-interrupted', status: 'interrupted' })
+    ])
+    expect(writeChatSessionTurns).toHaveBeenCalledWith(
+      'conversation-a',
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'turn-interrupted', status: 'interrupted' })
+      ])
+    )
+    expect(events).toContain('interrupted')
+  })
+
   it('uses the real shared lifecycle for streaming and durable response messages', async () => {
     let listener: Parameters<DesktopChatSessionBoundary['onRagStream']>[0] = () => undefined
     const boundary: DesktopChatSessionBoundary = {
@@ -117,7 +153,7 @@ describe('DesktopChatSession', () => {
       truncateRagMessages: vi.fn(async () => 1)
     }
     const session = new DesktopChatSession(boundary)
-    session.restoreConversation('conversation-a', [
+    await session.restoreConversation('conversation-a', [
       {
         id: 'turn-a',
         conversationId: 'conversation-a',
@@ -177,7 +213,7 @@ describe('DesktopChatSession', () => {
       'conversation-a',
       'user',
       'Edited question',
-      undefined
+      { chatTurnId: 'turn-a' }
     )
   })
 
@@ -425,6 +461,159 @@ describe('DesktopChatSession', () => {
   })
 })
 
+describe('DesktopChatSession reasoning routing', () => {
+  function ragBoundary(): DesktopChatSessionBoundary {
+    return {
+      ragChat: vi.fn(async () => ({ answer: 'Routed answer' })),
+      onRagStream: () => () => undefined,
+      cancelRag: vi.fn()
+    }
+  }
+
+  it('carries an enabled reasoning flag into the rag boundary and the durable turn request', async () => {
+    const boundary = ragBoundary()
+    const session = new DesktopChatSession(boundary)
+
+    const result = await session.send({ ...input('turn-think'), thinking: true })
+
+    expect(boundary.ragChat).toHaveBeenCalledWith(
+      'Question turn-think',
+      'All',
+      [],
+      'project-a',
+      'conversation-a',
+      false,
+      'turn-think',
+      true,
+      []
+    )
+    expect(result.turn.request.request).toMatchObject({ reasoning: { enabled: true } })
+  })
+
+  it('does not enable reasoning in the rag boundary when thinking is off', async () => {
+    const boundary = ragBoundary()
+    const session = new DesktopChatSession(boundary)
+
+    const result = await session.send({ ...input('turn-plain'), thinking: false })
+
+    expect(boundary.ragChat).toHaveBeenCalledWith(
+      'Question turn-plain',
+      'All',
+      [],
+      'project-a',
+      'conversation-a',
+      false,
+      'turn-plain',
+      false,
+      []
+    )
+    expect(result.turn.request.request).toMatchObject({ reasoning: { enabled: false } })
+  })
+
+  it('maps the reasoning flag onto the tool boundary thinking option', async () => {
+    const boundary: DesktopChatSessionBoundary = {
+      ...ragBoundary(),
+      toolChat: vi.fn(async () => ({ answer: 'Tool answer', toolCalls: [] }))
+    }
+    const session = new DesktopChatSession(boundary)
+    const tools = {
+      kind: 'tools' as const,
+      connectors: true,
+      allMemory: false,
+      imageAvailable: false
+    }
+
+    await session.send({ ...input('turn-tools-think'), ...tools, thinking: true })
+    await session.send({ ...input('turn-tools-plain'), ...tools, thinking: false })
+
+    expect(boundary.toolChat).toHaveBeenNthCalledWith(
+      1,
+      'Question turn-tools-think',
+      [],
+      expect.objectContaining({ streamId: 'turn-tools-think', thinking: true })
+    )
+    expect(boundary.toolChat).toHaveBeenNthCalledWith(
+      2,
+      'Question turn-tools-plain',
+      [
+        { role: 'user', content: 'Question turn-tools-think' },
+        { role: 'assistant', content: 'Tool answer' }
+      ],
+      expect.objectContaining({ streamId: 'turn-tools-plain', thinking: false })
+    )
+  })
+
+  it('sends the image payload to the image boundary without any reasoning request', async () => {
+    const boundary: DesktopChatSessionBoundary = {
+      ...ragBoundary(),
+      generateImage: vi.fn(async () => ({
+        dataUrl: 'data:image/png;base64,cG5n',
+        path: '/generated/dawn.png',
+        syncId: 'dawn-sync-id',
+        seed: 7,
+        model: 'DreamShaper'
+      }))
+    }
+    const session = new DesktopChatSession(boundary)
+
+    const result = await session.send({
+      ...input('turn-image-only'),
+      kind: 'image',
+      thinking: true,
+      request: {
+        prompt: 'A cabin at dawn',
+        negativePrompt: 'blurry',
+        width: 512,
+        height: 768,
+        steps: 20,
+        cfgScale: 7,
+        seed: 7,
+        conversationId: 'conversation-a',
+        projectId: 'project-a'
+      }
+    })
+
+    expect(boundary.generateImage).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: 'A cabin at dawn', conversationId: 'conversation-a' })
+    )
+    expect(boundary.ragChat).not.toHaveBeenCalled()
+    expect(result.turn.request.operation).toMatchObject({
+      type: 'image',
+      prompt: 'A cabin at dawn',
+      negativePrompt: 'blurry',
+      width: 512,
+      height: 768,
+      steps: 20,
+      guidanceScale: 7,
+      seed: 7
+    })
+    expect(result.turn.request.request).not.toHaveProperty('reasoning')
+  })
+
+  it('merges the durable user context with the turn id instead of replacing it', async () => {
+    const boundary: DesktopChatSessionBoundary = {
+      ...ragBoundary(),
+      addRagMessage: vi.fn(async () => ({ id: 3, uuid: 'user-3' }))
+    }
+    const session = new DesktopChatSession(boundary)
+
+    await session.send({
+      ...input('turn-ctx'),
+      userPersistence: {
+        content: 'Question turn-ctx',
+        context: { source: 'voice', attachments: ['a.png'] }
+      }
+    })
+
+    expect(boundary.addRagMessage).toHaveBeenCalledWith(
+      'conversation-a',
+      'user',
+      'Question turn-ctx',
+      { source: 'voice', attachments: ['a.png'], chatTurnId: 'turn-ctx' }
+    )
+  })
+})
+
 describe('DesktopChatSession context compaction', () => {
   it('compacts on a full window, keeps the turn, and continues with the compacted history', async () => {
     const histories: Array<Array<{ role: string; content: string }>> = []
@@ -458,7 +647,7 @@ describe('DesktopChatSession context compaction', () => {
       status: 'completed' as const,
       request: { operation: { type: 'text' as const }, request: {} }
     }))
-    session.restoreConversation('conversation-c', long)
+    await session.restoreConversation('conversation-c', long)
 
     const result = await session.send(input('turn-c', 'conversation-c'))
 
@@ -469,6 +658,45 @@ describe('DesktopChatSession context compaction', () => {
     expect(boundary.generateText).toHaveBeenCalledTimes(1)
     expect(histories[1]!.some((turn) => turn.content.includes('What was said before'))).toBe(true)
     expect(histories[1]!.length).toBeLessThan(histories[0]!.length)
+  })
+
+  it('still compacts with the default window when the llama settings lookup fails', async () => {
+    let calls = 0
+    const boundary: DesktopChatSessionBoundary = {
+      ragChat: vi.fn(async () => {
+        calls += 1
+        if (calls === 1) throw new Error('the request exceeds the available context size')
+        return { answer: 'Continued after default window', context: { sources: [] } }
+      }),
+      onRagStream: vi.fn(() => () => undefined),
+      cancelRag: vi.fn(),
+      generateText: vi.fn(async () => 'Earlier summary'),
+      getLlmSettings: vi.fn(async () => {
+        throw new Error('llama-server is not running')
+      })
+    }
+    const session = new DesktopChatSession(boundary)
+    const events: string[] = []
+    session.subscribe((event) => events.push(event.type))
+    const long = Array.from({ length: 24 }, (_, index) => ({
+      id: `t${index}`,
+      conversationId: 'conversation-e',
+      userMessage: { role: 'user' as const, content: `Question ${index} ${'x'.repeat(600)}` },
+      responseMessages: [
+        { role: 'assistant' as const, content: `Answer ${index} ${'y'.repeat(600)}` }
+      ],
+      status: 'completed' as const,
+      request: { operation: { type: 'text' as const }, request: {} }
+    }))
+    await session.restoreConversation('conversation-e', long)
+
+    const result = await session.send(input('turn-e', 'conversation-e'))
+
+    expect(boundary.getLlmSettings).toHaveBeenCalledTimes(1)
+    expect(result.response.answer).toBe('Continued after default window')
+    expect(calls).toBe(2)
+    expect(events).toContain('compacted')
+    expect(boundary.generateText).toHaveBeenCalledTimes(1)
   })
 
   it('surfaces the original error when the window is full but Desktop cannot compact', async () => {

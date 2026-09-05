@@ -10,6 +10,11 @@ process.env.OFFGRID_DATA_DIR = dataDir
 
 await import('../../model-services')
 const manager = await import('../../models-manager')
+const { createOffGridApplication } = await import('@offgrid/application')
+const { desktopModelWorkspacePorts } = await import('../../model-services')
+const { registerDesktopApplication } = await import('../../composition/application-access')
+const application = createOffGridApplication({ models: desktopModelWorkspacePorts })
+registerDesktopApplication(application)
 
 const FAMILY_ID = 'unsloth/Qwen3.5-0.8B-GGUF'
 const PRIMARY = 'Qwen3.5-0.8B-Q4_K_M.gguf'
@@ -24,7 +29,8 @@ beforeAll(() => {
   fs.mkdirSync(modelsDir, { recursive: true })
 })
 
-afterAll(() => {
+afterAll(async () => {
+  await application.stop()
   if (originalDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
   else process.env.OFFGRID_DATA_DIR = originalDataDir
   fs.rmSync(dataDir, { recursive: true, force: true })
@@ -87,7 +93,7 @@ describe('transferred vision variant activation', () => {
       primary: PRIMARY,
       mmproj: PROJECTOR
     })
-    expect(await manager.setActiveModel(FAMILY_ID)).toEqual({ success: true })
+    expect(await manager.setActiveModel(exactId)).toEqual({ success: true })
     expect(JSON.parse(fs.readFileSync(path.join(modelsDir, 'active-model.json'), 'utf8'))).toEqual({
       id: exactId,
       primary: PRIMARY,

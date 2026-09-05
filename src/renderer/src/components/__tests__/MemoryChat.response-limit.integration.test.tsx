@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SettingsPanel } from '../SettingsPanel'
 import { TooltipProvider } from '../ui/tooltip'
 import { ChatBoundary, installBoundary, renderChat, send } from './harness/chat-boundary'
+import { modelControlSnapshot } from './harness/model-control-snapshot'
 
 const OLD_MAX_TOKENS = 2048
 const RAISED_MAX_TOKENS = 4096
@@ -34,7 +35,17 @@ describe('<MemoryChat/> - response limit through public renderer contracts', () 
     let maxTokens = OLD_MAX_TOKENS
     const setLlmSettings = vi.fn(async (patch: { maxTokens?: number }) => {
       maxTokens = patch.maxTokens ?? maxTokens
-      return { maxTokens }
+      return {
+        ok: true as const,
+        value: {
+          operationId: 'response-limit-save',
+          settings: { maxTokens },
+          changed: ['maxTokens'],
+          launch: null,
+          published: [],
+          syncFailure: null
+        }
+      }
     })
     Object.assign(boundary.api, {
       getLlmSettings: async () => ({ maxTokens }),
@@ -101,6 +112,17 @@ describe('<MemoryChat/> - response limit through public renderer contracts', () 
         ...patch,
         effectiveCtxSize: patch.ctxSize ?? settings.effectiveCtxSize
       }
+      return {
+        ok: true as const,
+        value: {
+          operationId: 'context-window-save',
+          settings,
+          changed: ['ctxSize'],
+          launch: null,
+          published: [],
+          syncFailure: null
+        }
+      }
     })
     Object.assign(boundary.api, {
       getModelCatalog: async () => ({
@@ -108,7 +130,7 @@ describe('<MemoryChat/> - response limit through public renderer contracts', () 
         models: [{ id: 'local/qwen', name: 'Qwen 3.5 2B' }]
       }),
       getActiveModel: async () => 'local/qwen',
-      getModelControlProjection: async () => ({
+      getModelControlProjection: async () => modelControlSnapshot({
         kinds: ['vision'],
         models: [{ id: 'local/qwen', name: 'Qwen 3.5 2B', kind: 'vision', files: [] }],
         installed: [],

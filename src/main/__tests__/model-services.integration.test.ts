@@ -10,6 +10,7 @@ import path from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { CATALOG } from '@offgrid/models'
 import type { OffGridApplication } from '@offgrid/application'
+import { createFakeLocalTextRuntime } from './harness/local-text-runtime'
 
 const previousDataDir = process.env.OFFGRID_DATA_DIR
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-model-services-'))
@@ -95,7 +96,7 @@ describe('Desktop shared model-service composition', () => {
     const application = await createModelsApplication({
       listCatalog: async () => [],
       listInstalled: async () => [],
-      localTextRuntimeState: async () => ({ ready: false, loaded: false })
+      localTextRuntime: createFakeLocalTextRuntime().runtime
     })
 
     await expect(
@@ -122,7 +123,7 @@ describe('Desktop shared model-service composition', () => {
     const readyApplication = await createModelsApplication({
       listCatalog: async () => [voice],
       listInstalled: async () => [],
-      localTextRuntimeState: async () => ({ ready: false, loaded: false }),
+      localTextRuntime: createFakeLocalTextRuntime().runtime,
       localVoiceRuntimeState: async () => ({ installed: true, ready: true })
     })
     await readyApplication.models.refresh()
@@ -146,7 +147,7 @@ describe('Desktop shared model-service composition', () => {
     const unavailableApplication = await createModelsApplication({
       listCatalog: async () => [voice],
       listInstalled: async () => [voice.id],
-      localTextRuntimeState: async () => ({ ready: false, loaded: false }),
+      localTextRuntime: createFakeLocalTextRuntime().runtime,
       localVoiceRuntimeState: async () => ({ installed: false, ready: false })
     })
     await unavailableApplication.models.refresh()
@@ -201,7 +202,7 @@ describe('Desktop shared model-service composition', () => {
     const visionRouteApplication = await createModelsApplication({
       listCatalog: async () => [{ ...text, kind: 'vision' }],
       listInstalled: async () => [text.id],
-      localTextRuntimeState: async () => ({ ready: true, loaded: true })
+      localTextRuntime: createFakeLocalTextRuntime({ ready: true }).runtime
     })
     await visionRouteApplication.models.refresh()
     const visionRouteInventory = visionRouteApplication.models.snapshot().inventory
@@ -221,11 +222,10 @@ describe('Desktop shared model-service composition', () => {
     const thinkingRouteApplication = await createModelsApplication({
       listCatalog: async () => [{ ...text, kind: 'vision' }],
       listInstalled: async () => [text.id],
-      localTextRuntimeState: async () => ({
+      localTextRuntime: createFakeLocalTextRuntime({
         ready: true,
-        loaded: true,
-        reasoning: { transport: 'llama-server', control: 'enable-thinking' }
-      })
+        state: { reasoning: { transport: 'llama-server', control: 'enable-thinking' } }
+      }).runtime
     })
     await thinkingRouteApplication.models.refresh()
     const thinkingRouteInventory = thinkingRouteApplication.models.snapshot().inventory
@@ -282,24 +282,15 @@ describe('Desktop shared model-service composition', () => {
     expect(manager.getActiveModalities()).toMatchObject({ text: text.id, image: image.id })
     expect(await manager.getActiveModelIds()).toEqual(expect.arrayContaining([text.id, image.id]))
 
-    let nativeReady = false
-    let nativeLoads = 0
-    let nativeUnloads = 0
+    const native = createFakeLocalTextRuntime({
+      onLoad: () => {
+        expect(startupApplication.models.snapshot().residents).toEqual([])
+      }
+    })
     const startupApplication = await createModelsApplication({
       listCatalog: async () => [text],
       listInstalled: async () => [text.id],
-      localTextRuntimeState: async () => ({ ready: nativeReady, loaded: nativeReady }),
-      localTextLifecycle: {
-        async load() {
-          expect(startupApplication.models.snapshot().residents).toEqual([])
-          nativeLoads += 1
-          nativeReady = true
-        },
-        async unload() {
-          nativeUnloads += 1
-          nativeReady = false
-        }
-      }
+      localTextRuntime: native.runtime
     })
 
     await startupApplication.models.refresh()
@@ -320,7 +311,7 @@ describe('Desktop shared model-service composition', () => {
     await expect(
       startupApplication.models.load({ modality: 'text', modelId: startupTextRoute })
     ).resolves.toMatchObject({ ok: true })
-    expect(nativeLoads).toBe(1)
+    expect(native.loads).toBe(1)
     expect(
       startupApplication.models
         .snapshot()
@@ -337,7 +328,7 @@ describe('Desktop shared model-service composition', () => {
       ok: true,
       value: true
     })
-    expect(nativeUnloads).toBe(1)
+    expect(native.unloads).toBe(1)
     expect(
       startupApplication.models
         .snapshot()
@@ -349,13 +340,11 @@ describe('Desktop shared model-service composition', () => {
     const failingStartupApplication = await createModelsApplication({
       listCatalog: async () => [text],
       listInstalled: async () => [text.id],
-      localTextRuntimeState: async () => ({ ready: false, loaded: false }),
-      localTextLifecycle: {
-        load: async () => {
+      localTextRuntime: createFakeLocalTextRuntime({
+        onLoad: () => {
           throw startupError
-        },
-        unload: async () => undefined
-      }
+        }
+      }).runtime
     })
     await failingStartupApplication.models.refresh()
     await expect(
@@ -444,7 +433,7 @@ describe('Desktop memory advisory facts (Shared owns the rule)', () => {
     ])
     vi.spyOn(os, 'totalmem').mockReturnValue(options.totalBytes)
     vi.spyOn(os, 'freemem').mockReturnValue(options.totalBytes)
-    let ready = false
+    const native = createFakeLocalTextRuntime()
     const application = applicationModule.createOffGridApplication({
       models: {
         ...modelServices.createDesktopModelWorkspacePorts({
@@ -459,15 +448,7 @@ describe('Desktop memory advisory facts (Shared owns the rule)', () => {
               return undefined
             }
           },
-          localTextRuntimeState: async () => ({ ready, loaded: ready }),
-          localTextLifecycle: {
-            async load() {
-              ready = true
-            },
-            async unload() {
-              ready = false
-            }
-          }
+          localTextRuntime: native.runtime
         }),
         control: controlPort.createDesktopModelControlPort({
           readCatalog: async () => ({ kinds: ['text'], models: [sizedText] })

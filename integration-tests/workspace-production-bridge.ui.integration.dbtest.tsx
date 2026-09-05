@@ -35,7 +35,7 @@ const previousUserData = process.env.OFFGRID_USER_DATA
 const previousDataDir = process.env.OFFGRID_DATA_DIR
 const bridge = vi.hoisted(() => ({
   handlers: new Map<string, IpcHandler>(),
-  mainListeners: new Map<string, IpcHandler>(),
+  mainListeners: new Map<string, Set<IpcHandler>>(),
   rendererListeners: new Map<string, Set<IpcListener>>()
 }))
 
@@ -63,9 +63,30 @@ vi.mock('electron', () => ({
     encryptString: (value: string) => Buffer.from(value),
     decryptString: (value: Buffer) => value.toString()
   },
+  // Mirrors the real Electron ipcMain surface the booted main modules use (handle / removeHandler /
+  // on / removeListener / removeAllListeners), including Electron's one-handler-per-channel rule.
   ipcMain: {
-    handle: (channel: string, handler: IpcHandler) => bridge.handlers.set(channel, handler),
-    on: (channel: string, handler: IpcHandler) => bridge.mainListeners.set(channel, handler)
+    handle: (channel: string, handler: IpcHandler) => {
+      if (bridge.handlers.has(channel)) {
+        throw new Error(`Attempted to register a second handler for '${channel}'`)
+      }
+      bridge.handlers.set(channel, handler)
+    },
+    removeHandler: (channel: string) => {
+      bridge.handlers.delete(channel)
+    },
+    on: (channel: string, listener: IpcHandler) => {
+      const listeners = bridge.mainListeners.get(channel) ?? new Set<IpcHandler>()
+      listeners.add(listener)
+      bridge.mainListeners.set(channel, listeners)
+    },
+    removeListener: (channel: string, listener: IpcHandler) => {
+      bridge.mainListeners.get(channel)?.delete(listener)
+    },
+    removeAllListeners: (channel?: string) => {
+      if (channel === undefined) bridge.mainListeners.clear()
+      else bridge.mainListeners.delete(channel)
+    }
   },
   ipcRenderer: {
     invoke: async (channel: string, ...args: unknown[]) => {
@@ -74,7 +95,7 @@ vi.mock('electron', () => ({
       return handler(event, ...args)
     },
     send: (channel: string, ...args: unknown[]) => {
-      bridge.mainListeners.get(channel)?.(event, ...args)
+      for (const listener of bridge.mainListeners.get(channel) ?? []) listener(event, ...args)
     },
     sendSync: () => false,
     on: (channel: string, listener: IpcListener) => {

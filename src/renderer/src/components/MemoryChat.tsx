@@ -106,6 +106,7 @@ import {
   mergeDurableAndStreaming,
   restoredChatSessionTurns
 } from '@renderer/lib/chat-transcript-projection'
+import { projectRecoveredChatTurns } from '@renderer/lib/chat-restart-projection'
 import {
   createDesktopChatSession,
   subscribeDesktopChatStream,
@@ -386,11 +387,13 @@ export function MemoryChat({
       conversationMessageLoadVersionRef.current.set(conversationId, nextVersion)
       const rawMessages = await window.api.getRagMessages(conversationId)
       if (conversationMessageLoadVersionRef.current.get(conversationId) !== nextVersion) return null
-      desktopChatSession.restoreConversation(
+      const recoveredTurns = await desktopChatSession.restoreConversation(
         conversationId,
         restoredChatSessionTurns(conversationId, rawMessages)
       )
-      return mapRagMessages(rawMessages)
+      if (conversationMessageLoadVersionRef.current.get(conversationId) !== nextVersion) return null
+      const durableMessages = mapRagMessages(rawMessages)
+      return projectRecoveredChatTurns(rawMessages, durableMessages, recoveredTurns)
     },
     [desktopChatSession]
   )
@@ -2024,7 +2027,8 @@ export function MemoryChat({
           session: {
             turnId: sessionTurn.id,
             status: sessionTurn.status,
-            responseMessages: sessionTurn.responseMessages ?? []
+            responseMessages: sessionTurn.responseMessages ?? [],
+            reasoningRequested: sessionTurn.request.request.reasoning?.enabled === true
           }
         })
         // Finalize the streamed placeholder in place (never append a second bubble).
@@ -2035,6 +2039,8 @@ export function MemoryChat({
                   ...m,
                   content: answer,
                   context: toolCtxWithReasoning,
+                  reasoning: toolReasoning,
+                  reasoningRequested: sessionTurn.request.request.reasoning?.enabled === true,
                   toolCalls,
                   // A tool-owned image the memory rule refused offers the same "Run anyway" as the
                   // direct path: one affordance shape, one owner (imageMemoryRefusal).
@@ -2148,7 +2154,7 @@ export function MemoryChat({
 
       // Placeholder message that fills in live as tokens/reasoning stream in
       // (matched by streamId in the onRagStream subscription).
-      const streamId = opts?.sessionReplay?.turnId ?? `a-${Date.now()}`
+      const streamId = opts?.turnId ?? opts?.sessionReplay?.turnId ?? `a-${Date.now()}`
       activeStreamId = streamId // expose to finally for cleanup
       streamConvRef.current.set(streamId, convId!)
       desktopChatSession.beginLiveTurn(streamId)
@@ -2274,7 +2280,8 @@ export function MemoryChat({
           session: {
             turnId: sessionTurn.id,
             status: sessionTurn.status,
-            responseMessages: sessionTurn.responseMessages ?? []
+            responseMessages: sessionTurn.responseMessages ?? [],
+            reasoningRequested: sessionTurn.request.request.reasoning?.enabled === true
           }
         })
         setConvMessages(convId, (prev) =>
@@ -2284,6 +2291,8 @@ export function MemoryChat({
                   ...m,
                   content: assistantContent,
                   context: assistantContext,
+                  reasoning: ragReasoning,
+                  reasoningRequested: sessionTurn.request.request.reasoning?.enabled === true,
                   toolCalls: ragLiveTurn?.toolCalls.length ? ragLiveTurn.toolCalls : m.toolCalls,
                   activity: undefined,
                   cutoff: result.cutoff,
@@ -2392,6 +2401,7 @@ export function MemoryChat({
     onTranscriptForDraft: (text) => draftStore.update((p) => `${p}${p ? ' ' : ''}${text}`),
     runTurn: (request, onAnswer) =>
       sendMessage(request.text, {
+        turnId: request.turnId,
         conversationId: request.conversationId,
         projectIdOverride: request.projectId,
         asUserInput: true,
@@ -2407,7 +2417,7 @@ export function MemoryChat({
     silenceAfterSpeechMs: voiceSilenceAfterSpeechMs,
     speakerDrainMs: voiceSpeakerDrainMs,
     isGenerating: Boolean(activeConversationId && generatingConvs.has(activeConversationId)),
-    isPlaybackActive: voicePlaybackOwner !== null,
+    isPlaybackActive: voicePlaybackOwner !== null || voiceQuestion.speaking,
     getTranscriptionLabel: () => window.api.getTranscriptionInfo(),
     onCapture: voiceQuestion.capture,
     onAbandon: voiceQuestion.abandon
@@ -2510,7 +2520,9 @@ export function MemoryChat({
                   session: {
                     turnId: settled.sessionTurn.id,
                     status: settled.sessionTurn.status,
-                    responseMessages: settled.sessionTurn.responseMessages ?? []
+                    responseMessages: settled.sessionTurn.responseMessages ?? [],
+                    reasoningRequested:
+                      settled.sessionTurn.request.request.reasoning?.enabled === true
                   }
                 }
               : {})

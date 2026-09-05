@@ -20,10 +20,14 @@ describe('Desktop modality queue composition', () => {
     ])
     const queue = new ModalityQueue()
 
-    applyQueueConfig(
-      queue,
-      readQueueConfig((key, fallback) => persisted.get(key) ?? fallback)
-    )
+    // Same contract as the production settings store: the reader promises the
+    // fallback's type, so only a stored value of that runtime type is returned.
+    const readPersisted = <T>(key: string, fallback: T): T => {
+      const stored = persisted.get(key)
+      return typeof stored === typeof fallback ? (stored as T) : fallback
+    }
+
+    applyQueueConfig(queue, readQueueConfig(readPersisted))
 
     expect(queue.isEnabled()).toBe(false)
     expect(queue.getConfig()).toEqual({ enabled: false, tier1CoexistsWithTier2: false })

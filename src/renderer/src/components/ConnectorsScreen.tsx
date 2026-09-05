@@ -50,9 +50,6 @@ function ConnectorSetup({
   )
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const api = (window as any).api
-
 interface Connector {
   id: number
   name: string
@@ -205,7 +202,7 @@ function ConnectorConnectControls({
 
 async function removePendingConnector(id: number | undefined): Promise<void> {
   if (id == null) return
-  await api.mcpRemove?.(id)
+  await window.api.mcpRemove(id)
 }
 
 async function persistConnectorSecrets(
@@ -214,7 +211,7 @@ async function persistConnectorSecrets(
 ): Promise<void> {
   if (id == null) return
   for (const [key, value] of Object.entries(secretValues)) {
-    if (value) await api.secretsSet?.(`connector:${id}:${key}`, value)
+    if (value) await window.api.secretsSet(`connector:${id}:${key}`, value)
   }
 }
 
@@ -268,7 +265,7 @@ export function ConnectorsScreen(): ReactElement {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      setItems((await api.mcpList?.()) ?? [])
+      setItems((await window.api.mcpList()) ?? [])
     } finally {
       setLoading(false)
     }
@@ -295,7 +292,7 @@ export function ConnectorsScreen(): ReactElement {
     setErrorFor((p) => ({ ...p, [entry.id]: '' }))
     let id: number | undefined
     try {
-      id = await api.mcpAdd?.({
+      id = await window.api.mcpAdd({
         name: entry.name,
         transport: entry.transport,
         url: entry.url,
@@ -303,13 +300,14 @@ export function ConnectorsScreen(): ReactElement {
         args: entry.args,
         envKeys: entry.secrets?.map((s) => s.key)
       })
-      if (id != null) pendingConnectorIds.current.set(entry.id, id)
+      if (id == null) throw new Error('Connector was not created')
+      pendingConnectorIds.current.set(entry.id, id)
       if (cancelledConnections.current.has(entry.id)) {
         await removePendingConnector(id)
         return
       }
       await persistConnectorSecrets(id, secretVals)
-      const res = await api.mcpTest?.(id)
+      const res = await window.api.mcpTest(id)
       const outcome = await settleConnectionAttempt(
         id,
         cancelledConnections.current.has(entry.id),
@@ -343,7 +341,7 @@ export function ConnectorsScreen(): ReactElement {
     const connectorId = pendingConnectorIds.current.get(entryId)
     if (connectorId == null) return
     try {
-      await api.mcpRemove?.(connectorId)
+      await window.api.mcpRemove(connectorId)
     } catch {
       // The in-flight connect owns final cleanup and will restore the card state.
     }
@@ -359,7 +357,7 @@ export function ConnectorsScreen(): ReactElement {
 
   const addCustom = async (): Promise<void> => {
     if (!name.trim()) return
-    await api.mcpAdd?.({
+    await window.api.mcpAdd({
       name: name.trim(),
       transport,
       url: transport === 'http' ? url.trim() : undefined,
@@ -377,25 +375,25 @@ export function ConnectorsScreen(): ReactElement {
   const test = async (id: number): Promise<void> => {
     setTestingId(id)
     try {
-      await api.mcpTest?.(id)
+      await window.api.mcpTest(id)
     } finally {
       setTestingId(null)
       load()
     }
   }
   const toggle = async (id: number, enabled: boolean): Promise<void> => {
-    await api.mcpSetEnabled?.(id, enabled)
+    await window.api.mcpSetEnabled(id, enabled)
     load()
   }
   const remove = async (id: number): Promise<void> => {
-    await api.mcpRemove?.(id)
+    await window.api.mcpRemove(id)
     load()
   }
   const sync = async (id: number, query?: string): Promise<void> => {
     setSyncingId(id)
     setSyncMsg('')
     try {
-      const res = await api.mcpIngest?.(id, query)
+      const res = await window.api.mcpIngest(id, query)
       if (res && !res.ok) setSyncMsg(res.error ?? 'Sync failed')
       else if (res && res.count === 0) setSyncMsg('Synced — nothing new found.')
       else if (res) setSyncMsg(`Synced ${res.count} item${res.count === 1 ? '' : 's'}.`)
@@ -403,12 +401,12 @@ export function ConnectorsScreen(): ReactElement {
       setSyncingId(null)
       load()
       const c = items.find((x) => x.id === id)
-      if (c) setSyncedItems((await api.mcpItems?.(c.name)) ?? [])
+      if (c) setSyncedItems((await window.api.mcpItems(c.name)) ?? [])
     }
   }
   const openDetail = async (c: Connector): Promise<void> => {
     setDetailId(c.id)
-    setSyncedItems((await api.mcpItems?.(c.name)) ?? [])
+    setSyncedItems((await window.api.mcpItems(c.name)) ?? [])
   }
   const fmtAgo = (ms: number | null): string => {
     if (!ms) return 'never'

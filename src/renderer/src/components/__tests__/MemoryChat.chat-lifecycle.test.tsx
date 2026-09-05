@@ -28,9 +28,10 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     vi.clearAllMocks()
     ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
     globalThis.requestAnimationFrame = (callback: FrameRequestCallback): number => {
-      callback(0)
-      return 1
+      return setTimeout(() => callback(0), 0) as unknown as number
     }
+    globalThis.cancelAnimationFrame = (handle: number): void =>
+      clearTimeout(handle as unknown as NodeJS.Timeout)
     resetTaskSessionStoreForTests()
   })
 
@@ -51,7 +52,7 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
 
     const composer = await screen.findByPlaceholderText('Ask about “Project Alpha”…')
     expect((composer as HTMLTextAreaElement).value).toBe('Continue from the completed browser task')
-    expect(document.activeElement).toBe(composer)
+    await waitFor(() => expect(document.activeElement).toBe(composer))
     expect(boundary.calls).toHaveLength(0)
   })
 
@@ -210,13 +211,19 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
 
     expect(await screen.findByText('Thinking…')).toBeTruthy()
     expect(screen.getByText('First compare risk, then reversibility.')).toBeTruthy()
-    expect(screen.getByText('Choose plan B because it is reversible.')).toBeTruthy()
+    expect(await screen.findByText('Choose plan B because it is reversible.')).toBeTruthy()
 
     boundary.resolve(0, 'Choose plan B because it is reversible.')
 
+    await waitFor(() =>
+      expect(boundary.addRagMessage.mock.calls.some((call) => call[1] === 'assistant')).toBe(true)
+    )
     const thoughtProcess = await screen.findByRole('button', { name: /thought process/i })
     const thoughtProcessLabel = screen.getByText('Thought process')
     expect(thoughtProcessLabel.classList.contains('whitespace-nowrap')).toBe(true)
+    // A completed turn restores its thought process collapsed (ChatThinkingBlock opens by
+    // default only while live); the reader opens it on purpose.
+    expect(screen.queryByText('First compare risk, then reversibility.')).toBeNull()
     await user.click(thoughtProcess)
     expect(await screen.findByText('First compare risk, then reversibility.')).toBeTruthy()
     expect(screen.getByText('Choose plan B because it is reversible.')).toBeTruthy()
@@ -329,41 +336,28 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
   it('does not play a canceled synthesis and stops active speech on navigation (#106)', async () => {
     const boundary = new ChatBoundary()
     installBoundary(boundary)
-    const audios: Array<{ play: ReturnType<typeof vi.fn>; pause: ReturnType<typeof vi.fn> }> = []
-    vi.stubGlobal(
-      'Audio',
-      class {
-        error = null
-        onended: (() => void) | null = null
-        onerror: (() => void) | null = null
-        play = vi.fn(async () => undefined)
-        pause = vi.fn()
-
-        constructor(_url: string) {
-          audios.push(this)
-        }
-      }
-    )
     const user = userEvent.setup()
     const view = renderChat({ conversationId: 'conversation-b' })
 
     await user.click(await screen.findByRole('button', { name: 'Speak' }))
-    await waitFor(() => expect(boundary.speechTurns).toHaveLength(1))
+    await waitFor(() => expect(boundary.manualSpeechTurns).toHaveLength(1))
     await user.click(screen.getByRole('button', { name: /Generating/ }))
-    boundary.speechTurns[0]!.reject(new Error('canceled synthesis settled late'))
+    boundary.manualSpeechTurns[0]!.reject(new Error('canceled synthesis settled late'))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Speak' })).toBeTruthy())
-    expect(audios).toHaveLength(0)
     expect(screen.queryByRole('alert')).toBeNull()
+    expect(boundary.api.speechCommands.interrupt).toHaveBeenCalledOnce()
 
     await user.click(screen.getByRole('button', { name: 'Speak' }))
-    await waitFor(() => expect(boundary.speechTurns).toHaveLength(2))
-    boundary.speechTurns[1]!.resolve({ dataUrl: 'data:audio/wav;base64,UklGRg==' })
+    await waitFor(() => expect(boundary.manualSpeechTurns).toHaveLength(2))
+    const command = boundary.api.speechCommands.speak.mock.calls[1]![0]
+    boundary.manualSpeechTurns[1]!.resolve({
+      ok: true,
+      value: { operationId: command.operationId }
+    })
     await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy())
-    expect(audios).toHaveLength(1)
-    expect(audios[0]!.play).toHaveBeenCalledOnce()
 
     view.unmount()
-    expect(audios[0]!.pause).toHaveBeenCalledOnce()
+    expect(boundary.api.speechCommands.interrupt).toHaveBeenCalledTimes(2)
   })
 
   it('shows an actionable error when assistant speech cannot be generated (#105)', async () => {
@@ -373,8 +367,8 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     renderChat({ conversationId: 'conversation-b' })
 
     await user.click(await screen.findByRole('button', { name: 'Speak' }))
-    await waitFor(() => expect(boundary.speechTurns).toHaveLength(1))
-    boundary.speechTurns[0]!.reject(new Error('native worker unavailable'))
+    await waitFor(() => expect(boundary.manualSpeechTurns).toHaveLength(1))
+    boundary.manualSpeechTurns[0]!.reject(new Error('native worker unavailable'))
 
     expect((await screen.findByRole('alert')).textContent).toMatch(
       /speech could not be generated.*text-to-speech is installed in settings/i
@@ -392,8 +386,16 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
 
     await user.click(await screen.findByRole('button', { name: 'Speak' }))
 
-    await waitFor(() => expect(boundary.speechTurns).toHaveLength(1))
-    expect(boundary.api.speak).toHaveBeenCalledWith('Read this answer.')
+    await waitFor(() => expect(boundary.manualSpeechTurns).toHaveLength(1))
+    expect(boundary.api.speechCommands.speak).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'Read this answer.' })
+    )
+    const command = boundary.api.speechCommands.speak.mock.calls[0]![0]
+    boundary.manualSpeechTurns[0]!.resolve({
+      ok: true,
+      value: { operationId: command.operationId }
+    })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy())
   })
 
   it('streams and persists the first local reply in one assistant bubble (#32)', async () => {

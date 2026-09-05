@@ -39,13 +39,15 @@ const allProduction = [...desktopProduction, ...proProduction]
 describe('model execution architecture', () => {
   it('keeps legacy LLM execution inside the shared GenerationService adapter', () => {
     expect(
-      offenders(allProduction, /\bllm\.(?:chat|chatStream|streamChat)\s*\(/g, new Set([
-        'src/main/model-generation-adapters.ts'
-      ]))
+      offenders(
+        allProduction,
+        /\bllm\.(?:chat|chatStream|streamChat)\s*\(/g,
+        new Set(['src/main/model-generation-adapters.ts'])
+      )
     ).toEqual([])
   })
 
-  it('keeps raw modality engines behind the Desktop generation adapter', () => {
+  it('keeps raw modality engines behind their Desktop platform adapters', () => {
     expect(
       offenders(
         allProduction,
@@ -54,6 +56,9 @@ describe('model execution architecture', () => {
           'src/main/embeddings.ts',
           'src/main/imagegen.ts',
           'src/main/model-generation-adapters.ts',
+          // Shared Speech owns the workflow. This adapter supplies its native transcription and
+          // synthesis ports; no consumer may call either engine directly.
+          'src/main/composition/speech-io.ts',
           'src/main/transcription/select.ts',
           'src/main/tts.ts'
         ])

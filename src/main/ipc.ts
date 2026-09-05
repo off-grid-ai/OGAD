@@ -1,5 +1,6 @@
 import { ipcMain, BrowserWindow, app, clipboard } from 'electron'
 import { randomUUID } from 'node:crypto'
+import type { ChatTurn } from '@offgrid/models'
 import { setupArtifactPreviewIpc } from './artifact-preview-ipc'
 import {
   getDB,
@@ -25,6 +26,8 @@ import {
   deleteRagConversation,
   addRagMessage,
   getRagMessages,
+  readChatSessionTurns,
+  writeChatSessionTurns,
   updateRagConversationTitle,
   searchRagConversationIds,
   getSettings,
@@ -59,7 +62,12 @@ import { setupSpeechPlaybackIpc } from './speech-playback-ipc'
 import { setupSpeechMicrophoneIpc } from './speech-microphone-ipc'
 import { setupSpeechTextCleaningIpc } from './speech-text-cleaning-ipc'
 import { setupSpeechCommandIpc } from './speech-command-ipc'
-import { CACHE_CLEANUP_CHANNEL } from '../shared/ipc-contracts'
+import {
+  CACHE_CLEANUP_CHANNEL,
+  SETUP_PROGRESS_CHANNEL,
+  type ModelImportResultContract,
+  type SetupProgressContract
+} from '../shared/ipc-contracts'
 import {
   CHAT_INTENT_RESPONSE_SCHEMA,
   buildArtifactGenerationPrompt,
@@ -191,7 +199,9 @@ const modelDownloadIpcProjection = new ModelDownloadIpcProjectionLifecycle({
   }
 })
 
-export function startModelDownloadIpcProjection(models: Pick<ModelsFacade, 'events'>): void {
+export function startModelDownloadIpcProjection(
+  models: Pick<ModelsFacade, 'events' | 'watch'>
+): void {
   modelDownloadIpcProjection.install(models)
 }
 
@@ -1238,6 +1248,15 @@ export function setupIPC(): void {
     return getRagMessages(conversationId)
   })
 
+  ipcMain.handle('chat-session:read-turns', (_, conversationId: string) => {
+    return readChatSessionTurns(conversationId)
+  })
+
+  ipcMain.handle('chat-session:write-turns', (_, conversationId: string, turns: unknown) => {
+    if (!Array.isArray(turns)) throw new TypeError('Chat session turns must be an array')
+    writeChatSessionTurns(conversationId, turns as ChatTurn[])
+  })
+
   ipcMain.handle(
     'rag:truncate-messages',
     async (_e, conversationId: string, anchor: RagTruncationAnchor) => {
@@ -1485,6 +1504,7 @@ export function setupIPC(): void {
   // === Off Grid AI MODEL CATALOG (text, vision, image, voice, transcription) ===
 
   ipcMain.handle('models:control-projection', () => desktopModels.snapshot().control)
+  ipcMain.handle('models:operations-projection', () => desktopModels.snapshot().operations)
   ipcMain.handle('models:control', (_event, input: unknown) => {
     const parsed = parseModelControlIntent(input)
     return parsed.ok ? desktopModels.control(parsed.value) : parsed
@@ -1511,7 +1531,7 @@ export function setupIPC(): void {
     import('./cache-cleanup').then((m) => m.clearEphemeralCache())
   )
   // Import a local .gguf from disk (file picker → validate → copy → register).
-  ipcMain.handle('models:import', async () => {
+  ipcMain.handle('models:import', async (): Promise<ModelImportResultContract> => {
     const { dialog } = await import('electron')
     const r = await dialog.showOpenDialog({
       title: 'Import a local model',
@@ -1559,12 +1579,12 @@ export function setupIPC(): void {
   ipcMain.handle('setup:auto-configure', async (event) => {
     const { autoConfigure } = await import('./setup')
     const surface = event.sender
-    return autoConfigure((p) => {
+    return autoConfigure((p: SetupProgressContract) => {
       // A closed window is UI teardown, not a setup failure. `send` on destroyed webContents
       // throws, and letting that escape would fail the model work because the surface went
       // away - the mirror image of the cancelled-reads-as-failed bug fixed upstream.
       if (surface.isDestroyed()) return
-      surface.send('setup:progress', p)
+      surface.send(SETUP_PROGRESS_CHANNEL, p)
     })
   })
   // Restart a component. We only ever stop OUR OWN processes — never SIGKILL an

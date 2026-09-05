@@ -41,6 +41,7 @@ import {
   specialistReclassificationModality,
   transferredProjectorRepair,
   type CatalogEntry,
+  type HFSearchResult,
   type ModelCapabilities,
   type ModelModality,
   type Modality,
@@ -49,6 +50,7 @@ import {
 } from '@offgrid/models'
 import type { ModelControlCatalogModel } from '@offgrid/application'
 import type { RemoteVisionInventoryModel } from '../shared/remote-vision-server'
+import type { ModelImportResultContract } from '../shared/ipc-contracts'
 import { registerDesktopModelManagerPorts } from './model-manager-ports'
 import { desktopModelSelectionPersistence } from './model-selection-persistence'
 import { platformFetch } from '@offgrid/models/fetch'
@@ -431,7 +433,7 @@ export async function listInstalled(): Promise<string[]> {
   ]
 }
 
-export async function searchModels(query: string, kind?: string): Promise<unknown[]> {
+export async function searchModels(query: string, kind?: string): Promise<HFSearchResult[]> {
   try {
     const { searchHuggingFace } = await import('@offgrid/models')
     return await searchHuggingFace(query, {
@@ -900,7 +902,15 @@ export function desktopModelTransferRegistrationPorts(
     },
     readLocalModels: () => getLocalModels(dir()),
     writeLocalModels: (models) => saveLocalModels([...models], dir()),
-    recordDownloaded: (model) => recordDownloaded(dir(), model),
+    recordDownloaded: ({ id, familyId, packageIdentity, manifest }) =>
+      recordDownloaded(dir(), {
+        id,
+        familyId,
+        packageIdentity,
+        name: manifest.name,
+        kind: manifest.kind,
+        files: manifest.files.map((file) => file.name)
+      }),
     hasDownloaded: (id) => Boolean(findDownloaded(dir(), id)),
     packageIdentity: (manifest) => modelPackageIdentity(manifest as TransferredModelManifest)
   }
@@ -975,9 +985,7 @@ const activeProjectorRepairPorts = desktopActiveProjectorRepairPorts()
 registerDesktopDownloadMetadataRepairPorts(activeProjectorRepairPorts)
 
 /** Import and register one local GGUF through the Shared model-library transaction. */
-export async function importLocalModel(
-  source: string
-): Promise<{ success: boolean; error?: string; id?: string }> {
+export async function importLocalModel(source: string): Promise<ModelImportResultContract> {
   const outcome = await desktopModels.import({ path: source, modality: 'text' })
   return outcome.ok
     ? { success: true, id: outcome.value.id }

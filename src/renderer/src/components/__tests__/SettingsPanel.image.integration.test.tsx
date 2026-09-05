@@ -4,6 +4,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SettingsPanel } from '../SettingsPanel'
+import { preloadCapabilityFakes } from './harness/chat-boundary'
+import { modelControlBoundary } from './harness/model-control-snapshot'
 
 afterEach(() => {
   cleanup()
@@ -13,8 +15,18 @@ afterEach(() => {
 describe('<SettingsPanel/> image settings', () => {
   it('opens on the active image model and persists the same image preferences Chat uses', async () => {
     const saveSetting = vi.fn(async () => undefined)
-    const setActiveModalModel = vi.fn(async () => undefined)
+    const modelControl = modelControlBoundary({
+      kinds: ['image'],
+      models: [
+        { id: 'dreamshaper-xl-v2-turbo.gguf' },
+        { id: 'juggernaut-xl-v9.gguf' }
+      ],
+      installed: ['dreamshaper-xl-v2-turbo.gguf', 'juggernaut-xl-v9.gguf'],
+      active: { image: 'dreamshaper-xl-v2-turbo.gguf' }
+    })
     ;(window as unknown as { api: Record<string, unknown> }).api = {
+      ...preloadCapabilityFakes(),
+      ...modelControl,
       getLlmSettings: async () => ({}),
       getModelCatalog: async () => ({ models: [] }),
       getActiveModel: async () => null,
@@ -33,7 +45,6 @@ describe('<SettingsPanel/> image settings', () => {
         enhanceImagePrompts: true
       }),
       saveSetting,
-      setActiveModalModel,
       ttsVoices: async () => [],
       prepareTtsVoice: async () => ({ ready: true }),
       onTtsVoiceProgress: () => () => {},
@@ -63,9 +74,11 @@ describe('<SettingsPanel/> image settings', () => {
       )
     )
 
-    fireEvent.change(screen.getByRole('spinbutton', { name: 'Image guidance' }), {
+    const guidance = screen.getByRole('spinbutton', { name: 'Image guidance' })
+    fireEvent.change(guidance, {
       target: { value: '4' }
     })
+    fireEvent.blur(guidance)
     await waitFor(() =>
       expect(saveSetting).toHaveBeenCalledWith(
         'imageParams',
@@ -77,6 +90,6 @@ describe('<SettingsPanel/> image settings', () => {
 
     await user.click(model)
     await user.click(screen.getByRole('menuitemradio', { name: 'juggernaut-xl-v9' }))
-    expect(setActiveModalModel).toHaveBeenCalledWith('image', 'juggernaut-xl-v9.gguf')
+    expect(modelControl.projection().active.image.modelId).toBe('juggernaut-xl-v9.gguf')
   })
 })

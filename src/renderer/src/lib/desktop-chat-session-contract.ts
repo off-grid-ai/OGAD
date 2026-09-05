@@ -102,6 +102,8 @@ export interface DesktopChatSessionBoundary {
     content: string,
     context?: unknown
   ): Promise<{ id: number; uuid: string }>
+  readChatSessionTurns?(conversationId: string): Promise<ChatTurn[]>
+  writeChatSessionTurns?(conversationId: string, turns: readonly ChatTurn[]): Promise<void>
   truncateRagMessages?(conversationId: string, anchor: DesktopTruncationAnchor): Promise<unknown>
 }
 

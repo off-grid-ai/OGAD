@@ -44,7 +44,7 @@ export const desktopApplication = createOffGridApplication({
     ...desktopModelWorkspacePorts,
     downloads: desktopModelDownloads.ports,
     control: createDesktopModelControlPort(),
-    guidedSetup: createDesktopGuidedSetupPorts(),
+    guidedSetup: createDesktopGuidedSetupPorts(desktopModelWorkspacePorts.guidedSetupRuntime),
     activation: { resolve: resolveDesktopActivation },
     library: {
       ...desktopModelLibraryPorts,

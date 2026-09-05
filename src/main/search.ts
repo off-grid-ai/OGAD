@@ -635,6 +635,8 @@ export interface UniversalSearchOptions {
   collapseScreenMoments?: boolean
   sort?: SearchSort
   excludeChatId?: string
+  /** Shared policy resolves relative language; this adapter applies its absolute interval. */
+  timeRange?: Parameters<typeof rankResults>[1]['timeRange']
   /**
    * Names this caller's stream of queries, so a newer one abandons this one. Build it with
    * `searchStreamId(surface, senderId)` so the identity is per WINDOW as well as per surface - a
@@ -691,7 +693,8 @@ async function runUniversalSearch(
     sources: opts.sources,
     kinds: opts.kinds,
     excludeChatId: opts.excludeChatId,
-    sort: opts.sort
+    sort: opts.sort,
+    timeRange: opts.timeRange
   })
   for (const r of ordered)
     r.imagePath = thumbFor({ key: r.key, kind: r.kind, refId: r.refId } as RawHit)
