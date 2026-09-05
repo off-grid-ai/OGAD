@@ -106,7 +106,10 @@ const shapeAssertions = [
 const failures = []
 
 try {
-  verifyWorkspaceProof(path.dirname(sharedPackages), desktopRoot)
+  verifyWorkspaceProof(path.dirname(sharedPackages), {
+    directory: desktopRoot,
+    packages: contract.map((entry) => `@offgrid/${entry.package}`)
+  })
 } catch (error) {
   failures.push(
     `Shared artifact provenance failed: ${error instanceof Error ? error.message : String(error)}`
