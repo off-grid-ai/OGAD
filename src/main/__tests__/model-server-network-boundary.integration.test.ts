@@ -1,8 +1,12 @@
 import net from 'node:net'
 import os from 'node:os'
-import type { AddressInfo } from 'node:net'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { startModelServer, stopModelServer } from '../model-server'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { getGatewayPort, startModelServer, stopModelServer } from '../model-server'
+import { reserveGatewayPort } from './harness/gateway-port'
+
+vi.mock('electron', () =>
+  import('./harness/electron-app-boundary').then((m) => m.electronAppBoundary())
+)
 
 let gatewayPort = 0
 
@@ -10,19 +14,6 @@ function nonLoopbackIpv4Address(): string | undefined {
   return Object.values(os.networkInterfaces())
     .flatMap((addresses) => addresses ?? [])
     .find((address) => address.family === 'IPv4' && !address.internal)?.address
-}
-
-async function freeLoopbackPort(): Promise<number> {
-  const probe = net.createServer()
-  await new Promise<void>((resolve, reject) => {
-    probe.once('error', reject)
-    probe.listen(0, '127.0.0.1', resolve)
-  })
-  const port = (probe.address() as AddressInfo).port
-  await new Promise<void>((resolve, reject) => {
-    probe.close((error) => (error ? reject(error) : resolve()))
-  })
-  return port
 }
 
 async function waitForLoopbackGateway(): Promise<Response> {
@@ -55,8 +46,12 @@ function acceptsTcpConnection(host: string): Promise<boolean> {
 }
 
 beforeAll(async () => {
-  gatewayPort = await freeLoopbackPort()
-  startModelServer(gatewayPort)
+  // Hold the port on the gateway's own bind host, release it only at the moment we hand it over,
+  // then read back the port the gateway ACTUALLY bound - it may have scanned past a live sibling.
+  const reservation = await reserveGatewayPort()
+  await reservation.release()
+  await startModelServer(reservation.port)
+  gatewayPort = getGatewayPort()
 })
 
 afterAll(() => {

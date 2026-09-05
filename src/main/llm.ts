@@ -1162,7 +1162,7 @@ export class LLMService {
     if (await isPortFree(this.port)) {
       return
     }
-    const free = await pickFreePort(this.port, (p) => isPortFree(p))
+    const free = await pickFreePort(this.port, { host: '127.0.0.1' })
     if (free === null) {
       this.lastErrorMsg = modelPortConflictReason(this.port)
       console.error(`[LLMService] ${this.lastErrorMsg}`)

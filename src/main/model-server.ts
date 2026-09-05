@@ -882,7 +882,14 @@ export async function startModelServer(
   if (server || startingGateway) return
   startingGateway = true
   upstreamPortResolver = options.upstreamPort ?? (() => llm.getPort())
-  boundGatewayPort = (await pickFreePort(port)) ?? port
+  const availablePort = await pickFreePort(port, { host: GATEWAY_BIND_HOST })
+  if (availablePort === null) {
+    startingGateway = false
+    boundGatewayPort = GATEWAY_PORT
+    upstreamPortResolver = () => llm.getPort()
+    throw new Error(`No gateway port is available from ${port} on ${GATEWAY_BIND_HOST}.`)
+  }
+  boundGatewayPort = availablePort
 
   server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*')

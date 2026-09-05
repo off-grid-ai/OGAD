@@ -1,26 +1,20 @@
 import fs from 'node:fs'
-import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { startModelServer, stopModelServer } from '../model-server'
+import { flushDiagnosticLog } from '../diagnostics-log'
+import { freeGatewayPort } from './harness/gateway-port'
+
+vi.mock('electron', () =>
+  import('./harness/electron-app-boundary').then((m) => m.electronAppBoundary())
+)
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-gateway-diagnostics-'))
 const logPath = path.join(root, 'desktop.log')
 const originalLogPath = process.env.OFFGRID_DIAGNOSTIC_LOG
 let port = 0
 
-async function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer()
-    probe.once('error', reject)
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address()
-      if (!address || typeof address === 'string') return reject(new Error('no TCP port'))
-      probe.close((error) => (error ? reject(error) : resolve(address.port)))
-    })
-  })
-}
 
 async function fetchGateway(): Promise<Response> {
   let lastError: unknown
@@ -37,12 +31,13 @@ async function fetchGateway(): Promise<Response> {
 
 beforeAll(async () => {
   process.env.OFFGRID_DIAGNOSTIC_LOG = logPath
-  port = await freePort()
-  startModelServer(port)
+  port = await freeGatewayPort()
+  await startModelServer(port)
 })
 
-afterAll(() => {
+afterAll(async () => {
   stopModelServer()
+  await flushDiagnosticLog()
   if (originalLogPath === undefined) delete process.env.OFFGRID_DIAGNOSTIC_LOG
   else process.env.OFFGRID_DIAGNOSTIC_LOG = originalLogPath
   fs.rmSync(root, { recursive: true, force: true })
@@ -54,6 +49,8 @@ describe('gateway diagnostic lifecycle', () => {
     expect(response.status).toBe(200)
     const requestId = response.headers.get('x-request-id')
     expect(requestId).toBeTruthy()
+    await response.arrayBuffer()
+    await flushDiagnosticLog()
 
     const log = fs.readFileSync(logPath, 'utf8')
     expect(log).toContain(

@@ -72,8 +72,20 @@ export class LoopbackMediaServer {
     // The preferred media port (MEDIA_PORT) may be taken by another Off Grid AI Desktop instance; scan upward
     // for a free one. requestedPort 0 = let the OS assign (tests) — inherently free. urlFor() serves
     // the LIVE boundPort, so downstream links follow wherever it bound.
-    const target =
-      this.requestedPort > 0 ? ((await pickFreePort(this.requestedPort)) ?? this.requestedPort) : 0
+    let target = 0
+    if (this.requestedPort > 0) {
+      const available = await pickFreePort(this.requestedPort, { host: '127.0.0.1' })
+      if (available === null) {
+        // Selection already proved every candidate unavailable. Do not retry the known-busy
+        // requested port. Clear the in-flight owner so an explicit later start can retry after the
+        // external listener releases it.
+        this.startPromise = null
+        throw new Error(
+          `No loopback media port is available from ${this.requestedPort} on 127.0.0.1.`
+        )
+      }
+      target = available
+    }
     const candidate = http.createServer((req, res) => this.handle(req, res))
     this.server = candidate
     await new Promise<void>((resolve, reject) => {
