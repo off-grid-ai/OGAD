@@ -91,9 +91,7 @@ describe('<ActionGateDock/> approval recovery', () => {
           sentDecision = { actionId, decision: decision as GateDecision }
           return true
         },
-        undo: async () => ({ ok: false }),
-        onGatePending: () => () => undefined,
-        onOutcome: () => () => undefined
+        undo: async () => ({ ok: false })
       }
     } as never
 

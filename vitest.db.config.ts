@@ -5,6 +5,14 @@ import { resolve } from 'node:path'
 // default vitest run because they load the better-sqlite3 native module (see
 // scripts/test-db.sh). Run via `npm run test:db`.
 export default defineConfig({
+  // Vitest executes jsdom suites in Node. Keep its Vite transform on the server
+  // dependency boundary so a rendered DB journey can import Node built-ins
+  // without Vite trying to bundle them for a browser.
+  environments: {
+    client: {
+      consumer: 'server'
+    }
+  },
   resolve: {
     alias: {
       '@offgrid/core': resolve(__dirname, 'src'),
@@ -18,6 +26,7 @@ export default defineConfig({
       'integration-tests/*.dbtest.ts',
       'integration-tests/*.dbtest.tsx',
       'src/main/__tests__/*.dbtest.ts',
+      'src/renderer/src/**/*.dbtest.tsx',
       'pro/main/__tests__/*.dbtest.ts'
     ],
     exclude: ['node_modules/**', 'out/**', 'e2e/**'],
