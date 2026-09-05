@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { CaptureReadinessProjection } from '@offgrid/application'
+import {
+  modelsFailureMessage,
+  type CaptureReadinessProjection,
+  type ModelsOperationsSnapshot
+} from '@offgrid/application'
 import { captureReadinessClient } from '@renderer/lib/capture-readiness-client'
+import { modelControlClient } from '@renderer/lib/model-control-client'
 import type { ProgressLike } from '@offgrid/ui'
-import { useModelDownloadProgress } from '@renderer/hooks/useModelDownloadProgress'
 
 export interface CaptureReadinessController {
   projection: CaptureReadinessProjection | null
   progress: ProgressLike | null
+  repairing: boolean
   /**
    * Why the last readiness check or repair did not succeed, for the surface to SHOW. A repair
    * that failed silently left the prompt looking untouched and its button live again, so the
@@ -16,32 +21,26 @@ export interface CaptureReadinessController {
   repair(): Promise<void>
 }
 
-/** Shared already turned its typed failure into a sentence; anything else is an unexpected throw. */
-function failureText(error: unknown): string {
-  return error instanceof Error ? error.message : 'Capture vision support could not be prepared.'
-}
-
 /** Desktop composition for Shared capture readiness. It supplies Electron observations and I/O only. */
 export function useCaptureReadiness(isPro: boolean): CaptureReadinessController {
   const [projection, setProjection] = useState<CaptureReadinessProjection | null>(null)
-  const [progress, setProgress] = useState<ProgressLike | null>(null)
-  const [failure, setFailure] = useState<string | null>(null)
-  const refresh = useCallback(
-    async (preserveFailure = false): Promise<void> => {
-      if (!isPro || !window.api.proInvoke) {
-        setProjection(null)
-        return
-      }
-      try {
-        setProjection(await captureReadinessClient.projection())
-        if (!preserveFailure) setFailure(null)
-      } catch (error) {
-        console.error('Failed to check capture vision readiness:', error)
-        setFailure(failureText(error))
-      }
-    },
-    [isPro]
-  )
+  const [operations, setOperations] = useState<ModelsOperationsSnapshot | null>(null)
+  const refresh = useCallback(async (): Promise<void> => {
+    if (!isPro || !window.api.proInvoke) {
+      setProjection(null)
+      return
+    }
+    try {
+      const [nextProjection, nextOperations] = await Promise.all([
+        captureReadinessClient.projection(),
+        modelControlClient.operations()
+      ])
+      setProjection(nextProjection)
+      setOperations(nextOperations)
+    } catch (error) {
+      console.error('Failed to check capture vision readiness:', error)
+    }
+  }, [isPro])
 
   useEffect(() => {
     void refresh()
@@ -50,44 +49,33 @@ export function useCaptureReadiness(isPro: boolean): CaptureReadinessController 
   useEffect(() => {
     if (!isPro) return
     const offCapture = window.api.proOn?.('capture:changed', () => void refresh())
+    const offOperations = modelControlClient.observeOperations(setOperations)
     return () => {
       if (typeof offCapture === 'function') offCapture()
+      offOperations()
     }
   }, [isPro, refresh])
 
-  useModelDownloadProgress((event) => {
-    if (projection?.kind !== 'missing-projector' || event.modelId !== projection.modelId) return
-    if (event.status === 'completed') {
-      setProgress(null)
-      void refresh()
-    } else if (event.status === 'failed' || event.status === 'interrupted') {
-      // The projector download is the repair. Its failure IS the repair's failure, and it arrives
-      // on this event rather than from the call that started it, so it has to be surfaced here.
-      setProgress(null)
-      setFailure(event.error ?? 'The vision projector download did not finish.')
-    } else if (event.status === 'cancelled') {
-      setProgress(null)
-    } else {
-      setProgress(event)
-    }
-  }, isPro)
+  const repairOperation =
+    projection?.kind === 'missing-projector'
+      ? [...(operations?.active ?? []), ...(operations?.recent ?? [])].find(
+          (operation) =>
+            operation.kind === 'projector_repair' && operation.modelId === projection.modelId
+        )
+      : undefined
+  const repairing = repairOperation?.state === 'active'
+  const progress: ProgressLike | null = repairing ? (repairOperation.progress ?? null) : null
+  const failure = repairOperation?.failure ? modelsFailureMessage(repairOperation.failure) : null
 
   const repair = useCallback(async (): Promise<void> => {
-    if (projection?.kind === 'missing-projector') setProgress({ percent: 0 })
-    setFailure(null)
     try {
       if (projection) await captureReadinessClient.repair(projection)
     } catch (error) {
-      setProgress(null)
       console.error('Failed to repair capture vision readiness:', error)
-      setFailure(failureText(error))
     } finally {
-      if (projection?.kind === 'missing-projector') setProgress(null)
-      // Reconcile the canonical Shared projection without erasing the outcome of this repair.
-      // A later capture event or successful retry performs a normal refresh and clears it.
-      void refresh(true)
+      void refresh()
     }
   }, [projection, refresh])
 
-  return { projection, progress, failure, repair }
+  return { projection, progress, repairing, failure, repair }
 }

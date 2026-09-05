@@ -7,9 +7,8 @@ import { deviceNoun } from '@renderer/lib/device'
 import { PermissionsPanel } from './PermissionsPanel'
 import { usePermissionController } from './use-permission-controller'
 import { useRendererEntitlement } from '@renderer/bootstrap/useRendererEntitlement'
-import { formatTransferSpeed } from '@offgrid/application'
 import { projectProgress, type ProgressLike } from '@offgrid/ui'
-import { formatStorageBytes } from './setup/storage-format'
+import { downloadProgressSummary } from '@renderer/lib/download-progress'
 import { useTaskWorkspaceOpen } from '@renderer/lib/task-side-panel'
 import { useCaptureReadiness } from './use-capture-readiness'
 import type { CaptureReadinessProjection } from '@offgrid/application'
@@ -147,6 +146,7 @@ export function PermissionGate({ children }: PermissionGateProps): React.JSX.Ele
               issue={captureReadiness.projection.kind}
               modelName={captureReadiness.projection.modelName}
               progress={captureReadiness.progress}
+              repairing={captureReadiness.repairing}
               failure={captureReadiness.failure}
               onOpen={() => void captureReadiness.repair()}
               onDismiss={() => setSetupDismissed(true)}
@@ -278,6 +278,7 @@ function SetupNudge({
   issue,
   modelName,
   progress,
+  repairing = false,
   failure,
   onOpen,
   onDismiss
@@ -287,6 +288,7 @@ function SetupNudge({
   issue?: RepairableCaptureProjection['kind']
   modelName?: string | null
   progress?: ProgressLike | null
+  repairing?: boolean
   failure?: string | null
   onOpen: () => void
   onDismiss: () => void
@@ -336,18 +338,18 @@ function SetupNudge({
             ? 'Allow this Mac to find and sync directly with your devices.'
             : 'Grant screen and accessibility access so Off Grid AI can see and remember.'
   const presentedProgress = progress ? projectProgress(progress) : null
-  const cta =
-    progress != null
-      ? presentedProgress?.determinate
-        ? `Downloading ${Math.round(presentedProgress.percentage ?? 0)}%`
-        : 'Downloading'
-      : issue === 'missing-projector'
-        ? 'Download vision support'
-        : issue === 'choose-vision-model'
-          ? 'Choose model'
-          : missingModel
-            ? 'Configure'
-            : 'Set up'
+  const summary = presentedProgress ? downloadProgressSummary(presentedProgress) : null
+  const cta = repairing
+    ? presentedProgress?.determinate
+      ? `Downloading ${Math.round(presentedProgress.percentage ?? 0)}%`
+      : 'Downloading'
+    : issue === 'missing-projector'
+      ? 'Download vision support'
+      : issue === 'choose-vision-model'
+        ? 'Choose model'
+        : missingModel
+          ? 'Configure'
+          : 'Set up'
   // When Tasks consumes the whole usable workspace, defer this non-blocking
   // prompt. In split mode, keep it wholly inside Chat and away from native
   // browser content.
@@ -372,20 +374,15 @@ function SetupNudge({
             {failure}
           </div>
         ) : null}
-        {presentedProgress ? (
+        {summary ? (
           <div className="mt-1 tabular-nums text-muted-foreground">
-            {presentedProgress.totalBytes !== undefined
-              ? `${formatStorageBytes(presentedProgress.currentBytes)} / ${formatStorageBytes(presentedProgress.totalBytes)}`
-              : 'Total size unavailable'}
-            {presentedProgress.bytesPerSecond !== undefined
-              ? ` · ${formatTransferSpeed(presentedProgress.bytesPerSecond)}`
-              : ''}
+            {summary.bytes} · {summary.rate}
           </div>
         ) : null}
       </div>
       <button
         onClick={onOpen}
-        disabled={progress != null}
+        disabled={repairing}
         className="ml-1 whitespace-nowrap rounded-lg bg-green-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-green-500"
       >
         {cta}
