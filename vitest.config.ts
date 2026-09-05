@@ -91,14 +91,12 @@ export default defineConfig({
       // fails the run; this only decouples "a test flaked" from "the coverage
       // report is missing". Mirrors vitest.db.config.ts.
       reportOnFailure: true,
-      // all:true + an `include` of the LOGIC surface (.ts, both core src AND the pro
-      // submodule) => every logic file is in the denominator whether or not a test imports
-      // it, so untested modules show as 0% and are VISIBLE (previously all:false hid them -
-      // pro/main had ~72 .ts files but only the imported ones counted, flattering the %).
-      // Mirrors mobile's collectCoverageFrom(src + pro). UI (.tsx) is deliberately NOT here:
-      // desktop covers rendered components via the Playwright e2e tour, not unit tests.
+      // all:true + one workspace include (core + Pro, production TypeScript + rendered TSX)
+      // keeps every consumer-owned module visible even when no test imports it. Render tests and
+      // e2e coverage now contribute to the same report instead of leaving Pro UI as an unmeasured
+      // blind spot.
       all: true,
-      include: ['src/**/*.ts', 'pro/**/*.ts'],
+      include: ['src/**/*.ts', 'src/**/*.tsx', 'pro/**/*.ts', 'pro/**/*.tsx'],
       // text-summary is the console line, json-summary powers the README badges.
       reporter: ['text-summary', 'json-summary', 'json'],
       // Excludes: (a) vendored/built code (not ours) and (b) native/DB/spawn/IPC-wiring
@@ -248,16 +246,7 @@ export default defineConfig({
         'pro/main/clipboard.ts',
         'pro/main/focus.ts',
         'pro/main/dictation/hotkey/toggle.ts',
-        'pro/main/crm/notify.ts', // pure Electron Notification shell (isSupported/new Notification/show) — no branchable logic
-
-        // Renderer .tsx COMPONENTS are rendered-behavior surface, covered by the Playwright
-        // e2e tour (npm run test:e2e) + targeted render tests (MemoryChat.image.test.tsx),
-        // NOT unit coverage — their pure logic is extracted to measured .ts (lib/*, image-params,
-        // message-persistence, chat-labels, image-intent). The coverage `include` is .ts-only by
-        // design; this also drops any .tsx a render test transitively imports from the denominator
-        // (a render test asserts the terminal artifact, it is not a unit-coverage vehicle).
-        'src/renderer/src/**/*.tsx',
-        'pro/renderer/**/*.tsx'
+        'pro/main/crm/notify.ts' // pure Electron Notification shell (isSupported/new Notification/show) — no branchable logic
       ],
       thresholds: usesAggregateCoverageGate
         ? undefined
