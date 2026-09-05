@@ -30,7 +30,7 @@
     "demo": "npm run build && npm run demo:run",
     "demo:run": "npm run verify:shared-contract && mkdir -p \"$PWD/.demo-profile\" && ln -sfn \"$HOME/Library/Application Support/Off Grid AI Desktop/models\" \"$PWD/.demo-profile/models\" && OFFGRID_PRO=1 OFFGRID_SEED=force OFFGRID_SEED_PRO=force OFFGRID_USER_DATA=\"$PWD/.demo-profile\" electron-vite preview",
     "demo:fresh": "rm -rf \"$PWD/.demo-profile\" && npm run demo",
-    "dev": "npm run verify:shared-contract && node scripts/stage-native.mjs && electron-vite dev",
+    "dev": "node scripts/dev.mjs",
     "gateway": "npm run verify:shared-contract && node scripts/stage-native.mjs && OFFGRID_SERVER_ONLY=1 electron-vite dev",
     "build": "npm run verify:shared-contract && node scripts/stage-native.mjs && npm run typecheck && electron-vite build",
     "postinstall": "electron-builder install-app-deps",

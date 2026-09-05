@@ -427,13 +427,17 @@ export default defineConfig(
       'e2e/fixtures/computer-use-hybrid-llama-server.mjs',
       'scripts/bench-capture.mjs',
       'scripts/bench-chat.mjs',
+      'scripts/dev.mjs',
+      'scripts/dev.test.mjs',
+      'scripts/lib/shared-consumer-fixture.mjs',
       'scripts/initialize-lint-baseline.mjs',
       'scripts/lib/app-support.mjs',
       'scripts/seed-e2e-license.mjs',
       'scripts/stage-native.mjs',
       'scripts/verify-lint-ratchet.mjs',
       'scripts/verify-model-architecture.mjs',
-      'scripts/verify-shared-consumer-contract.mjs'
+      'scripts/verify-shared-consumer-contract.mjs',
+      'scripts/verify-shared-consumer-contract.test.mjs'
     ],
     rules: {
       '@typescript-eslint/explicit-function-return-type': 'off'
