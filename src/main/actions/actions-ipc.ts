@@ -11,6 +11,13 @@ import { parseActionRecord } from '@offgrid/use'
 import { parseGateDecision, resolveActionGate } from './gate-host'
 import { getActionsRuntime } from './use-runtime'
 
+const ACTION_HANDLER_CHANNELS = [
+  'actions:get-projection',
+  'actions:resolve-gate',
+  'actions:undo',
+  'actions:retry'
+] as const
+
 function broadcast(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send(channel, payload)
@@ -53,8 +60,12 @@ export function registerActionsIpc(): () => void {
     return runtime.retry(actionId)
   })
 
+  let released = false
   return () => {
+    if (released) return
+    released = true
     stopProjection()
     stopOutcomes()
+    for (const channel of ACTION_HANDLER_CHANNELS) ipcMain.removeHandler(channel)
   }
 }
