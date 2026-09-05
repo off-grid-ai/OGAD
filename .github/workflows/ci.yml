@@ -173,7 +173,7 @@ jobs:
         timeout-minutes: 20
         env:
           OFFGRID_AGGREGATE_COVERAGE: '1'
-        run: npm run test:coverage
+        run: npm run test:coverage:workspace
       # The DB journeys - 74 files, 255 cases - which CI has NEVER run.
       #
       # They are excluded from the default vitest project because they load the real native SQLite and need
