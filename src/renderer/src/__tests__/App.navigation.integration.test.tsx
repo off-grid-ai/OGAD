@@ -84,6 +84,29 @@ describe('<App/> desktop navigation integration', () => {
     clearRegisteredSlots()
   })
 
+  it('reserves a shell row for startup notices instead of covering the brand mark', async () => {
+    installAppBoundary({
+      startupStatus: async () => ({
+        phase: 'degraded',
+        applicationStatus: 'degraded',
+        running: [],
+        stages: [],
+        degraded: [{ domain: 'models', reporter: 'models', reason: 'load failed' }],
+        lifecycleFailure: null
+      })
+    })
+
+    render(<App />)
+
+    const noticeText = await screen.findByText('Your models are limited.')
+    const notice = noticeText.closest('[role="status"]')
+    expect(notice).not.toBeNull()
+    expect(notice?.className).toContain('shrink-0')
+    expect(notice?.className).not.toContain('absolute')
+    expect(notice?.parentElement?.className).toContain('flex-col')
+    expect(notice?.nextElementSibling?.className).toContain('flex-1')
+  })
+
   it('keeps a dense project master-detail state through Cmd+[ and Cmd+] (#50, #59)', async () => {
     const user = userEvent.setup()
     render(<App />)

@@ -83,7 +83,8 @@ function joinNames(names: readonly string[]): string {
  * reduced, and inventing a per-domain fallback claim would be the same defect again.
  */
 function limitedSentence(names: readonly string[]): string {
-  return `${joinNames(names)} ${names.length === 1 ? 'is' : 'are'} limited.`
+  const verb = names.length === 1 && names[0] !== 'Your models' ? 'is' : 'are'
+  return `${joinNames(names)} ${verb} limited.`
 }
 
 function degradedLabel(snapshot: StartupSnapshotContract): string {
@@ -142,7 +143,7 @@ export function StartupNotice(): React.JSX.Element | null {
     return (
       <div
         role="status"
-        className="pointer-events-none absolute inset-x-0 top-0 z-50 flex items-center justify-center gap-2 bg-red-950/90 px-4 py-1.5 font-mono text-[11px] text-red-200"
+        className="pointer-events-none relative z-50 flex shrink-0 items-center justify-center gap-2 bg-red-950/90 px-4 py-1.5 font-mono text-[11px] text-red-200"
       >
         <WarningCircle size={13} weight="bold" aria-hidden />
         <span>
@@ -156,7 +157,7 @@ export function StartupNotice(): React.JSX.Element | null {
     return (
       <div
         role="status"
-        className="pointer-events-none absolute inset-x-0 top-0 z-50 flex items-center justify-center gap-2 bg-amber-950/80 px-4 py-1.5 font-mono text-[11px] text-amber-200"
+        className="pointer-events-none relative z-50 flex shrink-0 items-center justify-center gap-2 bg-amber-950/80 px-4 py-1.5 font-mono text-[11px] text-amber-200"
       >
         <WarningCircle size={13} aria-hidden />
         <span>{degradedLabel(snapshot)}</span>
@@ -167,7 +168,7 @@ export function StartupNotice(): React.JSX.Element | null {
   return (
     <div
       role="status"
-      className="pointer-events-none absolute inset-x-0 top-0 z-50 flex items-center justify-center gap-2 bg-neutral-900/85 px-4 py-1.5 font-mono text-[11px] text-neutral-400"
+      className="pointer-events-none relative z-50 flex shrink-0 items-center justify-center gap-2 bg-neutral-900/85 px-4 py-1.5 font-mono text-[11px] text-neutral-400"
     >
       <span>{pendingLabel(snapshot.running)}</span>
       <LoadingDots />

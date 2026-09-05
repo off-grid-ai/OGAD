@@ -1109,378 +1109,384 @@ function AppContent(): React.ReactElement {
   }
 
   return (
-    <div className="h-screen w-full overflow-hidden bg-neutral-950 relative">
+    <div className="relative flex h-screen w-full flex-col overflow-hidden bg-neutral-950">
       {/* The shell opens before startup finishes, so it says so instead of not opening. */}
       <StartupNotice />
-      <CommandPalette
-        onOpenHit={handleOpenHit}
-        onSeeAll={openSearch}
-        /* The sidebar IS the list of screens - the palette searches that, never a second copy. */
-        screens={[
-          ...[...navigationItems, ...bottomNav].map(({ label, view, locked }) => ({
-            label,
-            view,
-            locked
-          })),
-          ...internalTabPaletteScreens([...navigationItems, ...bottomNav]),
-          ...SETTINGS_DESTINATIONS
-        ]}
-        onGoTo={(view, subroute) => {
-          goToView(view as ViewMode, subroute)
-          setSidebarOpen(false)
-        }}
-      />
-      {/* Recording indicator — auto-records detected meetings; always visible. */}
-      {(rec.recording || rec.busy) && (
-        <button
-          onClick={() =>
-            rec.warningSecondsLeft > 0 ? rec.keepAlive() : rec.recording && rec.stop()
-          }
-          className="absolute left-1/2 top-4 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border border-red-500/40 bg-neutral-900/95 px-3.5 py-1.5 font-mono text-xs text-neutral-200 shadow-xl backdrop-blur hover:border-red-500"
-        >
-          {rec.busy ? (
-            <>
-              <IconLoader2 className="h-3.5 w-3.5 animate-spin text-neutral-400" /> Transcribing
-              meeting…
-            </>
-          ) : rec.warningSecondsLeft > 0 ? (
-            <>
-              <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400" />
-              Stopping in {rec.warningSecondsLeft}s - click to keep, or rejoin the meeting
-            </>
-          ) : (
-            <>
-              <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
-              Recording{' '}
-              {rec.platform === 'zoom'
-                ? 'Zoom'
-                : rec.platform === 'teams'
-                  ? 'Teams'
-                  : rec.platform === 'meet'
-                    ? 'Meet'
-                    : 'meeting'}{' '}
-              · {Math.floor(rec.elapsed / 60)}:{String(rec.elapsed % 60).padStart(2, '0')} · click
-              to stop
-            </>
-          )}
-        </button>
-      )}
-      {/* Update ready — a new version downloaded and is staged. The button drives
-          the install (quit + swap + relaunch); a plain quit/force-kill would leave
-          it unapplied. */}
-      {updateReady && (
-        <div className="absolute right-4 top-4 z-50 flex items-center gap-3 rounded-md border border-green-500/40 bg-neutral-900/95 px-3.5 py-2 font-mono text-xs text-neutral-200 shadow-xl backdrop-blur">
-          <IconDownload className="h-4 w-4 text-green-500" />
-          <span>Update {updateReady} is ready</span>
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        <CommandPalette
+          onOpenHit={handleOpenHit}
+          onSeeAll={openSearch}
+          /* The sidebar IS the list of screens - the palette searches that, never a second copy. */
+          screens={[
+            ...[...navigationItems, ...bottomNav].map(({ label, view, locked }) => ({
+              label,
+              view,
+              locked
+            })),
+            ...internalTabPaletteScreens([...navigationItems, ...bottomNav]),
+            ...SETTINGS_DESTINATIONS
+          ]}
+          onGoTo={(view, subroute) => {
+            goToView(view as ViewMode, subroute)
+            setSidebarOpen(false)
+          }}
+        />
+        {/* Recording indicator — auto-records detected meetings; always visible. */}
+        {(rec.recording || rec.busy) && (
           <button
-            onClick={async () => {
-              setInstalling(true)
-              try {
-                await window.api.installUpdate()
-              } catch {
-                // quitAndInstall normally never returns (the app exits). If it
-                // rejects, unlock the button so the user can retry.
-                setInstalling(false)
-                addNotification({
-                  type: 'info',
-                  title: 'Update restart failed',
-                  message: 'Try again from the update banner.'
-                })
-              }
-            }}
-            disabled={installing}
-            className="flex items-center gap-1.5 rounded-sm border border-green-500/50 bg-green-500/10 px-2.5 py-1 text-emerald-400 hover:bg-green-500/20 disabled:opacity-60"
+            onClick={() =>
+              rec.warningSecondsLeft > 0 ? rec.keepAlive() : rec.recording && rec.stop()
+            }
+            className="absolute left-1/2 top-4 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border border-red-500/40 bg-neutral-900/95 px-3.5 py-1.5 font-mono text-xs text-neutral-200 shadow-xl backdrop-blur hover:border-red-500"
           >
-            {installing ? (
+            {rec.busy ? (
               <>
-                <IconLoader2 className="h-3.5 w-3.5 animate-spin" /> Restarting…
+                <IconLoader2 className="h-3.5 w-3.5 animate-spin text-neutral-400" /> Transcribing
+                meeting…
+              </>
+            ) : rec.warningSecondsLeft > 0 ? (
+              <>
+                <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400" />
+                Stopping in {rec.warningSecondsLeft}s - click to keep, or rejoin the meeting
               </>
             ) : (
-              'Restart to update'
+              <>
+                <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
+                Recording{' '}
+                {rec.platform === 'zoom'
+                  ? 'Zoom'
+                  : rec.platform === 'teams'
+                    ? 'Teams'
+                    : rec.platform === 'meet'
+                      ? 'Meet'
+                      : 'meeting'}{' '}
+                · {Math.floor(rec.elapsed / 60)}:{String(rec.elapsed % 60).padStart(2, '0')} · click
+                to stop
+              </>
             )}
           </button>
-        </div>
-      )}
-      {/* Background — flat Off Grid AI terminal grid (theme-aware), with a dark-mode
-          starfield + periodic shooting star layered on top. */}
-      <GridBackdrop className="z-0" />
-      <StarfieldBackdrop className="z-0" />
-
-      <div className="flex h-full relative z-10">
-        {/* Aceternity Sidebar */}
-        <Sidebar open={sidebarOpen} setOpen={setSidebarOpen}>
-          <SidebarBody
-            role="navigation"
-            aria-label="Primary navigation"
-            aria-expanded={sidebarOpen}
-            className="justify-between gap-3 bg-neutral-900/80 backdrop-blur-xl border-r border-neutral-800"
-            onMouseEnter={() => setSidebarOpen(true)}
-            onMouseLeave={() => setSidebarOpen(false)}
-            onFocusCapture={() => setSidebarOpen(true)}
-            onBlurCapture={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget)) setSidebarOpen(false)
-            }}
-          >
-            <div className="flex min-h-0 flex-1 flex-col">
-              {/* The rail expands only while hovered or keyboard-focused. */}
-              <div
-                className={cn('flex items-center py-2', sidebarOpen ? 'gap-2' : 'justify-center')}
-              >
-                <img src={logo} alt="Off Grid AI" className="h-8 w-8 shrink-0 rounded-lg" />
-                {sidebarOpen ? (
-                  <span className="flex-1 text-left font-semibold text-white whitespace-pre">
-                    Off Grid AI
-                  </span>
-                ) : null}
-              </div>
-
-              {/* Back / forward — a distinct control (filled), available everywhere (⌘[ / ⌘]) */}
-              <div className={cn('mt-3 flex items-center gap-1', !sidebarOpen && 'justify-center')}>
-                {sidebarOpen && (
-                  <button
-                    onClick={toggleSidebarPinned}
-                    aria-label={sidebarPinned ? 'Unpin sidebar' : 'Pin sidebar'}
-                    aria-pressed={sidebarPinned}
-                    title={sidebarPinned ? 'Unpin: open on hover' : 'Pin: keep the sidebar open'}
-                    className={cn(
-                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-800 bg-neutral-800/40 transition-colors hover:border-neutral-700 hover:bg-neutral-800 hover:text-white',
-                      sidebarPinned ? 'text-green-500' : 'text-neutral-400'
-                    )}
-                  >
-                    {sidebarPinned ? (
-                      <IconPinnedOff className="h-4 w-4 shrink-0" />
-                    ) : (
-                      <IconPin className="h-4 w-4 shrink-0" />
-                    )}
-                  </button>
-                )}
-                <button
-                  onClick={navigateBack}
-                  disabled={!canGoBack}
-                  aria-label="Back"
-                  title="Back (⌘[)"
-                  className={cn(
-                    'flex items-center justify-center gap-1.5 rounded-lg border border-neutral-800 bg-neutral-800/40 text-neutral-300 transition-colors hover:border-neutral-700 hover:bg-neutral-800 hover:text-white disabled:opacity-30 disabled:hover:bg-neutral-800/40',
-                    sidebarOpen ? 'flex-1 px-2 py-1.5' : 'h-9 w-9'
-                  )}
-                >
-                  <IconArrowLeft className="h-4 w-4 shrink-0" />
-                  {sidebarOpen && <span className="text-xs font-medium">Back</span>}
-                </button>
-                {sidebarOpen && (
-                  <button
-                    onClick={navigateForward}
-                    disabled={!canGoForward}
-                    aria-label="Forward"
-                    title="Forward (⌘])"
-                    className="flex items-center justify-center rounded-lg border border-neutral-800 bg-neutral-800/40 px-2 py-1.5 text-neutral-300 transition-colors hover:border-neutral-700 hover:bg-neutral-800 hover:text-white disabled:opacity-30 disabled:hover:bg-neutral-800/40"
-                  >
-                    <IconArrowRight className="h-4 w-4 shrink-0" />
-                  </button>
-                )}
-              </div>
-
-              {/* Navigation (scrolls; Settings is pinned to the bottom) */}
-              <div className="mt-5 flex flex-1 flex-col overflow-y-auto overflow-x-hidden pr-0.5">
-                <SidebarNavigationMenu
-                  activeView={viewMode}
-                  expanded={sidebarOpen}
-                  groups={navigationGroups}
-                  renderItem={renderNavItem}
-                />
-              </div>
-            </div>
-
-            {/* Pinned bottom */}
-            {/* neutral-800 is the surface token, theme-aware on its own - neutral-200 is the TEXT
-                token, which drew a hard black rule here in light mode. See navRowClass. */}
-            <div className="flex flex-col gap-1 border-t border-neutral-800 pt-2">
-              <ModelStatusDot
-                open={sidebarOpen}
-                onClick={() => {
-                  navigateTo('settings', () => {
-                    setNavigationSubroute(null)
-                    setSettingsSection('setup')
-                    setSettingsNavigationKey((key) => key + 1)
+        )}
+        {/* Update ready — a new version downloaded and is staged. The button drives
+          the install (quit + swap + relaunch); a plain quit/force-kill would leave
+          it unapplied. */}
+        {updateReady && (
+          <div className="absolute right-4 top-4 z-50 flex items-center gap-3 rounded-md border border-green-500/40 bg-neutral-900/95 px-3.5 py-2 font-mono text-xs text-neutral-200 shadow-xl backdrop-blur">
+            <IconDownload className="h-4 w-4 text-green-500" />
+            <span>Update {updateReady} is ready</span>
+            <button
+              onClick={async () => {
+                setInstalling(true)
+                try {
+                  await window.api.installUpdate()
+                } catch {
+                  // quitAndInstall normally never returns (the app exits). If it
+                  // rejects, unlock the button so the user can retry.
+                  setInstalling(false)
+                  addNotification({
+                    type: 'info',
+                    title: 'Update restart failed',
+                    message: 'Try again from the update banner.'
                   })
-                }}
-              />
-              <NavThemeToggle expanded={sidebarOpen} />
-              {bottomNav.map(renderNavItem)}
-              {/* Cross-sell to the companion phone app — opens the /mobile page
-                  (App Store + Google Play). Mirrors mobile's link back to desktop. */}
-              <button
-                onClick={() => openExternal(OFF_GRID_MOBILE_URL)}
-                aria-label="Mobile app"
-                title={!sidebarOpen ? 'Get the mobile app' : undefined}
-                className={navRowClass(sidebarOpen)}
-              >
-                <IconDeviceMobile className="h-5 w-5 shrink-0" />
-                {sidebarOpen && <span className="flex-1 text-left whitespace-pre">Mobile app</span>}
-                {sidebarOpen && (
-                  <IconExternalLink className="h-3.5 w-3.5 shrink-0 text-neutral-400/60" />
-                )}
-              </button>
-            </div>
-          </SidebarBody>
-        </Sidebar>
+                }
+              }}
+              disabled={installing}
+              className="flex items-center gap-1.5 rounded-sm border border-green-500/50 bg-green-500/10 px-2.5 py-1 text-emerald-400 hover:bg-green-500/20 disabled:opacity-60"
+            >
+              {installing ? (
+                <>
+                  <IconLoader2 className="h-3.5 w-3.5 animate-spin" /> Restarting…
+                </>
+              ) : (
+                'Restart to update'
+              )}
+            </button>
+          </div>
+        )}
+        {/* Background — flat Off Grid AI terminal grid (theme-aware), with a dark-mode
+          starfield + periodic shooting star layered on top. */}
+        <GridBackdrop className="z-0" />
+        <StarfieldBackdrop className="z-0" />
 
-        <div className="min-w-0 flex-1" data-testid="main-workspace">
-          <div className="flex h-full flex-col overflow-hidden">
-            {/* Global reprocessing banner */}
-            <AnimatePresence>
-              <ReprocessingBanner />
-            </AnimatePresence>
-            {/* Content Area */}
-            <div className="flex-1 overflow-hidden">
-              <AnimatePresence mode="wait">
-                {viewMode === 'chats' && selectedSessionId ? (
-                  <motion.div
-                    key={`chat-detail-${selectedSessionId}`}
-                    initial={{ opacity: 0, filter: 'blur(10px)' }}
-                    animate={{ opacity: 1, filter: 'blur(0px)' }}
-                    exit={{ opacity: 0, filter: 'blur(5px)' }}
-                    transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
-                    className="h-full"
-                  >
-                    <ChatDetail
-                      sessionId={selectedSessionId}
-                      onBack={handleBack}
-                      onSelectEntity={(entityId) => {
-                        navigateTo('entities', () => {
-                          setSelectedEntityId(entityId)
-                          setSelectedSessionId(null)
-                        })
-                      }}
-                      onSelectMemory={(memoryId) => {
-                        navigateTo('memories', () => {
-                          setSelectedMemoryId(memoryId)
-                          setSelectedSessionId(null)
-                        })
-                      }}
-                    />
-                  </motion.div>
-                ) : (
-                  <motion.div
-                    key={viewMode}
-                    initial={{ opacity: 0, filter: 'blur(10px)' }}
-                    animate={{ opacity: 1, filter: 'blur(0px)' }}
-                    exit={{ opacity: 0, filter: 'blur(5px)' }}
-                    transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
-                    className="p-6 h-full overflow-y-auto"
-                  >
-                    {viewMode === 'explore' ? (
-                      <ExploreScreen onRunPreset={handleRunPreset} />
-                    ) : viewMode === 'memory-chat' ? (
-                      <MemoryChat
-                        onNavigateToMemory={handleSelectMemory}
-                        onNavigateToChat={handleSelectChat}
-                        onNavigateToMeeting={(meetingId) =>
-                          handleProNavigate({ view: 'meetings', meetingId })
-                        }
-                        onNavigateToEntity={handleSelectEntity}
-                        onOpenProject={(id) => {
-                          navigateTo('projects', () => setSelectedProjectId(id))
-                        }}
-                        onSeekReplay={(ts) => {
-                          navigateTo('replay', () => setReplayTarget(ts || Date.now()))
-                        }}
-                        onOpenSkillPreset={handleOpenSkillPreset}
-                        onOpenConnectors={() => navigateTo('connectors')}
-                        openTarget={chatTarget}
-                        onTargetConsumed={() => setChatTarget(null)}
-                        onTaskDetailModeChange={setTaskDetailSidebarMode}
-                      />
-                    ) : viewMode === 'tasks' ? (
-                      TaskWorkspace ? (
-                        createElement(TaskWorkspace, {
-                          standalone: true,
-                          onDetailModeChange: setTaskDetailSidebarMode
-                        })
+        <div className="flex h-full relative z-10">
+          {/* Aceternity Sidebar */}
+          <Sidebar open={sidebarOpen} setOpen={setSidebarOpen}>
+            <SidebarBody
+              role="navigation"
+              aria-label="Primary navigation"
+              aria-expanded={sidebarOpen}
+              className="justify-between gap-3 bg-neutral-900/80 backdrop-blur-xl border-r border-neutral-800"
+              onMouseEnter={() => setSidebarOpen(true)}
+              onMouseLeave={() => setSidebarOpen(false)}
+              onFocusCapture={() => setSidebarOpen(true)}
+              onBlurCapture={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) setSidebarOpen(false)
+              }}
+            >
+              <div className="flex min-h-0 flex-1 flex-col">
+                {/* The rail expands only while hovered or keyboard-focused. */}
+                <div
+                  className={cn('flex items-center py-2', sidebarOpen ? 'gap-2' : 'justify-center')}
+                >
+                  <img src={logo} alt="Off Grid AI" className="h-8 w-8 shrink-0 rounded-lg" />
+                  {sidebarOpen ? (
+                    <span className="flex-1 text-left font-semibold text-white whitespace-pre">
+                      Off Grid AI
+                    </span>
+                  ) : null}
+                </div>
+
+                {/* Back / forward — a distinct control (filled), available everywhere (⌘[ / ⌘]) */}
+                <div
+                  className={cn('mt-3 flex items-center gap-1', !sidebarOpen && 'justify-center')}
+                >
+                  {sidebarOpen && (
+                    <button
+                      onClick={toggleSidebarPinned}
+                      aria-label={sidebarPinned ? 'Unpin sidebar' : 'Pin sidebar'}
+                      aria-pressed={sidebarPinned}
+                      title={sidebarPinned ? 'Unpin: open on hover' : 'Pin: keep the sidebar open'}
+                      className={cn(
+                        'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-800 bg-neutral-800/40 transition-colors hover:border-neutral-700 hover:bg-neutral-800 hover:text-white',
+                        sidebarPinned ? 'text-green-500' : 'text-neutral-400'
+                      )}
+                    >
+                      {sidebarPinned ? (
+                        <IconPinnedOff className="h-4 w-4 shrink-0" />
                       ) : (
-                        <UpgradeScreen feature={getProFeature(viewMode)} />
-                      )
-                    ) : viewMode === 'chats' ? (
-                      <ChatList onSelectSession={setSelectedSessionId} />
-                    ) : viewMode === 'models' ? (
-                      <ModelsScreen
-                        navigationSubroute={navigationSubroute}
-                        onNavigateSubroute={setNavigationSubroute}
-                      />
-                    ) : viewMode === 'projects' ? (
-                      <ProjectsScreen
-                        onOpenChat={handleOpenProjectChat}
-                        selectedProjectId={selectedProjectId}
-                        onSelectProject={setSelectedProjectId}
-                      />
-                    ) : viewMode === 'connectors' ? (
-                      <ConnectorsScreen />
-                    ) : viewMode === 'gateway' ? (
-                      <GatewayScreen />
-                    ) : viewMode === 'settings' ? (
-                      <Settings
-                        key={settingsNavigationKey}
-                        activeSection={settingsSection}
-                        onSectionChange={setSettingsSection}
-                      />
-                    ) : !isPro ? (
-                      <UpgradeScreen feature={getProFeature(viewMode)} />
-                    ) : proFeatureComingSoon(viewMode, currentPlatform(), isPro) ? (
-                      <UpgradeScreen variant="coming-soon" feature={getProFeature(viewMode)} />
-                    ) : (
-                      // Pro tabs: render through the pro view-router when active,
-                      // otherwise show the upgrade writeup for that feature.
-                      <ProViewRoute
-                        viewMode={viewMode}
-                        context={
-                          {
-                            setView: (v) => navigateTo(v as ViewMode),
-                            onNavigate: handleProNavigate,
-                            navigationSubroute,
-                            setNavigationSubroute,
-                            navigateBack,
-                            replayTarget,
-                            meetingTarget,
-                            actionTarget,
-                            approvalTarget,
-                            calendarEventTarget,
-                            actionsMode,
-                            actionsEntity,
-                            searchQuery,
-                            onSearchQueryChange: setSearchQuery,
-                            searchSources,
-                            onSearchSourcesChange: setSearchSources,
-                            searchSort,
-                            onSearchSortChange: setSearchSort,
-                            selectedMemoryId,
-                            setSelectedMemoryId,
-                            selectedEntityId,
-                            rec,
-                            onSelectEntity: handleSelectEntity,
-                            onSelectMemory: handleSelectMemory,
-                            onOpenHit: handleOpenHit,
-                            openChatOwner: handleOpenChatOwner
-                          } satisfies ProViewContext
-                        }
-                      />
+                        <IconPin className="h-4 w-4 shrink-0" />
+                      )}
+                    </button>
+                  )}
+                  <button
+                    onClick={navigateBack}
+                    disabled={!canGoBack}
+                    aria-label="Back"
+                    title="Back (⌘[)"
+                    className={cn(
+                      'flex items-center justify-center gap-1.5 rounded-lg border border-neutral-800 bg-neutral-800/40 text-neutral-300 transition-colors hover:border-neutral-700 hover:bg-neutral-800 hover:text-white disabled:opacity-30 disabled:hover:bg-neutral-800/40',
+                      sidebarOpen ? 'flex-1 px-2 py-1.5' : 'h-9 w-9'
                     )}
-                  </motion.div>
-                )}
+                  >
+                    <IconArrowLeft className="h-4 w-4 shrink-0" />
+                    {sidebarOpen && <span className="text-xs font-medium">Back</span>}
+                  </button>
+                  {sidebarOpen && (
+                    <button
+                      onClick={navigateForward}
+                      disabled={!canGoForward}
+                      aria-label="Forward"
+                      title="Forward (⌘])"
+                      className="flex items-center justify-center rounded-lg border border-neutral-800 bg-neutral-800/40 px-2 py-1.5 text-neutral-300 transition-colors hover:border-neutral-700 hover:bg-neutral-800 hover:text-white disabled:opacity-30 disabled:hover:bg-neutral-800/40"
+                    >
+                      <IconArrowRight className="h-4 w-4 shrink-0" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Navigation (scrolls; Settings is pinned to the bottom) */}
+                <div className="mt-5 flex flex-1 flex-col overflow-y-auto overflow-x-hidden pr-0.5">
+                  <SidebarNavigationMenu
+                    activeView={viewMode}
+                    expanded={sidebarOpen}
+                    groups={navigationGroups}
+                    renderItem={renderNavItem}
+                  />
+                </div>
+              </div>
+
+              {/* Pinned bottom */}
+              {/* neutral-800 is the surface token, theme-aware on its own - neutral-200 is the TEXT
+                token, which drew a hard black rule here in light mode. See navRowClass. */}
+              <div className="flex flex-col gap-1 border-t border-neutral-800 pt-2">
+                <ModelStatusDot
+                  open={sidebarOpen}
+                  onClick={() => {
+                    navigateTo('settings', () => {
+                      setNavigationSubroute(null)
+                      setSettingsSection('setup')
+                      setSettingsNavigationKey((key) => key + 1)
+                    })
+                  }}
+                />
+                <NavThemeToggle expanded={sidebarOpen} />
+                {bottomNav.map(renderNavItem)}
+                {/* Cross-sell to the companion phone app — opens the /mobile page
+                  (App Store + Google Play). Mirrors mobile's link back to desktop. */}
+                <button
+                  onClick={() => openExternal(OFF_GRID_MOBILE_URL)}
+                  aria-label="Mobile app"
+                  title={!sidebarOpen ? 'Get the mobile app' : undefined}
+                  className={navRowClass(sidebarOpen)}
+                >
+                  <IconDeviceMobile className="h-5 w-5 shrink-0" />
+                  {sidebarOpen && (
+                    <span className="flex-1 text-left whitespace-pre">Mobile app</span>
+                  )}
+                  {sidebarOpen && (
+                    <IconExternalLink className="h-3.5 w-3.5 shrink-0 text-neutral-400/60" />
+                  )}
+                </button>
+              </div>
+            </SidebarBody>
+          </Sidebar>
+
+          <div className="min-w-0 flex-1" data-testid="main-workspace">
+            <div className="flex h-full flex-col overflow-hidden">
+              {/* Global reprocessing banner */}
+              <AnimatePresence>
+                <ReprocessingBanner />
               </AnimatePresence>
+              {/* Content Area */}
+              <div className="flex-1 overflow-hidden">
+                <AnimatePresence mode="wait">
+                  {viewMode === 'chats' && selectedSessionId ? (
+                    <motion.div
+                      key={`chat-detail-${selectedSessionId}`}
+                      initial={{ opacity: 0, filter: 'blur(10px)' }}
+                      animate={{ opacity: 1, filter: 'blur(0px)' }}
+                      exit={{ opacity: 0, filter: 'blur(5px)' }}
+                      transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
+                      className="h-full"
+                    >
+                      <ChatDetail
+                        sessionId={selectedSessionId}
+                        onBack={handleBack}
+                        onSelectEntity={(entityId) => {
+                          navigateTo('entities', () => {
+                            setSelectedEntityId(entityId)
+                            setSelectedSessionId(null)
+                          })
+                        }}
+                        onSelectMemory={(memoryId) => {
+                          navigateTo('memories', () => {
+                            setSelectedMemoryId(memoryId)
+                            setSelectedSessionId(null)
+                          })
+                        }}
+                      />
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key={viewMode}
+                      initial={{ opacity: 0, filter: 'blur(10px)' }}
+                      animate={{ opacity: 1, filter: 'blur(0px)' }}
+                      exit={{ opacity: 0, filter: 'blur(5px)' }}
+                      transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
+                      className="p-6 h-full overflow-y-auto"
+                    >
+                      {viewMode === 'explore' ? (
+                        <ExploreScreen onRunPreset={handleRunPreset} />
+                      ) : viewMode === 'memory-chat' ? (
+                        <MemoryChat
+                          onNavigateToMemory={handleSelectMemory}
+                          onNavigateToChat={handleSelectChat}
+                          onNavigateToMeeting={(meetingId) =>
+                            handleProNavigate({ view: 'meetings', meetingId })
+                          }
+                          onNavigateToEntity={handleSelectEntity}
+                          onOpenProject={(id) => {
+                            navigateTo('projects', () => setSelectedProjectId(id))
+                          }}
+                          onSeekReplay={(ts) => {
+                            navigateTo('replay', () => setReplayTarget(ts || Date.now()))
+                          }}
+                          onOpenSkillPreset={handleOpenSkillPreset}
+                          onOpenConnectors={() => navigateTo('connectors')}
+                          openTarget={chatTarget}
+                          onTargetConsumed={() => setChatTarget(null)}
+                          onTaskDetailModeChange={setTaskDetailSidebarMode}
+                        />
+                      ) : viewMode === 'tasks' ? (
+                        TaskWorkspace ? (
+                          createElement(TaskWorkspace, {
+                            standalone: true,
+                            onDetailModeChange: setTaskDetailSidebarMode
+                          })
+                        ) : (
+                          <UpgradeScreen feature={getProFeature(viewMode)} />
+                        )
+                      ) : viewMode === 'chats' ? (
+                        <ChatList onSelectSession={setSelectedSessionId} />
+                      ) : viewMode === 'models' ? (
+                        <ModelsScreen
+                          navigationSubroute={navigationSubroute}
+                          onNavigateSubroute={setNavigationSubroute}
+                        />
+                      ) : viewMode === 'projects' ? (
+                        <ProjectsScreen
+                          onOpenChat={handleOpenProjectChat}
+                          selectedProjectId={selectedProjectId}
+                          onSelectProject={setSelectedProjectId}
+                        />
+                      ) : viewMode === 'connectors' ? (
+                        <ConnectorsScreen />
+                      ) : viewMode === 'gateway' ? (
+                        <GatewayScreen />
+                      ) : viewMode === 'settings' ? (
+                        <Settings
+                          key={settingsNavigationKey}
+                          activeSection={settingsSection}
+                          onSectionChange={setSettingsSection}
+                        />
+                      ) : !isPro ? (
+                        <UpgradeScreen feature={getProFeature(viewMode)} />
+                      ) : proFeatureComingSoon(viewMode, currentPlatform(), isPro) ? (
+                        <UpgradeScreen variant="coming-soon" feature={getProFeature(viewMode)} />
+                      ) : (
+                        // Pro tabs: render through the pro view-router when active,
+                        // otherwise show the upgrade writeup for that feature.
+                        <ProViewRoute
+                          viewMode={viewMode}
+                          context={
+                            {
+                              setView: (v) => navigateTo(v as ViewMode),
+                              onNavigate: handleProNavigate,
+                              navigationSubroute,
+                              setNavigationSubroute,
+                              navigateBack,
+                              replayTarget,
+                              meetingTarget,
+                              actionTarget,
+                              approvalTarget,
+                              calendarEventTarget,
+                              actionsMode,
+                              actionsEntity,
+                              searchQuery,
+                              onSearchQueryChange: setSearchQuery,
+                              searchSources,
+                              onSearchSourcesChange: setSearchSources,
+                              searchSort,
+                              onSearchSortChange: setSearchSort,
+                              selectedMemoryId,
+                              setSelectedMemoryId,
+                              selectedEntityId,
+                              rec,
+                              onSelectEntity: handleSelectEntity,
+                              onSelectMemory: handleSelectMemory,
+                              onOpenHit: handleOpenHit,
+                              openChatOwner: handleOpenChatOwner
+                            } satisfies ProViewContext
+                          }
+                        />
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
             </div>
           </div>
         </div>
+        <AnimatePresence>
+          {modelSettingsOpen && (
+            <SettingsPanel
+              key={modelSettingsTab}
+              initialTab={modelSettingsTab}
+              onClose={() => setModelSettingsOpen(false)}
+            />
+          )}
+        </AnimatePresence>
+        {TaskFloatingView ? createElement(TaskFloatingView) : null}
       </div>
-      <AnimatePresence>
-        {modelSettingsOpen && (
-          <SettingsPanel
-            key={modelSettingsTab}
-            initialTab={modelSettingsTab}
-            onClose={() => setModelSettingsOpen(false)}
-          />
-        )}
-      </AnimatePresence>
-      {TaskFloatingView ? createElement(TaskFloatingView) : null}
     </div>
   )
 }
