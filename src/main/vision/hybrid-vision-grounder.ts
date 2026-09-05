@@ -200,7 +200,7 @@ function reasonerOutcome(response: VisionPolicyResponse): ReasonerOutcome {
   return { error: `unsupported hybrid reasoner tool ${JSON.stringify(call.name)}` }
 }
 
-function taskContext(input: VisionPolicyInput): string {
+function taskContext(input: VisionPolicyInput, guidance: readonly string[]): string {
   return [
     `Task brief:\n${input.goal}`,
     input.currentMilestone ? `Current milestone:\n${input.currentMilestone}` : '',
@@ -211,20 +211,26 @@ function taskContext(input: VisionPolicyInput): string {
     input.olderVisualFacts.length
       ? `Older task outcomes. These can be stale:\n${input.olderVisualFacts.join('\n')}`
       : '',
+    guidance.length
+      ? `Authoritative user guidance for the next decision:\n${guidance.map((item) => `- ${item}`).join('\n')}`
+      : '',
     'Inspect this exact screen and call one transition tool.'
   ]
     .filter(Boolean)
     .join('\n\n')
 }
 
-function reasonerRequest(input: VisionPolicyInput): VisionPolicyRequest {
+function reasonerRequest(
+  input: VisionPolicyInput,
+  guidance: readonly string[]
+): VisionPolicyRequest {
   return {
     messages: [
       { role: 'system', content: HYBRID_REASONER_SYSTEM_PROMPT },
       {
         role: 'user',
         content: [
-          { type: 'text', text: taskContext(input) },
+          { type: 'text', text: taskContext(input, guidance) },
           { type: 'image_url', image_url: { url: input.currentScreenshotDataUrl } }
         ]
       }
@@ -290,7 +296,7 @@ export function createHybridVisionGrounder(
 ): (input: VisionGroundingInput) => Promise<VisionGroundingResult> {
   return async (input) => {
     const prepared = await prepareVisionGrounding(input, environment)
-    const request = reasonerRequest(prepared.policyInput)
+    const request = reasonerRequest(prepared.policyInput, input.guidance)
     const response = await dependencies.runReasoner(
       { ...request, generationRouteId: dependencies.reasonerRouteId },
       input.signal,
