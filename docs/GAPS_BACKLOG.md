@@ -7,6 +7,41 @@ how to reproduce, and the fix direction. Close with evidence; never hide.
 
 ## OPEN
 
+### DL-20260904 (P1) - Manual download controls and progress need final confirmation
+
+User manual evidence on 2026-09-04:
+
+- Storage shows installed vision models while Text offers Download. The projection correction has
+  passed focused real-facade checks against rebuilt Shared packages. User confirmation remains open.
+- Legacy and current download identities produced duplicate rows. Recovery and exact-job actions
+  have focused regression coverage; the full manual journey remains open.
+- At 17:28, Retry kept all Cancel controls disabled until its transfer ended. A real application,
+  temporary-filesystem regression reproduced this and passed after separating retry/cancel state.
+- At 17:35, the user confirmed Cancel worked, but other Retry buttons remained disabled. The scalar
+  retry owner still blocked unrelated rows. Per-download operation ownership is now implemented.
+  A real-owner three-job regression and the full Storage file pass 10/10; web typecheck passes.
+  Root independently reran the tests. Manual confirmation of this follow-up remains open.
+- At 17:34, Add vision support on an installed Qwen card showed a bar without transfer details.
+  The installed-state branch hides the download summary. Card and detail views must show measured
+  percentage, transferred/total bytes and rate, with explicit unavailable values when facts are absent.
+
+Close only after the user confirms independent Retry/Cancel across concurrent jobs, projector
+progress details, correct installed inventory, and no duplicate rows. Do not delete the user's
+model files to make the display agree. E2E remains deferred until manual completion is confirmed.
+
+### DEV-20260904 (P2) - Shared watcher needs manual launch confirmation
+
+Desktop `npm run dev` now starts the Shared watcher. It reuses the ordered builder and consumer
+verifier, serializes rebuilds, refuses duplicate supervisors, and cleans up its own child processes.
+Renderer HMR remains active. Shared source edits stop the app and restart it after a verified full
+Shared build; a failed build leaves the app stopped until inputs change. This can interrupt active
+recordings/downloads. Production verification is unchanged.
+
+The isolated integration test covers valid-proof startup without rebuilding, coalesced edits,
+an edit during a build, failure/recovery, duplicate ownership and child cleanup. Root independently
+ran it successfully. The user has been given the launch command; real watcher launch/reload
+confirmation remains open. No normal-profile app was launched or stopped by that test.
+
 ### ARC-001 (P1) - Application facade boundary needs its final six-domain static gate
 
 Desktop already has strict ESLint, Dependency Cruiser, and custom Models gates. Do not add a generic
@@ -2921,5 +2956,20 @@ Recorded so the next test author is not misled. `102dcd84` added a required `ena
 never moves and no Stop appears - so a test that stubbed component state instead of initialising the
 renderer entitlement would go green while exercising nothing. Whether two gates are intended is a
 design question for the meeting owner; that they exist is the fact tests must respect.
+
+Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
+
+## `diagnostics-log.integration.test.ts` fails 3 tests, pre-existing, one asserting the source layout of a file that moved (OPEN — Codex core-test scope)
+
+`src/main/__tests__/diagnostics-log.integration.test.ts` fails three tests, and an A/B with the new
+`@offgrid/pro/main` alias removed proves all three pre-exist it. Two are `ENOENT` on the private log
+path the test expects written. The third - "installs IPC tracing before core and Pro handler
+registration" - does `mainSource.indexOf('loadProFeaturesMain()', tracing)` and asserts on the SOURCE
+ORDER of `src/main/index.ts` (`:114`). That file was restructured into a thin entry with the startup
+body moved to `application-main.ts`, so `loadProFeaturesMain()` is no longer in the source it reads and
+`indexOf` returns -1. A test keyed to a filename's contents silently stops testing anything when the
+code moves - the same failure mode as the filename-keyed architecture check repaired earlier.
+
+Desktop core main tests are Codex's scope; recorded here, not touched.
 
 Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
