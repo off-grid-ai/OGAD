@@ -3022,3 +3022,16 @@ Removal lands only after Shared's canonical catalog hydration exposes these as c
 so Mobile consumes the resolver and never a copied value.
 
 Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
+
+## Mobile `downloadItemMapping` cannot be unit-loaded: the services barrel constructs a service at import (OPEN — production, found by a test)
+
+`mobile/src/screens/DownloadManagerScreen/downloadItemMapping.ts:1` imports `hardwareService` from the
+`../../services` barrel. Loading the barrel constructs `ImageGenerationService` at module scope
+(`imageGenerationService.ts:85` via `services/index.ts:21`), which calls `applicationFacade()` and
+throws "The mobile application facade is not configured." A pure row-mapping module therefore cannot
+be tested without standing up the whole composition. Three row-level regressions (role -> "Vision
+support", no role -> filename, `paused` passes through) were written and withdrawn rather than fake
+the facade. Focused fix: import `hardwareService` from its own module; then the three tests land.
+Mobile `10c435a0` records the gap in the test header.
+
+Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
