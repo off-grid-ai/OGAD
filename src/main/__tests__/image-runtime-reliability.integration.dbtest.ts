@@ -14,6 +14,7 @@ import type { AddressInfo } from 'node:net'
 import { createOfflineFetchBoundary, type OfflineFetchBoundary } from './harness/offline-fetch'
 import { buildMessages } from '../llm/chat-payload'
 import { readImages } from '../llm/read-images'
+import { EXECUTORCH_KOKORO_MODEL_ID } from '@offgrid/models'
 
 const hostFetch = globalThis.fetch.bind(globalThis)
 
@@ -26,6 +27,7 @@ const fixture = (() => {
     resourceDir: path.join(root, 'resources'),
     llamaLog: path.join(root, 'llama-starts.log'),
     imageLog: path.join(root, 'image-runs.log'),
+    imageMode: path.join(root, 'image-mode.json'),
     ttsFailureMarker: path.join(root, 'fail-next-tts'),
     ttsInputLog: path.join(root, 'tts-inputs.log')
   }
@@ -46,17 +48,20 @@ vi.mock('electron', () => ({
 }))
 
 const CHAT_MODEL = 'chat-runtime-fixture.gguf'
+const CHAT_MODEL_ID = `local:${CHAT_MODEL}`
 const IMAGE_MODEL = 'image-runtime-fixture.safetensors'
 const PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 
 let llm: typeof import('../llm').llm
 let generateImage: typeof import('../imagegen').generateImage
+let desktopImageApplication: typeof import('../imagegen/application-service').desktopImageApplication
 let synthesize: typeof import('../tts').synthesize
 let startModelServer: typeof import('../model-server').startModelServer
 let stopModelServer: typeof import('../model-server').stopModelServer
 let gatewayPort: number
 let offlineNetwork: OfflineFetchBoundary
+let unregisterApplication: (() => void) | undefined
 
 async function rawLocalText(prompt: string, images: string[] = []): Promise<string> {
   const messages = buildMessages(prompt, readImages(images), llm.getSettings().systemPrompt ?? '')
@@ -128,10 +133,34 @@ const fs = require('node:fs')
 const args = process.argv.slice(2)
 const value = (flag) => args[args.indexOf(flag) + 1]
 fs.appendFileSync(process.env.OFFGRID_TEST_IMAGE_LOG, 'run\\n')
-fs.writeFileSync(value('-o'), Buffer.from('${PNG_BASE64}', 'base64'))
+let mode = { kind: 'ok', delayMs: 0 }
+try { mode = JSON.parse(fs.readFileSync(process.env.OFFGRID_TEST_IMAGE_MODE, 'utf8')) } catch {}
+const finish = () => {
+  if (mode.kind === 'memory') {
+    process.stderr.write('ggml_metal alloc failed OFFGRID_IMAGE_MEMORY_LIMIT:native image weights do not fit\\n')
+    process.exit(1)
+  }
+  if (mode.kind === 'no-output') process.exit(0)
+  if (mode.kind === 'progress') {
+    process.stderr.write('seed 4242\\n')
+    process.stderr.write('1/4 - 0.50s/it\\n')
+    process.stderr.write('4/4 - 0.50s/it\\n')
+    process.stderr.write('1/2 - 0.10s/it\\n')
+  }
+  fs.writeFileSync(value('-o'), Buffer.from('${PNG_BASE64}', 'base64'))
+}
+setTimeout(finish, mode.delayMs || 0)
 `
   )
   fs.chmodSync(executable, 0o755)
+}
+
+function setImageBoundaryMode(mode: { kind: string; delayMs?: number } | null): void {
+  if (!mode) {
+    fs.rmSync(fixture.imageMode, { force: true })
+    return
+  }
+  fs.writeFileSync(fixture.imageMode, JSON.stringify(mode))
 }
 
 function installFakeTtsBoundary(): void {
@@ -232,6 +261,7 @@ beforeAll(async () => {
   process.env.OFFGRID_RESOURCE_DIR = fixture.resourceDir
   process.env.OFFGRID_TEST_LLAMA_LOG = fixture.llamaLog
   process.env.OFFGRID_TEST_IMAGE_LOG = fixture.imageLog
+  process.env.OFFGRID_TEST_IMAGE_MODE = fixture.imageMode
   process.env.OFFGRID_TEST_TTS_FAILURE_MARKER = fixture.ttsFailureMarker
   process.env.OFFGRID_TEST_TTS_INPUT_LOG = fixture.ttsInputLog
 
@@ -241,11 +271,25 @@ beforeAll(async () => {
   fs.writeFileSync(path.join(modelsDir, IMAGE_MODEL), 'image checkpoint')
   fs.writeFileSync(
     path.join(modelsDir, 'active-model.json'),
-    JSON.stringify({ id: 'runtime-fixture', primary: CHAT_MODEL })
+    JSON.stringify({ id: CHAT_MODEL_ID, primary: CHAT_MODEL })
+  )
+  fs.writeFileSync(
+    path.join(modelsDir, 'local-models.json'),
+    JSON.stringify([
+      {
+        id: CHAT_MODEL_ID,
+        name: 'Chat runtime fixture',
+        primary: CHAT_MODEL,
+        kind: 'text',
+        sizeBytes: fs.statSync(path.join(modelsDir, CHAT_MODEL)).size
+      }
+    ])
   )
   fs.writeFileSync(
     path.join(modelsDir, 'active-modalities.json'),
-    JSON.stringify({ image: IMAGE_MODEL, speech: 'desktop-test-voice' })
+    // The speech selection must name the catalog voice route: the registered application resolves
+    // the active voice through the models facade, which only knows catalog ids.
+    JSON.stringify({ image: IMAGE_MODEL, speech: EXECUTORCH_KOKORO_MODEL_ID })
   )
   installFakeLlamaBoundary()
   installFakeImageBoundary()
@@ -257,15 +301,27 @@ beforeAll(async () => {
     { llm: productionLlm },
     { generateImage: productionGenerateImage },
     { synthesize: productionSynthesize },
-    modelServer
+    modelServer,
+    imageApplication
   ] = await Promise.all([
     import('../llm'),
     import('../imagegen'),
     import('../tts'),
-    import('../model-server')
+    import('../model-server'),
+    import('../imagegen/application-service')
   ])
+  const [{ createOffGridApplication }, { desktopModelWorkspacePorts }, applicationAccess] =
+    await Promise.all([
+      import('@offgrid/application'),
+      import('../model-services'),
+      import('../composition/application-access')
+    ])
+  unregisterApplication = applicationAccess.registerDesktopApplication(
+    createOffGridApplication({ models: desktopModelWorkspacePorts })
+  )
   llm = productionLlm
   generateImage = productionGenerateImage
+  desktopImageApplication = imageApplication.desktopImageApplication
   synthesize = productionSynthesize
   startModelServer = modelServer.startModelServer
   stopModelServer = modelServer.stopModelServer
@@ -287,12 +343,14 @@ afterAll(async () => {
     'native model processes to exit'
   )
   expect(offlineNetwork.blockedRequests).toEqual(['https://example.invalid/health'])
+  unregisterApplication?.()
   vi.unstubAllGlobals()
   delete process.env.OFFGRID_DATA_DIR
   delete process.env.OFFGRID_BIN_DIR
   delete process.env.OFFGRID_RESOURCE_DIR
   delete process.env.OFFGRID_TEST_LLAMA_LOG
   delete process.env.OFFGRID_TEST_IMAGE_LOG
+  delete process.env.OFFGRID_TEST_IMAGE_MODE
   delete process.env.OFFGRID_TEST_TTS_FAILURE_MARKER
   delete process.env.OFFGRID_TEST_TTS_INPUT_LOG
   fs.rmSync(fixture.root, { recursive: true, force: true })
@@ -450,7 +508,7 @@ describe('multimodal runtime reliability', () => {
     fs.writeFileSync(path.join(modelDir, 'mmproj.gguf'), 'gguf')
     fs.writeFileSync(
       path.join(modelDir, 'active-model.json'),
-      JSON.stringify({ id: 'runtime-fixture', primary: CHAT_MODEL, mmproj: 'mmproj.gguf' })
+      JSON.stringify({ id: CHAT_MODEL_ID, primary: CHAT_MODEL, mmproj: 'mmproj.gguf' })
     )
     expect(await rawLocalText('Describe the private diagram.', [image.path])).toBe('chat recovered')
 
@@ -595,4 +653,96 @@ describe('multimodal runtime reliability', () => {
     expect(reopenedArtifacts.listArtifacts({ projectId: 'image-release-project' })).toEqual([])
     expect(fs.readFileSync(exportPath)).toEqual(imageBytes)
   }, 20_000)
+})
+
+describe('desktop image application live pipeline', () => {
+  const baseRequest = { model: IMAGE_MODEL, width: 512, height: 512, steps: 4 }
+
+  it('maps native progress into the preparing → generating → decoding update sequence', async () => {
+    setImageBoundaryMode({ kind: 'progress' })
+    const updates: Array<{ stage: string; phase?: string; step?: number; secPerStep?: number }> = []
+    try {
+      const output = await generateImage(
+        { ...baseRequest, prompt: 'progress mapping', seed: 7 },
+        (update) =>
+          updates.push({
+            stage: update.stage,
+            phase: update.progress?.phase,
+            step: update.progress?.step,
+            secPerStep: update.progress?.secPerStep
+          })
+      )
+      expect(output.seed).toBe(4242)
+      expect(output.dataUrl).toBe(`data:image/png;base64,${PNG_BASE64}`)
+    } finally {
+      setImageBoundaryMode(null)
+    }
+    expect(updates[0]).toMatchObject({ stage: 'preparing', phase: undefined })
+    // The fake emits `1/4 - 0.50s/it`, `4/4 - 0.50s/it`, then `1/2 - 0.10s/it`; Shared's
+    // reduceImageProgress parses the s/it value and flips to decoding when the step counter restarts.
+    expect(updates).toContainEqual({
+      stage: 'generating',
+      phase: 'sampling',
+      step: 1,
+      secPerStep: 0.5
+    })
+    expect(updates).toContainEqual({
+      stage: 'generating',
+      phase: 'sampling',
+      step: 4,
+      secPerStep: 0.5
+    })
+    expect(updates).toContainEqual({
+      stage: 'decoding',
+      phase: 'decoding',
+      step: 1,
+      secPerStep: 0.1
+    })
+    expect(updates.some((update) => update.stage === 'enhancing')).toBe(true)
+  }, 20_000)
+
+  it('refuses a second request while one is in flight and cancels the running one', async () => {
+    setImageBoundaryMode({ kind: 'slow', delayMs: 4_000 })
+    const runsBefore = lineCount(fixture.imageLog)
+    try {
+      const first = generateImage({ ...baseRequest, prompt: 'first in flight' })
+      await waitFor(
+        () => lineCount(fixture.imageLog) > runsBefore,
+        'first image to reach the native runtime'
+      )
+      expect(desktopImageApplication.isRunning()).toBe(true)
+      await expect(generateImage({ ...baseRequest, prompt: 'second while busy' })).rejects.toThrow(
+        'An image is already generating — please wait for it to finish.'
+      )
+      await waitFor(() => desktopImageApplication.status().phase === 'generating', 'native run')
+      await desktopImageApplication.cancel()
+      await expect(first).rejects.toThrow('Image generation cancelled.')
+    } finally {
+      setImageBoundaryMode(null)
+    }
+    await waitFor(() => !desktopImageApplication.isRunning(), 'application to settle')
+    const recovered = await generateImage({ ...baseRequest, prompt: 'after cancel' })
+    expect(recovered.dataUrl).toBe(`data:image/png;base64,${PNG_BASE64}`)
+  }, 30_000)
+
+  it('surfaces a native memory-guard failure and a missing output file as real errors', async () => {
+    setImageBoundaryMode({ kind: 'memory' })
+    try {
+      await expect(generateImage({ ...baseRequest, prompt: 'memory refused' })).rejects.toThrow(
+        'OFFGRID_IMAGE_MEMORY_LIMIT:native image weights do not fit'
+      )
+    } finally {
+      setImageBoundaryMode(null)
+    }
+    setImageBoundaryMode({ kind: 'no-output' })
+    try {
+      await expect(generateImage({ ...baseRequest, prompt: 'no output' })).rejects.toThrow(
+        'Image generation produced no output file.'
+      )
+    } finally {
+      setImageBoundaryMode(null)
+    }
+    const recovered = await generateImage({ ...baseRequest, prompt: 'after failures' })
+    expect(recovered.dataUrl).toBe(`data:image/png;base64,${PNG_BASE64}`)
+  }, 30_000)
 })
