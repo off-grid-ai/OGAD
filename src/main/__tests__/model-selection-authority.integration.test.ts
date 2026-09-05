@@ -98,11 +98,23 @@ describe('Desktop active-model authority', () => {
 
     const { DesktopModelSelectionPersistence } = await import('../model-selection-persistence')
     const persistence = new DesktopModelSelectionPersistence(() => modelDirectory)
+    let textRuntimeLoaded = false
     const application = await createModelsApplication(
       {
         listCatalog: async () => selectedModels,
         listInstalled: async () => selectedModels.map((model) => model.id),
-        localTextRuntimeState: async () => ({ ready: true, loaded: true }),
+        localTextRuntimeState: async () => ({
+          ready: textRuntimeLoaded,
+          loaded: textRuntimeLoaded
+        }),
+        localTextLifecycle: {
+          load: async () => {
+            textRuntimeLoaded = true
+          },
+          unload: async () => {
+            textRuntimeLoaded = false
+          }
+        },
         localVoiceRuntimeState: async () => ({ installed: true, ready: true })
       },
       persistence
@@ -134,16 +146,22 @@ describe('Desktop active-model authority', () => {
       await expect(
         application.models.select({ modality, modelId: inventoryRoute.routeId })
       ).resolves.toMatchObject({ ok: true })
+      if (modality === 'text') {
+        await expect(application.models.prepare(modality)).resolves.toMatchObject({ ok: true })
+      }
 
       const active = application.models.snapshot().active[modality]
       const executed = application.models.resolve({ modality, allowFallback: false }).selected
+      const currentInventoryRoute = application.models.lookup(inventoryRoute.routeId)
       if (!active) throw new Error(`No active-model projection exists for ${modality}.`)
+      if (!currentInventoryRoute) throw new Error(`The selected ${modality} route disappeared.`)
       expect(persistence.readCanonical(modality)).toBe(inventoryRoute.routeId)
       expect(active.selectedRouteId).toBe(inventoryRoute.routeId)
       expect(active.model).toMatchObject({
         id: modelId,
         routeId: inventoryRoute.routeId,
-        loaded: inventoryRoute.loaded
+        loaded: currentInventoryRoute.loaded,
+        ready: true
       })
       expect(executed?.routeId).toBe(inventoryRoute.routeId)
     }
