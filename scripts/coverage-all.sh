@@ -27,22 +27,21 @@ MERGE="../shared/scripts/new-code-coverage.mjs"
 
 echo "▶ product-integration (unit + integration)…"
 rm -rf coverage
-OFFGRID_AGGREGATE_COVERAGE=1 npm run test:coverage >/tmp/coverage-all-product.log 2>&1
-PRODUCT_STATUS=$?
-grep -E "^ +Tests " /tmp/coverage-all-product.log | tail -1
+OFFGRID_AGGREGATE_COVERAGE=1 npm run test:coverage 2>&1 \
+  | tee /tmp/coverage-all-product.log
+PRODUCT_STATUS=${PIPESTATUS[0]}
 
 echo "▶ DB journeys (real SQLite)…"
 rm -rf coverage-db
 OFFGRID_DB_VITEST_CONFIG=vitest.db.coverage.config.ts npm run test:db -- --coverage \
-  >/tmp/coverage-all-db.log 2>&1
-DB_STATUS=$?
-grep -E "^ +Tests " /tmp/coverage-all-db.log | tail -1
+  2>&1 | tee /tmp/coverage-all-db.log
+DB_STATUS=${PIPESTATUS[0]}
 
 if [ "${1:-}" = "--with-e2e" ]; then
   echo "▶ e2e tour (built app, needs a display)…"
   rm -rf coverage-e2e-raw coverage-e2e
-  OFFGRID_E2E_COVERAGE="$PWD/coverage-e2e-raw" npm run test:e2e >/tmp/coverage-all-e2e.log 2>&1
-  grep -E "passed|failed" /tmp/coverage-all-e2e.log | tail -1
+  OFFGRID_E2E_COVERAGE="$PWD/coverage-e2e-raw" npm run test:e2e 2>&1 \
+    | tee /tmp/coverage-all-e2e.log
   if [ -n "$(ls -A coverage-e2e-raw 2>/dev/null)" ]; then
     ../shared/node_modules/.bin/c8 report --temp-directory=coverage-e2e-raw --reporter=json \
       --report-dir=coverage-e2e --all=false >/dev/null 2>&1
