@@ -122,6 +122,13 @@ interface RendererAPIOverrides {
   platform?: string
   /** Approval UX v2: the inline gate card + outcome/undo feed. */
   actions?: {
+    getProjection: () => Promise<import('@offgrid/application').UseSnapshot>
+    onProjection: (cb: (snapshot: import('@offgrid/application').UseSnapshot) => void) => () => void
+    retry: (
+      actionId: string
+    ) => Promise<
+      import('@offgrid/application').Outcome<boolean, import('@offgrid/application').UseFailure>
+    >
     resolveGate: (actionId: string, decision: unknown) => Promise<boolean>
     undo: (record: unknown) => Promise<{ ok: boolean; detail?: string }>
     onGatePending: (cb: (request: unknown) => void) => () => void

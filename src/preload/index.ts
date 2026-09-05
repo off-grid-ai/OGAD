@@ -127,6 +127,25 @@ const offGridApi = {
   },
   // Approval UX v2: the inline gate card + outcome/undo feed (core surface).
   actions: {
+    getProjection: (): Promise<import('@offgrid/application').UseSnapshot> =>
+      ipcRenderer.invoke('actions:get-projection'),
+    onProjection: (cb: (snapshot: import('@offgrid/application').UseSnapshot) => void) => {
+      const sub = (
+        _e: unknown,
+        snapshot: import('@offgrid/application').UseSnapshot
+      ): void => cb(snapshot)
+      ipcRenderer.on('actions:projection-changed', sub)
+      return unsubscribe('actions:projection-changed', sub)
+    },
+    retry: (
+      actionId: string
+    ): Promise<
+      import('@offgrid/application').Outcome<
+        boolean,
+        import('@offgrid/application').UseFailure
+      >
+    > =>
+      ipcRenderer.invoke('actions:retry', actionId),
     resolveGate: (actionId: string, decision: unknown) =>
       ipcRenderer.invoke('actions:resolve-gate', actionId, decision),
     undo: (record: unknown) => ipcRenderer.invoke('actions:undo', record),

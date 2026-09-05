@@ -10,6 +10,10 @@ const world = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   sent: [] as Array<{ channel: string; payload: unknown }>,
   outcomeListener: undefined as undefined | ((event: unknown) => void),
+  projectionListener: undefined as undefined | ((snapshot: unknown) => void),
+  projectionStops: 0,
+  outcomeStops: 0,
+  retryCalls: [] as string[],
   undoCalls: [] as unknown[]
 }))
 
@@ -32,9 +36,22 @@ vi.mock('electron', () => ({
 
 vi.mock('../use-runtime', () => ({
   getActionsRuntime: () => ({
+    snapshot: () => ({ actions: [], active: [], running: false }),
+    subscribe: (listener: (snapshot: unknown) => void) => {
+      world.projectionListener = listener
+      return () => {
+        world.projectionStops += 1
+      }
+    },
     onOutcome: (listener: (event: unknown) => void) => {
       world.outcomeListener = listener
-      return () => {}
+      return () => {
+        world.outcomeStops += 1
+      }
+    },
+    retry: async (actionId: string) => {
+      world.retryCalls.push(actionId)
+      return { ok: true, value: true }
     },
     undo: async (record: unknown) => {
       world.undoCalls.push(record)
@@ -72,6 +89,9 @@ describe('registerActionsIpc', () => {
     world.handlers.clear()
     world.sent.length = 0
     world.undoCalls.length = 0
+    world.retryCalls.length = 0
+    world.projectionStops = 0
+    world.outcomeStops = 0
     registerActionsIpc()
   })
 
@@ -94,6 +114,28 @@ describe('registerActionsIpc', () => {
     })
     const event = world.sent.find((s) => s.channel === 'actions:outcome')
     expect(event?.payload).toMatchObject({ id: 'act_1', outcome: 'done', undoable: true })
+  })
+
+  it('transports the canonical projection and retry intent without mapping them', async () => {
+    const getProjection = world.handlers.get('actions:get-projection')
+    expect(getProjection?.({})).toEqual({ actions: [], active: [], running: false })
+
+    const projection = { actions: [record()], active: [record()], running: true }
+    world.projectionListener?.(projection)
+    expect(
+      world.sent.find((event) => event.channel === 'actions:projection-changed')?.payload
+    ).toBe(projection)
+
+    const retry = world.handlers.get('actions:retry')
+    await expect(retry?.({}, 'act_ipc')).resolves.toEqual({ ok: true, value: true })
+    expect(world.retryCalls).toEqual(['act_ipc'])
+  })
+
+  it('releases both Shared subscriptions during application shutdown', () => {
+    const release = registerActionsIpc()
+    release()
+    expect(world.projectionStops).toBe(1)
+    expect(world.outcomeStops).toBe(1)
   })
 
   it('undo revalidates the record and refuses junk', async () => {

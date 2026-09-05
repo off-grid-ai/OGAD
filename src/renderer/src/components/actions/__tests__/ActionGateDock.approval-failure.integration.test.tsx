@@ -1,81 +1,153 @@
 // @vitest-environment jsdom
-
-/**
- * The application action gate through the real rendered approval dock. The Electron preload is
- * the only fake boundary: it publishes the application request and terminal outcome, while the
- * component owns the user decision and visible result.
- */
+import { DatabaseSync } from 'node:sqlite'
 import { act, cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { createUseApplication, type GateDecision, type SqlDriver } from '@offgrid/use'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ActionGateDock } from '../ActionGateDock'
 
-type EventListener = (event: unknown) => void
-
-class ActionBoundary {
-  private pendingListener: EventListener | null = null
-  private outcomeListener: EventListener | null = null
-
-  readonly api = {
-    isPro: false,
-    actions: {
-      onGatePending: (listener: EventListener) => {
-        this.pendingListener = listener
-        return () => {
-          this.pendingListener = null
-        }
-      },
-      onOutcome: (listener: EventListener) => {
-        this.outcomeListener = listener
-        return () => {
-          this.outcomeListener = null
-        }
-      },
-      resolveGate: async (actionId: string, decision: unknown) => {
-        this.outcomeListener?.({
-          id: actionId,
-          outcome: 'poisoned',
-          error: 'The destination rejected the change.',
-          record: { intent: 'Update the release calendar' }
-        })
-        return { accepted: true, decision }
-      },
-      undo: async () => ({ ok: false, detail: 'This action cannot be undone.' })
+const makeDriver = (): SqlDriver => {
+  const database = new DatabaseSync(':memory:')
+  return {
+    async run(sql, params = []) {
+      const statement = database.prepare(sql)
+      return {
+        changes: sql.trimStart().toUpperCase().startsWith('SELECT')
+          ? statement.all(...params).length
+          : Number(statement.run(...params).changes)
+      }
+    },
+    async get(sql, params = []) {
+      const statement = database.prepare(sql)
+      return statement.get(...params)
+    },
+    async all(sql, params = []) {
+      return database.prepare(sql).all(...params)
     }
-  }
-
-  publishPending(): void {
-    this.pendingListener?.({
-      actionId: 'calendar-update',
-      actionType: 'calendar',
-      title: 'Update the release calendar',
-      args: { date: 'September 8', event: 'Off Grid release' },
-      risk: 'irreversible',
-      sourceRef: 'conversation-a'
-    })
   }
 }
 
 afterEach(cleanup)
 
-describe('<ActionGateDock/> approval failure', () => {
-  it('shows the application failure after the user approves the proposed action', async () => {
-    const boundary = new ActionBoundary()
-    Object.defineProperty(window, 'api', { configurable: true, value: boundary.api })
+describe('<ActionGateDock/> approval recovery', () => {
+  it('keeps a failed approval retryable until the retried action completes', async () => {
+    let nextId = 0
+    let executions = 0
+    let sentDecision: { actionId: string; decision: GateDecision } | undefined
+    const decisions = new Map<string, (decision: GateDecision) => void>()
+    const parked = new Map<string, () => void>()
+    const allParked = new Set<() => void>()
+    const application = createUseApplication({
+      driver: makeDriver(),
+      scheduler: {
+        every: () => () => undefined,
+        after: (delayMs, listener) => {
+          const timer = setTimeout(listener, delayMs)
+          return () => clearTimeout(timer)
+        }
+      },
+      newId: () => `calendar-action-${++nextId}`,
+      park: {
+        onParked: (listener) => {
+          allParked.add(listener)
+          return () => allParked.delete(listener)
+        },
+        onActionParked: (actionId, listener) => {
+          parked.set(actionId, listener)
+          return () => parked.delete(actionId)
+        }
+      },
+      gate: ({ action }) =>
+        new Promise((resolve) => {
+          decisions.set(action.id, resolve)
+          parked.get(action.id)?.()
+          for (const listener of allParked) listener()
+        }),
+      device: {
+        async execute() {
+          executions += 1
+          return executions === 1
+            ? { ok: false, detail: 'The destination rejected the change.' }
+            : { ok: true, effectId: 'calendar:event-1' }
+        }
+      },
+      handlers: [
+        {
+          type: 'calendar',
+          rail: 'semantic',
+          defaultRisk: 'irreversible',
+          verification: 'status',
+          verify: async () => executions > 1
+        }
+      ]
+    })
+    window.api = {
+      isPro: false,
+      actions: {
+        getProjection: async () => application.snapshot(),
+        onProjection: (listener) => application.subscribe(listener),
+        retry: (actionId) => application.retry(actionId).then((value) => ({ ok: true, value })),
+        resolveGate: async (actionId, decision) => {
+          sentDecision = { actionId, decision: decision as GateDecision }
+          return true
+        },
+        undo: async () => ({ ok: false }),
+        onGatePending: () => () => undefined,
+        onOutcome: () => () => undefined
+      }
+    } as never
+
+    const driveUntil = async (condition: () => boolean): Promise<void> => {
+      for (let turn = 0; turn < 100 && !condition(); turn += 1) {
+        await act(async () => {
+          await new Promise((resolve) => setImmediate(resolve))
+          application.kick()
+        })
+      }
+      expect(condition()).toBe(true)
+    }
+    const proposed = await application.run({
+      proposal: {
+        type: 'calendar',
+        intent: 'Update the release calendar',
+        args: { date: 'September 8' },
+        risk: 'irreversible'
+      },
+      source: 'chat',
+      sourceRef: 'conversation-a'
+    })
+    expect(proposed.accepted).toBe(true)
+    await driveUntil(() => decisions.size === 1)
+
     const user = userEvent.setup()
     render(<ActionGateDock conversationId="conversation-a" />)
-
-    act(() => boundary.publishPending())
-    expect(await screen.findByText('Update the release calendar')).toBeTruthy()
-    expect(screen.getByText('This action cannot be undone.')).toBeTruthy()
-
+    expect(await screen.findByText('Approval needed')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Approve' }))
+    expect(screen.getByText('Approval needed')).toBeTruthy()
+    await act(async () => {
+      const sent = sentDecision
+      if (!sent) throw new Error('approval intent was not sent')
+      decisions.get(sent.actionId)?.(sent.decision)
+      decisions.delete(sent.actionId)
+    })
+    await driveUntil(() => application.snapshot().recoverable.length === 1)
+    expect(await screen.findByRole('button', { name: 'Retry' })).toBeTruthy()
+    expect(screen.getByText(/destination rejected the change/i)).toBeTruthy()
 
-    expect(
-      await screen.findByText(
-        'Update the release calendar - Failed (The destination rejected the change.)'
-      )
-    ).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+    await driveUntil(() => decisions.size === 1)
+    expect(await screen.findByText('Approval needed')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Approve' }))
+    await act(async () => {
+      const sent = sentDecision
+      if (!sent) throw new Error('approval intent was not sent')
+      decisions.get(sent.actionId)?.(sent.decision)
+      decisions.delete(sent.actionId)
+    })
+    await driveUntil(() => executions === 2 && application.snapshot().active.length === 0)
     expect(screen.queryByText('Approval needed')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+    expect(executions).toBe(2)
+    await application.stop()
   })
 })

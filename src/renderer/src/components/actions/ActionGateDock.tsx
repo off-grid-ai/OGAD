@@ -13,6 +13,7 @@
  * touches the chat's message model, so non-action turns are untouched.
  */
 import { useEffect, useState } from 'react'
+import type { ActionRecord, UseSnapshot } from '@offgrid/application'
 import { Button } from '@renderer/components/ui/button'
 import { presentActionApproval } from './action-approval-presentation'
 
@@ -25,74 +26,56 @@ interface GateRequest {
   sourceRef?: string
 }
 
-interface OutcomeEvent {
-  id: string
-  outcome: 'done' | 'rejected' | 'needs_help' | 'edited' | 'poisoned'
-  record?: { type?: string; intent?: string; attemptLog?: Array<{ detail?: string }> }
-  error?: string
-  undoable?: boolean
-}
+const EMPTY_PROJECTION: UseSnapshot = { actions: [], active: [], recoverable: [], running: false }
 
-const OUTCOME_LABEL: Record<string, string> = {
-  done: 'Done - verified',
-  rejected: 'Declined',
-  needs_help: 'Ran but could not be confirmed - needs your attention',
-  poisoned: 'Failed'
-}
+const gateRequestFrom = (record: ActionRecord): GateRequest => ({
+  actionId: record.id,
+  actionType: record.type,
+  title: record.intent,
+  args: record.args,
+  risk: record.risk,
+  sourceRef: record.sourceRef
+})
 
 export function ActionGateDock({
   conversationId
 }: Readonly<{ conversationId: string | null }>): React.JSX.Element | null {
-  const [pending, setPending] = useState<GateRequest[]>([])
-  const [outcomes, setOutcomes] = useState<OutcomeEvent[]>([])
+  const [projection, setProjection] = useState<UseSnapshot>(EMPTY_PROJECTION)
   const [edits, setEdits] = useState<Record<string, Record<string, string>>>({})
-  const [undone, setUndone] = useState<Record<string, string>>({})
 
   useEffect(() => {
-    const offPending = window.api.actions?.onGatePending((request) => {
-      const req = request as GateRequest
-      setPending((current) => [...current.filter((p) => p.actionId !== req.actionId), req])
+    const actions = window.api.actions
+    if (!actions) return
+    let updates = 0
+    let mounted = true
+    const offProjection = actions.onProjection((snapshot) => {
+      updates += 1
+      setProjection(snapshot)
     })
-    const offOutcome = window.api.actions?.onOutcome((event) => {
-      const outcome = event as OutcomeEvent
-      setPending((current) => current.filter((p) => p.actionId !== outcome.id))
-      if (outcome.outcome === 'edited') {
-        return // the re-gated card arrives as its own pending event
-      }
-      setOutcomes((current) => [...current.slice(-2), outcome])
+    const updatesBeforeRead = updates
+    void actions.getProjection().then((snapshot) => {
+      if (mounted && updates === updatesBeforeRead) setProjection(snapshot)
     })
     return () => {
-      offPending?.()
-      offOutcome?.()
+      mounted = false
+      offProjection()
     }
   }, [])
 
   const resolve = (actionId: string, decision: unknown): void => {
-    // Drop the card the instant the user decides, so it doesn't sit there while the
-    // action runs and the outcome makes its way back. An edit re-gates and arrives as
-    // its own fresh pending event; approve/reject land as an outcome row.
-    setPending((current) => current.filter((p) => p.actionId !== actionId))
     void window.api.actions?.resolveGate(actionId, decision)
-  }
-
-  const undo = async (event: OutcomeEvent): Promise<void> => {
-    const result = await window.api.actions?.undo(event.record)
-    setUndone((current) => ({
-      ...current,
-      [event.id]: result?.ok ? 'Undone' : (result?.detail ?? 'Undo failed')
-    }))
   }
 
   // sourceRef is the task's existing Chat owner. The same rule applies in free
   // and Pro builds, and a different open Chat cannot display or decide this gate.
-  const visiblePending = pending.filter(
-    (request) => conversationId !== null && request.sourceRef === conversationId
+  const visiblePending = projection.active
+    .filter((record) => record.state === 'awaiting_approval')
+    .map(gateRequestFrom)
+    .filter((request) => conversationId !== null && request.sourceRef === conversationId)
+  const visibleRecoverable = projection.recoverable.filter(
+    (entry) => conversationId !== null && entry.record.sourceRef === conversationId
   )
-  // Pro writes every Action result into its execution chat and the shared task
-  // timeline. A second global banner above an unrelated chat composer has no
-  // stable conversation owner and can show stale, context-free outcomes.
-  const visibleOutcomes = window.api.isPro ? [] : outcomes
-  if (visiblePending.length === 0 && visibleOutcomes.length === 0) {
+  if (visiblePending.length === 0 && visibleRecoverable.length === 0) {
     return null
   }
 
@@ -191,30 +174,25 @@ export function ActionGateDock({
           </div>
         )
       })}
-      {visibleOutcomes.map((event) => (
+      {visibleRecoverable.map((event) => (
         <div
-          key={event.id}
+          key={event.actionId}
           data-testid="outcome-row"
           className="flex items-center justify-between gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs"
         >
-          <span className={event.outcome === 'done' ? 'text-primary' : 'text-muted-foreground'}>
-            {event.record?.intent ? `${event.record.intent} - ` : ''}
-            {undone[event.id] ?? OUTCOME_LABEL[event.outcome] ?? event.outcome}
-            {event.outcome === 'poisoned' && event.error ? ` (${event.error})` : ''}
+          <span className="text-muted-foreground">
+            {event.record.intent} - Ran but could not be confirmed - needs your attention
+            {event.record.attemptLog.at(-1)?.detail
+              ? ` (${event.record.attemptLog.at(-1)?.detail})`
+              : ''}
           </span>
           <span className="flex items-center gap-1">
-            {event.undoable && !undone[event.id] ? (
-              <Button size="sm" variant="outline" onClick={() => void undo(event)}>
-                Undo
-              </Button>
-            ) : null}
             <Button
               size="sm"
-              variant="ghost"
-              aria-label="Dismiss"
-              onClick={() => setOutcomes((current) => current.filter((o) => o.id !== event.id))}
+              variant="outline"
+              onClick={() => void window.api.actions?.retry(event.actionId)}
             >
-              x
+              Retry
             </Button>
           </span>
         </div>

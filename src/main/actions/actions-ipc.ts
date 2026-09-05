@@ -17,9 +17,13 @@ function broadcast(channel: string, payload: unknown): void {
   }
 }
 
-export function registerActionsIpc(): void {
+export function registerActionsIpc(): () => void {
   const runtime = getActionsRuntime()
-  runtime.onOutcome(({ outcome, undoable }) => {
+  ipcMain.handle('actions:get-projection', () => runtime.snapshot())
+  const stopProjection = runtime.subscribe((snapshot) => {
+    broadcast('actions:projection-changed', snapshot)
+  })
+  const stopOutcomes = runtime.onOutcome(({ outcome, undoable }) => {
     broadcast('actions:outcome', { ...outcome, undoable })
   })
 
@@ -38,4 +42,19 @@ export function registerActionsIpc(): void {
     }
     return runtime.undo(parsed.value)
   })
+
+  ipcMain.handle('actions:retry', (_event, actionId: unknown) => {
+    if (typeof actionId !== 'string' || actionId.length === 0) {
+      return {
+        ok: false,
+        failure: { kind: 'runtime', operation: 'retry', message: 'invalid action id' }
+      }
+    }
+    return runtime.retry(actionId)
+  })
+
+  return () => {
+    stopProjection()
+    stopOutcomes()
+  }
 }

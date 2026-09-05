@@ -1,8 +1,4 @@
-import {
-  modelsFailureMessage,
-  projectCaptureReadiness,
-  type CaptureReadinessProjection
-} from '@offgrid/application'
+import { projectCaptureReadiness, type CaptureReadinessProjection } from '@offgrid/application'
 import { modelControlClient } from './model-control-client'
 
 interface CaptureStatusObservation {
@@ -57,13 +53,9 @@ export const captureReadinessClient = {
       return
     }
     if (projection.kind !== 'missing-projector') return
-    const outcome = await modelControlClient.control({
+    return modelControlClient.control({
       type: 'repair-projector',
       modelId: projection.modelId
     })
-    if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
-    if (outcome.value.status === 'projector_installed_not_ready') {
-      throw new Error(modelsFailureMessage(outcome.value.failure))
-    }
   }
 }

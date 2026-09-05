@@ -22,7 +22,7 @@ import {
   type ExecuteResult,
   type TerminalChatActionOutcome
 } from '@offgrid/use'
-import type { Outcome, UseFailure, UsePlatformPorts } from '@offgrid/application'
+import type { Outcome, UseFailure, UsePlatformPorts, UseSnapshot } from '@offgrid/application'
 import { getDB } from '../database'
 import { callHook, hasHook, HOOKS, type ChatActionResult } from '../bootstrap/hookRegistry'
 import { shell } from 'electron'
@@ -53,12 +53,16 @@ import { taskKindForActionType } from '../tools/nativeActionToolExtension-logic'
 import { desktopUse } from '../composition/application-access'
 
 export interface ActionsRuntime {
+  /** Canonical Shared projection. Desktop transports it without deriving lifecycle state. */
+  snapshot(): UseSnapshot
+  subscribe(listener: (snapshot: UseSnapshot) => void): () => void
   propose(
     input: unknown,
     meta: { source: ActionSource; sourceRef?: string }
   ): Promise<ProposeOutcome>
   /** Reverse a done action through its handler's undo capability. */
   undo(record: ActionRecord): Promise<{ ok: boolean; detail?: string }>
+  retry(actionId: string): Promise<Outcome<boolean, UseFailure>>
   /** Every outcome as it lands, with whether it can be undone - the chat
    *  card and Undo chip feed. Returns unsubscribe. */
   onOutcome(listener: (event: { outcome: TickOutcome; undoable: boolean }) => void): () => void
@@ -345,6 +349,8 @@ export function createDesktopUsePorts(): UsePlatformPorts {
 }
 
 const runtime: ActionsRuntime = {
+  snapshot: () => desktopUse.snapshot(),
+  subscribe: (listener) => desktopUse.subscribe(listener),
   async propose(input, meta) {
     const parsed = parseActionProposal(input)
     if (!parsed.ok) return { accepted: false, reason: parsed.error }
@@ -364,6 +370,7 @@ const runtime: ActionsRuntime = {
   onParked: (actionId, listener) => desktopUse.onParked(actionId, listener),
   kick: () => desktopUse.kick(),
   undo: (record) => desktopUse.undo(record.id),
+  retry: (actionId) => desktopUse.retry(actionId),
   onOutcome: (listener) =>
     desktopUse.events((event) => {
       if (event.type === 'action_outcome') listener(event)
