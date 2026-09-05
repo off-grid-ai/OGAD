@@ -27,6 +27,23 @@ export interface VitestProjectDefinition {
   }
 }
 
+const coreProductTestFiles = [
+  'integration-tests/*.test.ts',
+  'src/**/*.test.ts',
+  'src/**/*.test.tsx'
+]
+
+const proProductTestFiles = ['pro/**/*.test.ts', 'pro/**/*.test.tsx']
+
+/**
+ * The Desktop repository owns one product-test entry point. When Desktop Pro is
+ * checked out, its tests join that same Vitest project instead of requiring a
+ * second runner invocation.
+ */
+export function createProductTestFiles(hasPro: boolean): string[] {
+  return [...coreProductTestFiles, ...(hasPro ? proProductTestFiles : [])]
+}
+
 export function createVitestProjects(
   productTestFiles: string[],
   commonExcludes: string[]

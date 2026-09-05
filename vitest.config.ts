@@ -1,7 +1,7 @@
 import { resolve } from 'path'
 import { existsSync } from 'fs'
 import { defineConfig } from 'vitest/config'
-import { createVitestProjects } from './src/main/__tests__/vitest-projects'
+import { createProductTestFiles, createVitestProjects } from './src/main/__tests__/vitest-projects'
 
 // The pro/ submodule is present in the working tree when you have access, absent
 // otherwise (and in a fork CI without the cross-repo token). Only enforce the
@@ -16,12 +16,7 @@ const usesAggregateCoverageGate = process.env.OFFGRID_AGGREGATE_COVERAGE === '1'
 // a core-only checkout can carry stray pro/ files (this repo tracks a handful
 // of pro test files with no implementations beside them), and collecting
 // orphan tests fails the suite for everyone without desktop-pro access.
-const productTestFiles = [
-  'integration-tests/*.test.ts',
-  'src/**/*.test.ts',
-  'src/**/*.test.tsx',
-  ...(hasPro ? ['pro/**/*.test.ts', 'pro/**/*.test.tsx'] : [])
-]
+const productTestFiles = createProductTestFiles(hasPro)
 const commonExcludes = ['e2e/**', 'node_modules/**', 'out/**']
 
 // Unit + integration tests (fast, deterministic). The Playwright Electron E2E lives
