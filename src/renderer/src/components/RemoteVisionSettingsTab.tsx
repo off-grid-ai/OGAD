@@ -198,20 +198,16 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
       const result = (await window.api.testRemoteVisionServer(
         update
       )) as RemoteVisionConnectionResult
-      if (!result.ok) {
-        setStatus(result.error || 'Connection failed.')
-        return
-      }
-      const discovered = result.models ?? []
-      const nextSelections = result.selections ?? {}
-      const nextModel =
-        nextSelections.text ??
-        (discovered.some((model) => model.id === selectedModel && model.modality === 'text')
-          ? selectedModel
-          : '')
-      // Text comes from the capability-projected list; image, transcription, voice, and
-      // embeddings come from the catalog, which is the only place the server declares them.
-      const mediaModels = Object.entries(result.catalog ?? {}).flatMap(([modality, options]) =>
+      const discovered = result.ok ? (result.models ?? []) : []
+      const nextSelections = result.ok ? (result.selections ?? {}) : {}
+      const catalog = result.ok ? (result.catalog ?? {}) : {}
+      const nextModel = result.ok
+        ? (nextSelections.text ??
+          (discovered.some((model) => model.id === selectedModel && model.modality === 'text')
+            ? selectedModel
+            : ''))
+        : ''
+      const mediaModels = Object.entries(catalog).flatMap(([modality, options]) =>
         modality === 'text'
           ? []
           : options.map((model) => ({
@@ -225,10 +221,14 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
         ...current,
         model: nextModel,
         selections: nextSelections,
-        catalog: result.catalog ?? {}
+        catalog
       }))
       setModelQuery(nextModel)
-      setShowModels(true)
+      setShowModels(result.ok)
+      if (!result.ok) {
+        setStatus(result.error || 'Connection failed.')
+        return
+      }
       setStatus(
         discovered.length > 0
           ? `Connected in ${result.latencyMs} ms. ${discovered.length} model${discovered.length === 1 ? '' : 's'} found.`
