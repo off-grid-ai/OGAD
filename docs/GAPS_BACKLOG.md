@@ -2974,7 +2974,7 @@ Desktop core main tests are Codex's scope; recorded here, not touched.
 
 Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
 
-## Mobile download retry cannot clear a partial: `removePartial` is unimplemented and, on Android, unimplementable as specified (OPEN — Shared contract decision needed)
+## Mobile download retry cannot clear a partial: `removePartial` is unimplemented; the host must map the final path to the native partial (OPEN — Mobile implementation, contract holds)
 
 Shared's `prepareDownloadRetry` (`models/src/downloads/coordinator-retry.ts:20`) throws
 `Download partial cleanup is not configured` when `DownloadFilePort.removePartial` is absent, and
@@ -2991,12 +2991,17 @@ length. On Android an interrupted download therefore leaves incomplete bytes AT 
 `hasFinal` is true, verification fails, and retry surfaces as "Existing artifact requires installation
 reconciliation before retry" — a reconciliation error in place of a retry.
 
-Two resolutions, both outside Mobile's ownership: (a) Android adopts a distinct `.part` path so
-partial and final are separable (native change with in-flight migration), or (b) Shared widens the
-`removePartial` contract to "remove incomplete bytes at this path, the caller having established any
-final here is valid". Decision routed to the user and the Shared models owner. Mobile implements the
-moment either lands; the "final + partial → only partial removed" regression is only expressible
-under (a).
+CORRECTION (same day, after the native slice `ea2dbb34`): the "Android streams into the final path"
+reading was wrong. `download.destination` on Android is a per-download staging path
+(`${downloadId}_${fileName}` under the external Downloads dir), and Mobile's finalize transaction
+(`downloadInstallTransaction.ts`) moves it to the final path, enforcing source != destination. So
+partial and final ARE separable on both platforms and Aquinas's contract holds as written. What
+`removePartial(finalPath)` needs is a host-side mapping from the final artifact path to the native
+partial: on Android the cancelled Room rows for the same url + fileName (now adopted or discarded on the
+next start by `adoptOrDiscardCancelledPartial`), on iOS the retained resume data and the temp partial it
+references. Mobile implements this in `compositeDownloadFilePort`; no Shared change and no Android
+`.part` migration are required. Until then every Mobile retry through `clearIncompatiblePartial` still
+throws "Download partial cleanup is not configured".
 
 Also recorded: the coordinator's `cancel(id, removePartial=true)` does not call `files.removePartial`;
 it calls `files.remove(path)` filtered to non-`completed` artifacts (`coordinator.ts:332-338`), so the
