@@ -2833,3 +2833,36 @@ are real state; every fix is verified against source and then by the USER retest
 exercising their data.
 
 Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
+
+## A licence with no device cap is reported as a failed registration (OPEN — production, found by a test)
+
+`desktop/pro/main/licensing/license-service.ts:428`:
+```ts
+if (!license.maxMachines) return { ok: false, reason: 'registration_failed' }
+```
+A provider that reports no device cap is labelled `registration_failed` - but nothing was registered
+and nothing failed to register. It is a REFUSAL TO START mislabelled as a downstream failure, and the
+user is told their device could not be registered when the truth is the licence carried no capacity.
+
+The same function names this exact defect six lines below (`:430-437`): "Reported as
+network_unavailable until now, which is a lie about an internal state: nothing was ever sent." Line
+428 has the identical shape and was missed. It wants its own reason - `cap_unavailable` or similar -
+so a caller can tell "the provider gave us no capacity" from "we tried to register and could not".
+
+Also worth carrying into the fix: the service treats a cap of `0` and a missing cap identically here.
+The parser now distinguishes them (no cap is `null`, not zero seats - tested), so the service should
+too, or the parser's distinction is thrown away one line later.
+
+Found during test repair, not by manual testing. Not fixed in the test phase: production source,
+unreserved, needs an owner.
+
+## Stale hashed declaration chunks linger in Shared dist (LOW, housekeeping)
+
+`shared/packages/sync/dist/` holds several `index-*.d.ts` chunks from successive builds. The CURRENT
+chunks carry `maxDevices`; an older one (`index-B7kqQu5E.d.ts`) does not, which briefly read as "dist
+is stale against `types/index.ts:278`". It is not - but leftover chunks make the artifact directory
+ambiguous to inspect, and a stale chunk is exactly the kind of thing the new content-proof provenance
+should refuse. Worth confirming the ordered build cleans its output directory rather than appending
+to it.
+
+Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
