@@ -7,6 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import type { OffGridApplication } from '@offgrid/application'
 import { parseSyncedTaskRun } from '@offgrid/sync'
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-remote-task-sync-'))
@@ -37,16 +38,33 @@ const { applySyncedTaskControl, configureTaskControlSync, disposeTaskControlSync
   await import('../pro/main/sync/task-control-sync')
 
 const DEVICE_ID = 'desktop-release-107'
+let application: OffGridApplication
+let releaseApplication: () => void
 
-beforeAll(() => {
+beforeAll(async () => {
+  const [{ createOffGridApplication }, { desktopModelWorkspacePorts }, applicationAccess] =
+    await Promise.all([
+      import('@offgrid/application'),
+      import('../src/main/model-services'),
+      import('../src/main/composition/application-access')
+    ])
+  application = createOffGridApplication({
+    models: desktopModelWorkspacePorts,
+    automation: taskHistory.createDesktopAutomationPorts()
+  })
+  releaseApplication = applicationAccess.registerDesktopApplication(application)
+  await application.start()
   taskHistory.configureTaskExecutionDevice({ id: DEVICE_ID, name: 'Studio Mac' })
   configureTaskControlSync(DEVICE_ID, (deviceId) => deviceId === 'mobile-release-107')
 })
 
-afterAll(() => {
+afterAll(async () => {
   disposeTaskRunFrameProjection()
   disposeTaskControlSync()
-  taskHistory.resetTaskHistoryForTests()
+  await application.stop()
+  releaseApplication()
+  const { getDB } = await import('../src/main/database')
+  getDB().close()
   fs.rmSync(root, { recursive: true, force: true })
 })
 
