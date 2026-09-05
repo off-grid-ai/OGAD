@@ -7,6 +7,22 @@ how to reproduce, and the fix direction. Close with evidence; never hide.
 
 ## OPEN
 
+### ARC-20260905 (P1) - Three Desktop workflows bypass existing Shared owners
+
+The 2026-09-05 test audit rejected coverage that encoded three Desktop-owned state machines:
+
+- `ActionGateDock` removes a pending approval before the Shared Use outcome settles and exposes no
+  Shared snapshot, subscription, or retry path. Wire the existing Shared Use projection and prove
+  approve -> needs help -> retry -> re-approval -> done with a real application fixture.
+- Remote vision connection recovery can retain models from a previous server after a failed check.
+  Render the Shared remote-server result and prove stale models disappear before a successful retry.
+- Local-device rename bypasses Shared `renameLocal` and repeats the 64-character rule in Desktop
+  Pro. Route the intent through the existing Shared command and keep only persistence in the host.
+
+Do not close these gaps with local UI retention rules or label-only tests. Close each item only when
+Desktop is a reactive consumer of the Shared owner and the failure-and-recovery journey turns red if
+that production behavior is removed.
+
 ### DL-20260904 (P1) - Manual download controls and progress need final confirmation
 
 User manual evidence on 2026-09-04:
