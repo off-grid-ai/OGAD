@@ -84,7 +84,10 @@ export const desktopApplication = createOffGridApplication({
   newId: randomUUID
 })
 
-registerDesktopApplication(desktopApplication)
+// Registered for the life of the running application. `startDesktopApplication` re-registers so a
+// stop followed by a start in one process is served, and `stopDesktopApplication` disposes so a late
+// caller after stop gets "not initialized" rather than a stopped instance.
+let releaseApplicationRegistration = registerDesktopApplication(desktopApplication)
 
 let starting: ReturnType<typeof desktopApplication.start> | null = null
 let releaseSyncRuntime: (() => void) | null = null
@@ -171,6 +174,7 @@ export function startDesktopApplication(): ReturnType<typeof desktopApplication.
   if (starting) return starting
 
   const startPromise = (async () => {
+    releaseApplicationRegistration = registerDesktopApplication(desktopApplication)
     observeApplicationFailures()
     observeApplicationHealth()
     observeDomainForwarding()
@@ -198,6 +202,8 @@ export async function stopDesktopApplication(): Promise<void> {
     releaseUseForwarder = null
     releaseSyncRuntime?.()
     releaseSyncRuntime = null
+    // Last, and identity-checked: a disposer from a superseded registration cannot clear a newer one.
+    releaseApplicationRegistration()
     starting = null
   }
 }

@@ -21,8 +21,21 @@ import {
 
 let application: OffGridApplication | null = null
 
-export function registerDesktopApplication(value: OffGridApplication): void {
+/**
+ * Register THE application, and get back the disposer for exactly this registration.
+ *
+ * The disposer clears the registration only while this value is still the registered one. That is
+ * what makes it safe to hold across a restart: an old disposer that fires after a newer application
+ * has registered is a no-op, so it can never clear an application it did not register. Without a
+ * disposer at all, `stop()` left the singleton pointing at a stopped instance and every accessor
+ * below returned a dead application instead of the clear "not initialized" error - the next
+ * lifecycle test, or the next late caller in production, then failed somewhere unrelated.
+ */
+export function registerDesktopApplication(value: OffGridApplication): () => void {
   application = value
+  return () => {
+    if (application === value) application = null
+  }
 }
 
 function current(): OffGridApplication {
