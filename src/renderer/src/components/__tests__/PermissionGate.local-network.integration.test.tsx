@@ -9,6 +9,12 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PermissionGate } from '../PermissionGate'
 import { closeTaskWorkspace, openTaskSidePanel } from '../../lib/task-side-panel'
+import { modelControlBoundary } from './harness/model-control-snapshot'
+
+const modelControl = modelControlBoundary({
+  kinds: [],
+  models: [] as Array<{ id: string }>
+})
 
 let openLocalNetworkSettings: ReturnType<typeof vi.fn>
 let requestScreenRecordingPermission: ReturnType<typeof vi.fn>
@@ -22,6 +28,7 @@ let permissionStatus: {
 }
 
 beforeEach(() => {
+  modelControl.reset()
   openLocalNetworkSettings = vi.fn(async () => true)
   requestScreenRecordingPermission = vi.fn(async () => false)
   openScreenRecordingSettings = vi.fn(async () => true)
@@ -35,6 +42,7 @@ beforeEach(() => {
   Object.defineProperty(window, 'api', {
     configurable: true,
     value: {
+      ...modelControl,
       isPro: true,
       getPermissionStatus: async () => permissionStatus,
       checkModelStatus: async () => ({ downloaded: true, modelsDir: '/tmp/models' }),
