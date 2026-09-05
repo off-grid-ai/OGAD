@@ -15,16 +15,17 @@ import {
   IconEye,
   IconDatabase,
   IconStarFilled,
-  IconClock
+  IconPlayerPause,
+  IconPlayerPlay
 } from '@tabler/icons-react'
 import { StoragePanel } from './setup/StoragePanel'
 import { SidePanel } from './SidePanel'
 import { deviceNoun } from '@renderer/lib/device'
 import { collectTags, matchesAllTags, toggleTag } from '@renderer/lib/model-tag-filter'
 import { companionDownloadLabel } from '@renderer/lib/download-label'
-import { formatTransferSpeed } from '@offgrid/application'
+import { isActiveDownloadStatus } from '@offgrid/application'
 import { projectProgress } from '@offgrid/ui'
-import { downloadTimeRemaining } from '@renderer/lib/download-progress'
+import { downloadProgressSummary } from '@renderer/lib/download-progress'
 import {
   modelSettingsTabForKind,
   openModelSettingsPanel,
@@ -44,7 +45,8 @@ import {
   modelsFailureMessage,
   type ModelControlCatalogModel,
   type ModelControlProjection,
-  type ModelControlSuccess
+  type ModelControlSuccess,
+  type PublicDownloadInfo
 } from '@offgrid/application'
 import {
   filterAndSort,
@@ -63,10 +65,6 @@ import {
   type ModelsFailure
 } from '@offgrid/application'
 import { modelControlClient } from '@renderer/lib/model-control-client'
-import {
-  useModelDownloadProgress,
-  type ModelDownloadProgressEvent
-} from '@renderer/hooks/useModelDownloadProgress'
 import {
   internalTabFromSubroute,
   internalTabRoutes,
@@ -224,11 +222,13 @@ const MODE_LABELS: Record<string, string> = { txt2img: 'Text→Image', img2img: 
 /** What the card needs to describe a download honestly: one percent for the WHOLE job, the bytes
  *  behind it, which file is in flight and how many the job has, and why it failed if it did. */
 interface DownloadCardProgress {
-  percent: number
+  downloadId?: string
+  percent?: number
   /** The download's own lifecycle phase, straight from the event. A typed union, so `cancelled`
    *  and `interrupted` stay distinguishable from a genuine `failed` without reading any text. */
-  status?: ModelDownloadProgressEvent['status']
+  status?: PublicDownloadInfo['status']
   currentFile?: string
+  currentFileRole?: PublicDownloadInfo['currentFileRole']
   /** The typed refusal kind when the REQUEST was refused, so what happened is never re-derived
    *  by comparing the rendered message against a known string. */
   failureKind?: ModelsFailure['kind']
@@ -271,26 +271,72 @@ function formatSize(bytes: number): string {
   return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`
 }
 
-/**
- * The progress feed counts in MEBIbytes (1024 * 1024), which is why dividing it by 1024 produced
- * 23.7 for the same 25.4 GB file the meta line described. Convert to bytes on the way in, then the
- * one rule above decides how it reads.
- */
-const BYTES_PER_MIB = 1024 * 1024
-
-function formatTransferred(megabytes: string): string {
-  const mib = Number(megabytes)
-  if (!Number.isFinite(mib)) return `${megabytes} MB`
-  return formatSize(mib * BYTES_PER_MIB)
-}
-
-/** What part of the model is moving right now, as a quiet tail on the progress line. Empty for the
- *  ordinary single-file case, where naming it adds words and no information. */
-function downloadPartLabel(prog: DownloadCardProgress): string {
-  const companion = companionDownloadLabel(prog.currentFile)
-  if (companion) return `· adding ${companion}`
-  if ((prog.fileCount ?? 0) > 1) return `· file ${prog.fileIndex} of ${prog.fileCount}`
-  return ''
+/** One read-only transfer summary for the catalog card and its detail panel. */
+function renderDownloadSummary(prog: DownloadCardProgress, showFile = false): React.JSX.Element {
+  const progress = projectProgress(prog)
+  const summary = downloadProgressSummary(progress)
+  const companion = companionDownloadLabel(prog.currentFileRole)
+  const status =
+    prog.status === 'preparing'
+      ? 'Preparing'
+      : prog.status === 'queued'
+        ? 'Queued'
+        : progress.determinate
+          ? `${Math.round(progress.percentage ?? 0)}%`
+          : 'Downloading'
+  const parts = [
+    companion,
+    prog.status === 'paused' ? 'Paused' : null,
+    status,
+    summary.bytes,
+    summary.rate,
+    summary.timeRemaining
+  ].filter(Boolean)
+  return (
+    <div
+      className="grid w-full min-w-0 gap-1 text-[10px] tabular-nums text-neutral-500"
+      aria-label="Download progress"
+    >
+      <div
+        className="flex min-w-0 items-baseline gap-1 overflow-hidden whitespace-nowrap text-neutral-400"
+        title={parts.join(' · ')}
+      >
+        {companion && (
+          <>
+            <span className="shrink-0">{companion}</span>
+            <span aria-hidden="true">·</span>
+          </>
+        )}
+        {prog.status === 'paused' && (
+          <>
+            <span className="shrink-0">Paused</span>
+            <span aria-hidden="true">·</span>
+          </>
+        )}
+        <span className="shrink-0 text-neutral-300">{status}</span>
+        <span aria-hidden="true">·</span>
+        <span>{summary.bytes}</span>
+        <span aria-hidden="true">·</span>
+        <span>{summary.rate}</span>
+        {summary.timeRemaining && (
+          <>
+            <span aria-hidden="true">·</span>
+            <span className="min-w-0 truncate">{summary.timeRemaining}</span>
+          </>
+        )}
+      </div>
+      {showFile && prog.currentFile && (
+        <div className="mt-1 min-w-0 break-all text-neutral-500" aria-label="Current download file">
+          {prog.currentFile}
+        </div>
+      )}
+      {prog.commandError && (
+        <span className="min-w-0 truncate text-red-400/90" title={prog.commandError} role="status">
+          {prog.commandError}
+        </span>
+      )}
+    </div>
+  )
 }
 
 /** Plain words for a download that did not finish. You need two things from this line: what
@@ -311,8 +357,12 @@ function downloadFailureText(prog: DownloadCardProgress): string {
   return prog.error
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const api = (window as any).api
+/**
+ * Read the preload bridge at USE time, never at module load: the bridge is installed on `window`
+ * before the renderer mounts, and any consumer that imports this module must see the same object
+ * the runtime sees. `IElectronAPI` mirrors the preload `offGridApi`, so no cast is needed.
+ */
+const bridge = (): IElectronAPI => window.api
 
 /**
  * The two carried-but-not-done outcomes: the command ran, and the model still is not usable.
@@ -347,7 +397,9 @@ export function ModelsScreen({
     Record<string, { supportsVision: boolean; projectorInstalled: boolean }>
   >({})
   const refreshVision = (): void => {
-    void api.getModelVisionStatus?.().then((s) => setVisionSt(s ?? {}))
+    void bridge()
+      .getModelVisionStatus()
+      .then((s) => setVisionSt(s ?? {}))
   }
   const initialRequestedKind = useRef<string | null>(null)
   const [activeKind, setActiveKind] = useState<string>(() => {
@@ -373,23 +425,58 @@ export function ModelsScreen({
     setActiveKind(internalTabFromSubroute('models', navigationSubroute ?? null).id)
   }, [navigationSubroute, onNavigateSubroute])
   const [progress, setProgress] = useState<Record<string, DownloadCardProgress>>({})
+  const changingDownloadOwners = useRef(new Map<string, string>())
+  const [changingDownloads, setChangingDownloads] = useState<ReadonlySet<string>>(new Set())
   // Active model ids across ALL modalities (chat + image/voice/transcription) —
   // one truth from the backend; the UI never re-derives "active" per kind.
   const [activeIds, setActiveIds] = useState<Set<string>>(new Set())
   const isActive = (id: string): boolean => activeIds.has(id)
-  const applyModelControlProjection = useCallback(
-    (projection: ModelControlProjection): void => {
-      setKinds([...projection.kinds])
-      setModels(projection.models.map(mutableCatalogModel))
-      setInstalled([...projection.installed])
-      setActiveIds(new Set(projection.activeIds))
-      setActiveKind((current) =>
-        current === 'storage' || projection.kinds.includes(current)
-          ? current
-          : (projection.kinds[0] ?? 'text')
-      )
-    },
-    []
+  const applyModelControlProjection = useCallback((projection: ModelControlProjection): void => {
+    setKinds([...projection.kinds])
+    setModels(projection.models.map(mutableCatalogModel))
+    setInstalled([...projection.installed])
+    setActiveIds(new Set(projection.activeIds))
+    setProgress((current) => {
+      const next = { ...current }
+      const projectedDownloadIds = new Set(projection.downloads.map((row) => row.downloadId))
+      for (const [modelId, existing] of Object.entries(current)) {
+        // Rows admitted by Shared live only as long as Shared publishes their download identity.
+        // Keep a local command refusal, which has no download identity, until the next user action.
+        if (existing.downloadId && !projectedDownloadIds.has(existing.downloadId)) {
+          delete next[modelId]
+        }
+      }
+      for (const row of projection.downloads) {
+        const existing = current[row.modelId]
+        if (row.status === 'cancelled' || row.status === 'completed') {
+          delete next[row.modelId]
+          continue
+        }
+        next[row.modelId] = {
+          ...existing,
+          downloadId: row.downloadId,
+          status: row.status,
+          currentFile: row.currentFile ?? row.fileName,
+          currentFileRole: row.currentFileRole,
+          downloadedBytes: row.bytesDownloaded,
+          totalBytes: row.totalBytes,
+          percent: undefined,
+          bytesPerSecond: row.status === 'paused' ? undefined : row.bytesPerSecond,
+          error: row.reason,
+          commandError: existing?.downloadId === row.downloadId ? existing.commandError : undefined
+        }
+      }
+      return next
+    })
+    setActiveKind((current) =>
+      current === 'storage' || projection.kinds.includes(current)
+        ? current
+        : (projection.kinds[0] ?? 'text')
+    )
+  }, [])
+  useEffect(
+    () => modelControlClient.observe(applyModelControlProjection),
+    [applyModelControlProjection]
   )
   // -- Request ownership -----------------------------------------------------------------
   // Six paths write the shared projection, and nothing orders them: `model-control-client` is a
@@ -508,7 +595,7 @@ export function ModelsScreen({
     if (importing) return
     setImporting(true)
     try {
-      const res = await api.importLocalModel?.()
+      const res = await bridge().importLocalModel()
       if (res?.success) {
         await refreshModelControl()
         selectKind('text')
@@ -521,45 +608,27 @@ export function ModelsScreen({
   }
 
   useEffect(() => {
-    api
-      .systemHealth?.()
+    bridge()
+      .systemHealth()
       .then((h: { ramGb?: number }) => setRamGb(h.ramGb ?? null))
       .catch(() => {})
     void refreshModelControl()
     refreshVision()
   }, [refreshModelControl])
 
-  useModelDownloadProgress((d: ModelDownloadProgressEvent) => {
-    if (d.status === 'cancelled') {
-      setProgress((p) => withoutProgressEntry(p, d.modelId))
-      return
-    }
-    const { modelId, ...fields } = d
-    setProgress((p) => {
-      const prev = p[modelId]
-      return {
-        ...p,
-        [modelId]: {
-          ...prev,
-          ...fields,
-          percent: fields.percent ?? prev?.percent ?? 0,
-          currentFile: fields.currentFile ?? prev?.currentFile
-        }
-      }
-    })
-    if (d.status === 'completed') {
-      void refreshModelControl()
-      refreshVision()
-    }
-  })
-
-  const cancelDownload = (id: string): void => {
+  const changeDownload = (
+    id: string,
+    type: 'cancel-download' | 'pause-download' | 'resume-download'
+  ): void => {
     // NOT erased optimistically. The row is the only honest picture of a transfer that is still
     // running until the cancel is actually accepted, and clearing it first meant a refused cancel
     // left the user believing they had stopped something they had not.
+    if (changingDownloadOwners.current.has(id)) return
     const operationId = claimDownload(id)
+    changingDownloadOwners.current.set(id, operationId)
+    setChangingDownloads(new Set(changingDownloadOwners.current.keys()))
     void modelControlClient
-      .control({ type: 'cancel-download', modelId: id, operationId })
+      .control({ type, modelId: progress[id]?.downloadId ?? id, operationId })
       .then((outcome) => {
         if (!outcome.ok) {
           // The COMMAND failed; the DOWNLOAD did not. Its percent, status and byte counts keep
@@ -572,74 +641,121 @@ export function ModelsScreen({
               [id]: {
                 ...current[id],
                 percent: current[id]?.percent ?? 0,
-                commandError: `Couldn't cancel: ${modelsFailureMessage(outcome.failure)}`
+                commandError: `Couldn't ${type === 'pause-download' ? 'pause' : type === 'resume-download' ? 'resume' : 'cancel'}: ${modelsFailureMessage(outcome.failure)}`
               }
             }))
           }
           return
         }
         // Accepted: now the row may go, and any stale command message with it.
-        if (ownsDownload(id, outcome.value.operationId)) {
+        if (type === 'cancel-download' && ownsDownload(id, outcome.value.operationId)) {
           setProgress((p) => withoutProgressEntry(p, id))
         }
         if (!ownsProjection(outcome.value.operationId)) return
         applyModelControlProjection(outcome.value.projection)
       })
-  }
-  const download = (id: string): void => {
-    // 'queued', not 'downloading': nothing has been downloaded yet, and claiming otherwise is what
-    // left a refused request showing a spinner at 0% forever. The main process moves it to
-    // 'downloading' when bytes actually start, and to 'failed' if it never gets that far.
-    setProgress((p) => ({ ...p, [id]: { percent: 0, status: 'queued' } }))
-    const operationId = claimDownload(id)
-    void modelControlClient
-      .control({ type: 'download', modelId: id, operationId })
-      .then((outcome) => {
-        if (!outcome.ok) {
-          // Row cleanup is PER MODEL, not the single publication authority: a stale refusal must
-          // not paint red over the row a newer request for this same model is already filling,
-          // but another model's download starting is no reason to drop this one's error.
-          if (!ownsDownload(id, operationId)) return
-          // A refusal that IS a cancellation is not a failure, and must not be dressed as one -
-          // the same distinction the setup panel draws. It clears the row exactly like the
-          // `cancelled` result below, rather than leaving red text and a "Try again".
-          if (outcome.failure.kind === 'cancelled') {
-            setProgress((p) => withoutProgressEntry(p, id))
-            return
-          }
-          setProgress((current) => ({
-            ...current,
-            [id]: {
-              ...current[id],
-              percent: 0,
-              status: 'failed',
-              // The kind travels with the message so the card never has to re-read the message.
-              failureKind: outcome.failure.kind,
-              error: modelsFailureMessage(outcome.failure)
-            }
-          }))
-          return
-        }
-        const result = outcome.value
-        // A cancelled download leaves no row behind. Per-model, for the reason above.
-        if (result.status === 'cancelled' && ownsDownload(id, result.operationId)) {
-          setProgress((p) => withoutProgressEntry(p, id))
-        }
-        // Publication is the single authority. A download whose projection is refused here is not
-        // lost work: the download-completed subscription calls refreshModelControl, which claims
-        // the authority itself and republishes.
-        if (!ownsProjection(result.operationId)) return
-        // Unconditional across STATUSES: `installed_not_active` and `projector_installed_not_ready`
-        // are successful DOWNLOADS - the bytes are on disk - and each carries the projection
-        // proving it. Dropping them left a finished download still listed as not installed. They
-        // are not reported as download failures here because this command only asked for the
-        // download; saying a model is installed but not active is the activation surface's job.
-        applyModelControlProjection(result.projection)
+      .finally(() => {
+        if (changingDownloadOwners.current.get(id) !== operationId) return
+        changingDownloadOwners.current.delete(id)
+        setChangingDownloads(new Set(changingDownloadOwners.current.keys()))
       })
   }
-  const retryDownload = (id: string): void => {
-    setProgress((p) => withoutProgressEntry(p, id))
-    download(id)
+  const renderDownloadActions = (id: string, prog: DownloadCardProgress): React.JSX.Element => (
+    <div className="flex shrink-0 items-center gap-0.5">
+      {prog.downloadId && prog.status !== 'preparing' && (
+        <button
+          disabled={changingDownloads.has(id)}
+          onClick={() =>
+            changeDownload(id, prog.status === 'paused' ? 'resume-download' : 'pause-download')
+          }
+          aria-label={prog.status === 'paused' ? 'Resume' : 'Pause'}
+          title={prog.status === 'paused' ? 'Resume download' : 'Pause download'}
+          className="rounded p-1 text-neutral-500 transition-colors duration-150 hover:bg-neutral-800 hover:text-neutral-200 active:scale-90 disabled:opacity-40"
+        >
+          {prog.status === 'paused' ? (
+            <IconPlayerPlay className="h-3.5 w-3.5" />
+          ) : (
+            <IconPlayerPause className="h-3.5 w-3.5" />
+          )}
+        </button>
+      )}
+      {prog.downloadId && prog.status !== 'preparing' && (
+        <button
+          disabled={changingDownloads.has(id)}
+          onClick={() => changeDownload(id, 'cancel-download')}
+          aria-label="Cancel"
+          title="Cancel download"
+          className="rounded p-1 text-neutral-500 transition-colors duration-150 hover:bg-neutral-800 hover:text-red-400 active:scale-90 disabled:opacity-40"
+        >
+          <IconX className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  )
+  const download = (model: ModelEntry, type: 'download' | 'repair-projector' = 'download'): void => {
+    const id = model.id
+    const operationId = claimDownload(id)
+    const primary =
+      model.artifacts.find((artifact) => artifact.role === 'primary') ?? model.artifacts[0]
+    const command = modelControlClient.control({
+      type: type === 'download' ? 'queue-download' : type,
+      modelId: id,
+      ...(type === 'download' && primary
+        ? {
+            selection: {
+              repositoryId: model.sourceModelId ?? model.id,
+              fileName: primary.name
+            }
+          }
+        : {}),
+      operationId
+    })
+    void command.then((outcome) => {
+      if (!outcome.ok) {
+        // Row cleanup is PER MODEL, not the single publication authority: a stale refusal must
+        // not paint red over the row a newer request for this same model is already filling,
+        // but another model's download starting is no reason to drop this one's error.
+        if (!ownsDownload(id, operationId)) return
+        // A refusal that IS a cancellation is not a failure, and must not be dressed as one -
+        // the same distinction the setup panel draws. It clears the row exactly like the
+        // `cancelled` result below, rather than leaving red text and a "Try again".
+        if (outcome.failure.kind === 'cancelled') {
+          setProgress((p) => withoutProgressEntry(p, id))
+          return
+        }
+        setProgress((current) => ({
+          ...current,
+          [id]: {
+            ...current[id],
+            percent: 0,
+            status: outcome.failure.kind === 'interrupted' ? 'interrupted' : 'failed',
+            // The kind travels with the message so the card never has to re-read the message.
+            failureKind: outcome.failure.kind,
+            error: modelsFailureMessage(outcome.failure)
+          }
+        }))
+        return
+      }
+      const result = outcome.value
+      // A cancelled download leaves no row behind. Per-model, for the reason above.
+      if (result.status === 'cancelled' && ownsDownload(id, result.operationId)) {
+        setProgress((p) => withoutProgressEntry(p, id))
+      }
+      // Publication is the single authority. A download whose projection is refused here is not
+      // lost work: the download-completed subscription calls refreshModelControl, which claims
+      // the authority itself and republishes.
+      if (!ownsProjection(result.operationId)) return
+      // Unconditional across STATUSES: `installed_not_active` and `projector_installed_not_ready`
+      // are successful DOWNLOADS - the bytes are on disk - and each carries the projection
+      // proving it. Dropping them left a finished download still listed as not installed. They
+      // are not reported as download failures here because this command only asked for the
+      // download; saying a model is installed but not active is the activation surface's job.
+      applyModelControlProjection(result.projection)
+    })
+  }
+  const retryDownload = (model: ModelEntry): void => {
+    setProgress((p) => withoutProgressEntry(p, model.id))
+    download(model)
   }
   const removeModel = async (id: string, label: string): Promise<void> => {
     if (!window.confirm(`Delete "${label}"? This removes its files from disk.`)) return
@@ -654,11 +770,10 @@ export function ModelsScreen({
       if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
       if (!ownsProjection(outcome.value.operationId)) {
         // SETTLED BUT UNPUBLISHED. The files are gone in the main process, and unlike a download
-        // there is no completion event to put that on screen - `onModelProgress` is downloads only,
-        // and the owner's `model_control_*` events never cross to the renderer (checked). Left
-        // alone the screen would list a deleted model forever. Re-applying the projection we just
-        // refused is not the answer - it lost because it is stale - so take a fresh authoritative
-        // read, which claims publication normally rather than bypassing it.
+        // there is no later model-control projection guaranteed to put that on screen. Left alone
+        // the screen would list a deleted model forever. Re-applying the projection we just refused
+        // is not the answer - it lost because it is stale - so take a fresh authoritative read,
+        // which claims publication normally rather than bypassing it.
         void refreshModelControl()
         return
       }
@@ -758,7 +873,7 @@ export function ModelsScreen({
     // the request is abandoned the moment a newer query supersedes it.
     let live = true
     const t = setTimeout(async () => {
-      const res = await api.searchModels?.(q, activeKind)
+      const res = await bridge().searchModels(q, activeKind)
       if (!live) return
       setHfResults(res ?? [])
       setSearching(false)
@@ -781,10 +896,7 @@ export function ModelsScreen({
 
   // The image model recommended for this machine's RAM (Light Q4 on <=16GB, full
   // Q8 above) — one pure rule, reused for both the badge and the top-of-list sort.
-  const recommendedImageId = useMemo(
-    () => recommendedImageModelId(models, ramGb),
-    [models, ramGb]
-  )
+  const recommendedImageId = useMemo(() => recommendedImageModelId(models, ramGb), [models, ramGb])
 
   const displayed = useMemo(
     () =>
@@ -811,43 +923,41 @@ export function ModelsScreen({
     const byId = new Map(list.map((model) => [model.id, model]))
     return filterAndSort(
       list.map((m) => ({
-          ...m,
-          org: m.org ?? '',
-          params: m.params ?? parseParamCount(m.name) ?? undefined,
-          files: m.artifacts,
-          credibility: determineCredibility((m.id || '').split('/')[0]!)
-        })),
+        ...m,
+        org: m.org ?? '',
+        params: m.params ?? parseParamCount(m.name) ?? undefined,
+        files: m.artifacts,
+        credibility: determineCredibility((m.id || '').split('/')[0]!)
+      })),
       filterState
     )
       .map((model) => byId.get(model.id))
       .filter((model): model is ModelEntry => model !== undefined)
-        .filter((m) => sizeBucket == null || totalBytes(m) <= sizeBucket * 1e9)
-        .filter(
-          (m) =>
-            activeKind !== 'text' || (USE_CASES.find((u) => u.id === useCase)?.match(m) ?? true)
+      .filter((m) => sizeBucket == null || totalBytes(m) <= sizeBucket * 1e9)
+      .filter(
+        (m) => activeKind !== 'text' || (USE_CASES.find((u) => u.id === useCase)?.match(m) ?? true)
+      )
+      .filter((m) => matchesAllTags(m.tags, selectedTags))
+      .sort((a, b) => {
+        // Active first, then other installed, then available — within each tier keep feature rank.
+        const rank = (x: { id: string }): number =>
+          activeIds.has(x.id) ? 0 : installed.includes(x.id) ? 1 : 2
+        return (
+          rank(a) - rank(b) ||
+          catalogEntryRank(a, recommendedImageId) - catalogEntryRank(b, recommendedImageId)
         )
-        .filter((m) => matchesAllTags(m.tags, selectedTags))
-        .sort((a, b) => {
-          // Active first, then other installed, then available — within each tier keep feature rank.
-          const rank = (x: { id: string }): number =>
-            activeIds.has(x.id) ? 0 : installed.includes(x.id) ? 1 : 2
-          return (
-            rank(a) - rank(b) ||
-            catalogEntryRank(a, recommendedImageId) - catalogEntryRank(b, recommendedImageId)
-          )
-        })
-  },
-    [
-      list,
-      filterState,
-      sizeBucket,
-      activeKind,
-      useCase,
-      selectedTags,
-      activeIds,
-      installed,
-      recommendedImageId
-    ])
+      })
+  }, [
+    list,
+    filterState,
+    sizeBucket,
+    activeKind,
+    useCase,
+    selectedTags,
+    activeIds,
+    installed,
+    recommendedImageId
+  ])
 
   const tabs = internalTabRoutes('models').filter(
     ({ id }) => id === 'storage' || kinds.includes(id)
@@ -871,22 +981,23 @@ export function ModelsScreen({
     return fitTier(gb, ramGb)
   }
 
-  const renderCard = (
-    m: ModelEntry,
-    isHf = false
-  ): React.JSX.Element => {
+  const renderCard = (m: ModelEntry, isHf = false): React.JSX.Element => {
     const isInstalled = installed.includes(m.id)
     const isRemote = Boolean(m.remoteServerId)
     const active = isActive(m.id)
     const prog = progress[m.id]
-    const downloading = prog && prog.status !== 'completed' && prog.status !== 'failed'
+    const downloading =
+      prog?.status !== undefined &&
+      (isActiveDownloadStatus(prog.status) || prog.status === 'paused')
     const downloadProgress = prog ? projectProgress(prog) : null
-    const timeRemaining = downloadProgress ? downloadTimeRemaining(downloadProgress) : null
     // Installed, vision-capable, but the projector isn't on disk (e.g. downloaded before
     // the model gained vision) → offer to fetch just the projector. downloadModel skips
     // files already present, so this pulls only the mmproj.
     const vs = visionSt[m.id]
     const projectorMissing = isInstalled && !!vs?.supportsVision && !vs.projectorInstalled
+    const failedProjector =
+      prog?.currentFileRole === 'mmproj' &&
+      (prog.status === 'failed' || prog.status === 'interrupted')
     const bytes = totalBytes(m)
     const size = formatSize(bytes) || null
     const meta = [m.org, m.params ? `${m.params}B` : null, size, fmtReleaseDate(m.releaseDate)]
@@ -995,16 +1106,18 @@ export function ModelsScreen({
         )}
 
         {/* Action row */}
-        <div className="mt-auto flex items-center justify-between gap-2 pt-1">
+        <div
+          className={`mt-auto flex gap-2 pt-1 ${downloading ? 'flex-col items-stretch' : 'items-center justify-between'}`}
+        >
           {comingSoon ? (
             <span className="text-[10px] text-neutral-500">
               Available after support is fully tested
             </span>
-          ) : active ? (
+          ) : active && !downloading ? (
             <span className="flex items-center gap-1 text-[11px] text-green-500">
               <IconCircleCheck className="h-3.5 w-3.5" /> Active
             </span>
-          ) : isInstalled ? (
+          ) : isInstalled && !downloading ? (
             // Every installed model is activatable for its type — no kind branch.
             // Includes a downloaded HF model (registered as installed), so its search
             // card flips from Download to Use instead of resetting.
@@ -1022,63 +1135,8 @@ export function ModelsScreen({
               )}
             </button>
           ) : downloading ? (
-            // Status left, action right, across the full width of the card. Stacked in a column on
-            // the left they left half the card empty and the whole thing read as lopsided; the row
-            // is already justify-between, so the pair simply uses the space that was there.
-            // The percent is NOT in the button: a control whose meaning is "Cancel" is the one place
-            // the card's main number should not live.
-            <>
-              <div className="flex min-w-0 items-baseline gap-1.5 text-[10px] text-neutral-500">
-                <span className="text-neutral-300">
-                  {prog.status === 'queued'
-                    ? 'Queued'
-                    : downloadProgress?.determinate
-                      ? `${Math.round(downloadProgress.percentage ?? 0)}%`
-                      : 'Downloading'}
-                </span>
-                {downloadProgress && downloadProgress.totalBytes !== undefined ? (
-                  <span className="whitespace-nowrap">
-                    {formatSize(downloadProgress.currentBytes)} of{' '}
-                    {formatSize(downloadProgress.totalBytes)}
-                  </span>
-                ) : prog.downloadedMB && prog.totalMB ? (
-                  <span className="whitespace-nowrap">
-                    {formatTransferred(prog.downloadedMB)} of {formatTransferred(prog.totalMB)}
-                  </span>
-                ) : null}
-                {downloadProgress?.bytesPerSecond !== undefined ? (
-                  <span className="whitespace-nowrap">
-                    · {formatTransferSpeed(downloadProgress.bytesPerSecond)}
-                  </span>
-                ) : null}
-                {timeRemaining ? (
-                  <span className="whitespace-nowrap">· {timeRemaining}</span>
-                ) : null}
-                <span className="min-w-0 truncate">{downloadPartLabel(prog)}</span>
-                {prog.commandError ? (
-                  // The transfer's own numbers keep their place; this sits beside them as a note
-                  // about the COMMAND, so a refused cancel never masquerades as a failed download.
-                  <span
-                    className="min-w-0 truncate text-red-400/90"
-                    title={prog.commandError}
-                    role="status"
-                  >
-                    · {prog.commandError}
-                  </span>
-                ) : null}
-              </div>
-              <button
-                onClick={() => cancelDownload(m.id)}
-                className="flex shrink-0 items-center gap-1 rounded border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-400 transition-all duration-150 hover:border-red-500/60 hover:text-red-400 active:scale-95"
-              >
-                {prog.status === 'queued' ? (
-                  <IconClock className="h-3 w-3" />
-                ) : (
-                  <IconX className="h-3 w-3" />
-                )}
-                Cancel
-              </button>
-            </>
+            // Metrics keep the full card width. Compact controls sit beside the progress bar below.
+            renderDownloadSummary(prog)
           ) : prog?.status === 'failed' || prog?.status === 'interrupted' ? (
             // A failure is a STATE of the action row, not a banner under it. As its own block it
             // stacked a second button beneath "Download" and asked you to choose between two ways
@@ -1098,7 +1156,7 @@ export function ModelsScreen({
                 {downloadFailureText(prog)}
               </span>
               <button
-                onClick={() => retryDownload(m.id)}
+                onClick={() => retryDownload(m)}
                 className="flex shrink-0 items-center gap-1 rounded border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95"
               >
                 <IconDownload className="h-3 w-3" /> Try again
@@ -1106,7 +1164,7 @@ export function ModelsScreen({
             </>
           ) : (
             <button
-              onClick={() => download(m.id)}
+              onClick={() => download(m)}
               className="flex items-center gap-1 rounded border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95"
             >
               <IconDownload className="h-3 w-3" /> Download
@@ -1145,13 +1203,21 @@ export function ModelsScreen({
         {/* Vision-capable but projector not downloaded — offer to add it. Hidden while a
             download is in flight (the progress UI covers that). */}
         {!comingSoon && projectorMissing && !downloading && (
-          <button
-            onClick={() => download(m.id)}
-            title="Download the vision projector so this model can read images"
-            className="flex items-center gap-1 rounded border border-amber-400/50 px-2 py-1 text-[10px] text-amber-300 transition-all duration-150 hover:border-amber-400 hover:bg-amber-400/10 active:scale-95"
-          >
-            <IconEye className="h-3 w-3" /> Add vision support
-          </button>
+          <div className="grid min-w-0 gap-1">
+            {failedProjector && (
+              <p className="text-[10px] text-neutral-500" role="status">
+                {downloadFailureText(prog)}
+              </p>
+            )}
+            <button
+              onClick={() => download(m, 'repair-projector')}
+              title="Download the vision projector so this model can read images"
+              className="flex items-center gap-1 rounded border border-amber-400/50 px-2 py-1 text-[10px] text-amber-300 transition-all duration-150 hover:border-amber-400 hover:bg-amber-400/10 active:scale-95"
+            >
+              <IconEye className="h-3 w-3 shrink-0" />{' '}
+              {failedProjector ? 'Retry vision support (mmproj)' : 'Add vision support'}
+            </button>
+          </div>
         )}
 
         {/* Download progress: one bar, one line. It used to be four stacked rows — a percent chip,
@@ -1160,11 +1226,14 @@ export function ModelsScreen({
             carries the exact amount, and the part being fetched is named at the end of it where it
             belongs (adding a projector to a model already on disk is not a re-download). */}
         {downloading && (
-          <div className="h-0.5 w-full overflow-hidden rounded-full bg-neutral-800">
-            <div
-              className="h-full w-full origin-left bg-green-500 transition-transform duration-300 ease-out motion-reduce:transition-none"
-              style={{ transform: `scaleX(${(downloadProgress?.percentage ?? 0) / 100})` }}
-            />
+          <div className="flex w-full items-center gap-1.5">
+            <div className="h-0.5 min-w-0 flex-1 overflow-hidden rounded-full bg-neutral-800">
+              <div
+                className="h-full w-full origin-left bg-green-500 transition-transform duration-300 ease-out motion-reduce:transition-none"
+                style={{ transform: `scaleX(${(downloadProgress?.percentage ?? 0) / 100})` }}
+              />
+            </div>
+            {renderDownloadActions(m.id, prog)}
           </div>
         )}
       </div>
@@ -1471,9 +1540,10 @@ export function ModelsScreen({
             const isInstalled = installed.includes(m.id)
             const active = isActive(m.id)
             const prog = progress[m.id]
-            const downloading = prog && prog.status !== 'completed' && prog.status !== 'failed'
+            const downloading =
+              prog?.status !== undefined &&
+              (isActiveDownloadStatus(prog.status) || prog.status === 'paused')
             const comingSoon = m.availability === 'coming_soon'
-            const downloadProgress = prog ? projectProgress(prog) : null
             const rows: [string, string | null][] = [
               ['Source', m.org || (isLocal ? 'Imported' : '—')],
               ['Parameters', m.params ? `${m.params}B` : null],
@@ -1569,16 +1639,18 @@ export function ModelsScreen({
                   )}
                 </div>
 
-                <div className="flex items-center gap-2 border-t border-neutral-800 px-5 py-3">
+                <div
+                  className={`flex gap-2 border-t border-neutral-800 px-5 py-3 ${downloading ? 'flex-col items-stretch' : 'items-center'}`}
+                >
                   {comingSoon ? (
                     <span className="text-xs text-neutral-500">
                       Download and Use unlock after support is fully tested.
                     </span>
-                  ) : active ? (
+                  ) : active && !downloading ? (
                     <span className="flex items-center gap-1 text-xs text-green-500">
                       <IconCircleCheck className="h-4 w-4" /> Active
                     </span>
-                  ) : isInstalled ? (
+                  ) : isInstalled && !downloading ? (
                     <>
                       <button
                         onClick={() => {
@@ -1601,21 +1673,24 @@ export function ModelsScreen({
                       </button>
                     </>
                   ) : downloading ? (
-                    <span className="text-xs text-neutral-400">
-                      {/* Same rule as the card: the percent is the whole download, and the part
-                          being fetched is named beside it, never given a percent of its own. */}
-                      {prog.status === 'queued'
-                        ? 'Queued'
-                        : companionDownloadLabel(prog.currentFile)
-                          ? `Downloading ${downloadProgress?.determinate ? `${Math.round(downloadProgress.percentage ?? 0)}%` : ''} · adding ${companionDownloadLabel(prog.currentFile)}`
-                          : downloadProgress?.determinate
-                            ? `Downloading ${Math.round(downloadProgress.percentage ?? 0)}%…`
-                            : 'Downloading…'}
-                    </span>
+                    <>
+                      {renderDownloadSummary(prog, true)}
+                      <div className="flex w-full items-center gap-2">
+                        <div className="h-0.5 min-w-0 flex-1 overflow-hidden rounded-full bg-neutral-800">
+                          <div
+                            className="h-full w-full origin-left bg-green-500 transition-transform duration-300 ease-out motion-reduce:transition-none"
+                            style={{
+                              transform: `scaleX(${(projectProgress(prog).percentage ?? 0) / 100})`
+                            }}
+                          />
+                        </div>
+                        {renderDownloadActions(m.id, prog)}
+                      </div>
+                    </>
                   ) : (
                     <button
                       onClick={() => {
-                        download(m.id)
+                        download(m)
                         closeDetail()
                       }}
                       className="flex items-center gap-1 rounded border border-neutral-700 px-3 py-1.5 text-xs text-white transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95"

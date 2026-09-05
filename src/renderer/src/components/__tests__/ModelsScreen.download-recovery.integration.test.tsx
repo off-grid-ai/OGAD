@@ -8,40 +8,38 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
-import type { ModelControlCatalogModel, ModelControlProjection } from '@offgrid/application'
+import type {
+  ModelControlArtifact,
+  ModelControlCatalogModel,
+  ModelControlProjection,
+  PublicDownloadInfo
+} from '@offgrid/application'
 import { modelControlSnapshot } from './harness/model-control-snapshot'
+import { ModelsScreen } from '../ModelsScreen'
 
-const MODEL = {
+const PRIMARY_ARTIFACT = {
+  name: 'recoverable.gguf',
+  role: 'primary',
+  sizeBytes: 2_000_000_000
+} satisfies ModelControlArtifact
+
+const MODEL: ModelControlCatalogModel = {
   id: 'acme/recoverable-model',
   name: 'Recoverable Model',
-  kind: 'language',
-  org: 'Acme',
-  params: 3,
-  artifacts: [{ name: 'recoverable.gguf', role: 'primary', sizeBytes: 2_000_000_000 }]
-} satisfies ModelControlCatalogModel
-
-type ProgressEvent = Parameters<typeof window.api.onModelProgress>[0] extends (
-  event: infer Event
-) => void
-  ? Event
-  : never
+  kind: 'text',
+  artifacts: [PRIMARY_ARTIFACT]
+}
 
 let projection: ModelControlProjection
-let progressListeners: Array<(event: ProgressEvent) => void> = []
 let projectionListeners: Array<(next: ModelControlProjection) => void> = []
 let attempt = 0
-let ModelsScreen: typeof import('../ModelsScreen').ModelsScreen
-
-function publishProgress(event: ProgressEvent): void {
-  for (const listener of progressListeners) listener(event)
-}
 
 function publishProjection(next: ModelControlProjection): void {
   projection = next
   for (const listener of projectionListeners) listener(next)
 }
 
-beforeAll(async () => {
+beforeAll(() => {
   Object.defineProperty(window, 'api', {
     configurable: true,
     value: {
@@ -51,12 +49,6 @@ beforeAll(async () => {
         projectionListeners.push(listener)
         return () => {
           projectionListeners = projectionListeners.filter((candidate) => candidate !== listener)
-        }
-      },
-      onModelProgress: (listener: (event: ProgressEvent) => void) => {
-        progressListeners.push(listener)
-        return () => {
-          progressListeners = progressListeners.filter((candidate) => candidate !== listener)
         }
       },
       controlModel: async (intent: { type: string; operationId: string }) => {
@@ -74,14 +66,18 @@ beforeAll(async () => {
           }
         }
 
-        const installed = { ...projection, installed: [MODEL.id] }
-        publishProjection(installed)
-        publishProgress({
+        const completed: PublicDownloadInfo = {
           downloadId: 'download:recoverable',
           modelId: MODEL.id,
-          fileName: MODEL.artifacts[0].name,
-          status: 'completed'
-        })
+          fileName: PRIMARY_ARTIFACT.name,
+          bytesDownloaded: PRIMARY_ARTIFACT.sizeBytes,
+          totalBytes: PRIMARY_ARTIFACT.sizeBytes,
+          status: 'completed',
+          localUri: `file:///models/${PRIMARY_ARTIFACT.name}`,
+          startedAt: 1
+        }
+        const installed = { ...projection, installed: [MODEL.id], downloads: [completed] }
+        publishProjection(installed)
         return {
           ok: true,
           value: { status: 'completed', operationId: intent.operationId, projection: installed }
@@ -91,19 +87,19 @@ beforeAll(async () => {
       estimateModelFit: async () => ({ level: 'ok', message: '' })
     }
   })
-  ;({ ModelsScreen } = await import('../ModelsScreen'))
 })
 
 afterEach(() => {
   cleanup()
   attempt = 0
-  progressListeners = []
   projectionListeners = []
 })
 
 describe('<ModelsScreen/> model download recovery', () => {
   it('shows an interrupted download and installs the model after the user retries', async () => {
-    projection = modelControlSnapshot({ kinds: ['language'], models: [MODEL] })
+    // The harness's download row type predates PublicDownloadInfo (totalBytes/startedAt); this
+    // journey starts with no downloads, so the Shared read model is satisfied directly.
+    projection = { ...modelControlSnapshot({ kinds: ['text'], models: [MODEL] }), downloads: [] }
     const user = userEvent.setup()
     render(<ModelsScreen />)
 
