@@ -2796,3 +2796,40 @@ reporting it needs no new mechanism. Every other silent `!ok` return in the file
 the same pass.
 
 Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
+
+## MANUAL TEST FINDINGS — normal profile (OPEN until the user retests; source fixes in flight)
+
+Reported by the user on the normal profile after the code milestone handoff. Each is a confirmed
+defect with an owner. None is closed until the USER retests and says so; a source fix landing does
+not close a manual finding.
+
+**1. Storage lists Gemma under Vision, but Text says unavailable.** The same model appears in the
+vision inventory (five rows) and is absent from the text list as "unavailable" - yet text and vision
+map to ONE runtime slot (`runtimeModalityForModelKind` sends `text`, `vision` and `code` to the
+`text` route), so a model present for one must be resolvable for the other. This is an identity
+mismatch between the shared model-control projection and the claimed adapter identity, not a missing
+model. Owner: shared `application/models/model-control-projection` plus the adapter identity, with a
+regression test. Do NOT re-test by re-downloading; the artifact is on disk.
+
+**2. Holo and UI-TARS each appear twice: a legacy manifest ID and a canonical one, both persisted.**
+The registry holds two rows for one model because the ID scheme changed and the old row was never
+reconciled to the new identity. Every surface that keys by ID then sees two models. Owner: durable
+reconciliation of legacy to canonical IDs in the persisted registry, preserving the user's rows -
+this must not delete or rewrite data the user did not ask to change.
+
+**3. StoragePanel marks OLD duplicate rows as running.** The refresh overlays live download progress
+by `modelId` onto EVERY persisted row with that id - so with finding 2 in place, the stale legacy row
+lights up as "running" alongside the real one, and a user is shown a download that is not happening.
+A false runtime-state projection, the same class fixed on the Models screen. Also being traced: a
+cancel on one of those rows appears to be superseded by the refresh rather than honoured. Owner:
+StoragePanel plus its test.
+
+These three compound: finding 2 creates the duplicate rows, finding 3 paints progress onto the wrong
+one, and finding 1 means the model the user actually has is invisible where they expect it.
+
+STANDING RULE for everything above: no user download, data mutation or cancellation is to be
+performed to reproduce or verify any of this. The user's registry, partial downloads and model files
+are real state; every fix is verified against source and then by the USER retesting, not by us
+exercising their data.
+
+Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
