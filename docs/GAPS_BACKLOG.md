@@ -2866,3 +2866,30 @@ should refuse. Worth confirming the ordered build cleans its output directory ra
 to it.
 
 Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
+
+## The application singleton can be registered but never unregistered (OPEN — test infrastructure in production source)
+
+`desktop/src/main/composition/application-access.ts` exposes `registerDesktopApplication` (`:24`) and
+nothing that returns the module-level `application` (`:22`) to null. Nine core integration tests and
+now both Pro transfer tests construct, register, start and STOP a real application - and after `stop()`
+the singleton still points at the stopped instance. They work only because the next test's
+`register` overwrites the pointer.
+
+The footgun: a test file that stops its application and then touches `desktopModels` without
+constructing a new one gets a stopped application, not a clear error - and `desktopModels` is a Proxy
+that resolves through the singleton on every access, so the failure surfaces wherever the next call
+happens to be. The shared test helper (`pro/main/__tests__/helpers/desktop-application.ts`) documents
+this in its `stop()` rather than pretending teardown is complete.
+
+Fix is one function - `unregisterDesktopApplication()` or a reset - in core production source. Not
+made in the test phase without an owner; recorded so the next test author does not rediscover it.
+
+## The CRM projection channel name is defined twice in production (LOW, DRY)
+
+`renderer/lib/crm-projections.ts:22` holds the `crm:projection-changed` channel constant privately;
+`main/crm/projections.ts:33` exports its own copy, and that module imports `BrowserWindow`, so a
+renderer test cannot import the exported one without dragging electron into jsdom. A test therefore
+had to write the literal - a declared DRY exception in the test that is really a DRY gap in
+production: one string, two owners, and a renderer that cannot reach the exported one.
+
+Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
