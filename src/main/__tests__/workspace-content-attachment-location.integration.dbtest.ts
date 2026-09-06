@@ -99,10 +99,10 @@ describe('Workspace Content attachment local identity', () => {
         },
         responseMessages: [{ role: 'assistant', content: 'done' }],
         status: 'completed',
-        request: { operation: { type: 'chat' }, request: {} }
+        request: { operation: { type: 'text' }, request: {} }
       }
     ])
-    expect(runtime.root.workspaceContent.snapshot().messages[0].local?.contentLocations).toEqual([
+    expect(runtime.root.workspaceContent.snapshot().messages[0]!.local?.contentLocations).toEqual([
       { contentId: 'image-a', uri: '/device/a.png' },
       { contentId: 'audio-b', data: 'audio-bytes' },
       { contentId: 'file-c', uri: '/device/c.txt' }
@@ -135,6 +135,8 @@ describe('Workspace Content attachment local identity', () => {
     const turn = snapshot.chatTurns[0]
     const parts = user.portable.content
     if (typeof parts === 'string') throw new Error('Expected rich content')
+    const imagePart = parts[0]!
+    const filePart = parts[2]!
     expect(
       await runtime.root.workspaceContent.execute({
         type: 'replace_chat_session',
@@ -143,12 +145,12 @@ describe('Workspace Content attachment local identity', () => {
         messages: [
           {
             ...user,
-            portable: { ...user.portable, content: [parts[2], parts[0]] },
+            portable: { ...user.portable, content: [filePart, imagePart] },
             local: undefined
           },
           { ...response, local: undefined }
         ],
-        turns: [turn]
+        turns: [turn!]
       })
     ).toMatchObject({ ok: true })
     const settled = runtime.root.workspaceContent
@@ -169,7 +171,7 @@ describe('Workspace Content attachment local identity', () => {
         messageId: 'user-1',
         portable: {
           role: 'user',
-          content: [parts[0], { ...parts[0] }]
+          content: [imagePart, imagePart]
         },
         origin: 'local'
       })
@@ -180,9 +182,9 @@ describe('Workspace Content attachment local identity', () => {
       workspaceContent: runtime.root.workspaceContent,
       newId: () => 'unused'
     }).read('conversation-1')
-    expect(projected[0].userMessage.content).toEqual([
-      { ...parts[2], uri: '/device/c.txt' },
-      { ...parts[0], uri: '/device/a.png' }
+    expect(projected[0]!.userMessage.content).toEqual([
+      { ...filePart, uri: '/device/c.txt' },
+      { ...imagePart, uri: '/device/a.png' }
     ])
     await runtime.root.stop()
     runtime.db.close()
