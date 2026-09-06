@@ -237,7 +237,7 @@ export function ModelsScreen({
   // vision-capable models have their projector downloaded. Drives the "add vision
   // support" affordance for a model installed before it gained a projector.
   const [visionSt, setVisionSt] = useState<
-    Record<string, { supportsVision: boolean; projectorInstalled: boolean }>
+    Record<string, { supportsVision: boolean; projectorInstalled: boolean }> | undefined
   >({})
   const refreshVision = (): void => {
     void bridge().getModelVisionStatus().then(setVisionSt)
@@ -810,7 +810,7 @@ export function ModelsScreen({
       active={isActive(model.id)}
       remote={Boolean(model.remoteServerId)}
       progress={progress[model.id]}
-      visionStatus={visionSt[model.id]}
+      visionStatus={visionSt?.[model.id]}
       ramTier={ramTier}
       recommendedImageId={recommendedImageId}
       switching={switching}

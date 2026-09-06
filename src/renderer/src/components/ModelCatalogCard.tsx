@@ -11,7 +11,6 @@ import {
 import {
   catalogTagTone,
   isActiveDownloadStatus,
-  supportsModelSettings,
   visibleCatalogTags,
   type CatalogTagTone,
   type FitTier
@@ -19,6 +18,7 @@ import {
 import { projectProgress } from '@offgrid/ui'
 import { companionDownloadLabel } from '@renderer/lib/download-label'
 import { downloadProgressSummary } from '@renderer/lib/download-progress'
+import { supportsModelSettings } from '@renderer/lib/model-settings-panel'
 import {
   downloadFailureText,
   formatModelReleaseDate,
