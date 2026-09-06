@@ -79,7 +79,7 @@
     },
     "src/main/browser/browser-host.ts": {
       "max-lines": [
-        1071
+        1051
       ],
       "max-lines-per-function": [
         393
@@ -141,25 +141,17 @@
         1,
         1
       ],
-      "max-lines-per-function": [
-        345
-      ],
       "complexity": [
-        18
+        16
       ],
       "max-lines": [
-        1445
+        1334
       ],
       "no-else-return": [
         1
       ],
       "max-params": [
         5
-      ]
-    },
-    "src/main/desktop-generation.ts": {
-      "complexity": [
-        17
       ]
     },
     "src/main/dev-seed.ts": {
@@ -198,14 +190,14 @@
     },
     "src/main/imagegen.ts": {
       "max-lines": [
-        946
+        930
       ],
       "complexity": [
         21,
-        20
+        18
       ],
       "max-lines-per-function": [
-        295
+        288
       ]
     },
     "src/main/ipc-query-logic.ts": {
@@ -222,10 +214,10 @@
         4
       ],
       "max-lines": [
-        2109
+        2078
       ],
       "complexity": [
-        30,
+        25,
         24,
         21,
         18
@@ -235,8 +227,8 @@
         1
       ],
       "max-lines-per-function": [
-        1510,
-        324
+        1441,
+        316
       ],
       "no-console": [
         1,
@@ -252,8 +244,6 @@
         1
       ],
       "@typescript-eslint/no-shadow": [
-        1,
-        1,
         1,
         1,
         1
@@ -278,12 +268,11 @@
     },
     "src/main/llm.ts": {
       "complexity": [
-        33,
-        26,
+        29,
         16
       ],
       "max-lines": [
-        1368
+        1362
       ],
       "no-console": [
         1,
@@ -297,7 +286,6 @@
       ],
       "max-params": [
         5,
-        4,
         4
       ]
     },
@@ -346,17 +334,15 @@
         7
       ],
       "max-lines": [
-        1195
+        1173
       ],
       "complexity": [
         51,
-        31,
         19,
         18
       ],
       "max-lines-per-function": [
-        320,
-        266
+        289
       ],
       "no-console": [
         1
@@ -433,7 +419,7 @@
         1
       ],
       "max-lines": [
-        724
+        707
       ],
       "max-params": [
         4
