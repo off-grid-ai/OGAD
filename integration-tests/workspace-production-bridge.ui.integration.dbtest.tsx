@@ -160,7 +160,7 @@ async function bootProductionMain(): Promise<void> {
     { llm },
     { registerTaskHistoryIpc },
     { registerActionsIpc },
-    { desktopApplication }
+    { desktopApplication, startDesktopApplication, stopDesktopApplication: stopApplication }
   ] = await Promise.all([
     import('../src/main/ipc'),
     import('../src/main/rag-ipc'),
@@ -169,6 +169,11 @@ async function bootProductionMain(): Promise<void> {
     import('../src/main/actions/actions-ipc'),
     import('../src/main/composition/application')
   ])
+  const started = await startDesktopApplication()
+  if (started.status !== 'running') {
+    throw new Error(`Desktop application did not start: ${JSON.stringify(started)}`)
+  }
+  stopDesktopApplication = stopApplication
   const selected = await desktopApplication.models.select({
     modality: 'text',
     modelId: 'unsloth/Qwen3.5-0.8B-GGUF'
@@ -203,9 +208,9 @@ beforeAll(async () => {
   process.env.OFFGRID_DATA_DIR = PROFILE_DIR
   installFakeActiveTextModel(PROFILE_DIR)
   fake = await startFakeLlamaServer()
-  const application = await import('../src/main/composition/application')
-  await application.startDesktopApplication()
-  stopDesktopApplication = application.stopDesktopApplication
+  // Load the root before task-history IPC to preserve its production initialization order. Start
+  // only after bootProductionMain clears the fixture maps, so startup registers fresh handlers.
+  await import('../src/main/composition/application')
   await bootProductionMain()
   await import('../src/preload/index')
   ;({ MemoryChat } = await import('../src/renderer/src/components/MemoryChat'))
@@ -237,6 +242,9 @@ afterAll(async () => {
   else process.env.OFFGRID_USER_DATA = previousUserData
   if (previousDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
   else process.env.OFFGRID_DATA_DIR = previousDataDir
+  bridge.handlers.clear()
+  bridge.mainListeners.clear()
+  bridge.rendererListeners.clear()
 })
 
 /**
@@ -269,26 +277,60 @@ describe('production workspace bridge', () => {
     await user.click(screen.getByRole('button', { name: /^send$/i }))
 
     expect(await inTranscript('The production bridge persisted this answer.')).toBeTruthy()
-    const { getRagConversations, getRagMessages } = await import('../src/main/database')
     await waitFor(() => {
-      const conversation = getRagConversations().find(
-        ({ title }) => title === 'Prove the complete local chat path'
-      )
-      expect(conversation).toBeTruthy()
-      expect(getRagMessages(conversation!.id).map(({ role, content }) => [role, content])).toEqual([
-        ['user', 'Prove the complete local chat path'],
-        ['assistant', 'The production bridge persisted this answer.']
-      ])
+      return window.api.workspaceContent.getSnapshot().then((snapshot) => {
+        const conversation = snapshot.conversations.find(
+          ({ title }) => title === 'Prove the complete local chat path'
+        )
+        expect(conversation).toBeTruthy()
+        expect(
+          snapshot.messages
+            .filter(({ conversationId }) => conversationId === conversation!.id)
+            .map(({ portable }) => [portable.role, portable.content])
+        ).toEqual([
+          ['user', [{ type: 'text', text: 'Prove the complete local chat path' }]],
+          ['assistant', 'The production bridge persisted this answer.']
+        ])
+      })
     })
+    expect(Reflect.has(window.api, 'getRagConversations')).toBe(false)
+    expect(Reflect.has(window.api, 'getRagConversation')).toBe(false)
+    expect(Reflect.has(window.api, 'getRagMessages')).toBe(false)
+    expect(Reflect.has(window.api, 'createRagConversation')).toBe(false)
+    expect(Reflect.has(window.api, 'addRagMessage')).toBe(false)
     expect(fake.requests).toHaveLength(1)
   })
 
-  it('renders projects, chats, messages, and artifacts after the real database reopens', async () => {
+  it('renders projects, chats, messages, and artifacts from the durable canonical tables', async () => {
     const api = window.api
-    const projectId = await api.createProject!({ name: 'Reopened Workspace' })
-    await api.createRagConversation('reopened-chat', 'Durable planning chat', projectId)
-    await api.addRagMessage('reopened-chat', 'user', 'Keep this project context')
-    await api.addRagMessage('reopened-chat', 'assistant', 'Context retained locally')
+    const project = await api.workspaceContent.execute({
+      type: 'create_project',
+      name: 'Reopened Workspace'
+    })
+    if (!project.ok) throw new Error(project.failure.message)
+    const createdProject = project.value.changes.find(
+      (change) => change.kind === 'put' && change.entity === 'project'
+    )
+    if (!createdProject) throw new Error('Project creation returned no canonical project record.')
+    const projectId = createdProject.record.id
+    const conversation = await api.workspaceContent.execute({
+      type: 'create_conversation',
+      conversationId: 'reopened-chat',
+      title: 'Durable planning chat',
+      projectId
+    })
+    if (!conversation.ok) throw new Error(conversation.failure.message)
+    for (const portable of [
+      { role: 'user' as const, content: 'Keep this project context' },
+      { role: 'assistant' as const, content: 'Context retained locally' }
+    ]) {
+      const message = await api.workspaceContent.execute({
+        type: 'append_message',
+        conversationId: 'reopened-chat',
+        portable
+      })
+      if (!message.ok) throw new Error(message.failure.message)
+    }
     await api.saveArtifact({
       kind: 'html',
       code: '<h1>Durable artifact</h1>',
@@ -298,8 +340,13 @@ describe('production workspace bridge', () => {
     })
 
     const { getDB } = await import('../src/main/database')
-    getDB().close()
-    expect(getDB().open).toBe(true)
+    expect(
+      getDB()
+        .prepare(
+          'SELECT COUNT(*) AS count FROM workspace_content_messages WHERE conversation_id = ?'
+        )
+        .get('reopened-chat')
+    ).toEqual({ count: 2 })
 
     render(<ProjectsScreen onOpenChat={() => undefined} />)
     expect(await screen.findByRole('button', { name: 'Reopened Workspace' })).toBeTruthy()
@@ -313,5 +360,168 @@ describe('production workspace bridge', () => {
     renderChat({ conversationId: 'reopened-chat' })
     expect(await inTranscript('Keep this project context')).toBeTruthy()
     expect(await inTranscript('Context retained locally')).toBeTruthy()
+  })
+
+  it('shows a canonically durable generated image before offering it to Sync', async () => {
+    const imageId = '44444444-4444-4444-8444-444444444444'
+    const imagePath = path.join(PROFILE_DIR, 'generated-images', `${imageId}.png`)
+    fs.mkdirSync(path.dirname(imagePath), { recursive: true })
+    fs.writeFileSync(imagePath, Buffer.from('durable-image-bytes'))
+
+    const { desktopApplication } = await import('../src/main/composition/application')
+    if (!desktopApplication.generatedImages) throw new Error('Generated Images is unavailable.')
+    const created = await desktopApplication.generatedImages.create({
+      id: imageId,
+      contentId: imageId,
+      conversationId: null,
+      prompt: 'A durable local proof image',
+      width: 512,
+      height: 512,
+      steps: 8,
+      seed: 7,
+      modelId: 'proof-model',
+      createdAt: '2026-09-06T00:00:00.000Z',
+      local: { path: imagePath, fileName: `${imageId}.png` }
+    })
+    if (!created.ok) throw new Error(created.failure.message)
+
+    const { getDB } = await import('../src/main/database')
+    const persisted = getDB()
+      .prepare('SELECT images_json FROM generated_image_gallery_state WHERE singleton = 1')
+      .get() as { images_json: string }
+    expect(JSON.parse(persisted.images_json)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: imageId })])
+    )
+
+    renderChat({ openGallery: true })
+    expect(await screen.findByAltText(`${imageId}.png`)).toBeTruthy()
+
+    const publications: unknown[] = []
+    const { HOOKS, registerHook, unregisterHook } =
+      await import('../src/main/bootstrap/hookRegistry')
+    const receivePublication = (mutation: unknown): void => publications.push(mutation)
+    registerHook(HOOKS.syncSharedFileMutation, receivePublication)
+    try {
+      const { shareGeneratedImage } = await import('../src/main/imagegen/generated-image-share')
+      expect(shareGeneratedImage(imagePath)).toBe(true)
+      expect(publications).toEqual([
+        expect.objectContaining({
+          kind: 'put',
+          file: expect.objectContaining({ syncId: imageId })
+        })
+      ])
+    } finally {
+      unregisterHook(HOOKS.syncSharedFileMutation, receivePublication)
+    }
+  })
+
+  it('serializes concurrent Chats and full deletion through production IPC', async () => {
+    const api = window.api
+    const project = await api.workspaceContent.execute({
+      type: 'create_project',
+      name: 'Concurrent privacy project'
+    })
+    if (!project.ok) throw new Error(project.failure.message)
+    const projectId = project.value.changes.find(
+      (change) => change.kind === 'put' && change.entity === 'project'
+    )?.record.id
+    if (!projectId) throw new Error('Privacy project was not created.')
+    const conversationId = 'privacy-concurrent-chat'
+    const conversation = await api.workspaceContent.execute({
+      type: 'create_conversation',
+      conversationId,
+      title: 'Concurrent privacy chat',
+      projectId
+    })
+    if (!conversation.ok) throw new Error(conversation.failure.message)
+    const message = await api.workspaceContent.execute({
+      type: 'append_message',
+      conversationId,
+      portable: { role: 'user', content: 'DISTINCTIVE concurrent privacy payload' }
+    })
+    if (!message.ok) throw new Error(message.failure.message)
+    const messageId = message.value.changes.find(
+      (change) => change.kind === 'put' && change.entity === 'message'
+    )?.record.id
+    if (!messageId) throw new Error('Privacy message was not created.')
+
+    const { registerDataDeletionGuard } = await import('../src/main/data-privacy')
+    const { pendingPrivacyPublicationIntent, pendingWorkspacePrivacyTargets } =
+      await import('../src/main/data-privacy-publication-intent')
+    const { desktopWorkspaceContentPersistence } =
+      await import('../src/main/composition/workspace-content')
+    let resumeAttempt = 0
+    let releaseSettlement: () => void = () => undefined
+    let observeSettlement: () => void = () => undefined
+    const settlementReached = new Promise<void>((resolve) => {
+      observeSettlement = resolve
+    })
+    const settlementPause = new Promise<void>((resolve) => {
+      releaseSettlement = resolve
+    })
+    const releaseGuard = registerDataDeletionGuard('proof:ipc-publication', {
+      scopes: ['chats', 'all'],
+      settlesWorkspacePublication: true,
+      suspend: () => undefined,
+      resume: async () => {
+        resumeAttempt += 1
+        if (resumeAttempt === 1) throw new Error('Injected publication failure')
+        const targets = pendingWorkspacePrivacyTargets()
+        if (!targets) throw new Error('Expected durable publication targets.')
+        await desktopWorkspaceContentPersistence().privacy.compactDeletedOutbox(targets)
+        observeSettlement()
+        await settlementPause
+      }
+    })
+    try {
+      const chats = api.clearDataCategory('chats') as Promise<{ success: boolean }>
+      const all = api.deleteAllData() as Promise<{ success: boolean }>
+      await settlementReached
+      expect(pendingPrivacyPublicationIntent()).toMatchObject({
+        scope: 'all',
+        phase: 'publication_compaction',
+        targets: expect.arrayContaining([
+          { entity: 'project', entityId: projectId },
+          { entity: 'conversation', entityId: conversationId },
+          { entity: 'message', entityId: messageId }
+        ])
+      })
+
+      await expect(
+        api.workspaceContent.execute({
+          type: 'create_project',
+          name: 'Must remain blocked'
+        })
+      ).rejects.toThrow('Chat work is paused')
+      const { desktopGeneratedImageGallery } =
+        await import('../src/main/imagegen/gallery-repository')
+      expect(() =>
+        desktopGeneratedImageGallery().create({
+          id: '55555555-5555-4555-8555-555555555555',
+          contentId: '55555555-5555-4555-8555-555555555555',
+          conversationId: null,
+          prompt: 'Must remain blocked',
+          width: 32,
+          height: 32,
+          steps: 1,
+          seed: 1,
+          modelId: 'proof-model',
+          createdAt: '2026-09-06T00:00:00.000Z',
+          local: { path: path.join(PROFILE_DIR, 'blocked.png'), fileName: 'blocked.png' }
+        })
+      ).toThrow('Image work is paused')
+      releaseSettlement()
+      expect(await chats).toEqual({ success: false })
+      expect(await all).toEqual({ success: true })
+
+      const reopened = await api.workspaceContent.execute({
+        type: 'create_project',
+        name: 'Admission reopened once'
+      })
+      expect(reopened.ok).toBe(true)
+    } finally {
+      releaseSettlement()
+      releaseGuard()
+    }
   })
 })
