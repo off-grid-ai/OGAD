@@ -4,24 +4,17 @@
 // img2img, persist the PNG under userData/generated-images, return a data URL.
 
 import { spawn, type ChildProcess } from 'child_process'
+import { createHash, randomUUID } from 'node:crypto'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
-import { nodeDownloadBridge } from './composition/node-download-bridge'
-import {
-  generatedImageSidecarPath,
-  readGeneratedImageSidecar,
-  writeGeneratedImageSidecar,
-  type GeneratedImageSidecar
-} from './imagegen/gallery-sidecar'
+import { writeGeneratedImageSidecar, type GeneratedImageSidecar } from './imagegen/gallery-sidecar'
 import {
   ensureCheckpointExtension as ensureCheckpointExt,
-  hasCheckpointExtension as hasCheckpointExt,
   IMAGE_CANCELLED_MESSAGE,
   initialImageProgress as initialProgressState,
   isImageModelFile,
   reduceImageProgress as reduceProgress,
-  stripCheckpointExtension as stripCheckpointExt,
   type ImageExecutionPlan,
   type ImageNativeExecutionFacts,
   imageTaesdFilename,
@@ -40,27 +33,35 @@ import {
   cancelMflux,
   MFLUX_MODELS
 } from './mflux'
-import { binRoots, dataDir, modelsDir, resourceDirs, exe } from './runtime-env'
+import { binRoots, dataDir, modelsDir, exe } from './runtime-env'
 import { sdServer } from './sd-server'
 import { hasMlmodelc, isQuantizedModel } from './imagegen/runtime-detect'
 import { buildCoreMLArgs, buildZImageArgs, buildStandardArgs } from './imagegen/args'
-import {
-  resolveExistingOwnedEntry,
-  resolveExistingOwnedPath,
-  resolveOwnedDestination
-} from './imagegen/owned-path'
+import { resolveExistingOwnedEntry, resolveExistingOwnedPath } from './imagegen/owned-path'
 import {
   type ImageGenerationPipelineUpdateContract,
   type ImageGenerationOutputContract,
   type ImageGenerationRequestContract
 } from '../shared/image-generation-contract'
-import { desktopModels } from './composition/application-access'
+import { desktopModels, desktopWorkspaceContent } from './composition/application-access'
+import { desktopGeneratedImageGallery } from './imagegen/gallery-repository'
 import {
   desktopImageApplication,
   registerDesktopImageCancelBoundary,
   registerDesktopImageInspectionBoundary
 } from './imagegen/application-service'
 import { desktopImageRuntimeIdentity } from './models/image-runtime-identity'
+import {
+  assertDesktopGeneratedImageOutputPrepared,
+  prebindDesktopGeneratedImageCreationPath,
+  prepareDesktopGeneratedImageOutputPath,
+  sealDesktopGeneratedImageCreationPath
+} from './imagegen/creation-intent-runtime'
+import { loraDir } from './imagegen/lora-library'
+import { imageFileSizeGb, inspectSourceDimensions } from './imagegen/image-inspection'
+
+export { downloadLora, ensureLoraDir, listLoras, type LoraInfo } from './imagegen/lora-library'
+export { listStyleThumbs } from './imagegen/style-thumbnails'
 
 function findSdCli(): string | null {
   for (const r of binRoots()) {
@@ -129,26 +130,31 @@ export function listGeneratedImages(scope?: GeneratedImageScope): {
   conversationId?: string
   projectId?: string | null
 }[] {
-  const dir = path.join(dataDir(), 'generated-images')
   try {
-    let all = fs
-      .readdirSync(dir)
-      .filter((f) => isGeneratedImageFile(f) && !f.startsWith('preview-'))
-      .flatMap((f) => {
-        const ownedImage = resolveExistingOwnedEntry(dir, f)
-        if (!ownedImage) return []
-        // The sidecar is the one owner of what is known about an image besides its bytes, including
-        // the syncId that names it on the mesh. Read through that module so this scan and the sync
-        // receiver cannot disagree about the shape.
-        const meta = readGeneratedImageSidecar(ownedImage)
+    const gallery = desktopGeneratedImageGallery().snapshot()
+    if (gallery.status !== 'ready') return []
+    const conversations = new Map(
+      desktopWorkspaceContent
+        .snapshot()
+        .conversations.map((conversation) => [conversation.id, conversation.projectId])
+    )
+    let all = gallery.images
+      .flatMap((image) => {
+        const ownedImage = resolveExistingOwnedPath(
+          path.join(dataDir(), 'generated-images'),
+          image.local.path
+        )
+        if (!ownedImage || !fs.existsSync(ownedImage)) return []
         return [
           {
             path: ownedImage,
-            name: f,
-            mtime: fs.statSync(ownedImage).mtimeMs,
-            syncId: meta.syncId,
-            conversationId: meta.conversationId,
-            projectId: meta.projectId ?? null
+            name: image.local.fileName ?? path.basename(ownedImage),
+            mtime: Date.parse(image.createdAt),
+            syncId: image.id,
+            conversationId: image.conversationId ?? undefined,
+            projectId: image.conversationId
+              ? (conversations.get(image.conversationId) ?? null)
+              : null
           }
         ]
       })
@@ -159,106 +165,6 @@ export function listGeneratedImages(scope?: GeneratedImageScope): {
   } catch {
     return []
   }
-}
-
-/** Delete a generated image from disk. */
-export function deleteGeneratedImage(p: string): boolean {
-  try {
-    const dir = path.join(dataDir(), 'generated-images')
-    const ownedImage = resolveExistingOwnedPath(dir, p)
-    if (!ownedImage || !isGeneratedImageFile(ownedImage)) return false
-    fs.unlinkSync(ownedImage)
-    fs.rmSync(generatedImageSidecarPath(ownedImage), { force: true })
-    return true
-  } catch {
-    return false
-  }
-}
-
-// --- Style-preset thumbnails (bundled release assets; never hotlinked) --------
-/** Map of style key -> bundled thumbnail path. */
-export function listStyleThumbs(): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const resources of resourceDirs()) {
-    const directory = path.join(resources, 'style-thumbs')
-    try {
-      for (const file of fs.readdirSync(directory)) {
-        const match = file.match(/^(.+)\.(png|jpe?g|webp)$/i)
-        if (match && !out[match[1]!]) out[match[1]!] = path.join(directory, file)
-      }
-    } catch {
-      /* this resource root does not contain style previews */
-    }
-  }
-  return out
-}
-
-// --- LoRA adapters -----------------------------------------------------------
-// LoRAs live in userData/models/loras as .safetensors. sd-cli applies them via
-// the `--lora-model-dir` flag + `<lora:NAME:WEIGHT>` syntax injected into the
-// prompt (NAME = filename without extension). Our checkpoints are quantized, so
-// sd-cli auto-selects "at_runtime" apply mode (compatible, slightly slower).
-function loraDir(): string {
-  return path.join(modelsDir(), 'loras')
-}
-
-export interface LoraInfo {
-  /** Filename without extension — the NAME used in <lora:NAME:weight>. */
-  name: string
-  /** Display label (name with separators tidied). */
-  label: string
-  file: string
-  sizeBytes: number
-}
-
-/** List installed LoRA adapters. */
-export function listLoras(): LoraInfo[] {
-  const dir = loraDir()
-  const out: LoraInfo[] = []
-  try {
-    for (const f of fs.readdirSync(dir)) {
-      if (!hasCheckpointExt(f)) continue
-      const ownedFile = resolveExistingOwnedEntry(dir, f)
-      if (!ownedFile) continue
-      const name = stripCheckpointExt(f)
-      let sizeBytes = 0
-      try {
-        sizeBytes = fs.statSync(ownedFile).size
-      } catch {
-        /* ignore */
-      }
-      out.push({ name, label: name.replace(/[_-]+/g, ' '), file: ownedFile, sizeBytes })
-    }
-  } catch {
-    /* dir doesn't exist yet */
-  }
-  return out.sort((a, b) => a.label.localeCompare(b.label))
-}
-
-/** Absolute path to the LoRA folder (created on demand) — for "reveal in Finder". */
-export function ensureLoraDir(): string {
-  const dir = loraDir()
-  fs.mkdirSync(dir, { recursive: true })
-  return dir
-}
-
-/** Download a LoRA .safetensors into the LoRA folder (HF resolve URLs, follows redirects). */
-export async function downloadLora(
-  url: string,
-  filename: string,
-  onProgress?: (pct: number) => void
-): Promise<string> {
-  const dir = ensureLoraDir()
-  const dest = resolveOwnedDestination(dir, filename)
-  if (!dest || !hasCheckpointExt(filename)) throw new Error('Invalid LoRA filename.')
-  if (fs.existsSync(dest) && fs.statSync(dest).size > 0) return dest
-  const bridge = nodeDownloadBridge(dir)
-  await bridge.download(url, dest, {
-    onProgress: (written, total) => {
-      if (total > 0) onProgress?.(Math.round((written / total) * 100))
-    }
-  })
-  return dest
 }
 
 /** Resolve the TAESD decoder for a model's family, if the file is installed.
@@ -343,29 +249,6 @@ function resolveNativeModel(selected?: string): string | null {
   return resolveExistingOwnedEntry(dir, runtimeId)
 }
 
-function fileSizeGb(filePath: string | null | undefined): number {
-  try {
-    return filePath ? fs.statSync(filePath).size / 1e9 : 0
-  } catch {
-    return 0
-  }
-}
-
-async function inspectSourceDimensions(
-  sourceImageUri: string | undefined
-): Promise<{ width: number; height: number } | undefined> {
-  if (!sourceImageUri) return undefined
-  try {
-    const { default: sharp } = await import('sharp')
-    const metadata = await sharp(sourceImageUri).metadata()
-    return metadata.width && metadata.height
-      ? { width: metadata.width, height: metadata.height }
-      : undefined
-  } catch {
-    return undefined
-  }
-}
-
 function inspectMfluxFacts(
   runtimeId: string,
   persistentRequested: boolean
@@ -420,7 +303,7 @@ export async function inspectImageNativeExecution(input: {
     modelName: path.basename(model),
     runtime: coreml ? 'coreml' : 'stable-diffusion',
     totalMemoryGb: os.totalmem() / 1e9,
-    modelSizeGb: fileSizeGb(model),
+    modelSizeGb: imageFileSizeGb(model),
     zImage,
     fullCheckpoint,
     quantized: isQuantizedModel(path.basename(model)),
@@ -442,8 +325,8 @@ export async function inspectImageNativeExecution(input: {
         : undefined
     },
     companionSizeGb: {
-      zImageTextEncoder: fileSizeGb(zImageTextEncoder),
-      zImageVae: fileSizeGb(zImageVae)
+      zImageTextEncoder: imageFileSizeGb(zImageTextEncoder),
+      zImageVae: imageFileSizeGb(zImageVae)
     }
   }
 }
@@ -531,23 +414,97 @@ export function saveGeneratedImageScope(imagePath: string, facts: GeneratedImage
  * itself, does not list an input as though the user had generated it. Returns the copy's path, or null
  * when the source cannot be read - a generation is not worth failing over its provenance.
  */
-export function preserveGeneratedImageSource(syncId: string, sourcePath: string): string | null {
+export interface GeneratedImageSourceOwnershipReceipt {
+  readonly path: string
+  readonly byteLength: number
+  readonly sha256: string
+  compensate(): void
+}
+
+/** Copy an init image and return the exact ownership needed for transaction compensation. */
+export function preserveGeneratedImageSourceWithReceipt(
+  syncId: string,
+  sourcePath: string
+): GeneratedImageSourceOwnershipReceipt | null {
   try {
     const directory = path.join(dataDir(), 'generated-images', 'sources')
     fs.mkdirSync(directory, { recursive: true })
     const extension = path.extname(sourcePath).toLowerCase() || '.png'
     const kept = path.join(directory, `${syncId}${extension}`)
-    const temporary = `${kept}.part`
+    let preexisting: Buffer | undefined
+    try {
+      preexisting = fs.readFileSync(kept)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    const temporary = `${kept}.${process.pid}.${randomUUID()}.part`
+    let ownedBytes: Buffer
     try {
       fs.copyFileSync(sourcePath, temporary)
+      ownedBytes = fs.readFileSync(temporary)
       fs.renameSync(temporary, kept)
     } finally {
       fs.rmSync(temporary, { force: true })
     }
-    return kept
+    const sha256 = createHash('sha256').update(ownedBytes).digest('hex')
+    return {
+      path: kept,
+      byteLength: ownedBytes.byteLength,
+      sha256,
+      compensate: () => {
+        let current: Buffer
+        try {
+          current = fs.readFileSync(kept)
+        } catch {
+          return
+        }
+        if (
+          current.byteLength !== ownedBytes.byteLength ||
+          createHash('sha256').update(current).digest('hex') !== sha256
+        ) {
+          return
+        }
+        if (preexisting === undefined) {
+          fs.rmSync(kept, { force: true })
+          return
+        }
+        const restore = `${kept}.${process.pid}.${randomUUID()}.rollback`
+        try {
+          fs.writeFileSync(restore, preexisting)
+          fs.renameSync(restore, kept)
+        } finally {
+          fs.rmSync(restore, { force: true })
+        }
+      }
+    }
   } catch (error) {
     console.error(
       `[imagegen] could not keep the init image: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    )
+    return null
+  }
+}
+
+export function prepareGeneratedImageOutputPath(requestId: string): string {
+  return prepareDesktopGeneratedImageOutputPath(requestId, '.png')
+}
+
+/** Compatibility value-only copy for callers whose operation cannot roll back. */
+export function preserveGeneratedImageSource(syncId: string, sourcePath: string): string | null {
+  try {
+    const directory = path.join(dataDir(), 'generated-images', 'sources')
+    fs.mkdirSync(directory, { recursive: true })
+    const extension = path.extname(sourcePath).toLowerCase() || '.png'
+    const destination = path.join(directory, `${syncId}${extension}`)
+    prebindDesktopGeneratedImageCreationPath(syncId, 'source', destination)
+    fs.copyFileSync(sourcePath, destination)
+    sealDesktopGeneratedImageCreationPath(syncId, 'source', destination)
+    return destination
+  } catch (error) {
+    console.error(
+      `[imagegen] could not keep the prepared init image: ${
         error instanceof Error ? error.message : String(error)
       }`
     )
@@ -606,9 +563,13 @@ export function cancelImageGen(): boolean {
  * serialization, cancellation fencing, and residency before this function runs. */
 export async function generateImageNative(
   plan: ImageExecutionPlan,
-  onUpdate?: (update: ImageGenerationPipelineUpdateContract) => void,
-  signal?: AbortSignal
+  options: {
+    onUpdate?: (update: ImageGenerationPipelineUpdateContract) => void
+    signal?: AbortSignal
+    outputPath: string
+  }
 ): Promise<ImageGenOutput> {
+  const { onUpdate } = options
   onUpdate?.({ stage: 'preparing', enhancedPrompt: plan.prompt })
   const progressObserver = onUpdate
     ? (progress: ImageGenProgress & { preview?: string }) =>
@@ -617,7 +578,11 @@ export async function generateImageNative(
           progress
         })
     : undefined
-  const output = await runImageGen(plan, progressObserver, signal ?? new AbortController().signal)
+  const output = await runImageGen(plan, {
+    onProgress: progressObserver,
+    signal: options.signal,
+    outputPath: options.outputPath
+  })
   return { ...output, prompt: plan.prompt }
 }
 
@@ -630,17 +595,41 @@ export async function generateImage(
   return desktopImageApplication.start(params, onUpdate)
 }
 
-async function runImageGen(
-  plan: ImageExecutionPlan,
-  onProgress?: (p: ImageGenProgress & { preview?: string }) => void,
-  signal: AbortSignal = new AbortController().signal
-): Promise<NativeImageGenOutput> {
+function beginNativeExecution(options: {
+  onProgress?: (progress: ImageGenProgress & { preview?: string }) => void
+  signal?: AbortSignal
+  outputPath: string
+}): {
+  onProgress: typeof options.onProgress
+  signal: AbortSignal
+  preparedOutputPath: string
+  cancelOnAbort: () => void
+} {
+  const signal = options.signal ?? new AbortController().signal
+  assertDesktopGeneratedImageOutputPrepared(options.outputPath)
   if (signal.aborted) throw new Error(IMAGE_CANCELLED_MESSAGE)
   nativeExecutionActive = true
   const cancelOnAbort = (): void => {
     cancelImageNative()
   }
   signal.addEventListener('abort', cancelOnAbort, { once: true })
+  return {
+    onProgress: options.onProgress,
+    signal,
+    preparedOutputPath: options.outputPath,
+    cancelOnAbort
+  }
+}
+
+async function runImageGen(
+  plan: ImageExecutionPlan,
+  options: {
+    onProgress?: (p: ImageGenProgress & { preview?: string }) => void
+    signal?: AbortSignal
+    outputPath: string
+  }
+): Promise<NativeImageGenOutput> {
+  const { onProgress, signal, preparedOutputPath, cancelOnAbort } = beginNativeExecution(options)
   try {
     // --- MLX / mflux runtime branch (FLUX / Z-Image with native LoRA) ----------
     // Self-contained: reuses the single-flight guard; the LLM is already evicted by the
@@ -651,7 +640,7 @@ async function runImageGen(
       const def = getMfluxModel(selectedModel)!
       const outDir = path.join(dataDir(), 'generated-images')
       fs.mkdirSync(outDir, { recursive: true })
-      const outPath = path.join(outDir, `img-${String(Date.now())}.png`)
+      const outPath = preparedOutputPath
       await runMflux(
         {
           prompt: plan.prompt,
@@ -699,9 +688,7 @@ async function runImageGen(
     const outDir = path.join(dataDir(), 'generated-images')
     fs.mkdirSync(outDir, { recursive: true })
     const seed = plan.seed ?? -1
-    const stamp = String(Date.now())
-    const outPath = path.join(outDir, `img-${stamp}.png`)
-    const previewPath = path.join(outDir, `preview-${stamp}.png`)
+    const outPath = preparedOutputPath
 
     const base = path.basename(model)
     const isZImage = Boolean(plan.companions.zImageTextEncoder)
@@ -759,16 +746,7 @@ async function runImageGen(
     // no-op. Re-introduce a resident server only if proven safe on 16GB + good output.
 
     const threads = String(Math.max(1, os.cpus().length - 2))
-    // Live preview: write a rough partial image every step ('proj' needs no extra
-    // model) so the UI can show the image forming step-by-step.
-    const previewArgs = [
-      '--preview',
-      'proj',
-      '--preview-path',
-      previewPath,
-      '--preview-interval',
-      '1'
-    ]
+    const previewArgs: string[] = []
 
     let args: string[]
     if (coreml) {
@@ -873,14 +851,7 @@ async function runImageGen(
           const { state, event } = reduceProgress(progress, line, plan.steps)
           progress = state
           if (onProgress && event) {
-            let preview: string | undefined
-            try {
-              if (fs.existsSync(previewPath))
-                preview = `data:image/png;base64,${fs.readFileSync(previewPath).toString('base64')}`
-            } catch {
-              /* preview not ready */
-            }
-            onProgress({ ...event, preview })
+            onProgress(event)
           }
         }
         const progressStream = (): { capture: (data: Buffer) => void; flush: () => void } => {
@@ -929,7 +900,6 @@ async function runImageGen(
       }
     } finally {
       currentChild = null
-      fs.promises.unlink(previewPath).catch(() => {})
       // LLM warm-back-up happens once in the generateImage() wrapper's finally
       // (covers both this sd-cli path and the mflux path).
     }
