@@ -790,7 +790,7 @@
     },
     "pro/main/crm/extract.ts": {
       "max-lines": [
-        652
+        609
       ],
       "complexity": [
         58
@@ -920,7 +920,7 @@
         1
       ],
       "max-lines": [
-        657
+        653
       ]
     },
     "pro/main/dictation/interpret-hotkey.ts": {
@@ -1058,10 +1058,10 @@
         1
       ],
       "max-lines-per-function": [
-        270
+        265
       ],
       "max-lines": [
-        532
+        528
       ]
     },
     "pro/main/sync/blob-frame-cipher.ts": {
@@ -1162,7 +1162,7 @@
     },
     "pro/main/sync/sync-store.ts": {
       "max-lines": [
-        1026
+        1024
       ]
     },
     "pro/main/sync/task-control-sync.ts": {
