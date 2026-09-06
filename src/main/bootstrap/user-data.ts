@@ -17,7 +17,7 @@ export function initializeUserData(): void {
   if (process.env.OFFGRID_USER_DATA) {
     fs.mkdirSync(process.env.OFFGRID_USER_DATA, { recursive: true })
     app.setPath('userData', process.env.OFFGRID_USER_DATA)
-    console.log('[userData] override path:', process.env.OFFGRID_USER_DATA)
+    process.stdout.write(`[userData] override path: ${process.env.OFFGRID_USER_DATA}\n`)
     return
   }
   const appData = app.getPath('appData')
