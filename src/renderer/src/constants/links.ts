@@ -9,9 +9,7 @@ export const OFF_GRID_WEBSITE_URL = 'https://getoffgridai.co'
  *  Mirrors mobile's link to getoffgridai.co/desktop. */
 export const OFF_GRID_MOBILE_URL = 'https://getoffgridai.co/mobile'
 
-/** Open a URL in the user's default browser (falls back to window.open). */
+/** Open a URL in the user's default browser through the required preload bridge. */
 export function openExternal(url: string): void {
-  const api = window.api
-  if (api?.openExternal) api.openExternal(url)
-  else window.open(url, '_blank')
+  window.api.openExternal(url)
 }

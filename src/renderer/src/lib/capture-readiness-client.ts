@@ -27,7 +27,7 @@ export const captureReadinessClient = {
     ])
     const activeId = models.active.text.modelId
     const captureStatus = (capture ?? {}) as CaptureStatusObservation
-    const visionStatuses = (statuses ?? {}) as Record<string, ModelVisionObservation>
+    const visionStatuses = statuses as Record<string, ModelVisionObservation>
     const activeStatus = activeId ? visionStatuses[activeId] : undefined
     const catalogModel = activeId ? models.models.find((model) => model.id === activeId) : undefined
     return projectCaptureReadiness({
