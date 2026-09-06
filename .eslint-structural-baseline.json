@@ -567,7 +567,6 @@
       ],
       "max-params": [
         9,
-        4,
         4
       ],
       "max-lines": [
@@ -576,7 +575,7 @@
     },
     "src/renderer/src/App.tsx": {
       "max-lines-per-function": [
-        1169
+        1155
       ],
       "complexity": [
         47
@@ -689,7 +688,7 @@
     },
     "src/renderer/src/components/SoftwareUpdateSection.tsx": {
       "complexity": [
-        31
+        29
       ]
     },
     "src/renderer/src/components/VoiceBubble.tsx": {
@@ -714,18 +713,18 @@
     },
     "src/renderer/src/components/setup/SetupPanel.tsx": {
       "complexity": [
-        30
+        29
       ]
     },
     "src/renderer/src/components/setup/StoragePanel.tsx": {
       "max-lines-per-function": [
-        521
+        481
       ],
       "complexity": [
-        25
+        20
       ],
       "max-lines": [
-        595
+        537
       ]
     },
     "src/renderer/src/components/tasks/ComputerUseStepDetails.tsx": {
