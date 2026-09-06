@@ -579,16 +579,13 @@
     },
     "src/renderer/src/components/ModelsScreen.tsx": {
       "max-lines-per-function": [
-        1061,
-        283
+        1051
       ],
       "complexity": [
-        65,
-        37,
-        27
+        47
       ],
       "max-lines": [
-        1345
+        1276
       ]
     },
     "src/renderer/src/components/Onboarding.tsx": {
@@ -1125,11 +1122,11 @@
         4
       ],
       "complexity": [
-        24,
+        21,
         18
       ],
       "max-lines": [
-        704
+        703
       ]
     },
     "pro/main/sync/sync-facade-state-bridge-lifecycle.ts": {
