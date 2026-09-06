@@ -985,16 +985,12 @@
     },
     "pro/main/licensing/license-service.ts": {
       "max-lines": [
-        740
+        730
       ],
       "no-console": [
         1,
         1,
         1
-      ],
-      "complexity": [
-        21,
-        20
       ]
     },
     "pro/main/meeting-controller.ts": {
@@ -1068,7 +1064,7 @@
     },
     "pro/main/sync/knowledge-document-transfer.ts": {
       "max-params": [
-        5
+        4
       ]
     },
     "pro/main/sync/macos-proximity.ts": {
@@ -1093,7 +1089,7 @@
         21
       ],
       "max-lines": [
-        602
+        600
       ]
     },
     "pro/main/sync/shared-file-sync-service.ts": {
@@ -1310,7 +1306,7 @@
         16
       ],
       "max-lines": [
-        587
+        581
       ]
     },
     "pro/renderer/screens/ReflectScreen.tsx": {
