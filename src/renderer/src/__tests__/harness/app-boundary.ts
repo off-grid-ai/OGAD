@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import type { UseSnapshot } from '@offgrid/application'
+import type { UseSnapshot, WorkspaceContentSnapshot } from '@offgrid/application'
 import { modelControlBoundary } from '../../components/__tests__/harness/model-control-snapshot'
 
 const EMPTY_ACTION_PROJECTION: UseSnapshot = {
@@ -20,6 +20,46 @@ export function appActionsBoundary(): NonNullable<Window['api']['actions']> {
   }
 }
 
+const appWorkspaceContentSnapshot = (): WorkspaceContentSnapshot => ({
+  status: 'ready',
+  revision: 'test-empty',
+  migration: { phase: 'current', version: 1 },
+  projects: APP_PROJECTS,
+  conversations: [],
+  messages: [],
+  chatTurns: []
+})
+
+/** The one renderer-test boundary for the canonical Shared-owned workspace projection. */
+export function appWorkspaceContentBoundary(
+  snapshot: WorkspaceContentSnapshot = appWorkspaceContentSnapshot()
+): NonNullable<Window['api']['workspaceContent']> {
+  const migrationSnapshot = {
+    phase: 'not_needed' as const,
+    preflight: {
+      status: 'current' as const,
+      counts: { projects: 0, rag_conversations: 0, rag_messages: 0, chat_session_turns: 0 },
+      reasons: []
+    }
+  }
+  return {
+    getSnapshot: async () => snapshot,
+    execute: async () => {
+      throw new Error('This UI journey did not configure a workspace-content command boundary.')
+    },
+    onSnapshot: () => () => undefined,
+    workflows: {
+      deleteProject: async () => ({ ok: true, value: undefined }),
+      deleteConversation: async () => ({ ok: true, value: undefined })
+    },
+    migration: {
+      getSnapshot: async () => migrationSnapshot,
+      retry: async () => migrationSnapshot,
+      onSnapshot: () => () => undefined
+    }
+  }
+}
+
 export const APP_PROJECTS = Array.from({ length: 12 }, (_, index) => {
   const suffix = index === 0 ? 'Alpha' : index === 1 ? 'Beta' : String(index + 1).padStart(2, '0')
   return {
@@ -28,6 +68,7 @@ export const APP_PROJECTS = Array.from({ length: 12 }, (_, index) => {
     description: '',
     systemPrompt: '',
     includeMemory: false,
+    createdAt: '2026-07-17T00:00:00.000Z',
     updatedAt: '2026-07-17T00:00:00.000Z'
   }
 })
@@ -96,6 +137,7 @@ export function installAppBoundary(overrides: Record<string, unknown> = {}): voi
     voiceTurn: { onRequest: eventSubscription, respond: () => undefined },
     getTranscriptionInfo: async () => null,
     actions: appActionsBoundary(),
+    workspaceContent: appWorkspaceContentBoundary(),
     ...overrides
   }
   const api = new Proxy(values, {
