@@ -27,6 +27,68 @@ function openModelLibrary(): void {
   window.history.replaceState(null, '', '/models')
 }
 
+function repairableCapture(
+  ready: boolean,
+  dismissed: boolean,
+  projection: CaptureReadinessProjection | null
+): RepairableCaptureProjection | null {
+  if (!ready || dismissed || !projection) return null
+  return projection.kind === 'missing-projector' || projection.kind === 'choose-vision-model'
+    ? projection
+    : null
+}
+
+interface NudgeCopyInput {
+  issue?: RepairableCaptureProjection['kind']
+  modelName?: string | null
+  missingModel?: boolean
+  missingLocalNetwork?: boolean
+  repairing: boolean
+  presentedProgress: ReturnType<typeof projectProgress> | null
+}
+
+function nudgeCta(input: NudgeCopyInput): string {
+  if (input.repairing) {
+    return input.presentedProgress?.determinate
+      ? `Downloading ${Math.round(input.presentedProgress.percentage ?? 0)}%`
+      : 'Downloading'
+  }
+  if (input.issue === 'missing-projector') return 'Download vision support'
+  if (input.issue === 'choose-vision-model') return 'Choose model'
+  return input.missingModel ? 'Configure' : 'Set up'
+}
+
+function projectNudgeCopy(input: NudgeCopyInput): { title: string; detail: string; cta: string } {
+  if (input.issue === 'missing-projector') {
+    return {
+      title: 'Capture needs vision support',
+      detail: `${input.modelName ?? 'The active model'} can read images after its vision projector is downloaded.`,
+      cta: nudgeCta(input)
+    }
+  }
+  if (input.issue === 'choose-vision-model') {
+    return {
+      title: 'Capture needs a vision model',
+      detail: `${input.modelName ?? 'The active model'} cannot analyze Replay frames. Choose a vision-capable chat model.`,
+      cta: nudgeCta(input)
+    }
+  }
+  if (input.missingModel) {
+    return {
+      title: 'Set up your local AI',
+      detail: `Pick a model yourself, or let Off Grid AI configure one for your ${deviceNoun()}.`,
+      cta: nudgeCta(input)
+    }
+  }
+  return {
+    title: input.missingLocalNetwork ? 'Allow Local Network access' : 'Finish setting up capture',
+    detail: input.missingLocalNetwork
+      ? 'Allow this Mac to find and sync directly with your devices.'
+      : 'Grant screen and accessibility access so Off Grid AI can see and remember.',
+    cta: nudgeCta(input)
+  }
+}
+
 export function PermissionGate({ children }: PermissionGateProps): React.JSX.Element {
   const { isPro } = useRendererEntitlement()
   const [modelStatus, setModelStatus] = useState<Awaited<
@@ -114,6 +176,7 @@ export function PermissionGate({ children }: PermissionGateProps): React.JSX.Ele
   // wall — so free users also get the "Configure for me" prompt when they have no
   // model yet (the most useful first-run action).
   const ready = permsOk && !!modelStatus?.configured
+  const captureIssue = repairableCapture(ready, setupDismissed, captureReadiness.projection)
 
   // Default (NON-blocking): drop straight into the shell so people can look around.
   // Show a slim, dismissible nudge when capture perms or a model are still missing.
@@ -137,21 +200,17 @@ export function PermissionGate({ children }: PermissionGateProps): React.JSX.Ele
             onDismiss={() => setSetupDismissed(true)}
           />
         )}
-        {ready &&
-          captureReadiness.projection &&
-          (captureReadiness.projection.kind === 'missing-projector' ||
-            captureReadiness.projection.kind === 'choose-vision-model') &&
-          !setupDismissed && (
-            <SetupNudge
-              issue={captureReadiness.projection.kind}
-              modelName={captureReadiness.projection.modelName}
-              progress={captureReadiness.progress}
-              repairing={captureReadiness.repairing}
-              failure={captureReadiness.failure}
-              onOpen={() => void captureReadiness.repair()}
-              onDismiss={() => setSetupDismissed(true)}
-            />
-          )}
+        {captureIssue ? (
+          <SetupNudge
+            issue={captureIssue.kind}
+            modelName={captureIssue.modelName}
+            progress={captureReadiness.progress}
+            repairing={captureReadiness.repairing}
+            failure={captureReadiness.failure}
+            onOpen={() => void captureReadiness.repair()}
+            onDismiss={() => setSetupDismissed(true)}
+          />
+        ) : null}
       </>
     )
   }
@@ -317,39 +376,16 @@ function SetupNudge({
   // Model-first wording. Missing a model is the thing that actually blocks you, and
   // "Configure for me" handles it in one click — so lead with that for both tiers.
   // Capture permissions (Pro-only) are the secondary, optional step.
-  const title =
-    issue === 'missing-projector'
-      ? 'Capture needs vision support'
-      : issue === 'choose-vision-model'
-        ? 'Capture needs a vision model'
-        : missingModel
-          ? 'Set up your local AI'
-          : missingLocalNetwork
-            ? 'Allow Local Network access'
-            : 'Finish setting up capture'
-  const detail =
-    issue === 'missing-projector'
-      ? `${modelName ?? 'The active model'} can read images after its vision projector is downloaded.`
-      : issue === 'choose-vision-model'
-        ? `${modelName ?? 'The active model'} cannot analyze Replay frames. Choose a vision-capable chat model.`
-        : missingModel
-          ? `Pick a model yourself, or let Off Grid AI configure one for your ${deviceNoun()}.`
-          : missingLocalNetwork
-            ? 'Allow this Mac to find and sync directly with your devices.'
-            : 'Grant screen and accessibility access so Off Grid AI can see and remember.'
   const presentedProgress = progress ? projectProgress(progress) : null
   const summary = presentedProgress ? downloadProgressSummary(presentedProgress) : null
-  const cta = repairing
-    ? presentedProgress?.determinate
-      ? `Downloading ${Math.round(presentedProgress.percentage ?? 0)}%`
-      : 'Downloading'
-    : issue === 'missing-projector'
-      ? 'Download vision support'
-      : issue === 'choose-vision-model'
-        ? 'Choose model'
-        : missingModel
-          ? 'Configure'
-          : 'Set up'
+  const { title, detail, cta } = projectNudgeCopy({
+    issue,
+    modelName,
+    missingModel,
+    missingLocalNetwork,
+    repairing,
+    presentedProgress
+  })
   // When Tasks consumes the whole usable workspace, defer this non-blocking
   // prompt. In split mode, keep it wholly inside Chat and away from native
   // browser content.
