@@ -7,30 +7,17 @@ import {
   IconSearch,
   IconChevronDown,
   IconCheck,
-  IconX,
-  IconTrash,
   IconUpload,
-  IconInfoCircle,
   IconExternalLink,
   IconEye,
-  IconDatabase,
-  IconStarFilled,
-  IconPlayerPause,
-  IconPlayerPlay
+  IconDatabase
 } from '@tabler/icons-react'
 import { StoragePanel } from './setup/StoragePanel'
 import { SidePanel } from './SidePanel'
 import { deviceNoun } from '@renderer/lib/device'
 import { collectTags, matchesAllTags, toggleTag } from '@renderer/lib/model-tag-filter'
-import { companionDownloadLabel } from '@renderer/lib/download-label'
-import { isActiveDownloadStatus } from '@offgrid/application'
 import { projectProgress } from '@offgrid/ui'
-import { downloadProgressSummary } from '@renderer/lib/download-progress'
-import {
-  modelSettingsTabForKind,
-  openModelSettingsPanel,
-  supportsModelSettings
-} from '@renderer/lib/model-settings-panel'
+import { modelSettingsTabForKind, openModelSettingsPanel } from '@renderer/lib/model-settings-panel'
 import {
   fitTier,
   type FitTier,
@@ -38,15 +25,9 @@ import {
   FIT_OK_FRAC,
   modelControlSurfaceForKind,
   catalogEntryRank,
-  catalogTagTone,
-  visibleCatalogTags,
-  type CatalogTagTone,
-  isLocalLibraryModelId,
   modelsFailureMessage,
-  type ModelControlCatalogModel,
   type ModelControlProjection,
-  type ModelControlSuccess,
-  type PublicDownloadInfo
+  type ModelControlSuccess
 } from '@offgrid/application'
 import {
   filterAndSort,
@@ -61,8 +42,7 @@ import {
   recommendedImageModelId,
   type FilterState,
   type Credibility,
-  type ModelKind,
-  type ModelsFailure
+  type ModelKind
 } from '@offgrid/application'
 import { modelControlClient } from '@renderer/lib/model-control-client'
 import {
@@ -71,6 +51,17 @@ import {
   internalTabSubroute
 } from '@renderer/lib/internal-tab-route'
 import { MODEL_FILE_EXTENSION } from '@offgrid/application'
+import {
+  modelDetailIdentity,
+  modelDetailState,
+  modelTotalBytes,
+  mutableCatalogModel,
+  type DownloadCardProgress,
+  type ModelEntry,
+  withoutProgressEntry
+} from './model-card-types'
+import { DownloadSummary, ModelCatalogCard } from './ModelCatalogCard'
+import { ModelDownloadActions } from './ModelDownloadActions'
 
 function Sel({
   value,
@@ -141,21 +132,6 @@ function Sel({
   )
 }
 
-type ModelEntry = Omit<ModelControlCatalogModel, 'artifacts' | 'imageModes' | 'tags'> & {
-  artifacts: Array<ModelControlCatalogModel['artifacts'][number]>
-  imageModes?: string[]
-  tags?: string[]
-}
-
-function mutableCatalogModel(model: ModelControlCatalogModel): ModelEntry {
-  return {
-    ...model,
-    artifacts: [...model.artifacts],
-    imageModes: model.imageModes ? [...model.imageModes] : undefined,
-    tags: model.tags ? [...model.tags] : undefined
-  }
-}
-
 interface UseCase {
   id: string
   label: string
@@ -202,143 +178,7 @@ const USE_CASES: UseCase[] = [
   }
 ]
 
-function fmtReleaseDate(iso?: string): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
-}
-
 // What a tag means is shared (catalogTagTone); how this surface paints it is not.
-const TAG_TONE_CLASS: Record<CatalogTagTone, string> = {
-  fast: 'border border-green-500/60 text-green-500',
-  light: 'border border-emerald-300/50 text-emerald-300',
-  challenger: 'text-amber-400',
-  plain: 'bg-neutral-800 text-neutral-500'
-}
-
-const MODE_LABELS: Record<string, string> = { txt2img: 'Text→Image', img2img: 'Image→Image' }
-
-/** What the card needs to describe a download honestly: one percent for the WHOLE job, the bytes
- *  behind it, which file is in flight and how many the job has, and why it failed if it did. */
-interface DownloadCardProgress {
-  downloadId?: string
-  percent?: number
-  /** The download's own lifecycle phase, straight from the event. A typed union, so `cancelled`
-   *  and `interrupted` stay distinguishable from a genuine `failed` without reading any text. */
-  status?: PublicDownloadInfo['status']
-  currentFile?: string
-  currentFileRole?: PublicDownloadInfo['currentFileRole']
-  /** The typed refusal kind when the REQUEST was refused, so what happened is never re-derived
-   *  by comparing the rendered message against a known string. */
-  failureKind?: ModelsFailure['kind']
-  error?: string
-  /** A COMMAND about this download was refused (a cancel that did not take), as opposed to the
-   *  transfer itself failing. Kept separate from `status`/`error` on purpose: the transfer is very
-   *  likely still running, and marking a live download `failed` to report a failed cancel just
-   *  swaps one false projection for another. */
-  commandError?: string
-  downloadedMB?: string
-  totalMB?: string
-  downloadedBytes?: number
-  totalBytes?: number
-  bytesPerSecond?: number
-  fileIndex?: number
-  fileCount?: number
-}
-
-function withoutProgressEntry(
-  progress: Record<string, DownloadCardProgress>,
-  modelId: string
-): Record<string, DownloadCardProgress> {
-  const next = { ...progress }
-  delete next[modelId]
-  return next
-}
-
-/**
- * A byte count at human scale, in decimal GB - the ONE size rule on this screen.
- *
- * It was two. The card's meta line divided bytes by 1e9 and the progress line divided megabytes by
- * 1024, so the same file was printed twice on one card in two different units under one label:
- * "25.4GB" above "23.7 GB". Decimal is the correct half - sizeBytes comes from Hugging Face, and
- * that is the number the publisher quotes - so the progress line was the one that lied.
- *
- * Below a gigabyte, MB reads better than "0.4 GB".
- */
-function formatSize(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return ''
-  return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`
-}
-
-/** One read-only transfer summary for the catalog card and its detail panel. */
-function renderDownloadSummary(prog: DownloadCardProgress, showFile = false): React.JSX.Element {
-  const progress = projectProgress(prog)
-  const summary = downloadProgressSummary(progress)
-  const companion = companionDownloadLabel(prog.currentFileRole)
-  const status =
-    prog.status === 'preparing'
-      ? 'Preparing'
-      : prog.status === 'queued'
-        ? 'Queued'
-        : progress.determinate
-          ? `${Math.round(progress.percentage ?? 0)}%`
-          : 'Downloading'
-  const parts = [
-    companion,
-    prog.status === 'paused' ? 'Paused' : null,
-    status,
-    summary.bytes,
-    summary.rate,
-    summary.timeRemaining
-  ].filter(Boolean)
-  return (
-    <div
-      className="grid w-full min-w-0 gap-1 text-[10px] tabular-nums text-neutral-500"
-      aria-label="Download progress"
-    >
-      <div
-        className="flex min-w-0 items-baseline gap-1 overflow-hidden whitespace-nowrap text-neutral-400"
-        title={parts.join(' · ')}
-      >
-        {companion && (
-          <>
-            <span className="shrink-0">{companion}</span>
-            <span aria-hidden="true">·</span>
-          </>
-        )}
-        {prog.status === 'paused' && (
-          <>
-            <span className="shrink-0">Paused</span>
-            <span aria-hidden="true">·</span>
-          </>
-        )}
-        <span className="shrink-0 text-neutral-300">{status}</span>
-        <span aria-hidden="true">·</span>
-        <span>{summary.bytes}</span>
-        <span aria-hidden="true">·</span>
-        <span>{summary.rate}</span>
-        {summary.timeRemaining && (
-          <>
-            <span aria-hidden="true">·</span>
-            <span className="min-w-0 truncate">{summary.timeRemaining}</span>
-          </>
-        )}
-      </div>
-      {showFile && prog.currentFile && (
-        <div className="mt-1 min-w-0 break-all text-neutral-500" aria-label="Current download file">
-          {prog.currentFile}
-        </div>
-      )}
-      {prog.commandError && (
-        <span className="min-w-0 truncate text-red-400/90" title={prog.commandError} role="status">
-          {prog.commandError}
-        </span>
-      )}
-    </div>
-  )
-}
-
 /** Plain words for a download that did not finish. You need two things from this line: what
  *  happened, and whether trying again is worth it. The raw engine string stays in the title
  *  attribute, where it helps a bug report without shouting at everyone else.
@@ -348,15 +188,6 @@ function renderDownloadSummary(prog: DownloadCardProgress, showFile = false): Re
  *  read a rendered sentence as if it were data. The `interrupted` comparison was also already
  *  dead: an interrupted download carries `status: 'interrupted'`, and only `status: 'failed'`
  *  reached this text, so an interrupted row rendered no explanation at all. */
-function downloadFailureText(prog: DownloadCardProgress): string {
-  if (prog.status === 'interrupted') {
-    return 'The download stopped before it finished. Try again to pick up where it left off.'
-  }
-  if (prog.failureKind === 'unknown_model') return 'This model is not available to download.'
-  if (!prog.error) return 'The download did not start.'
-  return prog.error
-}
-
 /**
  * Read the preload bridge at USE time, never at module load: the bridge is installed on `window`
  * before the renderer mounts, and any consumer that imports this module must see the same object
@@ -667,37 +498,16 @@ export function ModelsScreen({
         setChangingDownloads(new Set(changingDownloadOwners.current.keys()))
       })
   }
-  const renderDownloadActions = (id: string, prog: DownloadCardProgress): React.JSX.Element => (
-    <div className="flex shrink-0 items-center gap-0.5">
-      {prog.downloadId && prog.status !== 'preparing' && (
-        <button
-          disabled={changingDownloads.has(id)}
-          onClick={() =>
-            changeDownload(id, prog.status === 'paused' ? 'resume-download' : 'pause-download')
-          }
-          aria-label={prog.status === 'paused' ? 'Resume' : 'Pause'}
-          title={prog.status === 'paused' ? 'Resume download' : 'Pause download'}
-          className="rounded p-1 text-neutral-500 transition-colors duration-150 hover:bg-neutral-800 hover:text-neutral-200 active:scale-90 disabled:opacity-40"
-        >
-          {prog.status === 'paused' ? (
-            <IconPlayerPlay className="h-3.5 w-3.5" />
-          ) : (
-            <IconPlayerPause className="h-3.5 w-3.5" />
-          )}
-        </button>
-      )}
-      {prog.downloadId && prog.status !== 'preparing' && (
-        <button
-          disabled={changingDownloads.has(id)}
-          onClick={() => changeDownload(id, 'cancel-download')}
-          aria-label="Cancel"
-          title="Cancel download"
-          className="rounded p-1 text-neutral-500 transition-colors duration-150 hover:bg-neutral-800 hover:text-red-400 active:scale-90 disabled:opacity-40"
-        >
-          <IconX className="h-3.5 w-3.5" />
-        </button>
-      )}
-    </div>
+  const renderDownloadActions = (
+    id: string,
+    cardProgress: DownloadCardProgress
+  ): React.JSX.Element => (
+    <ModelDownloadActions
+      modelId={id}
+      progress={cardProgress}
+      changing={changingDownloads.has(id)}
+      onChange={changeDownload}
+    />
   )
   const download = (
     model: ModelEntry,
@@ -869,9 +679,6 @@ export function ModelsScreen({
   // filtered grid - follows on the deferred value, so a keystroke never waits on the list.
   const deferredQuery = useDeferredValue(query)
   const searchingMode = searchEnabled && deferredQuery.trim().length >= 2
-  const totalBytes = (m: { artifacts: readonly { sizeBytes?: number }[] }): number =>
-    m.artifacts.reduce((s, f) => s + (f.sizeBytes || 0), 0)
-
   useEffect(() => {
     const q = deferredQuery.trim()
     if (!searchEnabled || q.length < 2) {
@@ -946,7 +753,7 @@ export function ModelsScreen({
     )
       .map((model) => byId.get(model.id))
       .filter((model): model is ModelEntry => model !== undefined)
-      .filter((m) => sizeBucket == null || totalBytes(m) <= sizeBucket * 1e9)
+      .filter((m) => sizeBucket == null || modelTotalBytes(m) <= sizeBucket * 1e9)
       .filter(
         (m) => activeKind !== 'text' || (USE_CASES.find((u) => u.id === useCase)?.match(m) ?? true)
       )
@@ -989,296 +796,45 @@ export function ModelsScreen({
   // never-block posture, more accurate than the old 3-way "may not fit".
   const ramTier = (m: ModelEntry): FitTier => {
     if (!ramGb) return 'easy'
-    const gb = totalBytes(m) / 1e9
+    const gb = modelTotalBytes(m) / 1e9
     if (!gb) return 'easy'
     return fitTier(gb, ramGb)
   }
 
-  const renderCard = (m: ModelEntry, isHf = false): React.JSX.Element => {
-    const isInstalled = installed.includes(m.id)
-    const isRemote = Boolean(m.remoteServerId)
-    const active = isActive(m.id)
-    const prog = progress[m.id]
-    const downloading =
-      prog?.status !== undefined &&
-      (isActiveDownloadStatus(prog.status) || prog.status === 'paused')
-    const downloadProgress = prog ? projectProgress(prog) : null
-    // Installed, vision-capable, but the projector isn't on disk (e.g. downloaded before
-    // the model gained vision) → offer to fetch just the projector. downloadModel skips
-    // files already present, so this pulls only the mmproj.
-    const vs = visionSt[m.id]
-    const projectorMissing = isInstalled && !!vs?.supportsVision && !vs.projectorInstalled
-    const failedProjector =
-      prog?.currentFileRole === 'mmproj' &&
-      (prog.status === 'failed' || prog.status === 'interrupted')
-    const bytes = totalBytes(m)
-    const size = formatSize(bytes) || null
-    const meta = [m.org, m.params ? `${m.params}B` : null, size, fmtReleaseDate(m.releaseDate)]
-      .filter(Boolean)
-      .join(' · ')
-    const tier: FitTier = isHf ? 'easy' : ramTier(m)
-    const tags = visibleCatalogTags(m.tags)
-    const comingSoon = m.availability === 'coming_soon'
-    // The single image pick best-suited to THIS machine's RAM (Light on <=16GB,
-    // full above) — a prominent filled-emerald badge, distinct from the outlined tags.
-    const recommended = !isHf && !!recommendedImageId && m.id === recommendedImageId
-
-    return (
-      <div
-        key={m.id}
-        role="listitem"
-        className={`group flex flex-col gap-2 rounded-md border p-3 transition-all duration-150 hover:border-neutral-700 ${active ? 'border-green-500/50 bg-green-500/5' : 'border-neutral-800 bg-neutral-900/40'}`}
-      >
-        {/* Title row */}
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-1">
-              <button
-                onClick={() => openDetail(m)}
-                className="truncate text-left text-xs text-neutral-100 transition-colors duration-100 hover:text-emerald-500"
-              >
-                {m.name}
-              </button>
-              {m.kind === 'vision' && (
-                <span className="flex shrink-0 items-center gap-0.5 rounded-sm border border-green-500/60 px-1 py-px text-[8px] uppercase tracking-wide text-green-500">
-                  <IconEye className="h-2 w-2" /> Vision
-                </span>
-              )}
-              {m.isNew && (
-                <span className="shrink-0 rounded-sm border border-green-500/60 px-1 py-px text-[8px] uppercase tracking-wide text-green-500">
-                  New
-                </span>
-              )}
-            </div>
-            {meta && <div className="mt-0.5 truncate text-[10px] text-neutral-600">{meta}</div>}
-          </div>
-          <button
-            onClick={() => openDetail(m)}
-            title="Details"
-            className="shrink-0 rounded p-0.5 text-neutral-700 opacity-0 transition-all duration-150 hover:text-neutral-300 active:scale-90 group-hover:opacity-100"
-          >
-            <IconInfoCircle className="h-3.5 w-3.5" />
-          </button>
-        </div>
-
-        {/* Badges row */}
-        {(comingSoon ||
-          recommended ||
-          tags.length > 0 ||
-          tier === 'tight' ||
-          tier === 'wontFit') && (
-          <div className="flex flex-wrap items-center gap-1">
-            {comingSoon && (
-              <span className="shrink-0 rounded-sm border border-amber-400/60 px-1 py-px text-[8px] uppercase tracking-wide text-amber-400">
-                Coming soon
-              </span>
-            )}
-            {recommended && (
-              // Prominent FILLED emerald badge — the pick for this machine's RAM,
-              // set apart from the outlined capability tags below.
-              <span className="flex shrink-0 items-center gap-0.5 rounded-sm bg-green-500 px-1.5 py-px text-[8px] font-semibold uppercase tracking-wide text-black">
-                <IconStarFilled className="h-2 w-2" /> Recommended for you
-              </span>
-            )}
-            {tags.map((t) => {
-              // "Fast" = distilled few-step model (~30s vs ~100s) — highlight in
-              // the emerald brand accent so it reads as the recommended quick pick.
-              // "Light" = a smaller/lower-memory quant — amber outline so it reads
-              // as the memory-friendly variant (distinct from the emerald "Fast").
-              const cls = TAG_TONE_CLASS[catalogTagTone(t)]
-              return (
-                <span
-                  key={t}
-                  className={`rounded-sm px-1 py-px text-[8px] uppercase tracking-wide ${cls}`}
-                >
-                  {t}
-                </span>
-              )
-            })}
-            {(tier === 'tight' || tier === 'wontFit') && (
-              <span
-                className={`rounded-sm px-1.5 py-px text-[8px] uppercase tracking-wide ${
-                  tier === 'tight'
-                    ? 'border border-amber-400/60 text-amber-400'
-                    : 'border border-red-400/60 bg-red-400/10 text-red-400'
-                }`}
-                title={
-                  tier === 'tight'
-                    ? 'Fits, but context will be tight on this Mac'
-                    : "Past this Mac's comfortable ceiling — you can still Load anyway"
-                }
-              >
-                {tier === 'tight' ? 'Tight on RAM' : "Won't fit — Load anyway"}
-              </span>
-            )}
-          </div>
-        )}
-
-        {comingSoon && m.availabilityNote && (
-          <p className="text-[9px] leading-relaxed text-neutral-600">{m.availabilityNote}</p>
-        )}
-
-        {/* Action row */}
-        <div
-          className={`mt-auto flex gap-2 pt-1 ${downloading ? 'flex-col items-stretch' : 'items-center justify-between'}`}
-        >
-          {comingSoon ? (
-            <span className="text-[10px] text-neutral-500">
-              Available after support is fully tested
-            </span>
-          ) : active && !downloading ? (
-            <span className="flex items-center gap-1 text-[11px] text-green-500">
-              <IconCircleCheck className="h-3.5 w-3.5" /> Active
-            </span>
-          ) : isInstalled && !downloading ? (
-            // Every installed model is activatable for its type — no kind branch.
-            // Includes a downloaded HF model (registered as installed), so its search
-            // card flips from Download to Use instead of resetting.
-            <button
-              onClick={() => activateModel(m.id)}
-              disabled={!!switching}
-              className="flex items-center gap-1 rounded border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95 disabled:opacity-40"
-            >
-              {switching === m.id ? (
-                <>
-                  <IconLoader2 className="h-3 w-3 animate-spin" /> Switching
-                </>
-              ) : (
-                'Use'
-              )}
-            </button>
-          ) : downloading ? (
-            // Metrics keep the full card width. Compact controls sit beside the progress bar below.
-            renderDownloadSummary(prog)
-          ) : prog?.status === 'failed' || prog?.status === 'interrupted' ? (
-            // A failure is a STATE of the action row, not a banner under it. As its own block it
-            // stacked a second button beneath "Download" and asked you to choose between two ways
-            // of doing the same thing. Reason left, one button right, on the row that was already
-            // there.
-            //
-            // `interrupted` shares this row because it wants the same thing - a word and a retry -
-            // but not the failure tone: it stopped, it did not break.
-            <>
-              <span
-                className={`min-w-0 truncate text-[10px] ${
-                  prog.status === 'interrupted' ? 'text-neutral-400' : 'text-red-400/90'
-                }`}
-                title={prog.error}
-                role="status"
-              >
-                {downloadFailureText(prog)}
-              </span>
-              <button
-                onClick={() => retryDownload(m)}
-                className="flex shrink-0 items-center gap-1 rounded border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95"
-              >
-                <IconDownload className="h-3 w-3" /> Try again
-              </button>
-            </>
-          ) : (
-            <button
-              onClick={() => download(m)}
-              className="flex items-center gap-1 rounded border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95"
-            >
-              <IconDownload className="h-3 w-3" /> Download
-            </button>
-          )}
-          {isInstalled && (
-            <div className="flex shrink-0 items-center gap-1">
-              {active && !isRemote && supportsModelSettings(m.kind) && (
-                <button
-                  onClick={() => openModelSettings(m.kind)}
-                  aria-label="Open model settings"
-                  title="Open settings for the active model"
-                  className="rounded border border-neutral-800 px-1.5 py-1 text-[9px] text-neutral-500 transition-all duration-150 hover:border-green-500/60 hover:text-emerald-500 active:scale-95"
-                >
-                  Settings
-                </button>
-              )}
-              {!isRemote && (
-                <button
-                  onClick={() => removeModel(m.id, m.name)}
-                  disabled={deleting === m.id || active}
-                  title={active ? 'Switch to another model before deleting' : 'Delete from disk'}
-                  className="rounded p-1 text-neutral-700 transition-all duration-150 hover:text-red-400 active:scale-90 disabled:opacity-30 group-hover:text-neutral-500"
-                >
-                  {deleting === m.id ? (
-                    <IconLoader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <IconTrash className="h-3 w-3" />
-                  )}
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Vision-capable but projector not downloaded — offer to add it. Hidden while a
-            download is in flight (the progress UI covers that). */}
-        {!comingSoon && projectorMissing && !downloading && (
-          <div className="grid min-w-0 gap-1">
-            {failedProjector && (
-              <p className="text-[10px] text-neutral-500" role="status">
-                {downloadFailureText(prog)}
-              </p>
-            )}
-            <button
-              onClick={() => download(m, 'repair-projector')}
-              title="Download the vision projector so this model can read images"
-              className="flex items-center gap-1 rounded border border-amber-400/50 px-2 py-1 text-[10px] text-amber-300 transition-all duration-150 hover:border-amber-400 hover:bg-amber-400/10 active:scale-95"
-            >
-              <IconEye className="h-3 w-3 shrink-0" />{' '}
-              {failedProjector ? 'Retry vision support (mmproj)' : 'Add vision support'}
-            </button>
-          </div>
-        )}
-
-        {/* Download progress: one bar, one line. It used to be four stacked rows — a percent chip,
-            a shouted status, the bytes, then the bar — which said the same thing three times and
-            grew the card by half while it ran. The bar carries the shape of the progress, the line
-            carries the exact amount, and the part being fetched is named at the end of it where it
-            belongs (adding a projector to a model already on disk is not a re-download). */}
-        {downloading && (
-          <div className="flex w-full items-center gap-1.5">
-            <div className="h-0.5 min-w-0 flex-1 overflow-hidden rounded-full bg-neutral-800">
-              <div
-                className="h-full w-full origin-left bg-green-500 transition-transform duration-300 ease-out motion-reduce:transition-none"
-                style={{ transform: `scaleX(${(downloadProgress?.percentage ?? 0) / 100})` }}
-              />
-            </div>
-            {renderDownloadActions(m.id, prog)}
-          </div>
-        )}
-      </div>
-    )
-  }
+  const renderCard = (model: ModelEntry, isHf = false): React.JSX.Element => (
+    <ModelCatalogCard
+      key={model.id}
+      model={model}
+      isHf={isHf}
+      installed={installed.includes(model.id)}
+      active={isActive(model.id)}
+      remote={Boolean(model.remoteServerId)}
+      progress={progress[model.id]}
+      visionStatus={visionSt[model.id]}
+      ramTier={ramTier}
+      recommendedImageId={recommendedImageId}
+      switching={switching}
+      deleting={deleting}
+      onOpen={openDetail}
+      onActivate={(id) => void activateModel(id)}
+      onRetry={retryDownload}
+      onDownload={download}
+      onOpenSettings={openModelSettings}
+      onRemove={(id, label) => void removeModel(id, label)}
+      renderDownloadActions={renderDownloadActions}
+    />
+  )
 
   const GRID = 'grid grid-cols-2 gap-2 px-6 py-3 lg:grid-cols-3 2xl:grid-cols-4'
   const detailModel = detail
-  const detailIsLocal = detailModel ? isLocalLibraryModelId(detailModel.id) : false
-  const detailRepository = detailModel?.sourceModelId ?? detailModel?.id ?? ''
-  const detailUrl =
-    detailModel && !detailIsLocal && detailRepository.includes('/')
-      ? `https://huggingface.co/${detailRepository}`
-      : null
-  const detailBytes = detailModel ? totalBytes(detailModel) : 0
-  const detailIsInstalled = detailModel ? installed.includes(detailModel.id) : false
-  const detailIsActive = detailModel ? isActive(detailModel.id) : false
-  const detailProgress = detailModel ? progress[detailModel.id] : undefined
-  const detailIsDownloading =
-    detailProgress?.status !== undefined &&
-    (isActiveDownloadStatus(detailProgress.status) || detailProgress.status === 'paused')
-  const detailIsComingSoon = detailModel?.availability === 'coming_soon'
-  const detailRows: [string, string | null][] = detailModel
-    ? [
-        ['Source', detailModel.org || (detailIsLocal ? 'Imported' : '—')],
-        ['Parameters', detailModel.params ? `${detailModel.params}B` : null],
-        ['Quantization', detailModel.quant || null],
-        ['Download', formatSize(detailBytes) || null],
-        ['Released', fmtReleaseDate(detailModel.releaseDate) || null],
-        ['Min RAM', detailModel.minRamGb ? `${detailModel.minRamGb} GB` : null]
-      ]
-    : []
+  const { url: detailUrl, bytes: detailBytes, rows: detailRows } = modelDetailIdentity(detailModel)
+  const {
+    installed: detailIsInstalled,
+    active: detailIsActive,
+    progress: detailProgress,
+    downloading: detailIsDownloading,
+    comingSoon: detailIsComingSoon
+  } = modelDetailState({ model: detailModel, installed, activeIds, progress })
 
   return (
     <div className="flex h-full flex-col font-mono">
@@ -1687,7 +1243,7 @@ export function ModelsScreen({
                 </>
               ) : detailIsDownloading ? (
                 <>
-                  {renderDownloadSummary(detailProgress, true)}
+                  <DownloadSummary progress={detailProgress} showFile />
                   <div className="flex w-full items-center gap-2">
                     <div className="h-0.5 min-w-0 flex-1 overflow-hidden rounded-full bg-neutral-800">
                       <div
