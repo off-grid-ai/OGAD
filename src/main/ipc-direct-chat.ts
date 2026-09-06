@@ -7,7 +7,6 @@ import {
   type GenerationMessage
 } from '@offgrid/models'
 import { generateDesktopText } from './desktop-generation'
-import { readUrlText } from './tools'
 
 type StreamSender = { send: (channel: string, payload: unknown) => void }
 
@@ -36,6 +35,7 @@ export async function answerDirectChatIntent<T>(input: {
         step: { kind: 'reading', counts: { urls: input.urls.length } }
       })
     }
+    const { readUrlText } = await import('./tools')
     for (const url of input.urls) {
       try {
         references.push({ url, content: await readUrlText(url) })
