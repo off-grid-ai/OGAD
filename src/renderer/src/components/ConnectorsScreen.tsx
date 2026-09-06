@@ -1,19 +1,7 @@
 import { useEffect, useMemo, useState, useCallback, useRef, type ReactElement } from 'react'
 import { ConnectorPullQueryField } from './ConnectorPullQueryField'
 import { ConnectorSecretsForm } from './ConnectorSecretsForm'
-import {
-  IconLoader2,
-  IconPlug,
-  IconPlus,
-  IconTrash,
-  IconPlugConnected,
-  IconAlertTriangle,
-  IconCircleCheck,
-  IconRefresh,
-  IconChevronRight,
-  IconChevronLeft,
-  IconX
-} from '@tabler/icons-react'
+import * as Tabler from '@tabler/icons-react'
 import { connectorFailureReason } from '@offgrid/application'
 import {
   CONNECTOR_CATALOG,
@@ -174,11 +162,11 @@ function ConnectorConnectControls({
         >
           {connecting ? (
             <>
-              <IconLoader2 className="h-3.5 w-3.5 animate-spin" /> {progressLabel}
+              <Tabler.IconLoader2 className="h-3.5 w-3.5 animate-spin" /> {progressLabel}
             </>
           ) : (
             <>
-              <IconPlugConnected className="h-3.5 w-3.5" /> Connect
+              <Tabler.IconPlugConnected className="h-3.5 w-3.5" /> Connect
               {entry.auth === 'oauth' ? ' with OAuth' : ''}
             </>
           )}
@@ -191,7 +179,7 @@ function ConnectorConnectControls({
             title="Cancel authorization"
             className="flex size-8 shrink-0 items-center justify-center rounded-md border border-neutral-700 text-neutral-400 transition-colors hover:border-red-500 hover:text-red-400"
           >
-            <IconX className="h-3.5 w-3.5" />
+            <Tabler.IconX className="h-3.5 w-3.5" />
           </button>
         )}
       </div>
@@ -232,6 +220,19 @@ async function settleConnectionAttempt(
   if (result?.ok) return { connected: true }
   await removePendingConnector(id)
   return { connected: false, error: connectorFailureReason(result?.error ?? 'Could not connect') }
+}
+
+function connectorDetail(items: readonly Connector[], detailId: number | null): Connector | null {
+  return detailId == null ? null : (items.find((connector) => connector.id === detailId) ?? null)
+}
+
+function fmtAgo(ms: number | null): string {
+  if (!ms) return 'never'
+  const seconds = Math.floor((Date.now() - ms) / 1000)
+  if (seconds < 60) return 'just now'
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`
+  return `${Math.floor(seconds / 86400)}d ago`
 }
 
 export function ConnectorsScreen(): ReactElement {
@@ -408,20 +409,11 @@ export function ConnectorsScreen(): ReactElement {
     setDetailId(c.id)
     setSyncedItems((await window.api.mcpItems(c.name)) ?? [])
   }
-  const fmtAgo = (ms: number | null): string => {
-    if (!ms) return 'never'
-    const s = Math.floor((Date.now() - ms) / 1000)
-    if (s < 60) return 'just now'
-    if (s < 3600) return `${Math.floor(s / 60)}m ago`
-    if (s < 86400) return `${Math.floor(s / 3600)}h ago`
-    return `${Math.floor(s / 86400)}d ago`
-  }
-
   return (
     <div className="flex h-full flex-col bg-neutral-950 font-mono">
       <div className="flex items-center justify-between border-b border-neutral-900 px-6 py-4">
         <div className="flex items-center gap-3">
-          <IconPlug className="h-5 w-5 text-green-500" />
+          <Tabler.IconPlug className="h-5 w-5 text-green-500" />
           <div>
             <h1 className="text-lg tracking-tight text-white">Integrations</h1>
             <div className="text-[11px] uppercase tracking-wide text-neutral-600">
@@ -450,14 +442,14 @@ export function ConnectorsScreen(): ReactElement {
             onClick={() => setAdding((v) => !v)}
             className="flex items-center gap-1 rounded-md border border-neutral-800 px-3 py-1.5 text-xs text-neutral-300 hover:border-green-500 hover:text-green-500"
           >
-            <IconPlus className="h-4 w-4" /> Custom
+            <Tabler.IconPlus className="h-4 w-4" /> Custom
           </button>
         </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
         {(() => {
-          const detail = detailId != null ? items.find((c) => c.id === detailId) : null
+          const detail = connectorDetail(items, detailId)
           if (detail) {
             const dcat = CONNECTOR_CATALOG.find((x) => x.name === detail.name)
             const dNotReady = dcat != null && !dcat.ready // preview/unverified — don't expose Test/Sync
@@ -474,7 +466,7 @@ export function ConnectorsScreen(): ReactElement {
                   }}
                   className="flex items-center gap-1 text-xs text-neutral-400 hover:text-white"
                 >
-                  <IconChevronLeft className="h-4 w-4" /> All integrations
+                  <Tabler.IconChevronLeft className="h-4 w-4" /> All integrations
                 </button>
                 <div className="flex items-start gap-3">
                   {dcat ? (
@@ -512,9 +504,9 @@ export function ConnectorsScreen(): ReactElement {
                           className="flex items-center gap-1 rounded-md border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 hover:border-green-500 hover:text-green-500 disabled:opacity-50"
                         >
                           {testingId === detail.id ? (
-                            <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
+                            <Tabler.IconLoader2 className="h-3.5 w-3.5 animate-spin" />
                           ) : (
-                            <IconPlugConnected className="h-3.5 w-3.5" />
+                            <Tabler.IconPlugConnected className="h-3.5 w-3.5" />
                           )}{' '}
                           Test
                         </button>
@@ -533,7 +525,7 @@ export function ConnectorsScreen(): ReactElement {
                       }}
                       className="rounded-md p-1 text-neutral-600 hover:text-red-400"
                     >
-                      <IconTrash className="h-4 w-4" />
+                      <Tabler.IconTrash className="h-4 w-4" />
                     </button>
                   </div>
                 </div>
@@ -557,9 +549,9 @@ export function ConnectorsScreen(): ReactElement {
                       className="flex items-center gap-1 rounded-md bg-green-500/90 px-3 py-1.5 text-xs text-neutral-950 hover:bg-green-400 disabled:opacity-50"
                     >
                       {syncingId === detail.id ? (
-                        <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
+                        <Tabler.IconLoader2 className="h-3.5 w-3.5 animate-spin" />
                       ) : (
-                        <IconRefresh className="h-3.5 w-3.5" />
+                        <Tabler.IconRefresh className="h-3.5 w-3.5" />
                       )}{' '}
                       Sync recent
                     </button>
@@ -783,7 +775,7 @@ export function ConnectorsScreen(): ReactElement {
                   </h2>
                   {loading && items.length === 0 ? (
                     <div className="flex items-center justify-center gap-2 py-12 text-sm text-neutral-600">
-                      <IconLoader2 className="h-4 w-4 animate-spin" /> Loading…
+                      <Tabler.IconLoader2 className="h-4 w-4 animate-spin" /> Loading…
                     </div>
                   ) : items.length === 0 ? (
                     <p className="py-8 text-sm text-neutral-600">
@@ -818,11 +810,11 @@ export function ConnectorsScreen(): ReactElement {
                                   </span>
                                 ) : c.status === 'ok' ? (
                                   <span className="flex items-center gap-1 text-[11px] text-green-500">
-                                    <IconCircleCheck className="h-3.5 w-3.5" /> connected
+                                    <Tabler.IconCircleCheck className="h-3.5 w-3.5" /> connected
                                   </span>
                                 ) : c.status === 'error' ? (
                                   <span className="flex items-center gap-1 text-[11px] text-red-400">
-                                    <IconAlertTriangle className="h-3.5 w-3.5" /> error
+                                    <Tabler.IconAlertTriangle className="h-3.5 w-3.5" /> error
                                   </span>
                                 ) : (
                                   <span className="text-[11px] text-neutral-600">not tested</span>
@@ -834,7 +826,7 @@ export function ConnectorsScreen(): ReactElement {
                                   : `${c.synced_count ?? 0} items synced · last ${fmtAgo(c.last_synced)}`}
                               </div>
                             </div>
-                            <IconChevronRight className="h-4 w-4 shrink-0 text-neutral-600" />
+                            <Tabler.IconChevronRight className="h-4 w-4 shrink-0 text-neutral-600" />
                           </button>
                         )
                       })}

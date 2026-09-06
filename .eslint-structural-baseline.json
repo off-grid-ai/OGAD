@@ -569,7 +569,7 @@
     },
     "src/renderer/src/components/ConnectorsScreen.tsx": {
       "max-lines-per-function": [
-        610
+        606
       ],
       "max-lines": [
         843
