@@ -636,13 +636,13 @@
     },
     "src/renderer/src/components/SettingsPanel.tsx": {
       "max-lines-per-function": [
-        684
+        683
       ],
       "complexity": [
         68
       ],
       "max-lines": [
-        827
+        787
       ]
     },
     "src/renderer/src/components/SoftwareUpdateSection.tsx": {

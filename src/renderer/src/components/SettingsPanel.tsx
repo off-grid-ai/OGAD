@@ -1,29 +1,27 @@
-import { createElement, useCallback, useEffect, useState } from 'react'
+import { createElement, useCallback, useState } from 'react'
 import { persistToggle } from '@renderer/lib/persist-toggle'
 import {
   DEFAULT_CTX_SIZE,
   DEFAULT_MAX_TOOL_CALLS,
   DESKTOP_TEXT_SETTINGS_DEFAULTS,
   MAX_MAX_TOOL_CALLS,
-  MAX_TOKENS_AUTO,
   MIN_MAX_TOOL_CALLS,
   MIN_CAPTURE_CTX_SIZE,
   REASONING_BUDGET_AUTO,
   REASONING_BUDGET_OPTIONS,
   reasoningBudgetLabel,
   optionsWithinCeiling,
-  reconcileBudgets,
   failed,
   modelsFailureMessage,
   ok
 } from '@offgrid/application'
-import { gpuLayersHint, type EngineAccelerator } from '@offgrid/core/shared/engine-accelerator'
+import { gpuLayersHint } from '@offgrid/core/shared/engine-accelerator'
 import {
   contextWindowOptions,
   contextWindowHint,
   recommendedContextWindow
 } from '@renderer/lib/ctx-options'
-import { formatContextWindow, resolveModelName } from '@renderer/lib/model-summary'
+import { formatContextWindow } from '@renderer/lib/model-summary'
 import {
   invalidateDisplaySettings,
   invalidateLlmSettings
@@ -40,94 +38,27 @@ import { SettingsRow as Row } from './SettingsRow'
 import { SettingsSlider } from './SettingsSlider'
 import type { SettingsWriteOutcome } from './SettingsTextField'
 import { SettingsSelect } from './SettingsSelect'
-import type { SpeechLanguage } from '@offgrid/application'
 import { X } from '@phosphor-icons/react'
 import { getSlot, SLOTS } from '@renderer/bootstrap/slotRegistry'
-import { modelControlClient } from '@renderer/lib/model-control-client'
-
-const MAX_OUTPUT_AUTO = MAX_TOKENS_AUTO
-// The values THIS picker offers. The nesting rule they obey is shared (@offgrid/models); which
-// discrete steps to show is a desktop rendering choice, and OGAM uses sliders instead.
-const MAX_OUTPUT_OPTIONS = [2048, 4096, 8192, 16384, 32768]
-
-/** Zero threads is llama.cpp choosing for itself, which reads better than "0". */
-function threadsLabel(threads: number): string {
-  return threads === 0 ? 'auto' : String(threads)
-}
-
-/** The ceiling on thinking: the response length it must fit inside, which for an auto output cap
- *  is the context window. Mirrors reconcileBudgets so the options offered match what is kept. */
-function thinkingCeiling(s: LlmSettings): number {
-  const maxOutput = s.maxTokens ?? MAX_OUTPUT_AUTO
-  const ctx = s.ctxSize ?? DEFAULT_CTX_SIZE
-  return maxOutput === MAX_OUTPUT_AUTO ? ctx : maxOutput
-}
-
-/**
- * Apply one budget edit and pull the inner budgets back under it.
- *
- * Filtering the option lists stops a user PICKING an impossible combination; this stops an already
- * stored one surviving a change to an outer limit. Both read the same rule from @offgrid/models,
- * so the picker and the persisted value cannot disagree. Only genuinely changed fields are
- * returned, so an unrelated edit does not rewrite the other two.
- */
-function budgetChange(s: LlmSettings, patch: LlmSettings): LlmSettings {
-  const next = { ...s, ...patch }
-  const reconciled = reconcileBudgets({
-    contextWindow: next.ctxSize ?? DEFAULT_CTX_SIZE,
-    maxOutput: next.maxTokens ?? MAX_OUTPUT_AUTO,
-    thinkingBudget: next.reasoningBudget ?? REASONING_BUDGET_AUTO
-  })
-  return {
-    ...patch,
-    ...(reconciled.maxOutput !== (next.maxTokens ?? MAX_OUTPUT_AUTO)
-      ? { maxTokens: reconciled.maxOutput }
-      : {}),
-    ...(reconciled.thinkingBudget !== (next.reasoningBudget ?? REASONING_BUDGET_AUTO)
-      ? { reasoningBudget: reconciled.thinkingBudget }
-      : {})
-  }
-}
+import {
+  MAX_OUTPUT_AUTO,
+  MAX_OUTPUT_OPTIONS,
+  budgetChange,
+  thinkingCeiling,
+  threadsLabel,
+  type LlmSettings
+} from './settings-model-budget'
+import { useInitialSettings, type TranscriptionInfo } from './use-settings-panel-load'
 
 // Right-side Settings panel (same pattern as SkillsPanel/ArtifactCanvas).
 // Tabs: Model (inference params), Image, Voice (Kokoro TTS), Tools (built-in, read-only),
 // Connectors (MCP servers — the user's reusable tool library). All on-device.
-type KvCacheType = 'f16' | 'q8_0' | 'q4_0'
-type LlmSettings = {
-  temperature?: number
-  ctxSize?: number
-  topP?: number
-  topK?: number
-  minP?: number
-  repeatPenalty?: number
-  maxTokens?: number
-  maxToolCalls?: number
-  reasoningBudget?: number
-  systemPrompt?: string
-  kvCacheType?: KvCacheType
-  flashAttn?: boolean
-  gpuLayers?: number
-  threads?: number
-  batchSize?: number
-  effectiveCtxSize?: number // reported by the backend (RAM-clamped); read-only
-  modelMaxCtx?: number | null // the model's TRAINED window (GGUF); read-only, bounds the picker
-  gpuAccelerator?: EngineAccelerator | null // the engine the backend actually spawned; read-only
-}
 type Connector = {
   id: number
   name: string
   url?: string | null
   transport?: string
   enabled?: number | boolean
-}
-
-type TranscriptionInfo = {
-  engine: 'whisper' | 'parakeet' | 'whisper-resident'
-  modelId: string | null
-  label: string
-  language: string
-  languages: SpeechLanguage[]
-  options: { id: string | null; name: string; active: boolean }[]
 }
 
 const DEFAULT_TRANSCRIPTION_MODEL = '__default-transcription-model__'
@@ -149,6 +80,26 @@ const DEFAULTS: LlmSettings = {
   gpuLayers: 99,
   threads: 0,
   batchSize: 512
+}
+
+async function persistConnector(
+  connector: { name: string; url: string },
+  clear: () => void,
+  refresh: () => void
+): Promise<void> {
+  if (!connector.name.trim() || !connector.url.trim()) return
+  await window.api.mcpAdd({
+    name: connector.name.trim(),
+    transport: 'http',
+    url: connector.url.trim()
+  })
+  clear()
+  refresh()
+}
+
+function openModels(onClose: () => void): void {
+  onClose()
+  openActiveModelsPanel()
 }
 
 export function SettingsPanel({
@@ -178,31 +129,14 @@ export function SettingsPanel({
       .catch(() => setConnectors([]))
   }, [])
 
-  useEffect(() => {
-    window.api
-      .getLlmSettings()
-      .then((v: LlmSettings) => setS(v))
-      .catch(() => {})
-    void modelControlClient
-      .projection()
-      .then((projection) =>
-        setActiveModelName(resolveModelName(projection.models, projection.active.text.modelId))
-      )
-      .catch(() => setActiveModelName(null))
-    window.api
-      .getTranscriptionInfo()
-      .then((info: TranscriptionInfo) => setTranscriptionInfo(info))
-      .catch(() => setTranscriptionInfo(null))
-    window.api
-      .getSettings()
-      .then((settings) => setShowGenerationDetails(settings.showGenerationDetails === true))
-      .catch(() => {})
-    window.api
-      .listTools()
-      .then((t: { name: string; description: string }[]) => setTools(t))
-      .catch(() => {})
-    refreshConnectors()
-  }, [refreshConnectors])
+  useInitialSettings({
+    setSettings: setS,
+    setTranscriptionInfo,
+    setTools,
+    setActiveModelName,
+    setShowGenerationDetails,
+    refreshConnectors
+  })
 
   /**
    * Commit one group of model settings and say, in the user's terms, what happened.
@@ -256,19 +190,17 @@ export function SettingsPanel({
    * engine: the command asks its coordinator once per save, and a drag that is overtaken is
    * superseded rather than spawning.
    */
-  const commitLaunchSetting = commitModelSettings
-
   const commitGpuLayers = useCallback(
-    (gpuLayers: number) => commitLaunchSetting({ gpuLayers }),
-    [commitLaunchSetting]
+    (gpuLayers: number) => commitModelSettings({ gpuLayers }),
+    [commitModelSettings]
   )
   const commitThreads = useCallback(
-    (threads: number) => commitLaunchSetting({ threads }),
-    [commitLaunchSetting]
+    (threads: number) => commitModelSettings({ threads }),
+    [commitModelSettings]
   )
   const commitBatchSize = useCallback(
-    (batchSize: number) => commitLaunchSetting({ batchSize }),
-    [commitLaunchSetting]
+    (batchSize: number) => commitModelSettings({ batchSize }),
+    [commitModelSettings]
   )
 
   const resetDefaults = (): void => {
@@ -320,21 +252,10 @@ export function SettingsPanel({
       })
   }
 
-  const addConnector = async (): Promise<void> => {
-    if (!newConn.name.trim() || !newConn.url.trim()) return
-    await window.api.mcpAdd({
-      name: newConn.name.trim(),
-      transport: 'http',
-      url: newConn.url.trim()
-    })
-    setNewConn({ name: '', url: '' })
-    refreshConnectors()
-  }
+  const addConnector = (): Promise<void> =>
+    persistConnector(newConn, () => setNewConn({ name: '', url: '' }), refreshConnectors)
 
-  const openActiveModels = (): void => {
-    onClose()
-    openActiveModelsPanel()
-  }
+  const openActiveModels = (): void => openModels(onClose)
 
   const content = (
     <>
