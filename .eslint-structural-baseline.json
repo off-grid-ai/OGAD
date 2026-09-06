@@ -57,11 +57,6 @@
         784
       ]
     },
-    "src/main/backup/data-port.ts": {
-      "complexity": [
-        18
-      ]
-    },
     "src/main/bootstrap/loadProFeaturesMain.ts": {
       "no-console": [
         1,
@@ -100,11 +95,6 @@
     "src/main/chat-stream-state.ts": {
       "max-params": [
         4
-      ]
-    },
-    "src/main/composition/model-library.ts": {
-      "@typescript-eslint/no-shadow": [
-        1
       ]
     },
     "src/main/database.ts": {
@@ -174,8 +164,7 @@
     },
     "src/main/dev-seed.ts": {
       "max-params": [
-        7,
-        5
+        7
       ],
       "no-console": [
         1,
@@ -207,11 +196,6 @@
         16
       ]
     },
-    "src/main/imagegen/job-service.ts": {
-      "complexity": [
-        16
-      ]
-    },
     "src/main/imagegen.ts": {
       "max-lines": [
         946
@@ -224,19 +208,6 @@
         295
       ]
     },
-    "src/main/index.ts": {
-      "no-console": [
-        1,
-        1,
-        1
-      ],
-      "complexity": [
-        17
-      ],
-      "max-lines": [
-        543
-      ]
-    },
     "src/main/ipc-query-logic.ts": {
       "prefer-template": [
         1
@@ -246,8 +217,6 @@
       "max-params": [
         10,
         5,
-        5,
-        4,
         4,
         4,
         4
@@ -270,7 +239,6 @@
         324
       ],
       "no-console": [
-        1,
         1,
         1,
         1,
@@ -394,11 +362,6 @@
         1
       ]
     },
-    "src/main/models/desktop-model-download-service.ts": {
-      "complexity": [
-        18
-      ]
-    },
     "src/main/models/gguf.ts": {
       "max-params": [
         5
@@ -406,10 +369,7 @@
     },
     "src/main/models-manager.ts": {
       "max-lines": [
-        1325
-      ],
-      "complexity": [
-        34
+        1156
       ]
     },
     "src/main/permissions.ts": {
