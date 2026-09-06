@@ -1,5 +1,4 @@
 import { spawn, execSync, ChildProcess } from 'child_process'
-import os from 'os'
 import path from 'path'
 import * as fs from 'fs'
 import { modelsDir as getModelsDir, binRoots, isPackaged, exe } from './runtime-env'
@@ -12,12 +11,10 @@ import {
   DESKTOP_TEXT_SETTINGS_DEFAULTS,
   REASONING_BUDGET_AUTO,
   MAX_TOKENS_AUTO,
-  maxTokensForLlamaServer as maxTokensForWire,
   reasoningControlFromChatTemplate,
   reasoningMetadataFromChatTemplate,
   resolveMaxTokens,
   shouldAutoRecoverRuntime as shouldAutoRecover,
-  textContextLength,
   engineReadinessAction,
   modelReadinessIssue,
   textRuntimeLoadAttempts,
@@ -32,13 +29,9 @@ import {
   isGrounderModel,
   isPerformanceMode,
   isReasoningEffort,
-  type LlamaKvCacheType as KvCacheType,
-  type PerformanceMode,
   type PresetField,
-  type GenerationReasoning,
   type ModelReasoningMetadata,
   type ReasoningEffort,
-  type ReasoningWireFragment,
   type ResidentReclaim
 } from '@offgrid/models'
 import type { DesktopManagedRuntime } from './model-runtime-port'
@@ -53,122 +46,37 @@ import { readGgufContextLength } from './models/gguf-metadata'
 import { pickFreePort, isPortFree } from './free-port'
 import { engineSpawnEnv } from './llm/spawn-env'
 import { streamCompletion, type StreamResult } from './llm/stream'
-import { streamRemoteChatCompletion, type RemoteTextModelConnection } from './llm/remote-chat'
+import type { RemoteTextModelConnection } from './llm/remote-chat'
 import type { TeardownOutcome } from './llm/engine-teardown'
 import { emitChangedLlmSettings } from './sync-mutation'
 import { loadGatedVisionModelAdapter } from './vision/model-adapters/registry'
 import type { VisionModelArtifacts } from './vision/model-adapters/types'
-import { defaultChatModelArtifacts } from '@offgrid/models'
+import type {
+  KvCacheType,
+  LlmSettings,
+  LlmSettingsUpdateOptions,
+  LlmSettingsUpdateResult,
+  PerformanceMode,
+  StreamChatOptions
+} from './llm/contracts'
+import {
+  quarantineUnreadableConfig,
+  readJsonConfig,
+  readJsonConfigOrNull,
+  resolveActiveModelPaths,
+  storedLlmSettings
+} from './llm/config-files'
+import { safeTextContextSize } from './llm/context-budget'
+import { completeRemoteChat } from './llm/remote-completion'
 
-export type { KvCacheType, PerformanceMode }
-
-export interface LlmSettings {
-  performanceMode?: PerformanceMode
-  temperature?: number
-  ctxSize?: number
-  topP?: number
-  topK?: number
-  minP?: number
-  repeatPenalty?: number
-  maxTokens?: number
-  maxToolCalls?: number
-  reasoningBudget?: number
-  reasoningEffort?: ReasoningEffort
-  systemPrompt?: string
-  // Launch-time (require a server respawn to take effect):
-  kvCacheType?: KvCacheType // quantize the KV cache to cut memory (needs flash-attn)
-  flashAttn?: boolean // FlashAttention: faster + lower memory; required for quantized KV
-  gpuLayers?: number // -ngl: layers offloaded to the GPU. 99 = all.
-  threads?: number // CPU threads for inference
-  batchSize?: number // -b: prompt batch size
-}
-
-export interface LlmSettingsUpdateOptions {
-  /** Remote sync applies the winning value without creating a new local op. */
-  emitSync?: boolean
-}
-
-export interface LlmSettingsUpdateResult {
-  /**
-   * A launch argument moved, so the engine is running arguments that are now stale. Requesting the
-   * restart belongs to the settings command; this only reports that one is owed.
-   */
-  launchChanged: boolean
-}
-
-export interface StreamChatOptions {
-  temperature?: number
-  topP?: number
-  thinking?: boolean
-  reasoning?: GenerationReasoning
-  reasoningWire?: ReasoningWireFragment
-  signal?: AbortSignal
-  tools?: unknown[]
-  toolChoice?: unknown
-  maxTokens?: number
-  responseFormat?: unknown
-}
-
-/**
- * Reading a JSON config file, with ABSENCE and CORRUPTION told apart.
- *
- * Both used to arrive as the same swallowed exception behind a comment saying "defaults" or "no
- * active selection yet". They are not the same event: a missing file on a first launch is the
- * normal state and deserves silence, while a file that exists and does not parse is data loss - the
- * user's settings or their chosen model - and the app was quietly reverting to defaults and then
- * OVERWRITING the unreadable original on the next save, so the loss became permanent and
- * invisible.
- */
-type ConfigRead =
-  /** No file. The normal state before the first write. */
-  | { readonly kind: 'absent' }
-  | { readonly kind: 'ok'; readonly value: Record<string, unknown> }
-  /** The file exists and could not be read or parsed: corruption, or a device/IO failure. */
-  | { readonly kind: 'unreadable'; readonly reason: string }
-
-function readJsonConfig(file: string): ConfigRead {
-  let raw: string
-  try {
-    raw = fs.readFileSync(file, 'utf-8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'absent' }
-    return { kind: 'unreadable', reason: (error as Error).message }
-  }
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object') {
-      return { kind: 'unreadable', reason: 'the file does not contain a JSON object' }
-    }
-    return { kind: 'ok', value: parsed as Record<string, unknown> }
-  } catch (error) {
-    return { kind: 'unreadable', reason: (error as Error).message }
-  }
-}
-
-/**
- * Move an unreadable config aside so the next save cannot destroy it.
- *
- * This is the self-perpetuating half: without it, a corrupt settings file is read as "defaults",
- * and the first setting the user touches writes defaults OVER the original. Whatever was
- * recoverable is then gone, every launch looks like a fresh install, and nothing ever said so.
- */
-function quarantineUnreadableConfig(file: string, reason: string): void {
-  const quarantined = `${file}.unreadable`
-  try {
-    fs.rmSync(quarantined, { force: true })
-    fs.renameSync(file, quarantined)
-    console.error(
-      `[LLMService] ${path.basename(file)} could not be read (${reason}); kept as ${path.basename(quarantined)} and continuing with defaults`
-    )
-  } catch (error) {
-    // Reported, not retried: the file stays where it is and the next save may overwrite it, which
-    // is worth saying out loud rather than leaving as a silent possibility.
-    console.error(
-      `[LLMService] ${path.basename(file)} could not be read (${reason}) AND could not be moved aside`,
-      error
-    )
-  }
-}
+export type {
+  KvCacheType,
+  LlmSettings,
+  LlmSettingsUpdateOptions,
+  LlmSettingsUpdateResult,
+  PerformanceMode,
+  StreamChatOptions
+} from './llm/contracts'
 
 export class LLMService {
   private readonly healthInvalidationListeners = new Set<() => void>()
@@ -232,6 +140,7 @@ export class LLMService {
   // Auto (0) = unrestricted. Applied per request; no reload needed.
   private reasoningBudget = REASONING_BUDGET_AUTO
   private reasoningEffort: ReasoningEffort | undefined
+  private thinkingEnabled = false
   private systemPrompt = ''
   // Resource-usage preset. Governs the RAM budget the context clamp targets and
   // the default ctx/KV preset. 'balanced' preserves prior behavior.
@@ -290,38 +199,9 @@ export class LLMService {
       quarantineUnreadableConfig(this.settingsFile, stored.reason)
     }
     if (stored.kind === 'ok') {
-      const s = stored.value
-      if (typeof s.temperature === 'number') this.temperature = s.temperature
-      if (typeof s.ctxSize === 'number') this.ctxSize = s.ctxSize
-      if (typeof s.topP === 'number') this.topP = s.topP
-      if (typeof s.topK === 'number') this.topK = s.topK
-      if (typeof s.minP === 'number') this.minP = s.minP
-      if (typeof s.repeatPenalty === 'number') this.repeatPenalty = s.repeatPenalty
-      if (typeof s.maxTokens === 'number') this.maxTokens = s.maxTokens
-      if (typeof s.maxToolCalls === 'number')
-        this.maxToolCalls = normalizeMaxToolCalls(s.maxToolCalls)
-      if (typeof s.reasoningBudget === 'number') this.reasoningBudget = s.reasoningBudget
-      if (isReasoningEffort(s.reasoningEffort)) this.reasoningEffort = s.reasoningEffort
-      if (typeof s.systemPrompt === 'string') this.systemPrompt = s.systemPrompt
-      const storedKvCacheType = s.kvCacheType
-      if (
-        storedKvCacheType === 'f16' ||
-        storedKvCacheType === 'q8_0' ||
-        storedKvCacheType === 'q4_0'
-      ) {
-        this.kvCacheType = storedKvCacheType
-      }
-      if (typeof s.flashAttn === 'boolean') this.flashAttn = s.flashAttn
-      if (typeof s.gpuLayers === 'number') this.gpuLayers = s.gpuLayers
-      if (typeof s.threads === 'number') this.threads = s.threads
-      if (typeof s.batchSize === 'number') this.batchSize = s.batchSize
-      if (isPerformanceMode(s.performanceMode)) this.performanceMode = s.performanceMode
-      // Restore which preset fields the user pinned, so a plain restart keeps an
-      // explicit KV/ctx/flash-attn choice instead of letting the mode preset win.
-      if (Array.isArray(s.userExplicit)) {
-        for (const f of s.userExplicit)
-          if (f === 'ctxSize' || f === 'kvCacheType' || f === 'flashAttn') this.userExplicit.add(f)
-      }
+      const parsed = storedLlmSettings(stored.value)
+      Object.assign(this, parsed.settings)
+      for (const field of parsed.explicit) this.userExplicit.add(field)
     }
     // `absent` needs no branch: a first launch has no settings file, and the field defaults above
     // are already the answer. That is the one case here that is genuinely expected absence.
@@ -376,60 +256,15 @@ export class LLMService {
     return this.port
   }
 
-  /**
-   * One weight file's size in GB for the context budget, or 0 when it cannot be measured.
-   *
-   * EXPECTED ABSENCE for ENOENT: the budget is computed before a model is necessarily on disk (a
-   * fresh profile, a selection whose download has not finished), and a missing file contributing
-   * nothing is correct.
-   *
-   * Anything else is a DEVICE/IO FAILURE and is reported, because the consequence is not neutral:
-   * an unmeasurable weight file makes the budget look SMALLER than it is, so the context this
-   * picks can be too large for the memory actually left, and the load fails later somewhere that
-   * cannot explain why. Returning 0 is still the right fallback - a heuristic must not fail a load
-   * - but it stops being a silent one.
-   */
-  private weightsSizeGb(file: string): number {
-    try {
-      return fs.statSync(file).size / 1e9
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        console.error(
-          `[LLMService] could not measure ${path.basename(file)} for the context budget; treating it as 0 GB`,
-          error
-        )
-      }
-      return 0
-    }
-  }
-
   private safeCtxSize(requestedRaw: number): number {
-    const trained = this.trainedContext()
-    let totalGb: number | undefined
-    let weightsGb: number | undefined
-    try {
-      totalGb = os.totalmem() / 1e9
-      weightsGb = 0
-      weightsGb += this.weightsSizeGb(this.modelPath)
-      if (this.mmProjPath) weightsGb += this.weightsSizeGb(this.mmProjPath)
-    } catch {
-      totalGb = undefined
-      weightsGb = undefined
-    }
-    const effective = textContextLength({
+    return safeTextContextSize({
       requested: requestedRaw,
-      trainedContext: trained,
-      totalGb,
-      weightsGb,
+      trainedContext: this.trainedContext(),
+      modelPath: this.modelPath,
+      projectorPath: this.mmProjPath,
       kvType: this.kvCacheType,
       performanceMode: this.performanceMode
     })
-    if (typeof totalGb === 'number' && typeof weightsGb === 'number' && effective < requestedRaw) {
-      console.warn(
-        `[LLMService] Clamping context ${requestedRaw} -> ${effective} (RAM ${totalGb.toFixed(0)}GB, weights ${weightsGb.toFixed(1)}GB) to avoid memory overcommit`
-      )
-    }
-    return effective
   }
 
   /** The EFFECTIVE (RAM-clamped) context window the server is actually running
@@ -461,6 +296,7 @@ export class LLMService {
       maxToolCalls: this.maxToolCalls,
       reasoningBudget: this.reasoningBudget,
       reasoningEffort: this.reasoningEffort,
+      thinkingEnabled: this.thinkingEnabled,
       systemPrompt: this.systemPrompt,
       kvCacheType: this.kvCacheType,
       flashAttn: this.flashAttn,
@@ -535,7 +371,9 @@ export class LLMService {
     // restart. It throws now, so the settings command's write fails and the panel says so.
     const destination = this.settingsFile
     fs.mkdirSync(path.dirname(destination), { recursive: true })
-    const temporaryDirectory = fs.mkdtempSync(path.join(path.dirname(destination), '.llm-settings-'))
+    const temporaryDirectory = fs.mkdtempSync(
+      path.join(path.dirname(destination), '.llm-settings-')
+    )
     const temporary = path.join(temporaryDirectory, 'settings.json')
     try {
       fs.writeFileSync(
@@ -643,6 +481,7 @@ export class LLMService {
       this.maxToolCalls = normalizeMaxToolCalls(s.maxToolCalls)
     if (typeof s.reasoningBudget === 'number') this.reasoningBudget = s.reasoningBudget
     if (isReasoningEffort(s.reasoningEffort)) this.reasoningEffort = s.reasoningEffort
+    if (typeof s.thinkingEnabled === 'boolean') this.thinkingEnabled = s.thinkingEnabled
     if (typeof s.systemPrompt === 'string') this.systemPrompt = s.systemPrompt
     if (s.kvCacheType === 'f16' || s.kvCacheType === 'q8_0' || s.kvCacheType === 'q4_0')
       this.kvCacheType = s.kvCacheType
@@ -671,41 +510,14 @@ export class LLMService {
   // Resolve the active model's files. The Models screen writes active-model.json
   // ({ id, primary, mmproj }) after resolving a catalog entry; default to the
   // bundled Qwen3-VL vision model when nothing is selected yet.
-  /**
-   * The active model selection, read once and classified.
-   *
-   * Three sites used to parse this file with three different swallowed catches and three different
-   * fallbacks. Absence is genuine here - nothing is selected before the first activation, and the
-   * bundled default is the documented answer. An unreadable file is NOT: it is the user's chosen
-   * model, and silently loading a different one is a product change nobody was told about. So it
-   * is moved aside and stated, exactly once, rather than re-derived per call site.
-   */
   private readActiveModelSelection(): Record<string, unknown> | null {
-    const read = readJsonConfig(this.activeModelFile)
-    if (read.kind === 'ok') return read.value
-    if (read.kind === 'unreadable') {
-      quarantineUnreadableConfig(this.activeModelFile, read.reason)
-    }
-    return null
+    return readJsonConfigOrNull(this.activeModelFile)
   }
 
   private resolveModel(): void {
-    const modelsDir = getModelsDir()
-    const cfg = this.readActiveModelSelection()
-    if (typeof cfg?.primary === 'string' && cfg.primary) {
-      this.modelPath = path.join(modelsDir, cfg.primary)
-      this.mmProjPath =
-        typeof cfg.mmproj === 'string' && cfg.mmproj ? path.join(modelsDir, cfg.mmproj) : ''
-      return
-    }
-    // No active selection yet. Point at a real catalog vision model so that IF
-    // its files happen to be present we still load; otherwise modelsExist() is
-    // false and setup ("Configure for me") downloads + activates a fitting model.
-    // (The old default named a non-existent Qwen3-VL-4B and dead-ended fresh
-    // installs at a 502 — never auto-resolvable. Keep this aligned with the catalog.)
-    const artifacts = defaultChatModelArtifacts()
-    this.modelPath = path.join(modelsDir, artifacts.primary)
-    this.mmProjPath = artifacts.projector ? path.join(modelsDir, artifacts.projector) : ''
+    const paths = resolveActiveModelPaths(getModelsDir(), this.readActiveModelSelection())
+    this.modelPath = paths.modelPath
+    this.mmProjPath = paths.projectorPath
   }
 
   private applyModelReload(): void {
@@ -1301,44 +1113,6 @@ export class LLMService {
     }
   }
 
-  private completeRemote(
-    remote: RemoteTextModelConnection,
-    messages: unknown[],
-    onDelta: (text: string, kind: 'content' | 'reasoning') => void,
-    options: {
-      timeoutMs?: number
-      maxTokens?: number
-      temperature?: number
-      topP?: number
-      thinking?: boolean
-      reasoningWire?: ReasoningWireFragment
-      signal?: AbortSignal
-      responseFormat?: unknown
-      tools?: unknown[]
-      toolChoice?: unknown
-    }
-  ): Promise<StreamResult> {
-    return streamRemoteChatCompletion({
-      remote,
-      request: {
-        messages,
-        maxTokens: maxTokensForWire(resolveMaxTokens(options.maxTokens, this.maxTokens)),
-        temperature: options.temperature ?? this.temperature,
-        topP: options.topP ?? this.topP,
-        thinking: options.thinking,
-        reasoningWire: options.reasoningWire,
-        // Same setting the local engine gets — one remote seam, so every remote caller
-        // (chat, Web Use, Computer Use) honours the configured thinking cap.
-        reasoningBudget: this.reasoningBudget,
-        responseFormat: options.responseFormat,
-        tools: options.tools,
-        toolChoice: options.toolChoice
-      },
-      onDelta,
-      options: { signal: options.signal, timeoutMs: options.timeoutMs }
-    })
-  }
-
   /** Raw remote-engine boundary. Routing policy belongs to the shared model service. */
   streamChatRemote(
     remote: RemoteTextModelConnection,
@@ -1347,17 +1121,17 @@ export class LLMService {
     opts: StreamChatOptions = {},
     timeoutMs?: number
   ): Promise<StreamResult> {
-    return this.completeRemote(remote, messages, onDelta, {
-      timeoutMs,
-      maxTokens: opts.maxTokens,
-      temperature: opts.temperature,
-      topP: opts.topP,
-      thinking: opts.thinking,
-      reasoningWire: opts.reasoningWire,
-      signal: opts.signal,
-      responseFormat: opts.responseFormat,
-      tools: opts.tools,
-      toolChoice: opts.toolChoice
+    return completeRemoteChat({
+      remote,
+      messages,
+      onDelta,
+      options: { ...opts, timeoutMs },
+      settings: {
+        maxTokens: this.maxTokens,
+        temperature: this.temperature,
+        topP: this.topP,
+        reasoningBudget: this.reasoningBudget
+      }
     })
   }
 
