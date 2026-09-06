@@ -6,6 +6,29 @@ interface ShortcutProjection {
   message: string | null
 }
 
+function isSettingsRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function configuredAccelerator(settings: unknown): string {
+  if (!isSettingsRecord(settings)) {
+    throw new Error('The settings response is invalid')
+  }
+  const value: unknown =
+    'dictation:settings' in settings ? settings['dictation:settings'] : undefined
+  if (value !== undefined && !isSettingsRecord(value)) {
+    throw new Error('The saved dictation settings are invalid')
+  }
+  const accelerator =
+    isSettingsRecord(value) && 'accelerator' in value ? value.accelerator : undefined
+  if (accelerator !== undefined && typeof accelerator !== 'string') {
+    throw new Error('The saved dictation shortcut is invalid')
+  }
+  return typeof accelerator === 'string' && accelerator.trim()
+    ? accelerator
+    : DEFAULT_DICTATION_ACCELERATOR
+}
+
 /** Read-only configured value. This does not assert native hotkey registration or entitlement. */
 export function useDictationShortcut(): ShortcutProjection {
   const [projection, setProjection] = useState<ShortcutProjection>({
@@ -30,29 +53,8 @@ export function useDictationShortcut(): ShortcutProjection {
       ])
         .then((settings: unknown) => {
           if (!active || request !== generation) return
-          if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
-            throw new Error('The settings response is invalid')
-          }
-          const value: unknown =
-            'dictation:settings' in settings ? settings['dictation:settings'] : undefined
-          if (
-            value !== undefined &&
-            (!value || typeof value !== 'object' || Array.isArray(value))
-          ) {
-            throw new Error('The saved dictation settings are invalid')
-          }
-          const accelerator =
-            value && typeof value === 'object' && 'accelerator' in value
-              ? value.accelerator
-              : undefined
-          if (accelerator !== undefined && typeof accelerator !== 'string') {
-            throw new Error('The saved dictation shortcut is invalid')
-          }
           setProjection({
-            accelerator:
-              typeof accelerator === 'string' && accelerator.trim()
-                ? accelerator
-                : DEFAULT_DICTATION_ACCELERATOR,
+            accelerator: configuredAccelerator(settings),
             message: null
           })
         })

@@ -107,6 +107,12 @@ function LicenseActivation(): React.ReactElement {
 // writes up what the feature will do and points to early access (free waitlist)
 // or paying now (lifetime free + first access). People who've already paid are
 // reassured they're first in line.
+function needsPlatformNotice(feature: ProFeature | undefined): boolean {
+  return feature
+    ? !featureSupportsPlatform(feature, currentPlatform())
+    : PRO_FEATURES.some((candidate) => !featureSupportsPlatform(candidate, currentPlatform()))
+}
+
 export function UpgradeScreen({
   feature,
   variant = 'upgrade'
@@ -121,9 +127,7 @@ export function UpgradeScreen({
   // yet. Per-feature: if this writeup is for a specific feature, only warn when THAT
   // feature isn't ported here (so a Windows-ready feature like Vault shows no
   // warning). For the generic pitch, warn while any feature is still coming soon.
-  const platformNotice = f
-    ? !featureSupportsPlatform(f, currentPlatform())
-    : PRO_FEATURES.some((x) => !featureSupportsPlatform(x, currentPlatform()))
+  const platformNotice = needsPlatformNotice(f)
   const open = (url: string): void => {
     window.api.openExternal(url)
   }

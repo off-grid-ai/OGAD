@@ -35,6 +35,32 @@ interface ModelDownloadRowsProps {
 
 const PAUSABLE_OR_PAUSED = new Set<DownloadEntry['status']>(['downloading', 'queued', 'paused'])
 
+function DownloadPauseButton({
+  download,
+  busy,
+  onPause,
+  onResume
+}: {
+  download: DownloadEntry
+  busy: boolean
+  onPause(downloadId: string): void
+  onResume(downloadId: string): void
+}): React.ReactElement | null {
+  if (!PAUSABLE_OR_PAUSED.has(download.status)) return null
+  const paused = download.status === 'paused'
+  return (
+    <button
+      disabled={busy}
+      onClick={() => (paused ? onResume(download.downloadId) : onPause(download.downloadId))}
+      className="rounded-md p-1 text-neutral-500 hover:text-white disabled:opacity-50"
+      aria-label={`${paused ? 'Resume' : 'Pause'} ${download.modelId}`}
+      title={paused ? 'Resume download' : 'Pause download'}
+    >
+      {paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+    </button>
+  )
+}
+
 function ActiveDownloadRow({
   download,
   onCancel,
@@ -92,25 +118,7 @@ function ActiveDownloadRow({
           {progress.determinate ? `${Math.round(progress.percentage ?? 0)}%` : 'Downloading'}
         </span>
       )}
-      {PAUSABLE_OR_PAUSED.has(download.status) && (
-        <button
-          disabled={busy}
-          onClick={() =>
-            download.status === 'paused'
-              ? onResume(download.downloadId)
-              : onPause(download.downloadId)
-          }
-          className="rounded-md p-1 text-neutral-500 hover:text-white disabled:opacity-50"
-          aria-label={`${download.status === 'paused' ? 'Resume' : 'Pause'} ${download.modelId}`}
-          title={download.status === 'paused' ? 'Resume download' : 'Pause download'}
-        >
-          {download.status === 'paused' ? (
-            <Play className="h-3.5 w-3.5" />
-          ) : (
-            <Pause className="h-3.5 w-3.5" />
-          )}
-        </button>
-      )}
+      <DownloadPauseButton download={download} busy={busy} onPause={onPause} onResume={onResume} />
       {download.status !== 'preparing' && (
         <button
           disabled={busy}
