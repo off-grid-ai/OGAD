@@ -37,7 +37,8 @@ export function usePermissionController(enabled: boolean = true): PermissionCont
 
   useEffect(() => {
     if (!enabled) return
-    void check()
+    const load = window.setTimeout(() => void check(), 0)
+    return () => window.clearTimeout(load)
   }, [check, enabled])
 
   useEffect(() => {

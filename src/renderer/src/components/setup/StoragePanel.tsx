@@ -75,26 +75,24 @@ export function StoragePanel(): React.ReactElement {
   const applyModelControlProjection = useCallback((projection: ModelControlProjection): void => {
     setActiveIds(new Set(projection.activeIds))
     setDownloads(
-      projection.downloads.map(
-        (entry): DownloadEntry => ({
-          downloadId: entry.downloadId,
-          modelId: entry.modelId,
-          status: entry.status,
-          currentFile: entry.currentFile ?? entry.fileName,
-          currentFileRole: entry.currentFileRole,
-          downloadedBytes: entry.bytesDownloaded,
-          totalBytes: entry.totalBytes,
-          downloadedMB: (entry.bytesDownloaded / 1024 / 1024).toFixed(1),
-          totalMB: (entry.totalBytes / 1024 / 1024).toFixed(1),
-          ...(entry.totalBytes > 0
-            ? {
-                percent: Math.min(100, Math.round((entry.bytesDownloaded / entry.totalBytes) * 100))
-              }
-            : {}),
-          error: entry.reason,
-          bytesPerSecond: entry.bytesPerSecond
-        })
-      )
+      projection.downloads.map((entry): DownloadEntry => ({
+        downloadId: entry.downloadId,
+        modelId: entry.modelId,
+        status: entry.status,
+        currentFile: entry.currentFile ?? entry.fileName,
+        currentFileRole: entry.currentFileRole,
+        downloadedBytes: entry.bytesDownloaded,
+        totalBytes: entry.totalBytes,
+        downloadedMB: (entry.bytesDownloaded / 1024 / 1024).toFixed(1),
+        totalMB: (entry.totalBytes / 1024 / 1024).toFixed(1),
+        ...(entry.totalBytes > 0
+          ? {
+              percent: Math.min(100, Math.round((entry.bytesDownloaded / entry.totalBytes) * 100))
+            }
+          : {}),
+        error: entry.reason,
+        bytesPerSecond: entry.bytesPerSecond
+      }))
     )
     setRecoveryHealth(projection.downloadDurability)
   }, [])
@@ -116,9 +114,10 @@ export function StoragePanel(): React.ReactElement {
   }, [api])
 
   useEffect(() => {
-    refresh()
+    const initial = window.setTimeout(() => void refresh(), 0)
     const t = setInterval(refresh, 3000)
     return () => {
+      window.clearTimeout(initial)
       clearInterval(t)
       ++refreshVersion.current
     }

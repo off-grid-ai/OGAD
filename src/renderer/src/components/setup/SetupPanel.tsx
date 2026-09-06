@@ -196,8 +196,13 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
   // Each mount owns its read. Strict Mode cleanup invalidates the previous response.
   useEffect(() => {
     mounted.current = true
-    initialize().catch((error: unknown) => reportSetupFailure('initialization', error))
+    const load = window.setTimeout(
+      () =>
+        void initialize().catch((error: unknown) => reportSetupFailure('initialization', error)),
+      0
+    )
     return () => {
+      window.clearTimeout(load)
       mounted.current = false
       ++planRequest.current
     }

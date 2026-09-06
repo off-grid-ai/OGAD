@@ -43,7 +43,8 @@ export function useCaptureReadiness(isPro: boolean): CaptureReadinessController 
   }, [isPro])
 
   useEffect(() => {
-    void refresh()
+    const load = window.setTimeout(() => void refresh(), 0)
+    return () => window.clearTimeout(load)
   }, [refresh])
 
   useEffect(() => {

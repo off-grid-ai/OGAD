@@ -33,7 +33,8 @@ export function DataPrivacyPanel(): React.ReactElement {
   }, [api])
 
   useEffect(() => {
-    refresh()
+    const load = window.setTimeout(() => void refresh(), 0)
+    return () => window.clearTimeout(load)
   }, [refresh])
 
   // Time-based retention is offered for captures + meetings (they accumulate).

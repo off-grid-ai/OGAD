@@ -380,6 +380,18 @@ function carriedButNotActive(
   )
 }
 
+function consumeInitialModelRoute(navigationSubroute?: string | null): {
+  activeKind: string
+  requestedKind: string | null
+} {
+  const requestedKind = window.sessionStorage.getItem('offgrid:models:initial-kind')
+  window.sessionStorage.removeItem('offgrid:models:initial-kind')
+  return {
+    activeKind: requestedKind || internalTabFromSubroute('models', navigationSubroute ?? null).id,
+    requestedKind
+  }
+}
+
 export function ModelsScreen({
   navigationSubroute,
   onNavigateSubroute
@@ -397,17 +409,11 @@ export function ModelsScreen({
     Record<string, { supportsVision: boolean; projectorInstalled: boolean }>
   >({})
   const refreshVision = (): void => {
-    void bridge()
-      .getModelVisionStatus()
-      .then((s) => setVisionSt(s ?? {}))
+    void bridge().getModelVisionStatus().then(setVisionSt)
   }
-  const initialRequestedKind = useRef<string | null>(null)
-  const [activeKind, setActiveKind] = useState<string>(() => {
-    const requested = window.sessionStorage.getItem('offgrid:models:initial-kind')
-    window.sessionStorage.removeItem('offgrid:models:initial-kind')
-    initialRequestedKind.current = requested
-    return requested || internalTabFromSubroute('models', navigationSubroute ?? null).id
-  })
+  const [initialRoute] = useState(() => consumeInitialModelRoute(navigationSubroute))
+  const initialRequestedKind = useRef(initialRoute.requestedKind)
+  const [activeKind, setActiveKind] = useState<string>(initialRoute.activeKind)
   const selectKind = useCallback(
     (kind: string): void => {
       setActiveKind(kind)
@@ -562,7 +568,8 @@ export function ModelsScreen({
   // every selected tag. Reset when the tab changes so stale tags don't hide the list.
   const [selectedTags, setSelectedTags] = useState<string[]>([])
   useEffect(() => {
-    setSelectedTags([])
+    const reset = window.setTimeout(() => setSelectedTags([]), 0)
+    return () => window.clearTimeout(reset)
   }, [activeKind])
   const [detail, setDetail] = useState<ModelEntry | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
@@ -596,10 +603,10 @@ export function ModelsScreen({
     setImporting(true)
     try {
       const res = await bridge().importLocalModel()
-      if (res?.success) {
+      if (res.success) {
         await refreshModelControl()
         selectKind('text')
-      } else if (res && !res.canceled && res.error) {
+      } else if (!res.canceled && res.error) {
         window.alert(`Import failed: ${res.error}`)
       }
     } finally {
@@ -692,7 +699,10 @@ export function ModelsScreen({
       )}
     </div>
   )
-  const download = (model: ModelEntry, type: 'download' | 'repair-projector' = 'download'): void => {
+  const download = (
+    model: ModelEntry,
+    type: 'download' | 'repair-projector' = 'download'
+  ): void => {
     const id = model.id
     const operationId = claimDownload(id)
     const primary =
@@ -865,21 +875,24 @@ export function ModelsScreen({
   useEffect(() => {
     const q = deferredQuery.trim()
     if (!searchEnabled || q.length < 2) {
-      setHfResults([])
-      return
+      const reset = window.setTimeout(() => setHfResults([]), 0)
+      return () => window.clearTimeout(reset)
     }
-    setSearching(true)
     // A slow answer for an earlier query must never replace the results the user is looking at:
     // the request is abandoned the moment a newer query supersedes it.
     let live = true
+    const start = window.setTimeout(() => {
+      if (live) setSearching(true)
+    }, 0)
     const t = setTimeout(async () => {
       const res = await bridge().searchModels(q, activeKind)
       if (!live) return
-      setHfResults(res ?? [])
+      setHfResults(res)
       setSearching(false)
     }, 400)
     return () => {
       live = false
+      window.clearTimeout(start)
       clearTimeout(t)
     }
   }, [deferredQuery, activeKind, searchEnabled])
@@ -1241,6 +1254,31 @@ export function ModelsScreen({
   }
 
   const GRID = 'grid grid-cols-2 gap-2 px-6 py-3 lg:grid-cols-3 2xl:grid-cols-4'
+  const detailModel = detail
+  const detailIsLocal = detailModel ? isLocalLibraryModelId(detailModel.id) : false
+  const detailRepository = detailModel?.sourceModelId ?? detailModel?.id ?? ''
+  const detailUrl =
+    detailModel && !detailIsLocal && detailRepository.includes('/')
+      ? `https://huggingface.co/${detailRepository}`
+      : null
+  const detailBytes = detailModel ? totalBytes(detailModel) : 0
+  const detailIsInstalled = detailModel ? installed.includes(detailModel.id) : false
+  const detailIsActive = detailModel ? isActive(detailModel.id) : false
+  const detailProgress = detailModel ? progress[detailModel.id] : undefined
+  const detailIsDownloading =
+    detailProgress?.status !== undefined &&
+    (isActiveDownloadStatus(detailProgress.status) || detailProgress.status === 'paused')
+  const detailIsComingSoon = detailModel?.availability === 'coming_soon'
+  const detailRows: [string, string | null][] = detailModel
+    ? [
+        ['Source', detailModel.org || (detailIsLocal ? 'Imported' : '—')],
+        ['Parameters', detailModel.params ? `${detailModel.params}B` : null],
+        ['Quantization', detailModel.quant || null],
+        ['Download', formatSize(detailBytes) || null],
+        ['Released', fmtReleaseDate(detailModel.releaseDate) || null],
+        ['Min RAM', detailModel.minRamGb ? `${detailModel.minRamGb} GB` : null]
+      ]
+    : []
 
   return (
     <div className="flex h-full flex-col font-mono">
@@ -1529,179 +1567,153 @@ export function ModelsScreen({
 
       {/* Detail slide-over */}
       <AnimatePresence>
-        {detail &&
-          (() => {
-            const m = detail
-            const isLocal = isLocalLibraryModelId(m.id)
-            const hfRepo = m.sourceModelId ?? m.id
-            const hfUrl =
-              !isLocal && hfRepo.includes('/') ? `https://huggingface.co/${hfRepo}` : null
-            const bytes = totalBytes(m)
-            const isInstalled = installed.includes(m.id)
-            const active = isActive(m.id)
-            const prog = progress[m.id]
-            const downloading =
-              prog?.status !== undefined &&
-              (isActiveDownloadStatus(prog.status) || prog.status === 'paused')
-            const comingSoon = m.availability === 'coming_soon'
-            const rows: [string, string | null][] = [
-              ['Source', m.org || (isLocal ? 'Imported' : '—')],
-              ['Parameters', m.params ? `${m.params}B` : null],
-              ['Quantization', m.quant || null],
-              ['Download', formatSize(bytes) || null],
-              ['Released', fmtReleaseDate(m.releaseDate) || null],
-              ['Min RAM', m.minRamGb ? `${m.minRamGb} GB` : null]
-            ]
-            return (
-              <SidePanel
-                ariaLabel={`${m.name} details`}
-                onClose={closeDetail}
-                className="w-[26vw] min-w-[380px] font-mono"
+        {detailModel && (
+          <SidePanel
+            ariaLabel={`${detailModel.name} details`}
+            onClose={closeDetail}
+            className="w-[26vw] min-w-[380px] font-mono"
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-neutral-800 px-5 py-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <h2 className="truncate text-sm text-white">{detailModel.name}</h2>
+                  {detailModel.kind === 'vision' && (
+                    <span className="flex items-center gap-0.5 rounded-sm border border-green-500/60 px-1 py-px text-[8px] uppercase tracking-wide text-green-500">
+                      <IconEye className="h-2.5 w-2.5" /> Vision
+                    </span>
+                  )}
+                </div>
+                <div className="mt-0.5 truncate text-[10px] text-neutral-600">{detailModel.id}</div>
+              </div>
+              <button
+                onClick={closeDetail}
+                className="rounded border border-neutral-800 px-2.5 py-1 text-[10px] text-neutral-400 transition-all duration-150 hover:border-neutral-600 hover:text-white active:scale-95"
               >
-                <div className="flex items-start justify-between gap-3 border-b border-neutral-800 px-5 py-4">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <h2 className="truncate text-sm text-white">{m.name}</h2>
-                      {m.kind === 'vision' && (
-                        <span className="flex items-center gap-0.5 rounded-sm border border-green-500/60 px-1 py-px text-[8px] uppercase tracking-wide text-green-500">
-                          <IconEye className="h-2.5 w-2.5" /> Vision
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-0.5 truncate text-[10px] text-neutral-600">{m.id}</div>
-                  </div>
-                  <button
-                    onClick={closeDetail}
-                    className="rounded border border-neutral-800 px-2.5 py-1 text-[10px] text-neutral-400 transition-all duration-150 hover:border-neutral-600 hover:text-white active:scale-95"
-                  >
-                    Close
-                  </button>
-                </div>
+                Close
+              </button>
+            </div>
 
-                <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-                  {m.description && (
-                    <p className="text-xs leading-relaxed text-neutral-300">{m.description}</p>
-                  )}
-                  {comingSoon && (
-                    <div className="mt-3 rounded border border-amber-400/30 bg-amber-400/5 px-3 py-2">
-                      <p className="text-[9px] uppercase tracking-wide text-amber-400">
-                        Coming soon
-                      </p>
-                      <p className="mt-1 text-[10px] leading-relaxed text-neutral-400">
-                        {m.availabilityNote ?? 'Support is still being prepared and tested.'}
-                      </p>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+              {detailModel.description && (
+                <p className="text-xs leading-relaxed text-neutral-300">
+                  {detailModel.description}
+                </p>
+              )}
+              {detailIsComingSoon && (
+                <div className="mt-3 rounded border border-amber-400/30 bg-amber-400/5 px-3 py-2">
+                  <p className="text-[9px] uppercase tracking-wide text-amber-400">Coming soon</p>
+                  <p className="mt-1 text-[10px] leading-relaxed text-neutral-400">
+                    {detailModel.availabilityNote ?? 'Support is still being prepared and tested.'}
+                  </p>
+                </div>
+              )}
+              <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2">
+                {detailRows
+                  .filter(([, v]) => v)
+                  .map(([k, v]) => (
+                    <div key={k}>
+                      <dt className="text-[9px] uppercase tracking-wide text-neutral-600">{k}</dt>
+                      <dd className="text-xs text-neutral-200">{v}</dd>
                     </div>
-                  )}
-                  <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2">
-                    {rows
-                      .filter(([, v]) => v)
-                      .map(([k, v]) => (
-                        <div key={k}>
-                          <dt className="text-[9px] uppercase tracking-wide text-neutral-600">
-                            {k}
-                          </dt>
-                          <dd className="text-xs text-neutral-200">{v}</dd>
-                        </div>
-                      ))}
-                  </dl>
-                  {ramGb && bytes > 0 && (
-                    <p className="mt-4 text-[10px] text-neutral-500">
-                      {fitLevel(bytes / 1e9, ramGb) === 'ok'
-                        ? `Comfortable fit on your ${deviceNoun()}.`
-                        : fitLevel(bytes / 1e9, ramGb) === 'tight'
-                          ? 'Tight on RAM - context will be reduced.'
-                          : `Large for your ${deviceNoun()} - may run slowly.`}
-                    </p>
-                  )}
-                  {m.imageModes && m.imageModes.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-1">
-                      {m.imageModes.map((mode) => (
-                        <span
-                          key={mode}
-                          className="rounded-sm border border-green-500/40 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-green-500"
-                        >
-                          {MODE_LABELS[mode] ?? mode}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {hfUrl && (
-                    <button
-                      onClick={() =>
-                        (
-                          window as { api?: { openExternal?: (u: string) => void } }
-                        ).api?.openExternal?.(hfUrl)
-                      }
-                      className="mt-4 flex items-center gap-1 text-[10px] text-green-500 transition-colors duration-150 hover:text-emerald-500"
+                  ))}
+              </dl>
+              {ramGb && detailBytes > 0 && (
+                <p className="mt-4 text-[10px] text-neutral-500">
+                  {fitLevel(detailBytes / 1e9, ramGb) === 'ok'
+                    ? `Comfortable fit on your ${deviceNoun()}.`
+                    : fitLevel(detailBytes / 1e9, ramGb) === 'tight'
+                      ? 'Tight on RAM - context will be reduced.'
+                      : `Large for your ${deviceNoun()} - may run slowly.`}
+                </p>
+              )}
+              {detailModel.imageModes && detailModel.imageModes.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1">
+                  {detailModel.imageModes.map((mode) => (
+                    <span
+                      key={mode}
+                      className="rounded-sm border border-green-500/40 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-green-500"
                     >
-                      <IconExternalLink className="h-3 w-3" /> View on Hugging Face
-                    </button>
-                  )}
+                      {MODE_LABELS[mode] ?? mode}
+                    </span>
+                  ))}
                 </div>
-
-                <div
-                  className={`flex gap-2 border-t border-neutral-800 px-5 py-3 ${downloading ? 'flex-col items-stretch' : 'items-center'}`}
+              )}
+              {detailUrl && (
+                <button
+                  onClick={() =>
+                    (
+                      window as { api?: { openExternal?: (u: string) => void } }
+                    ).api?.openExternal?.(detailUrl)
+                  }
+                  className="mt-4 flex items-center gap-1 text-[10px] text-green-500 transition-colors duration-150 hover:text-emerald-500"
                 >
-                  {comingSoon ? (
-                    <span className="text-xs text-neutral-500">
-                      Download and Use unlock after support is fully tested.
-                    </span>
-                  ) : active && !downloading ? (
-                    <span className="flex items-center gap-1 text-xs text-green-500">
-                      <IconCircleCheck className="h-4 w-4" /> Active
-                    </span>
-                  ) : isInstalled && !downloading ? (
-                    <>
-                      <button
-                        onClick={() => {
-                          void activateModel(m.id)
-                          closeDetail()
+                  <IconExternalLink className="h-3 w-3" /> View on Hugging Face
+                </button>
+              )}
+            </div>
+
+            <div
+              className={`flex gap-2 border-t border-neutral-800 px-5 py-3 ${detailIsDownloading ? 'flex-col items-stretch' : 'items-center'}`}
+            >
+              {detailIsComingSoon ? (
+                <span className="text-xs text-neutral-500">
+                  Download and Use unlock after support is fully tested.
+                </span>
+              ) : detailIsActive && !detailIsDownloading ? (
+                <span className="flex items-center gap-1 text-xs text-green-500">
+                  <IconCircleCheck className="h-4 w-4" /> Active
+                </span>
+              ) : detailIsInstalled && !detailIsDownloading ? (
+                <>
+                  <button
+                    onClick={() => {
+                      void activateModel(detailModel.id)
+                      closeDetail()
+                    }}
+                    disabled={!!switching}
+                    className="rounded border border-neutral-700 px-3 py-1.5 text-xs text-white transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95 disabled:opacity-50"
+                  >
+                    Use this model
+                  </button>
+                  <button
+                    onClick={() => {
+                      void removeModel(detailModel.id, detailModel.name)
+                      closeDetail()
+                    }}
+                    className="rounded border border-neutral-800 px-3 py-1.5 text-xs text-neutral-500 transition-all duration-150 hover:border-red-500/60 hover:text-red-400 active:scale-95"
+                  >
+                    Delete
+                  </button>
+                </>
+              ) : detailIsDownloading ? (
+                <>
+                  {renderDownloadSummary(detailProgress, true)}
+                  <div className="flex w-full items-center gap-2">
+                    <div className="h-0.5 min-w-0 flex-1 overflow-hidden rounded-full bg-neutral-800">
+                      <div
+                        className="h-full w-full origin-left bg-green-500 transition-transform duration-300 ease-out motion-reduce:transition-none"
+                        style={{
+                          transform: `scaleX(${(projectProgress(detailProgress).percentage ?? 0) / 100})`
                         }}
-                        disabled={!!switching}
-                        className="rounded border border-neutral-700 px-3 py-1.5 text-xs text-white transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95 disabled:opacity-50"
-                      >
-                        Use this model
-                      </button>
-                      <button
-                        onClick={() => {
-                          void removeModel(m.id, m.name)
-                          closeDetail()
-                        }}
-                        className="rounded border border-neutral-800 px-3 py-1.5 text-xs text-neutral-500 transition-all duration-150 hover:border-red-500/60 hover:text-red-400 active:scale-95"
-                      >
-                        Delete
-                      </button>
-                    </>
-                  ) : downloading ? (
-                    <>
-                      {renderDownloadSummary(prog, true)}
-                      <div className="flex w-full items-center gap-2">
-                        <div className="h-0.5 min-w-0 flex-1 overflow-hidden rounded-full bg-neutral-800">
-                          <div
-                            className="h-full w-full origin-left bg-green-500 transition-transform duration-300 ease-out motion-reduce:transition-none"
-                            style={{
-                              transform: `scaleX(${(projectProgress(prog).percentage ?? 0) / 100})`
-                            }}
-                          />
-                        </div>
-                        {renderDownloadActions(m.id, prog)}
-                      </div>
-                    </>
-                  ) : (
-                    <button
-                      onClick={() => {
-                        download(m)
-                        closeDetail()
-                      }}
-                      className="flex items-center gap-1 rounded border border-neutral-700 px-3 py-1.5 text-xs text-white transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95"
-                    >
-                      <IconDownload className="h-3.5 w-3.5" /> Download
-                    </button>
-                  )}
-                </div>
-              </SidePanel>
-            )
-          })()}
+                      />
+                    </div>
+                    {renderDownloadActions(detailModel.id, detailProgress)}
+                  </div>
+                </>
+              ) : (
+                <button
+                  onClick={() => {
+                    void download(detailModel)
+                    closeDetail()
+                  }}
+                  className="flex items-center gap-1 rounded border border-neutral-700 px-3 py-1.5 text-xs text-white transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95"
+                >
+                  <IconDownload className="h-3.5 w-3.5" /> Download
+                </button>
+              )}
+            </div>
+          </SidePanel>
+        )}
       </AnimatePresence>
     </div>
   )
