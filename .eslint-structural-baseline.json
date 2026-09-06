@@ -1173,11 +1173,7 @@
     },
     "pro/main/sync/shared-file-sync-service.ts": {
       "max-lines": [
-        2011
-      ],
-      "complexity": [
-        20,
-        16
+        2009
       ],
       "max-params": [
         4,
