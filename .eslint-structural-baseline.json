@@ -771,11 +771,6 @@
         22
       ]
     },
-    "pro/main/crm/approvals.ts": {
-      "complexity": [
-        22
-      ]
-    },
     "pro/main/crm/calendar.ts": {
       "max-params": [
         4
@@ -1021,11 +1016,6 @@
         1
       ]
     },
-    "pro/main/meeting-detect.ts": {
-      "no-console": [
-        1
-      ]
-    },
     "pro/main/meeting-native.ts": {
       "no-console": [
         1,
@@ -1158,19 +1148,11 @@
       ],
       "max-lines": [
         704
-      ],
-      "@typescript-eslint/no-shadow": [
-        1
       ]
     },
     "pro/main/sync/sync-facade-state-bridge-lifecycle.ts": {
       "max-params": [
         5
-      ]
-    },
-    "pro/main/sync/sync-prefs.ts": {
-      "complexity": [
-        22
       ]
     },
     "pro/main/sync/sync-service.ts": {
@@ -1191,11 +1173,6 @@
     "pro/main/sync/task-run-projection.ts": {
       "complexity": [
         24
-      ]
-    },
-    "pro/main/sync/task-visual-step-projection.ts": {
-      "complexity": [
-        17
       ]
     },
     "pro/main/sync/tool-grant-mesh.ts": {
