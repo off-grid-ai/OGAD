@@ -1009,7 +1009,7 @@
         20
       ],
       "max-lines": [
-        553
+        546
       ]
     },
     "pro/main/meetings.ts": {
@@ -1023,7 +1023,7 @@
         16
       ],
       "max-lines": [
-        702
+        697
       ]
     },
     "pro/main/services.ts": {
@@ -1059,11 +1059,6 @@
         1
       ]
     },
-    "pro/main/sync/knowledge-document-transfer.ts": {
-      "max-params": [
-        4
-      ]
-    },
     "pro/main/sync/macos-proximity.ts": {
       "max-params": [
         4
@@ -1080,7 +1075,7 @@
     },
     "pro/main/sync/model-transfer-service.ts": {
       "max-params": [
-        5
+        4
       ],
       "complexity": [
         21
@@ -1136,7 +1131,7 @@
     },
     "pro/main/sync/sync-service.ts": {
       "max-lines": [
-        823
+        817
       ]
     },
     "pro/main/sync/sync-store.ts": {
@@ -1358,11 +1353,10 @@
     },
     "pro/renderer/settings-sections.tsx": {
       "complexity": [
-        26,
-        21
+        24
       ],
       "max-lines": [
-        759
+        555
       ]
     },
     "pro/renderer/settings-sync.tsx": {
