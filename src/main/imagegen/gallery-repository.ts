@@ -786,10 +786,15 @@ async function quarantineAndReleaseOwnedBytes(
     throw new Error('Generated image deletion quarantine evidence is invalid.')
   }
   fs.mkdirSync(quarantineRoot, { recursive: true })
-  db.prepare(
-    `UPDATE generated_image_byte_deletions SET quarantine_path = ?
-     WHERE image_id = ? AND deletion_operation_id = ?`
-  ).run(quarantinePath, row.image_id, row.deletion_operation_id)
+  const recorded = db
+    .prepare(
+      `UPDATE generated_image_byte_deletions SET quarantine_path = ?
+       WHERE image_id = ? AND deletion_operation_id = ?`
+    )
+    .run(quarantinePath, row.image_id, row.deletion_operation_id)
+  if (recorded.changes !== 1) {
+    throw new Error('Generated image deletion intent disappeared before quarantine.')
+  }
 
   if (!fs.existsSync(quarantinePath) && fs.existsSync(owned)) {
     if (commitFence && !commitFence()) return
