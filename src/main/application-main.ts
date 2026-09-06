@@ -66,6 +66,53 @@ function runTextModelPrepareStage(): Promise<StartupStageResult<StartupTextModel
   })
 }
 
+function isServerOnlyLaunch(): boolean {
+  return process.argv.includes('--server-only') || process.env.OFFGRID_SERVER_ONLY === '1'
+}
+
+function startServerOnlyApplication(): void {
+  writeDiagnosticLog('gateway', 'server-only.started', {
+    port: 7878,
+    uiEnabled: false,
+    captureEnabled: false
+  })
+  if (process.platform === 'darwin' && app.dock) {
+    try {
+      app.dock.hide()
+    } catch {
+      /* ignore */
+    }
+  }
+  // Headless: no window exists to open early, so there is nothing to order around. It runs
+  // through the SAME stage machinery as the windowed sequence, so its deadlines, its typed
+  // results and its degraded reports are the ones every other startup step gets - a second mode
+  // is not a second startup contract.
+  void runIndependentStartupStages([
+    {
+      name: 'models.gateway.start',
+      deadlineMs: 30_000,
+      domain: 'models',
+      // A late listener is still owned by the shutdown registry (`stopGateway`), so it cannot
+      // outlive the process untracked.
+      lateEffectIsRecoverable: true,
+      run: () => startModelServer()
+    },
+    {
+      // One start, whatever the deadline does: the composition root memoises the start promise,
+      // so a late completion resolves THAT one instead of starting a second runtime.
+      name: 'application.start',
+      deadlineMs: 20_000,
+      required: true,
+      lateEffectIsRecoverable: true,
+      run: () =>
+        import('./composition/application').then(({ startDesktopApplication }) =>
+          startDesktopApplication()
+        )
+    }
+  ])
+  void runTextModelPrepareStage()
+}
+
 import {
   initLicensing,
   refreshCachedProEntitlement,
@@ -158,49 +205,12 @@ const applicationReady = app.whenReady().then(async () => {
   // own — `<app-binary> --server-only` (or OFFGRID_SERVER_ONLY=1) — while still
   // reusing the Electron-built native binaries. First step toward a standalone
   // gateway CLI (see docs/GATEWAY_SPINE.md "externalize later").
-  const serverOnly =
-    process.argv.includes('--server-only') || process.env.OFFGRID_SERVER_ONLY === '1'
-  if (serverOnly) {
-    console.log('[gateway] server-only mode — gateway on :7878, no UI/capture')
-    if (process.platform === 'darwin' && app.dock) {
-      try {
-        app.dock.hide()
-      } catch {
-        /* ignore */
-      }
-    }
-    // Headless: no window exists to open early, so there is nothing to order around. It runs
-    // through the SAME stage machinery as the windowed sequence, so its deadlines, its typed
-    // results and its degraded reports are the ones every other startup step gets - a second mode
-    // is not a second startup contract.
-    void runIndependentStartupStages([
-      {
-        name: 'models.gateway.start',
-        deadlineMs: 30_000,
-        domain: 'models',
-        // A late listener is still owned by the shutdown registry (`stopGateway`), so it cannot
-        // outlive the process untracked.
-        lateEffectIsRecoverable: true,
-        run: () => startModelServer()
-      },
-      {
-        // One start, whatever the deadline does: the composition root memoises the start promise,
-        // so a late completion resolves THAT one instead of starting a second runtime.
-        name: 'application.start',
-        deadlineMs: 20_000,
-        required: true,
-        lateEffectIsRecoverable: true,
-        run: () =>
-          import('./composition/application').then(({ startDesktopApplication }) =>
-            startDesktopApplication()
-          )
-      }
-    ])
-    void runTextModelPrepareStage()
+  if (isServerOnlyLaunch()) {
+    startServerOnlyApplication()
     return // skip window, tray, IPC, capture, connectors — gateway only
   }
 
-  console.log('APP READY: Initializing Services...')
+  writeDiagnosticLog('app', 'services.initializing')
 
   // One-time, idempotent cleanup of the old "My Memories" AI-chat imports.
   try {
@@ -420,10 +430,10 @@ const applicationReady = app.whenReady().then(async () => {
       name: 'workflows:failure-observer',
       shutdown: observeWorkflowFailures(applicationRoot.value.desktopApplication)
     })
+    setupDesktopBackupIPC(applicationRoot.value.desktopApplication)
   }
   setupMcpIpc() // basic MCP connectors (management + chat tool extension)
   registerNativeActionTools(registerToolExtension) // the assistant's tools (macOS full set; Windows Outlook subset)
-  setupDesktopBackupIPC()
   ipcMain.handle('media:url', (_e, absPath: string) => mediaUrlFor(absPath))
   // Nothing below depends on anything else below it: these are separate domains registering their
   // own handlers, so their import and setup latency is paid once, not eleven times over.
