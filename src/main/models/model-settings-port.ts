@@ -15,6 +15,25 @@
 import type { EncodedModelSetting, ModelsSettingsPort } from '@offgrid/application'
 import { CORE_SYNC_ENTITIES, emitSyncMutation } from '../sync-mutation'
 import { llm, type LlmSettings } from '../llm'
+import { getSetting } from '../database'
+
+const LEGACY_IMAGE_SETTING_KEYS = [
+  'imageParams',
+  'imgSeed',
+  'imgNegative',
+  'enhanceImagePrompts'
+] as const
+
+function readCommittedSettings(): Readonly<Record<string, unknown>> {
+  const settings = llm.getSettings() as Readonly<Record<string, unknown>>
+  const migrated: Record<string, unknown> = { ...settings }
+  for (const key of LEGACY_IMAGE_SETTING_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(settings, key)) continue
+    const legacy = getSetting<unknown>(key, undefined)
+    if (legacy !== undefined) migrated[key] = legacy
+  }
+  return migrated
+}
 
 /** The committed record narrowed to the keys this save moved: one persist, no unrelated writes. */
 export function committedSettingsPatch(
@@ -31,7 +50,7 @@ export function createDesktopModelSettingsPort(): ModelsSettingsPort {
     platform: 'desktop',
     // Synchronous by contract, and it can be: the engine holds the hydrated record in memory, so a
     // settings form never waits on SQLite to render what is committed.
-    read: () => llm.getSettings() as Readonly<Record<string, unknown>>,
+    read: readCommittedSettings,
     /**
      * One persist per save.
      *

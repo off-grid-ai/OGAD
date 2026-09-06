@@ -27,6 +27,7 @@ function ImageMetadata({
 
 export function ChatImagePreview({
   src,
+  imageId,
   path,
   alt = 'Generated',
   metadata,
@@ -35,6 +36,7 @@ export function ChatImagePreview({
   onOpen
 }: Readonly<{
   src: string
+  imageId?: string
   path?: string
   alt?: string
   metadata?: ImageGenerationMetadata
@@ -43,14 +45,14 @@ export function ChatImagePreview({
    *  default: a preview with its own max-width would otherwise get a click target spanning the
    *  whole bubble, so clicking the empty space beside it would open the viewer. */
   fill?: boolean
-  onOpen: (image: { url: string; path?: string }) => void
+  onOpen: (image: { url: string; imageId?: string; path?: string }) => void
 }>): React.JSX.Element {
   return (
     <div className={fill ? 'w-full' : undefined}>
       <button
         type="button"
         aria-label={`Open ${alt}`}
-        onClick={() => onOpen({ url: src, path })}
+        onClick={() => onOpen({ url: src, imageId, path })}
         className={fill ? 'block w-full max-w-full' : 'block max-w-full'}
       >
         <img src={src} alt={alt} className={className} />
@@ -199,4 +201,3 @@ export function AudioPane({ path, title }: { path: string; title: string }): Rea
     </div>
   )
 }
-

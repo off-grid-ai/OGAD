@@ -1,44 +1,20 @@
-// The QR/code pairing payload the desktop hands a phone so it can run this machine's
-// MCP action tools. Small, versioned JSON. The SAME data the manual "enter URL +
-// token" flow uses, so QR and code stay interchangeable.
+// The QR/code pairing payload the desktop hands a phone so it can run this machine's MCP action
+// tools is owned by @offgrid/sync (`tool-grant-contract`): the discriminator, the version, the
+// payload shape, the URL rule and the JSON encoding all live there, next to the parser the phone
+// and the mesh grant path use. Desktop keeps no copy of those rules - a second copy is how the QR
+// and the scanner drift apart.
 //
-// Contract (mirrored by the OGAM mobile parser - keep the two in sync):
-//   { t: 'offgrid-mcp-pair', v: 1, url: 'http://<ip>:<port>/mcp', token, name? }
-//
-// Pure - no electron, unit tested.
+// This module is the Desktop main-process path for that contract. It re-exports, it does not wrap:
+// there is no Desktop-side build, encode or validation step layered on top.
 
-/** Discriminator so a scanner can tell our QR from any other. */
-export const MCP_PAIR_TYPE = 'offgrid-mcp-pair'
-export const MCP_PAIR_VERSION = 1
-
-export interface McpPairingPayload {
-  t: typeof MCP_PAIR_TYPE
-  v: typeof MCP_PAIR_VERSION
-  /** The MCP endpoint on this machine's gateway, e.g. http://192.168.1.18:7878/mcp */
-  url: string
-  /** The action-tool bearer token. */
-  token: string
-  /** This desktop's display name, for the phone to label the connection. */
-  name?: string
-}
-
-/** Build the pairing payload from the live gateway details. */
-export function buildPairingPayload(opts: {
-  lanIp: string
-  port: number
-  token: string
-  name?: string
-}): McpPairingPayload {
-  return {
-    t: MCP_PAIR_TYPE,
-    v: MCP_PAIR_VERSION,
-    url: `http://${opts.lanIp}:${opts.port}/mcp`,
-    token: opts.token,
-    ...(opts.name ? { name: opts.name } : {})
-  }
-}
-
-/** The string that goes into the QR (and that the phone scans). */
-export function encodePairingPayload(payload: McpPairingPayload): string {
-  return JSON.stringify(payload)
-}
+export {
+  MCP_PAIR_TYPE,
+  MCP_PAIR_VERSION,
+  MCP_MIN_TOKEN_LENGTH,
+  buildLocalMcpUrl,
+  buildMcpPairingPayload,
+  encodeMcpPairingPayload,
+  parseMcpPairingPayload,
+  validateMcpPairing
+} from '@offgrid/sync'
+export type { McpPairing, McpPairingPayload } from '@offgrid/sync'

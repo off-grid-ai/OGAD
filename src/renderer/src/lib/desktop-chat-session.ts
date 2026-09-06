@@ -265,7 +265,7 @@ export class DesktopChatSession {
   }
 
   invalidate(conversationId: string): void {
-    this.service.stopConversation(conversationId)
+    this.stopConversation(conversationId, 'Conversation no longer exists')
     this.repository.invalidate(conversationId)
   }
 

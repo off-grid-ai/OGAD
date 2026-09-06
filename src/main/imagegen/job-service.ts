@@ -1,24 +1,31 @@
 import { randomUUID } from 'node:crypto'
+import path from 'node:path'
 import {
   canAcknowledgeImageConversation,
   isImageApplicationInFlight,
   type ImageApplicationSnapshot
 } from '@offgrid/models'
-import { generatedImageMetadataJson } from '@offgrid/sync'
+import { createGeneratedImageRecord, type GeneratedImageRecord } from '@offgrid/application'
 import type { ChatHome } from '@offgrid/sync'
+import sharp from 'sharp'
 import {
   type ImageGenerationJobContract,
   type ImageGenerationRequestContract,
   type ImageGenerationResultContract
 } from '../../shared/image-generation-contract'
+import { preserveGeneratedImageSource, type ImageGenOutput } from '../imagegen'
 import {
-  preserveGeneratedImageSource,
-  saveGeneratedImageScope,
-  type ImageGenOutput
-} from '../imagegen'
+  applicationMutationAdmission,
+  type ApplicationMutationAdmission
+} from '../mutation-admission'
 import { desktopImageApplication, type DesktopImageApplicationRequest } from './application-service'
-import type { GeneratedImageSidecar } from './gallery-sidecar'
-import { noteGeneratedImageMessage, shareGeneratedImage } from './generated-image-share'
+import {
+  prepareDesktopGeneratedImageCreation,
+  settleMissingDesktopGeneratedImageSource,
+  settleDesktopGeneratedImageCreation
+} from './creation-intent-runtime'
+import { desktopGeneratedImageGallery } from './gallery-repository'
+import { noteGeneratedImageMessage } from './generated-image-share'
 
 export type ImageGenerationJobRequest = ImageGenerationRequestContract & {
   conversationId?: string
@@ -65,12 +72,16 @@ export class ImageGenerationCancellationError extends Error {
 export type ImageGenerationResult = ImageGenerationResultContract
 
 export interface ImageGenerationPersistencePort {
-  /** The scope, not the whole request: the sidecar owns these facts and nothing else here. */
-  saveScope(path: string, facts: GeneratedImageSidecar): void
-  /** Offer a finished image that already has a complete reserved chat association. */
-  share(path: string): boolean
+  /** Persist recovery evidence before the native owner can create bytes. */
+  prepareCreation?(requestId: string, expectsSource: boolean): void
+  /** Remove recovery evidence only after gallery admission or verified cleanup. */
+  settleCreation?(requestId: string): void
+  /** Prove that a requested retained source created no app-owned destination. */
+  settleMissingSource?(requestId: string): void
+  /** Commit metadata only after the native artifact exists. */
+  create(record: GeneratedImageRecord): Promise<void>
   /** Record the durable message association and offer the image with that link. */
-  noteMessage(path: string, shownIn: ChatHome): boolean
+  noteMessage(path: string, shownIn: ChatHome): Promise<boolean>
   /** Keep the app's own copy of the image this generation was based on. */
   preserveSource(syncId: string, sourcePath: string): string | null
 }
@@ -84,10 +95,45 @@ export interface DesktopImageApplicationPort {
 }
 
 const nativeImageGenerationPersistence: ImageGenerationPersistencePort = {
-  saveScope: (path, facts) => saveGeneratedImageScope(path, facts),
-  share: (path) => shareGeneratedImage(path),
-  noteMessage: (path, shownIn) => noteGeneratedImageMessage({ ...shownIn, imagePath: path }),
+  prepareCreation: prepareDesktopGeneratedImageCreation,
+  settleCreation: settleDesktopGeneratedImageCreation,
+  settleMissingSource: settleMissingDesktopGeneratedImageSource,
+  create: async (record) => {
+    const outcome = await desktopGeneratedImageGallery().create(record)
+    if (!outcome.ok) throw new Error(outcome.failure.message)
+  },
+  noteMessage: (imagePath, shownIn) => noteGeneratedImageMessage({ ...shownIn, imagePath }),
   preserveSource: (syncId, sourcePath) => preserveGeneratedImageSource(syncId, sourcePath)
+}
+
+async function generatedImageRecord(input: {
+  id: string
+  request: ImageGenerationJobRequest
+  output: ImageGenOutput
+  startedAt: number
+  steps: number | undefined
+}): Promise<GeneratedImageRecord> {
+  const dimensions = await sharp(input.output.path).metadata()
+  if (!dimensions.width || !dimensions.height || !input.steps) {
+    throw new Error('The generated image is missing canonical dimensions or step count.')
+  }
+  return createGeneratedImageRecord({
+    id: input.id,
+    ...(input.request.conversationId === undefined
+      ? {}
+      : { conversationId: input.request.conversationId }),
+    prompt: input.output.prompt,
+    ...(input.request.negativePrompt === undefined
+      ? {}
+      : { negativePrompt: input.request.negativePrompt }),
+    width: dimensions.width,
+    height: dimensions.height,
+    steps: input.steps,
+    seed: input.output.seed,
+    modelId: input.output.model,
+    createdAt: new Date(input.startedAt).toISOString(),
+    local: { path: input.output.path, fileName: path.basename(input.output.path) }
+  })
 }
 
 function jobPhase(
@@ -143,14 +189,19 @@ export class ImageGenerationJobService {
   private readonly conversationListeners = new Set<ConversationListener>()
   private readonly jobListeners = new Set<JobListener>()
   private pendingCommitId: string | null = null
+  private pendingTotalSteps: number | null = null
   private persistenceFailure: { requestId: string; error: string; finishedAt: number } | null = null
   private cancellationFailure: { requestId: string; error: string } | null = null
 
   constructor(
     private readonly persistence: ImageGenerationPersistencePort = nativeImageGenerationPersistence,
-    private readonly application: DesktopImageApplicationPort = desktopImageApplication
+    private readonly application: DesktopImageApplicationPort = desktopImageApplication,
+    private readonly admission: ApplicationMutationAdmission = applicationMutationAdmission
   ) {
     this.application.onChange((snapshot) => {
+      if (snapshot.requestId === this.pendingCommitId && snapshot.progress?.totalSteps) {
+        this.pendingTotalSteps = snapshot.progress.totalSteps
+      }
       if (snapshot.phase === 'done' && snapshot.requestId === this.pendingCommitId) return
       this.publish(this.project(snapshot))
     })
@@ -173,6 +224,7 @@ export class ImageGenerationJobService {
 
   /** Reject before a caller reserves related state for a job this service cannot accept. */
   assertCanStart(): void {
+    this.admission.assertOpen('images')
     if (this.application.isRunning()) {
       throw new Error('An image is already generating — please wait for it to finish.')
     }
@@ -180,14 +232,20 @@ export class ImageGenerationJobService {
 
   async start(request: ImageGenerationJobRequest): Promise<ImageGenerationResult> {
     this.assertCanStart()
+    return this.admission.admit('images', () => this.run(request))
+  }
+
+  private async run(request: ImageGenerationJobRequest): Promise<ImageGenerationResult> {
     const id = randomUUID()
+    this.persistence.prepareCreation?.(id, Boolean(request.initImage))
     this.pendingCommitId = id
+    this.pendingTotalSteps = null
     this.persistenceFailure = null
     this.cancellationFailure = null
     try {
       const output = await this.application.start({ ...request, requestId: id })
       const startedAt = this.application.status().startedAt ?? Date.now()
-      this.finalize({ id, request, output, startedAt })
+      await this.finalize({ id, request, output, startedAt })
       this.pendingCommitId = null
       this.cancellationFailure = null
       this.publish(this.status())
@@ -197,9 +255,11 @@ export class ImageGenerationJobService {
         const failure =
           error instanceof ImageGenerationPersistenceError
             ? error
-            : new ImageGenerationPersistenceError(id, this.application.status().result?.path ?? '', {
-                cause: error
-              })
+            : new ImageGenerationPersistenceError(
+                id,
+                this.application.status().result?.path ?? '',
+                { cause: error }
+              )
         this.persistenceFailure = {
           requestId: id,
           error: failure.message,
@@ -244,20 +304,26 @@ export class ImageGenerationJobService {
    * Called only after the renderer has persisted the generated assistant message.
    * A remounted Chat observes this and refreshes the conversation from SQLite.
    *
-   * A job with a reserved message id was offered after its sidecar commit. Otherwise `noteMessage`
-   * writes the first complete association and performs the deferred offer. The generated-image owner
-   * treats a repeated acknowledgement as idempotent.
+   * The requested message id is not authority. `noteMessage` verifies the acknowledged identity
+   * against the durable Workspace Content owner before it performs the deferred offer. The
+   * generated-image owner treats a repeated acknowledgement as idempotent.
    */
-  acknowledgeConversation(conversationId: string, messageId?: string): boolean {
+  async acknowledgeConversation(conversationId: string, messageId?: string): Promise<boolean> {
     const snapshot = this.status()
     if (!canAcknowledgeImageConversation(snapshot, conversationId)) return false
     const syncId = snapshot.id
     if (!syncId) return false
     const reservedMessageId = this.application.status().messageId
-    if (!reservedMessageId && !messageId) return false
-    if (messageId && snapshot.outputPath) {
+    const acknowledgedMessageId = messageId ?? reservedMessageId
+    if (!acknowledgedMessageId) return false
+    if (snapshot.outputPath) {
       try {
-        if (!this.persistence.noteMessage(snapshot.outputPath, { conversationId, messageId })) {
+        if (
+          !(await this.persistence.noteMessage(snapshot.outputPath, {
+            conversationId,
+            messageId: acknowledgedMessageId
+          }))
+        ) {
           throw new Error('The generated image could not be linked to its conversation message.')
         }
       } catch (error) {
@@ -282,55 +348,42 @@ export class ImageGenerationJobService {
     return true
   }
 
-  private finalize(context: {
+  private async finalize(context: {
     id: string
     request: ImageGenerationJobRequest
     output: ImageGenOutput
     startedAt: number
-  }): void {
+  }): Promise<void> {
     const { id, request, output, startedAt } = context
     if (!output.path) {
       throw new ImageGenerationPersistenceError(id, '', {
         cause: new Error('The native image runtime did not return an owned output path.')
       })
     }
-    const keptSource = request.initImage
-      ? this.persistence.preserveSource(id, request.initImage)
-      : null
     try {
-      this.persistence.saveScope(output.path, {
-        syncId: id,
-        ...(keptSource ? { initImage: keptSource } : {}),
-        ...(request.conversationId ? { conversationId: request.conversationId } : {}),
-        ...(request.messageId ? { messageId: request.messageId } : {}),
-        projectId: request.projectId ?? null,
-        createdAt: new Date(startedAt).toISOString(),
-        ...(request.width ? { width: request.width } : {}),
-        ...(request.height ? { height: request.height } : {}),
-        metadataJson: generatedImageMetadataJson({
-          prompt: output.prompt,
-          ...(request.negativePrompt === undefined
-            ? {}
-            : { negativePrompt: request.negativePrompt }),
-          ...(request.steps === undefined ? {} : { steps: request.steps }),
-          seed: output.seed,
-          modelId: output.model
-        })
-      })
+      if (request.initImage && !this.persistence.preserveSource(id, request.initImage)) {
+        this.persistence.settleMissingSource?.(id)
+      }
+      const steps = this.pendingTotalSteps ?? request.steps
+      await this.persistence.create(
+        await generatedImageRecord({ id, request, output, startedAt, steps })
+      )
     } catch (scopeError) {
+      let cleanupError: unknown = null
+      try {
+        this.persistence.settleCreation?.(id)
+      } catch (cause) {
+        cleanupError = cause
+      }
       console.error(
         `[image-job] ${JSON.stringify({
-          event: 'save-scope-failed',
+          event: 'gallery-create-failed',
           id,
           error: scopeError instanceof Error ? scopeError.message : String(scopeError)
         })}`
       )
-      throw new ImageGenerationPersistenceError(id, output.path, { cause: scopeError })
-    }
-    const hasReservedMessageAssociation = Boolean(request.conversationId && request.messageId)
-    if (hasReservedMessageAssociation && !this.persistence.share(output.path)) {
       throw new ImageGenerationPersistenceError(id, output.path, {
-        cause: new Error('The committed generated image could not be described for sharing.')
+        cause: cleanupError ? new AggregateError([scopeError, cleanupError]) : scopeError
       })
     }
   }

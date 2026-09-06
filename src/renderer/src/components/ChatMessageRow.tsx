@@ -139,6 +139,7 @@ function VoiceMessageRow({
         <MessageThinkingHeader message={message} />
         <ChatImagePreview
           src={message.image}
+          imageId={message.imageId}
           path={message.imagePath}
           metadata={message.imageMetadata}
           className="max-w-[20rem] cursor-zoom-in rounded-md border border-neutral-800 transition-opacity hover:opacity-90"
@@ -330,6 +331,7 @@ function MessageBubble({
       {message.image ? (
         <ChatImagePreview
           src={message.image}
+          imageId={message.imageId}
           path={message.imagePath}
           metadata={message.imageMetadata}
           className="mb-2 w-full max-w-full cursor-zoom-in rounded-md border border-neutral-800 object-contain transition-opacity hover:opacity-90"

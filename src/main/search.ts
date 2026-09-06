@@ -23,6 +23,12 @@ import {
   type SearchResult,
   type SearchSort
 } from './search-ranking'
+import {
+  chatFacetCount,
+  chatSearchHits,
+  chatSourceCount,
+  workspaceChatSnapshot
+} from './search-workspace-content'
 
 export type { SearchResult, SearchSort } from './search-ranking'
 
@@ -155,8 +161,9 @@ export function searchSources(): { source: string; count: number }[] {
   const mtg = db.prepare('SELECT COUNT(*) AS c FROM meetings').get() as { c: number }
   if (mtg.c) rows.push({ source: 'Meeting', count: mtg.c })
   // Your own data, not just captured surfaces: chats and project knowledge bases.
-  const chat = db.prepare('SELECT COUNT(*) AS c FROM rag_conversations').get() as { c: number }
-  if (chat.c) rows.push({ source: 'Chat', count: chat.c })
+  const workspace = workspaceChatSnapshot()
+  const chatCount = workspace ? chatSourceCount(workspace) : 0
+  if (chatCount) rows.push({ source: 'Chat', count: chatCount })
   const kb = db.prepare('SELECT COUNT(*) AS c FROM rag_documents').get() as { c: number }
   if (kb.c) rows.push({ source: 'Knowledge base', count: kb.c })
   return rows
@@ -186,13 +193,9 @@ export function searchFacets(query: string): { source: string; count: number }[]
   }
   const terms = queryTerms(q, 6)
   if (terms.length) {
-    const chatM = likeMatch(LIKE_COLUMNS.chat, terms)
-    const chat = db
-      .prepare(
-        `SELECT COUNT(*) AS c FROM (SELECT rc.id FROM rag_messages rm JOIN rag_conversations rc ON rc.id=rm.conversation_id WHERE ${chatM.where} GROUP BY rc.id)`
-      )
-      .get(...chatM.args) as { c: number }
-    if (chat.c) out.push({ source: 'Chat', count: chat.c })
+    const workspace = workspaceChatSnapshot()
+    const chat = workspace ? chatFacetCount(workspace, terms) : 0
+    if (chat) out.push({ source: 'Chat', count: chat })
     const docM = likeMatch(LIKE_COLUMNS.doc, terms)
     const kb = db
       .prepare(
@@ -365,28 +368,20 @@ function keywordHits(query: string, perSource: number): RawHit[][] {
     // Raw frame OCR via LIKE — catches exact on-screen words dropped from the summary.
     likeFrameHits(query, perSource),
     // Your own chat conversations (title + message content), one hit per chat.
-    likeChatHits(query, perSource),
+    chatHits(query, perSource),
     // Project knowledge-base documents (chunked file content).
     likeDocHits(query, perSource)
   ]
 }
 
-// Chat conversations have no FTS index — LIKE over message content OR the chat
-// title, one hit per conversation (newest first). The conversation id (TEXT) is
-// carried in `url` so the renderer can open that exact chat.
-function likeChatHits(query: string, limit: number): RawHit[] {
+// Your own chats, read from the canonical Workspace Content owner rather than the legacy
+// transcript tables: one hit per matching conversation (newest first), the conversation id
+// carried in `url` so the renderer can open that exact chat. See `search-workspace-content.ts`.
+function chatHits(query: string, limit: number): RawHit[] {
   const terms = queryTerms(query, 6)
   if (!terms.length) return []
-  const { where, args } = likeMatch(LIKE_COLUMNS.chat, terms)
-  return getDB()
-    .prepare(
-      `SELECT 'chat:'||rc.id AS key, 'chat' AS kind, 0 AS refId, COALESCE(rc.title,'Chat') AS title,
-              substr(rm.content,1,300) AS snippet, 'Chat' AS surface, rc.id AS url,
-              ${epochMsSql('rc.updated_at')} AS ts
-         FROM rag_messages rm JOIN rag_conversations rc ON rc.id = rm.conversation_id
-        WHERE ${where} GROUP BY rc.id ORDER BY rc.updated_at DESC LIMIT ?`
-    )
-    .all(...args, limit) as RawHit[]
+  const workspace = workspaceChatSnapshot()
+  return workspace ? chatSearchHits(workspace, terms, limit) : []
 }
 
 // Knowledge-base documents (per project) — LIKE over chunk content, one hit per

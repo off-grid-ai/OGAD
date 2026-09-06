@@ -11,13 +11,16 @@ import {
   type ModelsFacade,
   type OffGridApplication,
   type OffGridApplicationSnapshot,
+  type OffGridWorkflows,
   type OffGridDomain,
   type PartialGenerationState,
   type RagFacade,
   type SyncFacade,
   type Unsubscribe,
-  type UseFacade
+  type UseFacade,
+  type WorkspaceContentFacade
 } from '@offgrid/application'
+import { applicationMutationAdmission } from '../mutation-admission'
 
 interface DesktopApplicationRegistry {
   current: OffGridApplication | null
@@ -154,6 +157,35 @@ export const desktopSync: SyncFacade = new Proxy({} as SyncFacade, {
     const facade = current().sync
     const value = facade[property as keyof SyncFacade]
     return typeof value === 'function' ? value.bind(facade) : value
+  }
+})
+
+/**
+ * Stable access to the Shared Workspace Content facade without a composition-root import cycle.
+ * Background writers that create or update projects, conversations, and messages read and command
+ * through this facade instead of a legacy table, so Workspace Content stays the one canonical owner.
+ */
+export const desktopWorkspaceContent: WorkspaceContentFacade = new Proxy(
+  {} as WorkspaceContentFacade,
+  {
+    get: (_target, property) => {
+      const facade = current().workspaceContent
+      if (property === 'execute') {
+        return (command: Parameters<WorkspaceContentFacade['execute']>[0]) =>
+          applicationMutationAdmission.admit('chats', () => facade.execute(command))
+      }
+      const value = facade[property as keyof WorkspaceContentFacade]
+      return typeof value === 'function' ? value.bind(facade) : value
+    }
+  }
+)
+
+/** Stable access to Shared cross-domain workflows for non-UI main-process coordinators. */
+export const desktopWorkflows: OffGridWorkflows = new Proxy({} as OffGridWorkflows, {
+  get: (_target, property) => {
+    const workflows = current().workflows
+    const value = workflows[property as keyof OffGridWorkflows]
+    return typeof value === 'function' ? value.bind(workflows) : value
   }
 })
 

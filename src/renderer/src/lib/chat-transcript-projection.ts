@@ -116,6 +116,7 @@ export function projectChatMessage(turn: ProjectedTurn, context?: RagContext): C
     reasoningLabel: turn.reasoningLabel,
     provenance: turn.provenance,
     image: imageReference ? captureUrlForPath(imageReference.path) : undefined,
+    imageId: imageReference?.id,
     imagePath: imageReference?.path,
     imageMetadata: context?.imageMetadata,
     attachments: Array.isArray(context?.attachments) ? context.attachments : undefined

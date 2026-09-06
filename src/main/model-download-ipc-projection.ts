@@ -4,6 +4,7 @@ type ModelProjectionChannel =
   | 'model:download-progress'
   | 'models:control-projection-changed'
   | 'models:operations-projection-changed'
+  | 'models:settings-projection-changed'
 
 interface DownloadProgressTarget {
   isDestroyed(): boolean
@@ -43,8 +44,9 @@ export function observeModelDownloadIpcProjection(input: {
   report(error: unknown): void
 }): () => void {
   return input.models.events((event) => {
-    if (event.type !== 'download') return
-    publishProjection(input, 'model:download-progress', event.event)
+    if (event.type === 'download') publishProjection(input, 'model:download-progress', event.event)
+    else if (event.type === 'settings_committed')
+      publishProjection(input, 'models:settings-projection-changed', event.committed.settings)
   })
 }
 

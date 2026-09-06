@@ -53,6 +53,7 @@ let activeProRuntime: ActiveProRuntime | null = null
 let activeEntitlementBootstrap: ActiveProRuntime | null = null
 let lifecycleTask: Promise<void> = Promise.resolve()
 let applicationShutdownOwnerRegistered = false
+let personalDataRegistration: Promise<void> | null = null
 
 function enqueueLifecycle(operation: () => Promise<void>): Promise<void> {
   const result = lifecycleTask.then(operation)
@@ -155,6 +156,35 @@ export async function loadProEntitlementProvider(): Promise<void> {
     }
   ).registerEntitlementProvider
   if (typeof register === 'function') await register()
+}
+
+/**
+ * Register passive Pro privacy stores before application recovery. This imports no writer and starts
+ * no Pro service. Free builds expose no registration function and remain a no-op.
+ */
+export function registerProPersonalStoresBeforeApplication(): Promise<void> {
+  personalDataRegistration ??= import('@offgrid/pro/main').then((pro: unknown) => {
+    const registerPlatform = (pro as { registerEntitlementProvider?: () => void | Promise<void> })
+      .registerEntitlementProvider
+    const register = (pro as { registerProPersonalStores?: () => void | Promise<void> })
+      .registerProPersonalStores
+    const registerPrivacy = (
+      pro as {
+        registerPassivePrivacyPublicationRecovery?: () => void | Promise<void>
+      }
+    ).registerPassivePrivacyPublicationRecovery
+    return Promise.resolve(typeof registerPlatform === 'function' ? registerPlatform() : undefined)
+      .then(() =>
+        Promise.all([
+          typeof register === 'function' ? Promise.resolve(register()) : Promise.resolve(),
+          typeof registerPrivacy === 'function'
+            ? Promise.resolve(registerPrivacy())
+            : Promise.resolve()
+        ])
+      )
+      .then(() => undefined)
+  })
+  return personalDataRegistration
 }
 
 /** Whether pro features should activate. The pro submodule must be present AND

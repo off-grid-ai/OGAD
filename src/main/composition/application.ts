@@ -20,20 +20,46 @@ import { createDesktopAutomationPorts, forwardDesktopAutomationEvent } from '../
 import { createDesktopUsePorts, observeActionOutcome } from '../actions/use-runtime'
 import { createDesktopGuidedSetupPorts } from './guided-setup'
 import { createDesktopSpeechIoPorts } from './speech-io'
-import { createDesktopSpeechSelectionPort } from './speech-selection'
+import {
+  createDesktopSpeechPreferencePorts,
+  createDesktopSpeechSelectionPort
+} from './speech-selection'
 import { setupSpeechMicrophoneIpc } from '../speech-microphone-ipc'
 import { setupSpeechPlaybackIpc } from '../speech-playback-ipc'
 import { setupSpeechTextCleaningIpc } from '../speech-text-cleaning-ipc'
 import { consumeDesktopApplicationExtensionPorts } from './application-extension-ports'
 import { claimDesktopSyncRuntime } from '../sync-runtime-owner'
 import { writeDiagnosticLog } from '../diagnostics-log'
+import { registerApplicationMutationAdmissionGuard } from '../mutation-admission-privacy'
 import { setupVoiceTurnIpc } from '../voice-turn-ipc'
 import { desktopModelDownloads } from '../models/desktop-model-download-ports'
 import { createDesktopModelControlPort } from '../models/desktop-model-control-port'
 import { createDesktopModelTransferQueryPorts } from '../models/model-transfer-query-ports'
+import { desktopWorkspaceContentPersistence } from './workspace-content'
+import { registerWorkspaceContentIpc } from './workspace-content-ipc'
+import { registerGeneratedImageGalleryProjectionIpc } from './generated-image-gallery-ipc'
+import { desktopWorkspaceContentMigrationRuntime } from '../workspace-content/migration-runtime'
+import { registerWorkspaceContentMigrationIpc } from '../workspace-content/workspace-content-ipc'
+import { getDB } from '../database'
+import {
+  DesktopGeneratedImageGalleryRepository,
+  migrateGeneratedImageSidecars,
+  registerDesktopGeneratedImageGallery
+} from '../imagegen/gallery-repository'
+import { DesktopConversationDeletionIntentRepository } from '../workspace-content/conversation-deletion-recovery'
+import { DesktopDeletionContinuationResolver } from '../workspace-content/deletion-continuation-resolver'
+import { DesktopProjectMediaCleanup } from '../workspace-content/project-deletion-recovery'
+import {
+  resumeGeneratedImagePublication,
+  suspendGeneratedImagePublication
+} from '../imagegen/generated-image-share'
+import { registerDataDeletionGuard } from '../data-privacy'
 
 const speechIo = createDesktopSpeechIoPorts()
 const extensionPorts = consumeDesktopApplicationExtensionPorts()
+const generatedImageGalleryRepository = new DesktopGeneratedImageGalleryRepository(getDB())
+const workspaceContentPersistence = desktopWorkspaceContentPersistence()
+const deletionContinuationResolver = new DesktopDeletionContinuationResolver(getDB())
 
 export const desktopApplication = createOffGridApplication({
   models: {
@@ -63,9 +89,47 @@ export const desktopApplication = createOffGridApplication({
   },
   automation: createDesktopAutomationPorts(),
   use: createDesktopUsePorts(),
+  // The Shared owner for projects, conversations, messages and chat turns. Desktop supplies only
+  // the normalized SQLite repository built in `../workspace-content`; Shared owns identity,
+  // ordering, mutation-origin policy and the reactive projection. The port IS the repository -
+  // `WorkspaceContentPlatformPorts = WorkspaceContentRepositoryPort` - and shared's root does the
+  // `{ repository: ... }` wrapping itself, so wrapping it here would nest it one level too deep.
+  workspaceContent: workspaceContentPersistence.repository,
+  generatedImageGallery: generatedImageGalleryRepository,
+  projectDeletionRecovery: {
+    ...workspaceContentPersistence.projectDeletionRecovery,
+    // One gallery repository instance on the device, so one durable byte-journal owner: the project
+    // media phase drains the SAME journal the canonical gallery writes, never a second one.
+    media: new DesktopProjectMediaCleanup(getDB(), generatedImageGalleryRepository),
+    deletionContinuationResolver,
+    conversations: {
+      intents: new DesktopConversationDeletionIntentRepository(getDB()),
+      captureImageReleaseScope: async (scope, imageIds, continuation) => {
+        generatedImageGalleryRepository.captureByteDeletionScope(
+          scope,
+          imageIds,
+          continuation?.operationId
+        )
+      },
+      settleImageBytes: async (scope, continuation) => {
+        const settlement = await generatedImageGalleryRepository.settleByteDeletionsForScope(
+          scope,
+          continuation
+        )
+        if (settlement === 'fenced') {
+          throw new Error('Generated-image byte settlement lost the current deletion winner.')
+        }
+      },
+      now: () => new Date().toISOString(),
+      deletionContinuationResolver
+    }
+  },
+  beforeSideEffects: () =>
+    import('../data-privacy').then((privacy) => privacy.resumePendingFullDataDeletion()),
   sync: extensionPorts.sync,
   speech: {
     ...speechIo,
+    ...createDesktopSpeechPreferencePorts(),
     microphone: setupSpeechMicrophoneIpc(),
     playback: setupSpeechPlaybackIpc(),
     selection: createDesktopSpeechSelectionPort(),
@@ -83,11 +147,17 @@ export const desktopApplication = createOffGridApplication({
   voiceTurn: setupVoiceTurnIpc(),
   newId: randomUUID
 })
+if (desktopApplication.generatedImages) {
+  registerDesktopGeneratedImageGallery(
+    desktopApplication.generatedImages,
+    generatedImageGalleryRepository
+  )
+}
 
 // Registered for the life of the running application. `startDesktopApplication` re-registers so a
 // stop followed by a start in one process is served, and `stopDesktopApplication` disposes so a late
 // caller after stop gets "not initialized" rather than a stopped instance.
-let releaseApplicationRegistration = registerDesktopApplication(desktopApplication)
+let releaseApplicationRegistration: (() => void) | null = null
 
 let starting: ReturnType<typeof desktopApplication.start> | null = null
 let releaseSyncRuntime: (() => void) | null = null
@@ -95,6 +165,13 @@ let releaseFailureObserver: (() => void) | null = null
 let releaseHealthObserver: (() => void) | null = null
 let releaseAutomationForwarder: (() => void) | null = null
 let releaseUseForwarder: (() => void) | null = null
+let releaseWorkspaceContentIpc: (() => void) | null = null
+let releaseGeneratedImageGalleryIpc: (() => void) | null = null
+let releaseWorkspaceContentMigrationIpc: (() => void) | null = null
+let releaseMutationAdmissionGuard: (() => void) | null = null
+let releaseImagePublicationGuard: (() => void) | null = null
+let releaseLocalResourceGuard: (() => void) | null = null
+let lifecycleGeneration = 0
 
 /**
  * Two domain streams desktop forwards to owners of its own: Automation's events to the task-history
@@ -169,27 +246,86 @@ function observeApplicationHealth(): void {
 observeApplicationFailures()
 observeApplicationHealth()
 observeDomainForwarding()
+// Migration status and retry must be visible before the required migration can complete. All
+// command-bearing application surfaces are registered only after the same runtime settles.
+releaseWorkspaceContentMigrationIpc = registerWorkspaceContentMigrationIpc()
 
 export function startDesktopApplication(): ReturnType<typeof desktopApplication.start> {
   if (starting) return starting
 
+  const generation = ++lifecycleGeneration
   const startPromise = (async () => {
-    releaseApplicationRegistration = registerDesktopApplication(desktopApplication)
+    await desktopWorkspaceContentMigrationRuntime.awaitRequiredCompletion()
+    if (generation !== lifecycleGeneration) {
+      throw new Error('Desktop application startup was stopped during workspace migration.')
+    }
+    releaseApplicationRegistration ??= registerDesktopApplication(desktopApplication)
     observeApplicationFailures()
     observeApplicationHealth()
     observeDomainForwarding()
+    releaseWorkspaceContentMigrationIpc ??= registerWorkspaceContentMigrationIpc()
+    releaseMutationAdmissionGuard ??= registerApplicationMutationAdmissionGuard()
+    await workspaceContentPersistence
+      .startLocalResourceReleaseRecovery()
+      .catch((error) =>
+        console.error('[workspace-content] local resource recovery remains pending', error)
+      )
+    releaseLocalResourceGuard ??= registerDataDeletionGuard('desktop:local-resource-releases', {
+      scopes: ['images', 'all'],
+      suspend: workspaceContentPersistence.privacy.suspendLocalResourceReleases,
+      resume: workspaceContentPersistence.privacy.resumeLocalResourceReleases
+    })
+    releaseImagePublicationGuard ??= registerDataDeletionGuard('desktop:image-publication', {
+      scopes: ['images', 'all'],
+      suspend: suspendGeneratedImagePublication,
+      resume: resumeGeneratedImagePublication
+    })
     releaseSyncRuntime = claimDesktopSyncRuntime('application')
     // No catch: `start()` never rejects. Every step's failure, and anything thrown outside the step
     // loop, is recorded as a keyed report and reaches the observers above as a `'lifecycle'` event -
     // so a catch here could only write a second, competing record of state shared already owns.
-    return await desktopApplication.start()
+    const outcome = await desktopApplication.start()
+    if (outcome.status === 'running') {
+      if (desktopApplication.generatedImages) {
+        releaseGeneratedImageGalleryIpc ??= registerGeneratedImageGalleryProjectionIpc(
+          desktopApplication.generatedImages
+        )
+        try {
+          await migrateGeneratedImageSidecars({
+            repository: generatedImageGalleryRepository,
+            gallery: desktopApplication.generatedImages
+          })
+          desktopApplication.reportDegraded({
+            domain: 'generatedImages',
+            source: 'desktop sidecar migration',
+            reason: null
+          })
+        } catch (cause) {
+          desktopApplication.reportDegraded({
+            domain: 'generatedImages',
+            source: 'desktop sidecar migration',
+            reason: cause instanceof Error ? cause.message : String(cause)
+          })
+        }
+      }
+      releaseWorkspaceContentIpc ??= registerWorkspaceContentIpc()
+    }
+    return outcome
   })()
   starting = startPromise
+  void startPromise.then((outcome) => {
+    if (outcome.status !== 'failed' || starting !== startPromise) return
+    starting = null
+    releaseSyncRuntime?.()
+    releaseSyncRuntime = null
+  })
   return startPromise
 }
 
 export async function stopDesktopApplication(): Promise<void> {
+  lifecycleGeneration += 1
   try {
+    await workspaceContentPersistence.stopLocalResourceReleaseRecovery()
     await desktopApplication.stop()
   } finally {
     releaseFailureObserver?.()
@@ -200,10 +336,23 @@ export async function stopDesktopApplication(): Promise<void> {
     releaseAutomationForwarder = null
     releaseUseForwarder?.()
     releaseUseForwarder = null
+    releaseWorkspaceContentIpc?.()
+    releaseWorkspaceContentIpc = null
+    releaseGeneratedImageGalleryIpc?.()
+    releaseGeneratedImageGalleryIpc = null
+    releaseWorkspaceContentMigrationIpc?.()
+    releaseWorkspaceContentMigrationIpc = null
+    releaseMutationAdmissionGuard?.()
+    releaseMutationAdmissionGuard = null
+    releaseImagePublicationGuard?.()
+    releaseImagePublicationGuard = null
+    releaseLocalResourceGuard?.()
+    releaseLocalResourceGuard = null
     releaseSyncRuntime?.()
     releaseSyncRuntime = null
     // Last, and identity-checked: a disposer from a superseded registration cannot clear a newer one.
-    releaseApplicationRegistration()
+    releaseApplicationRegistration?.()
+    releaseApplicationRegistration = null
     starting = null
   }
 }

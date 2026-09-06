@@ -1,4 +1,5 @@
 import type { TaskGuideAttachmentInput } from '../../../shared/task-guidance'
+import { executeWorkspaceContentCommand } from './workspace-content-client'
 
 interface TaskGuideResult {
   available: boolean
@@ -15,7 +16,7 @@ export interface SubmitTaskGuidanceInput {
 
 /**
  * Submit guidance once, then project the accepted event into its owning Chat.
- * The projection is durable and synced, but it is not a new Chat generation.
+ * The message is durable, but it is not a new Chat generation.
  */
 export async function submitTaskGuidance({
   taskId,
@@ -38,9 +39,17 @@ export async function submitTaskGuidance({
   const attachmentNames = attachments.map((attachment) => attachment.name)
   const chatContent =
     text || `Attached task guidance: ${attachmentNames.join(', ') || 'guidance attachment'}`
-  await window.api.addRagMessage(journeyId, 'user', chatContent, {
-    taskGuidance: { taskId, state: 'accepted', attachmentNames }
+  const outcome = await executeWorkspaceContentCommand({
+    type: 'append_message',
+    conversationId: journeyId,
+    portable: { role: 'user', content: chatContent },
+    local: { taskGuidance: { taskId, state: 'accepted', attachmentNames } }
   })
+  if (!outcome.ok) throw new Error(outcome.failure.message)
+  const message = outcome.value.changes.find(
+    (change) => change.kind === 'put' && change.entity === 'message'
+  )
+  if (!message) throw new Error('Chat could not confirm the saved guidance message.')
   window.dispatchEvent(
     new CustomEvent('og:task-guidance-message', { detail: { conversationId: journeyId } })
   )

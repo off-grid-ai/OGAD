@@ -96,15 +96,8 @@ export interface DesktopChatSessionBoundary {
     slide: number,
     imagePath: string
   ): Promise<unknown>
-  addRagMessage?(
-    conversationId: string,
-    role: 'user' | 'assistant',
-    content: string,
-    context?: unknown
-  ): Promise<{ id: number; uuid: string }>
   readChatSessionTurns?(conversationId: string): Promise<ChatTurn[]>
   writeChatSessionTurns?(conversationId: string, turns: readonly ChatTurn[]): Promise<void>
-  truncateRagMessages?(conversationId: string, anchor: DesktopTruncationAnchor): Promise<unknown>
 }
 
 interface DesktopChatSessionCommonInput {

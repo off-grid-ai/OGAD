@@ -60,7 +60,6 @@ interface DashboardStats {
 
 type RagConversation = import('../../shared/ipc-contracts').RagConversationContract
 
-type RagMessage = import('../../shared/ipc-contracts').RagMessageContract
 type RagChatResult = import('../../shared/ipc-contracts').RagChatResultContract
 
 // DUPLICATE (ambient decl). Canonical shape: the `reprocess:progress` IPC payload
@@ -308,18 +307,7 @@ interface RendererAPIOverrides {
   >
   cancelRag: (streamId: string) => void
 
-  // RAG Conversations
-  createRagConversation: (id: string, title?: string, projectId?: string | null) => Promise<string>
-  getRagConversations: (
-    projectId?: string | null,
-    page?: { limit?: number; updatedBefore?: string }
-  ) => Promise<RagConversation[]>
-  onRagConversationsChanged?: (
-    callback: (data: { conversationId: string; projectId: string | null }) => void
-  ) => () => void
-  setRagConversationProject: (id: string, projectId: string | null) => Promise<boolean>
-  getRagConversation: (id: string) => Promise<RagConversation | null>
-  getRagMessages: (conversationId: string) => Promise<RagMessage[]>
+  // Chat persistence
   readChatSessionTurns: (
     conversationId: string
   ) => Promise<import('@offgrid/application').ChatTurn[]>
@@ -327,18 +315,7 @@ interface RendererAPIOverrides {
     conversationId: string,
     turns: readonly import('@offgrid/application').ChatTurn[]
   ) => Promise<void>
-  addRagMessage: (
-    conversationId: string,
-    role: 'user' | 'assistant',
-    content: string,
-    context?: unknown
-  ) => Promise<{ id: number; uuid: string }>
-  truncateRagMessages: (
-    conversationId: string,
-    anchor: { messageId: string; keepAnchor: boolean }
-  ) => Promise<number>
   updateRagConversationTitle: (id: string, title: string) => Promise<RagConversation>
-  deleteRagConversation: (id: string) => Promise<void>
 
   // App Settings
   getSettings: () => Promise<AppSettings>

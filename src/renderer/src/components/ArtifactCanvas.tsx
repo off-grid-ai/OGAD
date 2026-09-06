@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { ARTIFACT_KIND_LABELS } from '@renderer/lib/artifact-labels'
+import { artifactKindLabel } from '@renderer/lib/artifact-labels'
 import type { Artifact } from '@renderer/lib/artifact-parser'
 import { SidePanel } from './SidePanel'
 
@@ -12,7 +12,6 @@ import { SidePanel } from './SidePanel'
 
 // 'text'/'image' are catalogued inputs (uploaded file / pasted block / image) —
 // shown as plain text or a thumbnail, never executed in the sandbox.
-const KIND_LABEL = ARTIFACT_KIND_LABELS
 
 function escapeForHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -280,7 +279,7 @@ else { __ogShow('No React component found — define a component named App or a 
 
   return (
     <SidePanel
-      ariaLabel={artifact.title || KIND_LABEL[artifact.kind]}
+      ariaLabel={artifact.title || artifactKindLabel(artifact.kind)}
       onClose={onClose}
       className="min-w-[360px] max-w-[90vw]"
       style={{ width: width ? `${width}px` : '30vw' }}
@@ -297,7 +296,7 @@ else { __ogShow('No React component found — define a component named App or a 
       <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2.5">
         <div className="flex items-center gap-2 text-sm text-neutral-200">
           <span className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-green-500">
-            {KIND_LABEL[artifact.kind]}
+            {artifactKindLabel(artifact.kind)}
           </span>
           <span className="truncate">{artifact.title || 'Canvas'}</span>
         </div>

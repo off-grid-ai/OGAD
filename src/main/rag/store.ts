@@ -5,9 +5,6 @@
 // files and what Off Grid AI has seen (the KB-sources decision).
 
 import { getDB } from '../database'
-import { deleteArtifactsForProject } from '../artifacts'
-import { CORE_SYNC_ENTITIES } from '@offgrid/application'
-import { emitSyncMutation } from '../sync-mutation'
 import { randomUUID } from 'crypto'
 import {
   MEMORY_CANDIDATE_LIMIT,
@@ -16,7 +13,6 @@ import {
   projectIncludesMemory as projectIncludesMemoryRule,
   type ChunkCandidate,
   type MediaKind,
-  type Project,
   type RagDocument,
   type VectorStore
 } from '@offgrid/rag'
@@ -28,18 +24,6 @@ export function ensureRagStoreSchema(): void {
   if (migrated) return
   const db = getDB()
   db.exec(`
-    CREATE TABLE IF NOT EXISTS projects (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      description TEXT NOT NULL DEFAULT '',
-      system_prompt TEXT NOT NULL DEFAULT '',
-      icon TEXT,
-      include_memory INTEGER NOT NULL DEFAULT 1,
-      origin_device_id TEXT,
-      origin_device_name TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
     CREATE TABLE IF NOT EXISTS rag_documents (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       sync_id TEXT,
@@ -61,14 +45,6 @@ export function ensureRagStoreSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_rag_chunks_doc ON rag_chunks(doc_id);
     CREATE INDEX IF NOT EXISTS idx_rag_documents_project ON rag_documents(project_id);
   `)
-  const projectColumns = db.prepare("SELECT name FROM pragma_table_info('projects')").all() as {
-    name: string
-  }[]
-  for (const column of ['origin_device_id', 'origin_device_name']) {
-    if (!projectColumns.some(({ name }) => name === column)) {
-      db.exec(`ALTER TABLE projects ADD COLUMN ${column} TEXT`)
-    }
-  }
   const columns = getDB().prepare("SELECT name FROM pragma_table_info('rag_documents')").all() as {
     name: string
   }[]
@@ -91,9 +67,9 @@ export function ensureRagStoreSchema(): void {
 /** Whether a project folds captured memories into its KB: its stored flag, else the shared default. */
 export function projectIncludesMemory(projectId: string): boolean {
   ensureRagStoreSchema()
-  const row = getDB().prepare('SELECT include_memory FROM projects WHERE id = ?').get(projectId) as
-    | { include_memory: number }
-    | undefined
+  const row = getDB()
+    .prepare('SELECT include_memory FROM workspace_content_projects WHERE id = ?')
+    .get(projectId) as { include_memory: number } | undefined
   return projectIncludesMemoryRule(row ? row.include_memory === 1 : undefined)
 }
 
@@ -206,19 +182,17 @@ export const desktopVectorStore: VectorStore = {
       enabled: number
       created_at: string
     }[]
-    return rows.map(
-      (r): RagDocument => ({
-        id: r.id,
-        syncId: r.sync_id,
-        projectId: r.project_id,
-        name: r.name,
-        path: r.path,
-        size: r.size,
-        kind: r.kind as MediaKind,
-        enabled: r.enabled === 1,
-        createdAt: r.created_at
-      })
-    )
+    return rows.map((r): RagDocument => ({
+      id: r.id,
+      syncId: r.sync_id,
+      projectId: r.project_id,
+      name: r.name,
+      path: r.path,
+      size: r.size,
+      kind: r.kind as MediaKind,
+      enabled: r.enabled === 1,
+      createdAt: r.created_at
+    }))
   },
 
   async listDocumentPage(afterId, limit) {
@@ -258,10 +232,17 @@ export const desktopVectorStore: VectorStore = {
     tx()
   },
 
-  async deleteDocumentsByProject(projectId) {
+  async deleteDocumentsByProject(projectId, commitFence) {
     ensureRagStoreSchema()
     const db = getDB()
-    db.transaction(() => deleteRagDocumentRowsByProject(db, projectId))()
+    const committed = db.transaction(() => {
+      if (commitFence && !commitFence()) {
+        return false
+      }
+      deleteRagDocumentRowsByProject(db, projectId)
+      return true
+    })()
+    return committed ? undefined : 'fenced'
   }
 }
 
@@ -305,139 +286,21 @@ function deleteRagDocumentRowsByProject(db: ReturnType<typeof getDB>, projectId:
 export function getRagDocument(docId: number): RagDocument | undefined {
   ensureRagStoreSchema()
   const row = getDB().prepare(`${DOCUMENT_SELECT} WHERE id = ?`).get(docId) as
-    | RagDocumentRow
-    | undefined
+    RagDocumentRow | undefined
   return row ? mapDocument(row) : undefined
 }
 
 export function getRagDocumentBySyncId(syncId: string): RagDocument | undefined {
   ensureRagStoreSchema()
   const row = getDB().prepare(`${DOCUMENT_SELECT} WHERE sync_id = ?`).get(syncId) as
-    | RagDocumentRow
-    | undefined
+    RagDocumentRow | undefined
   return row ? mapDocument(row) : undefined
 }
 
 export function projectExists(projectId: string): boolean {
   ensureRagStoreSchema()
-  return getDB().prepare('SELECT 1 FROM projects WHERE id = ?').get(projectId) !== undefined
-}
-
-// --- Projects + threads CRUD (not part of the engine's VectorStore) ---------
-
-export function listProjects(): (Project & { includeMemory: boolean })[] {
-  ensureRagStoreSchema()
-  const rows = getDB().prepare('SELECT * FROM projects ORDER BY updated_at DESC').all() as {
-    id: string
-    name: string
-    description: string
-    system_prompt: string
-    icon: string | null
-    include_memory: number
-    created_at: string
-    updated_at: string
-  }[]
-  return rows.map((r) => ({
-    id: r.id,
-    name: r.name,
-    description: r.description,
-    systemPrompt: r.system_prompt,
-    icon: r.icon ?? undefined,
-    includeMemory: r.include_memory === 1,
-    createdAt: r.created_at,
-    updatedAt: r.updated_at
-  }))
-}
-
-export function createProject(p: {
-  id: string
-  name: string
-  description?: string
-  systemPrompt?: string
-  icon?: string
-}): void {
-  ensureRagStoreSchema()
-  getDB()
-    .prepare(
-      'INSERT INTO projects (id, name, description, system_prompt, icon) VALUES (?, ?, ?, ?, ?)'
-    )
-    .run(p.id, p.name, p.description ?? '', p.systemPrompt ?? '', p.icon ?? null)
-  emitSyncMutation({ entity: CORE_SYNC_ENTITIES.project, entityId: p.id, kind: 'put' })
-}
-
-export function updateProject(
-  id: string,
-  patch: {
-    name?: string
-    description?: string
-    systemPrompt?: string
-    icon?: string
-    includeMemory?: boolean
-  }
-): void {
-  ensureRagStoreSchema()
-  const db = getDB()
-  const sets: string[] = []
-  const args: unknown[] = []
-  if (patch.name !== undefined) {
-    sets.push('name = ?')
-    args.push(patch.name)
-  }
-  if (patch.description !== undefined) {
-    sets.push('description = ?')
-    args.push(patch.description)
-  }
-  if (patch.systemPrompt !== undefined) {
-    sets.push('system_prompt = ?')
-    args.push(patch.systemPrompt)
-  }
-  if (patch.icon !== undefined) {
-    sets.push('icon = ?')
-    args.push(patch.icon)
-  }
-  if (patch.includeMemory !== undefined) {
-    sets.push('include_memory = ?')
-    args.push(patch.includeMemory ? 1 : 0)
-  }
-  if (!sets.length) return
-  sets.push("updated_at = datetime('now')")
-  args.push(id)
-  const result = db.prepare(`UPDATE projects SET ${sets.join(', ')} WHERE id = ?`).run(...args)
-  if (result.changes === 1) {
-    emitSyncMutation({ entity: CORE_SYNC_ENTITIES.project, entityId: id, kind: 'put' })
-  }
-}
-
-export function deleteProject(id: string): void {
-  ensureRagStoreSchema()
-  const db = getDB()
-  const projectWasPresent =
-    db.prepare('SELECT 1 AS present FROM projects WHERE id = ?').get(id) !== undefined
-  const conversations = db
-    .prepare('SELECT id FROM rag_conversations WHERE project_id = ?')
-    .all(id) as Array<{ id: string }>
-  const tx = db.transaction(() => {
-    deleteRagDocumentRowsByProject(db, id)
-    // A project is a folder and knowledge scope, not the owner of chat history. Removing it moves
-    // its conversations back to unfiled Chat while preserving every message.
-    db.prepare(
-      `UPDATE rag_conversations
-       SET project_id = NULL, updated_at = CURRENT_TIMESTAMP
-       WHERE project_id = ?`
-    ).run(id)
-    db.prepare('DELETE FROM projects WHERE id = ?').run(id)
-  })
-  tx()
-  // Artifacts (generated images/docs) are files, not DB rows — clean them outside
-  // the transaction so a deleted project's artifacts don't linger in the library.
-  deleteArtifactsForProject(id)
-  if (!projectWasPresent) return
-  for (const conversation of conversations) {
-    emitSyncMutation({
-      entity: CORE_SYNC_ENTITIES.conversation,
-      entityId: conversation.id,
-      kind: 'put'
-    })
-  }
-  emitSyncMutation({ entity: CORE_SYNC_ENTITIES.project, entityId: id, kind: 'delete' })
+  return (
+    getDB().prepare('SELECT 1 FROM workspace_content_projects WHERE id = ?').get(projectId) !==
+    undefined
+  )
 }

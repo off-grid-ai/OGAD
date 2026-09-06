@@ -289,11 +289,14 @@ export class DesktopImageGenerationAdapter extends DesktopTypedGenerationAdapter
     if (!operation.executionPlan) {
       throw new Error('Shared did not provide an image execution plan.')
     }
-    const { generateImageNative } = await import('./imagegen')
+    const { generateImageNative, prepareGeneratedImageOutputPath } = await import('./imagegen')
+    const requestId = request.identity?.turnId
+    if (!requestId)
+      throw new Error('Desktop image generation requires a prepared request identity.')
+    const outputPath = prepareGeneratedImageOutputPath(requestId)
     const channel = new GenerationChunkChannel()
-    void generateImageNative(
-      operation.executionPlan,
-      (update) => {
+    void generateImageNative(operation.executionPlan, {
+      onUpdate: (update) => {
         reportDesktopImageProgress(request.identity?.turnId ?? '', update)
         const progress = 'progress' in update ? update.progress : undefined
         const enhancedPrompt = 'enhancedPrompt' in update ? update.enhancedPrompt : undefined
@@ -311,8 +314,9 @@ export class DesktopImageGenerationAdapter extends DesktopTypedGenerationAdapter
           })
         }
       },
-      request.signal
-    ).then(
+      signal: request.signal,
+      outputPath
+    }).then(
       (output) => {
         channel.push({
           output: {

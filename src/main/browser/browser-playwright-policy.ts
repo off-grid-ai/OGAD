@@ -23,13 +23,12 @@ export type BrowserSemanticDecisionRequest = WebUseSemanticDecisionRequest
 export async function decideBrowserSemanticAction(
   request: BrowserSemanticDecisionRequest
 ): Promise<SemanticDecision> {
-  const { llm } = await import('../llm')
-  const { generateWithDesktopModels, refreshDesktopModels } = await import(
-    '../composition/application-access'
-  )
+  const { desktopModels, generateWithDesktopModels, refreshDesktopModels } =
+    await import('../composition/application-access')
   const prompt = webUseSemanticDecisionPrompt(request)
   await refreshDesktopModels()
-  const systemPrompt = llm.getSettings().systemPrompt?.trim()
+  const committedPrompt = desktopModels.snapshot().settings.systemPrompt
+  const systemPrompt = typeof committedPrompt === 'string' ? committedPrompt.trim() : ''
   const result = await generateWithDesktopModels({
     operation: { type: 'text' },
     messages: [

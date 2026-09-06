@@ -3,15 +3,13 @@
 
 import { ipcMain, dialog, BrowserWindow } from 'electron'
 import fs from 'fs'
-import { randomUUID } from 'node:crypto'
-import { listProjects, createProject, updateProject, deleteProject } from './rag'
 import { desktopRag } from './composition/application-access'
-import { desktopApplication } from './composition/application'
 import { requireApplicationOutcome } from './composition/application-outcome'
 import { attachmentPickerExtensions } from '@offgrid/sync'
-import { workflowFailureMessage } from '@offgrid/application'
 import {
+  PROJECT_DOCUMENTS_CHANGED_CHANNEL,
   PROJECT_INDEX_PROGRESS_CHANNEL,
+  type ProjectDocumentsChangedContract,
   type ProjectIndexProgressContract
 } from '../shared/ipc-contracts'
 
@@ -20,37 +18,46 @@ import {
 // gif/bmp/heic/opus/aiff/avi the router actually handles.
 const DOC_FILTERS = [{ name: 'Documents, audio & video', extensions: attachmentPickerExtensions() }]
 
-export function setupRagIPC(): void {
-  // --- Projects -------------------------------------------------------------
-  ipcMain.handle('projects:list', () => listProjects())
+let releaseDocumentProjection: (() => void) | null = null
 
-  ipcMain.handle(
-    'projects:create',
-    (_e, p: { name: string; description?: string; systemPrompt?: string; icon?: string }) => {
-      const id = randomUUID()
-      createProject({ id, ...p })
-      return id
+function publishProjectDocumentsChanged(projectId: string): void {
+  const payload: ProjectDocumentsChangedContract = { projectId }
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send(PROJECT_DOCUMENTS_CHANGED_CHANNEL, payload)
+  }
+}
+
+function observeDocumentProjection(): () => void {
+  releaseDocumentProjection?.()
+  const release = desktopRag.events((event) => {
+    switch (event.type) {
+      case 'document_indexed':
+      case 'document_enabled':
+      case 'document_removed':
+        publishProjectDocumentsChanged(event.document.projectId)
+        break
+      case 'project_documents_removed':
+        publishProjectDocumentsChanged(event.projectId)
+        break
+      default:
+        break
     }
-  )
-
-  ipcMain.handle('projects:update', (_e, id: string, patch: Record<string, unknown>) => {
-    updateProject(id, patch)
   })
+  releaseDocumentProjection = release
+  return () => {
+    if (releaseDocumentProjection !== release) return
+    releaseDocumentProjection = null
+    release()
+  }
+}
 
-  ipcMain.handle('projects:delete', async (_e, id: string) => {
-    // The workflow owns the cross-domain cleanup (RAG index, then sync). Its failure is the
-    // reason it exists: deleting the local row after a partial cleanup destroys the only
-    // record of what still has to be cleaned up, so the typed failure stops the delete and
-    // reaches the caller instead of being dropped.
-    const cleanup = await desktopApplication.workflows.deleteProject(id)
-    if (!cleanup.ok) throw new Error(workflowFailureMessage(cleanup.failure))
-    deleteProject(id)
-  })
-
+export function setupRagIPC(): () => void {
+  const releaseProjection = observeDocumentProjection()
   // --- Knowledge base (documents) ------------------------------------------
-  ipcMain.handle('projects:list-documents', async (_e, projectId: string) =>
-    requireApplicationOutcome(await desktopRag.listDocuments(projectId))
-  )
+  ipcMain.handle('projects:list-documents', async (_e, projectId: string) => {
+    requireApplicationOutcome(await desktopRag.loadProjectDocuments(projectId))
+    return desktopRag.snapshot().documents.filter((document) => document.projectId === projectId)
+  })
 
   ipcMain.handle('projects:add-documents', async (e, projectId: string) => {
     const win = BrowserWindow.fromWebContents(e.sender) ?? undefined
@@ -95,4 +102,12 @@ export function setupRagIPC(): void {
   ipcMain.handle('projects:delete-document', async (_e, docId: number) =>
     requireApplicationOutcome(await desktopRag.removeDocument(docId))
   )
+
+  return () => {
+    releaseProjection()
+    ipcMain.removeHandler('projects:list-documents')
+    ipcMain.removeHandler('projects:add-documents')
+    ipcMain.removeHandler('projects:toggle-document')
+    ipcMain.removeHandler('projects:delete-document')
+  }
 }

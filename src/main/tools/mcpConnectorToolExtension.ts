@@ -8,6 +8,7 @@
 import type { ToolContext, ToolExtension } from '../tools'
 import { listConnectors, fetchTools, callConnectorTool } from '../mcp'
 import { shouldGate } from '../actions/approval'
+import { mcpConnectorActionRisk, type McpConnectorActionRisk } from '@offgrid/models'
 import { getActionsRuntime } from '../actions/use-runtime'
 import {
   runChatConnectorAction,
@@ -18,7 +19,6 @@ import {
   MCP_TOOL_PREFIX,
   buildConnectorToolSchema,
   formatConnectorToolResult,
-  riskOf,
   type ConnectorToolDefinition
 } from './mcpConnectorToolExtension-logic'
 
@@ -83,7 +83,10 @@ function formatChatConnectorExecution(
 
 export class McpConnectorToolExtension implements ToolExtension {
   id = 'mcp-connectors'
-  private byName = new Map<string, { id: number; tool: string; connector: string }>()
+  private byName = new Map<
+    string,
+    { id: number; tool: string; connector: string; risk: McpConnectorActionRisk }
+  >()
 
   constructor(private readonly boundary: McpConnectorToolBoundary = productionBoundary) {}
 
@@ -113,7 +116,12 @@ export class McpConnectorToolExtension implements ToolExtension {
         for (const t of tools) {
           const schema = buildConnectorToolSchema(c, t)
           const fnName = schema.function.name
-          this.byName.set(fnName, { id: c.id, tool: t.name, connector: c.name })
+          this.byName.set(fnName, {
+            id: c.id,
+            tool: t.name,
+            connector: c.name,
+            risk: mcpConnectorActionRisk(t)
+          })
           out.push(schema)
         }
       }
@@ -134,7 +142,7 @@ export class McpConnectorToolExtension implements ToolExtension {
   ): Promise<string> {
     const meta = this.byName.get(name)
     if (!meta) return `Error: unknown connector tool ${name}`
-    const risk = riskOf(meta.tool)
+    const risk = meta.risk
     if (shouldGate(risk)) {
       const execution = await runChatConnectorAction(this.boundary.actions, {
         connectorId: meta.id,

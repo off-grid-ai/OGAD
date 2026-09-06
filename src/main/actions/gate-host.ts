@@ -186,7 +186,7 @@ export async function gateHost({ action }: { action: ActionRecord }): Promise<Ga
   // A task invoked in Chat starts there immediately. Action Approval owns only tasks proposed
   // outside Chat; after approval, that owner creates the execution Chat and starts the task.
   if (conversationId !== null) return { kind: 'approve' }
-  const queued = proposeActionApproval({
+  const queued = await proposeActionApproval({
     kind: railToKind(action.rail),
     title: action.intent,
     detail: JSON.stringify(action.args, null, 2),

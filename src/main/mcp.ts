@@ -36,6 +36,12 @@ export interface ConnectorToolDefinition {
   name: string
   description?: string
   inputSchema?: unknown
+  annotations?: {
+    readOnlyHint?: boolean
+    destructiveHint?: boolean
+    idempotentHint?: boolean
+    openWorldHint?: boolean
+  }
 }
 
 export interface ConnectorToolCallResult {

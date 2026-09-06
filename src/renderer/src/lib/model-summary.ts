@@ -27,17 +27,6 @@ export function resolveModelName(
   return models.find((m) => m.id === id)?.name ?? id
 }
 
-/** Apply active-model capability evidence before a Chat request is created. */
-export function admitThinkingRequest(
-  enabled: boolean,
-  activeModelName: string | null,
-  thinkingCapability: boolean | null
-): boolean {
-  // The hook publishes capability evidence only while its projection is ready. A missing model,
-  // loading projection, failed projection, or unknown capability therefore fails closed.
-  return enabled && activeModelName !== null && thinkingCapability === true
-}
-
 interface TextModelSummaryEntry {
   id: string
   name?: string

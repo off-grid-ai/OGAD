@@ -11,7 +11,7 @@
 // is). Risk is classified per executor via its own riskOf(); the shape below is the
 // one thing every executor shares.
 
-import { callHook, hasHook, HOOKS } from '../bootstrap/hookRegistry'
+import { callHookAsync, hasHook, HOOKS } from '../bootstrap/hookRegistry'
 
 /** How consequential an action is, independent of which executor produced it.
  *  - read: observes only, never changes the world (a screenshot, a list call)
@@ -60,10 +60,15 @@ export function shouldGate(risk: ActionRisk): boolean {
  *  yet migrated keeps gating MCP writes instead of silently running them. hasHook
  *  distinguishes "new handler present" from "new handler returned undefined", so a
  *  registered new handler is always authoritative and the legacy path is only used
- *  when the new name is genuinely unregistered. */
-export function proposeActionApproval(request: ActionApprovalRequest): boolean | undefined {
+ *  when the new name is genuinely unregistered.
+ *
+ *  Awaited: the pro handler only reports "queued" once the approval and its execution chat are
+ *  committed, so the caller never parks an action against an approval that is still settling. */
+export async function proposeActionApproval(
+  request: ActionApprovalRequest
+): Promise<boolean | undefined> {
   if (hasHook(HOOKS.actionsProposeApproval)) {
-    return callHook<boolean>(HOOKS.actionsProposeApproval, request)
+    return callHookAsync<boolean>(HOOKS.actionsProposeApproval, request)
   }
-  return callHook<boolean>(HOOKS.legacyMcpProposeApproval, request)
+  return callHookAsync<boolean>(HOOKS.legacyMcpProposeApproval, request)
 }

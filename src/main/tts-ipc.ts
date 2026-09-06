@@ -1,5 +1,4 @@
 import { ipcMain } from 'electron'
-import { getSetting } from './database'
 import { writeDiagnosticLog } from './diagnostics-log'
 
 /** Register the complete renderer-to-TTS contract in one place. The renderer sends text and an
@@ -52,7 +51,8 @@ export function setupTtsIpc(): void {
     let chosenVoice = voice
     if (!chosenVoice) {
       try {
-        chosenVoice = getSetting<string>('ttsVoice', '') || undefined
+        const { desktopApplication } = await import('./composition/application')
+        chosenVoice = desktopApplication.speech.snapshot().models.voice ?? undefined
       } catch (error) {
         // The synthesis owner can safely choose its default, but the persistence outage must remain
         // observable instead of looking like an intentional user selection.

@@ -24,13 +24,14 @@ import {
   type TaskRunSnapshot,
   type TaskRunUpdate
 } from '@offgrid/automation'
-import type { AutomationPlatformPorts } from '@offgrid/application'
-import { getDB, getRagMessages } from '../database'
+import { generationMessageText, type AutomationPlatformPorts } from '@offgrid/application'
+import { getDB } from '../database'
 import { TaskHistoryStore } from './task-history-store'
 import { persistTaskResultInChat } from './task-result-chat'
 import { notifyRagConversationChanged } from '../rag-conversation-events'
 import { callHook, HOOKS } from '../bootstrap/hookRegistry'
 import { desktopAutomation } from '../composition/application-access'
+import { desktopApplication } from '../composition/application'
 
 let configuredRunner: TaskRetryRunner | null = null
 let configuredControl: TaskControlPort | null = null
@@ -67,6 +68,21 @@ async function readGuidanceAttachment(
   return { kind: processed.kind, text: processed.text }
 }
 
+function retryGuidanceForTask(task: TaskRunSnapshot): string[] {
+  const snapshot = desktopApplication.workspaceContent.snapshot()
+  if (snapshot.status !== 'ready') throw new Error('Workspace content is not ready.')
+  const messages = snapshot.messages
+    .filter((message) => message.conversationId === task.journeyId)
+    .map((message) => {
+      const context = { ...message.local, ...message.portable.context }
+      return {
+        content: generationMessageText(message.portable),
+        context: Object.keys(context).length ? JSON.stringify(context) : null
+      }
+    })
+  return retryGuidanceFromMessages(task.taskId, messages)
+}
+
 /** Desktop I/O for the one Automation application constructed by the Shared root. */
 export function createDesktopAutomationPorts(): AutomationPlatformPorts {
   const store = new TaskHistoryStore(getDB())
@@ -78,8 +94,7 @@ export function createDesktopAutomationPorts(): AutomationPlatformPorts {
       name: os.hostname() || 'This computer'
     },
     retryRunner: lateBoundRunner,
-    guidanceForTask: (task) =>
-      retryGuidanceFromMessages(task.taskId, getRagMessages(task.journeyId)),
+    guidanceForTask: retryGuidanceForTask,
     attachments: { read: readGuidanceAttachment },
     control: (taskId, intent) => configuredControl?.(taskId, intent) ?? false
   }
@@ -174,6 +189,23 @@ function pruneSnapshots(tasks: readonly TaskRunSnapshot[]): void {
   }
 }
 
+/**
+ * Durable task-result projections run one at a time and in arrival order, so a later event for the
+ * same task can never commit before an earlier one and announce a stale result.
+ */
+let taskResultQueue: Promise<void> = Promise.resolve()
+
+/** Persist the result first; announce it only once Workspace Content has durably committed it. */
+async function projectTaskResult(snapshot: TaskRunSnapshot): Promise<void> {
+  const committed = await persistTaskResultInChat(getDB(), snapshot)
+  if (committed && snapshot.journeyId) {
+    notifyRagConversationChanged({ conversationId: snapshot.journeyId })
+  }
+  callHook(HOOKS.actionsObserveTaskResult, snapshot)
+  pruneSnapshots(desktopAutomation.list())
+  broadcast(snapshot)
+}
+
 export function forwardDesktopAutomationEvent(event: AutomationEvent): void {
   if (event.type === 'execution_device_changed') return
   if (event.type === 'task_run_live' || !isLocalTaskRunMutation(event)) {
@@ -181,12 +213,14 @@ export function forwardDesktopAutomationEvent(event: AutomationEvent): void {
     return
   }
   const snapshot = event.snapshot
-  if (persistTaskResultInChat(getDB(), snapshot) && snapshot.journeyId) {
-    notifyRagConversationChanged({ conversationId: snapshot.journeyId })
-  }
-  callHook(HOOKS.actionsObserveTaskResult, snapshot)
-  pruneSnapshots(desktopAutomation.list())
-  broadcast(snapshot)
+  const run = taskResultQueue.then(
+    () => projectTaskResult(snapshot),
+    () => projectTaskResult(snapshot)
+  )
+  taskResultQueue = run.then(
+    () => undefined,
+    () => undefined
+  )
 }
 
 export function recordTaskRun(update: TaskRunUpdate): TaskRunSnapshot {

@@ -24,7 +24,7 @@ export function setComputerUseSettings(
   saveSetting(COMPUTER_USE_SETTINGS_KEY, normalized)
   if (options.emitSync !== false) {
     emitSyncMutation({
-      entity: CORE_SYNC_ENTITIES.modelSetting,
+      entity: CORE_SYNC_ENTITIES.computerUseSetting,
       entityId: COMPUTER_USE_SETTINGS_KEY,
       kind: 'put',
       fields: { value: normalized }

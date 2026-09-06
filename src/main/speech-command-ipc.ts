@@ -1,4 +1,5 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { VOICE_TURN_LABELS } from '@offgrid/application'
 import type {
   OffGridApplication,
   SpeakCommand,
@@ -12,10 +13,24 @@ import {
   SPEECH_EVENT_CHANNEL,
   SPEECH_FEED_STREAM_CHANNEL,
   SPEECH_FINISH_STREAM_CHANNEL,
+  SPEECH_GET_SNAPSHOT_CHANNEL,
   SPEECH_INTERRUPT_CHANNEL,
+  SPEECH_SELECT_MODEL_CHANNEL,
+  SPEECH_SELECT_VOICE_CHANNEL,
+  SPEECH_SAVE_PREFERENCES_CHANNEL,
+  SPEECH_SNAPSHOT_CHANGED_CHANNEL,
   SPEECH_SPEAK_CHANNEL,
+  SPEECH_START_REALTIME_CHANNEL,
+  SPEECH_STOP_REALTIME_CHANNEL,
   SPEECH_TRANSCRIBE_CHANNEL,
+  type DesktopSpeechSnapshot,
   type SpeechCancelTranscriptionOutcome,
+  type SpeechSelectionOutcome,
+  type SpeechPreferencesOutcome,
+  type SpeechPreferencesPatch,
+  type SpeechStartRealtimeCommand,
+  type SpeechStartRealtimeOutcome,
+  type SpeechStopRealtimeOutcome,
   type SpeechTranscribeOutcome,
   type SpeechSpeakOutcome
 } from '../shared/speech-command-contract'
@@ -79,6 +94,29 @@ function parseOperationId(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 && value.length <= 256 ? value : null
 }
 
+function parseStartRealtimeCommand(value: unknown): SpeechStartRealtimeCommand | null {
+  if (!value || typeof value !== 'object') return null
+  const command = value as Record<string, unknown>
+  if (
+    typeof command.mode !== 'string' ||
+    !Object.prototype.hasOwnProperty.call(VOICE_TURN_LABELS, command.mode) ||
+    !optionalString(command.language, 64)
+  ) {
+    return null
+  }
+  return {
+    mode: command.mode as SpeechStartRealtimeCommand['mode'],
+    ...(typeof command.language === 'string' ? { language: command.language } : {})
+  }
+}
+
+function parseSelection(value: unknown, maxLength: number): string | null | undefined {
+  if (value === null) return null
+  return typeof value === 'string' && value.length > 0 && value.length <= maxLength
+    ? value
+    : undefined
+}
+
 function parseTranscribeCommand(value: unknown): TranscribeCommand | null {
   if (!value || typeof value !== 'object') return null
   const command = value as Record<string, unknown>
@@ -111,6 +149,7 @@ function assertMainRenderer(event: IpcMainInvokeEvent): void {
 
 let registered = false
 let stopEvents: (() => void) | null = null
+let stopSnapshots: (() => void) | null = null
 
 async function speechApplication(): Promise<OffGridApplication> {
   const { desktopApplication } = await import('./composition/application')
@@ -118,12 +157,67 @@ async function speechApplication(): Promise<OffGridApplication> {
     const contents = getMainWindow()?.webContents
     if (contents && !contents.isDestroyed()) contents.send(SPEECH_EVENT_CHANNEL, event)
   })
+  stopSnapshots ??= desktopApplication.speech.subscribe((snapshot) => {
+    const contents = getMainWindow()?.webContents
+    if (contents && !contents.isDestroyed()) {
+      contents.send(SPEECH_SNAPSHOT_CHANGED_CHANNEL, snapshot)
+    }
+  })
   return desktopApplication
 }
 
 export function setupSpeechCommandIpc(): void {
   if (registered) return
   registered = true
+  ipcMain.handle(SPEECH_GET_SNAPSHOT_CHANNEL, async (event): Promise<DesktopSpeechSnapshot> => {
+    assertMainRenderer(event)
+    return (await speechApplication()).speech.snapshot()
+  })
+  ipcMain.handle(
+    SPEECH_START_REALTIME_CHANNEL,
+    async (event, value: unknown): Promise<SpeechStartRealtimeOutcome> => {
+      assertMainRenderer(event)
+      const command = parseStartRealtimeCommand(value)
+      if (!command) throw new Error('Invalid realtime speech command.')
+      return (await speechApplication()).speech.startRealtime(command)
+    }
+  )
+  ipcMain.handle(
+    SPEECH_STOP_REALTIME_CHANNEL,
+    async (event): Promise<SpeechStopRealtimeOutcome> => {
+      assertMainRenderer(event)
+      return (await speechApplication()).speech.stopRealtime()
+    }
+  )
+  ipcMain.handle(
+    SPEECH_SELECT_MODEL_CHANNEL,
+    async (event, modality: unknown, value: unknown): Promise<SpeechSelectionOutcome> => {
+      assertMainRenderer(event)
+      if (modality !== 'stt' && modality !== 'tts') throw new Error('Invalid speech modality.')
+      const modelId = parseSelection(value, 512)
+      if (modelId === undefined) throw new Error('Invalid speech model selection.')
+      return (await speechApplication()).speech.selectModel(modality, modelId)
+    }
+  )
+  ipcMain.handle(
+    SPEECH_SELECT_VOICE_CHANNEL,
+    async (event, value: unknown): Promise<SpeechSelectionOutcome> => {
+      assertMainRenderer(event)
+      const voice = parseSelection(value, 256)
+      if (voice === undefined) throw new Error('Invalid speech voice selection.')
+      return (await speechApplication()).speech.selectVoice(voice)
+    }
+  )
+  ipcMain.handle(
+    SPEECH_SAVE_PREFERENCES_CHANNEL,
+    async (event, value: unknown): Promise<SpeechPreferencesOutcome> => {
+      assertMainRenderer(event)
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error('Invalid speech preference patch.')
+      }
+      return (await speechApplication()).speech.savePreferences(value as SpeechPreferencesPatch)
+    }
+  )
   ipcMain.handle(
     SPEECH_TRANSCRIBE_CHANNEL,
     async (event, value: unknown): Promise<SpeechTranscribeOutcome> => {
@@ -182,8 +276,16 @@ export function setupSpeechCommandIpc(): void {
       ipcMain.removeHandler(SPEECH_FEED_STREAM_CHANNEL)
       ipcMain.removeHandler(SPEECH_FINISH_STREAM_CHANNEL)
       ipcMain.removeHandler(SPEECH_INTERRUPT_CHANNEL)
+      ipcMain.removeHandler(SPEECH_GET_SNAPSHOT_CHANNEL)
+      ipcMain.removeHandler(SPEECH_START_REALTIME_CHANNEL)
+      ipcMain.removeHandler(SPEECH_STOP_REALTIME_CHANNEL)
+      ipcMain.removeHandler(SPEECH_SELECT_MODEL_CHANNEL)
+      ipcMain.removeHandler(SPEECH_SELECT_VOICE_CHANNEL)
+      ipcMain.removeHandler(SPEECH_SAVE_PREFERENCES_CHANNEL)
       stopEvents?.()
       stopEvents = null
+      stopSnapshots?.()
+      stopSnapshots = null
       registered = false
     }
   })

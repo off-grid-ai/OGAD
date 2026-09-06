@@ -190,4 +190,4 @@ export type ModelImportResultContract =
       readonly id?: never
     }
 
-export type ArtifactKindContract = 'html' | 'svg' | 'mermaid' | 'react' | 'text' | 'image'
+export type { ArtifactKind as ArtifactKindContract } from '@offgrid/artifacts'

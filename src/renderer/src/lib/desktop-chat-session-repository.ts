@@ -7,26 +7,21 @@ export interface DesktopTurnPersistencePort {
 
 /** Renderer-owned persistence projection used by the shared chat lifecycle. */
 export class DesktopTurnRepository implements ChatSessionRepositoryPort {
-  private readonly conversations = new Map<string, ChatTurn[]>()
-
-  constructor(private readonly persistence: DesktopTurnPersistencePort = {}) {}
+  constructor(private readonly persistence?: DesktopTurnPersistencePort) {}
 
   async read(conversationId: string): Promise<readonly ChatTurn[]> {
-    const durable = await this.persistence.readChatSessionTurns?.(conversationId)
-    if (durable) {
-      this.conversations.set(conversationId, [...durable])
-      return durable
-    }
-    return this.conversations.get(conversationId) ?? []
+    const read = this.persistence?.readChatSessionTurns
+    if (!read) throw new Error('Desktop chat-session read persistence is unavailable.')
+    return read(conversationId)
   }
 
   async write(conversationId: string, turns: readonly ChatTurn[]): Promise<void> {
-    this.conversations.set(conversationId, [...turns])
-    await this.persistence.writeChatSessionTurns?.(conversationId, turns)
+    const write = this.persistence?.writeChatSessionTurns
+    if (!write) throw new Error('Desktop chat-session write persistence is unavailable.')
+    await write(conversationId, turns)
   }
 
-  invalidate(conversationId: string): void {
-    this.conversations.delete(conversationId)
+  invalidate(_conversationId: string): void {
+    // The main-process Workspace Content repository is stateless, so there is no local cache.
   }
-
 }

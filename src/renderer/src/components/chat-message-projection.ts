@@ -6,6 +6,7 @@
  * `MessageRowState` in, the intent `MessageRowActions` out.
  */
 import { toSpeakableText } from '@renderer/lib/speakable'
+import { stripArtifactFences } from '@offgrid/artifacts'
 import {
   attachmentKindFor,
   isPromptEnhancementStatus,
@@ -62,9 +63,6 @@ export function parseAsk(content: string): AskBlock | null {
 }
 
 const ASK_FENCE = /```ask\s*\n[\s\S]*?```/i
-// Artifact code (html/svg/mermaid/react/image) is rendered on the side canvas, not
-// dumped inline — strip the fenced block from the chat bubble and show a card instead.
-const ARTIFACT_FENCE = /```(?:html|svg|mermaid|jsx|tsx|react|image)\s*\n[\s\S]*?```/gi
 const CITATION = /\[S(\d+)\]/g
 
 /** Turn a raw message into clean, speakable/readable text: drop app-only fenced blocks
@@ -73,7 +71,9 @@ const CITATION = /\[S(\d+)\]/g
  *  so none can leak raw markdown to the engine or the transcript. */
 export function messageToSpeakable(raw: string): string {
   return toSpeakableText(
-    (raw || '').replace(ASK_FENCE, '').replace(ARTIFACT_FENCE, '').replace(CITATION, '').trim()
+    stripArtifactFences((raw || '').replace(ASK_FENCE, ''))
+      .replace(CITATION, '')
+      .trim()
   )
 }
 
@@ -108,7 +108,7 @@ export function activityLabel(a?: {
 }
 
 export type StoredMessageAttachment = NonNullable<ChatMessage['attachments']>[number]
-export type OpenImage = { url: string; path?: string }
+export type OpenImage = { url: string; imageId?: string; path?: string }
 
 export function isSupportingMessage(message: ChatMessage): boolean {
   return isSupportingChatContext({

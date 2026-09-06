@@ -1,5 +1,6 @@
 import type { ToolEmbeddingExecutionPort } from '@offgrid/models'
 import { llm } from '../llm'
+import { desktopModels } from '../composition/application-access'
 import { readImages } from '../llm/read-images'
 
 /** Desktop engine and settings I/O only. Shared owns every routing decision. */
@@ -15,7 +16,8 @@ export function desktopToolContextSize(): number {
 }
 
 export function desktopToolCallLimit(): number | undefined {
-  return llm.getSettings().maxToolCalls
+  const value = desktopModels.snapshot().settings.maxToolCalls
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
 /** Native projector probe plus filesystem decoding at one platform boundary. */

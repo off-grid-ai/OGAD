@@ -11,30 +11,10 @@ interface DesktopChatEventProjection {
   listeners: ReadonlySet<(event: ChatSessionEvent) => void>
 }
 
-/** Projects Shared lifecycle events to Desktop persistence and presentation ports. */
+/** Projects Shared lifecycle events to presentation listeners. Persistence belongs to ChatSession. */
 export async function publishDesktopChatEvent({
   event,
-  inputFor,
-  boundary,
   listeners
 }: DesktopChatEventProjection): Promise<void> {
-  if (event.type === 'invalidated') {
-    const input = event.turnIds.map(inputFor).find((candidate) => candidate !== undefined)
-    if (input?.invalidationAnchor && boundary.truncateRagMessages) {
-      await boundary.truncateRagMessages(event.conversationId, input.invalidationAnchor)
-    }
-  }
-  if (event.type === 'started') {
-    const input = inputFor(event.turn.id)
-    const persistence = input?.userPersistence
-    if (input && persistence && boundary.addRagMessage) {
-      await boundary.addRagMessage(
-        input.conversationId,
-        'user',
-        persistence.content,
-        { ...(persistence.context ?? {}), chatTurnId: event.turn.id }
-      )
-    }
-  }
   for (const listener of listeners) listener(event)
 }

@@ -68,6 +68,7 @@ export type ChatMessage = {
   content: string
   context?: RagContext
   image?: string
+  imageId?: string
   imagePath?: string
   imageMetadata?: ImageGenerationMetadata
   /** The artifact exists, but its durable Chat projection failed. */

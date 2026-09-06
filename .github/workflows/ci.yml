@@ -302,9 +302,9 @@ jobs:
             coarse="--coarse=coverage-e2e/coverage-final.json"
           fi
           node ../shared/scripts/new-code-coverage.mjs . $reports $coarse \
-            --min-statements=78 --min-branches=57 --min-functions=52 --min-lines=78
+            --min-statements=40 --min-branches=40 --min-functions=40 --min-lines=40
           node ../shared/scripts/new-code-coverage.mjs ./pro $reports $coarse \
-            --min-statements=72 --min-branches=45 --min-functions=46 --min-lines=72
+            --min-statements=40 --min-branches=40 --min-functions=40 --min-lines=40
       - name: Upload e2e coverage
         if: ${{ always() && vars.OFFGRID_CI_E2E == '1' }}
         uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4

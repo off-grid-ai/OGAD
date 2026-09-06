@@ -3,7 +3,13 @@ import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import JSZip from 'jszip'
-import { BundleError, type ArchivePort } from '@offgrid/sync/portable'
+import {
+  BundleError,
+  type ArchivePort,
+  type PackedArchiveLease,
+  type StagedArchiveLease,
+  type UnpackedArchiveLease
+} from '@offgrid/sync/portable'
 import { isSafeBackupKey } from './file-mapper'
 
 async function regularFile(filePath: string): Promise<fs.Stats> {
@@ -59,8 +65,12 @@ export class DesktopBackupArchive implements ArchivePort {
     this.restoreRoot = path.join(options.userDataDir, 'restored-backups')
   }
 
-  stageDir(): Promise<string> {
-    return fs.promises.mkdtemp(path.join(this.tempDir, 'offgrid-backup-stage-'))
+  async stageDir(): Promise<StagedArchiveLease> {
+    const directory = await fs.promises.mkdtemp(path.join(this.tempDir, 'offgrid-backup-stage-'))
+    return {
+      directory,
+      release: () => fs.promises.rm(directory, { recursive: true, force: true })
+    }
   }
 
   async writeText(absPath: string, text: string): Promise<void> {
@@ -88,7 +98,8 @@ export class DesktopBackupArchive implements ArchivePort {
     await fs.promises.copyFile(srcPath, destAbsPath, fs.constants.COPYFILE_EXCL)
   }
 
-  async pack(stageDir: string, suggestedName: string): Promise<string> {
+  async pack(stageDir: string, suggestedName: string): Promise<PackedArchiveLease> {
+    const outputDir = await fs.promises.mkdtemp(path.join(this.tempDir, 'offgrid-backup-archive-'))
     try {
       const zip = new JSZip()
       const files = await walkFiles(stageDir)
@@ -98,21 +109,22 @@ export class DesktopBackupArchive implements ArchivePort {
           await fs.promises.readFile(path.join(stageDir, relative))
         )
       }
-      const outputDir = await fs.promises.mkdtemp(
-        path.join(this.tempDir, 'offgrid-backup-archive-')
-      )
       const output = path.join(outputDir, suggestedName)
       await fs.promises.writeFile(
         output,
         await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
       )
-      return output
-    } finally {
-      await fs.promises.rm(stageDir, { recursive: true, force: true })
+      return {
+        archivePath: output,
+        release: () => fs.promises.rm(outputDir, { recursive: true, force: true })
+      }
+    } catch (error) {
+      await fs.promises.rm(outputDir, { recursive: true, force: true })
+      throw error
     }
   }
 
-  async unpack(archivePath: string): Promise<string> {
+  async unpack(archivePath: string): Promise<UnpackedArchiveLease> {
     await regularFile(archivePath)
     const zip = await JSZip.loadAsync(await fs.promises.readFile(archivePath))
     const output = await fs.promises.mkdtemp(path.join(this.tempDir, 'offgrid-backup-unpack-'))
@@ -128,7 +140,10 @@ export class DesktopBackupArchive implements ArchivePort {
           flag: 'wx'
         })
       }
-      return output
+      return {
+        directory: output,
+        release: () => fs.promises.rm(output, { recursive: true, force: true })
+      }
     } catch (error) {
       await fs.promises.rm(output, { recursive: true, force: true })
       throw error

@@ -5,19 +5,21 @@ import {
   type ImageParamOverride,
   type ImageParamStore
 } from '@renderer/lib/image-params'
-import {
-  publishActiveImageModelChanged,
-  publishImageSettings,
-  type ImageSettingKey,
-  type ImageSettingsProjection
-} from '@renderer/lib/image-settings-store'
+import { publishActiveImageModelChanged } from '@renderer/lib/active-image-model-events'
 import { SettingsNumberField } from './SettingsNumberField'
 import { SettingsSelect } from './SettingsSelect'
 import { SettingsTextField, type SettingsWriteOutcome } from './SettingsTextField'
 import { failed, modelFileDisplayName, modelsFailureMessage, ok } from '@offgrid/application'
+import { normalizeImageParameterStore } from '@offgrid/models'
 import { modelControlClient } from '@renderer/lib/model-control-client'
 
-type ImageSettings = ImageSettingsProjection
+interface ImageSettings {
+  imageParams?: ImageParamStore
+  imgSeed?: string
+  imgNegative?: string
+  enhanceImagePrompts?: boolean
+}
+type ImageSettingKey = keyof ImageSettings
 
 const modelLabel = modelFileDisplayName
 
@@ -31,19 +33,30 @@ export function ImageSettingsTab(): React.JSX.Element {
   const [saveFailure, setSaveFailure] = useState('')
 
   useEffect(() => {
-    void Promise.all([window.api.imageGenStatus(), window.api.getSettings()])
+    const apply = (settings: Record<string, unknown>): void => {
+      if (settings.imageParams && typeof settings.imageParams === 'object')
+        setParams(normalizeImageParameterStore(settings.imageParams))
+      if (typeof settings.imgSeed === 'string') setSeed(settings.imgSeed)
+      if (typeof settings.imgNegative === 'string') setNegativePrompt(settings.imgNegative)
+      if (typeof settings.enhanceImagePrompts === 'boolean')
+        setEnhance(settings.enhanceImagePrompts)
+    }
+    const release = window.api.onModelSettingsProjection(apply)
+    void Promise.all([window.api.imageGenStatus(), window.api.getLlmSettings()])
       .then(([status, settings]) => {
         const available = status?.models ?? []
         const active = status?.defaultModel ?? ''
-        const saved = settings as ImageSettings
         setModels(available)
         setModel(active)
-        setParams(saved.imageParams ?? {})
-        setSeed(saved.imgSeed ?? '')
-        setNegativePrompt(saved.imgNegative ?? '')
-        setEnhance(saved.enhanceImagePrompts ?? true)
+        setParams(normalizeImageParameterStore(settings.imageParams))
+        setSeed(typeof settings.imgSeed === 'string' ? settings.imgSeed : '')
+        setNegativePrompt(typeof settings.imgNegative === 'string' ? settings.imgNegative : '')
+        setEnhance(
+          typeof settings.enhanceImagePrompts === 'boolean' ? settings.enhanceImagePrompts : true
+        )
       })
       .catch(() => {})
+    return release
   }, [])
 
   const effective = resolveImageParams(model, params)
@@ -53,11 +66,17 @@ export function ImageSettingsTab(): React.JSX.Element {
   const save = useCallback(
     async <K extends ImageSettingKey>(
       key: K,
-      value: NonNullable<ImageSettingsProjection[K]>
+      value: NonNullable<ImageSettings[K]>
     ): Promise<SettingsWriteOutcome> => {
       try {
-        await window.api.saveSetting(key, value)
-        publishImageSettings({ [key]: value } as ImageSettingsProjection)
+        const outcome = await window.api.setLlmSettings({ [key]: value })
+        if (!outcome.ok) return failed({ message: modelsFailureMessage(outcome.failure) })
+        const committed = outcome.value.settings
+        if (committed.imageParams) setParams(normalizeImageParameterStore(committed.imageParams))
+        if (typeof committed.imgSeed === 'string') setSeed(committed.imgSeed)
+        if (typeof committed.imgNegative === 'string') setNegativePrompt(committed.imgNegative)
+        if (typeof committed.enhanceImagePrompts === 'boolean')
+          setEnhance(committed.enhanceImagePrompts)
         return ok(undefined)
       } catch {
         return failed({ message: 'This setting could not be saved.' })
@@ -68,7 +87,7 @@ export function ImageSettingsTab(): React.JSX.Element {
 
   const persist = <K extends ImageSettingKey>(
     key: K,
-    value: NonNullable<ImageSettingsProjection[K]>
+    value: NonNullable<ImageSettings[K]>
   ): void => {
     void save(key, value).then((outcome) => {
       setSaveFailure(outcome.ok ? '' : outcome.failure.message)

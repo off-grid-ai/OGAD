@@ -12,7 +12,7 @@ import {
   gatewayImageExtensionForMime,
   resolveImageGenerationSettings,
   resolveImageParameters,
-  type ImageParameterStore,
+  normalizeImageParameterStore,
   type ImageApplicationSnapshot,
   type ImageGenerationApplicationPorts,
   type ImageNativeExecutionFacts,
@@ -37,7 +37,6 @@ import {
 } from '../../shared/image-generation-contract'
 import { generateDesktopOperation } from '../desktop-generation'
 import { registerDesktopImageProgress } from '../generation-progress'
-import { getSetting } from '../database'
 import {
   desktopModels,
   DesktopModelsOperationError,
@@ -52,6 +51,10 @@ import {
   imageGenerationApplication,
   registerDesktopImageApplicationPorts
 } from '../composition/imagegen'
+import {
+  prepareDesktopGeneratedImageOutputPath,
+  sealDesktopGeneratedImageCreationPath
+} from './creation-intent-runtime'
 
 let nativeCancelBoundary: () => void | Promise<void> = () => undefined
 let nativeInspectionBoundary: (input: {
@@ -144,14 +147,17 @@ function validateImageArtifact(
 }
 
 export async function persistImageGenerationOutput(
-  output: ImageGenerationOutputContract
+  output: ImageGenerationOutputContract,
+  requestId?: string
 ): Promise<ImageGenerationOutputContract> {
+  if (!requestId) throw new Error('Image persistence requires its prepared request ID.')
   const directory = path.join(dataDir(), 'generated-images')
   fs.mkdirSync(directory, { recursive: true })
   const localPath = localImageArtifactPath(output.path, directory)
   if (localPath) {
     const bytes = await fs.promises.readFile(localPath)
     const mime = validateImageArtifact(bytes, imageMimeForPath(localPath))
+    sealDesktopGeneratedImageCreationPath(requestId, 'output', localPath)
     return {
       ...output,
       path: localPath,
@@ -174,11 +180,12 @@ export async function persistImageGenerationOutput(
     throw new Error('The image engine returned no readable image artifact.')
   }
   const mime = validateImageArtifact(bytes, declaredMime)
-  const destination = path.join(
-    directory,
-    `img-${String(Date.now())}-${randomUUID()}${gatewayImageExtensionForMime(mime)}`
+  const destination = prepareDesktopGeneratedImageOutputPath(
+    requestId,
+    gatewayImageExtensionForMime(mime)
   )
   await fs.promises.writeFile(destination, bytes)
+  sealDesktopGeneratedImageCreationPath(requestId, 'output', destination)
   return {
     ...output,
     path: destination,
@@ -207,7 +214,7 @@ export function desktopImageApplicationPorts(): ImageGenerationApplicationPorts<
       // generates an image: composer, tool call, gateway, paired phone. One store, one resolver.
       const parameters = resolveImageParameters(
         model,
-        getSetting<ImageParameterStore>('imageParams', {})
+        normalizeImageParameterStore(desktopModels.snapshot().settings.imageParams)
       )
       return {
         ...resolveImageGenerationSettings({
@@ -222,7 +229,7 @@ export function desktopImageApplicationPorts(): ImageGenerationApplicationPorts<
             useOpenCL: false
           }
         }),
-        enhancePrompt: getSetting<boolean>('enhanceImagePrompts', true)
+        enhancePrompt: desktopModels.snapshot().settings.enhanceImagePrompts !== false
       }
     },
     async enhancePrompt(request, signal, ...callbacks) {
@@ -298,7 +305,10 @@ export function desktopImageApplicationPorts(): ImageGenerationApplicationPorts<
         prompt: input.prompt
       }
     },
-    persist: ({ output }) => persistImageGenerationOutput(output),
+    persist: ({ output, request }) => {
+      if (!request.requestId) throw new Error('Image persistence requires its prepared request ID.')
+      return persistImageGenerationOutput(output, request.requestId)
+    },
     cancelBoundary: async () => nativeCancelBoundary(),
     ejectForRetry: async () => {
       const outcome = await desktopModels.unload({ modality: 'image', keepSelection: true })
