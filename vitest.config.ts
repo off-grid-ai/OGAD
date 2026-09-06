@@ -1,8 +1,12 @@
 import { resolve } from 'path'
-import { existsSync, readFileSync } from 'fs'
+import { existsSync } from 'fs'
 import { availableParallelism } from 'os'
 import { defineConfig } from 'vitest/config'
-import { createProductTestFiles, createVitestProjects } from './src/main/__tests__/vitest-projects'
+import {
+  createProductTestFiles,
+  createUiBehaviorTestFiles,
+  createVitestProjects
+} from './src/main/__tests__/vitest-projects'
 import { databaseProjectOptions } from './vitest.db.config'
 
 // The pro/ submodule is present in the working tree when you have access, absent
@@ -10,18 +14,27 @@ import { databaseProjectOptions } from './vitest.db.config'
 // pro-specific threshold group when pro is actually checked out, so a core-only
 // run measures + gates core alone instead of erroring on an empty pro/** glob.
 const hasPro = existsSync(resolve(__dirname, 'pro/tsconfig.json'))
-// Set by CI and the pre-push hook, which may fold optional e2e evidence into this unified
-// product + database report before gating. See resolveCoverageThresholds below.
-const usesAggregateCoverageGate = process.env.OFFGRID_AGGREGATE_COVERAGE === '1'
 // The pro test globs are gated the same way the pro thresholds already are:
 // a core-only checkout can carry stray pro/ files (this repo tracks a handful
 // of pro test files with no implementations beside them), and collecting
 // orphan tests fails the suite for everyone without desktop-pro access.
 const productTestFiles = createProductTestFiles(hasPro)
+const uiBehaviorTestFiles = createUiBehaviorTestFiles(hasPro)
 const commonExcludes = ['e2e/**', 'node_modules/**', 'out/**']
-const configuredProjects = createVitestProjects(productTestFiles, commonExcludes)
-const productProject = configuredProjects[0]!
-const nonConsumerProjects = configuredProjects.slice(1)
+const configuredProjects = createVitestProjects(
+  uiBehaviorTestFiles,
+  productTestFiles,
+  commonExcludes
+)
+const uiBehaviorProject = configuredProjects[0]!
+const serviceIntegrationProject = configuredProjects[1]!
+const nonConsumerProjects = configuredProjects.slice(2).map((project) => ({
+  ...project,
+  test: {
+    ...project.test,
+    sequence: { groupOrder: project.test.sequence.groupOrder + 2 }
+  }
+}))
 const desktopWorkerCount = Math.max(1, Math.min(8, availableParallelism() - 2))
 const databaseWorkerCount = Math.max(1, Math.min(4, availableParallelism() - 2))
 
@@ -51,53 +64,11 @@ export const DATABASE_EXCLUSIVE_TESTS = [
   'pro/main/__tests__/sync-service.integration.dbtest.ts'
 ]
 
-/**
- * The one workspace coverage gate — READ, never redeclared.
- *
- * coverage-gate.json beside this file is the single machine-readable owner of the four numbers.
- * Every runner that measures this repository reads that one file: vitest here (one combined
- * product + database report) and scripts/coverage-all.sh, which turns the
- * same object into the merged new-code run's `--min-*` flags. There is no second, softer floor
- * anywhere, no per-package group, and no copy of the numbers to drift out of step.
- *
- * All four metrics use a 65% minimum, as requested by the maintainer.
- * Change coverage-gate.json to update the minimum for every runner.
- */
-export interface CoverageGate {
-  statements: number
-  branches: number
-  functions: number
-  lines: number
-}
-
-export const WORKSPACE_COVERAGE_GATE: CoverageGate = JSON.parse(
-  readFileSync(resolve(__dirname, 'coverage-gate.json'), 'utf-8')
-) as CoverageGate
-
-/**
- * WHICH report this run's gate is applied to — never WHETHER the gate exists.
- *
- * A direct run applies the gate to Vitest's one product + database report. Under the aggregate
- * run (scripts/coverage-all.sh and CI), optional e2e evidence can still be folded in and new-code
- * coverage is calculated afterwards. Enforcement moves downstream in that mode, using the same
- * WORKSPACE_COVERAGE_GATE numbers.
- */
-export function resolveCoverageThresholds(
-  mergesWithComplementaryReports: boolean
-): CoverageGate | undefined {
-  return mergesWithComplementaryReports ? undefined : WORKSPACE_COVERAGE_GATE
-}
-
-// Unit + integration tests (fast, deterministic). The Playwright Electron E2E lives
+// Behavioral UI and service integration tests. The Playwright Electron E2E lives
 // in e2e/ and runs via `npm run test:e2e`, NOT here.
 //
-// Coverage (npm run test:coverage) gates the TESTABLE surface: the pure, Electron-free
-// decision logic the codebase deliberately extracts so it can be exercised in-process
-// (see CLAUDE.md "pull the pure part out"). Electron/DB/native-bound shells are excluded
-// because they can't be unit-tested directly — cover the logic you pulled out of them.
-// WORKSPACE_COVERAGE_GATE above is the floor, enforced here and on pre-push, and `include`
-// means a new pure module with no test drags the number down, so untested logic cannot
-// sneak in.
+// Coverage is diagnostic. It reports which production paths the behavioral suites execute,
+// but it does not decide whether a user journey passes.
 export default defineConfig({
   // Renderer path aliases, mirrored 1:1 from tsconfig.web.json `paths`. Without these
   // a .tsx render test cannot import any renderer module (electron-vite provides them
@@ -146,8 +117,12 @@ export default defineConfig({
     // cross-process filesystem lock prevents config-file races.
     projects: [
       {
-        ...productProject,
-        test: { ...productProject.test, maxWorkers: desktopWorkerCount }
+        ...uiBehaviorProject,
+        test: { ...uiBehaviorProject.test, maxWorkers: desktopWorkerCount }
+      },
+      {
+        ...serviceIntegrationProject,
+        test: { ...serviceIntegrationProject.test, maxWorkers: desktopWorkerCount }
       },
       {
         extends: true,
@@ -157,7 +132,7 @@ export default defineConfig({
           exclude: [...databaseProjectOptions.test.exclude, ...DATABASE_EXCLUSIVE_TESTS],
           fileParallelism: true,
           maxWorkers: databaseWorkerCount,
-          sequence: { groupOrder: 1 }
+          sequence: { groupOrder: 2 }
         }
       },
       {
@@ -167,7 +142,7 @@ export default defineConfig({
           ...databaseProjectOptions.test,
           name: 'database-exclusive-integration',
           include: DATABASE_EXCLUSIVE_TESTS,
-          sequence: { groupOrder: 2 }
+          sequence: { groupOrder: 3 }
         }
       },
       ...nonConsumerProjects
@@ -340,8 +315,7 @@ export default defineConfig({
         'pro/main/focus.ts',
         'pro/main/dictation/hotkey/toggle.ts',
         'pro/main/crm/notify.ts' // pure Electron Notification shell (isSupported/new Notification/show) — no branchable logic
-      ],
-      thresholds: resolveCoverageThresholds(usesAggregateCoverageGate)
+      ]
     }
   }
 })

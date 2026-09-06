@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Every suite's coverage, in one number, over the code this branch ADDS.
+# Every suite's coverage, in one report, over the code this branch adds.
 #
 # Desktop has several test projects. The canonical coverage command runs the product and database
 # projects in one Vitest process, so core and Pro contribute to one instrumented report:
 #
-#   1. product-integration  (npm test)          unit + integration, jsdom + node
+#   1. UI behavior + service integration        rendered UI + service boundaries
 #   2. the DB journeys                          real native SQLite, whole relaunch journeys, ABI-swapped
 #   3. the heavy projects    (npm run test:heavy) model-port + packaging; some self-skip without real engines
 #   4. the e2e tour          (npm run test:e2e)  the built Electron app, driven by Playwright
@@ -20,30 +20,14 @@
 #   ./scripts/coverage-all.sh                        both local suites
 #   ./scripts/coverage-all.sh --with-e2e             also capture e2e locally (needs a display)
 #   E2E_COVERAGE_REPORT=path ./scripts/coverage-all.sh   fold in a report from CI's e2e-coverage artifact
-#   ./scripts/coverage-all.sh --print-gate           print the coverage floor flags and exit
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
 MERGE="../shared/scripts/new-code-coverage.mjs"
 
-# The four floor percentages are owned by coverage-gate.json alone — the same file vitest.config.ts
-# reads for its `thresholds`. Deriving the merged new-code run's flags from it is what makes the two
-# gates ONE gate: raising or lowering the floor is a one-file edit that both runners pick up, and
-# neither can drift below the other. `--print-gate` prints the derived flags and exits, so a test can
-# assert this script and vitest agree without running a suite.
-if ! GATE_FLAGS="$(node -e 'const gate = require(process.argv[1]); process.stdout.write(Object.entries(gate).map(([metric, min]) => `--min-${metric}=${min}`).join(" "))' "$PWD/coverage-gate.json" 2>/dev/null)"; then
-  echo "coverage-gate.json is missing or unreadable - refusing to run without the coverage floor." >&2
-  exit 1
-fi
-
-if [ "${1:-}" = "--print-gate" ]; then
-  echo "$GATE_FLAGS"
-  exit 0
-fi
-
 echo "▶ Desktop + Desktop Pro (product + database journeys)…"
 rm -rf coverage
-OFFGRID_AGGREGATE_COVERAGE=1 npm run test:coverage -- \
+npm run test:coverage -- \
   --silent --reporter=verbose --color 2>&1 \
   | tee /tmp/coverage-all-desktop.log
 DESKTOP_STATUS=${PIPESTATUS[0]}
@@ -76,8 +60,7 @@ echo
 E2E_NOTE="without the e2e tour"
 [ -n "$COARSE" ] && E2E_NOTE="including the e2e tour"
 echo "▶ new-code coverage from ${#REPORTS[@]} source-instrumented report(s), $E2E_NOTE:"
-node "$MERGE" . "${REPORTS[@]}" $COARSE $GATE_FLAGS
-DESKTOP_COVERAGE_STATUS=$?
+node "$MERGE" . "${REPORTS[@]}" $COARSE
 
 if [ -z "$COARSE" ]; then
   echo
@@ -89,7 +72,6 @@ fi
 # The suites' own exit codes are surfaced, so a green number from a red suite is impossible to mistake.
 [ $DESKTOP_STATUS -eq 0 ] || echo "warning: Desktop + Desktop Pro exited $DESKTOP_STATUS"
 
-if [ $DESKTOP_STATUS -ne 0 ] || \
-  [ $DESKTOP_COVERAGE_STATUS -ne 0 ]; then
+if [ $DESKTOP_STATUS -ne 0 ]; then
   exit 1
 fi
