@@ -266,6 +266,59 @@ function liveTaskToolIndex(
   return -1
 }
 
+interface WorkStepDisclosureProps {
+  details: string | undefined
+  reasoning: string | undefined
+  ownsContext: boolean
+  context: RagContext | undefined
+  navigation: ContextNavigation | undefined
+  linkedTask: TaskSession | undefined
+  taskWorkspaceOpen: boolean
+}
+
+function WorkStepDisclosure({
+  details,
+  reasoning,
+  ownsContext,
+  context,
+  navigation,
+  linkedTask,
+  taskWorkspaceOpen
+}: WorkStepDisclosureProps): React.JSX.Element {
+  return (
+    <CollapsibleContent className="mt-1 border-l-2 border-neutral-800 pl-3 text-xs leading-relaxed text-neutral-500">
+      {reasoning ? <ChatThinkingBlock content={reasoning} className="mb-1.5" /> : null}
+      {details ? <ChatMarkdown content={details} /> : null}
+      {ownsContext ? (
+        <div className="mt-2 max-h-[400px] overflow-y-auto border-t border-neutral-800 pt-2">
+          <ContextDetails context={context!} navigation={navigation!} />
+        </div>
+      ) : null}
+      <ComputerUseStepDetails details={linkedTask?.stepDetails} />
+      {linkedTask ? (
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="mt-2 border border-neutral-700 px-2 py-1 text-[10px] text-neutral-300 hover:border-neutral-500"
+            onClick={() =>
+              taskWorkspaceOpen
+                ? closeTaskWorkspace()
+                : openTaskSidePanel({
+                    taskId: linkedTask.taskId,
+                    kind: linkedTask.kind,
+                    detail: true
+                  })
+            }
+          >
+            {taskWorkspaceOpen ? 'Close task details' : 'Open task details'}
+          </button>
+          <RetryTaskButton task={linkedTask} />
+        </div>
+      ) : null}
+    </CollapsibleContent>
+  )
+}
+
 /** One persisted execution timeline for both live previews and durable assistant turns. */
 export function ChatToolRows({
   tools,
@@ -390,38 +443,15 @@ export function ChatToolRows({
                     ) : null}
                   </CollapsibleTrigger>
                   {hasDisclosure ? (
-                    <CollapsibleContent className="mt-1 border-l-2 border-neutral-800 pl-3 text-xs leading-relaxed text-neutral-500">
-                      {reasoning ? (
-                        <ChatThinkingBlock content={reasoning} className="mb-1.5" />
-                      ) : null}
-                      {details ? <ChatMarkdown content={details} /> : null}
-                      {ownsContext ? (
-                        <div className="mt-2 max-h-[400px] overflow-y-auto border-t border-neutral-800 pt-2">
-                          <ContextDetails context={context} navigation={navigation} />
-                        </div>
-                      ) : null}
-                      <ComputerUseStepDetails details={linkedTask?.stepDetails} />
-                      {linkedTask ? (
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            className="mt-2 border border-neutral-700 px-2 py-1 text-[10px] text-neutral-300 hover:border-neutral-500"
-                            onClick={() =>
-                              taskWorkspaceOpen
-                                ? closeTaskWorkspace()
-                                : openTaskSidePanel({
-                                    taskId: linkedTask.taskId,
-                                    kind: linkedTask.kind,
-                                    detail: true
-                                  })
-                            }
-                          >
-                            {taskWorkspaceOpen ? 'Close task details' : 'Open task details'}
-                          </button>
-                          <RetryTaskButton task={linkedTask} />
-                        </div>
-                      ) : null}
-                    </CollapsibleContent>
+                    <WorkStepDisclosure
+                      details={details}
+                      reasoning={reasoning}
+                      ownsContext={ownsContext}
+                      context={context}
+                      navigation={navigation}
+                      linkedTask={linkedTask}
+                      taskWorkspaceOpen={taskWorkspaceOpen}
+                    />
                   ) : null}
                 </Collapsible>
               </li>

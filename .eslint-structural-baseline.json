@@ -564,7 +564,7 @@
     "src/renderer/src/components/ChatToolRows.tsx": {
       "complexity": [
         36,
-        26
+        25
       ]
     },
     "src/renderer/src/components/ConnectorsScreen.tsx": {
