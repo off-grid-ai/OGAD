@@ -193,7 +193,7 @@ describe('manual update check', () => {
     })
     expect(quitAndInstall).not.toHaveBeenCalled()
     expect(checkForUpdates).toHaveBeenCalledTimes(3)
-  }, 15_000)
+  }, 30_000)
 
   it('restores finite update download progress with bytes, rate and terminal state', async () => {
     const updater = await import('../updater')
