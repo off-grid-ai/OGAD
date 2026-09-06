@@ -445,19 +445,27 @@ class BrowserHost implements BrowserRailHost {
     return child
   }
 
-  newTab(): { sessionId: string } {
+  /** A manual tab belongs to the chat that opened it (journeyId), so the docked
+   * pane scopes it to that chat and it does not leak into other conversations.
+   * Tabs opened outside a chat (the Tasks route) stay unbound. */
+  newTab(journeyId?: string): { sessionId: string } {
     const sessionId = randomUUID()
-    const record = this.createSession({ sessionId, historyId: sessionId, kind: 'manual' })
+    const record = this.createSession({
+      sessionId,
+      historyId: sessionId,
+      kind: 'manual',
+      ...(journeyId ? { journeyId } : {})
+    })
     return { sessionId: record.sessionId }
   }
 
   /** Open a Chat link as a normal manual page. This is deliberately separate
    * from runTask: reading a source must never start Web Use automation. */
-  async openUrl(url: string): Promise<{ sessionId: string } | null> {
+  async openUrl(url: string, journeyId?: string): Promise<{ sessionId: string } | null> {
     if (!/^https?:\/\//i.test(url)) return null
     const target = normalizeBrowserAddress(url)
     if (!target) return null
-    const opened = this.newTab()
+    const opened = this.newTab(journeyId)
     await this.navigate(target, opened.sessionId)
     return opened
   }
@@ -1038,9 +1046,13 @@ export function registerBrowserViewIpc(): void {
     if (!isBrowserRegionOwner(owner)) return
     browserHost().setRegion(owner, parseRect(raw))
   })
-  ipcMain.handle('browser:new-tab', () => browserHost().newTab())
-  ipcMain.handle('browser:open-url', (_event, url: unknown) =>
-    typeof url === 'string' ? browserHost().openUrl(url) : null
+  ipcMain.handle('browser:new-tab', (_event, journeyId: unknown) =>
+    browserHost().newTab(typeof journeyId === 'string' ? journeyId : undefined)
+  )
+  ipcMain.handle('browser:open-url', (_event, url: unknown, journeyId: unknown) =>
+    typeof url === 'string'
+      ? browserHost().openUrl(url, typeof journeyId === 'string' ? journeyId : undefined)
+      : null
   )
   ipcMain.handle('browser:get-sessions', () => browserHost().getSessions())
   ipcMain.handle('browser:activate-session', (_event, sessionId: unknown) =>

@@ -188,8 +188,8 @@ interface RendererAPIOverrides {
       owner: 'docked' | 'floating',
       rect: { x: number; y: number; width: number; height: number } | null
     ) => void
-    newTab: () => Promise<{ sessionId: string }>
-    openUrl: (url: string) => Promise<{ sessionId: string } | null>
+    newTab: (journeyId?: string) => Promise<{ sessionId: string }>
+    openUrl: (url: string, journeyId?: string) => Promise<{ sessionId: string } | null>
     getSessions: () => Promise<{
       activeSessionId: string | null
       sessions: Array<{
