@@ -1291,7 +1291,7 @@
         1336
       ],
       "max-lines-per-function": [
-        419
+        416
       ]
     },
     "pro/renderer/screens/DevicesScreen.tsx": {
@@ -1313,15 +1313,15 @@
     },
     "pro/renderer/screens/EntitiesScreen.tsx": {
       "max-lines-per-function": [
-        390,
-        321
+        388,
+        314
       ],
       "complexity": [
-        29,
+        28,
         22
       ],
       "max-lines": [
-        1706
+        1694
       ]
     },
     "pro/renderer/screens/MeetingActivitySection.tsx": {
@@ -1331,13 +1331,13 @@
     },
     "pro/renderer/screens/MeetingsScreen.tsx": {
       "max-lines-per-function": [
-        443
+        429
       ],
       "complexity": [
-        52
+        42
       ],
       "max-lines": [
-        525
+        464
       ]
     },
     "pro/renderer/screens/NotificationList.tsx": {
@@ -1361,13 +1361,13 @@
     },
     "pro/renderer/screens/ReplayScreen.tsx": {
       "max-lines-per-function": [
-        542
+        530
       ],
       "complexity": [
         21
       ],
       "max-lines": [
-        597
+        589
       ]
     },
     "pro/renderer/screens/TodoCard.tsx": {
@@ -1395,10 +1395,10 @@
     },
     "pro/renderer/screens/VoiceScreen.tsx": {
       "max-lines": [
-        990
+        984
       ],
       "complexity": [
-        29
+        28
       ]
     },
     "pro/renderer/settings-sections.tsx": {
