@@ -32,7 +32,6 @@ import { currentPlatform, isMac } from './lib/device'
 import { NotificationProvider } from './hooks/NotificationProvider'
 import { useNotifications } from './hooks/useNotifications'
 import { ToastProvider } from './hooks/ToastProvider'
-import { useReprocessing } from './hooks/reprocessing-context'
 import { ReprocessingProvider } from './hooks/useReprocessing'
 import { createElement, useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react'
 import { GridBackdrop } from './components/ui/grid-backdrop'
@@ -54,7 +53,6 @@ import {
   IconPin,
   IconPinnedOff,
   IconArrowRight,
-  IconActivityHeartbeat,
   IconDeviceMobile,
   IconListCheck,
   IconExternalLink,
@@ -71,6 +69,8 @@ import { internalTabPaletteScreens } from './lib/paletteScreens'
 import { getSlot, SLOTS } from './bootstrap/slotRegistry'
 import { SidebarNavigationMenu } from './components/navigation/SidebarNavigationMenu'
 import { StartupNotice } from './components/StartupNotice'
+import { WorkspaceContentMigrationNotice } from './components/WorkspaceContentMigrationNotice'
+import { ModelStatusDot, ReprocessingBanner } from './components/AppStatusIndicators'
 import { CHAT_VIEW, setCurrentView } from './lib/current-view'
 import {
   OPEN_MODEL_SETTINGS_PANEL_EVENT,
@@ -137,6 +137,22 @@ interface BrowserRoute {
   settingsSection: string | null
 }
 
+const navRowClass = (expanded: boolean, active = false): string =>
+  cn(
+    'group/nav relative flex items-center gap-3 rounded-lg py-2 text-sm transition-colors',
+    expanded ? 'px-3' : 'justify-center px-0',
+    active
+      ? 'bg-green-500/10 text-emerald-400'
+      : 'text-neutral-400 hover:bg-neutral-500/10 hover:text-white'
+  )
+
+type TaskSlots = [ReturnType<typeof getSlot>, ReturnType<typeof getSlot>]
+
+function taskSlotProjection(isPro: boolean, ready: boolean): TaskSlots {
+  if (!isPro || !ready) return [undefined, undefined]
+  return [getSlot(SLOTS.taskWorkspace), getSlot(SLOTS.taskFloatingView)]
+}
+
 const VIEW_BY_PATH: Readonly<Record<string, ViewMode>> = {
   '/': 'day',
   '/explore': 'explore',
@@ -187,49 +203,6 @@ function browserRoute(path: string, fallback: ViewMode): BrowserRoute {
   }
 }
 
-function ReprocessingBanner(): React.ReactElement | null {
-  const { reprocessing, progress } = useReprocessing()
-  if (!reprocessing) return null
-
-  const pct =
-    progress && progress.total > 0 ? Math.round((progress.processed / progress.total) * 100) : 0
-
-  return (
-    <motion.div
-      initial={{ height: 0, opacity: 0 }}
-      animate={{ height: 'auto', opacity: 1 }}
-      exit={{ height: 0, opacity: 0 }}
-      transition={{ duration: 0.3 }}
-      className="bg-neutral-900/90 backdrop-blur-sm border-b border-neutral-800 px-4 py-2 flex items-center gap-3"
-    >
-      <motion.div
-        className="w-3.5 h-3.5 border-2 border-neutral-400 border-t-transparent rounded-full shrink-0"
-        animate={{ rotate: 360 }}
-        transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
-      />
-      <span className="text-sm text-neutral-400 flex-1 min-w-0 truncate">
-        {progress?.phase === 'cleared'
-          ? 'Data cleared. Rebuilding memories and entities...'
-          : progress
-            ? `Reprocessing session ${progress.processed} of ${progress.total}...`
-            : 'Reprocessing sessions...'}
-      </span>
-      {progress && progress.total > 0 && (
-        <div className="w-24 h-1.5 bg-neutral-800 rounded-full overflow-hidden shrink-0">
-          <motion.div
-            className="h-full bg-neutral-500 rounded-full"
-            animate={{ width: `${pct}%` }}
-            transition={{ duration: 0.3 }}
-          />
-        </div>
-      )}
-      {progress && progress.total > 0 && (
-        <span className="text-xs text-neutral-600 shrink-0">{pct}%</span>
-      )}
-    </motion.div>
-  )
-}
-
 // One rule for the look of EVERY sidebar row - nav items, the model-status row, the mobile-app
 // link. The Tailwind palette is remapped onto the theme-aware --og-* tokens in assets/main.css,
 // so these classes already flip with data-theme and no `dark:` variant belongs here: `dark:` is
@@ -237,102 +210,10 @@ function ReprocessingBanner(): React.ReactElement | null {
 // disagrees with data-theme whenever the app theme and the OS theme differ.
 // The tell that made this visible: neutral-900 is a SURFACE token here (#f5f5f5 in light), not a
 // text token, so `hover:text-neutral-900` painted the label near-white on a near-white row.
-const navRowClass = (expanded: boolean, active = false): string =>
-  cn(
-    'group/nav relative flex items-center gap-3 rounded-lg py-2 text-sm transition-colors',
-    expanded ? 'px-3' : 'justify-center px-0',
-    active
-      ? 'bg-green-500/10 text-emerald-400'
-      : 'text-neutral-400 hover:bg-neutral-500/10 hover:text-white'
-  )
-
 // Model-server health dot for the sidebar. Uses the same authoritative chat probe
 // as the full System Health panel, through a narrow IPC projection that does not
 // re-check permissions, the gateway, image generation, and native helpers every
 // five seconds. Green = running, amber = starting, red = stopped.
-type ChatHealth = 'ready' | 'starting' | 'down' | null
-function ModelStatusDot({
-  open,
-  onClick
-}: {
-  open: boolean
-  onClick: () => void
-}): React.ReactElement {
-  const [status, setStatus] = useState<ChatHealth>(null)
-  useEffect(() => {
-    let live = true
-    let refreshInFlight: Promise<void> | null = null
-    const api = window.api
-    const applyHealth = (chat: { status?: string } | null | undefined): void => {
-      const next: ChatHealth =
-        chat?.status === 'ready' ? 'ready' : chat?.status === 'starting' ? 'starting' : 'down'
-      if (live) setStatus(next)
-    }
-    const refresh = (): void => {
-      if (refreshInFlight !== null) return
-      refreshInFlight = Promise.resolve(api.chatHealth())
-        .then(applyHealth)
-        .catch(() => {
-          if (live) setStatus('down')
-        })
-        .finally(() => {
-          refreshInFlight = null
-        })
-    }
-    const refreshWhenVisible = (): void => {
-      if (document.visibilityState === 'visible') refresh()
-    }
-    const offChanged = api.onChatHealthChanged(applyHealth)
-    refresh()
-    window.addEventListener('focus', refreshWhenVisible)
-    document.addEventListener('visibilitychange', refreshWhenVisible)
-    const id = setInterval(refreshWhenVisible, 60_000)
-    return () => {
-      live = false
-      clearInterval(id)
-      window.removeEventListener('focus', refreshWhenVisible)
-      document.removeEventListener('visibilitychange', refreshWhenVisible)
-      try {
-        offChanged()
-      } catch {
-        /* preload subscription already closed */
-      }
-    }
-  }, [])
-  const color =
-    status == null
-      ? 'text-neutral-500'
-      : status === 'ready'
-        ? 'text-green-500'
-        : status === 'starting'
-          ? 'text-amber-500'
-          : 'text-red-500'
-  const text =
-    status == null
-      ? 'Checking…'
-      : status === 'ready'
-        ? 'Model running'
-        : status === 'starting'
-          ? 'Model starting'
-          : 'Model stopped'
-  const label =
-    status === 'down'
-      ? 'Model server stopped. Open Setup and health.'
-      : `Model server: ${text.toLowerCase()}. Open Setup and health.`
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={label}
-      aria-label={label}
-      className={navRowClass(open)}
-    >
-      <IconActivityHeartbeat className={cn('h-5 w-5 shrink-0', color)} />
-      {open && <span className="flex-1 text-left text-xs">{text}</span>}
-    </button>
-  )
-}
-
 function ProViewRoute({
   viewMode,
   context
@@ -354,10 +235,9 @@ function AppContent(): React.ReactElement {
   // Re-render once pro renderer features have activated (registers the view-router).
   const [proReady, setProReady] = useState(false)
   const [proActivation, setProActivation] = useState<ProRendererActivation>('none')
-  const TaskWorkspace = isPro && proReady ? getSlot(SLOTS.taskWorkspace) : undefined
+  const [TaskWorkspace, TaskFloatingView] = taskSlotProjection(isPro, proReady)
   // Rendered at the app root, NOT inside the route switch: a running task follows the user across
   // navigation, so a route-scoped mount would unmount it exactly when it is wanted.
-  const TaskFloatingView = isPro && proReady ? getSlot(SLOTS.taskFloatingView) : undefined
   const [externalUnreadCount, setExternalUnreadCount] = useState(0)
   useEffect(() => {
     let mounted = true
@@ -1569,36 +1449,48 @@ function App(): React.ReactElement {
 
   if (!onboarded && !setupChecked)
     return (
-      <div className="p-6 font-mono text-sm" role="status">
-        {setupCheckError ?? 'Checking your saved setup...'}
-        {setupCheckError && (
-          <button
-            className="ml-3 underline"
-            onClick={() => {
-              setSetupCheckError(null)
-              setSetupRetry((value) => value + 1)
-            }}
-          >
-            Retry
-          </button>
-        )}
-      </div>
+      <>
+        <WorkspaceContentMigrationNotice />
+        <div className="p-6 font-mono text-sm" role="status">
+          {setupCheckError ?? 'Checking your saved setup...'}
+          {setupCheckError && (
+            <button
+              className="ml-3 underline"
+              onClick={() => {
+                setSetupCheckError(null)
+                setSetupRetry((value) => value + 1)
+              }}
+            >
+              Retry
+            </button>
+          )}
+        </div>
+      </>
     )
 
-  if (!onboarded) return <Onboarding onComplete={() => setOnboarded(true)} />
+  if (!onboarded)
+    return (
+      <>
+        <WorkspaceContentMigrationNotice />
+        <Onboarding onComplete={() => setOnboarded(true)} />
+      </>
+    )
 
   return (
-    <RendererEntitlementProvider>
-      <PermissionGate>
-        <NotificationProvider>
-          <ToastProvider>
-            <ReprocessingProvider>
-              <AppContent />
-            </ReprocessingProvider>
-          </ToastProvider>
-        </NotificationProvider>
-      </PermissionGate>
-    </RendererEntitlementProvider>
+    <>
+      <WorkspaceContentMigrationNotice />
+      <RendererEntitlementProvider>
+        <PermissionGate>
+          <NotificationProvider>
+            <ToastProvider>
+              <ReprocessingProvider>
+                <AppContent />
+              </ReprocessingProvider>
+            </ToastProvider>
+          </NotificationProvider>
+        </PermissionGate>
+      </RendererEntitlementProvider>
+    </>
   )
 }
 

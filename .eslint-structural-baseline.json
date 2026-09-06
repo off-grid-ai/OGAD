@@ -535,13 +535,13 @@
     },
     "src/renderer/src/App.tsx": {
       "max-lines-per-function": [
-        1155
+        1154
       ],
       "complexity": [
-        47
+        45
       ],
       "max-lines": [
-        1502
+        1497
       ]
     },
     "src/renderer/src/bootstrap/loadProFeaturesRenderer.ts": {
