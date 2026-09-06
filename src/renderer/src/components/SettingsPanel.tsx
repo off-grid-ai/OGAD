@@ -22,6 +22,7 @@ import {
   recommendedContextWindow
 } from '@renderer/lib/ctx-options'
 import { formatContextWindow } from '@renderer/lib/model-summary'
+import { modelControlClient } from '@renderer/lib/model-control-client'
 import {
   invalidateDisplaySettings,
   invalidateLlmSettings

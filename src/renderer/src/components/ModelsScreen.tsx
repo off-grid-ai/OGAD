@@ -52,6 +52,7 @@ import {
 } from '@renderer/lib/internal-tab-route'
 import { MODEL_FILE_EXTENSION } from '@offgrid/application'
 import {
+  imageModeLabel,
   modelDetailIdentity,
   modelDetailState,
   modelTotalBytes,
@@ -1189,7 +1190,7 @@ export function ModelsScreen({
                       key={mode}
                       className="rounded-sm border border-green-500/40 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-green-500"
                     >
-                      {MODE_LABELS[mode] ?? mode}
+                      {imageModeLabel(mode)}
                     </span>
                   ))}
                 </div>

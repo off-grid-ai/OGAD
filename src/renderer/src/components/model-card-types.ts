@@ -52,6 +52,17 @@ export function formatModelSize(bytes: number): string {
   return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`
 }
 
+const IMAGE_MODE_LABELS: Record<string, string> = {
+  txt2img: 'Text→Image',
+  img2img: 'Image→Image'
+}
+
+/** How an image model's mode reads to a person. Unknown modes show their raw id rather than
+ *  disappearing, so a new backend mode is still visible in the catalog. */
+export function imageModeLabel(mode: string): string {
+  return IMAGE_MODE_LABELS[mode] ?? mode
+}
+
 export function modelTotalBytes(model: { artifacts: readonly { sizeBytes?: number }[] }): number {
   return model.artifacts.reduce((sum, artifact) => sum + (artifact.sizeBytes ?? 0), 0)
 }
@@ -89,13 +100,24 @@ export function modelDetailIdentity(model: ModelEntry | null): ModelDetailIdenti
   }
 }
 
-export interface ModelDetailState {
+/** One rule for "this download is still in flight": actively moving, or paused and resumable.
+ *  The card and the detail panel must agree, so they both read it from here. */
+export function isDownloadInFlight(progress: DownloadCardProgress | undefined): boolean {
+  return Boolean(
+    progress?.status && (isActiveDownloadStatus(progress.status) || progress.status === 'paused')
+  )
+}
+
+/** A download can only be in flight if there is progress behind it. Saying that in the type lets
+ *  the detail panel narrow on `downloading` instead of re-checking `progress` at every use. */
+export type ModelDetailState = {
   installed: boolean
   active: boolean
-  progress: DownloadCardProgress | undefined
-  downloading: boolean
   comingSoon: boolean
-}
+} & (
+  | { downloading: true; progress: DownloadCardProgress }
+  | { downloading: false; progress: DownloadCardProgress | undefined }
+)
 
 export function modelDetailState(input: {
   model: ModelEntry | null
@@ -113,15 +135,14 @@ export function modelDetailState(input: {
     }
   }
   const progress = input.progress[input.model.id]
-  return {
+  const identity = {
     installed: input.installed.includes(input.model.id),
     active: input.activeIds.has(input.model.id),
-    progress,
-    downloading: Boolean(
-      progress?.status && (isActiveDownloadStatus(progress.status) || progress.status === 'paused')
-    ),
     comingSoon: input.model.availability === 'coming_soon'
   }
+  return isDownloadInFlight(progress) && progress
+    ? { ...identity, downloading: true, progress }
+    : { ...identity, downloading: false, progress }
 }
 
 export function downloadFailureText(progress: DownloadCardProgress): string {

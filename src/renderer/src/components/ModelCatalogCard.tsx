@@ -10,7 +10,6 @@ import {
 } from '@tabler/icons-react'
 import {
   catalogTagTone,
-  isActiveDownloadStatus,
   visibleCatalogTags,
   type CatalogTagTone,
   type FitTier
@@ -21,6 +20,7 @@ import { downloadProgressSummary } from '@renderer/lib/download-progress'
 import { supportsModelSettings } from '@renderer/lib/model-settings-panel'
 import {
   downloadFailureText,
+  isDownloadInFlight,
   formatModelReleaseDate,
   formatModelSize,
   modelTotalBytes,
@@ -270,12 +270,6 @@ function InstalledActions(props: CardActionProps): React.JSX.Element | null {
   )
 }
 
-function downloadActive(progress: DownloadCardProgress | undefined): boolean {
-  return Boolean(
-    progress?.status && (isActiveDownloadStatus(progress.status) || progress.status === 'paused')
-  )
-}
-
 function VisionSupport({
   model,
   visible,
@@ -309,7 +303,7 @@ function VisionSupport({
   )
 }
 
-export interface ModelCatalogCardProps extends CardActionProps {
+export interface ModelCatalogCardProps extends Omit<CardActionProps, 'downloading'> {
   isHf?: boolean
   recommendedImageId: string | null
   visionStatus: { supportsVision: boolean; projectorInstalled: boolean } | undefined
@@ -356,7 +350,7 @@ function catalogPresentation(props: ModelCatalogCardProps): {
 
 export function ModelCatalogCard(props: ModelCatalogCardProps): React.JSX.Element {
   const { model } = props
-  const downloading = downloadActive(props.progress)
+  const downloading = isDownloadInFlight(props.progress)
   const projector = projectorProjection(props)
   const meta = modelMetadata(model)
   const { tier, recommended } = catalogPresentation(props)
