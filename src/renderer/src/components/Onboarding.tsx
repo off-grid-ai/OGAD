@@ -7,30 +7,7 @@ import { cn } from '@renderer/lib/utils'
 import { deviceNoun, shortcutLabel } from '@renderer/lib/device'
 import { useDictationShortcut } from '@renderer/lib/use-dictation-shortcut'
 import logo from '@/assets/logo.png'
-import {
-  ArrowRight,
-  Check,
-  ChatCircle,
-  Eye,
-  Image as ImageIcon,
-  Microphone,
-  SpeakerHigh,
-  FolderOpen,
-  CalendarBlank,
-  CheckSquare,
-  Rewind,
-  MagnifyingGlass,
-  Graph,
-  ShieldCheck,
-  Waveform,
-  ChatsCircle,
-  ClipboardText,
-  Devices,
-  Files,
-  Package,
-  Browser,
-  CursorClick
-} from '@phosphor-icons/react'
+import * as Phosphor from '@phosphor-icons/react'
 
 // Word-by-word blur-in, matching the brand's terminal feel.
 function TextGenerate({
@@ -87,55 +64,55 @@ function restoredStep(): number {
 }
 
 const ORBIT = [
-  { icon: ChatCircle, label: 'Chat' },
-  { icon: Eye, label: 'Vision' },
-  { icon: ImageIcon, label: 'Image' },
-  { icon: Microphone, label: 'Voice' },
-  { icon: SpeakerHigh, label: 'Speech' },
-  { icon: Browser, label: 'Web Use' },
-  { icon: CursorClick, label: 'Computer Use' },
-  { icon: FolderOpen, label: 'Projects' }
+  { icon: Phosphor.ChatCircle, label: 'Chat' },
+  { icon: Phosphor.Eye, label: 'Vision' },
+  { icon: Phosphor.Image, label: 'Image' },
+  { icon: Phosphor.Microphone, label: 'Voice' },
+  { icon: Phosphor.SpeakerHigh, label: 'Speech' },
+  { icon: Phosphor.Browser, label: 'Web Use' },
+  { icon: Phosphor.CursorClick, label: 'Computer Use' },
+  { icon: Phosphor.FolderOpen, label: 'Projects' }
 ]
 
 // The Pro layer — every capability described by what it does, on-device.
 const PRO_GRID = [
   {
-    icon: Rewind,
+    icon: Phosphor.Rewind,
     label: 'Replay',
     line: 'Rewinds your screen history, so the doc or number you saw last week is a scrub away, not a hunt.'
   },
   {
-    icon: Microphone,
+    icon: Phosphor.Microphone,
     label: 'Meetings',
     line: 'Records and transcribes your calls on-device, so you walk out with the decisions and to-dos already written.'
   },
   {
-    icon: CheckSquare,
+    icon: Phosphor.CheckSquare,
     label: 'Actions',
     line: 'Gets browser and desktop work done from chat with Web Use and Computer Use, while you can pause or take control.'
   },
   {
-    icon: MagnifyingGlass,
+    icon: Phosphor.MagnifyingGlass,
     label: 'Memory',
     line: 'One search across everything you have seen, said, and saved, so you never lose a thing twice.'
   },
   {
-    icon: Graph,
+    icon: Phosphor.Graph,
     label: 'Entities',
     line: 'Builds a record of every person and project on its own, so you walk into any call knowing where you left off.'
   },
   {
-    icon: CalendarBlank,
+    icon: Phosphor.CalendarBlank,
     label: 'Day',
     line: 'Lays out your day from your work and the calendars you connect, so you start oriented instead of scrambling.'
   },
   {
-    icon: ShieldCheck,
+    icon: Phosphor.ShieldCheck,
     label: 'Vault',
     line: `Encrypts passwords, keys, and secret files with a key that never leaves this ${deviceNoun()}, so they stay yours alone.`
   },
   {
-    icon: Waveform,
+    icon: Phosphor.Waveform,
     label: 'Voice',
     line: (accelerator: string | null) =>
       accelerator
@@ -146,41 +123,46 @@ const PRO_GRID = [
 
 const SYNC_GRID = [
   {
-    icon: ChatsCircle,
+    icon: Phosphor.ChatsCircle,
     label: 'Workspace',
     line: 'Chats, projects, messages, tool results, and knowledge stay current.'
   },
   {
-    icon: ClipboardText,
+    icon: Phosphor.ClipboardText,
     label: 'Copied text',
     line: 'Copy on one device. Paste from another.'
   },
   {
-    icon: Files,
+    icon: Phosphor.Files,
     label: 'Files',
     line: 'Screenshots, downloads, generated media, and attachments move directly.'
   },
   {
-    icon: Package,
+    icon: Phosphor.Package,
     label: 'Models',
     line: 'See and switch the active Chat, Image, Transcription, Voice, and Computer Use model on a named Desktop.'
   }
 ]
+
+function advanceOnboarding(currentStep: number, onComplete: () => void): number | null {
+  if (currentStep < steps.length - 1) {
+    const nextStep = currentStep + 1
+    localStorage.setItem(ONBOARDING_STEP_KEY, String(nextStep))
+    return nextStep
+  }
+  localStorage.removeItem(ONBOARDING_STEP_KEY)
+  localStorage.setItem('onboarding_completed', 'true')
+  onComplete()
+  return null
+}
 
 export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
   const dictationShortcut = useDictationShortcut()
   const [currentStep, setCurrentStep] = useState(restoredStep)
 
   const handleNext = (): void => {
-    if (currentStep < steps.length - 1) {
-      const nextStep = currentStep + 1
-      localStorage.setItem(ONBOARDING_STEP_KEY, String(nextStep))
-      setCurrentStep(nextStep)
-    } else {
-      localStorage.removeItem(ONBOARDING_STEP_KEY)
-      localStorage.setItem('onboarding_completed', 'true')
-      onComplete()
-    }
+    const nextStep = advanceOnboarding(currentStep, onComplete)
+    if (nextStep !== null) setCurrentStep(nextStep)
   }
 
   return (
@@ -379,7 +361,7 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
             <div className="relative z-10 mx-auto grid w-full max-w-6xl grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(420px,0.95fr)] lg:items-center">
               <div>
                 <div className="mb-4 flex items-center gap-2 text-[11px] uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
-                  <Devices className="h-4 w-4" weight="regular" />
+                  <Phosphor.Devices className="h-4 w-4" weight="regular" />
                   Your private mesh
                 </div>
                 <TextGenerate
@@ -513,9 +495,9 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
             {currentStep === steps.length - 1 ? 'Start using Off Grid AI' : 'Continue'}
           </span>
           {currentStep === steps.length - 1 ? (
-            <Check className="h-4 w-4" weight="bold" />
+            <Phosphor.Check className="h-4 w-4" weight="bold" />
           ) : (
-            <ArrowRight
+            <Phosphor.ArrowRight
               className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
               weight="bold"
             />
