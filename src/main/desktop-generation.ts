@@ -13,8 +13,11 @@ import type {
   ModelModality,
   ReasoningEffort
 } from '@offgrid/models'
-import { nativeToolPlannerUnavailableMessage } from '@offgrid/models'
-import { llm } from './llm'
+import {
+  isReasoningEffort,
+  nativeToolPlannerUnavailableMessage,
+  prepareSingleShotChatRequest
+} from '@offgrid/models'
 import { readImages } from './llm/read-images'
 import { desktopToolExecutor, type DesktopToolExecutionSession } from './desktop-tool-executor'
 import {
@@ -47,6 +50,11 @@ export interface DesktopGenerationOptions {
   identity?: GenerationRequest['identity']
   events?: GenerationEvents
   toolExecution?: DesktopToolExecutionSession
+  /**
+   * A system prompt already prepared by the canonical `@offgrid/models` chat-context owner.
+   * Desktop does not compose one; when omitted the stored user setting is used as-is.
+   */
+  systemPrompt?: string
 }
 
 function responseFormat(value: unknown): GenerationResponseFormat | undefined {
@@ -102,24 +110,28 @@ function toolChoice(value: unknown): GenerationToolChoice | undefined {
     : undefined
 }
 
-export function promptMessages(prompt: string, images: string[] = []): GenerationMessage[] {
+/**
+ * Wraps an ALREADY-PREPARED prompt (and an already-prepared system prompt) as a generation
+ * request. It applies no prompt rules of its own; `@offgrid/models` owns prompt composition.
+ */
+export function promptMessages(
+  prompt: string,
+  images: string[] = [],
+  preparedSystemPrompt: string = committedSystemPrompt()
+): GenerationMessage[] {
   const decoded = readImages(images)
-  const messages: GenerationMessage[] = [
-    {
-      role: 'user',
-      content: [
-        { type: 'text', text: prompt },
-        ...decoded.map((image) => ({
-          type: 'image' as const,
-          mimeType: image.mime,
-          data: image.base64
-        }))
-      ]
-    }
-  ]
-  const systemPrompt = llm.getSettings().systemPrompt?.trim()
-  if (systemPrompt) messages.unshift({ role: 'system', content: systemPrompt })
-  return messages
+  const systemPrompt = preparedSystemPrompt.trim()
+  const { messages } = prepareSingleShotChatRequest({
+    systemPrompt,
+    message: prompt,
+    images: decoded.map((image) => ({ data: image.base64, mimeType: image.mime }))
+  })
+  return systemPrompt ? messages : messages.slice(1)
+}
+
+function committedSystemPrompt(): string {
+  const value = desktopModels.snapshot().settings.systemPrompt
+  return typeof value === 'string' ? value : ''
 }
 
 function throwDesktopGenerationError(error: unknown): never {
@@ -139,55 +151,79 @@ function throwDesktopGenerationError(error: unknown): never {
   throw error
 }
 
-export async function generateDesktopMessages(
+function generationReasoningPreferences(settings: {
+  reasoningBudget?: unknown
+  reasoningEffort?: unknown
+}): { budget?: number; effort?: ReasoningEffort } {
+  const budget =
+    typeof settings.reasoningBudget === 'number' &&
+    Number.isFinite(settings.reasoningBudget) &&
+    settings.reasoningBudget > 0
+      ? settings.reasoningBudget
+      : undefined
+  return {
+    budget,
+    effort: isReasoningEffort(settings.reasoningEffort) ? settings.reasoningEffort : undefined
+  }
+}
+
+function createDesktopGenerationRequest(
   messages: GenerationMessage[],
-  options: DesktopGenerationOptions = {}
-): Promise<GenerationResult> {
-  await refreshDesktopModels()
-  const settings = llm.getSettings()
+  options: DesktopGenerationOptions,
+  preferences: { budget?: number; effort?: ReasoningEffort }
+): { request: GenerationRequest; turnId: string } {
   const needsVision = messages.some(
     (message) =>
       Array.isArray(message.content) && message.content.some((part) => part.type === 'image')
   )
   const turnId = options.identity?.turnId ?? `desktop:${randomUUID()}`
-  const request: GenerationRequest = {
-    profile: options.profile,
-    operation: options.operation ?? { type: 'text' },
-    messages,
-    identity: options.identity ?? { conversationId: turnId, turnId },
-    responseFormat: responseFormat(options.responseFormat),
-    tools: toolDefinitions(options.tools),
-    toolChoice: toolChoice(options.toolChoice),
-    toolHandling: options.toolHandling,
-    sampling: {
-      temperature: options.temperature,
-      topP: options.topP
-    },
-    maxTokens: options.maxTokens,
-    maxToolRounds: options.maxToolRounds,
-    maxToolCalls: options.maxToolCalls,
-    timeoutMs: options.timeoutMs,
-    signal: options.signal,
-    ...(options.thinking === undefined
-      ? {}
-      : {
-          reasoning: {
-            enabled: options.thinking,
-            ...(settings.reasoningBudget && settings.reasoningBudget > 0
-              ? { budgetTokens: settings.reasoningBudget }
-              : {}),
-            ...((options.reasoningEffort ?? settings.reasoningEffort)
-              ? { effort: options.reasoningEffort ?? settings.reasoningEffort }
-              : {})
-          }
-        }),
-    requiredCapabilities: {
-      ...(needsVision ? { vision: true } : {}),
-      ...(options.thinking === undefined ? {} : { thinking: options.thinking })
-    },
-    // Fallback and partial-output handling are profile facts; shared fills them at the entry.
-    routeId: options.routeId
+  return {
+    turnId,
+    request: {
+      profile: options.profile,
+      operation: options.operation ?? { type: 'text' },
+      messages,
+      identity: options.identity ?? { conversationId: turnId, turnId },
+      responseFormat: responseFormat(options.responseFormat),
+      tools: toolDefinitions(options.tools),
+      toolChoice: toolChoice(options.toolChoice),
+      toolHandling: options.toolHandling,
+      sampling: { temperature: options.temperature, topP: options.topP },
+      maxTokens: options.maxTokens,
+      maxToolRounds: options.maxToolRounds,
+      maxToolCalls: options.maxToolCalls,
+      timeoutMs: options.timeoutMs,
+      signal: options.signal,
+      ...(options.thinking === undefined
+        ? {}
+        : {
+            reasoning: {
+              enabled: options.thinking,
+              ...(preferences.budget ? { budgetTokens: preferences.budget } : {}),
+              ...((options.reasoningEffort ?? preferences.effort)
+                ? { effort: options.reasoningEffort ?? preferences.effort }
+                : {})
+            }
+          }),
+      requiredCapabilities: {
+        ...(needsVision ? { vision: true } : {}),
+        ...(options.thinking === undefined ? {} : { thinking: options.thinking })
+      },
+      routeId: options.routeId
+    }
   }
+}
+
+export async function generateDesktopMessages(
+  messages: GenerationMessage[],
+  options: DesktopGenerationOptions = {}
+): Promise<GenerationResult> {
+  await refreshDesktopModels()
+  const { request, turnId } = createDesktopGenerationRequest(
+    messages,
+    options,
+    generationReasoningPreferences(desktopModels.snapshot().settings)
+  )
   const unregister = options.toolExecution
     ? desktopToolExecutor.register(turnId, options.toolExecution)
     : undefined
@@ -204,7 +240,10 @@ export function generateDesktopText(
   prompt: string,
   options: DesktopGenerationOptions = {}
 ): Promise<GenerationResult> {
-  return generateDesktopMessages(promptMessages(prompt, options.images), options)
+  return generateDesktopMessages(
+    promptMessages(prompt, options.images, options.systemPrompt),
+    options
+  )
 }
 
 export async function generateDesktopOperation(
