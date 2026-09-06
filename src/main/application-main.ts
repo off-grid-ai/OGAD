@@ -1,6 +1,5 @@
 import { app, BrowserWindow, protocol, session, desktopCapturer, screen } from 'electron'
 import { tmpdir } from 'os'
-import type { ApplicationStartResult } from '@offgrid/application'
 
 import { restoreCanonicalProductName } from './bootstrap/user-data'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -16,11 +15,7 @@ import { startMediaServer, stopMediaServer, mediaUrlFor } from './media-server'
 import { capturePathFromUrl, serveCaptureFile } from './ogcapture-serve'
 import { serveArtifactPreview } from './artifact-preview'
 import { ipcMain } from 'electron'
-import {
-  loadProEntitlementProvider,
-  loadProFeaturesMain,
-  registerProPersonalStoresBeforeApplication
-} from './bootstrap/loadProFeaturesMain'
+import { loadProEntitlementProvider, loadProFeaturesMain } from './bootstrap/loadProFeaturesMain'
 import { resolveWindowPresentation } from './bootstrap/window-presentation'
 import { mayUseIsolatedEvidenceInstance } from './bootstrap/isolated-evidence-instance'
 
@@ -103,53 +98,6 @@ import {
   registerCoreShutdownOwners
 } from './shutdown'
 
-function requireRunningApplication(result: ApplicationStartResult): void {
-  if (result.status === 'running') return
-  throw new Error(`Application start ${result.status} (${result.reason}): ${result.message}`)
-}
-
-async function startServerOnlyApplication(): Promise<boolean> {
-  const requested =
-    process.argv.includes('--server-only') || process.env.OFFGRID_SERVER_ONLY === '1'
-  if (!requested) return false
-
-  writeDiagnosticLog('gateway', 'server-only.started', {
-    port: 7878,
-    userInterface: false,
-    capture: false
-  })
-  if (process.platform === 'darwin' && app.dock) {
-    try {
-      app.dock.hide()
-    } catch {
-      /* ignore */
-    }
-  }
-  // Headless mode uses the same startup-stage contract as the windowed sequence. A late listener
-  // remains owned by the shutdown registry, and the composition root memoises its one start.
-  void runIndependentStartupStages([
-    {
-      name: 'models.gateway.start',
-      deadlineMs: 30_000,
-      domain: 'models',
-      lateEffectIsRecoverable: true,
-      run: () => startModelServer()
-    },
-    {
-      name: 'application.start',
-      deadlineMs: 20_000,
-      required: true,
-      lateEffectIsRecoverable: true,
-      run: () =>
-        import('./composition/application').then(({ startDesktopApplication }) =>
-          startDesktopApplication()
-        )
-    }
-  ])
-  void runTextModelPrepareStage()
-  return true
-}
-
 installDiagnosticConsoleCapture()
 writeDiagnosticLog('app', 'bootstrap.started', {
   version: app.getVersion(),
@@ -204,18 +152,55 @@ if (!windowPresentation.showWindow) {
 
 const applicationReady = app.whenReady().then(async () => {
   restoreCanonicalProductName()
-  // Passive privacy registration must precede the application's full-delete recovery. It starts no
-  // Pro writer; the capture admission guard remains owned by normal Pro activation.
-  await registerProPersonalStoresBeforeApplication()
 
   // Server-only (headless) mode: boot just the multimodal gateway + LLM runtime,
   // no window / tray / capture / CRM loops. Lets the gateway be deployed on its
   // own — `<app-binary> --server-only` (or OFFGRID_SERVER_ONLY=1) — while still
   // reusing the Electron-built native binaries. First step toward a standalone
   // gateway CLI (see docs/GATEWAY_SPINE.md "externalize later").
-  if (await startServerOnlyApplication()) return
+  const serverOnly =
+    process.argv.includes('--server-only') || process.env.OFFGRID_SERVER_ONLY === '1'
+  if (serverOnly) {
+    console.log('[gateway] server-only mode — gateway on :7878, no UI/capture')
+    if (process.platform === 'darwin' && app.dock) {
+      try {
+        app.dock.hide()
+      } catch {
+        /* ignore */
+      }
+    }
+    // Headless: no window exists to open early, so there is nothing to order around. It runs
+    // through the SAME stage machinery as the windowed sequence, so its deadlines, its typed
+    // results and its degraded reports are the ones every other startup step gets - a second mode
+    // is not a second startup contract.
+    void runIndependentStartupStages([
+      {
+        name: 'models.gateway.start',
+        deadlineMs: 30_000,
+        domain: 'models',
+        // A late listener is still owned by the shutdown registry (`stopGateway`), so it cannot
+        // outlive the process untracked.
+        lateEffectIsRecoverable: true,
+        run: () => startModelServer()
+      },
+      {
+        // One start, whatever the deadline does: the composition root memoises the start promise,
+        // so a late completion resolves THAT one instead of starting a second runtime.
+        name: 'application.start',
+        deadlineMs: 20_000,
+        required: true,
+        lateEffectIsRecoverable: true,
+        run: () =>
+          import('./composition/application').then(({ startDesktopApplication }) =>
+            startDesktopApplication()
+          )
+      }
+    ])
+    void runTextModelPrepareStage()
+    return // skip window, tray, IPC, capture, connectors — gateway only
+  }
 
-  writeDiagnosticLog('app', 'services.initializing')
+  console.log('APP READY: Initializing Services...')
 
   // One-time, idempotent cleanup of the old "My Memories" AI-chat imports.
   try {
@@ -438,6 +423,7 @@ const applicationReady = app.whenReady().then(async () => {
   }
   setupMcpIpc() // basic MCP connectors (management + chat tool extension)
   registerNativeActionTools(registerToolExtension) // the assistant's tools (macOS full set; Windows Outlook subset)
+  setupDesktopBackupIPC()
   ipcMain.handle('media:url', (_e, absPath: string) => mediaUrlFor(absPath))
   // Nothing below depends on anything else below it: these are separate domains registering their
   // own handlers, so their import and setup latency is paid once, not eleven times over.
@@ -463,10 +449,7 @@ const applicationReady = app.whenReady().then(async () => {
       deadlineMs: 10_000,
       domain: 'rag',
       run: ({ commit }) =>
-        import('./rag-ipc').then(({ setupRagIPC }) => {
-          const shutdown = commit('rag.ipc.handlers', setupRagIPC)
-          if (shutdown) applicationShutdown.register({ name: 'rag:ipc', shutdown })
-        })
+        import('./rag-ipc').then(({ setupRagIPC }) => commit('rag.ipc.handlers', setupRagIPC))
     },
     {
       name: 'actions.ipc', // Approval UX v2: inline gate cards + outcome/undo feed
@@ -538,16 +521,10 @@ const applicationReady = app.whenReady().then(async () => {
       // ready either: the phase is read from the application's own status, and a stage settling
       // after its deadline is reported `late`, which is degradation, not readiness.
       lateEffectIsRecoverable: true,
-      run: async () => {
-        if (!applicationRoot.ok) throw new Error('The application root could not be constructed.')
-        const result = await applicationRoot.value.startDesktopApplication()
-        requireRunningApplication(result)
-        applicationShutdown.register({
-          name: 'backup:ipc',
-          shutdown: setupDesktopBackupIPC(applicationRoot.value.desktopApplication)
-        })
-        return result
-      }
+      run: () =>
+        applicationRoot.ok
+          ? applicationRoot.value.startDesktopApplication()
+          : Promise.reject(new Error('The application root could not be constructed.'))
     },
     {
       // Repair legacy catalog classifications before any runtime reads the active chat model.
@@ -617,8 +594,7 @@ const applicationReady = app.whenReady().then(async () => {
         // reconciliation can request discovery, so the shared application must finish its
         // memoised start first. The shell is already open; this only orders the two background
         // stages and cannot construct or start a second application.
-        const startResult = await applicationRoot.value.startDesktopApplication()
-        requireRunningApplication(startResult)
+        await applicationRoot.value.startDesktopApplication()
         await loadProFeaturesMain()
       }
     },
