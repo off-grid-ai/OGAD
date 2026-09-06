@@ -61,7 +61,7 @@ import { ElectronPlaywrightRelay } from './electron-playwright-relay'
 import { PlaywrightMcpSession } from './playwright-mcp-session'
 import { runBrowserPlaywrightTask } from './browser-playwright-task'
 import { automationTaskReadStatus } from '@offgrid/automation'
-import { explicitBrowserAddress } from './browser-address'
+import { explicitBrowserAddress, normalizeBrowserAddress } from './browser-address'
 
 export { explicitBrowserAddress, normalizeBrowserAddress } from './browser-address'
 

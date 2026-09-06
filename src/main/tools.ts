@@ -60,6 +60,15 @@ import {
 } from './tools/platform-ports'
 import { toolRoutingService } from './composition/tools'
 import type { GenerationToolCall, GenerationToolDefinition } from '@offgrid/models'
+import type { ToolActivity, ToolCallStatus, ToolContext, ToolResult } from './tool-types'
+
+export type {
+  ToolActivity,
+  ToolCallStatus,
+  ToolContext,
+  ToolConversationTurn,
+  ToolResult
+} from './tool-types'
 
 const sharedToolDefinition = (name: string): ReturnType<typeof catalogEntryToDefinition> =>
   catalogEntryToDefinition(findToolCatalogEntry(name)!)
@@ -86,46 +95,6 @@ export function setToolEnabled(name: string, enabled: boolean): void {
 // Per-turn context a tool may need beyond its args. Injected by the loop so a tool
 // owns its full behavior instead of the loop special-casing it (e.g. search_memory
 // excludes the current conversation so it can't cite itself).
-export interface ToolContext {
-  conversationId?: string
-  /** Authenticated Mobile launch identity. Only the MCP admission boundary sets it. */
-  taskLaunch?: { launchId: string; requestingDeviceId: string }
-  /** The exact user message. Approval-gated tools use this instead of trusting model-made args. */
-  userQuery?: string
-  /** Bounded prior user/assistant turns. Intake tools combine these facts with
-   *  the current query instead of treating a follow-up as a new task. */
-  history?: ToolConversationTurn[]
-  onActivity?: (activity: ToolActivity) => void
-  /** The active project (if the chat is in one), so search_knowledge_base can query
-   *  that project's uploaded docs + captured memory. */
-  projectId?: string
-}
-
-export interface ToolConversationTurn {
-  role: 'user' | 'assistant'
-  content: string
-}
-
-export type ToolCallStatus = 'completed' | 'failed' | 'pending'
-
-export type ToolActivity = { kind: 'planning'; label: 'Planning next action…' }
-
-// A tool's structured result. Most tools just return text (a bare string, which the
-// loop normalizes to { text }); a tool may ALSO emit side channels — `sources`
-// (interactive citations, from search_memory) and `imageRequest` (the deferred
-// image prompt, from generate_image) — so the loop dispatches every tool uniformly
-// and no longer branches on the tool's name.
-export interface ToolResult {
-  text: string
-  /** Structured execution state. `pending` means the tool needs user input. */
-  status?: ToolCallStatus
-  /** When true, `text` is the final user-facing answer and no model may rewrite it. */
-  authoritative?: boolean
-  sources?: UnifiedSource[]
-  imageRequest?: { prompt: string }
-  imageRequests?: ProposalDeferredImageRequest[]
-}
-
 type ToolDef = {
   name: string
   description: string
@@ -208,7 +177,9 @@ const TOOLS: ToolDef[] = [
       const q = String(a.query ?? '').trim()
       if (!q) return 'Error: empty query.'
       try {
-        const res = await fetch(duckDuckGoSearchUrl(q), { headers: { 'User-Agent': 'Mozilla/5.0' } })
+        const res = await fetch(duckDuckGoSearchUrl(q), {
+          headers: { 'User-Agent': 'Mozilla/5.0' }
+        })
         return formatWebSearchResults(parseDuckDuckGoResults(await res.text()), q)
       } catch (e) {
         return 'Error: search failed — ' + (e as Error).message
@@ -236,7 +207,8 @@ const TOOLS: ToolDef[] = [
           }
         })
         const results = parseBraveResults(await res.text())
-        if (!results.length) return 'No results found (Brave markup may have changed — try web_search).'
+        if (!results.length)
+          return 'No results found (Brave markup may have changed — try web_search).'
         return formatWebSearchResults(results, q)
       } catch (e) {
         return 'Error: brave search failed — ' + (e as Error).message
