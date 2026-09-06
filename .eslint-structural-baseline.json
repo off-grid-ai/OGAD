@@ -621,24 +621,15 @@
     },
     "src/renderer/src/components/MemoryChat.tsx": {
       "max-lines": [
-        7140
+        5184
       ],
       "complexity": [
-        164,
         163,
-        27,
-        21,
-        17,
-        16
+        161
       ],
       "max-lines-per-function": [
-        4652,
-        826
-      ],
-      "prefer-template": [
-        1,
-        1,
-        1
+        4630,
+        816
       ]
     },
     "src/renderer/src/components/ModelsScreen.tsx": {

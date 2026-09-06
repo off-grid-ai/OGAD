@@ -1,4 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  createElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction
+} from 'react'
 import { buildSendHistory } from '@renderer/lib/chat-history'
 import { waitingLabel } from '@renderer/lib/chat-labels'
 import { writeClipboardWithFallback } from '@renderer/lib/clipboard-write'
@@ -6,7 +16,6 @@ import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 import { isAgenticTurn } from '@renderer/lib/agentic-active'
 import { useActiveModelSummary } from '@renderer/hooks/useActiveModelSummary'
-import { admitThinkingRequest } from '@renderer/lib/model-summary'
 import { shouldFollowBottom } from '@renderer/lib/scroll-follow'
 import {
   failed as failedOutcome,
@@ -14,8 +23,15 @@ import {
   describeAttachment,
   isPromptEnhancementReasoningLabel,
   PROMPT_ENHANCEMENT_REASONING_LABEL,
-  groupWorkRuns
+  groupWorkRuns,
+  generationMessageText,
+  modelsFailureMessage,
+  speechFailureMessage,
+  workflowFailureMessage,
+  type ConversationRecord,
+  type MessageRecord
 } from '@offgrid/application'
+import { normalizeImageParameterStore } from '@offgrid/models'
 import {
   cleanImagePrompt,
   isCancellationError,
@@ -23,8 +39,7 @@ import {
   type ChatTurn,
   compactionNoticeText,
   fallbackNoticeText,
-  modelFileDisplayName,
-  type VoiceTurnMode
+  modelFileDisplayName
 } from '@offgrid/application'
 import { getSlot, SLOTS } from '@/bootstrap/slotRegistry'
 import { callHook } from '@/bootstrap/hookRegistry'
@@ -73,21 +88,19 @@ import { ConversationSearchList } from './ConversationSearchList'
 import { NewProjectNameField } from './NewProjectNameField'
 import { ImageLightbox } from './media/ImageLightbox'
 import { resolveImageParams, setOverride, type ImageParamStore } from '@renderer/lib/image-params'
-import {
-  subscribeActiveImageModel,
-  subscribeImageSettings
-} from '@renderer/lib/image-settings-store'
+import { subscribeActiveImageModel } from '@renderer/lib/active-image-model-events'
 import {
   DISPLAY_SETTINGS_INVALIDATED_EVENT,
   LLM_SETTINGS_INVALIDATED_EVENT
 } from '@renderer/lib/settings-invalidation'
-import {
-  DEFAULT_VOICE_PREFERENCES,
-  VOICE_PREFERENCES_CHANGED_EVENT,
-  readVoicePreferences,
-  type VoicePreferences
-} from '@renderer/lib/voice-preferences'
+import { DEFAULT_VOICE_PREFERENCES } from '@renderer/lib/voice-preferences'
+import { useSpeechProjection } from '@renderer/hooks/useSpeechProjection'
 import { buildAssistantContext, readPersistedChatSessionTurn } from '../lib/message-persistence'
+import {
+  executeWorkspaceContentCommand,
+  getWorkspaceContentSnapshot
+} from '@renderer/lib/workspace-content-client'
+import { useWorkspaceContentProjection } from '@renderer/hooks/useWorkspaceContentProjection'
 import { withGeneratedImageReference } from '../../../shared/generated-image-reference'
 import type { RagConversationContract, ResponseCutoffContract } from '../../../shared/ipc-contracts'
 import type {
@@ -97,14 +110,14 @@ import type {
   Conversation,
   ImageGenerationMetadata,
   ImageProgress,
-  ProjectLite,
   RagContext,
   StoredAttachment
 } from '@renderer/lib/chat-transcript-types'
 import {
   mapRagMessages,
   mergeDurableAndStreaming,
-  restoredChatSessionTurns
+  restoredChatSessionTurns,
+  type RawRagMessage
 } from '@renderer/lib/chat-transcript-projection'
 import { projectRecoveredChatTurns } from '@renderer/lib/chat-restart-projection'
 import {
@@ -166,10 +179,65 @@ const GENERATED_IMAGE_NOT_SAVED =
   'The image was created, but Chat could not save its message. It remains in Generated images.'
 const GENERATED_IMAGE_NOT_LINKED =
   'The image was saved in Chat, but it could not be linked for device sync.'
-const CHAT_ANSWER_NOT_SAVED =
-  'The answer is visible, but Chat could not save it. Copy it before you leave this chat.'
 const CHAT_ARTIFACT_NOT_SAVED =
   'The answer is visible, but its artifact could not be added to the gallery.'
+const INITIAL_COMPOSER_IMAGE_STEPS = 10
+
+function workspaceConversation(
+  record: ConversationRecord,
+  messages: readonly MessageRecord[]
+): Conversation {
+  const transcript = messages.filter((message) => message.conversationId === record.id)
+  const last = transcript.at(-1)
+  return {
+    id: record.id,
+    title: record.title,
+    project_id: record.projectId,
+    created_at: record.createdAt,
+    updated_at: record.updatedAt,
+    message_count: transcript.length,
+    last_role: last?.portable.role,
+    last_content: last ? generationMessageText(last.portable) : null
+  }
+}
+
+function workspaceRawMessages(records: readonly MessageRecord[]): RawRagMessage[] {
+  return records.map((record) => {
+    const { origin_device_id, origin_device_name, ...localContext } = record.local ?? {}
+    const context = { ...localContext, ...(record.portable.context ?? {}) }
+    return {
+      id: record.id,
+      uuid: record.id,
+      role: record.portable.role,
+      content: generationMessageText(record.portable),
+      context: Object.keys(context).length ? context : undefined,
+      created_at: record.createdAt,
+      origin_device_id,
+      origin_device_name
+    }
+  })
+}
+
+async function appendWorkspaceErrorWhenNoTurn(input: {
+  conversationId: string
+  turnId?: string
+  content: string
+}): Promise<string | null> {
+  const snapshot = await getWorkspaceContentSnapshot()
+  if (input.turnId && snapshot.chatTurns.some((turn) => turn.id === input.turnId)) return null
+
+  const outcome = await executeWorkspaceContentCommand({
+    type: 'append_message',
+    conversationId: input.conversationId,
+    portable: { role: 'assistant', content: input.content }
+  })
+  if (!outcome.ok) throw new Error(outcome.failure.message)
+  const created = outcome.value.changes.find(
+    (change) => change.kind === 'put' && change.entity === 'message'
+  )
+  if (!created) throw new Error('Chat could not confirm that it saved the error message.')
+  return created.record.id
+}
 
 function completedImageMessage(
   content: string,
@@ -306,18 +374,26 @@ function textRecordingTooltip(phase: ChatVoicePhase, transcriptionLabel: string)
   return 'Record voice'
 }
 
-async function stopLiveWebUseForConversation(conversationId: string | null): Promise<void> {
+async function retireLiveUseForConversation(conversationId: string | null): Promise<void> {
   if (!conversationId || !window.api.tasks?.list || !window.api.vision?.control) return
+  const tasks = await window.api.tasks.list()
+  const live = new Set(['running', 'paused', 'waiting', 'reconnecting'])
+  const matching = tasks.filter(
+    (task) => task.journeyId === conversationId && live.has(task.status)
+  )
+  const stopped = await Promise.all(
+    matching.map((task) => window.api.vision!.control('stop', task.taskId))
+  )
+  if (stopped.some((value) => value !== true)) {
+    throw new Error('External computer activity did not confirm that it stopped.')
+  }
+}
+
+async function stopLiveUseForConversation(conversationId: string | null): Promise<void> {
   try {
-    const tasks = await window.api.tasks.list()
-    const live = new Set(['running', 'paused', 'waiting', 'reconnecting'])
-    const matching = tasks.filter(
-      (task) =>
-        task.kind === 'web_use' && task.journeyId === conversationId && live.has(task.status)
-    )
-    await Promise.all(matching.map((task) => window.api.vision!.control('stop', task.taskId)))
+    await retireLiveUseForConversation(conversationId)
   } catch (error) {
-    console.error('Failed to stop Web Use for this Chat:', error)
+    console.error('Failed to stop external use for this Chat:', error)
   }
 }
 
@@ -327,6 +403,153 @@ async function stopLiveTask(task: Pick<TaskSession, 'taskId' | 'kind'>): Promise
 
 function stopFailureMessage(kind: TaskSession['kind']): string {
   return `${kind === 'web_use' ? 'Web Use' : 'Computer Use'} could not be stopped on this device.`
+}
+
+interface IncomingFilesProjection {
+  isPro: boolean
+  files: IncomingSharedFile[]
+}
+
+function useIncomingSharedFiles(isPro: boolean): IncomingSharedFile[] {
+  const [projection, setProjection] = useState<IncomingFilesProjection>({ isPro, files: [] })
+  if (projection.isPro !== isPro) {
+    setProjection({ isPro, files: [] })
+  }
+
+  useEffect(() => {
+    if (!isPro) return
+    const off = callHook<() => void>(
+      SYNC_SUBSCRIBE_INCOMING_FILES_HOOK,
+      (files: IncomingSharedFile[]) => setProjection({ isPro, files })
+    )
+    return () => off?.()
+  }, [isPro])
+
+  return projection.files
+}
+
+interface ChatVisionProjection {
+  available: boolean
+  refresh: () => void
+}
+
+function useChatVisionProjection(
+  setWarning: Dispatch<SetStateAction<string | null>>
+): ChatVisionProjection {
+  const [available, setAvailable] = useState(false)
+  const refresh = useCallback((): void => {
+    void window.api
+      .chatVisionAvailable()
+      .then((nextAvailable) => {
+        const next = nextAvailable === true
+        setAvailable(next)
+        if (next) setWarning(null)
+      })
+      .catch((error) => {
+        console.error('[ModelControl] Chat vision capability projection failed.', error)
+        setAvailable(false)
+        setWarning(
+          'Chat could not verify image support. Image attachments stay off until model status is available.'
+        )
+      })
+  }, [setWarning])
+
+  useEffect(() => {
+    const refreshWhenVisible = (): void => {
+      if (document.visibilityState === 'visible') refresh()
+    }
+    refresh()
+    window.addEventListener(LLM_SETTINGS_INVALIDATED_EVENT, refresh)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      window.removeEventListener(LLM_SETTINGS_INVALIDATED_EVENT, refresh)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
+  }, [refresh])
+
+  return { available, refresh }
+}
+
+function proSlotAvailable(isPro: boolean, slot: string): boolean {
+  return isPro && Boolean(getSlot(slot))
+}
+
+function proTaskWorkspaceVisible(isOpen: boolean, isPro: boolean): boolean {
+  return isOpen && proSlotAvailable(isPro, SLOTS.taskWorkspace)
+}
+
+function conversationToggleLabel(willShow: boolean): string {
+  return willShow ? 'Show conversations' : 'Collapse conversation list'
+}
+
+function workspaceTransition(reduceMotion: boolean, dragging: boolean): string {
+  return reduceMotion || dragging ? 'none' : 'flex-grow 420ms cubic-bezier(0.22, 1, 0.36, 1)'
+}
+
+function composerImageParams(
+  model: string,
+  store: ImageParamStore
+): {
+  size: number
+  steps: number
+  cfgScale: number
+} {
+  return model
+    ? resolveImageParams(model, store)
+    : { size: 512, steps: INITIAL_COMPOSER_IMAGE_STEPS, cfgScale: 2 }
+}
+
+function renderProSlot(
+  isPro: boolean,
+  slot: string,
+  props: Record<string, unknown> = {}
+): ReactNode {
+  if (!isPro) return null
+  const Slot = getSlot(slot)
+  return Slot ? createElement(Slot, props) : null
+}
+
+function renderChatMessagesFooter(
+  isPro: boolean,
+  conversationId: string | null,
+  props: Record<string, unknown>
+): ReactNode {
+  return conversationId
+    ? renderProSlot(isPro, SLOTS.chatMessagesFooter, { conversationId, ...props })
+    : null
+}
+
+type ConversationCreationOutcome =
+  { ok: true; conversationId: string } | { ok: false; message: string }
+
+async function createWorkspaceConversation(
+  text: string,
+  projectId: string | null | undefined
+): Promise<ConversationCreationOutcome> {
+  const title = text.length > 50 ? `${text.slice(0, 47)}...` : text
+  try {
+    const outcome = await executeWorkspaceContentCommand({
+      type: 'create_conversation',
+      title,
+      ...(projectId === null ? {} : { projectId })
+    })
+    if (!outcome.ok) {
+      return { ok: false, message: `Your conversation was not created. ${outcome.failure.message}` }
+    }
+    const created = outcome.value.changes.find(
+      (change) => change.kind === 'put' && change.entity === 'conversation'
+    )
+    return created
+      ? { ok: true, conversationId: created.record.id }
+      : {
+          ok: false,
+          message: 'Your conversation was created, but its identity is unavailable. Try again.'
+        }
+  } catch (error) {
+    console.error('Failed to create conversation:', error)
+    const reason = error instanceof Error ? error.message : String(error)
+    return { ok: false, message: `Your conversation was not created. ${reason}` }
+  }
 }
 
 export function MemoryChat({
@@ -348,6 +571,7 @@ export function MemoryChat({
     desktopChatSessionRef.current = createDesktopChatSession()
   }
   const desktopChatSession = desktopChatSessionRef.current
+  const workspaceContent = useWorkspaceContentProjection()
   // The read side of the live turn, handed to the transcript below. Stable for the session's life.
   const liveTurns = desktopChatSession.liveTurns()
   const { isPro } = useRendererEntitlement()
@@ -386,7 +610,10 @@ export function MemoryChat({
     async (conversationId: string): Promise<ChatMessage[] | null> => {
       const nextVersion = (conversationMessageLoadVersionRef.current.get(conversationId) ?? 0) + 1
       conversationMessageLoadVersionRef.current.set(conversationId, nextVersion)
-      const rawMessages = await window.api.getRagMessages(conversationId)
+      const snapshot = await getWorkspaceContentSnapshot()
+      const rawMessages = workspaceRawMessages(
+        snapshot.messages.filter((message) => message.conversationId === conversationId)
+      )
       if (conversationMessageLoadVersionRef.current.get(conversationId) !== nextVersion) return null
       const recoveredTurns = await desktopChatSession.restoreConversation(
         conversationId,
@@ -414,8 +641,9 @@ export function MemoryChat({
   // Whether the active chat model can read images. Gate image attachment on this. The
   // main-owned model selection is read on mount and after an explicit invalidation;
   // opening Chat must not create a permanent IPC polling loop.
-  const [chatVision, setChatVision] = useState(false)
   const [attachWarn, setAttachWarn] = useState<string | null>(null)
+  const { available: chatVision, refresh: refreshChatVision } =
+    useChatVisionProjection(setAttachWarn)
   /**
    * Files a peer has announced for this chat whose bytes have not arrived.
    *
@@ -423,7 +651,7 @@ export function MemoryChat({
    * so writing it onto the turn would tell peers that already hold the file to wait for it. The main
    * process sends the whole set on every change, so this replaces rather than merges.
    */
-  const [incomingFiles, setIncomingFiles] = useState<IncomingSharedFile[]>([])
+  const incomingFiles = useIncomingSharedFiles(isPro)
   // Off unless asked for (Settings -> Model -> Generation details), matching mobile.
   const [showGenerationDetails, setShowGenerationDetails] = useState(false)
   useEffect(() => {
@@ -438,17 +666,6 @@ export function MemoryChat({
     window.addEventListener(DISPLAY_SETTINGS_INVALIDATED_EVENT, refresh)
     return () => window.removeEventListener(DISPLAY_SETTINGS_INVALIDATED_EVENT, refresh)
   }, [])
-  useEffect(() => {
-    if (!isPro) {
-      setIncomingFiles([])
-      return
-    }
-    const off = callHook<() => void>(
-      SYNC_SUBSCRIBE_INCOMING_FILES_HOOK,
-      (files: IncomingSharedFile[]) => setIncomingFiles(files)
-    )
-    return () => off?.()
-  }, [isPro])
   // Matched on the message's UUID, which is what `id` carries here (`String(m.uuid ?? m.id)`) and is
   // the only identity a peer can name — the autoincrement row id is local to one device.
   const incomingFilesFor = useCallback(
@@ -456,38 +673,23 @@ export function MemoryChat({
       messageUuid ? incomingFiles.filter((file) => file.messageId === messageUuid) : [],
     [incomingFiles]
   )
-  const refreshChatVision = useCallback((): void => {
-    void window.api
-      .chatVisionAvailable()
-      .then((available) => setChatVision(available === true))
-      .catch((error) => {
-        console.error('[ModelControl] Chat vision capability projection failed.', error)
-        setChatVision(false)
-        setAttachWarn(
-          'Chat could not verify image support. Image attachments stay off until model status is available.'
-        )
-      })
-  }, [])
-  useEffect(() => {
-    const refreshWhenVisible = (): void => {
-      if (document.visibilityState === 'visible') refreshChatVision()
-    }
-    refreshChatVision()
-    window.addEventListener(LLM_SETTINGS_INVALIDATED_EVENT, refreshChatVision)
-    document.addEventListener('visibilitychange', refreshWhenVisible)
-    return () => {
-      window.removeEventListener(LLM_SETTINGS_INVALIDATED_EVENT, refreshChatVision)
-      document.removeEventListener('visibilitychange', refreshWhenVisible)
-    }
-  }, [refreshChatVision])
-  useEffect(() => {
-    if (chatVision) setAttachWarn(null)
-  }, [chatVision]) // cleared once a vision model is active
   const [skills, setSkills] = useState<{ name: string; description: string }[]>([])
   const [askSel, setAskSel] = useState<Record<string, string[]>>({})
   const [loading, setLoading] = useState(false)
-  const [conversations, setConversations] = useState<Conversation[]>([])
+  const conversations = useMemo(
+    () =>
+      (workspaceContent?.conversations ?? []).map((conversation) =>
+        workspaceConversation(conversation, workspaceContent?.messages ?? [])
+      ),
+    [workspaceContent]
+  )
+  const canonicalConversationIdsRef = useRef<ReadonlySet<string>>(new Set())
+  canonicalConversationIdsRef.current = new Set(
+    conversations.map((conversation) => conversation.id)
+  )
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
+  const activeConversationIdRef = useRef<string | null>(null)
+  activeConversationIdRef.current = activeConversationId
   useEffect(() => {
     onActiveConversationChange?.(activeConversationId)
     // Publish to the module store so out-of-tree handlers (Chat link clicks) can
@@ -518,8 +720,8 @@ export function MemoryChat({
     return () => stopAllVoicePlayback()
   }, [activeConversationId])
   const [openTabs, setOpenTabs] = useState<string[]>([]) // conversation ids open as tabs
-  const TaskWorkspace = isPro ? getSlot(SLOTS.taskWorkspace) : undefined
-  const taskWorkspaceVisible = useTaskWorkspaceOpen() && Boolean(TaskWorkspace)
+  const taskWorkspaceAvailable = proSlotAvailable(isPro, SLOTS.taskWorkspace)
+  const taskWorkspaceVisible = proTaskWorkspaceVisible(useTaskWorkspaceOpen(), isPro)
   const [taskWorkspaceDragging, setTaskWorkspaceDragging] = useState(false)
   const reduceWorkspaceMotion = useReducedMotion()
   const {
@@ -536,13 +738,11 @@ export function MemoryChat({
     reportTaskSize,
     resizeTaskFromKeyboard: resizeTaskWorkspaceFromKeyboard
   } = useWorkspacePaneController(taskWorkspaceVisible)
-  const conversationsToggleLabel = conversationsToggleWillShow
-    ? 'Show conversations'
-    : 'Collapse conversation list'
-  const taskWorkspaceTransition =
-    reduceWorkspaceMotion || taskWorkspaceDragging
-      ? 'none'
-      : 'flex-grow 420ms cubic-bezier(0.22, 1, 0.36, 1)'
+  const conversationsToggleLabel = conversationToggleLabel(conversationsToggleWillShow)
+  const taskWorkspaceTransition = workspaceTransition(
+    Boolean(reduceWorkspaceMotion),
+    taskWorkspaceDragging
+  )
   const galleryTriggerRef = useRef<HTMLButtonElement>(null)
 
   const handleTaskDetailModeChange = useCallback(
@@ -556,9 +756,6 @@ export function MemoryChat({
   const [mode, setMode] = useState<ChatMode>('ask')
   const [showImageOptions, setShowImageOptions] = useState(false)
   const [imageAvailable, setImageAvailable] = useState(false)
-  const [imgSize, setImgSize] = useState(512)
-  const [imgSteps, setImgSteps] = useState(10)
-  const [imgCfgScale, setImgCfgScale] = useState(2)
   const [imgSeed, setImgSeed] = useState('')
   const [imgNegative, setImgNegative] = useState('')
   // Rewrite the prompt with the local model before generating (default on). Reads
@@ -568,12 +765,14 @@ export function MemoryChat({
   const [imgStrength, setImgStrength] = useState(0.6)
   const [imgModels, setImgModels] = useState<string[]>([])
   const [imgModel, setImgModel] = useState<string>('')
-  // Per-model steps/size overrides. This is the ONE persisted owner of those two
-  // params — the composer and (future) a Settings > Image section both read/write
-  // it. Persisted via saveSetting('imageParams', …). A value here means the user
-  // pinned it; absence means "track the model default". Resolved through the pure
-  // resolveImageParams so a model change never clobbers a user override.
+  // Shared Models owns these per-model overrides. A value means the user pinned it;
+  // absence means "track the model default" through the canonical resolver.
   const [imgParamStore, setImgParamStore] = useState<ImageParamStore>({})
+  const {
+    size: imgSize,
+    steps: imgSteps,
+    cfgScale: imgCfgScale
+  } = composerImageParams(imgModel, imgParamStore)
   const [activeStyle, setActiveStyle] = useState<string | null>(null)
   const [styleThumbs, setStyleThumbs] = useState<Record<string, string>>({})
   const [imgProgress, setImgProgress] = useState<ImageProgress | null>(null)
@@ -587,7 +786,10 @@ export function MemoryChat({
   // The image progress/warm-up UI shows only when the ACTIVE conversation is the one
   // generating an image — never a background conversation's gen (D9).
   const generatingImage = imageGenConv !== null && imageGenConv === activeConversationId
-  const [projects, setProjects] = useState<ProjectLite[]>([])
+  const projects = useMemo(
+    () => (workspaceContent?.projects ?? []).map(({ id, name }) => ({ id, name })),
+    [workspaceContent]
+  )
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
   // Captured-memory context is a Pro ("remembers") feature; core chats are plain
   // (no memory) or scoped to a project. The UI never says "memory".
@@ -597,24 +799,32 @@ export function MemoryChat({
   const [toolsOn, setToolsOn] = useState(false)
   const [connectorsOn, setConnectorsOn] = useState(false)
   const [thinkingEnabled, setThinkingEnabled] = useState(false)
-  const [voiceMode, setVoiceMode] = useState(DEFAULT_VOICE_PREFERENCES.voiceMode)
-  const [voiceTurnMode, setVoiceTurnMode] = useState<VoiceTurnMode>(
-    DEFAULT_VOICE_PREFERENCES.turnMode
+  const [thinkingSavePending, setThinkingSavePending] = useState(false)
+  const speechProjection = useSpeechProjection()
+  const speechPreferences = speechProjection.snapshot?.preferences ?? DEFAULT_VOICE_PREFERENCES
+  const {
+    voiceMode,
+    turnMode: voiceTurnMode,
+    silenceAfterSpeechMs: voiceSilenceAfterSpeechMs,
+    speakerDrainMs: voiceSpeakerDrainMs,
+    ttsEnabled,
+    speed: ttsSpeed
+  } = speechPreferences
+  const setVoiceMode = useCallback(
+    async (update: boolean | ((current: boolean) => boolean)): Promise<void> => {
+      const value = typeof update === 'function' ? update(voiceMode) : update
+      try {
+        const outcome = await window.api.speechCommands.savePreferences({ voiceMode: value })
+        if (!outcome.ok) setAttachWarn(speechFailureMessage(outcome.failure))
+      } catch (error) {
+        setAttachWarn(error instanceof Error ? error.message : 'Voice preference could not save.')
+      }
+    },
+    [voiceMode]
   )
-  const [voiceSilenceAfterSpeechMs, setVoiceSilenceAfterSpeechMs] = useState(
-    DEFAULT_VOICE_PREFERENCES.silenceAfterSpeechMs
-  )
-  const [voiceSpeakerDrainMs, setVoiceSpeakerDrainMs] = useState(
-    DEFAULT_VOICE_PREFERENCES.speakerDrainMs
-  )
-  const [ttsEnabled, setTtsEnabled] = useState(DEFAULT_VOICE_PREFERENCES.ttsEnabled)
-  const [ttsSpeed, setTtsSpeed] = useState(DEFAULT_VOICE_PREFERENCES.speed)
   const [voicePlaybackOwner, setVoicePlaybackOwner] = useState<string | null>(null)
   useEffect(() => {
-    if (!voiceMode) {
-      stopAllVoicePlayback()
-      setVoicePlaybackOwner(null)
-    }
+    if (!voiceMode) stopAllVoicePlayback()
   }, [voiceMode])
 
   // Composer preferences persist across sessions (memory scope, thinking, tools,
@@ -625,8 +835,6 @@ export function MemoryChat({
     composerNoMemory: noMemory,
     composerToolsOn: toolsOn,
     composerConnectorsOn: connectorsOn,
-    composerThinking: thinkingEnabled,
-    composerVoiceMode: voiceMode,
     imgSeed,
     imgNegative,
     enhanceImagePrompts: enhanceImg,
@@ -651,7 +859,8 @@ export function MemoryChat({
       if (Object.is(persistedPreferenceValues.current[key], value)) return okOutcome(undefined)
       persistedPreferenceValues.current[key] = value
       try {
-        await window.api.saveSetting(key, value)
+        const outcome = await window.api.setLlmSettings({ [key]: value })
+        if (!outcome.ok) return failedOutcome({ message: modelsFailureMessage(outcome.failure) })
         return okOutcome(undefined)
       } catch {
         return failedOutcome({ message: 'This could not be saved.' })
@@ -689,45 +898,17 @@ export function MemoryChat({
             typeof s.composerConnectorsOn === 'boolean'
               ? s.composerConnectorsOn
               : previous.composerConnectorsOn,
-          composerThinking:
-            typeof s.composerThinking === 'boolean'
-              ? s.composerThinking
-              : previous.composerThinking,
-          imgSeed: typeof s.imgSeed === 'string' ? s.imgSeed : previous.imgSeed,
-          imgNegative: typeof s.imgNegative === 'string' ? s.imgNegative : previous.imgNegative,
-          enhanceImagePrompts:
-            typeof s.enhanceImagePrompts === 'boolean'
-              ? s.enhanceImagePrompts
-              : previous.enhanceImagePrompts,
           imgStrength: typeof s.imgStrength === 'number' ? s.imgStrength : previous.imgStrength,
           imgStyle:
-            typeof s.imgStyle === 'string' || s.imgStyle === null ? s.imgStyle : previous.imgStyle,
-          imageParams:
-            s.imageParams && typeof s.imageParams === 'object'
-              ? s.imageParams
-              : previous.imageParams
+            typeof s.imgStyle === 'string' || s.imgStyle === null ? s.imgStyle : previous.imgStyle
         })
         if (typeof s.composerNoMemory === 'boolean') setNoMemory(s.composerNoMemory)
         if (typeof s.composerToolsOn === 'boolean') setToolsOn(s.composerToolsOn)
         if (typeof s.composerConnectorsOn === 'boolean') setConnectorsOn(s.composerConnectorsOn)
-        if (typeof s.composerThinking === 'boolean') setThinkingEnabled(s.composerThinking)
         setShowGenerationDetails(s.showGenerationDetails === true)
-        const voicePreferences = readVoicePreferences(s)
-        persistedPreferenceValues.current.composerVoiceMode = voicePreferences.voiceMode
-        setVoiceMode(voicePreferences.voiceMode)
-        setVoiceTurnMode(voicePreferences.turnMode)
-        setVoiceSilenceAfterSpeechMs(voicePreferences.silenceAfterSpeechMs)
-        setVoiceSpeakerDrainMs(voicePreferences.speakerDrainMs)
-        setTtsEnabled(voicePreferences.ttsEnabled)
-        setTtsSpeed(voicePreferences.speed)
         // Image-composer params: per-model steps/size overrides + the global
         // seed/negative/strength/style. These are persisted so they survive a
         // remount (they used to reset every mount).
-        if (s.imageParams && typeof s.imageParams === 'object')
-          setImgParamStore(s.imageParams as ImageParamStore)
-        if (typeof s.imgSeed === 'string') setImgSeed(s.imgSeed)
-        if (typeof s.imgNegative === 'string') setImgNegative(s.imgNegative)
-        if (typeof s.enhanceImagePrompts === 'boolean') setEnhanceImg(s.enhanceImagePrompts)
         if (typeof s.imgStrength === 'number') setImgStrength(s.imgStrength)
         if (typeof s.imgStyle === 'string' || s.imgStyle === null)
           setActiveStyle((s.imgStyle as string | null) ?? null)
@@ -746,30 +927,83 @@ export function MemoryChat({
     persistChangedPreference('composerConnectorsOn', connectorsOn)
   }, [connectorsOn, persistChangedPreference])
   useEffect(() => {
-    persistChangedPreference('composerThinking', thinkingEnabled)
-  }, [persistChangedPreference, thinkingEnabled])
-  useEffect(() => {
-    persistChangedPreference('composerVoiceMode', voiceMode)
-  }, [persistChangedPreference, voiceMode])
-  useEffect(() => {
-    const applyPreferences = (event: Event): void => {
-      const next = (event as CustomEvent<VoicePreferences>).detail
-      persistedPreferenceValues.current.composerVoiceMode = next.voiceMode
-      setVoiceMode(next.voiceMode)
-      setVoiceTurnMode(next.turnMode)
-      setVoiceSilenceAfterSpeechMs(next.silenceAfterSpeechMs)
-      setVoiceSpeakerDrainMs(next.speakerDrainMs)
-      setTtsEnabled(next.ttsEnabled)
-      setTtsSpeed(next.speed)
+    let revision = 0
+    const apply = (settings: Record<string, unknown>): void => {
+      revision += 1
+      if (typeof settings.thinkingEnabled === 'boolean')
+        setThinkingEnabled(settings.thinkingEnabled)
+      if (settings.imageParams && typeof settings.imageParams === 'object') {
+        persistedPreferenceValues.current.imageParams = settings.imageParams
+        setImgParamStore(normalizeImageParameterStore(settings.imageParams))
+      }
+      if (typeof settings.imgSeed === 'string') {
+        persistedPreferenceValues.current.imgSeed = settings.imgSeed
+        setImgSeed(settings.imgSeed)
+      }
+      if (typeof settings.imgNegative === 'string') {
+        persistedPreferenceValues.current.imgNegative = settings.imgNegative
+        setImgNegative(settings.imgNegative)
+      }
+      if (typeof settings.enhanceImagePrompts === 'boolean') {
+        persistedPreferenceValues.current.enhanceImagePrompts = settings.enhanceImagePrompts
+        setEnhanceImg(settings.enhanceImagePrompts)
+      }
     }
-    window.addEventListener(VOICE_PREFERENCES_CHANGED_EVENT, applyPreferences)
-    return () => window.removeEventListener(VOICE_PREFERENCES_CHANGED_EVENT, applyPreferences)
+    const release = window.api.onModelSettingsProjection(apply)
+    const startingRevision = revision
+    Promise.all([window.api.getLlmSettings(), window.api.getSettings()])
+      .then(async ([settings, legacy]) => {
+        if (revision !== startingRevision) return
+        if (typeof settings.thinkingEnabled === 'boolean') {
+          apply(settings)
+          return
+        }
+        if (typeof legacy.composerThinking !== 'boolean') return
+        const migrated = await window.api.setLlmSettings(
+          { thinkingEnabled: legacy.composerThinking },
+          'migration'
+        )
+        if (revision !== startingRevision) return
+        if (!migrated.ok) {
+          setAttachWarn(modelsFailureMessage(migrated.failure))
+          return
+        }
+        apply(migrated.value.settings)
+      })
+      .catch((error) => {
+        if (revision === startingRevision)
+          setAttachWarn(error instanceof Error ? error.message : 'Thinking setting could not load.')
+      })
+    return () => {
+      revision += 1
+      release()
+    }
   }, [])
+  const persistChangedImagePreference = useCallback(
+    (key: 'imageParams' | 'enhanceImagePrompts', value: ImageParamStore | boolean): void => {
+      if (Object.is(persistedPreferenceValues.current[key], value)) return
+      void window.api
+        .setLlmSettings({ [key]: value })
+        .then((outcome) => {
+          if (!outcome.ok) {
+            setAttachWarn(modelsFailureMessage(outcome.failure))
+            return
+          }
+          persistedPreferenceValues.current[key] = outcome.value.settings[key]
+        })
+        .catch((error) => {
+          setAttachWarn(
+            error instanceof Error ? error.message : 'Image setting could not be saved.'
+          )
+        })
+    },
+    []
+  )
   // Persist the global image-composer params only when they differ from the latest
   // main-owned values. Hydration and settings invalidations update the snapshot first.
   useEffect(() => {
-    persistChangedPreference('enhanceImagePrompts', enhanceImg)
-  }, [enhanceImg, persistChangedPreference])
+    persistChangedImagePreference('enhanceImagePrompts', enhanceImg)
+  }, [enhanceImg, persistChangedImagePreference])
   useEffect(() => {
     persistChangedPreference('imgStrength', imgStrength)
   }, [imgStrength, persistChangedPreference])
@@ -787,10 +1021,26 @@ export function MemoryChat({
   const modelSummary = useActiveModelSummary(modelPickerOpen)
   const modelProjectionReady = modelSummary.status === 'ready'
   const thinkingAvailable =
-    modelProjectionReady && admitThinkingRequest(true, modelSummary.name, modelSummary.thinking)
-  const thinkingRequested =
-    modelProjectionReady &&
-    admitThinkingRequest(thinkingEnabled, modelSummary.name, modelSummary.thinking)
+    modelProjectionReady && modelSummary.name !== null && modelSummary.thinking === true
+  // The renderer presents capability evidence; Shared routing admits or refuses the request.
+  const thinkingRequested = thinkingEnabled
+  const toggleThinking = useCallback(async (): Promise<void> => {
+    if (thinkingSavePending) return
+    setThinkingSavePending(true)
+    try {
+      const outcome = await window.api.setLlmSettings({ thinkingEnabled: !thinkingEnabled })
+      if (!outcome.ok) {
+        setAttachWarn(modelsFailureMessage(outcome.failure))
+        return
+      }
+      setThinkingEnabled(outcome.value.settings.thinkingEnabled === true)
+      if (outcome.value.syncFailure) setAttachWarn(modelsFailureMessage(outcome.value.syncFailure))
+    } catch (error) {
+      setAttachWarn(error instanceof Error ? error.message : 'Thinking setting could not be saved.')
+    } finally {
+      setThinkingSavePending(false)
+    }
+  }, [thinkingEnabled, thinkingSavePending])
   const thinkingControlLabel =
     modelSummary.status === 'loading'
       ? 'Thinking unavailable while model status loads'
@@ -831,11 +1081,13 @@ export function MemoryChat({
     renderer?: 'image' | 'document' | 'audio' | 'video' | 'text'
   } | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [lightbox, setLightbox] = useState<{ url: string; path?: string } | null>(null)
+  const [lightbox, setLightbox] = useState<{
+    url: string
+    imageId?: string
+    path?: string
+  } | null>(null)
   // Pro registers this slot after the core renderer starts. Resolve it on each render so an
   // execution-chat approval cannot stay hidden behind a value cached before Pro activation.
-  const ChatMessagesFooter = isPro ? getSlot(SLOTS.chatMessagesFooter) : undefined
-  const TaskSupervisorOverlay = isPro ? getSlot(SLOTS.taskSupervisorOverlay) : undefined
   // Esc closes the open overlay (attachment viewer / image lightbox).
   useEffect(() => {
     if (!viewer && !lightbox) return
@@ -852,15 +1104,15 @@ export function MemoryChat({
   const [skillsOpen, setSkillsOpen] = useState(false)
   const [selectedSkillName, setSelectedSkillName] = useState<string | undefined>()
   const [showGallery, setShowGallery] = useState(false)
-  // The canvas / text viewer / gallery belong to a specific message, so they must
-  // not bleed across chats — close them whenever the active conversation changes
-  // (switch tab, new chat, close-to-fallback, open-from-projects, delete).
-  useEffect(() => {
+  const selectActiveConversation = useCallback((conversationId: string | null): void => {
+    setActiveConversationId(conversationId)
     setCanvasArtifact(null)
     setViewer(null)
     setShowGallery(false)
-  }, [activeConversationId])
-  const [gallery, setGallery] = useState<{ path: string; name: string; mtime: number }[]>([])
+  }, [])
+  const [gallery, setGallery] = useState<
+    { path: string; name: string; mtime: number; syncId?: string }[]
+  >([])
   const [galleryTab, setGalleryTab] = useState<'images' | 'artifacts'>('images')
   const [galleryScope, setGalleryScope] = useState<'chat' | 'project' | 'all'>('all')
   const [artifacts, setArtifacts] = useState<
@@ -929,9 +1181,6 @@ export function MemoryChat({
               ? [...prev, notice]
               : [...prev.slice(0, placeholder), notice, ...prev.slice(placeholder)]
           })
-          void window.api
-            .addRagMessage(turn.conversationId, 'assistant', content)
-            .catch(() => undefined)
         }
         if (event.type === 'compacted') {
           // Forward-looking: what is on screen stays. The app says so.
@@ -966,6 +1215,8 @@ export function MemoryChat({
   // its awaits and bails (no error bubble, no persisted junk) instead of finalizing a
   // turn the user abandoned. Cleared when the conversation's send settles.
   const cancelledRef = useRef<Set<string>>(new Set())
+  const conversationDeletionGenerationRef = useRef<Map<string, number>>(new Map())
+  const pendingConversationRetirementsRef = useRef<Map<string, Promise<void>>>(new Map())
 
   useEffect(() => {
     const requestSequence = speechRequestRef
@@ -1011,46 +1262,27 @@ export function MemoryChat({
   // locally for the dropdown; we never hold a divergent latched copy. Called on
   // mount and whenever the model picker closes, so a change made there flows back
   // into the composer. Falls back to a sensible default only when nothing is active.
-  const refreshImageModel = useCallback(async () => {
-    try {
-      const s = await window.api.imageGenStatus()
-      if (!s) return
-      setImageAvailable(!!s.available)
-      const rawModels: unknown = s.models
-      const models: string[] = Array.isArray(rawModels)
-        ? rawModels.filter((model: unknown): model is string => typeof model === 'string')
-        : []
-      setImgModels(models)
-      // Main resolves which installed model a composer starts on (the shared default rule).
-      setImgModel(typeof s.defaultModel === 'string' ? s.defaultModel : '')
-    } catch {
-      /* engine may be down; leave prior state */
-    }
+  const refreshImageModel = useCallback((): void => {
+    void window.api
+      .imageGenStatus()
+      .then((status) => {
+        if (!status) return
+        setImageAvailable(!!status.available)
+        const rawModels: unknown = status.models
+        const models: string[] = Array.isArray(rawModels)
+          ? rawModels.filter((model: unknown): model is string => typeof model === 'string')
+          : []
+        setImgModels(models)
+        // Main resolves which installed model a composer starts on (the shared default rule).
+        setImgModel(typeof status.defaultModel === 'string' ? status.defaultModel : '')
+      })
+      .catch(() => {
+        /* engine may be down; leave prior state */
+      })
   }, [])
   // The composer applies the image settings that were committed, and only those. It used to
   // re-read EVERY setting and the image engine's status on each change, so one character typed in
   // the settings panel re-rendered this whole screen.
-  useEffect(() => {
-    return subscribeImageSettings((committed) => {
-      if (committed.imageParams) {
-        persistedPreferenceValues.current.imageParams = committed.imageParams
-        setImgParamStore(committed.imageParams)
-      }
-      if (typeof committed.imgSeed === 'string') {
-        persistedPreferenceValues.current.imgSeed = committed.imgSeed
-        setImgSeed(committed.imgSeed)
-      }
-      if (typeof committed.imgNegative === 'string') {
-        persistedPreferenceValues.current.imgNegative = committed.imgNegative
-        setImgNegative(committed.imgNegative)
-      }
-      if (typeof committed.enhanceImagePrompts === 'boolean') {
-        persistedPreferenceValues.current.enhanceImagePrompts = committed.enhanceImagePrompts
-        setEnhanceImg(committed.enhanceImagePrompts)
-      }
-    })
-  }, [])
-
   // A change of ACTIVE IMAGE MODEL is the one image change that does need engine status, and it
   // arrives on its own channel so preference edits never trigger this read.
   useEffect(() => {
@@ -1067,51 +1299,25 @@ export function MemoryChat({
     prevPickerOpen.current = modelPickerOpen
   }, [modelPickerOpen, refreshImageModel])
 
-  // Load conversations on mount; probe image gen; load projects for scoping.
+  // Probe image generation and load presentation-only style thumbnails on mount.
   useEffect(() => {
-    void (async () => {
-      const convos = await window.api.getRagConversations().catch(() => [])
-      setConversations(convos)
-      // Open the latest conversation by default (most recent first), unless the shell
-      // asked to open a specific chat/project — then its own effect handles it.
-      if (!openTarget && convos.length > 0) {
-        const first = convos[0]! // convos.length > 0
-        setActiveConversationId(first.id)
-        setActiveProjectId((first as { project_id?: string | null }).project_id ?? null)
-        setOpenTabs([first.id])
-        try {
-          const nextMessages = await loadLatestConversationMessages(first.id)
-          if (nextMessages) replaceDurableMessages(first.id, nextMessages)
-        } catch {
-          replaceDurableMessages(first.id, [])
-        }
-      }
-    })()
     void refreshImageModel()
-    window.api
-      .listProjects()
-      .then((p: ProjectLite[]) => setProjects(p))
-      .catch((error: unknown) => console.error('Failed to load projects:', error))
     window.api
       .styleThumbs()
       .then((t: Record<string, string>) => setStyleThumbs(t))
       .catch((error: unknown) => console.error('Failed to load style thumbnails:', error))
-  }, [])
+  }, [refreshImageModel])
 
-  // Resolve the size + steps controls for the current model: a per-model user
-  // OVERRIDE (persisted in imgParamStore) wins; otherwise fall back to the model's
-  // default from the SINGLE shared source of truth the main process also uses (so
-  // the two layers can't drift — a stale copy once defaulted turbo models to 4
-  // steps -> rainbow artifacts). This never clobbers a value the user typed: the
-  // resolver reads the override for whichever model is now selected. Depends on the
-  // store too, so persisted overrides apply once they load.
-  useEffect(() => {
-    if (!imgModel) return
-    const { steps, size, cfgScale } = resolveImageParams(imgModel, imgParamStore)
-    setImgSize(size)
-    setImgSteps(steps)
-    setImgCfgScale(cfgScale)
-  }, [imgModel, imgParamStore])
+  const [initialConversationOpened, setInitialConversationOpened] = useState(false)
+  if (!initialConversationOpened && workspaceContent && !openTarget) {
+    setInitialConversationOpened(true)
+    const first = conversations[0]
+    if (first) {
+      selectActiveConversation(first.id)
+      setActiveProjectId(first.project_id ?? null)
+      setOpenTabs([first.id])
+    }
+  }
 
   // Composer image-model dropdown: write through to the SAME owner ModelPicker
   // uses, then mirror locally for immediate UI. This is what
@@ -1143,7 +1349,6 @@ export function MemoryChat({
   // a model switch (setOverride is pure; a value == the model default clears it).
   const setStepsOverride = useCallback(
     (value: number) => {
-      setImgSteps(value)
       if (!imgModel) return
       setImgParamStore((prev) => setOverride(prev, imgModel, 'steps', value))
     },
@@ -1151,7 +1356,6 @@ export function MemoryChat({
   )
   const setSizeOverride = useCallback(
     (value: number) => {
-      setImgSize(value)
       if (!imgModel) return
       setImgParamStore((prev) => setOverride(prev, imgModel, 'size', value))
     },
@@ -1159,7 +1363,6 @@ export function MemoryChat({
   )
   const setCfgScaleOverride = useCallback(
     (value: number) => {
-      setImgCfgScale(value)
       if (!imgModel) return
       setImgParamStore((prev) => setOverride(prev, imgModel, 'cfgScale', value))
     },
@@ -1168,33 +1371,35 @@ export function MemoryChat({
   // Persist the per-model image params in ONE effect (not inside the state updater —
   // an updater must be pure; StrictMode double-invokes it, firing the IPC save twice).
   useEffect(() => {
-    persistChangedPreference('imageParams', imgParamStore)
-  }, [imgParamStore, persistChangedPreference])
+    persistChangedImagePreference('imageParams', imgParamStore)
+  }, [imgParamStore, persistChangedImagePreference])
 
   const activeProjectName = projects.find((p) => p.id === activeProjectId)?.name
-
-  const loadProjects = useCallback(async () => {
-    try {
-      setProjects((await window.api.listProjects()) || [])
-    } catch (e) {
-      console.error(e)
-    }
-  }, [])
 
   // Assign the current chat to a project (or clear it). Persists if a conversation exists.
   const assignProject = useCallback(
     async (projectId: string | null) => {
-      setActiveProjectId(projectId)
       setProjectMenuOpen(false)
       setProjCreating(false)
       if (activeConversationId) {
         try {
-          await window.api.setRagConversationProject(activeConversationId, projectId)
+          const outcome = await executeWorkspaceContentCommand({
+            type: 'update_conversation',
+            conversationId: activeConversationId,
+            patch: { projectId }
+          })
+          if (!outcome.ok) {
+            setAttachWarn(outcome.failure.message)
+            return
+          }
         } catch (e) {
           console.error(e)
+          setAttachWarn(e instanceof Error ? e.message : String(e))
+          return
         }
-        await loadConversations()
       }
+      setActiveProjectId(projectId)
+      setAttachWarn(null)
     },
     [activeConversationId]
   )
@@ -1208,14 +1413,25 @@ export function MemoryChat({
         return
       }
       try {
-        const id = await window.api.createProject({ name })
-        await loadProjects()
-        if (id) await assignProject(id)
+        const outcome = await executeWorkspaceContentCommand({ type: 'create_project', name })
+        if (!outcome.ok) {
+          setAttachWarn(outcome.failure.message)
+          return
+        }
+        const created = outcome.value.changes.find(
+          (change) => change.kind === 'put' && change.entity === 'project'
+        )
+        if (!created) {
+          setAttachWarn('The project was created, but its identity is unavailable. Try again.')
+          return
+        }
+        await assignProject(created.record.id)
       } catch (e) {
         console.error('Failed to create project', e)
+        setAttachWarn(e instanceof Error ? e.message : 'Chat could not create the project.')
       }
     },
-    [loadProjects, assignProject]
+    [assignProject]
   )
 
   const followBottom = useCallback((): void => {
@@ -1292,49 +1508,11 @@ export function MemoryChat({
     }
   }, [refreshConversationMessages, markGenerating])
 
-  const conversationListRequestRef = useRef<Promise<void> | null>(null)
-  const conversationListRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const loadConversations = useCallback(async (): Promise<void> => {
-    if (conversationListRequestRef.current) return conversationListRequestRef.current
-    const request = (async () => {
-      try {
-        const convos = await window.api.getRagConversations()
-        setConversations(convos)
-      } catch (e) {
-        console.error('Failed to load conversations:', e)
-      } finally {
-        conversationListRequestRef.current = null
-      }
-    })()
-    conversationListRequestRef.current = request
-    return request
-  }, [])
-
-  const scheduleConversationListRefresh = useCallback((): void => {
-    if (conversationListRefreshTimerRef.current) {
-      clearTimeout(conversationListRefreshTimerRef.current)
-    }
-    conversationListRefreshTimerRef.current = setTimeout(() => {
-      conversationListRefreshTimerRef.current = null
-      void loadConversations()
-    }, 250)
-  }, [loadConversations])
-
-  useEffect(
-    () => () => {
-      if (conversationListRefreshTimerRef.current) {
-        clearTimeout(conversationListRefreshTimerRef.current)
-      }
-    },
-    []
-  )
-
   const switchConversation = useCallback(
     async (convId: string) => {
       setOpenTabs((t) => (t.includes(convId) ? t : [...t, convId]))
       if (convId === activeConversationId) return
-      setActiveConversationId(convId)
+      selectActiveConversation(convId)
       setActiveProjectId(conversations.find((c) => c.id === convId)?.project_id ?? null)
       try {
         const nextMessages = await loadLatestConversationMessages(convId)
@@ -1348,7 +1526,7 @@ export function MemoryChat({
         setMessagesByConv((prev) => (prev[convId] ? prev : { ...prev, [convId]: [] }))
       }
     },
-    [activeConversationId, conversations, loadLatestConversationMessages]
+    [activeConversationId, conversations, loadLatestConversationMessages, selectActiveConversation]
   )
 
   // Close a chat tab; fall back to another open tab (or a fresh chat) if it was active.
@@ -1360,7 +1538,7 @@ export function MemoryChat({
           const fallback = next[next.length - 1]
           if (fallback) void switchConversation(fallback)
           else {
-            setActiveConversationId(null)
+            selectActiveConversation(null)
             setConvMessages(null, [])
             setActiveProjectId(null)
           }
@@ -1368,31 +1546,20 @@ export function MemoryChat({
         return next
       })
     },
-    [activeConversationId, switchConversation]
+    [activeConversationId, selectActiveConversation, setConvMessages, switchConversation]
   )
 
-  // A conversation changed underneath us - most often a message synced from another device. Reload
-  // that thread when it is the one on screen, and refresh the list either way so ordering follows.
-  //
-  // Skipped while THIS device is generating in that conversation: the in-flight reply lives in local
-  // state and re-reading the table mid-stream would drop it.
+  // Workspace Content broadcasts are the transcript read owner. Do not replace an in-flight stream.
   useEffect(() => {
-    const off = window.api.onRagConversationsChanged?.(({ conversationId }) => {
-      void (async () => {
-        try {
-          if (conversationId && generatingRef.current.has(conversationId)) {
-            pendingRefreshRef.current.add(conversationId)
-          } else if (conversationId && conversationId === activeConversationId) {
-            await refreshConversationMessages(conversationId)
-          }
-          scheduleConversationListRefresh()
-        } catch (error) {
-          console.error('Failed to refresh a synced conversation:', error)
-        }
-      })()
-    })
-    return () => off?.()
-  }, [activeConversationId, refreshConversationMessages, scheduleConversationListRefresh])
+    if (!workspaceContent || !activeConversationId) return
+    if (generatingRef.current.has(activeConversationId)) {
+      pendingRefreshRef.current.add(activeConversationId)
+      return
+    }
+    void refreshConversationMessages(activeConversationId).catch((error) =>
+      console.error('Failed to refresh a workspace conversation:', error)
+    )
+  }, [activeConversationId, refreshConversationMessages, workspaceContent?.revision])
 
   // Task guidance is written to the originating conversation by the Tasks
   // workspace. Refresh that conversation immediately so its special guidance
@@ -1406,27 +1573,31 @@ export function MemoryChat({
         if (conversationId === activeConversationId) {
           await refreshConversationMessages(conversationId)
         }
-        scheduleConversationListRefresh()
       })()
     }
     window.addEventListener('og:task-guidance-message', onTaskGuidanceMessage)
     return () => window.removeEventListener('og:task-guidance-message', onTaskGuidanceMessage)
-  }, [activeConversationId, refreshConversationMessages, scheduleConversationListRefresh])
+  }, [activeConversationId, refreshConversationMessages])
 
   // Open a target passed from the Projects tab (an existing chat, or a new chat
   // scoped to a project). Resolves project from the DB to avoid stale state.
   useEffect(() => {
-    if (!openTarget) return
+    if (!openTarget || !workspaceContent) return
     ;(async () => {
       try {
         setPresetSetup(null)
         setApprovalIntake({ status: 'idle' })
         if (openTarget.conversationId) {
           const convId = openTarget.conversationId
-          setActiveConversationId(convId)
+          const conv = conversations.find((conversation) => conversation.id === convId)
+          if (!conv) {
+            setAttachWarn('That conversation no longer exists. Start a new chat to continue.')
+            startNewConversation()
+            return
+          }
+          selectActiveConversation(convId)
           setOpenTabs((t) => (t.includes(convId) ? t : [...t, convId]))
-          const conv = await window.api.getRagConversation(convId)
-          setActiveProjectId((conv as { project_id?: string | null }).project_id ?? null)
+          setActiveProjectId(conv.project_id ?? null)
           const nextMessages = await loadLatestConversationMessages(convId)
           if (nextMessages) replaceDurableMessages(convId, nextMessages)
           if (openTarget.approvalId) {
@@ -1435,23 +1606,22 @@ export function MemoryChat({
           }
           if (openTarget.draftPrompt) draftStore.set(openTarget.draftPrompt)
         } else if (openTarget.projectId) {
-          setActiveConversationId(null)
+          selectActiveConversation(null)
           setConvMessages(null, [])
           setActiveProjectId(openTarget.projectId)
         } else if (openTarget.presetId) {
-          setActiveConversationId(null)
+          selectActiveConversation(null)
           setConvMessages(null, [])
           setActiveProjectId(null)
           setPresetSetup(presetById(openTarget.presetId) ?? null)
         } else if (openTarget.draftPrompt) {
-          setActiveConversationId(null)
+          selectActiveConversation(null)
           setConvMessages(null, [])
           setActiveProjectId(null)
           draftStore.set(openTarget.draftPrompt)
         }
         if (openTarget.openGallery) setShowGallery(true)
         if (openTarget.draftPrompt) requestAnimationFrame(() => draftInputRef.current?.focus())
-        await loadConversations()
       } catch (e) {
         console.error('Failed to open chat target:', e)
       } finally {
@@ -1459,7 +1629,7 @@ export function MemoryChat({
       }
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openTarget])
+  }, [openTarget, workspaceContent])
 
   const openApprovalIntake = useCallback((approvalId: number): void => {
     setApprovalIntake({ status: 'loading', approvalId })
@@ -1477,17 +1647,138 @@ export function MemoryChat({
   }, [openApprovalIntake])
 
   const startNewConversation = useCallback(() => {
-    setActiveConversationId(null)
+    selectActiveConversation(null)
     setConvMessages(null, []) // clear the fresh-chat bucket
     setActiveProjectId(null)
     setPresetSetup(null)
     setApprovalIntake({ status: 'idle' })
-  }, [setConvMessages])
+  }, [selectActiveConversation, setConvMessages])
+
+  // Workspace Content is the canonical list of conversations. Reconcile both when that projection
+  // changes and when a local target/tab changes, so a stale deep link cannot hide behind an already
+  // observed revision.
+  useEffect(() => {
+    if (!workspaceContent) return
+    let current = true
+    queueMicrotask(() => {
+      if (!current) return
+      const canonicalConversationIds = new Set(conversations.map((conversation) => conversation.id))
+      const survivingTabs = openTabs.filter((id) => canonicalConversationIds.has(id))
+      const removedConversationIds = new Set(
+        [
+          ...openTabs,
+          ...Object.keys(messagesByConv),
+          ...(activeConversationId ? [activeConversationId] : [])
+        ].filter((id) => id !== NEW_CHAT && !canonicalConversationIds.has(id))
+      )
+
+      setOpenTabs((tabs) => {
+        const next = tabs.filter((id) => canonicalConversationIds.has(id))
+        return next.length === tabs.length ? tabs : next
+      })
+      setMessagesByConv((messagesByConversation) => {
+        const staleIds = Object.keys(messagesByConversation).filter(
+          (id) => id !== NEW_CHAT && !canonicalConversationIds.has(id)
+        )
+        if (staleIds.length === 0) return messagesByConversation
+        const next = { ...messagesByConversation }
+        for (const id of staleIds) delete next[id]
+        return next
+      })
+
+      for (const removedConversationId of removedConversationIds) {
+        cancelledRef.current.add(removedConversationId)
+        conversationDeletionGenerationRef.current.set(
+          removedConversationId,
+          (conversationDeletionGenerationRef.current.get(removedConversationId) ?? 0) + 1
+        )
+        desktopChatSession.invalidate(removedConversationId)
+        conversationMessageLoadVersionRef.current.set(
+          removedConversationId,
+          (conversationMessageLoadVersionRef.current.get(removedConversationId) ?? 0) + 1
+        )
+        generatingRef.current.delete(removedConversationId)
+        pendingRefreshRef.current.delete(removedConversationId)
+        if (!pendingConversationRetirementsRef.current.has(removedConversationId)) {
+          const retirement = retireLiveUseForConversation(removedConversationId)
+          pendingConversationRetirementsRef.current.set(removedConversationId, retirement)
+          void retirement.then(
+            () => {
+              if (
+                pendingConversationRetirementsRef.current.get(removedConversationId) === retirement
+              ) {
+                pendingConversationRetirementsRef.current.delete(removedConversationId)
+              }
+            },
+            () => undefined
+          )
+        }
+      }
+      if (removedConversationIds.size > 0) {
+        setGeneratingConvs(new Set(generatingRef.current))
+      }
+
+      const removedActiveConversationId = activeConversationId
+      if (
+        !removedActiveConversationId ||
+        canonicalConversationIds.has(removedActiveConversationId)
+      ) {
+        return
+      }
+
+      setLoading(false)
+      const retirements = [...pendingConversationRetirementsRef.current.values()]
+      void Promise.all(retirements)
+        .then(() => {
+          if (activeConversationIdRef.current !== removedActiveConversationId) return
+          const fallback = survivingTabs[survivingTabs.length - 1]
+          if (fallback) void switchConversation(fallback)
+          else startNewConversation()
+        })
+        .catch((error) => {
+          console.error('Failed to retire a deleted conversation:', error)
+          setAttachWarn('This deleted chat still has active work. Stop it before you continue.')
+        })
+    })
+    return () => {
+      current = false
+    }
+  }, [
+    activeConversationId,
+    conversations,
+    desktopChatSession,
+    messagesByConv,
+    openTabs,
+    startNewConversation,
+    switchConversation,
+    workspaceContent
+  ])
+
+  const conversationIsStillCanonical = useCallback(
+    async (conversationId: string, deletionGeneration: number): Promise<boolean> => {
+      if (
+        (conversationDeletionGenerationRef.current.get(conversationId) ?? 0) !== deletionGeneration
+      ) {
+        return false
+      }
+      const latest = await getWorkspaceContentSnapshot()
+      return (
+        (conversationDeletionGenerationRef.current.get(conversationId) ?? 0) ===
+          deletionGeneration &&
+        latest.conversations.some((conversation) => conversation.id === conversationId)
+      )
+    },
+    []
+  )
 
   const deleteConversation = useCallback(
     async (convId: string) => {
       try {
-        await window.api.deleteRagConversation(convId)
+        const outcome = await window.api.workspaceContent.workflows.deleteConversation(convId)
+        if (!outcome.ok) {
+          setAttachWarn(workflowFailureMessage(outcome.failure))
+          return
+        }
         // Drop the deleted conversation's cached messages; reset to a fresh chat if active.
         setMessagesByConv((prev) => {
           const n = { ...prev }
@@ -1496,19 +1787,19 @@ export function MemoryChat({
           return n
         })
         setOpenTabs((t) => t.filter((id) => id !== convId))
-        if (activeConversationId === convId) setActiveConversationId(null)
-        await loadConversations()
+        if (activeConversationId === convId) selectActiveConversation(null)
       } catch (err) {
         console.error('Failed to delete conversation:', err)
+        setAttachWarn(
+          err instanceof Error ? err.message : 'Chat could not delete the conversation.'
+        )
       }
     },
-    [activeConversationId]
+    [activeConversationId, selectActiveConversation]
   )
 
-  const conversationRenamed = useCallback((stored: RagConversationContract): void => {
-    setConversations((current) =>
-      current.map((conversation) => (conversation.id === stored.id ? stored : conversation))
-    )
+  const conversationRenamed = useCallback((_stored: RagConversationContract): void => {
+    // Workspace Content broadcasts the canonical renamed record.
   }, [])
 
   /** Persist the durable Chat row first, then complete its mesh association.
@@ -1516,28 +1807,14 @@ export function MemoryChat({
   const persistGeneratedImageProjection = async (input: {
     conversationId: string
     turnId: string
+    messageId?: string
     imagePath: string
     imageSyncId?: string
     storedContent: string
     context: unknown
   }): Promise<{ messageId: string | null; warning?: string }> => {
-    let messageId: string
-    try {
-      const stored = await window.api.addRagMessage(
-        input.conversationId,
-        'assistant',
-        input.storedContent,
-        input.context
-      )
-      messageId = stored.uuid
-    } catch (error) {
-      console.error('[chat-image] generated artifact projection failed', {
-        conversationId: input.conversationId,
-        turnId: input.turnId,
-        imagePath: input.imagePath,
-        imageSyncId: input.imageSyncId,
-        error
-      })
+    const messageId = input.messageId
+    if (!messageId) {
       setAttachWarn(GENERATED_IMAGE_NOT_SAVED)
       return { messageId: null, warning: GENERATED_IMAGE_NOT_SAVED }
     }
@@ -1583,10 +1860,33 @@ export function MemoryChat({
     if (!typed && atts.length === 0) return
     // Shared ChatSessionService queues this turn by conversation after its durable input is saved.
     const targetConv = opts?.conversationId ?? activeConversationId
+    const targetRetirement = targetConv
+      ? pendingConversationRetirementsRef.current.get(targetConv)
+      : undefined
+    if (targetRetirement) {
+      try {
+        await targetRetirement
+      } catch {
+        setAttachWarn('This deleted chat still has active work. Stop it before you continue.')
+        return
+      }
+    }
+    const targetDeletionGeneration = targetConv
+      ? (conversationDeletionGenerationRef.current.get(targetConv) ?? 0)
+      : 0
+    if (targetConv && !canonicalConversationIdsRef.current.has(targetConv)) {
+      setAttachWarn('That conversation no longer exists. Start a new chat to continue.')
+      return
+    }
     // A live operator task owns this journey until it finishes. New Chat input is
     // guidance for that task, not a second memory/model turn running beside it.
     if (!regen && targetConv && !opts?.imageRequest) {
       const listedTasks = await window.api.tasks?.list(50)
+      if (!(await conversationIsStillCanonical(targetConv, targetDeletionGeneration))) {
+        cancelledRef.current.add(targetConv)
+        setAttachWarn('That conversation was deleted before your message was sent.')
+        return
+      }
       const liveTask = guidanceTaskForJourney(listedTasks ?? taskSessions, targetConv)
       if (liveTask) {
         const guidanceText = [
@@ -1642,19 +1942,28 @@ export function MemoryChat({
     // A drained queue item carries its own conversationId; a normal send uses the
     // active tab. Either way, this send is bound to `convId` end-to-end.
     let convId = opts?.conversationId ?? activeConversationId
+    let convDeletionGeneration = targetDeletionGeneration
 
     // Create new conversation if none active
     if (!convId) {
-      convId = crypto.randomUUID()
-      const title = trimmed.length > 50 ? `${trimmed.slice(0, 47)}...` : trimmed
-      try {
-        await window.api.createRagConversation(convId, title, projectId)
-        setActiveConversationId(convId)
-        setOpenTabs((t) => (t.includes(convId!) ? t : [...t, convId!]))
-      } catch (e) {
-        console.error('Failed to create conversation:', e)
+      const creation = await createWorkspaceConversation(trimmed, projectId)
+      if (!creation.ok) {
+        setAttachWarn(creation.message)
         return
       }
+      const createdConversationId = creation.conversationId
+      convId = createdConversationId
+      convDeletionGeneration = conversationDeletionGenerationRef.current.get(convId) ?? 0
+      selectActiveConversation(convId)
+      setOpenTabs((tabs) =>
+        tabs.includes(createdConversationId) ? tabs : [...tabs, createdConversationId]
+      )
+    }
+
+    if (!(await conversationIsStillCanonical(convId, convDeletionGeneration))) {
+      cancelledRef.current.add(convId)
+      setAttachWarn('That conversation was deleted before your message was sent.')
+      return
     }
 
     // From here this send belongs to `convId` — lock + target THAT conversation, so
@@ -1670,7 +1979,7 @@ export function MemoryChat({
     let keptInit: { id: string; path: string } | null = null
     if (imgInit) {
       try {
-        keptInit = await window.api.keepInitImage(imgInit)
+        keptInit = await window.api.keepInitImage(imgInit, convId)
       } catch (e) {
         // Not worth failing the turn over: the image still generates, it just has no before-picture.
         console.error('Could not keep the init image', e)
@@ -1806,11 +2115,12 @@ export function MemoryChat({
         initImage: keptInit?.path ?? imgInit ?? undefined,
         strength: imgInit ? imgStrength : undefined
       }
+      const imageTurnId = opts?.sessionReplay?.turnId ?? `image-${crypto.randomUUID()}`
       try {
         const { response: img, turn: sessionTurn } = await desktopChatSession.send({
           kind: 'image',
           conversationId: convId,
-          turnId: opts?.sessionReplay?.turnId ?? `image-${crypto.randomUUID()}`,
+          turnId: imageTurnId,
           projectId,
           userMessage: { role: 'user', content: trimmed },
           query: imageRequest.prompt,
@@ -1865,6 +2175,7 @@ export function MemoryChat({
         const projection = await persistGeneratedImageProjection({
           conversationId: convId,
           turnId: sessionTurn.id,
+          messageId: sessionTurn.responseMessageIds?.at(-1),
           imagePath: img.path,
           imageSyncId: img.syncId,
           storedContent: completedImage.storedContent,
@@ -1890,17 +2201,13 @@ export function MemoryChat({
         // User-cancelled: just drop the loading state, no error bubble.
         if (!isCancellationError(e)) {
           console.error('Image generation failed', e)
-          setConvMessages(convId, (prev) => [
-            ...prev,
-            {
-              id: `a-${Date.now()}`,
-              role: 'assistant',
-              content: errorContent,
-              imageMemoryRetry: refusal?.retry
-            }
-          ])
+          let messageId: string | null = null
           try {
-            await window.api.addRagMessage(convId, 'assistant', errorContent)
+            messageId = await appendWorkspaceErrorWhenNoTurn({
+              conversationId: convId,
+              turnId: imageTurnId,
+              content: errorContent
+            })
           } catch (persistenceError) {
             console.error('[chat-image] could not persist image failure message', {
               conversationId: convId,
@@ -1910,6 +2217,15 @@ export function MemoryChat({
               'The image failed, and Chat could not save the error. Copy it before you leave this chat.'
             )
           }
+          setConvMessages(convId, (prev) => [
+            ...prev,
+            {
+              id: messageId ?? `a-${Date.now()}`,
+              role: 'assistant',
+              content: errorContent,
+              imageMemoryRetry: refusal?.retry
+            }
+          ])
         }
       } finally {
         markGenerating(
@@ -1921,17 +2237,15 @@ export function MemoryChat({
         setLoading(false)
         setImgProgress(null)
         setImageGenConv((c) => (c === convId ? null : c))
-        await loadConversations()
       }
       return
     }
 
     let activeStreamId: string | undefined
     try {
-      // History is built from the TARGET conversation's own messages (never the
-      // active tab's `messages`) — a drained-queue or background send is bound to
-      // `convId`, so its history must come from that conversation (D8).
-      const history = buildSendHistory(messagesByConv[convId] ?? EMPTY_MSGS, !!regen, trimmed)
+      // A drained-queue or background send reads the target conversation from the durable owner.
+      const durableHistory = (await loadLatestConversationMessages(convId)) ?? EMPTY_MSGS
+      const history = buildSendHistory(durableHistory, !!regen, trimmed)
 
       // Agentic tools path (opt-in, non-project). The model calls built-in tools,
       // plus (when Connectors is on) MCP connector tools. STREAMS like the RAG path:
@@ -2063,33 +2377,6 @@ export function MemoryChat({
           imageRequests = [tr.imageRequest]
         }
         if (toolGeneratedImages.length > 0 && !cancelledRef.current.has(convId)) {
-          try {
-            const stored = await window.api.addRagMessage(
-              convId,
-              'assistant',
-              answer,
-              toolCtxWithReasoning
-            )
-            setConvMessages(convId, (previous) =>
-              previous.map((message) =>
-                message.id === toolStreamId ? { ...message, id: stored.uuid } : message
-              )
-            )
-          } catch (error) {
-            console.error('[chat-image] could not persist the tool answer', {
-              conversationId: convId,
-              turnId: toolStreamId,
-              error
-            })
-            setAttachWarn(CHAT_ANSWER_NOT_SAVED)
-            setConvMessages(convId, (previous) =>
-              previous.map((message) =>
-                message.id === toolStreamId
-                  ? { ...message, persistenceWarning: CHAT_ANSWER_NOT_SAVED }
-                  : message
-              )
-            )
-          }
           for (const [index, img] of toolGeneratedImages.entries()) {
             const prompt = imageRequests[index]?.prompt ?? img.prompt ?? modelQuery
             const completedImage = completedImageMessage(
@@ -2100,6 +2387,7 @@ export function MemoryChat({
             const projection = await persistGeneratedImageProjection({
               conversationId: convId,
               turnId: toolStreamId,
+              messageId: sessionTurn.responseMessageIds?.at(-1),
               imagePath: img.path,
               imageSyncId: img.syncId,
               storedContent: completedImage.storedContent,
@@ -2121,33 +2409,6 @@ export function MemoryChat({
             ])
           }
           return
-        }
-        try {
-          const stored = await window.api.addRagMessage(
-            convId,
-            'assistant',
-            answer,
-            toolCtxWithReasoning
-          )
-          setConvMessages(convId, (previous) =>
-            previous.map((message) =>
-              message.id === toolStreamId ? { ...message, id: stored.uuid } : message
-            )
-          )
-        } catch (error) {
-          console.error('[chat] could not persist the tool answer', {
-            conversationId: convId,
-            turnId: toolStreamId,
-            error
-          })
-          setAttachWarn(CHAT_ANSWER_NOT_SAVED)
-          setConvMessages(convId, (previous) =>
-            previous.map((message) =>
-              message.id === toolStreamId
-                ? { ...message, persistenceWarning: CHAT_ANSWER_NOT_SAVED }
-                : message
-            )
-          )
         }
         return
       }
@@ -2246,6 +2507,7 @@ export function MemoryChat({
         const projection = await persistGeneratedImageProjection({
           conversationId: convId,
           turnId: streamId,
+          messageId: sessionTurn.responseMessageIds?.at(-1),
           imagePath: ragImage.path,
           imageSyncId: ragImage.syncId,
           storedContent: completedImage.storedContent,
@@ -2327,21 +2589,6 @@ export function MemoryChat({
               /* ignore */
             })
         }
-        try {
-          const stored = await window.api.addRagMessage(
-            convId,
-            'assistant',
-            assistantContent,
-            assistantContext
-          )
-          setConvMessages(convId, (previous) =>
-            previous.map((message) =>
-              message.id === streamId ? { ...message, id: stored.uuid } : message
-            )
-          )
-        } catch (e) {
-          console.error('Failed to persist assistant message:', e)
-        }
       }
     } catch (e) {
       // User stopped and the call REJECTED rather than returning, so there is no result to read.
@@ -2357,26 +2604,42 @@ export function MemoryChat({
       // Update the streaming placeholder to show the error — never append a second bubble.
       const sid = activeStreamId
       if (sid) desktopChatSession.cancelLiveTurn(sid)
-      setConvMessages(convId, (prev) => {
-        const hasPlaceholder = sid && prev.some((m) => m.id === sid)
-        if (hasPlaceholder)
-          return prev.map((m) =>
-            m.id === sid
-              ? { ...m, content: errorContent, activity: undefined, streaming: false }
-              : m
-          )
-        return [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: errorContent }]
-      })
+      let messageId: string | null = null
       try {
-        await window.api.addRagMessage(convId, 'assistant', errorContent)
+        messageId = await appendWorkspaceErrorWhenNoTurn({
+          conversationId: convId,
+          turnId: sid,
+          content: errorContent
+        })
       } catch (persistenceError) {
         console.error('[chat] generation failure message could not be persisted', {
           conversationId: convId,
           generationError: e,
           persistenceError
         })
-        setAttachWarn(CHAT_ANSWER_NOT_SAVED)
+        setAttachWarn(
+          'The answer failed, and Chat could not save the error. Copy it before you leave this chat.'
+        )
       }
+      setConvMessages(convId, (prev) => {
+        const hasPlaceholder = sid && prev.some((m) => m.id === sid)
+        if (hasPlaceholder)
+          return prev.map((m) =>
+            m.id === sid
+              ? {
+                  ...m,
+                  ...(messageId ? { id: messageId } : {}),
+                  content: errorContent,
+                  activity: undefined,
+                  streaming: false
+                }
+              : m
+          )
+        return [
+          ...prev,
+          { id: messageId ?? `a-${Date.now()}`, role: 'assistant', content: errorContent }
+        ]
+      })
     } finally {
       cancelledRef.current.delete(convId)
       markGenerating(
@@ -2386,7 +2649,6 @@ export function MemoryChat({
           .entries.some((entry) => entry.conversationId === convId)
       )
       setLoading(false)
-      await loadConversations()
       if (activeStreamId) streamConvRef.current.delete(activeStreamId)
     }
   }
@@ -2511,30 +2773,6 @@ export function MemoryChat({
             : m
         )
       )
-      try {
-        await window.api.addRagMessage(
-          convId,
-          'assistant',
-          answer,
-          buildAssistantContext(settled?.persistContext ?? settled?.context, {
-            reasoning,
-            cutoff: settled?.cutoff,
-            ...(settled?.sessionTurn
-              ? {
-                  session: {
-                    turnId: settled.sessionTurn.id,
-                    status: settled.sessionTurn.status,
-                    responseMessages: settled.sessionTurn.responseMessages ?? [],
-                    reasoningRequested:
-                      settled.sessionTurn.request.request.reasoning?.enabled === true
-                  }
-                }
-              : {})
-          })
-        )
-      } catch (e) {
-        console.error('Failed to persist stopped assistant message:', e)
-      }
     },
     [setConvMessages]
   )
@@ -2665,23 +2903,21 @@ export function MemoryChat({
     [interruptManualSpeech, speakingId, speakLoadingId, ttsSpeed]
   )
 
-  const refreshGallery = useCallback(async () => {
+  const refreshGallery = useCallback((): void => {
     const scope =
       galleryScope === 'chat'
         ? { conversationId: activeConversationId || '__none__' }
         : galleryScope === 'project'
           ? { projectId: activeProjectId }
           : undefined
-    try {
-      setGallery((await window.api.listGeneratedImages(scope)) || [])
-    } catch (e) {
-      console.error(e)
-    }
-    try {
-      setArtifacts(await window.api.listArtifacts(scope))
-    } catch (e) {
-      console.error(e)
-    }
+    void window.api
+      .listGeneratedImages(scope)
+      .then((images) => setGallery(images || []))
+      .catch((error) => console.error(error))
+    void window.api
+      .listArtifacts(scope)
+      .then(setArtifacts)
+      .catch((error) => console.error(error))
   }, [galleryScope, activeConversationId, activeProjectId])
 
   // Reload the gallery when it opens, its scope changes, or the core-neutral incoming-file
@@ -2690,6 +2926,14 @@ export function MemoryChat({
     if (!showGallery) return
     void refreshGallery()
   }, [showGallery, refreshGallery, incomingFiles])
+
+  useEffect(
+    () =>
+      window.api.onGeneratedImageGalleryChanged(() => {
+        if (showGallery) void refreshGallery()
+      }),
+    [refreshGallery, showGallery]
+  )
 
   const deleteArtifact = useCallback(async (id: string) => {
     try {
@@ -2749,21 +2993,20 @@ export function MemoryChat({
     }
   }, [])
 
-  const deleteImage = useCallback(async (path?: string) => {
-    if (!path) return
+  const deleteImage = useCallback(async (imageId?: string) => {
+    if (!imageId) return
     try {
-      await window.api.deleteGeneratedImage(path)
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.imagePath === path
-            ? { ...m, image: undefined, imagePath: undefined, content: `${m.content}  (deleted)` }
-            : m
-        )
-      )
-      setGallery((prev) => prev.filter((g) => g.path !== path))
+      const outcome = await window.api.deleteGeneratedImage(imageId)
+      if (outcome.status === 'failed') {
+        setAttachWarn(outcome.message)
+        return
+      }
       setLightbox(null)
-    } catch (e) {
-      console.error(e)
+    } catch (error) {
+      console.error(error)
+      setAttachWarn(
+        error instanceof Error ? error.message : 'The generated image could not be deleted.'
+      )
     }
   }, [])
 
@@ -2897,13 +3140,29 @@ export function MemoryChat({
           // place — no new user bubble. Also prune the persisted rows so reopening
           // the chat doesn't show old answers stacked.
           void (async () => {
-            await stopLiveWebUseForConversation(activeConversationId)
+            await stopLiveUseForConversation(activeConversationId)
             setMessages((prev) => prev.slice(0, i + 1))
-            if (activeConversationId && !sessionTurn)
-              await window.api.truncateRagMessages(activeConversationId, {
-                messageId: mi.id,
-                keepAnchor: true
-              })
+            if (activeConversationId && !sessionTurn) {
+              try {
+                const snapshot = await getWorkspaceContentSnapshot()
+                const anchor = snapshot.messages.find((message) => message.id === mi.id)
+                if (!anchor) throw new Error('Chat could not find the message to regenerate.')
+                const outcome = await executeWorkspaceContentCommand({
+                  type: 'rewrite_message_tail',
+                  conversationId: activeConversationId,
+                  anchorMessageId: mi.id,
+                  expectedAnchorUpdatedAt: anchor.updatedAt
+                })
+                if (!outcome.ok) throw new Error(outcome.failure.message)
+              } catch (error) {
+                console.error('Failed to prepare the conversation for regeneration:', error)
+                setAttachWarn(
+                  error instanceof Error ? error.message : 'Chat could not regenerate this answer.'
+                )
+                await refreshConversationMessages(activeConversationId)
+                return
+              }
+            }
             // The turn's own attachments, not the composer's - the composer was cleared when this
             // turn was first sent, so regenerating without them re-asks the question WITHOUT its image.
             await sendMessage(content, {
@@ -2951,29 +3210,27 @@ export function MemoryChat({
       .map((message) => readPersistedChatSessionTurn(message.context))
       .find((turn) => turn !== undefined)
     const keptAtts = attachmentsOf(edited)
-    const persisted = keptAtts.length
-      ? {
-          attachments: keptAtts.map(
-            (attachment): StoredAttachment => ({
-              name: attachment.name,
-              kind: attachment.kind,
-              text: attachment.text,
-              path: attachment.path
-            })
-          )
-        }
-      : undefined
     void (async () => {
-      await stopLiveWebUseForConversation(cid)
+      await stopLiveUseForConversation(cid)
       try {
         if (cid) {
           if (!sessionTurn) {
-            await window.api.truncateRagMessages(cid, { messageId: edited.id, keepAnchor: false })
-            await window.api.addRagMessage(cid, 'user', text, persisted)
+            const snapshot = await getWorkspaceContentSnapshot()
+            const anchor = snapshot.messages.find((message) => message.id === edited.id)
+            if (!anchor) throw new Error('Chat could not find the message to edit.')
+            const outcome = await executeWorkspaceContentCommand({
+              type: 'rewrite_message_tail',
+              conversationId: cid,
+              anchorMessageId: edited.id,
+              expectedAnchorUpdatedAt: anchor.updatedAt,
+              editedContent: text
+            })
+            if (!outcome.ok) throw new Error(outcome.failure.message)
           }
         }
       } catch (error) {
         console.error('Failed to persist the edited user message:', error)
+        setAttachWarn(error instanceof Error ? error.message : 'Chat could not save the edit.')
         if (cid) {
           try {
             await refreshConversationMessages(cid)
@@ -3160,7 +3417,7 @@ export function MemoryChat({
       })
     },
     startEdit: (message) => {
-      void stopLiveWebUseForConversation(activeConversationId)
+      void stopLiveUseForConversation(activeConversationId)
       setEditingId(message.id)
     },
     cancelEdit: () => setEditingId(null),
@@ -3621,13 +3878,10 @@ export function MemoryChat({
                         })}
                         {/* A reply generating on another one of your devices, streaming here live. Pro
                     registers the renderer; the free build has no slot and this is nothing. */}
-                        {ChatMessagesFooter && activeConversationId ? (
-                          <ChatMessagesFooter
-                            conversationId={activeConversationId}
-                            promptEnhancementActive={promptEnhancementActive}
-                            promptEnhancementComplete={promptEnhancementComplete}
-                          />
-                        ) : null}
+                        {renderChatMessagesFooter(isPro, activeConversationId, {
+                          promptEnhancementActive,
+                          promptEnhancementComplete
+                        })}
                         {/* The in-flight image card shows whenever an image job owns this chat, including a
                           tool-invoked image while the assistant turn is still streaming. Only the text
                           placeholder waits for streaming to end. */}
@@ -4093,7 +4347,7 @@ export function MemoryChat({
                         {/* Approval UX v2: pending gate cards + outcomes, in-flow above the composer */}
                         <ActionGateDock conversationId={activeConversationId} />
                         {/* Vision rail: the supervisor overlay slides in during a computer-use task */}
-                        {TaskSupervisorOverlay ? <TaskSupervisorOverlay /> : null}
+                        {renderProSlot(isPro, SLOTS.taskSupervisorOverlay)}
                         {voiceTurns.microphoneDenied && (
                           <div
                             role="alert"
@@ -4398,9 +4652,9 @@ export function MemoryChat({
                                   type="button"
                                   variant="outline"
                                   size="sm"
-                                  disabled={!thinkingAvailable}
+                                  disabled={!thinkingAvailable || thinkingSavePending}
                                   aria-label={thinkingControlLabel}
-                                  onClick={() => setThinkingEnabled((t) => !t)}
+                                  onClick={async () => toggleThinking()}
                                   className={`h-8 gap-1.5 rounded-full ${thinkingRequested ? 'border-green-500 text-primary' : 'text-neutral-400'}`}
                                 >
                                   <Brain className="h-3.5 w-3.5" /> Thinking
@@ -4420,7 +4674,7 @@ export function MemoryChat({
                             </Tooltip>
                             <VoiceModeControl
                               active={voiceMode}
-                              onToggle={() => setVoiceMode((current) => !current)}
+                              onToggle={() => void setVoiceMode((current) => !current)}
                               onOpenSettings={() => {
                                 closePanels()
                                 setSettingsInitialTab('voice')
@@ -4601,7 +4855,7 @@ export function MemoryChat({
               </Panel>
             </PanelGroup>
           </Panel>
-          {TaskWorkspace ? (
+          {taskWorkspaceAvailable ? (
             <PanelResizeHandle
               aria-label="Resize Chat and task"
               title="Drag to resize Chat and task"
@@ -4623,7 +4877,7 @@ export function MemoryChat({
               <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px bg-transparent group-hover:bg-green-500/50 group-focus-visible:bg-green-500 group-data-[resize-handle-state=drag]:bg-green-500" />
             </PanelResizeHandle>
           ) : null}
-          {TaskWorkspace ? (
+          {taskWorkspaceAvailable ? (
             <Panel
               ref={taskWorkspaceRef}
               id="task-workspace"
@@ -4636,13 +4890,13 @@ export function MemoryChat({
               style={{ transition: taskWorkspaceTransition }}
               onResize={reportTaskSize}
             >
-              <TaskWorkspace
-                mainWorkspaceCollapsed={chatBodyCollapsed}
-                onToggleMainWorkspace={toggleChatBodyVisibility}
-                onDetailModeChange={handleTaskDetailModeChange}
-                routeActive
-                conversationId={activeConversationId}
-              />
+              {renderProSlot(isPro, SLOTS.taskWorkspace, {
+                mainWorkspaceCollapsed: chatBodyCollapsed,
+                onToggleMainWorkspace: toggleChatBodyVisibility,
+                onDetailModeChange: handleTaskDetailModeChange,
+                routeActive: true,
+                conversationId: activeConversationId
+              })}
             </Panel>
           ) : null}
         </PanelGroup>
@@ -4783,13 +5037,15 @@ export function MemoryChat({
                 >
                   Download
                 </button>
-                <button
-                  type="button"
-                  onClick={() => deleteImage(lightbox.path!)}
-                  className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:border-red-500 hover:text-red-400"
-                >
-                  Delete
-                </button>
+                {lightbox.imageId ? (
+                  <button
+                    type="button"
+                    onClick={() => deleteImage(lightbox.imageId)}
+                    className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:border-red-500 hover:text-red-400"
+                  >
+                    Delete
+                  </button>
+                ) : null}
               </>
             ) : undefined
           }
@@ -4851,7 +5107,11 @@ export function MemoryChat({
                         <button
                           key={g.path}
                           onClick={() =>
-                            setLightbox({ url: captureUrlForPath(g.path), path: g.path })
+                            setLightbox({
+                              url: captureUrlForPath(g.path),
+                              imageId: g.syncId,
+                              path: g.path
+                            })
                           }
                           className="overflow-hidden rounded-md border border-neutral-800 transition-colors hover:border-green-500"
                         >
