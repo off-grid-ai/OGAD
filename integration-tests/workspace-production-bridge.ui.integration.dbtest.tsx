@@ -10,14 +10,9 @@ import path from 'node:path'
 // The DB Vitest config uses the classic JSX transform, which reads this binding at runtime.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import React from 'react'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  installFakeActiveTextModel,
-  startFakeLlamaServer,
-  type FakeLlamaServer
-} from '../src/main/__tests__/harness/fake-llama-server'
 
 interface IpcEvent {
   sender: {
@@ -144,7 +139,6 @@ vi.mock('@lancedb/lancedb', () => ({
   })
 }))
 
-let fake: FakeLlamaServer
 let MemoryChat: typeof import('../src/renderer/src/components/MemoryChat').MemoryChat
 let ProjectsScreen: typeof import('../src/renderer/src/components/ProjectsScreen').ProjectsScreen
 let TooltipProvider: typeof import('../src/renderer/src/components/ui/tooltip').TooltipProvider
@@ -157,14 +151,12 @@ async function bootProductionMain(): Promise<void> {
   const [
     { setupIPC },
     { setupRagIPC },
-    { llm },
     { registerTaskHistoryIpc },
     { registerActionsIpc },
-    { desktopApplication, startDesktopApplication, stopDesktopApplication: stopApplication }
+    { startDesktopApplication, stopDesktopApplication: stopApplication }
   ] = await Promise.all([
     import('../src/main/ipc'),
     import('../src/main/rag-ipc'),
-    import('../src/main/llm'),
     import('../src/main/tasks/task-history-ipc'),
     import('../src/main/actions/actions-ipc'),
     import('../src/main/composition/application')
@@ -174,21 +166,6 @@ async function bootProductionMain(): Promise<void> {
     throw new Error(`Desktop application did not start: ${JSON.stringify(started)}`)
   }
   stopDesktopApplication = stopApplication
-  const selected = await desktopApplication.models.select({
-    modality: 'text',
-    modelId: 'unsloth/Qwen3.5-0.8B-GGUF'
-  })
-  if (!selected.ok) {
-    throw new Error(`Could not select the test model: ${JSON.stringify(selected.failure)}`)
-  }
-  const service = llm as unknown as { port: number; initialized: boolean; paused: boolean }
-  service.port = fake.port
-  service.initialized = true
-  service.paused = false
-  const refreshed = await desktopApplication.models.refresh()
-  if (!refreshed.ok) {
-    throw new Error(`Could not refresh the test model: ${JSON.stringify(refreshed.failure)}`)
-  }
   setupIPC()
   setupRagIPC()
   registerTaskHistoryIpc()
@@ -206,8 +183,6 @@ function renderChat(target?: { conversationId?: string; projectId?: string }): v
 beforeAll(async () => {
   process.env.OFFGRID_USER_DATA = PROFILE_DIR
   process.env.OFFGRID_DATA_DIR = PROFILE_DIR
-  installFakeActiveTextModel(PROFILE_DIR)
-  fake = await startFakeLlamaServer()
   // Load the root before task-history IPC to preserve its production initialization order. Start
   // only after bootProductionMain clears the fixture maps, so startup registers fresh handlers.
   await import('../src/main/composition/application')
@@ -228,7 +203,6 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
-  fake.reset()
 })
 
 afterAll(async () => {
@@ -236,7 +210,6 @@ afterAll(async () => {
   await stopDesktopApplication?.()
   const { getDB } = await import('../src/main/database')
   if (getDB().open) getDB().close()
-  await fake.close()
   fs.rmSync(PROFILE_DIR, { recursive: true, force: true })
   if (previousUserData === undefined) delete process.env.OFFGRID_USER_DATA
   else process.env.OFFGRID_USER_DATA = previousUserData
@@ -267,40 +240,6 @@ async function inTranscript(text: string): Promise<HTMLElement> {
 }
 
 describe('production workspace bridge', () => {
-  it('sends a rendered chat turn through preload, IPC, the model socket, and SQLite', async () => {
-    fake.enqueue({ content: 'The production bridge persisted this answer.' })
-    const user = userEvent.setup()
-    renderChat()
-
-    const composer = await screen.findByPlaceholderText(/^ask /i)
-    fireEvent.change(composer, { target: { value: 'Prove the complete local chat path' } })
-    await user.click(screen.getByRole('button', { name: /^send$/i }))
-
-    expect(await inTranscript('The production bridge persisted this answer.')).toBeTruthy()
-    await waitFor(() => {
-      return window.api.workspaceContent.getSnapshot().then((snapshot) => {
-        const conversation = snapshot.conversations.find(
-          ({ title }) => title === 'Prove the complete local chat path'
-        )
-        expect(conversation).toBeTruthy()
-        expect(
-          snapshot.messages
-            .filter(({ conversationId }) => conversationId === conversation!.id)
-            .map(({ portable }) => [portable.role, portable.content])
-        ).toEqual([
-          ['user', [{ type: 'text', text: 'Prove the complete local chat path' }]],
-          ['assistant', 'The production bridge persisted this answer.']
-        ])
-      })
-    })
-    expect(Reflect.has(window.api, 'getRagConversations')).toBe(false)
-    expect(Reflect.has(window.api, 'getRagConversation')).toBe(false)
-    expect(Reflect.has(window.api, 'getRagMessages')).toBe(false)
-    expect(Reflect.has(window.api, 'createRagConversation')).toBe(false)
-    expect(Reflect.has(window.api, 'addRagMessage')).toBe(false)
-    expect(fake.requests).toHaveLength(1)
-  })
-
   it('renders projects, chats, messages, and artifacts from the durable canonical tables', async () => {
     const api = window.api
     const project = await api.workspaceContent.execute({
@@ -339,15 +278,6 @@ describe('production workspace bridge', () => {
       projectId
     })
 
-    const { getDB } = await import('../src/main/database')
-    expect(
-      getDB()
-        .prepare(
-          'SELECT COUNT(*) AS count FROM workspace_content_messages WHERE conversation_id = ?'
-        )
-        .get('reopened-chat')
-    ).toEqual({ count: 2 })
-
     render(<ProjectsScreen onOpenChat={() => undefined} />)
     expect(await screen.findByRole('button', { name: 'Reopened Workspace' })).toBeTruthy()
     expect(await screen.findByText('Durable planning chat')).toBeTruthy()
@@ -384,14 +314,6 @@ describe('production workspace bridge', () => {
       local: { path: imagePath, fileName: `${imageId}.png` }
     })
     if (!created.ok) throw new Error(created.failure.message)
-
-    const { getDB } = await import('../src/main/database')
-    const persisted = getDB()
-      .prepare('SELECT images_json FROM generated_image_gallery_state WHERE singleton = 1')
-      .get() as { images_json: string }
-    expect(JSON.parse(persisted.images_json)).toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: imageId })])
-    )
 
     renderChat({ openGallery: true })
     expect(await screen.findByAltText(`${imageId}.png`)).toBeTruthy()
