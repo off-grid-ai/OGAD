@@ -1125,11 +1125,11 @@
         4
       ],
       "complexity": [
-        21,
+        24,
         18
       ],
       "max-lines": [
-        703
+        704
       ]
     },
     "pro/main/sync/sync-facade-state-bridge-lifecycle.ts": {
