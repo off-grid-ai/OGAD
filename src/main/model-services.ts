@@ -22,9 +22,9 @@ import {
 } from './model-selection-persistence'
 import { getRemoteVisionServer, desktopRemoteServerPorts } from './vision/remote-vision-server'
 import { peekRemoteReasoningMetadata, remoteReasoningMetadata } from './llm/remote-chat'
-import { llm } from './llm'
 import {
   DesktopLocalGenerationAdapter,
+  desktopLocalTextRuntime,
   desktopGenerationObservations,
   DesktopRemoteGenerationAdapter,
   DesktopImageGenerationAdapter,
@@ -34,8 +34,7 @@ import {
   DesktopRemoteVoiceGenerationAdapter,
   DesktopRemoteTranscriptionGenerationAdapter,
   DesktopRemoteEmbeddingGenerationAdapter,
-  DesktopEmbeddingGenerationAdapter,
-  type DesktopLocalTextRuntime
+  DesktopEmbeddingGenerationAdapter
 } from './model-generation-adapters'
 import { desktopToolExecutor } from './desktop-tool-executor'
 import { getResidencyMode } from './runtime-residency'
@@ -400,21 +399,6 @@ export function createDesktopModelWorkspacePorts(
       isReady: async () => (await localTextRuntime.state()).ready
     }
   }
-}
-
-const desktopLocalTextRuntime: DesktopLocalTextRuntime = {
-  load: () => llm.init(),
-  unload: async () => {
-    await llm.unload()
-  },
-  state: async () => ({
-    ready: llm.isReady(),
-    loaded: llm.isReady(),
-    reasoning: llm.getReasoningMetadata(),
-    contextLength: llm.effectiveContextSize()
-  }),
-  settings: () => llm.getSettings(),
-  streamChatLocal: (...args) => llm.streamChatLocal(...args)
 }
 
 export const desktopModelWorkspacePorts = createDesktopModelWorkspacePorts({

@@ -134,6 +134,22 @@ export interface DesktopLocalTextRuntime {
   ): ReturnType<typeof llm.streamChatLocal>
 }
 
+/** Native text I/O adapter. Shared residency is the only caller that may drive load and unload. */
+export const desktopLocalTextRuntime: DesktopLocalTextRuntime = {
+  load: () => llm.init(),
+  unload: async () => {
+    await llm.unload()
+  },
+  state: async () => ({
+    ready: llm.isReady(),
+    loaded: llm.isReady(),
+    reasoning: llm.getReasoningMetadata(),
+    contextLength: llm.effectiveContextSize()
+  }),
+  settings: () => llm.getSettings(),
+  streamChatLocal: (...args) => llm.streamChatLocal(...args)
+}
+
 export class DesktopLocalGenerationAdapter extends DesktopGenerationAdapter {
   constructor(
     observations: DesktopGenerationObservations,
