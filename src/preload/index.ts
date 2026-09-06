@@ -84,22 +84,9 @@ import {
   type SpeechTextCleanRequest,
   type SpeechTextCleanResult
 } from '../shared/speech-text-cleaning-contract'
-import {
-  SPEECH_CANCEL_TRANSCRIPTION_CHANNEL,
-  SPEECH_EVENT_CHANNEL,
-  SPEECH_FEED_STREAM_CHANNEL,
-  SPEECH_FINISH_STREAM_CHANNEL,
-  SPEECH_INTERRUPT_CHANNEL,
-  SPEECH_SPEAK_CHANNEL,
-  SPEECH_TRANSCRIBE_CHANNEL,
-  type DesktopSpeechEvent,
-  type SpeechCancelTranscriptionOutcome,
-  type SpeechStreamCommand,
-  type SpeechSpeakCommand,
-  type SpeechSpeakOutcome,
-  type SpeechTranscribeCommand,
-  type SpeechTranscribeOutcome
-} from '../shared/speech-command-contract'
+import { workspaceContentApi } from './workspace-content-api'
+import { speechCommandApi } from './speech-command-api'
+import type { LlmSettingsUpdate } from './preload-api-contracts'
 
 console.log('PRELOAD SCRIPT LOADED')
 
@@ -170,6 +157,11 @@ const offGridApi = {
       return unsubscribe('actions:outcome', sub)
     }
   },
+  // Workspace content (projects / conversations / messages): one command channel and one
+  // reactive snapshot channel over the Shared `workspaceContent` facade. Transport only -
+  // main owns the state, the renderer must not cache or re-project it.
+  // Handlers: main/composition/workspace-content-ipc.ts.
+  workspaceContent: workspaceContentApi,
   // One durable projection for Web Use and Computer Use tabs/history.
   tasks: {
     list: (limit?: number): Promise<TaskRunSnapshot[]> => ipcRenderer.invoke('tasks:list', limit),
@@ -357,52 +349,15 @@ const offGridApi = {
   // Stop an in-flight streaming turn; the partial answer is kept.
   cancelRag: (streamId: string) => ipcRenderer.send('rag:cancel', streamId),
 
-  // RAG Conversation History
-  createRagConversation: (id: string, title?: string, projectId?: string | null) =>
-    ipcRenderer.invoke('rag:create-conversation', id, title, projectId),
-  /**
-   * One bounded page of the conversation list, newest first. Omit `page` for the newest page;
-   * pass `updatedBefore` (the `updated_at` of the last row you hold) to continue.
-   */
-  getRagConversations: (
-    projectId?: string | null,
-    page?: { limit?: number; updatedBefore?: string }
-  ) => ipcRenderer.invoke('rag:get-conversations', projectId, page),
-  onRagConversationsChanged: (
-    callback: (data: { conversationId: string; projectId: string | null }) => void
-  ) => {
-    const subscription = (
-      _event: unknown,
-      data: { conversationId: string; projectId: string | null }
-    ): void => callback(data)
-    ipcRenderer.on('rag:conversations-changed', subscription)
-    return unsubscribe('rag:conversations-changed', subscription)
-  },
   /** Conversation ids whose message content matches, bounded. */
   searchRagConversationIds: (query: string, limit?: number) =>
     ipcRenderer.invoke('rag:search-conversation-ids', query, limit),
-  setRagConversationProject: (id: string, projectId: string | null) =>
-    ipcRenderer.invoke('rag:set-conversation-project', id, projectId),
-  getRagConversation: (id: string) => ipcRenderer.invoke('rag:get-conversation', id),
-  getRagMessages: (conversationId: string) =>
-    ipcRenderer.invoke('rag:get-messages', conversationId),
   readChatSessionTurns: (conversationId: string) =>
     ipcRenderer.invoke('chat-session:read-turns', conversationId),
   writeChatSessionTurns: (conversationId: string, turns: unknown[]) =>
     ipcRenderer.invoke('chat-session:write-turns', conversationId, turns),
-  addRagMessage: (
-    conversationId: string,
-    role: 'user' | 'assistant',
-    content: string,
-    context?: unknown
-  ) => ipcRenderer.invoke('rag:add-message', conversationId, role, content, context),
-  truncateRagMessages: (
-    conversationId: string,
-    anchor: { messageId: string; keepAnchor: boolean }
-  ) => ipcRenderer.invoke('rag:truncate-messages', conversationId, anchor),
   updateRagConversationTitle: (id: string, title: string) =>
     ipcRenderer.invoke('rag:update-conversation-title', id, title),
-  deleteRagConversation: (id: string) => ipcRenderer.invoke('rag:delete-conversation', id),
 
   // Entities
   getEntities: (appName?: string) => ipcRenderer.invoke('db:get-entities', appName),
@@ -650,31 +605,20 @@ const offGridApi = {
 
   // --- LLM inference settings ---
   getLlmSettings: () => ipcRenderer.invoke('llm:get-settings'),
+  onModelSettingsProjection: (callback: (settings: Record<string, unknown>) => void) => {
+    const subscription = (_event: unknown, settings: Record<string, unknown>): void =>
+      callback(settings)
+    ipcRenderer.on('models:settings-projection-changed', subscription)
+    return unsubscribe('models:settings-projection-changed', subscription)
+  },
   /**
    * Commit model settings. Resolves with ONE committed projection - the whole committed record,
    * the keys that moved, how the engine restart ended, and any sync-publish failure that left the
    * local value committed - or with a typed failure. A refused value commits nothing, so the form
    * keeps its draft. Nothing needs a read-back afterwards.
    */
-  setLlmSettings: (s: {
-    temperature?: number
-    ctxSize?: number
-    topP?: number
-    topK?: number
-    minP?: number
-    repeatPenalty?: number
-    maxTokens?: number
-    maxToolCalls?: number
-    reasoningBudget?: number
-    reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
-    systemPrompt?: string
-    kvCacheType?: 'f16' | 'q8_0' | 'q4_0'
-    flashAttn?: boolean
-    gpuLayers?: number
-    threads?: number
-    batchSize?: number
-    performanceMode?: 'conservative' | 'balanced' | 'extreme'
-  }) => ipcRenderer.invoke('llm:set-settings', s),
+  setLlmSettings: (s: LlmSettingsUpdate, origin?: 'local' | 'migration') =>
+    ipcRenderer.invoke('llm:set-settings', s, origin),
   getRemoteVisionServer: () => ipcRenderer.invoke('vision:remote-server:get'),
   setRemoteVisionServer: (update: RemoteVisionServerUpdate) =>
     ipcRenderer.invoke('vision:remote-server:set', update),
@@ -692,11 +636,9 @@ const offGridApi = {
   createArtifactPreview: (documentHtml: string) =>
     ipcRenderer.invoke('artifacts:preview:create', documentHtml),
   revokeArtifactPreview: (url: string) => ipcRenderer.invoke('artifacts:preview:revoke', url),
-  // Kind union MUST match the renderer's `saveArtifact` contract in
-  // src/renderer/src/env.d.ts (text/image are real artifact kinds). Guarded by
-  // src/main/__tests__/ipc-type-parity.test.ts.
+  // Shared Artifacts owns every admitted kind. Preload only transports that contract.
   saveArtifact: (a: {
-    kind: 'html' | 'svg' | 'mermaid' | 'react' | 'text' | 'image'
+    kind: ArtifactKindContract
     code: string
     title?: string
     conversationId?: string
@@ -850,24 +792,7 @@ const offGridApi = {
       ipcRenderer.send(VOICE_TURN_RESULT_CHANNEL, result)
     }
   },
-  speechCommands: {
-    transcribe: (command: SpeechTranscribeCommand): Promise<SpeechTranscribeOutcome> =>
-      ipcRenderer.invoke(SPEECH_TRANSCRIBE_CHANNEL, command),
-    cancelTranscription: (operationId: string): Promise<SpeechCancelTranscriptionOutcome> =>
-      ipcRenderer.invoke(SPEECH_CANCEL_TRANSCRIPTION_CHANNEL, operationId),
-    speak: (command: SpeechSpeakCommand): Promise<SpeechSpeakOutcome> =>
-      ipcRenderer.invoke(SPEECH_SPEAK_CHANNEL, command),
-    feedStream: (command: SpeechStreamCommand): Promise<void> =>
-      ipcRenderer.invoke(SPEECH_FEED_STREAM_CHANNEL, command),
-    finishStream: (operationId: string): Promise<void> =>
-      ipcRenderer.invoke(SPEECH_FINISH_STREAM_CHANNEL, operationId),
-    interrupt: (): Promise<void> => ipcRenderer.invoke(SPEECH_INTERRUPT_CHANNEL),
-    onEvent: (callback: (event: DesktopSpeechEvent) => void) => {
-      const listener = (_event: unknown, event: DesktopSpeechEvent): void => callback(event)
-      ipcRenderer.on(SPEECH_EVENT_CHANNEL, listener)
-      return unsubscribe(SPEECH_EVENT_CHANNEL, listener)
-    }
-  },
+  speechCommands: speechCommandApi,
 
   // --- On-device image generation (stable-diffusion.cpp) ---
   imageGenStatus: () => ipcRenderer.invoke('imagegen:status'),
@@ -887,7 +812,15 @@ const offGridApi = {
     ipcRenderer.on('imagegen:lora-progress', sub)
     return unsubscribe('imagegen:lora-progress', sub)
   },
-  deleteGeneratedImage: (p: string) => ipcRenderer.invoke('imagegen:delete', p),
+  deleteGeneratedImage: (
+    imageId: string
+  ): Promise<import('../main/imagegen/gallery-repository').DesktopGeneratedImageRemovalOutcome> =>
+    ipcRenderer.invoke('imagegen:delete', imageId),
+  onGeneratedImageGalleryChanged: (cb: () => void): (() => void) => {
+    const sub = (): void => cb()
+    ipcRenderer.on('imagegen:gallery-changed', sub)
+    return unsubscribe('imagegen:gallery-changed', sub)
+  },
   exportGeneratedImage: (srcPath: string, suggestedName?: string) =>
     ipcRenderer.invoke('imagegen:export', srcPath, suggestedName),
   onImageGenJobState: (
@@ -906,8 +839,8 @@ const offGridApi = {
     return unsubscribe('imagegen:conversation-updated', sub)
   },
   pickImageForGen: () => ipcRenderer.invoke('imagegen:pick-image'),
-  keepInitImage: (sourcePath: string) =>
-    ipcRenderer.invoke('imagegen:keep-init-image', sourcePath) as Promise<{
+  keepInitImage: (sourcePath: string, conversationId: string) =>
+    ipcRenderer.invoke('imagegen:keep-init-image', sourcePath, conversationId) as Promise<{
       id: string
       path: string
     } | null>,
@@ -919,16 +852,6 @@ const offGridApi = {
   ) => ipcRenderer.invoke('imagegen:generate', params) as Promise<ImageGenerationResultContract>,
 
   // --- Projects + RAG (knowledge bases) + project chat ---
-  listProjects: () => ipcRenderer.invoke('projects:list'),
-  createProject: (p: {
-    name: string
-    description?: string
-    systemPrompt?: string
-    icon?: string
-  }) => ipcRenderer.invoke('projects:create', p),
-  updateProject: (id: string, patch: Record<string, unknown>) =>
-    ipcRenderer.invoke('projects:update', id, patch),
-  deleteProject: (id: string) => ipcRenderer.invoke('projects:delete', id),
   listProjectDocuments: (projectId: string) =>
     ipcRenderer.invoke('projects:list-documents', projectId),
   addProjectDocuments: (projectId: string) =>
