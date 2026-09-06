@@ -61,6 +61,9 @@ import { ElectronPlaywrightRelay } from './electron-playwright-relay'
 import { PlaywrightMcpSession } from './playwright-mcp-session'
 import { runBrowserPlaywrightTask } from './browser-playwright-task'
 import { automationTaskReadStatus } from '@offgrid/automation'
+import { explicitBrowserAddress } from './browser-address'
+
+export { explicitBrowserAddress, normalizeBrowserAddress } from './browser-address'
 
 function broadcast(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -78,41 +81,6 @@ interface Rect {
 }
 
 type BrowserTaskState = BrowserTaskPointer & { sessionId: string }
-
-/** Convert what the user enters in the address field to a safe web URL. A host
- *  gets HTTPS; other text becomes a search. The browser rail never accepts
- *  file:, javascript:, or app protocols from this surface. */
-export function normalizeBrowserAddress(input: string): string | null {
-  const value = input.trim()
-  if (!value) {
-    return null
-  }
-  if (/^https?:\/\//i.test(value)) {
-    try {
-      const parsed = new URL(value)
-      return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.toString() : null
-    } catch {
-      return null
-    }
-  }
-  if (!/\s/.test(value) && value.includes('.')) {
-    try {
-      return new URL(`https://${value}`).toString()
-    } catch {
-      return null
-    }
-  }
-  return `https://www.google.com/search?q=${encodeURIComponent(value)}`
-}
-
-/** Use an address that the user wrote explicitly. This removes a full visual
- * model round trip for simple "open example.com" tasks. */
-export function explicitBrowserAddress(goal: string): string | null {
-  const match = goal.match(
-    /\b(?:https?:\/\/)?(?:www\.)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.[a-z]{2,}(?:\/[^\s,;]*)?/i
-  )
-  return match ? normalizeBrowserAddress(match[0].replace(/[.)!?]+$/, '')) : null
-}
 
 /** Fail-closed parse of the region the renderer reports. A missing/garbage value
  *  (or a zero-size rect) means "hide" - null. */
